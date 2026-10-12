@@ -1,0 +1,48 @@
+# Threat model
+
+Status: draft. Date: 2026-10-12. The maintainers review this document before each release (NFR-SEC-02).
+
+## 1. Assets
+
+| Asset | Where it is |
+|---|---|
+| Backup data | restic repositories |
+| Repository passwords and backend credentials | Control plane database, encrypted. Agent memory during a job. |
+| Key encryption key (KEK) | File or environment variable on the control plane host |
+| Job signing key | File on the control plane host |
+| CA private key | File on the control plane host |
+| Agent private keys | Each agent host |
+| Hook allow-lists | Each agent host |
+| Audit log | Control plane database |
+
+## 2. Trust boundaries
+
+1. Browser or API client and control plane.
+2. Agent and control plane.
+3. Agent and repository backend.
+4. Control plane and PostgreSQL.
+5. Tenant and tenant in one installation.
+
+## 3. Threats and controls
+
+| ID | Threat | Control | Residual risk |
+|---|---|---|---|
+| T1 | A compromised agent reads or deletes a repository during a job. | Secrets only for one job (ADR-0003). Dedicated maintenance agent. Storage controls in NFR-SEC-08. | **Accepted.** An attacker with root on the host during a job can delete the repository if the backend permits deletion. |
+| T2 | A compromised control plane executes code on all hosts. | Hook allow-list on agents (ADR-0004). Typed steps without raw arguments (FR-PR-01). | The control plane can still send restic steps, for example `forget` with a short retention. Storage controls in NFR-SEC-08 limit the damage. |
+| T3 | An attacker writes to the database and inserts jobs. | Job signatures with a key outside the database (ADR-0005). | None if the signing key stays safe. |
+| T4 | Replay of an old job. | Nonce, sequence number and expiry time in the signature. | None. |
+| T5 | A database dump discloses secrets. | Envelope encryption with a KEK outside the database (ADR-0017). | If an attacker gets the KEK and the dump, all secrets are disclosed. |
+| T6 | One agent impersonates another agent or another tenant. | Identity only from the mTLS certificate (FR-PR-08). Row-Level Security (ADR-0006). | None. |
+| T7 | A user of one tenant reads data of another tenant. | Application checks, Row-Level Security, isolation test AC-TN-01. | Defects in new endpoints. AC-TN-01 fails on unchecked endpoints. |
+| T8 | A stolen enrollment token enrolls a false agent. | One-time token with a short TTL. Optional quarantine mode (FR-ID-06). | A false agent can receive jobs of its tenant until an Admin revokes it. |
+| T9 | Secrets in process arguments, logs or crash dumps. | Environment variables or pipe only (FR-AG-06). Masking (NFR-SEC-05). Crash dumps disabled (FR-AG-07). | A local administrator can read the environment of a running process. |
+| T10 | A malicious update of the agent. | Release key separate from control plane keys (FR-AG-13). | Compromise of the release key. |
+| T11 | Denial of service through enrollment. | Rate limit (FR-ID-05). | A distributed attack. Use a reverse proxy with rate limits. |
+
+## 4. Recommendations for operators
+
+1. Turn on bucket versioning and lifecycle rules on S3 repositories.
+2. Give each host group its own backend credentials.
+3. Run the maintenance agent on a dedicated host.
+4. Copy important repositories (`restic copy`) to a second repository that agents cannot access.
+5. Keep the KEK, the job signing key and the CA key outside the database backup. Back them up separately.
