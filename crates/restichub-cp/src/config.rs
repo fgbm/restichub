@@ -41,11 +41,27 @@ pub const LOG_LEVEL_ENV: &str = "RESTICHUB_LOG_LEVEL";
 ///
 /// The value is a comma-separated list of networks, for example `10.0.0.0/8,192.168.0.0/16`.
 pub const TRUSTED_PROXIES_ENV: &str = "RESTICHUB_TRUSTED_PROXIES";
+/// The name of the environment variable that holds the session idle timeout in seconds.
+pub const SESSION_IDLE_ENV: &str = "RESTICHUB_AUTH_SESSION_IDLE_SECS";
+/// The name of the environment variable that holds the session absolute lifetime in seconds.
+pub const SESSION_ABSOLUTE_ENV: &str = "RESTICHUB_AUTH_SESSION_ABSOLUTE_SECS";
+/// The name of the environment variable that holds the per-user sign-in rate per minute.
+pub const SIGN_IN_USER_RATE_ENV: &str = "RESTICHUB_AUTH_SIGN_IN_USER_RATE";
+/// The name of the environment variable that holds the per-IP sign-in rate per minute.
+pub const SIGN_IN_IP_RATE_ENV: &str = "RESTICHUB_AUTH_SIGN_IN_IP_RATE";
+/// The name of the environment variable that turns on insecure cookies.
+pub const INSECURE_COOKIES_ENV: &str = "RESTICHUB_SERVER_INSECURE_COOKIES";
+/// The name of the environment variable that holds the largest number of concurrent password hashes.
+pub const MAX_CONCURRENT_HASHES_ENV: &str = "RESTICHUB_AUTH_MAX_CONCURRENT_HASHES";
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:8080";
 const DEFAULT_LOG_LEVEL: &str = "info";
 const DEFAULT_MAX_CONNECTIONS: u32 = 10;
 const DEFAULT_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_SESSION_IDLE: Duration = Duration::from_secs(30 * 60);
+const DEFAULT_SESSION_ABSOLUTE: Duration = Duration::from_secs(12 * 60 * 60);
+const DEFAULT_SIGN_IN_USER_RATE: u32 = 10;
+const DEFAULT_SIGN_IN_IP_RATE: u32 = 30;
 
 /// The command of the control plane binary.
 #[derive(Debug, Clone)]
@@ -124,6 +140,49 @@ pub enum ConfigError {
     Secret(#[from] restichub_secrets::SecretError),
 }
 
+/// The configuration of the local authentication (ADR-0023, section Local authentication).
+#[derive(Debug, Clone)]
+pub struct AuthConfig {
+    /// The session idle timeout.
+    pub session_idle: Duration,
+    /// The session absolute lifetime.
+    pub session_absolute: Duration,
+    /// The number of sign-in attempts for each `(tenant, username)` pair in one minute.
+    pub sign_in_user_rate: u32,
+    /// The number of sign-in attempts for each source IP address in one minute.
+    pub sign_in_ip_rate: u32,
+    /// Turns off the `Secure` attribute and the `__Host-` prefix of the session cookie.
+    ///
+    /// The value is for local development over plain HTTP. It is a loud risk.
+    pub insecure_cookies: bool,
+    /// The largest number of concurrent password hashes.
+    ///
+    /// The default is the number of available CPUs. Argon2id uses about 19 MiB of memory for each
+    /// hash, so the semaphore bounds the memory of the process.
+    pub max_concurrent_hashes: u32,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            session_idle: DEFAULT_SESSION_IDLE,
+            session_absolute: DEFAULT_SESSION_ABSOLUTE,
+            sign_in_user_rate: DEFAULT_SIGN_IN_USER_RATE,
+            sign_in_ip_rate: DEFAULT_SIGN_IN_IP_RATE,
+            insecure_cookies: false,
+            max_concurrent_hashes: default_max_concurrent_hashes(),
+        }
+    }
+}
+
+/// Returns the default number of concurrent password hashes.
+fn default_max_concurrent_hashes() -> u32 {
+    std::thread::available_parallelism()
+        .map(|count| count.get() as u32)
+        .unwrap_or(4)
+        .max(1)
+}
+
 /// The configuration of the control plane at run time.
 ///
 /// A `Debug` of this type shows no secret. The field `database_password` hides the value, and the
@@ -146,6 +205,8 @@ pub struct Config {
     pub log_level: String,
     /// The networks whose `X-Forwarded-For` header the control plane trusts.
     pub trusted_proxies: TrustedProxies,
+    /// The local authentication settings.
+    pub auth: AuthConfig,
 }
 
 impl Config {
@@ -180,7 +241,8 @@ impl Config {
             .or(file.log_level)
             .unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned());
 
-        let trusted_proxies = trusted_proxies(env, file.server)?;
+        let trusted_proxies = trusted_proxies(env, file.server.as_ref())?;
+        let auth = auth_config(env, file.auth.as_ref(), file.server.as_ref())?;
 
         let database_url = env
             .get(DATABASE_URL_ENV)
@@ -236,6 +298,7 @@ impl Config {
             log_format,
             log_level,
             trusted_proxies,
+            auth,
         })
     }
 }
@@ -291,13 +354,26 @@ struct FileConfig {
     log_format: Option<String>,
     log_level: Option<String>,
     server: Option<ServerConfig>,
+    auth: Option<AuthSection>,
 }
 
 /// The `[server]` section of the configuration file.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ServerConfig {
     trusted_proxies: Option<Vec<String>>,
+    insecure_cookies: Option<bool>,
+}
+
+/// The `[auth]` section of the configuration file.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthSection {
+    session_idle_secs: Option<u64>,
+    session_absolute_secs: Option<u64>,
+    sign_in_user_rate: Option<u32>,
+    sign_in_ip_rate: Option<u32>,
+    max_concurrent_hashes: Option<u32>,
 }
 
 impl FileConfig {
@@ -336,7 +412,7 @@ fn log_format(value: Option<&str>) -> Result<LogFormat, ConfigError> {
 /// The environment overrides the file. The environment value is a comma-separated list.
 fn trusted_proxies(
     env: &dyn EnvReader,
-    server: Option<ServerConfig>,
+    server: Option<&ServerConfig>,
 ) -> Result<TrustedProxies, ConfigError> {
     let entries: Vec<String> = match env.get(TRUSTED_PROXIES_ENV) {
         Some(value) => value
@@ -344,7 +420,7 @@ fn trusted_proxies(
             .map(|entry| entry.trim().to_owned())
             .collect(),
         None => server
-            .and_then(|server| server.trusted_proxies)
+            .and_then(|server| server.trusted_proxies.clone())
             .unwrap_or_default(),
     };
     TrustedProxies::parse(entries.iter().map(String::as_str)).map_err(|reason| {
@@ -353,6 +429,105 @@ fn trusted_proxies(
             reason,
         }
     })
+}
+
+/// Reads the local authentication settings.
+///
+/// The environment overrides the file.
+fn auth_config(
+    env: &dyn EnvReader,
+    auth: Option<&AuthSection>,
+    server: Option<&ServerConfig>,
+) -> Result<AuthConfig, ConfigError> {
+    let defaults = AuthConfig::default();
+    let session_idle_secs = number(
+        env,
+        SESSION_IDLE_ENV,
+        auth.and_then(|a| a.session_idle_secs),
+    )?
+    .unwrap_or(defaults.session_idle.as_secs());
+    let session_absolute_secs = number(
+        env,
+        SESSION_ABSOLUTE_ENV,
+        auth.and_then(|a| a.session_absolute_secs),
+    )?
+    .unwrap_or(defaults.session_absolute.as_secs());
+    let sign_in_user_rate = number(
+        env,
+        SIGN_IN_USER_RATE_ENV,
+        auth.and_then(|a| a.sign_in_user_rate),
+    )?
+    .unwrap_or(defaults.sign_in_user_rate);
+    let sign_in_ip_rate = number(
+        env,
+        SIGN_IN_IP_RATE_ENV,
+        auth.and_then(|a| a.sign_in_ip_rate),
+    )?
+    .unwrap_or(defaults.sign_in_ip_rate);
+    let insecure_cookies = boolean(
+        env,
+        INSECURE_COOKIES_ENV,
+        server.and_then(|s| s.insecure_cookies),
+    )?
+    .unwrap_or(false);
+    let max_concurrent_hashes = number(
+        env,
+        MAX_CONCURRENT_HASHES_ENV,
+        auth.and_then(|a| a.max_concurrent_hashes),
+    )?
+    .unwrap_or(defaults.max_concurrent_hashes)
+    .max(1);
+    if session_idle_secs == 0 || session_absolute_secs == 0 {
+        return Err(ConfigError::Invalid {
+            name: "auth.session_idle_secs",
+            reason: "the value must be at least 1".to_owned(),
+        });
+    }
+    Ok(AuthConfig {
+        session_idle: Duration::from_secs(session_idle_secs),
+        session_absolute: Duration::from_secs(session_absolute_secs),
+        sign_in_user_rate,
+        sign_in_ip_rate,
+        insecure_cookies,
+        max_concurrent_hashes,
+    })
+}
+
+/// Reads a number from the environment or from the file.
+fn number<T: std::str::FromStr>(
+    env: &dyn EnvReader,
+    name: &'static str,
+    file: Option<T>,
+) -> Result<Option<T>, ConfigError> {
+    match env.get(name) {
+        Some(value) => match value.trim().parse::<T>() {
+            Ok(parsed) => Ok(Some(parsed)),
+            Err(_) => Err(ConfigError::Invalid {
+                name,
+                reason: format!("`{value}` is not a number"),
+            }),
+        },
+        None => Ok(file),
+    }
+}
+
+/// Reads a boolean from the environment or from the file.
+fn boolean(
+    env: &dyn EnvReader,
+    name: &'static str,
+    file: Option<bool>,
+) -> Result<Option<bool>, ConfigError> {
+    match env.get(name) {
+        Some(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(Some(true)),
+            "0" | "false" | "no" | "off" => Ok(Some(false)),
+            _ => Err(ConfigError::Invalid {
+                name,
+                reason: format!("`{value}` is not a boolean"),
+            }),
+        },
+        None => Ok(file),
+    }
 }
 
 /// The configuration of the `migrate` command.

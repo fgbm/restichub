@@ -33,13 +33,35 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     let config = Config::load(&cli)?;
     telemetry::init(&config)?;
     tracing::info!(listen_addr = %config.listen_addr, "starting the control plane");
+    if config.auth.insecure_cookies {
+        tracing::warn!(
+            "server.insecure_cookies is on: the session cookie drops the Secure attribute and the __Host- prefix; a plain HTTP network can then read the session and another host on the same parent domain can set a cookie with the same name (cookie tossing); use this setting only for local development over plain HTTP"
+        );
+    }
+    // Build the dummy password hash before the first sign-in, so no request pays for it.
+    restichub_cp::password::warm_dummy();
 
     let database = connect_database(&config).await?;
     database.verify_runtime_role().await?;
     database.verify_migrations().await?;
+    restichub_cp::setup::ensure_setup_token(&database, &restichub_cp::clock::SystemClock)
+        .await
+        .context("cannot prepare the initial setup")?;
 
+    // The periodic maintenance removes the expired sessions and setup tokens.
+    restichub_cp::maintenance::spawn(
+        database.clone(),
+        restichub_cp::maintenance::CLEANUP_INTERVAL,
+    );
+
+    let auth = restichub_cp::server::AuthState::new(config.auth.clone());
+    restichub_cp::maintenance::spawn_limiter_sweep(
+        auth.user_limiter.clone(),
+        auth.ip_limiter.clone(),
+        restichub_cp::maintenance::LIMITER_SWEEP_INTERVAL,
+    );
     let app = server::router(
-        AppState::new(database).with_trusted_proxies(config.trusted_proxies.clone()),
+        AppState::with_auth(database, auth).with_trusted_proxies(config.trusted_proxies.clone()),
     );
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await

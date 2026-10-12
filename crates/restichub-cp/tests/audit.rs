@@ -1,4 +1,7 @@
 //! Audit API and audit service tests (issue #19, AC-AU-01, AC-RP-03).
+//!
+//! A test builds its authentication through a real session in the database. The extractor no longer
+//! accepts a context from the request extensions.
 
 use std::time::Duration;
 
@@ -8,17 +11,29 @@ use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use restichub_cp::audit::AuditService;
-use restichub_cp::context::{RequestContext, Role};
 use restichub_cp::server::{AUDIT_PLATFORM_PATH, AUDIT_TENANT_PATH, AppState, router};
 use restichub_db::audit::{self, Actor, AuditAction, AuditEvent, AuditFilter, AuditPage};
-use restichub_db::test_util::test_database;
-use restichub_db::{Database, DatabaseConfig, SecretId, tenants};
+use restichub_db::test_util::{TestDatabase, test_database};
+use restichub_db::{
+    Database, DatabaseConfig, PLATFORM_TENANT_ID, SecretId, TenantId, memberships, sessions,
+    tenants, users,
+};
 use serde_json::Value;
+use time::OffsetDateTime;
 use tower::ServiceExt;
 use uuid::Uuid;
 
 /// The plaintext marker that must never appear in an audit row.
 const CANARY: &str = "canary-secret-value";
+
+/// The socket peer of a test request.
+fn peer() -> ConnectInfo<std::net::SocketAddr> {
+    ConnectInfo(
+        "203.0.113.7:1234"
+            .parse()
+            .unwrap_or_else(|_| std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0))),
+    )
+}
 
 /// Builds a router with a lazy database. The database points to no server.
 fn lazy_app() -> Result<Router, Box<dyn std::error::Error>> {
@@ -38,23 +53,53 @@ async fn body_json(
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-/// Builds a request with a request context and a socket peer.
-fn request_with_context(
+/// Builds a request with the socket peer and an optional session cookie.
+fn request(
     method: &str,
     uri: &str,
-    context: RequestContext,
+    cookie: Option<&str>,
 ) -> Result<Request<Body>, Box<dyn std::error::Error>> {
-    let mut request = Request::builder()
-        .method(method)
-        .uri(uri)
-        .body(Body::empty())?;
-    request.extensions_mut().insert(context);
-    request.extensions_mut().insert(ConnectInfo(
-        "203.0.113.7:1234"
-            .parse()
-            .unwrap_or_else(|_| std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0))),
-    ));
+    let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(value) = cookie {
+        builder = builder.header(header::COOKIE, value);
+    }
+    let mut request = builder.body(Body::empty())?;
+    request.extensions_mut().insert(peer());
     Ok(request)
+}
+
+/// Creates a session for a user with a role in a tenant and returns the cookie header value.
+async fn sign_in(
+    db: &TestDatabase,
+    tenant: TenantId,
+    role: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let user = users::create(
+        &mut tx,
+        &users::NewUser {
+            username: "tester",
+            password_hash: "phc",
+            display_name: "Tester",
+        },
+    )
+    .await?;
+    memberships::set_role(&mut tx, user, role).await?;
+    let value = restichub_cp::token::random_token()?;
+    let hash = restichub_cp::token::hash_token(&value);
+    let now = OffsetDateTime::now_utc();
+    sessions::create(
+        &mut tx,
+        user,
+        &hash,
+        now + time::Duration::hours(12),
+        now,
+        None,
+        None,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(format!("__Host-restichub_session={value}"))
 }
 
 #[tokio::test]
@@ -151,30 +196,17 @@ async fn the_audit_endpoint_rejects_an_unauthenticated_request()
 #[tokio::test]
 async fn the_platform_audit_endpoint_refuses_a_tenant_role()
 -> Result<(), Box<dyn std::error::Error>> {
-    let context = RequestContext::new(restichub_db::PLATFORM_TENANT_ID, Actor::System, Role::Admin);
-    let response = lazy_app()?
-        .oneshot(request_with_context("GET", AUDIT_PLATFORM_PATH, context)?)
-        .await?;
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    let problem = body_json(response).await?;
-    assert_eq!(
-        problem.get("code").and_then(Value::as_str),
-        Some("forbidden")
-    );
-    Ok(())
-}
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let mut tx = db.database().begin_platform().await?;
+    let tenant = tenants::create(&mut tx, "audit-forbidden").await?;
+    tx.commit().await?;
+    let cookie = sign_in(&db, tenant, "admin").await?;
 
-#[tokio::test]
-async fn a_platform_admin_with_a_normal_tenant_is_forbidden()
--> Result<(), Box<dyn std::error::Error>> {
-    // A platform operation needs the platform tenant, also for a Platform Admin.
-    let context = RequestContext::new(
-        restichub_db::TenantId::from_uuid(Uuid::now_v7()),
-        Actor::System,
-        Role::PlatformAdmin,
-    );
-    let response = lazy_app()?
-        .oneshot(request_with_context("GET", AUDIT_PLATFORM_PATH, context)?)
+    let app = router(AppState::new(db.database().clone()));
+    let response = app
+        .oneshot(request("GET", AUDIT_PLATFORM_PATH, Some(&cookie))?)
         .await?;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let problem = body_json(response).await?;
@@ -182,17 +214,27 @@ async fn a_platform_admin_with_a_normal_tenant_is_forbidden()
         problem.get("code").and_then(Value::as_str),
         Some("forbidden")
     );
+
+    db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
 async fn the_audit_endpoint_refuses_a_bad_query() -> Result<(), Box<dyn std::error::Error>> {
-    let context = RequestContext::new(restichub_db::PLATFORM_TENANT_ID, Actor::System, Role::Admin);
-    let response = lazy_app()?
-        .oneshot(request_with_context(
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let mut tx = db.database().begin_platform().await?;
+    let tenant = tenants::create(&mut tx, "audit-bad-query").await?;
+    tx.commit().await?;
+    let cookie = sign_in(&db, tenant, "viewer").await?;
+
+    let app = router(AppState::new(db.database().clone()));
+    let response = app
+        .oneshot(request(
             "GET",
             &format!("{AUDIT_TENANT_PATH}?limit=abc"),
-            context,
+            Some(&cookie),
         )?)
         .await?;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -201,6 +243,8 @@ async fn the_audit_endpoint_refuses_a_bad_query() -> Result<(), Box<dyn std::err
         problem.get("code").and_then(Value::as_str),
         Some("invalid_argument")
     );
+
+    db.cleanup().await;
     Ok(())
 }
 
@@ -267,11 +311,11 @@ async fn a_viewer_reads_the_tenant_audit_records() -> Result<(), Box<dyn std::er
     let mut tx = db.database().begin_tenant(tenant).await?;
     audit::insert(&mut tx, &event).await?;
     tx.commit().await?;
+    let cookie = sign_in(&db, tenant, "viewer").await?;
 
     let app = router(AppState::new(db.database().clone()));
-    let context = RequestContext::new(tenant, Actor::System, Role::Viewer);
     let response = app
-        .oneshot(request_with_context("GET", AUDIT_TENANT_PATH, context)?)
+        .oneshot(request("GET", AUDIT_TENANT_PATH, Some(&cookie))?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
     let page = body_json(response).await?;
@@ -311,15 +355,11 @@ async fn the_platform_audit_endpoint_returns_every_tenant() -> Result<(), Box<dy
     )
     .await?;
     tx.commit().await?;
+    let cookie = sign_in(&db, PLATFORM_TENANT_ID, "platform_admin").await?;
 
     let app = router(AppState::new(db.database().clone()));
-    let context = RequestContext::new(
-        restichub_db::PLATFORM_TENANT_ID,
-        Actor::System,
-        Role::PlatformAdmin,
-    );
     let response = app
-        .oneshot(request_with_context("GET", AUDIT_PLATFORM_PATH, context)?)
+        .oneshot(request("GET", AUDIT_PLATFORM_PATH, Some(&cookie))?)
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
     let page = body_json(response).await?;
