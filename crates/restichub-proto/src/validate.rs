@@ -1,6 +1,6 @@
 //! Argument validation of a job (FR-PR-10, FR-PR-01).
 //!
-//! The control plane calls [`validate_job`] before it signs a job. The agent
+//! The control plane calls [`validate_job`](crate::validate::validate_job) before it signs a job. The agent
 //! calls it before it runs a job. Validation keeps a job inside the typed
 //! contract: the job has steps, every step has a known kind, every step refers
 //! to a repository of the job, every required field is present, and every
