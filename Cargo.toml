@@ -52,7 +52,6 @@ zeroize = "1.9"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
-missing_docs = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

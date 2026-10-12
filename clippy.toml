@@ -1,0 +1,5 @@
+# Clippy configuration for the workspace.
+# A test function may use `expect` and `unwrap`. The workspace lints keep the two lints for the
+# production code.
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true

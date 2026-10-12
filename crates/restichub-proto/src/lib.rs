@@ -16,10 +16,6 @@ pub const PROTOCOL_VERSION_MINOR: u32 = 0;
 pub mod agent {
     /// Version 1 of the agent protocol.
     pub mod v1 {
-        // The names and the documentation of the generated items come from the
-        // `.proto` files.
-        #![allow(missing_docs)]
-
         tonic::include_proto!("restichub.agent.v1");
     }
 }
