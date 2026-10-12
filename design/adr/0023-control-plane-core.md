@@ -109,3 +109,16 @@ This section refines ADR-0017.
 | bcrypt or scrypt | Argon2id is the current recommendation and resists GPU attacks. |
 | JWT sessions | A JWT cannot be revoked on the server before its expiry. |
 | A separate platform schema without `tenant_id` | It violates the AGENTS.md rule that each table has `tenant_id`. |
+
+## Implementation notes
+
+These notes refine section Tenant isolation. The decision itself does not change. Issue #16 puts them into the schema.
+
+- The migrations do not create roles. A database administrator runs `crates/restichub-db/sql/bootstrap-roles.sql` once for each PostgreSQL cluster. The script creates the group role `restichub_app`, the definer role `restichub_auth` and the two login roles without a password. The administrator sets each password with `\password`. One ResticHub installation uses one PostgreSQL cluster.
+- The migrations run as a separate command, `restichub-cp migrate`. The command reads only the migration URL and password (`database_migration_url`), applies the migrations and stops. The server command `restichub-cp serve` accepts no migration credentials. The Docker Compose setup in epic #11 runs `restichub-cp migrate` as a one-shot service before the server.
+- The runtime login owns no object and is a member of `restichub_app`. The owner login runs the migrations and owns the schema.
+- The server compares the applied migration version in `_sqlx_migrations` with the latest embedded version at start. It refuses to start if the database is behind or ahead. The runtime role has `SELECT` on `_sqlx_migrations` only.
+- The control plane checks the runtime role at start. It stops the start in these cases. The role `restichub_app` has SUPERUSER, BYPASSRLS, CREATEROLE or CREATEDB. The runtime login is a superuser or has BYPASSRLS. The runtime login can become such a role. The runtime login, or a role it can become, owns an object, a namespace, a function or the database. The runtime login, or a role it can become, is a member of `pg_database_owner`. The runtime login is not a member of `restichub_app`.
+- A platform operation that writes audit records uses `PlatformTx`. The method `enter_tenant` sets the tenant id in the same transaction and accepts only a tenant that the transaction created. A tenant creation, its key row, its first user and its audit record then commit together or not at all. The repository function `tenants::create_with_bootstrap` does this sequence.
+- `FORCE ROW LEVEL SECURITY` also applies to the table owner. The authentication lookups `auth_find_tenant`, `auth_find_session` and `auth_find_api_token` are `SECURITY DEFINER` and owned by `restichub_auth`, a role with `BYPASSRLS`. Each function returns the named columns only and sets the search path. The runtime role gets `EXECUTE` and nothing else. The caller checks the session expiry, the token expiry and revocation, and the user `disabled` flag. The sign-in rate limit belongs to task #18.
+- The runtime role has no `DELETE` on `tenant_keys`. A tenant has one active key version.
