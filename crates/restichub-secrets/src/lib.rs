@@ -1,12 +1,52 @@
 //! ResticHub secret handling.
 //!
-//! This crate holds the secret value type and the functions that read a secret from a file or
-//! from the environment (ADR-0023). The later task T3 adds the key encryption key (KEK) logic.
+//! This crate holds the secret value type, the functions that read a secret from a file or from
+//! the environment, the key encryption key (KEK) providers and the envelope encryption of the
+//! secret values (ADR-0017, ADR-0023).
+//!
+//! The modules are:
+//!
+//! - [`kek`]: the KEK, the KEK providers and the key ID derivation;
+//! - [`envelope`]: the data encryption key (DEK), its generation and its wrapping;
+//! - [`secret`]: the encryption of a secret value with the DEK of a tenant;
+//! - [`check`]: the `kek_check` value and the verification that refuses a wrong KEK;
+//! - [`error`]: the error types.
+//!
+//! The crate shows no secret material in `Display` or in `Debug`. The key types zeroize the
+//! buffers on drop.
+//!
+//! # The environment variable `RESTICHUB_KEK`
+//!
+//! The environment provider reads the KEK from `RESTICHUB_KEK`. On Unix, any process of the same
+//! user can read the environment of another process through `/proc`. A child process inherits the
+//! environment of the control plane by default. The control plane MUST NOT spawn a child process
+//! that inherits the environment while `RESTICHUB_KEK` is set. The control plane clears the
+//! environment or passes an explicit, empty environment to each child process.
 
 use std::fmt;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
+
+pub mod check;
+pub mod envelope;
+pub mod error;
+pub mod kek;
+pub mod secret;
+
+mod crypto;
+
+pub use check::{KekCheck, make_kek_check, verify_kek_check};
+pub use crypto::NONCE_LEN;
+pub use envelope::{DEK_LEN, Dek, WrappedDek, generate_dek, unwrap_dek, wrap_dek};
+pub use error::{CryptoError, KekError};
+pub use kek::{
+    EnvKekProvider, FileKekProvider, KEK_ENV, KEK_FILE_PARAM, KEK_LEN, Kek, KekConfig, KekId,
+    KekProvider, generate_kek_encoded, load_kek_provider,
+};
+pub use secret::{EncryptedSecret, SecretPurpose, decrypt_secret, encrypt_secret};
 
 /// A secret string.
 ///
@@ -82,9 +122,29 @@ pub enum SecretError {
         #[source]
         source: std::io::Error,
     },
-    /// The file is readable by the group or by other users.
-    #[error("the secret file {path} is readable by the group or by other users")]
+    /// The path is a symbolic link.
+    #[error("the secret file {path} is a symbolic link")]
+    Symlink {
+        /// The path of the file.
+        path: PathBuf,
+    },
+    /// The path is not a regular file.
+    #[error("the secret file {path} is not a regular file")]
+    NotRegularFile {
+        /// The path of the file.
+        path: PathBuf,
+    },
+    /// The file permissions are wider than the owner.
+    #[error(
+        "the secret file {path} is readable, writable or executable by the group or by other users"
+    )]
     FilePermissions {
+        /// The path of the file.
+        path: PathBuf,
+    },
+    /// The file does not hold valid UTF-8.
+    #[error("the secret file {path} does not hold valid UTF-8")]
+    NotUtf8 {
         /// The path of the file.
         path: PathBuf,
     },
@@ -96,8 +156,8 @@ pub enum SecretError {
 /// `env_var` if `file_path` is not set. If `file_path` is set and the environment variable is also
 /// set, the function returns [`SecretError::BothSourcesSet`].
 ///
-/// On Unix, the function rejects a file that is readable by the group or by other users. The
-/// function removes one trailing line break from the file value.
+/// The function removes one trailing carriage return and one trailing line feed from the file
+/// value.
 pub fn read_secret(
     file_path: Option<&Path>,
     env_var: &str,
@@ -108,7 +168,7 @@ pub fn read_secret(
             if env.get(env_var).is_some() {
                 return Err(SecretError::BothSourcesSet);
             }
-            read_file(path)
+            read_secret_file(path)
         }
         None => match env.get(env_var) {
             Some(value) => Ok(SecretString::new(value)),
@@ -117,29 +177,75 @@ pub fn read_secret(
     }
 }
 
-fn read_file(path: &Path) -> Result<SecretString, SecretError> {
-    check_permissions(path)?;
-    let content = std::fs::read_to_string(path).map_err(|source| SecretError::FileRead {
+/// Reads a secret value from a file.
+///
+/// The function opens the file one time and reads from the same handle. The function rejects a
+/// symbolic link, a path that is not a regular file and a file whose permissions are wider than
+/// the owner (`mode & 0o077 != 0`) on Unix.
+///
+/// The function is crate-internal. The KEK provider uses it.
+pub(crate) fn read_secret_file(path: &Path) -> Result<SecretString, SecretError> {
+    check_not_symlink(path)?;
+    let file = open_readonly(path)?;
+    let metadata = file.metadata().map_err(|source| SecretError::FileRead {
         path: path.to_path_buf(),
         source,
     })?;
-    let value = content.strip_suffix('\n').unwrap_or(&content);
-    let value = value.strip_suffix('\r').unwrap_or(value);
-    Ok(SecretString::new(value.to_owned()))
+    if !metadata.is_file() {
+        return Err(SecretError::NotRegularFile {
+            path: path.to_path_buf(),
+        });
+    }
+    check_mode(&metadata, path)?;
+    read_all(file, path)
 }
 
-/// Checks that no other user can read the file.
+/// Opens the file for reading and refuses to follow a symbolic link on Unix.
 #[cfg(unix)]
-fn check_permissions(path: &Path) -> Result<(), SecretError> {
-    use std::os::unix::fs::PermissionsExt;
+fn open_readonly(path: &Path) -> Result<File, SecretError> {
+    use std::os::unix::fs::OpenOptionsExt;
 
-    let metadata = std::fs::metadata(path).map_err(|source| SecretError::FileRead {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|source| SecretError::FileRead {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+/// Opens the file for reading.
+#[cfg(not(unix))]
+fn open_readonly(path: &Path) -> Result<File, SecretError> {
+    File::open(path).map_err(|source| SecretError::FileRead {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// Refuses a symbolic link before the open.
+fn check_not_symlink(path: &Path) -> Result<(), SecretError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|source| SecretError::FileRead {
         path: path.to_path_buf(),
         source,
     })?;
+    if metadata.file_type().is_symlink() {
+        return Err(SecretError::Symlink {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
+}
+
+/// Checks that the file is readable by the owner only.
+#[cfg(unix)]
+fn check_mode(metadata: &std::fs::Metadata, path: &Path) -> Result<(), SecretError> {
+    use std::os::unix::fs::PermissionsExt;
+
     let mode = metadata.permissions().mode();
-    // The group read bit is 0o040. The other read bit is 0o004.
-    if mode & 0o044 != 0 {
+    // The group and the other bits are 0o077.
+    if mode & 0o077 != 0 {
         return Err(SecretError::FilePermissions {
             path: path.to_path_buf(),
         });
@@ -149,8 +255,35 @@ fn check_permissions(path: &Path) -> Result<(), SecretError> {
 
 /// Checks the file permissions. The function does nothing on a non-Unix platform.
 #[cfg(not(unix))]
-fn check_permissions(_path: &Path) -> Result<(), SecretError> {
+fn check_mode(_metadata: &std::fs::Metadata, _path: &Path) -> Result<(), SecretError> {
     Ok(())
+}
+
+/// Reads the whole file into a zeroizing buffer and trims one trailing line break.
+fn read_all(mut file: File, path: &Path) -> Result<SecretString, SecretError> {
+    let mut buffer = Zeroizing::new(Vec::new());
+    file.read_to_end(&mut buffer)
+        .map_err(|source| SecretError::FileRead {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if buffer.last() == Some(&b'\n') {
+        buffer.pop();
+    }
+    if buffer.last() == Some(&b'\r') {
+        buffer.pop();
+    }
+    let bytes = std::mem::take(&mut *buffer);
+    match String::from_utf8(bytes) {
+        Ok(value) => Ok(SecretString::new(value)),
+        Err(error) => {
+            let mut bytes = error.into_bytes();
+            bytes.zeroize();
+            Err(SecretError::NotUtf8 {
+                path: path.to_path_buf(),
+            })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -244,6 +377,58 @@ mod tests {
         let secret = read_secret(Some(&path), "SECRET", &env);
         std::fs::remove_file(&path).ok();
         assert!(matches!(secret, Err(SecretError::FilePermissions { .. })));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_0620_is_rejected() {
+        let path = temp_path("mode-620");
+        std::fs::write(&path, "from-file").ok();
+        permission(path.clone(), 0o620);
+        let secret = super::read_secret_file(&path);
+        std::fs::remove_file(&path).ok();
+        assert!(matches!(secret, Err(SecretError::FilePermissions { .. })));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_0604_is_rejected() {
+        let path = temp_path("mode-604");
+        std::fs::write(&path, "from-file").ok();
+        permission(path.clone(), 0o604);
+        let secret = super::read_secret_file(&path);
+        std::fs::remove_file(&path).ok();
+        assert!(matches!(secret, Err(SecretError::FilePermissions { .. })));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_0600_is_accepted() {
+        let path = temp_path("mode-600");
+        std::fs::write(&path, "from-file").ok();
+        permission(path.clone(), 0o600);
+        let secret = super::read_secret_file(&path);
+        std::fs::remove_file(&path).ok();
+        assert_eq!(
+            secret.ok().as_ref().map(SecretString::expose_secret),
+            Some("from-file")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let target = temp_path("symlink-target");
+        let link = temp_path("symlink-link");
+        std::fs::write(&target, "from-file").ok();
+        permission(target.clone(), 0o600);
+        symlink(&target, &link).ok();
+        let secret = super::read_secret_file(&link);
+        std::fs::remove_file(&link).ok();
+        std::fs::remove_file(&target).ok();
+        assert!(matches!(secret, Err(SecretError::Symlink { .. })));
     }
 
     #[cfg(unix)]
