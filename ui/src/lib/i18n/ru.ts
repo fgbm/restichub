@@ -1,0 +1,227 @@
+/*
+ * Russian message catalog. The keys must be the same as in `en.ts`.
+ * The type `MessageKey` and the assignment type enforce that.
+ *
+ * Text obeys design/style/ru-technical.md.
+ */
+import type { MessageKey } from './en';
+
+export const ru: Record<MessageKey, string> = {
+	// Product and layout
+	'app.name': 'ResticHub',
+	'app.skipToContent': 'Перейти к содержимому',
+	'nav.section.administration': 'Администрирование',
+	'nav.section.platform': 'Платформа',
+	'nav.overview': 'Обзор',
+	'nav.users': 'Пользователи',
+	'nav.apiTokens': 'Токены API',
+	'nav.audit': 'Журнал аудита',
+	'nav.platformAudit': 'Аудит платформы',
+	'nav.tenants': 'Арендаторы',
+	'nav.primary': 'Основная навигация',
+
+	// Top bar
+	'topbar.tenant': 'Арендатор',
+	'topbar.noTenant': 'Нет арендатора',
+	'topbar.account': 'Учётная запись',
+	'topbar.language': 'Язык',
+	'topbar.theme': 'Тема',
+	'topbar.theme.light': 'Светлая',
+	'topbar.theme.dark': 'Тёмная',
+	'topbar.theme.system': 'Как в системе',
+	'topbar.signOut': 'Выйти',
+	'topbar.role': 'Роль',
+
+	// Common
+	'common.actions': 'Действия',
+	'common.apply': 'Применить',
+	'common.cancel': 'Отмена',
+	'common.clear': 'Очистить',
+	'common.close': 'Закрыть',
+	'common.copy': 'Копировать',
+	'common.copied': 'Скопировано',
+	'common.create': 'Создать',
+	'common.delete': 'Удалить',
+	'common.dismiss': 'Закрыть',
+	'common.edit': 'Изменить',
+	'common.filter': 'Фильтр',
+	'common.loading': 'Загрузка',
+	'common.loadMore': 'Загрузить ещё',
+	'common.none': 'Нет',
+	'common.refresh': 'Обновить',
+	'common.reset': 'Сбросить',
+	'common.retry': 'Повторить',
+	'common.save': 'Сохранить',
+	'common.search': 'Поиск',
+	'common.show': 'Показать',
+	'common.hide': 'Скрыть',
+	'common.required': 'Обязательно',
+	'common.optional': 'Необязательно',
+	'common.all': 'Все',
+	'common.yes': 'Да',
+	'common.no': 'Нет',
+	'common.never': 'Никогда',
+	'common.unknown': 'Неизвестно',
+	'common.createdAt': 'Создано',
+	'common.status': 'Состояние',
+	'common.enabled': 'Включён',
+	'common.disabled': 'Отключён',
+	'common.suspended': 'Приостановлен',
+	'common.active': 'Активен',
+
+	// Pagination and table
+	'pagination.summary': 'Показано с {from} по {to} из {total}',
+	'pagination.pageOf': 'Страница {page} из {pages}',
+	'pagination.previous': 'Назад',
+	'pagination.next': 'Вперёд',
+	'table.empty.title': 'Нет записей',
+	'table.empty.description': 'Нет записей для показа.',
+	'table.loading': 'Загрузка записей',
+	'table.error': 'Данные не загрузились.',
+	'table.filterPlaceholder': 'Фильтр записей',
+
+	// Sign-in
+	'signIn.title': 'Вход',
+	'signIn.description': 'Укажите арендатора, имя пользователя и пароль.',
+	'signIn.tenant': 'Арендатор',
+	'signIn.tenantPlaceholder': 'имя арендатора',
+	'signIn.username': 'Имя пользователя',
+	'signIn.password': 'Пароль',
+	'signIn.submit': 'Войти',
+	'signIn.submitting': 'Вход',
+	'signIn.invalid': 'Арендатор, имя пользователя или пароль указаны неверно.',
+
+	// Setup
+	'setup.title': 'Первоначальная настройка',
+	'setup.description':
+		'Создайте первого администратора платформы. Используйте одноразовый токен настройки.',
+	'setup.setupToken': 'Токен настройки',
+	'setup.username': 'Имя пользователя',
+	'setup.displayName': 'Отображаемое имя',
+	'setup.password': 'Пароль',
+	'setup.confirmPassword': 'Повторите пароль',
+	'setup.passwordHint': 'Используйте 12 символов или больше.',
+	'setup.passwordMismatch': 'Пароли не совпадают.',
+	'setup.submit': 'Создать администратора платформы',
+	'setup.done': 'Администратор платформы готов. Войдите, чтобы продолжить.',
+
+	// Overview
+	'overview.title': 'Обзор',
+	'overview.description': 'Состояние установки.',
+	'overview.placeholder': 'Этот раздел покажет состояние установки в следующей версии.',
+
+	// Tenants
+	'tenants.title': 'Арендаторы',
+	'tenants.description': 'Создавайте арендаторов, приостанавливайте, возобновляйте и удаляйте их.',
+	'tenants.create': 'Создать арендатора',
+	'tenants.createTitle': 'Создание арендатора',
+	'tenants.name': 'Имя',
+	'tenants.namePlaceholder': 'имя арендатора',
+	'tenants.created': 'Арендатор создан.',
+	'tenants.suspend': 'Приостановить',
+	'tenants.resume': 'Возобновить',
+	'tenants.suspended': 'Арендатор приостановлен.',
+	'tenants.resumed': 'Арендатор возобновлён.',
+	'tenants.deleteTitle': 'Удаление арендатора',
+	'tenants.deleteBody':
+		'Это действие удалит арендатора «{name}» и все его данные. Возможна потеря данных. Продолжить?',
+	'tenants.deleted': 'Арендатор удалён.',
+
+	// Users
+	'users.title': 'Пользователи',
+	'users.description': 'Управляйте пользователями арендатора.',
+	'users.create': 'Создать пользователя',
+	'users.createTitle': 'Создание пользователя',
+	'users.username': 'Имя пользователя',
+	'users.displayName': 'Отображаемое имя',
+	'users.role': 'Роль',
+	'users.created': 'Пользователь создан.',
+	'users.disable': 'Отключить',
+	'users.enable': 'Включить',
+	'users.disabledToast': 'Пользователь отключён.',
+	'users.enabledToast': 'Пользователь включён.',
+	'users.role.admin': 'Администратор',
+	'users.role.operator': 'Оператор',
+	'users.role.viewer': 'Наблюдатель',
+	'users.role.platformAdmin': 'Администратор платформы',
+
+	// API tokens
+	'tokens.title': 'Токены API',
+	'tokens.description': 'Создавайте и отзывайте токены API для внешних инструментов.',
+	'tokens.create': 'Создать токен',
+	'tokens.createTitle': 'Создание токена API',
+	'tokens.name': 'Имя',
+	'tokens.value': 'Значение',
+	'tokens.namePlaceholder': 'имя токена',
+	'tokens.expiresAt': 'Действует до',
+	'tokens.prefix': 'Префикс',
+	'tokens.lastUsed': 'Последнее использование',
+	'tokens.created': 'Токен создан.',
+	'tokens.revoke': 'Отозвать',
+	'tokens.revokeTitle': 'Отзыв токена',
+	'tokens.revokeBody':
+		'Это действие отзовёт токен «{name}». Инструменты с этим токеном остановятся. Продолжить?',
+	'tokens.revoked': 'Токен отозван.',
+	'tokens.valueOnceTitle': 'Скопируйте значение токена',
+	'tokens.valueOnceBody': 'Это значение показывается один раз. Скопируйте его и сохраните.',
+	'tokens.valueWarning':
+		'Предупреждение: это значение больше не показать. Если вы его потеряете, создайте новый токен.',
+
+	// Audit log
+	'audit.title': 'Журнал аудита',
+	'audit.description': 'Каждая записанная операция с действующим лицом и изменением.',
+	'audit.filters.timeFrom': 'С',
+	'audit.filters.timeTo': 'По',
+	'audit.filters.action': 'Действие',
+	'audit.filters.actorType': 'Тип лица',
+	'audit.filters.actorId': 'Идентификатор лица',
+	'audit.filters.objectType': 'Тип объекта',
+	'audit.filters.objectId': 'Идентификатор объекта',
+	'audit.filters.actorPlaceholder': 'идентификатор лица',
+	'audit.filters.objectPlaceholder': 'идентификатор объекта',
+	'audit.columns.time': 'Время',
+	'audit.columns.actor': 'Действующее лицо',
+	'audit.columns.action': 'Действие',
+	'audit.columns.object': 'Объект',
+	'audit.columns.sourceIp': 'IP источника',
+	'audit.detailTitle': 'Запись аудита',
+	'audit.detailSubtitle': 'Запись {id}',
+	'audit.noMore': 'Записей больше нет.',
+	'audit.loaded': 'Загружено записей: {count}.',
+	'audit.actorType.user': 'Пользователь',
+	'audit.actorType.token': 'Токен API',
+	'audit.actorType.system': 'Система',
+
+	// Diff view
+	'diff.title': 'Изменение',
+	'diff.old': 'Прежнее значение',
+	'diff.new': 'Новое значение',
+	'diff.field': 'Поле',
+	'diff.redacted': 'скрыто',
+	'diff.empty': 'У этой записи нет изменения.',
+	'diff.unchanged': 'Без изменения',
+
+	// Key-value list
+	'keyValue.empty': 'Нет значений.',
+
+	// Alerts
+	'alert.problemTitle': 'Операция не выполнена.',
+	'alert.forbiddenTitle': 'У вас нет прав на эту операцию.',
+	'alert.notFoundTitle': 'Запись не существует.',
+	'alert.unauthorizedTitle': 'Сеанс завершён. Войдите снова.',
+	'alert.code': 'Код',
+	'alert.requestId': 'Идентификатор запроса',
+
+	// Errors from the API (problem codes)
+	'error.invalid_credentials': 'Арендатор, имя пользователя или пароль указаны неверно.',
+	'error.unauthorized': 'Сеанс завершён. Войдите снова.',
+	'error.forbidden': 'У вас нет прав на эту операцию.',
+	'error.not_found': 'Запись не существует.',
+	'error.validation_failed': 'Данные указаны неверно. Исправьте поля и повторите.',
+	'error.setup_already_done': 'Настройка уже выполнена.',
+	'error.invalid_setup_token': 'Токен настройки указан неверно.',
+	'error.rate_limited': 'Слишком много попыток. Подождите и повторите.',
+	'error.conflict': 'Запись уже существует.',
+	'error.internal_error': 'В сервере управления внутренняя проблема.',
+	'error.network': 'Сервер управления не ответил.'
+};

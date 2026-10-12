@@ -1,0 +1,227 @@
+/*
+ * English message catalog. This file is the source of the message keys.
+ * The type `MessageKey` comes from this object. The Russian catalog must have
+ * the same keys, and the compiler enforces that.
+ *
+ * Text obeys design/style/ste-en.md.
+ */
+export const en = {
+	// Product and layout
+	'app.name': 'ResticHub',
+	'app.skipToContent': 'Skip to content',
+	'nav.section.administration': 'Administration',
+	'nav.section.platform': 'Platform',
+	'nav.overview': 'Overview',
+	'nav.users': 'Users',
+	'nav.apiTokens': 'API tokens',
+	'nav.audit': 'Audit log',
+	'nav.platformAudit': 'Platform audit',
+	'nav.tenants': 'Tenants',
+	'nav.primary': 'Primary navigation',
+
+	// Top bar
+	'topbar.tenant': 'Tenant',
+	'topbar.noTenant': 'No tenant',
+	'topbar.account': 'Account',
+	'topbar.language': 'Language',
+	'topbar.theme': 'Theme',
+	'topbar.theme.light': 'Light',
+	'topbar.theme.dark': 'Dark',
+	'topbar.theme.system': 'System',
+	'topbar.signOut': 'Sign out',
+	'topbar.role': 'Role',
+
+	// Common
+	'common.actions': 'Actions',
+	'common.apply': 'Apply',
+	'common.cancel': 'Cancel',
+	'common.clear': 'Clear',
+	'common.close': 'Close',
+	'common.copy': 'Copy',
+	'common.copied': 'Copied',
+	'common.create': 'Create',
+	'common.delete': 'Delete',
+	'common.dismiss': 'Dismiss',
+	'common.edit': 'Edit',
+	'common.filter': 'Filter',
+	'common.loading': 'Loading',
+	'common.loadMore': 'Load more',
+	'common.none': 'None',
+	'common.refresh': 'Refresh',
+	'common.reset': 'Reset',
+	'common.retry': 'Retry',
+	'common.save': 'Save',
+	'common.search': 'Search',
+	'common.show': 'Show',
+	'common.hide': 'Hide',
+	'common.required': 'Required',
+	'common.optional': 'Optional',
+	'common.all': 'All',
+	'common.yes': 'Yes',
+	'common.no': 'No',
+	'common.never': 'Never',
+	'common.unknown': 'Unknown',
+	'common.createdAt': 'Created',
+	'common.status': 'Status',
+	'common.enabled': 'Enabled',
+	'common.disabled': 'Disabled',
+	'common.suspended': 'Suspended',
+	'common.active': 'Active',
+
+	// Pagination and table
+	'pagination.summary': 'Showing {from} to {to} of {total}',
+	'pagination.pageOf': 'Page {page} of {pages}',
+	'pagination.previous': 'Previous',
+	'pagination.next': 'Next',
+	'table.empty.title': 'No records',
+	'table.empty.description': 'There are no records to show.',
+	'table.loading': 'Loading records',
+	'table.error': 'The data did not load.',
+	'table.filterPlaceholder': 'Filter records',
+
+	// Sign-in
+	'signIn.title': 'Sign in',
+	'signIn.description': 'Enter your tenant, user name and password.',
+	'signIn.tenant': 'Tenant',
+	'signIn.tenantPlaceholder': 'tenant name',
+	'signIn.username': 'User name',
+	'signIn.password': 'Password',
+	'signIn.submit': 'Sign in',
+	'signIn.submitting': 'Signing in',
+	'signIn.invalid': 'The tenant, the user name or the password is not correct.',
+
+	// Setup
+	'setup.title': 'Initial setup',
+	'setup.description': 'Create the first Platform Admin. Use the one-time setup token.',
+	'setup.setupToken': 'Setup token',
+	'setup.username': 'User name',
+	'setup.displayName': 'Display name',
+	'setup.password': 'Password',
+	'setup.confirmPassword': 'Confirm password',
+	'setup.passwordHint': 'Use 12 characters or more.',
+	'setup.passwordMismatch': 'The passwords do not match.',
+	'setup.submit': 'Create the Platform Admin',
+	'setup.done': 'The Platform Admin is ready. Sign in to continue.',
+
+	// Overview
+	'overview.title': 'Overview',
+	'overview.description': 'The state of the installation.',
+	'overview.placeholder': 'This section shows the state of the installation in a later version.',
+
+	// Tenants
+	'tenants.title': 'Tenants',
+	'tenants.description': 'Create, suspend, resume and delete tenants.',
+	'tenants.create': 'Create tenant',
+	'tenants.createTitle': 'Create a tenant',
+	'tenants.name': 'Name',
+	'tenants.namePlaceholder': 'tenant name',
+	'tenants.created': 'The tenant is created.',
+	'tenants.suspend': 'Suspend',
+	'tenants.resume': 'Resume',
+	'tenants.suspended': 'The tenant is suspended.',
+	'tenants.resumed': 'The tenant is resumed.',
+	'tenants.deleteTitle': 'Delete the tenant',
+	'tenants.deleteBody':
+		'This action deletes the tenant "{name}" and all its data. Data loss occurs. Continue?',
+	'tenants.deleted': 'The tenant is deleted.',
+
+	// Users
+	'users.title': 'Users',
+	'users.description': 'Manage the users of the tenant.',
+	'users.create': 'Create user',
+	'users.createTitle': 'Create a user',
+	'users.username': 'User name',
+	'users.displayName': 'Display name',
+	'users.role': 'Role',
+	'users.created': 'The user is created.',
+	'users.disable': 'Disable',
+	'users.enable': 'Enable',
+	'users.disabledToast': 'The user is disabled.',
+	'users.enabledToast': 'The user is enabled.',
+	'users.role.admin': 'Admin',
+	'users.role.operator': 'Operator',
+	'users.role.viewer': 'Viewer',
+	'users.role.platformAdmin': 'Platform Admin',
+
+	// API tokens
+	'tokens.title': 'API tokens',
+	'tokens.description': 'Create and revoke API tokens for external tools.',
+	'tokens.create': 'Create token',
+	'tokens.createTitle': 'Create an API token',
+	'tokens.name': 'Name',
+	'tokens.value': 'Value',
+	'tokens.namePlaceholder': 'token name',
+	'tokens.expiresAt': 'Expires at',
+	'tokens.prefix': 'Prefix',
+	'tokens.lastUsed': 'Last used',
+	'tokens.created': 'The token is created.',
+	'tokens.revoke': 'Revoke',
+	'tokens.revokeTitle': 'Revoke the token',
+	'tokens.revokeBody':
+		'This action revokes the token "{name}". Tools with this token stop. Continue?',
+	'tokens.revoked': 'The token is revoked.',
+	'tokens.valueOnceTitle': 'Copy the token value',
+	'tokens.valueOnceBody': 'This value appears one time only. Copy it and keep it safe.',
+	'tokens.valueWarning':
+		'Warning: you cannot see this value again. If you lose it, create a new token.',
+
+	// Audit log
+	'audit.title': 'Audit log',
+	'audit.description': 'Every recorded operation, with the actor and the change.',
+	'audit.filters.timeFrom': 'From',
+	'audit.filters.timeTo': 'To',
+	'audit.filters.action': 'Action',
+	'audit.filters.actorType': 'Actor type',
+	'audit.filters.actorId': 'Actor ID',
+	'audit.filters.objectType': 'Object type',
+	'audit.filters.objectId': 'Object ID',
+	'audit.filters.actorPlaceholder': 'actor id',
+	'audit.filters.objectPlaceholder': 'object id',
+	'audit.columns.time': 'Time',
+	'audit.columns.actor': 'Actor',
+	'audit.columns.action': 'Action',
+	'audit.columns.object': 'Object',
+	'audit.columns.sourceIp': 'Source IP',
+	'audit.detailTitle': 'Audit record',
+	'audit.detailSubtitle': 'Record {id}',
+	'audit.noMore': 'No more records.',
+	'audit.loaded': 'Loaded {count} records.',
+	'audit.actorType.user': 'User',
+	'audit.actorType.token': 'API token',
+	'audit.actorType.system': 'System',
+
+	// Diff view
+	'diff.title': 'Change',
+	'diff.old': 'Old value',
+	'diff.new': 'New value',
+	'diff.field': 'Field',
+	'diff.redacted': 'redacted',
+	'diff.empty': 'This record has no change.',
+	'diff.unchanged': 'No change',
+
+	// Key-value list
+	'keyValue.empty': 'No values.',
+
+	// Alerts
+	'alert.problemTitle': 'The operation failed.',
+	'alert.forbiddenTitle': 'You do not have permission for this operation.',
+	'alert.notFoundTitle': 'The record does not exist.',
+	'alert.unauthorizedTitle': 'Your session ended. Sign in again.',
+	'alert.code': 'Code',
+	'alert.requestId': 'Request ID',
+
+	// Errors from the API (problem codes)
+	'error.invalid_credentials': 'The tenant, the user name or the password is not correct.',
+	'error.unauthorized': 'Your session ended. Sign in again.',
+	'error.forbidden': 'You do not have permission for this operation.',
+	'error.not_found': 'The record does not exist.',
+	'error.validation_failed': 'The data is not correct. Correct the fields and try again.',
+	'error.setup_already_done': 'The setup is already complete.',
+	'error.invalid_setup_token': 'The setup token is not correct.',
+	'error.rate_limited': 'Too many attempts. Wait and try again.',
+	'error.conflict': 'The record already exists.',
+	'error.internal_error': 'The control plane has an internal problem.',
+	'error.network': 'The control plane did not answer.'
+} as const;
+
+export type MessageKey = keyof typeof en;

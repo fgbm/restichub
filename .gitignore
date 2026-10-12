@@ -5,6 +5,8 @@
 node_modules/
 docs/dist/
 docs/.astro/
+ui/build/
+ui/.svelte-kit/
 
 # Vale downloaded packages
 styles/.vale-config/
