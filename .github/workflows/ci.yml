@@ -44,6 +44,23 @@ jobs:
       - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
 
+  proto:
+    name: Protocol Buffers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: 1.73.0
+          input: proto
+          lint: true
+          format: false
+          # Enable after proto/ exists on main.
+          breaking: false
+          breaking_against: https://github.com/${{ github.repository }}.git#format=git,branch=main,subdir=proto
+          push: false
+          pr_comment: false
+
   docs:
     name: Documentation site
     runs-on: ubuntu-latest

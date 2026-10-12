@@ -1,0 +1,242 @@
+// The control plane channel. The agent opens it and keeps it open (FR-ID-07).
+// Every message travels over mTLS. The agent identity comes from the
+// certificate, not from the message payload (FR-PR-08).
+syntax = "proto3";
+
+package restichub.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+import "restichub/agent/v1/job.proto";
+import "restichub/agent/v1/results.proto";
+
+// AgentService is the bidirectional stream between the agent and the control
+// plane. The agent opens the stream (ADR-0008).
+service AgentService {
+  // Connect carries control messages to the agent and agent messages back.
+  rpc Connect(stream AgentMessage) returns (stream ControlMessage);
+}
+
+// ControlMessage is one message from the control plane to the agent.
+message ControlMessage {
+  oneof payload {
+    // ServerHello is the first message. It agrees the protocol version and the
+    // capabilities (FR-PR-09).
+    ServerHello server_hello = 1;
+    // SignedJob is a job with its signature (FR-PR-03).
+    SignedJob signed_job = 2;
+    // CancelJob stops a running job (FR-SC-09).
+    CancelJob cancel_job = 3;
+    // CertificateIssued carries a rotated certificate (FR-ID-03).
+    CertificateIssued certificate_issued = 4;
+    // SigningKeyUpdate carries a new job signing public key (ADR-0005).
+    SigningKeyUpdate signing_key_update = 5;
+    // Ping is the application-level heartbeat (FR-ID-07).
+    Ping ping = 6;
+  }
+}
+
+// AgentMessage is one message from the agent to the control plane.
+message AgentMessage {
+  oneof payload {
+    // AgentHello is the first message of the agent (FR-PR-09).
+    AgentHello agent_hello = 1;
+    // JobAck acknowledges a job before it runs (FR-PR-06).
+    JobAck job_ack = 2;
+    // JobRejected refuses a job and gives the reason (FR-PR-03).
+    JobRejected job_rejected = 3;
+    // StepProgress reports progress of a running step (FR-AG-08).
+    StepProgress step_progress = 4;
+    // LogChunk carries log text (FR-AG-08).
+    LogChunk log_chunk = 5;
+    // StepResult reports the result of one step (FR-AG-09).
+    StepResult step_result = 6;
+    // JobResult reports the result of the full job.
+    JobResult job_result = 7;
+    // Pong answers a Ping (FR-ID-07).
+    Pong pong = 8;
+    // CertificateSigningRequest asks for certificate rotation (FR-ID-03).
+    CertificateSigningRequest certificate_signing_request = 9;
+  }
+}
+
+// ServerHello agrees the protocol version and the capabilities (FR-PR-09).
+message ServerHello {
+  // Major version of the control plane protocol.
+  uint32 protocol_version_major = 1;
+  // Minor version of the control plane protocol.
+  uint32 protocol_version_minor = 2;
+  // Capabilities that the control plane accepts.
+  repeated string accepted_capabilities = 3;
+}
+
+// CancelJob stops a job. The agent cancels the current step first (FR-AG-10).
+message CancelJob {
+  // Identifier of the job to cancel.
+  string job_id = 1;
+  // Time in seconds before the agent kills the process tree (FR-AG-10).
+  uint32 grace_period_seconds = 2;
+}
+
+// CertificateIssued carries a certificate for rotation (FR-ID-03).
+message CertificateIssued {
+  // Agent certificate in DER.
+  bytes certificate_der = 1;
+  // Certificate authority chain in DER.
+  repeated bytes ca_chain_der = 2;
+}
+
+// SigningKeyUpdate delivers a signed job signing key update (FR-PR-11,
+// ADR-0005). The agent verifies the signature before it decodes the update
+// (ADR-0005).
+message SigningKeyUpdate {
+  // Field names 1 and 2 carried the key_id and the public key directly. The
+  // update is a signed KeyUpdate message now (FR-PR-11), so the numbers are
+  // reused and the old names are reserved.
+  reserved "key_id", "public_key";
+  // Serialized KeyUpdate message. The signature covers the exact bytes of this
+  // field after the context prefix "restichub-key-update-v1\0" (FR-PR-11).
+  bytes key_update = 1;
+  // Ed25519 signature of the context prefix and the key_update bytes. The
+  // signature comes from signer_key_id.
+  bytes signature = 2;
+  // Identifier of the key that signs this update. The agent looks up the
+  // signer before it decodes key_update (ADR-0005). The decoded KeyUpdate
+  // carries the same identifier; a difference is an error (FR-PR-11).
+  string signer_key_id = 3;
+}
+
+// KeyUpdate rotates the job signing key (FR-PR-11, ADR-0005).
+message KeyUpdate {
+  // Identifier of the new job signing key.
+  string key_id = 1;
+  // New Ed25519 public key, 32 bytes.
+  bytes public_key = 2;
+  // Identifier of the key that signs this update.
+  string signer_key_id = 3;
+  // Time when the control plane created the update.
+  google.protobuf.Timestamp issued_at = 4;
+  // Identifiers of the keys that the agent must revoke.
+  repeated string revoked_key_ids = 5;
+}
+
+// Ping is the application-level heartbeat from the control plane (FR-ID-07).
+message Ping {
+  // Nonce that the agent repeats in the answer.
+  uint64 nonce = 1;
+}
+
+// AgentHello reports the agent identity and its capabilities (FR-PR-09).
+message AgentHello {
+  // Major version of the agent protocol.
+  uint32 protocol_version_major = 1;
+  // Minor version of the agent protocol.
+  uint32 protocol_version_minor = 2;
+  // Agent version in semantic versioning form.
+  string agent_version = 3;
+  // restic version, for example "0.19.0" (FR-AG-11).
+  string restic_version = 4;
+  // Operating system of the agent.
+  string os = 5;
+  // Processor architecture of the agent.
+  string arch = 6;
+  // Step types that the agent can run (FR-PR-02).
+  repeated string supported_step_types = 7;
+  // Metadata of the hook allow-list (FR-HK-04). It has no secrets.
+  repeated HookMetadata hooks = 8;
+  // Field number 9 held the sequence number of the last accepted job. Replay
+  // protection uses the job journal now (ADR-0020).
+  reserved 9;
+  reserved "last_accepted_sequence";
+}
+
+// HookMetadata is the public part of one allow-list hook (FR-HK-04).
+message HookMetadata {
+  // Identifier of the hook (FR-HK-02).
+  string hook_id = 1;
+  // Name and type of each hook parameter. Values are not present.
+  repeated HookParameterSpec parameters = 2;
+}
+
+// HookParameterSpec describes one hook parameter (FR-HK-02).
+message HookParameterSpec {
+  // Name of the parameter.
+  string name = 1;
+  // Type of the parameter.
+  HookParameterType type = 2;
+}
+
+// HookParameterType is the type of a hook parameter.
+enum HookParameterType {
+  HOOK_PARAMETER_TYPE_UNSPECIFIED = 0;
+  HOOK_PARAMETER_TYPE_STRING = 1;
+  HOOK_PARAMETER_TYPE_INTEGER = 2;
+  HOOK_PARAMETER_TYPE_BOOLEAN = 3;
+}
+
+// JobAck acknowledges a job and starts the lease (FR-PR-06).
+message JobAck {
+  // Identifier of the job.
+  string job_id = 1;
+  // Field number 2 held the job sequence number. Replay protection uses the
+  // job journal now (ADR-0020).
+  reserved 2;
+  reserved "sequence";
+}
+
+// JobRejected refuses a job and gives the reason (FR-PR-03).
+message JobRejected {
+  // Identifier of the rejected job.
+  string job_id = 1;
+  // Reason for the rejection.
+  RejectReason reason = 2;
+}
+
+// RejectReason is the reason why the agent refused a job (FR-PR-03).
+// The control plane records the reason in the audit log (AC-PR-01).
+enum RejectReason {
+  REJECT_REASON_UNSPECIFIED = 0;
+  // The signature does not match the job bytes.
+  REJECT_REASON_BAD_SIGNATURE = 1;
+  // The key_id is not in the agent key ring.
+  REJECT_REASON_UNKNOWN_KEY = 2;
+  // The job names a different agent.
+  REJECT_REASON_WRONG_AGENT = 3;
+  // The job names a different tenant.
+  REJECT_REASON_WRONG_TENANT = 4;
+  // The expiry time has passed.
+  REJECT_REASON_EXPIRED = 5;
+  // The job repeats one that the agent already accepted or completed
+  // (ADR-0020). The journal admission path normally answers such a job with a
+  // new JobAck or the stored JobResult.
+  REJECT_REASON_REPLAY = 6;
+  // The job uses a step type that the agent does not support.
+  REJECT_REASON_UNSUPPORTED_STEP = 7;
+  // The restic version does not support the request.
+  REJECT_REASON_UNSUPPORTED_RESTIC_VERSION = 8;
+  // The job uses a hook that the agent does not allow.
+  REJECT_REASON_UNKNOWN_HOOK = 9;
+  // A hook parameter does not obey the schema.
+  REJECT_REASON_INVALID_HOOK_PARAMETERS = 10;
+  // The hook allow-list is not secure (FR-HK-01).
+  REJECT_REASON_ALLOW_LIST_INSECURE = 11;
+  // The job bytes are not a valid Job message.
+  REJECT_REASON_MALFORMED = 12;
+  // The job lifetime is longer than the maximum (ADR-0020).
+  REJECT_REASON_LIFETIME_TOO_LONG = 13;
+  // The issued_at time is after the current time plus the clock skew
+  // (ADR-0020).
+  REJECT_REASON_NOT_YET_VALID = 14;
+}
+
+// Pong answers a Ping from the control plane (FR-ID-07).
+message Pong {
+  // Nonce from the Ping.
+  uint64 nonce = 1;
+}
+
+// CertificateSigningRequest asks the control plane to sign a new certificate
+// (FR-ID-03). The agent sends it over the existing mTLS channel.
+message CertificateSigningRequest {
+  // Certificate signing request in DER.
+  bytes csr_der = 1;
+}

@@ -1,0 +1,15 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    # The Connect stream uses the shared envelope messages AgentMessage and
+    # ControlMessage. Their names describe their role; the agent and the
+    # control plane must not trust the payload for identity (FR-PR-08).
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

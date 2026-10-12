@@ -1,0 +1,305 @@
+// Results, progress and logs that the agent sends to the control plane.
+// Error messages carry codes and parameters, not prose (NFR-DOC-04).
+syntax = "proto3";
+
+package restichub.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// StepProgress reports the progress of a running step. The fields come from the
+// restic "status" message (FR-AG-08).
+message StepProgress {
+  // Identifier of the job.
+  string job_id = 1;
+  // Identifier of the step.
+  string step_id = 2;
+  // Bytes that restic processed.
+  uint64 bytes_done = 3;
+  // Total bytes to process.
+  uint64 total_bytes = 4;
+  // Files that restic processed.
+  uint64 files_done = 5;
+  // Total files to process.
+  uint64 total_files = 6;
+  // Fraction of the work that is complete, from 0 to 1.
+  double percent_done = 7;
+  // Seconds since the step started.
+  double seconds_elapsed = 8;
+  // Estimated seconds remaining.
+  uint64 seconds_remaining = 9;
+  // Files that restic processes at this moment.
+  repeated string current_files = 10;
+}
+
+// LogChunk is one piece of the log of a job (FR-AG-08).
+message LogChunk {
+  // Identifier of the job.
+  string job_id = 1;
+  // Identifier of the step, or empty for a job-level log.
+  string step_id = 2;
+  // Source of the text.
+  LogStream stream = 3;
+  // Sequence number of the chunk in the stream.
+  uint64 sequence = 4;
+  // Raw log bytes.
+  bytes data = 5;
+}
+
+// LogStream is the source of a log chunk.
+enum LogStream {
+  LOG_STREAM_UNSPECIFIED = 0;
+  // Standard output of restic.
+  LOG_STREAM_STDOUT = 1;
+  // Standard error of restic.
+  LOG_STREAM_STDERR = 2;
+  // Output of the agent itself.
+  LOG_STREAM_AGENT = 3;
+}
+
+// StepStatus is the result of one step. The agent maps restic exit codes to
+// these values (FR-AG-09).
+enum StepStatus {
+  STEP_STATUS_UNSPECIFIED = 0;
+  // Exit code 0.
+  STEP_STATUS_SUCCESS = 1;
+  // Exit code 3.
+  STEP_STATUS_WARNING = 2;
+  // Exit code 11. The control plane retries the step later (FR-SC-05).
+  STEP_STATUS_RETRY = 3;
+  // Exit code 10 or 12.
+  STEP_STATUS_CONFIG_ERROR = 4;
+  // Exit code 130, or a cancellation by the control plane.
+  STEP_STATUS_CANCELLED = 5;
+  // Any other exit code.
+  STEP_STATUS_FAILED = 6;
+  // The step did not run.
+  STEP_STATUS_SKIPPED = 7;
+}
+
+// ErrorDetail is a machine-readable error (NFR-DOC-04).
+message ErrorDetail {
+  // Error code that the user interface translates.
+  string code = 1;
+  // Parameters of the error code.
+  repeated KeyValue params = 2;
+}
+
+// KeyValue is one named parameter.
+message KeyValue {
+  // Name of the parameter.
+  string key = 1;
+  // Value of the parameter.
+  string value = 2;
+}
+
+// StepResult is the result of one step (FR-AG-09).
+message StepResult {
+  // Identifier of the job.
+  string job_id = 1;
+  // Identifier of the step.
+  string step_id = 2;
+  // Result of the step.
+  StepStatus status = 3;
+  // Exit code of restic, or -1 when no process ran.
+  int32 exit_code = 4;
+  // Time when the step started.
+  google.protobuf.Timestamp started_at = 5;
+  // Time when the step finished.
+  google.protobuf.Timestamp finished_at = 6;
+  // Error details. Present when the status is not SUCCESS.
+  ErrorDetail error = 7;
+  // True after a hard kill that can leave a stale lock (FR-AG-10).
+  bool possible_stale_lock = 8;
+  // Output of the step. The type depends on the step type.
+  oneof output {
+    BackupSummary backup_summary = 9;
+    SnapshotList snapshot_list = 10;
+    LsPage ls_page = 11;
+    ForgetResult forget_result = 12;
+    CheckSummary check_summary = 13;
+    StatsSummary stats_summary = 14;
+  }
+}
+
+// BackupSummary is the "summary" message of "restic backup" (FR-MN-02).
+message BackupSummary {
+  // New files.
+  uint64 files_new = 1;
+  // Changed files.
+  uint64 files_changed = 2;
+  // Unchanged files.
+  uint64 files_unmodified = 3;
+  // New directories.
+  uint64 dirs_new = 4;
+  // Changed directories.
+  uint64 dirs_changed = 5;
+  // Unchanged directories.
+  uint64 dirs_unmodified = 6;
+  // New data blobs.
+  uint64 data_blobs = 7;
+  // New tree blobs.
+  uint64 tree_blobs = 8;
+  // Bytes added to the repository.
+  uint64 data_added = 9;
+  // Bytes added to the repository, packed.
+  uint64 data_added_packed = 10;
+  // Files processed.
+  uint64 total_files_processed = 11;
+  // Bytes processed.
+  uint64 total_bytes_processed = 12;
+  // Duration of the backup in seconds.
+  double total_duration_seconds = 13;
+  // Identifier of the new snapshot. Empty for a dry run.
+  string snapshot_id = 14;
+  // True when the run was a dry run.
+  bool dry_run = 15;
+}
+
+// Snapshot is one entry of "restic snapshots --json".
+message Snapshot {
+  // Full identifier of the snapshot.
+  string id = 1;
+  // Short identifier of the snapshot.
+  string short_id = 2;
+  // Creation time of the snapshot.
+  google.protobuf.Timestamp time = 3;
+  // Identifier of the tree.
+  string tree = 4;
+  // Backed-up paths.
+  repeated string paths = 5;
+  // Host name of the snapshot.
+  string hostname = 6;
+  // User name of the snapshot.
+  string username = 7;
+  // Tags of the snapshot.
+  repeated string tags = 8;
+  // restic version that made the snapshot.
+  string program_version = 9;
+  // Summary of the backup, when restic reports it.
+  BackupSummary summary = 10;
+}
+
+// SnapshotList is the output of "restic snapshots" (FR-RS-01).
+message SnapshotList {
+  // Snapshots that match the filter.
+  repeated Snapshot snapshots = 1;
+}
+
+// Node is one entry of "restic ls --json" (FR-RS-02).
+message Node {
+  // Base name of the node.
+  string name = 1;
+  // Type of the node.
+  NodeType type = 2;
+  // Full path of the node in the snapshot.
+  string path = 3;
+  // User identifier.
+  uint32 uid = 4;
+  // Group identifier.
+  uint32 gid = 5;
+  // Size in bytes.
+  int64 size = 6;
+  // File mode bits.
+  uint32 mode = 7;
+  // Permission string, for example "-rw-r--r--".
+  string permissions = 8;
+  // Modification time.
+  google.protobuf.Timestamp mtime = 9;
+  // Access time.
+  google.protobuf.Timestamp atime = 10;
+  // Change time.
+  google.protobuf.Timestamp ctime = 11;
+  // Target of a symbolic link.
+  string link_target = 12;
+}
+
+// NodeType is the type of a file system node.
+enum NodeType {
+  NODE_TYPE_UNSPECIFIED = 0;
+  NODE_TYPE_FILE = 1;
+  NODE_TYPE_DIR = 2;
+  NODE_TYPE_SYMLINK = 3;
+  NODE_TYPE_DEVICE = 4;
+  NODE_TYPE_CHAR_DEVICE = 5;
+  NODE_TYPE_FIFO = 6;
+  NODE_TYPE_SOCKET = 7;
+  NODE_TYPE_IRREGULAR = 8;
+}
+
+// LsPage is one page of the output of "restic ls" (FR-RS-02).
+message LsPage {
+  // Nodes of this page.
+  repeated Node nodes = 1;
+  // True when this page is the last page.
+  bool last = 2;
+}
+
+// ForgetResult is the output of "restic forget --json".
+message ForgetResult {
+  // One entry for each snapshot group.
+  repeated ForgetGroup groups = 1;
+}
+
+// ForgetGroup is one group of the retention rule.
+message ForgetGroup {
+  // Tags of the group.
+  repeated string tags = 1;
+  // Host name of the group.
+  string host = 2;
+  // Paths of the group.
+  repeated string paths = 3;
+  // Snapshots that the rule kept.
+  repeated ForgetSnapshot kept = 4;
+  // Snapshots that the rule removed.
+  repeated ForgetSnapshot removed = 5;
+}
+
+// ForgetSnapshot is one snapshot in a ForgetGroup.
+message ForgetSnapshot {
+  // Identifier of the snapshot.
+  string id = 1;
+  // Creation time of the snapshot.
+  google.protobuf.Timestamp time = 2;
+  // Reason why the rule kept the snapshot.
+  string reason = 3;
+}
+
+// CheckSummary is the output of "restic check --json".
+message CheckSummary {
+  // Number of errors.
+  uint64 num_errors = 1;
+  // True when restic suggests a repair.
+  bool repair_suggested = 2;
+  // Data blobs that restic checked.
+  uint64 blobs_checked = 3;
+  // Packs that restic checked.
+  uint64 packs_checked = 4;
+}
+
+// StatsSummary is the output of "restic stats --json" (FR-MN-07).
+message StatsSummary {
+  // Total size in bytes.
+  uint64 total_size = 1;
+  // Total size in bytes before compression.
+  uint64 total_uncompressed_size = 2;
+  // Number of files.
+  uint64 total_file_count = 3;
+  // Number of snapshots.
+  uint64 snapshots_count = 4;
+  // Ratio of the compressed size to the uncompressed size.
+  double compression_ratio = 5;
+}
+
+// JobResult is the result of the full job.
+message JobResult {
+  // Identifier of the job.
+  string job_id = 1;
+  // Result of the job.
+  StepStatus status = 2;
+  // Number of steps in the job.
+  uint32 steps_total = 3;
+  // Number of successful steps.
+  uint32 steps_succeeded = 4;
+  // Number of failed steps.
+  uint32 steps_failed = 5;
+}

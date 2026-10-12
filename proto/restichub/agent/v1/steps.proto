@@ -1,0 +1,269 @@
+// Steps are typed messages. Each step type has one message in the oneof of
+// Step. The protocol has no free-form maps or raw restic argument strings
+// (FR-PR-01, FR-PR-02).
+//
+// The agent builds the restic command line from the typed fields. It never
+// copies a job string into a shell. The argument construction rules (FR-PR-10,
+// ADR-0021) are:
+//   - A positional argument goes after "--", for example
+//     "restic backup -- /srv".
+//   - An option value uses the attached form "--flag=value". The agent never
+//     writes "--flag value".
+//   - The agent never sets "--password-command", "RESTIC_PASSWORD_COMMAND" or
+//     "-o sftp.command" from job data. Only the agent configuration sets them.
+syntax = "proto3";
+
+package restichub.agent.v1;
+
+// Step is one atomic command for the agent (FR-AG-05).
+message Step {
+  // Identifier of the step in the job.
+  string step_id = 1;
+  // Time in seconds after which the agent cancels the step (FR-AG-05).
+  uint32 timeout_seconds = 2;
+  oneof kind {
+    // BackupStep runs "restic backup".
+    BackupStep backup = 3;
+    // CheckStep runs "restic check".
+    CheckStep check = 4;
+    // SnapshotsStep runs "restic snapshots".
+    SnapshotsStep snapshots = 5;
+    // LsStep runs "restic ls".
+    LsStep ls = 6;
+    // RestoreStep runs "restic restore".
+    RestoreStep restore = 7;
+    // UnlockStep runs "restic unlock" for stale locks only.
+    UnlockStep unlock = 8;
+    // ForgetStep runs "restic forget".
+    ForgetStep forget = 9;
+    // PruneStep runs "restic prune".
+    PruneStep prune = 10;
+    // StatsStep runs "restic stats".
+    StatsStep stats = 11;
+    // HookStep runs an allow-listed hook (FR-HK-03).
+    HookStep hook = 12;
+    // UnlockAllStep runs "restic unlock --remove-all" (FR-SC-06).
+    UnlockAllStep unlock_all = 13;
+    // Field numbers 14 to 19 are reserved for the 1.0 step types of FR-PR-02:
+    // find, dump, copy, init, key_add and key_remove.
+  }
+}
+
+// BackupStep creates one snapshot.
+message BackupStep {
+  // Identifier of the repository of this job.
+  string repository_id = 1;
+  // Paths to back up.
+  repeated string paths = 2;
+  // Exclude patterns.
+  repeated string excludes = 3;
+  // Files that contain exclude patterns.
+  repeated string exclude_files = 4;
+  // Tags of the snapshot.
+  repeated string tags = 5;
+  // Use a file system snapshot, for example VSS on Windows.
+  bool use_fs_snapshot = 6;
+  // Stay on one file system.
+  bool one_file_system = 7;
+  // Exclude cache directories.
+  bool exclude_caches = 8;
+  // Upload limit in kibibytes each second. Zero means no limit (FR-AG-15).
+  uint64 limit_upload_kib = 9;
+  // Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
+  uint64 limit_download_kib = 10;
+  // Retry when a lock is present (FR-SC-05).
+  bool retry_lock = 11;
+}
+
+// CheckStep tests the repository structure.
+message CheckStep {
+  // Identifier of the repository of this job.
+  string repository_id = 1;
+  // Subset of data to read, for example "10%" or "1/7".
+  string read_data_subset = 2;
+  // Retry when a lock is present (FR-SC-05).
+  bool retry_lock = 3;
+}
+
+// SnapshotsStep lists snapshots. Date filters for snapshots are applied by the
+// control plane, not by restic. The control plane resolves them and sends a
+// concrete filter or a snapshot list.
+message SnapshotsStep {
+  // Filter by host name.
+  repeated string hosts = 1;
+  // Filter by tag.
+  repeated string tags = 2;
+  // Filter by path.
+  repeated string paths = 3;
+  // Show only the last N snapshots of each group.
+  uint32 latest = 4;
+  // Identifier of the repository of this job.
+  string repository_id = 5;
+}
+
+// LsStep lists the files of one snapshot (FR-RS-02). The agent pages over the
+// node stream: it sends the first "limit" nodes, and the control plane asks for
+// the next page with a higher "offset" (AC-RS-02).
+message LsStep {
+  // Identifier of the snapshot.
+  string snapshot_id = 1;
+  // Path inside the snapshot. An empty value means the root.
+  string path = 2;
+  // List directories recursively.
+  bool recursive = 3;
+  // Identifier of the repository of this job.
+  string repository_id = 4;
+  // Number of nodes to skip at the start of the stream.
+  uint64 offset = 5;
+  // Maximum number of nodes in this page. Zero means the agent default.
+  uint64 limit = 6;
+}
+
+// RestoreStep restores the files of one snapshot (FR-RS-04).
+message RestoreStep {
+  // Identifier of the snapshot.
+  string snapshot_id = 1;
+  // Target directory on the agent.
+  string target = 2;
+  // Include patterns.
+  repeated string includes = 3;
+  // Exclude patterns.
+  repeated string excludes = 4;
+  // Test the restore without writing files.
+  bool dry_run = 5;
+  // Policy for existing files.
+  OverwriteMode overwrite = 6;
+  // Verify the restored files after the restore.
+  bool verify = 7;
+  // Identifier of the repository of this job.
+  string repository_id = 8;
+}
+
+// OverwriteMode is the policy for existing files during a restore.
+enum OverwriteMode {
+  OVERWRITE_MODE_UNSPECIFIED = 0;
+  OVERWRITE_MODE_ALWAYS = 1;
+  OVERWRITE_MODE_IF_CHANGED = 2;
+  OVERWRITE_MODE_IF_NEWER = 3;
+  OVERWRITE_MODE_NEVER = 4;
+}
+
+// UnlockStep removes stale locks only. This message has no remove_all field
+// (FR-PR-02, FR-SC-06).
+message UnlockStep {
+  // Identifier of the repository of this job.
+  string repository_id = 1;
+}
+
+// UnlockAllStep removes all locks, including live locks. The control plane
+// creates this step only from an Admin action with a confirmation (FR-SC-06).
+message UnlockAllStep {
+  // Identifier of the repository of this job.
+  string repository_id = 1;
+}
+
+// SnapshotsFilter selects a group of snapshots.
+message SnapshotsFilter {
+  // Filter by host name.
+  repeated string hosts = 1;
+  // Filter by tag.
+  repeated string tags = 2;
+  // Filter by path.
+  repeated string paths = 3;
+}
+
+// ForgetStep applies the retention policy (FR-PF-01).
+message ForgetStep {
+  // Keep the last N snapshots.
+  uint32 keep_last = 1;
+  // Keep the hourly snapshots.
+  uint32 keep_hourly = 2;
+  // Keep the daily snapshots.
+  uint32 keep_daily = 3;
+  // Keep the weekly snapshots.
+  uint32 keep_weekly = 4;
+  // Keep the monthly snapshots.
+  uint32 keep_monthly = 5;
+  // Keep the yearly snapshots.
+  uint32 keep_yearly = 6;
+  // Keep the snapshots younger than a duration, for example "30d".
+  string keep_within = 7;
+  // Keep the snapshots with these tags.
+  repeated string keep_tags = 8;
+  // Group the snapshots before the retention rule.
+  repeated ForgetGroupBy group_by = 9;
+  // Filter the snapshots before the retention rule.
+  SnapshotsFilter filter = 10;
+  // Retry when a lock is present (FR-SC-05).
+  bool retry_lock = 11;
+  // Identifier of the repository of this job.
+  string repository_id = 12;
+}
+
+// ForgetGroupBy is the grouping key of the retention rule.
+enum ForgetGroupBy {
+  FORGET_GROUP_BY_UNSPECIFIED = 0;
+  FORGET_GROUP_BY_HOST = 1;
+  FORGET_GROUP_BY_PATHS = 2;
+  FORGET_GROUP_BY_TAGS = 3;
+}
+
+// PruneStep removes unused data from the repository.
+message PruneStep {
+  // Limit of unused data to keep, for example "5%" or "500M".
+  string max_unused = 1;
+  // Maximum size of data to repack, for example "50M".
+  string max_repack_size = 2;
+  // Retry when a lock is present (FR-SC-05).
+  bool retry_lock = 3;
+  // Identifier of the repository of this job.
+  string repository_id = 4;
+}
+
+// StatsStep reports the repository size (FR-MN-07).
+message StatsStep {
+  // Snapshot identifiers. An empty list means the whole repository.
+  repeated string snapshot_ids = 1;
+  // Mode of the statistics.
+  StatsMode mode = 2;
+  // Identifier of the repository of this job.
+  string repository_id = 3;
+}
+
+// StatsMode is the statistic mode of restic.
+enum StatsMode {
+  STATS_MODE_UNSPECIFIED = 0;
+  STATS_MODE_RESTORE_SIZE = 1;
+  STATS_MODE_FILES_BY_CONTENTS = 2;
+  STATS_MODE_BLOBS_PER_FILE = 3;
+  STATS_MODE_RAW_DATA = 4;
+}
+
+// HookStep runs one allow-listed hook (FR-HK-03). A duplicate or unknown
+// parameter name causes REJECT_REASON_INVALID_HOOK_PARAMETERS.
+message HookStep {
+  // Identifier of the hook in the agent allow-list.
+  string hook_id = 1;
+  // Phase of the hook in the job.
+  HookPhase phase = 2;
+  // Parameters that the agent validates against the allow-list schema.
+  repeated HookParameter parameters = 3;
+}
+
+// HookParameter is one named parameter of a hook (FR-HK-03).
+message HookParameter {
+  // Name of the parameter.
+  string name = 1;
+  // Value of the parameter.
+  string value = 2;
+}
+
+// HookPhase is the position of a hook in a job (FR-HK-05).
+enum HookPhase {
+  HOOK_PHASE_UNSPECIFIED = 0;
+  HOOK_PHASE_BEFORE = 1;
+  HOOK_PHASE_AFTER = 2;
+  HOOK_PHASE_ON_SUCCESS = 3;
+  HOOK_PHASE_ON_ERROR = 4;
+  HOOK_PHASE_FINALLY = 5;
+}

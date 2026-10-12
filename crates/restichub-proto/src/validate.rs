@@ -1,0 +1,799 @@
+//! Argument validation of a job (FR-PR-10, FR-PR-01).
+//!
+//! The control plane calls [`validate_job`] before it signs a job. The agent
+//! calls it before it runs a job. Validation keeps a job inside the typed
+//! contract: the job has steps, every step has a known kind, every step refers
+//! to a repository of the job, every required field is present, and every
+//! string field has no control character. A field with a format, for example a
+//! snapshot identifier or a size, must match that format. The SFTP private key
+//! is the one exception: a PEM key has line breaks, so that field rejects a NUL
+//! only.
+//!
+//! The agent builds the restic command line from the typed fields (ADR-0021).
+//! Validation rejects a flag-like value only where the field has a format. A
+//! free value, for example a path, an exclude pattern or a tag, may contain a
+//! flag-like string: the command builder places a positional value after `--`
+//! or attaches an option value with `--flag=value`, so the value never becomes
+//! an option.
+
+use std::collections::HashSet;
+
+use crate::agent::v1::{
+    HookStep, Job, RejectReason, RepositoryAccess, SnapshotsFilter, Step,
+    repository_access::BackendCredentials, step,
+};
+use crate::signing::Rejection;
+
+/// Validates a job against the typed contract (FR-PR-10).
+///
+/// # Errors
+///
+/// Returns a [`Rejection`] with [`RejectReason::UnsupportedStep`] for an
+/// unknown step kind, [`RejectReason::InvalidHookParameters`] for a duplicate
+/// hook parameter name, and [`RejectReason::Malformed`] for any other rule.
+pub fn validate_job(job: &Job) -> Result<(), Rejection> {
+    if job.steps.is_empty() {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+
+    for repository in &job.repositories {
+        check_repository(job, repository)?;
+    }
+
+    let repository_ids: Vec<&str> = job
+        .repositories
+        .iter()
+        .map(|repository| repository.repository_id.as_str())
+        .collect();
+
+    for step in &job.steps {
+        check_step(job, &repository_ids, step)?;
+    }
+
+    Ok(())
+}
+
+/// Validates one step against its kind.
+fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rejection> {
+    let Some(kind) = step.kind.as_ref() else {
+        return Err(reject(job, RejectReason::UnsupportedStep));
+    };
+
+    match kind {
+        step::Kind::Backup(backup) => {
+            check_repository_id(job, repository_ids, &backup.repository_id)?;
+            if backup.paths.is_empty() {
+                return Err(reject(job, RejectReason::Malformed));
+            }
+            check_free(job, backup.paths.iter())?;
+            check_free(job, backup.excludes.iter())?;
+            check_free(job, backup.exclude_files.iter())?;
+            check_free(job, backup.tags.iter())?;
+        }
+        step::Kind::Check(check) => {
+            check_repository_id(job, repository_ids, &check.repository_id)?;
+            check_format(job, &check.read_data_subset, is_read_data_subset)?;
+        }
+        step::Kind::Snapshots(snapshots) => {
+            check_repository_id(job, repository_ids, &snapshots.repository_id)?;
+            check_free(job, snapshots.hosts.iter())?;
+            check_free(job, snapshots.tags.iter())?;
+            check_free(job, snapshots.paths.iter())?;
+        }
+        step::Kind::Ls(ls) => {
+            check_repository_id(job, repository_ids, &ls.repository_id)?;
+            check_required_format(job, &ls.snapshot_id, is_snapshot_id)?;
+            check_free(job, std::iter::once(&ls.path))?;
+        }
+        step::Kind::Restore(restore) => {
+            check_repository_id(job, repository_ids, &restore.repository_id)?;
+            check_required_format(job, &restore.snapshot_id, is_snapshot_id)?;
+            check_required_free(job, &restore.target)?;
+            check_free(job, restore.includes.iter())?;
+            check_free(job, restore.excludes.iter())?;
+        }
+        step::Kind::Unlock(unlock) => {
+            check_repository_id(job, repository_ids, &unlock.repository_id)?;
+        }
+        step::Kind::UnlockAll(unlock_all) => {
+            check_repository_id(job, repository_ids, &unlock_all.repository_id)?;
+        }
+        step::Kind::Forget(forget) => {
+            check_repository_id(job, repository_ids, &forget.repository_id)?;
+            check_format(job, &forget.keep_within, is_keep_within)?;
+            check_free(job, forget.keep_tags.iter())?;
+            if let Some(filter) = &forget.filter {
+                check_filter(job, filter)?;
+            }
+        }
+        step::Kind::Prune(prune) => {
+            check_repository_id(job, repository_ids, &prune.repository_id)?;
+            check_format(job, &prune.max_unused, is_size_option)?;
+            check_format(job, &prune.max_repack_size, is_size_option)?;
+        }
+        step::Kind::Stats(stats) => {
+            check_repository_id(job, repository_ids, &stats.repository_id)?;
+            for snapshot_id in &stats.snapshot_ids {
+                check_format(job, snapshot_id, is_snapshot_id)?;
+            }
+        }
+        step::Kind::Hook(hook) => {
+            check_hook(job, hook)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates the filter of a forget step.
+fn check_filter(job: &Job, filter: &SnapshotsFilter) -> Result<(), Rejection> {
+    check_free(job, filter.hosts.iter())?;
+    check_free(job, filter.tags.iter())?;
+    check_free(job, filter.paths.iter())
+}
+
+/// Validates a hook step: a hook_id, no control character, and unique
+/// parameter names.
+fn check_hook(job: &Job, hook: &HookStep) -> Result<(), Rejection> {
+    if hook.hook_id.is_empty() || has_control(&hook.hook_id) {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+
+    let mut names = HashSet::new();
+    for parameter in &hook.parameters {
+        if has_control(&parameter.name) || has_control(&parameter.value) {
+            return Err(reject(job, RejectReason::Malformed));
+        }
+        if !names.insert(parameter.name.as_str()) {
+            return Err(reject(job, RejectReason::InvalidHookParameters));
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates the string fields of one repository access.
+fn check_repository(job: &Job, repository: &RepositoryAccess) -> Result<(), Rejection> {
+    if repository.repository_id.is_empty() {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+
+    let mut fields = vec![&repository.repository_id, &repository.location];
+    fields.push(&repository.password);
+    match &repository.backend_credentials {
+        Some(BackendCredentials::S3(credentials)) => {
+            fields.push(&credentials.access_key_id);
+            fields.push(&credentials.secret_access_key);
+            fields.push(&credentials.session_token);
+            fields.push(&credentials.region);
+        }
+        Some(BackendCredentials::Rest(credentials)) => {
+            fields.push(&credentials.username);
+            fields.push(&credentials.password);
+        }
+        Some(BackendCredentials::Sftp(credentials)) => {
+            // A PEM private key has line breaks. This field rejects a NUL only.
+            if has_nul(&credentials.private_key) {
+                return Err(reject(job, RejectReason::Malformed));
+            }
+            fields.push(&credentials.password);
+            fields.push(&credentials.known_hosts_entry);
+        }
+        Some(BackendCredentials::Local(_)) | None => {}
+    }
+
+    for field in fields {
+        if has_control(field) {
+            return Err(reject(job, RejectReason::Malformed));
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns true when `repository_id` is a non-empty identifier of one of the
+/// repositories of the job.
+fn check_repository_id(
+    job: &Job,
+    repository_ids: &[&str],
+    repository_id: &str,
+) -> Result<(), Rejection> {
+    if repository_id.is_empty() || !repository_ids.contains(&repository_id) {
+        Err(reject(job, RejectReason::Malformed))
+    } else {
+        Ok(())
+    }
+}
+
+/// Rejects a control character in a free string field. An empty value is
+/// allowed.
+fn check_free<'a>(
+    job: &Job,
+    values: impl IntoIterator<Item = &'a String>,
+) -> Result<(), Rejection> {
+    for value in values {
+        if has_control(value) {
+            return Err(reject(job, RejectReason::Malformed));
+        }
+    }
+    Ok(())
+}
+
+/// Rejects a control character or a value that does not match `is_valid` in a
+/// field with a format. An empty value is allowed.
+fn check_format(job: &Job, value: &str, is_valid: fn(&str) -> bool) -> Result<(), Rejection> {
+    if has_control(value) {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+    if !value.is_empty() && !is_valid(value) {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+    Ok(())
+}
+
+/// Rejects an empty value, a control character or a value that does not match
+/// `is_valid` in a required field with a format.
+fn check_required_format(
+    job: &Job,
+    value: &str,
+    is_valid: fn(&str) -> bool,
+) -> Result<(), Rejection> {
+    if value.is_empty() || has_control(value) || !is_valid(value) {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+    Ok(())
+}
+
+/// Rejects an empty value or a control character in a required free field.
+fn check_required_free(job: &Job, value: &str) -> Result<(), Rejection> {
+    if value.is_empty() || has_control(value) {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+    Ok(())
+}
+
+/// Returns true when `value` has a NUL, a carriage return or a line feed.
+fn has_control(value: &str) -> bool {
+    value
+        .bytes()
+        .any(|byte| byte == 0 || byte == b'\n' || byte == b'\r')
+}
+
+/// Returns true when `value` has a NUL byte. A PEM private key has line breaks,
+/// so the field that carries it rejects a NUL only.
+fn has_nul(value: &str) -> bool {
+    value.bytes().any(|byte| byte == 0)
+}
+
+/// Returns true for a snapshot identifier: `latest`, or 8 to 64 lower-case
+/// hexadecimal characters.
+fn is_snapshot_id(value: &str) -> bool {
+    if value == "latest" {
+        return true;
+    }
+    matches!(value.len(), 8..=64) && value.bytes().all(is_lower_hex)
+}
+
+/// Returns true for a lower-case hexadecimal character.
+fn is_lower_hex(byte: u8) -> bool {
+    byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+}
+
+/// Returns true for a keep-within duration: one or more digit groups, each
+/// followed by a unit of `y`, `m`, `w`, `d` or `h`.
+fn is_keep_within(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let digits_start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if index == digits_start || index >= bytes.len() {
+            return false;
+        }
+        match bytes[index] {
+            b'y' | b'Y' | b'm' | b'M' | b'w' | b'W' | b'd' | b'D' | b'h' | b'H' => index += 1,
+            _ => return false,
+        }
+    }
+    !value.is_empty()
+}
+
+/// Returns true for a size option: `unlimited`, a number with an optional
+/// fraction and a `%`, or a number with an optional binary unit.
+fn is_size_option(value: &str) -> bool {
+    if value == "unlimited" {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    if index == 0 {
+        return false;
+    }
+    if index == bytes.len() {
+        return true;
+    }
+    match bytes[index] {
+        b'%' => index == bytes.len() - 1,
+        b'.' => {
+            index += 1;
+            let fraction_start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            fraction_start != index && index == bytes.len() - 1 && bytes[index] == b'%'
+        }
+        b'k' | b'K' | b'm' | b'M' | b'g' | b'G' | b't' | b'T' => index == bytes.len() - 1,
+        _ => false,
+    }
+}
+
+/// Returns true for a read-data subset: a number pair `a/b`, a percentage, or
+/// a number with an optional binary unit.
+fn is_read_data_subset(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    if index == 0 {
+        return false;
+    }
+    if index == bytes.len() {
+        return true;
+    }
+    match bytes[index] {
+        b'/' => {
+            index += 1;
+            let digits_start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            digits_start != index && index == bytes.len()
+        }
+        b'%' => index == bytes.len() - 1,
+        b'.' => {
+            index += 1;
+            let fraction_start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            fraction_start != index && index == bytes.len() - 1 && bytes[index] == b'%'
+        }
+        b'k' | b'K' | b'm' | b'M' | b'g' | b'G' | b't' | b'T' => index == bytes.len() - 1,
+        _ => false,
+    }
+}
+
+/// Builds a malformed rejection for `job`.
+fn reject(job: &Job, reason: RejectReason) -> Rejection {
+    Rejection {
+        reason,
+        job_id: Some(job.job_id.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::v1::{
+        BackupStep, CheckStep, ForgetStep, HookParameter, HookStep, LsStep, PruneStep, RestoreStep,
+        SftpCredentials, SnapshotsStep, StatsStep, UnlockAllStep, UnlockStep,
+    };
+
+    const BAD_OPTION: &str = "--password-command=cmd /c calc";
+    const BAD_SHORT: &str = "-x";
+
+    fn repository() -> RepositoryAccess {
+        RepositoryAccess {
+            repository_id: "repo-1".to_owned(),
+            location: "s3:s3.example.com/bucket".to_owned(),
+            ..RepositoryAccess::default()
+        }
+    }
+
+    fn job_with(steps: Vec<Step>) -> Job {
+        Job {
+            job_id: "job-1".to_owned(),
+            tenant_id: "tenant-1".to_owned(),
+            agent_id: "agent-1".to_owned(),
+            repositories: vec![repository()],
+            steps,
+            ..Job::default()
+        }
+    }
+
+    /// Builds a valid job with one unlock step and SFTP credentials on its
+    /// repository.
+    fn job_with_sftp(credentials: SftpCredentials) -> Job {
+        let mut job = job_with(vec![step(step::Kind::Unlock(UnlockStep {
+            repository_id: string("repo-1"),
+        }))]);
+        job.repositories[0].backend_credentials = Some(BackendCredentials::Sftp(credentials));
+        job
+    }
+
+    fn step(kind: step::Kind) -> Step {
+        Step {
+            step_id: "step-1".to_owned(),
+            kind: Some(kind),
+            ..Step::default()
+        }
+    }
+
+    fn string(value: &str) -> String {
+        value.to_owned()
+    }
+
+    fn malformed(job: &Job) -> bool {
+        validate_job(job) == Err(reject(job, RejectReason::Malformed))
+    }
+
+    /// AC-PR-08: a job of valid typed steps passes.
+    #[test]
+    fn ac_pr_08_accepts_valid_job() {
+        let steps = vec![
+            step(step::Kind::Backup(BackupStep {
+                repository_id: string("repo-1"),
+                paths: vec![string("/srv"), string("/etc")],
+                excludes: vec![string("*.tmp")],
+                tags: vec![string("daily")],
+                ..BackupStep::default()
+            })),
+            step(step::Kind::Check(CheckStep {
+                repository_id: string("repo-1"),
+                read_data_subset: string("10%"),
+                ..CheckStep::default()
+            })),
+            step(step::Kind::Snapshots(SnapshotsStep {
+                repository_id: string("repo-1"),
+                ..SnapshotsStep::default()
+            })),
+            step(step::Kind::Ls(LsStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string("latest"),
+                path: string("/srv"),
+                ..LsStep::default()
+            })),
+            step(step::Kind::Restore(RestoreStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string("0123abcd"),
+                target: string("/restore"),
+                ..RestoreStep::default()
+            })),
+            step(step::Kind::Unlock(UnlockStep {
+                repository_id: string("repo-1"),
+            })),
+            step(step::Kind::UnlockAll(UnlockAllStep {
+                repository_id: string("repo-1"),
+            })),
+            step(step::Kind::Forget(ForgetStep {
+                repository_id: string("repo-1"),
+                keep_within: string("30d"),
+                ..ForgetStep::default()
+            })),
+            step(step::Kind::Prune(PruneStep {
+                repository_id: string("repo-1"),
+                max_unused: string("5%"),
+                max_repack_size: string("50M"),
+                ..PruneStep::default()
+            })),
+            step(step::Kind::Stats(StatsStep {
+                repository_id: string("repo-1"),
+                snapshot_ids: vec![string("0123abcd")],
+                ..StatsStep::default()
+            })),
+            step(step::Kind::Hook(HookStep {
+                hook_id: string("pg_dump"),
+                parameters: vec![HookParameter {
+                    name: string("database"),
+                    value: string("app"),
+                }],
+                ..HookStep::default()
+            })),
+        ];
+
+        assert_eq!(validate_job(&job_with(steps)), Ok(()));
+    }
+
+    /// AC-PR-08: a flag-like value in a field with a format is rejected. The
+    /// value is not a valid identifier, size or duration.
+    #[test]
+    fn ac_pr_08_rejects_flag_like_value_in_format_fields() {
+        let jobs = vec![
+            job_with(vec![step(step::Kind::Check(CheckStep {
+                repository_id: string("repo-1"),
+                read_data_subset: string(BAD_OPTION),
+                ..CheckStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Ls(LsStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string(BAD_OPTION),
+                ..LsStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Forget(ForgetStep {
+                repository_id: string("repo-1"),
+                keep_within: string(BAD_OPTION),
+                ..ForgetStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Prune(PruneStep {
+                repository_id: string("repo-1"),
+                max_unused: string(BAD_OPTION),
+                ..PruneStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Prune(PruneStep {
+                repository_id: string("repo-1"),
+                max_repack_size: string(BAD_OPTION),
+                ..PruneStep::default()
+            }))]),
+        ];
+
+        for job in &jobs {
+            assert!(malformed(job), "{:?}", job.steps);
+        }
+    }
+
+    /// AC-PR-08: a short flag in a field with a format is rejected.
+    #[test]
+    fn ac_pr_08_rejects_short_flag_in_format_fields() {
+        let jobs = vec![
+            job_with(vec![step(step::Kind::Check(CheckStep {
+                repository_id: string("repo-1"),
+                read_data_subset: string(BAD_SHORT),
+                ..CheckStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Ls(LsStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string(BAD_SHORT),
+                ..LsStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Forget(ForgetStep {
+                repository_id: string("repo-1"),
+                keep_within: string(BAD_SHORT),
+                ..ForgetStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Prune(PruneStep {
+                repository_id: string("repo-1"),
+                max_unused: string(BAD_SHORT),
+                ..PruneStep::default()
+            }))]),
+        ];
+
+        for job in &jobs {
+            assert!(malformed(job), "{:?}", job.steps);
+        }
+    }
+
+    /// AC-PR-08: a flag-like value in a free field is allowed. The command
+    /// builder places a positional value after `--` and attaches an option
+    /// value with `--flag=value`, so the value stays a value. Validation does
+    /// not reject it here.
+    #[test]
+    fn ac_pr_08_allows_flag_like_value_in_free_fields() {
+        let steps = vec![
+            step(step::Kind::Backup(BackupStep {
+                repository_id: string("repo-1"),
+                paths: vec![string(BAD_OPTION), string(BAD_SHORT)],
+                excludes: vec![string(BAD_OPTION)],
+                tags: vec![string(BAD_SHORT)],
+                ..BackupStep::default()
+            })),
+            step(step::Kind::Ls(LsStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string("latest"),
+                path: string(BAD_OPTION),
+                ..LsStep::default()
+            })),
+            step(step::Kind::Hook(HookStep {
+                hook_id: string("pg_dump"),
+                parameters: vec![HookParameter {
+                    name: string("database"),
+                    value: string(BAD_OPTION),
+                }],
+                ..HookStep::default()
+            })),
+        ];
+
+        assert_eq!(validate_job(&job_with(steps)), Ok(()));
+    }
+
+    /// AC-PR-08: a value with a line feed is rejected in a free field and in a
+    /// repository field. The SFTP private key is the one exception.
+    #[test]
+    fn ac_pr_08_rejects_newline_in_any_field() {
+        let newline = "value\nwith-newline";
+        let jobs = vec![
+            job_with(vec![step(step::Kind::Backup(BackupStep {
+                repository_id: string("repo-1"),
+                paths: vec![string(newline)],
+                ..BackupStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Backup(BackupStep {
+                repository_id: string("repo-1"),
+                paths: vec![string("/srv")],
+                excludes: vec![string(newline)],
+                ..BackupStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Backup(BackupStep {
+                repository_id: string("repo-1"),
+                paths: vec![string("/srv")],
+                tags: vec![string(newline)],
+                ..BackupStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Ls(LsStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string("latest"),
+                path: string(newline),
+                ..LsStep::default()
+            }))]),
+            job_with(vec![step(step::Kind::Hook(HookStep {
+                hook_id: string("pg_dump"),
+                parameters: vec![HookParameter {
+                    name: string("database"),
+                    value: string(newline),
+                }],
+                ..HookStep::default()
+            }))]),
+        ];
+
+        for job in &jobs {
+            assert!(malformed(job), "{:?}", job.steps);
+        }
+
+        let mut with_newline_repository = job_with(vec![step(step::Kind::Unlock(UnlockStep {
+            repository_id: string("repo-1"),
+        }))]);
+        with_newline_repository.repositories[0].location = string(newline);
+        assert!(malformed(&with_newline_repository));
+
+        let with_newline_known_hosts = job_with_sftp(SftpCredentials {
+            known_hosts_entry: string(newline),
+            ..SftpCredentials::default()
+        });
+        assert!(malformed(&with_newline_known_hosts));
+    }
+
+    /// AC-PR-08: an SFTP private key in PEM form has line breaks. That field
+    /// rejects a NUL only, not a line break.
+    #[test]
+    fn ac_pr_08_allows_line_breaks_in_sftp_private_key() {
+        let key = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\nBBBB\r\n\
+                   -----END OPENSSH PRIVATE KEY-----";
+        let job = job_with_sftp(SftpCredentials {
+            private_key: string(key),
+            ..SftpCredentials::default()
+        });
+
+        assert_eq!(validate_job(&job), Ok(()));
+    }
+
+    /// AC-PR-08: a NUL in the SFTP private key is rejected.
+    #[test]
+    fn ac_pr_08_rejects_nul_in_sftp_private_key() {
+        let job = job_with_sftp(SftpCredentials {
+            private_key: string("key\0value"),
+            ..SftpCredentials::default()
+        });
+
+        assert!(malformed(&job));
+    }
+
+    /// AC-PR-08: an empty optional string is allowed.
+    #[test]
+    fn ac_pr_08_accepts_empty_optional_strings() {
+        let steps = vec![
+            step(step::Kind::Check(CheckStep {
+                repository_id: string("repo-1"),
+                read_data_subset: String::new(),
+                ..CheckStep::default()
+            })),
+            step(step::Kind::Forget(ForgetStep {
+                repository_id: string("repo-1"),
+                keep_within: String::new(),
+                ..ForgetStep::default()
+            })),
+        ];
+
+        assert_eq!(validate_job(&job_with(steps)), Ok(()));
+    }
+
+    /// AC-PR-08: a step without a kind is unsupported.
+    #[test]
+    fn ac_pr_08_rejects_unknown_step_kind() {
+        let unknown = Step {
+            step_id: string("step-1"),
+            ..Step::default()
+        };
+        let job = job_with(vec![unknown]);
+
+        assert_eq!(
+            validate_job(&job),
+            Err(reject(&job, RejectReason::UnsupportedStep))
+        );
+    }
+
+    /// AC-PR-08: a step that names a repository outside the job is malformed.
+    #[test]
+    fn ac_pr_08_rejects_unknown_repository() {
+        let job = job_with(vec![step(step::Kind::Backup(BackupStep {
+            repository_id: string("repo-9"),
+            paths: vec![string("/srv")],
+            ..BackupStep::default()
+        }))]);
+
+        assert!(malformed(&job));
+    }
+
+    /// AC-PR-08: each required field is checked. A missing step, a missing
+    /// repository_id, a missing snapshot_id, a missing target, a backup
+    /// without a path and a hook without a hook_id are malformed.
+    #[test]
+    fn ac_pr_08_rejects_missing_required_fields() {
+        let jobs = vec![
+            // A job without steps.
+            job_with(Vec::new()),
+            // A step without a repository_id.
+            job_with(vec![step(step::Kind::Backup(BackupStep {
+                paths: vec![string("/srv")],
+                ..BackupStep::default()
+            }))]),
+            // A backup step without a path.
+            job_with(vec![step(step::Kind::Backup(BackupStep {
+                repository_id: string("repo-1"),
+                ..BackupStep::default()
+            }))]),
+            // An ls step without a snapshot_id.
+            job_with(vec![step(step::Kind::Ls(LsStep {
+                repository_id: string("repo-1"),
+                ..LsStep::default()
+            }))]),
+            // A restore step without a snapshot_id.
+            job_with(vec![step(step::Kind::Restore(RestoreStep {
+                repository_id: string("repo-1"),
+                target: string("/restore"),
+                ..RestoreStep::default()
+            }))]),
+            // A restore step without a target.
+            job_with(vec![step(step::Kind::Restore(RestoreStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string("latest"),
+                ..RestoreStep::default()
+            }))]),
+            // A hook step without a hook_id.
+            job_with(vec![step(step::Kind::Hook(HookStep::default()))]),
+        ];
+
+        for job in &jobs {
+            assert!(malformed(job), "{:?}", job.steps);
+        }
+    }
+
+    /// AC-PR-08: a duplicate hook parameter name is invalid, an unknown hook
+    /// is not a validation error here (the agent checks the allow-list).
+    #[test]
+    fn ac_pr_08_rejects_duplicate_hook_parameters() {
+        let job = job_with(vec![step(step::Kind::Hook(HookStep {
+            hook_id: string("pg_dump"),
+            parameters: vec![
+                HookParameter {
+                    name: string("database"),
+                    value: string("app"),
+                },
+                HookParameter {
+                    name: string("database"),
+                    value: string("other"),
+                },
+            ],
+            ..HookStep::default()
+        }))]);
+
+        assert_eq!(
+            validate_job(&job),
+            Err(reject(&job, RejectReason::InvalidHookParameters))
+        );
+    }
+}

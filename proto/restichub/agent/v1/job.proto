@@ -1,0 +1,103 @@
+// The job model. A job carries its repository secrets inside the signed bytes
+// (FR-PR-05). The agent verifies the signature before it decodes the job
+// (ADR-0005). Replay protection uses the job journal, not a sequence number
+// (ADR-0020).
+syntax = "proto3";
+
+package restichub.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+import "restichub/agent/v1/steps.proto";
+
+// SignedJob is a Job with its Ed25519 signature (FR-PR-03).
+message SignedJob {
+  // Serialized Job message. The signature covers the exact bytes of this field
+  // after the context prefix "restichub-job-v1\0" (ADR-0005, ADR-0020).
+  bytes job = 1;
+  // Ed25519 signature of the context prefix and the job bytes.
+  bytes signature = 2;
+  // Identifier of the key that made the signature.
+  string key_id = 3;
+}
+
+// Job is one run of a plan (FR-PR-03).
+message Job {
+  // Identifier of the job.
+  string job_id = 1;
+  // Identifier of the tenant that owns the job (FR-TN-01).
+  string tenant_id = 2;
+  // Identifier of the agent that must run the job.
+  string agent_id = 3;
+  // Field numbers 4 and 5 held a monotonic sequence number and a nonce. Replay
+  // protection uses the job journal now (ADR-0020).
+  reserved 4, 5;
+  reserved "sequence", "nonce";
+  // Time after which the agent rejects the job (FR-SC-07).
+  google.protobuf.Timestamp expires_at = 6;
+  // Timeout of the full job in seconds (FR-AG-05).
+  uint32 timeout_seconds = 7;
+  // Repository access for this job only (FR-PR-05).
+  repeated RepositoryAccess repositories = 8;
+  // Steps in the order of execution (FR-AG-05).
+  repeated Step steps = 9;
+  // Time when the control plane created the job (ADR-0020). The agent rejects a
+  // job that is older than the maximum lifetime or that is from the future.
+  google.protobuf.Timestamp issued_at = 10;
+}
+
+// RepositoryAccess gives the agent access to one repository for one job.
+message RepositoryAccess {
+  // Identifier of the repository in the control plane.
+  string repository_id = 1;
+  // restic repository location, for example "s3:s3.example.com/bucket".
+  string location = 2;
+  // Password of the restic repository.
+  string password = 3;
+  // Backend credentials. The type depends on the backend.
+  oneof backend_credentials {
+    // Credentials for an S3-compatible backend.
+    S3Credentials s3 = 4;
+    // Credentials for a rest-server backend.
+    RestCredentials rest = 5;
+    // Credentials for an SFTP backend.
+    SftpCredentials sftp = 6;
+    // Credentials for a local path. Local backends need no credentials.
+    LocalCredentials local = 7;
+  }
+}
+
+// S3Credentials is the access data of an S3-compatible backend.
+message S3Credentials {
+  // Access key identifier.
+  string access_key_id = 1;
+  // Secret access key.
+  string secret_access_key = 2;
+  // Session token of a temporary credential. Empty for a permanent key.
+  string session_token = 3;
+  // Region of the bucket.
+  string region = 4;
+}
+
+// RestCredentials is the access data of a rest-server backend.
+message RestCredentials {
+  // User name.
+  string username = 1;
+  // Password.
+  string password = 2;
+}
+
+// SftpCredentials is the access data of an SFTP backend. The message carries
+// one private key or one password.
+message SftpCredentials {
+  // Private key in PEM form. Empty when the message carries a password. A PEM
+  // key has line breaks, so this field allows a line break and rejects a NUL
+  // only.
+  string private_key = 1;
+  // Password. Empty when the message carries a private key.
+  string password = 2;
+  // Known-hosts entry of the server.
+  string known_hosts_entry = 3;
+}
+
+// LocalCredentials is empty. A local path needs no credentials.
+message LocalCredentials {}

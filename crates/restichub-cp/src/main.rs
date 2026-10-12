@@ -2,8 +2,9 @@
 
 fn main() {
     println!(
-        "restichub-cp {} (protocol {})",
+        "restichub-cp {} (protocol {}.{})",
         env!("CARGO_PKG_VERSION"),
-        restichub_proto::PROTOCOL_VERSION
+        restichub_proto::PROTOCOL_VERSION_MAJOR,
+        restichub_proto::PROTOCOL_VERSION_MINOR
     );
 }
