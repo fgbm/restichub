@@ -319,7 +319,9 @@ mod tests {
         EnvKekProvider, FileKekProvider, KEK_ENV, KEK_FILE_PARAM, Kek, KekConfig, KekError, KekId,
         KekProvider, decode_kek, encode_kek, generate_kek_encoded, load_kek_provider,
     };
-    use crate::{EnvReader, SecretError};
+    use crate::EnvReader;
+    #[cfg(unix)]
+    use crate::SecretError;
 
     /// A test environment.
     struct MapEnv(HashMap<String, String>);
