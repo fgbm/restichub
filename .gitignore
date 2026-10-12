@@ -1,0 +1,25 @@
+# Rust
+/target/
+
+# Node
+node_modules/
+docs/dist/
+docs/.astro/
+
+# Vale downloaded packages
+styles/.vale-config/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local agent notes
+PAPERCUTS.md
