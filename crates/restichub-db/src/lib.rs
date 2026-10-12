@@ -120,8 +120,8 @@ pub mod test_util {
     //! The helper reads `RESTICHUB_TEST_DATABASE_URL`. If the variable is not set, the test
     //! prints a message and skips.
 
-    use sqlx::PgPool;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+    use sqlx::{AssertSqlSafe, PgPool};
     use uuid::Uuid;
 
     use super::Database;
@@ -183,7 +183,9 @@ pub mod test_util {
             .await
             .ok()?;
         let name = format!("restichub_test_{}", Uuid::now_v7().simple());
-        sqlx::query(&format!("CREATE DATABASE \"{name}\""))
+        // The name comes from a UUID and needs no bind parameter. PostgreSQL does not accept a
+        // bind parameter in `CREATE DATABASE`.
+        sqlx::query(AssertSqlSafe(format!("CREATE DATABASE \"{name}\"")))
             .execute(&admin_pool)
             .await
             .ok()?;
@@ -214,9 +216,13 @@ pub mod test_util {
         else {
             return;
         };
-        let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"))
-            .execute(&pool)
-            .await;
+        // The name comes from a UUID and needs no bind parameter. PostgreSQL does not accept a
+        // bind parameter in `DROP DATABASE`.
+        let _ = sqlx::query(AssertSqlSafe(format!(
+            "DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"
+        )))
+        .execute(&pool)
+        .await;
         pool.close().await;
     }
 }
