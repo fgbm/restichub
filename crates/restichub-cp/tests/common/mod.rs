@@ -4,6 +4,7 @@
 //! extractor no longer accepts a context from the request extensions.
 
 #![allow(dead_code)]
+#![allow(clippy::expect_used)]
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -58,10 +59,7 @@ pub fn request(
         }
         None => Body::empty(),
     };
-    let mut request = match builder.body(body) {
-        Ok(request) => request,
-        Err(error) => panic!("cannot build the request: {error}"),
-    };
+    let mut request = builder.body(body).expect("cannot build the request");
     request.extensions_mut().insert(peer());
     request
 }
@@ -78,7 +76,7 @@ pub fn raw_request(method: &str, uri: &str, cookie: &str, body: String) -> Reque
         .header(CSRF.0, CSRF.1)
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body))
-        .unwrap_or_else(|error| panic!("cannot build the request: {error}"));
+        .expect("cannot build the request");
     request.extensions_mut().insert(peer());
     request
 }
@@ -96,29 +94,29 @@ pub fn bearer_request(method: &str, uri: &str, token: &str, body: Option<Value>)
         }
         None => Body::empty(),
     };
-    let mut request = match builder.body(body) {
-        Ok(request) => request,
-        Err(error) => panic!("cannot build the request: {error}"),
-    };
+    let mut request = builder.body(body).expect("cannot build the request");
     request.extensions_mut().insert(peer());
     request
 }
 
 /// Reads the JSON body of a response.
 pub async fn body_json(response: axum::response::Response) -> Value {
-    let bytes = match response.into_body().collect().await {
-        Ok(body) => body.to_bytes(),
-        Err(error) => panic!("cannot read the body: {error}"),
-    };
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("cannot read the body")
+        .to_bytes();
     serde_json::from_slice(&bytes).unwrap_or(Value::Null)
 }
 
 /// Sends a request and returns the status, the session cookie pair and the JSON body.
 pub async fn send(app: &Router, request: Request<Body>) -> (StatusCode, Option<String>, Value) {
-    let response = match app.clone().oneshot(request).await {
-        Ok(response) => response,
-        Err(error) => panic!("the request failed: {error}"),
-    };
+    let response = app
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the request failed");
     let status = response.status();
     let cookie = response
         .headers()
@@ -172,17 +170,14 @@ pub fn app_with_kek(db: &Database) -> Router {
 
 /// Creates a tenant through a platform transaction.
 pub async fn create_tenant(db: &Database, name: &str) -> TenantId {
-    let mut tx = match db.begin_platform().await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    let tenant = match tenants::create(&mut tx, name).await {
-        Ok(tenant) => tenant,
-        Err(error) => panic!("cannot create the tenant: {error}"),
-    };
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the tenant: {error}");
-    }
+    let mut tx = db
+        .begin_platform()
+        .await
+        .expect("cannot begin the transaction");
+    let tenant = tenants::create(&mut tx, name)
+        .await
+        .expect("cannot create the tenant");
+    tx.commit().await.expect("cannot commit the tenant");
     tenant
 }
 
@@ -193,18 +188,13 @@ pub async fn create_tenant(db: &Database, name: &str) -> TenantId {
 pub async fn create_tenant_with_key(db: &Database, name: &str) -> TenantId {
     let kek = test_kek();
     let id = TenantId::new();
-    let dek = match restichub_secrets::generate_dek() {
-        Ok(dek) => dek,
-        Err(error) => panic!("cannot generate the DEK: {error}"),
-    };
-    let wrapped = match restichub_secrets::wrap_dek(kek.current(), id.as_uuid(), 1, &dek) {
-        Ok(wrapped) => wrapped,
-        Err(error) => panic!("cannot wrap the DEK: {error}"),
-    };
-    let mut tx = match db.begin_platform().await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
+    let dek = restichub_secrets::generate_dek().expect("cannot generate the DEK");
+    let wrapped = restichub_secrets::wrap_dek(kek.current(), id.as_uuid(), 1, &dek)
+        .expect("cannot wrap the DEK");
+    let mut tx = db
+        .begin_platform()
+        .await
+        .expect("cannot begin the transaction");
     let input = tenants::BootstrapTenant {
         id,
         name,
@@ -216,12 +206,12 @@ pub async fn create_tenant_with_key(db: &Database, name: &str) -> TenantId {
         source_ip: None,
         admin: None,
     };
-    if let Err(error) = tenants::create_with_bootstrap(&mut tx, &input).await {
-        panic!("cannot create the tenant with a key: {error}");
-    }
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the tenant with a key: {error}");
-    }
+    tenants::create_with_bootstrap(&mut tx, &input)
+        .await
+        .expect("cannot create the tenant with a key");
+    tx.commit()
+        .await
+        .expect("cannot commit the tenant with a key");
     id
 }
 
@@ -230,11 +220,11 @@ pub async fn create_tenant_with_key(db: &Database, name: &str) -> TenantId {
 /// The ciphertext is a placeholder. A test uses this helper only for a route fixture, not for a
 /// decryption.
 pub async fn seed_secret(db: &Database, tenant: TenantId, name: &str) -> restichub_db::SecretId {
-    let mut tx = match db.begin_tenant(tenant).await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    let id = match restichub_db::secrets::create(
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::secrets::create(
         &mut tx,
         &restichub_db::secrets::NewSecret {
             id: restichub_db::SecretId::new(),
@@ -247,28 +237,21 @@ pub async fn seed_secret(db: &Database, tenant: TenantId, name: &str) -> restich
         },
     )
     .await
-    {
-        Ok(id) => id,
-        Err(error) => panic!("cannot create the secret: {error}"),
-    };
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the secret: {error}");
-    }
+    .expect("cannot create the secret");
+    tx.commit().await.expect("cannot commit the secret");
     id
 }
 
 /// Sets the status of a tenant through a platform transaction.
 pub async fn set_tenant_status(db: &Database, tenant: TenantId, status: &str) {
-    let mut tx = match db.begin_platform().await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    if let Err(error) = tenants::set_status(&mut tx, tenant, status).await {
-        panic!("cannot set the tenant status: {error}");
-    }
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the status: {error}");
-    }
+    let mut tx = db
+        .begin_platform()
+        .await
+        .expect("cannot begin the transaction");
+    tenants::set_status(&mut tx, tenant, status)
+        .await
+        .expect("cannot set the tenant status");
+    tx.commit().await.expect("cannot commit the status");
 }
 
 /// Creates a user with a role and a password hash.
@@ -279,11 +262,11 @@ pub async fn create_user(
     password_hash: &str,
     role: &str,
 ) -> restichub_db::UserId {
-    let mut tx = match db.begin_tenant(tenant).await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    let user = match users::create(
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let user = users::create(
         &mut tx,
         &users::NewUser {
             username,
@@ -292,32 +275,24 @@ pub async fn create_user(
         },
     )
     .await
-    {
-        Ok(user) => user,
-        Err(error) => panic!("cannot create the user: {error}"),
-    };
-    if let Err(error) = memberships::set_role(&mut tx, user, role).await {
-        panic!("cannot set the role: {error}");
-    }
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the user: {error}");
-    }
+    .expect("cannot create the user");
+    memberships::set_role(&mut tx, user, role)
+        .await
+        .expect("cannot set the role");
+    tx.commit().await.expect("cannot commit the user");
     user
 }
 
 /// Creates a session for a user and returns the cookie header value.
 pub async fn session_cookie(db: &Database, tenant: TenantId, user: restichub_db::UserId) -> String {
-    let value = match restichub_cp::token::random_token() {
-        Ok(value) => value,
-        Err(error) => panic!("cannot build the token: {error}"),
-    };
+    let value = restichub_cp::token::random_token().expect("cannot build the token");
     let hash = restichub_cp::token::hash_token(&value);
     let now = OffsetDateTime::now_utc();
-    let mut tx = match db.begin_tenant(tenant).await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    if let Err(error) = sessions::create(
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    sessions::create(
         &mut tx,
         user,
         &hash,
@@ -327,12 +302,8 @@ pub async fn session_cookie(db: &Database, tenant: TenantId, user: restichub_db:
         None,
     )
     .await
-    {
-        panic!("cannot create the session: {error}");
-    }
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the session: {error}");
-    }
+    .expect("cannot create the session");
+    tx.commit().await.expect("cannot commit the session");
     format!("{COOKIE_NAME}={value}")
 }
 
@@ -367,16 +338,13 @@ async fn seed_token(
     role: &str,
     created_by: restichub_db::UserId,
 ) -> String {
-    let (value, prefix) = match restichub_cp::token::random_api_token() {
-        Ok(pair) => pair,
-        Err(error) => panic!("cannot build the token: {error}"),
-    };
+    let (value, prefix) = restichub_cp::token::random_api_token().expect("cannot build the token");
     let hash = restichub_cp::token::hash_token(&value);
-    let mut tx = match db.begin_tenant(tenant).await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    if let Err(error) = api_tokens::create(
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    api_tokens::create(
         &mut tx,
         &api_tokens::NewApiToken {
             name: "test-token",
@@ -388,36 +356,26 @@ async fn seed_token(
         },
     )
     .await
-    {
-        panic!("cannot create the token: {error}");
-    }
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the token: {error}");
-    }
+    .expect("cannot create the token");
+    tx.commit().await.expect("cannot commit the token");
     value
 }
 
 /// Returns the number of rows of a table in a tenant transaction.
 pub async fn count(db: &Database, tenant: TenantId, table: &'static str) -> i64 {
-    match restichub_db::test_util::count_rows(db, tenant, table).await {
-        Ok(count) => count,
-        Err(error) => panic!("cannot count the rows: {error}"),
-    }
+    restichub_db::test_util::count_rows(db, tenant, table)
+        .await
+        .expect("cannot count the rows")
 }
 
 /// Lists the users of a tenant.
 pub async fn list_users(db: &Database, tenant: TenantId) -> Vec<users::User> {
-    let mut tx = match db.begin_tenant(tenant).await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    let result = match users::list(&mut tx).await {
-        Ok(list) => list,
-        Err(error) => panic!("cannot list the users: {error}"),
-    };
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the list: {error}");
-    }
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let result = users::list(&mut tx).await.expect("cannot list the users");
+    tx.commit().await.expect("cannot commit the list");
     result
 }
 
@@ -427,33 +385,27 @@ pub async fn role_of(
     tenant: TenantId,
     user: restichub_db::UserId,
 ) -> Option<String> {
-    let mut tx = match db.begin_tenant(tenant).await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    let result = match memberships::role_of(&mut tx, user).await {
-        Ok(role) => role,
-        Err(error) => panic!("cannot read the role: {error}"),
-    };
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the role: {error}");
-    }
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let result = memberships::role_of(&mut tx, user)
+        .await
+        .expect("cannot read the role");
+    tx.commit().await.expect("cannot commit the role");
     result
 }
 
 /// Lists the API tokens of a tenant.
 pub async fn list_tokens(db: &Database, tenant: TenantId) -> Vec<api_tokens::ApiToken> {
-    let mut tx = match db.begin_tenant(tenant).await {
-        Ok(tx) => tx,
-        Err(error) => panic!("cannot begin the transaction: {error}"),
-    };
-    let result = match api_tokens::list(&mut tx).await {
-        Ok(list) => list,
-        Err(error) => panic!("cannot list the tokens: {error}"),
-    };
-    if let Err(error) = tx.commit().await {
-        panic!("cannot commit the list: {error}");
-    }
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let result = api_tokens::list(&mut tx)
+        .await
+        .expect("cannot list the tokens");
+    tx.commit().await.expect("cannot commit the list");
     result
 }
 
@@ -481,10 +433,10 @@ pub async fn token_revoked(
 
 /// Sends a request and returns the raw response.
 pub async fn send_response(app: &Router, request: Request<Body>) -> axum::response::Response {
-    match app.clone().oneshot(request).await {
-        Ok(response) => response,
-        Err(error) => panic!("the request failed: {error}"),
-    }
+    app.clone()
+        .oneshot(request)
+        .await
+        .expect("the request failed")
 }
 
 /// Reads the `Retry-After` header of a response.
