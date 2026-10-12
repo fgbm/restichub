@@ -24,6 +24,6 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0016](0016-native-database-steps-deferred.md) | Native database steps are deferred | accepted |
 | [0017](0017-secret-encryption.md) | Envelope encryption of secrets with a pluggable KEK provider | accepted |
 | [0018](0018-high-availability-deferred.md) | High availability is deferred | accepted |
-| [0019](0019-yaml-library.md) | serde-saphyr for YAML profile import and export | proposed |
+| [0019](0019-yaml-library.md) | serde-saphyr for YAML profile import and export | accepted |
 | [0020](0020-replay-protection-job-journal.md) | Replay protection with a job journal | accepted |
 | [0021](0021-restic-argument-construction.md) | restic argument construction and validation | accepted |

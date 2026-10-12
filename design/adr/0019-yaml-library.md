@@ -1,6 +1,6 @@
 # ADR-0019: serde-saphyr for YAML profile import and export
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-12
 - Requirements: FR-PF-07
 
