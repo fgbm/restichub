@@ -1,0 +1,270 @@
+//! Database tests for tenant isolation and the schema (issue #16, AC-TN-01 at the database layer).
+//!
+//! The tests read `RESTICHUB_TEST_DATABASE_URL`. If the variable is not set, the helper prints a
+//! message and the tests do nothing.
+//!
+//! The tests are inside the crate, because the connection methods are crate-internal (H1). The
+//! isolation checks read through the runtime login. The owner-level checks use the owner pool.
+
+mod audit;
+mod auth;
+mod migrations;
+mod rls;
+mod roles;
+mod secrets;
+mod tenants;
+
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{AssertSqlSafe, PgPool};
+
+use crate::audit::{Actor, AuditAction, AuditEvent};
+use crate::ids::{ApiTokenId, AuditLogId, SecretId, SessionId, SetupTokenId, UserId};
+use crate::test_util::TestDatabase;
+use crate::users::NewUser;
+use crate::{Database, TenantId, TenantTx, users};
+
+/// The error type of the tests.
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+/// The SECURITY DEFINER functions that the schema allows (N9).
+const SECURITY_DEFINER_ALLOWED: [&str; 4] = [
+    "auth_find_tenant",
+    "auth_find_session",
+    "auth_find_api_token",
+    "tenant_user_counts",
+];
+
+/// The tenant tables with the general tenant policy.
+const TENANT_TABLES: [&str; 8] = [
+    "users",
+    "memberships",
+    "sessions",
+    "api_tokens",
+    "tenant_keys",
+    "secrets",
+    "audit_log",
+    "setup_tokens",
+];
+
+/// The identifiers of one seeded tenant.
+struct Seed {
+    user: UserId,
+    session_id: SessionId,
+    session_hash: Vec<u8>,
+    api_token_id: ApiTokenId,
+    api_hash: Vec<u8>,
+}
+
+/// Returns the SQLSTATE of a database error.
+fn code(error: &sqlx::Error) -> Option<String> {
+    error
+        .as_database_error()
+        .and_then(|error| error.code())
+        .map(|code| code.to_string())
+}
+
+/// Asserts that a statement fails with the given SQLSTATE.
+fn assert_code(result: Result<sqlx::postgres::PgQueryResult, sqlx::Error>, expected: &str) {
+    match result {
+        Ok(_) => panic!("the statement must fail"),
+        Err(error) => assert_eq!(code(&error).as_deref(), Some(expected), "{error}"),
+    }
+}
+
+/// Creates two tenants through a platform transaction.
+async fn two_tenants(db: &Database) -> Result<(TenantId, TenantId), Box<dyn std::error::Error>> {
+    let mut tx = db.begin_platform().await?;
+    let tenant_a = crate::tenants::create(&mut tx, "tenant-a").await?;
+    let tenant_b = crate::tenants::create(&mut tx, "tenant-b").await?;
+    tx.commit().await?;
+    Ok((tenant_a, tenant_b))
+}
+
+/// Inserts one row of each tenant table for the tenant `tenant`.
+async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn std::error::Error>> {
+    let mut session_hash = tenant.as_uuid().as_bytes().to_vec();
+    session_hash[15] ^= 0x01;
+    let mut api_hash = tenant.as_uuid().as_bytes().to_vec();
+    api_hash[15] ^= 0x02;
+
+    let mut tx = db.begin_tenant(tenant).await?;
+    let user = users::create(
+        &mut tx,
+        &NewUser {
+            username: "alice",
+            password_hash: "phc$secret",
+            display_name: "Alice",
+        },
+    )
+    .await?;
+
+    sqlx::query("INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')")
+        .bind(tenant)
+        .bind(user)
+        .execute(tx.as_conn())
+        .await?;
+
+    let session_id = SessionId::new();
+    sqlx::query(
+        "INSERT INTO sessions (id, tenant_id, user_id, token_hash, expires_at) \
+         VALUES ($1, $2, $3, $4, now() + interval '1 hour')",
+    )
+    .bind(session_id)
+    .bind(tenant)
+    .bind(user)
+    .bind(&session_hash)
+    .execute(tx.as_conn())
+    .await?;
+
+    let api_token_id = ApiTokenId::new();
+    sqlx::query(
+        "INSERT INTO api_tokens \
+         (id, tenant_id, name, token_hash, display_prefix, role, created_by) \
+         VALUES ($1, $2, 'token', $3, 'rh_abcd', 'admin', $4)",
+    )
+    .bind(api_token_id)
+    .bind(tenant)
+    .bind(&api_hash)
+    .bind(user)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO tenant_keys (tenant_id, key_version, kek_id, wrapped_dek, nonce) \
+         VALUES ($1, 1, 'kek-1', $2, $3)",
+    )
+    .bind(tenant)
+    .bind(vec![3u8; 48])
+    .bind(vec![4u8; 12])
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO secrets \
+         (id, tenant_id, name, purpose, key_version, nonce, ciphertext) \
+         VALUES ($1, $2, 'secret', 'repository_password', 1, $3, $4)",
+    )
+    .bind(SecretId::new())
+    .bind(tenant)
+    .bind(vec![5u8; 12])
+    .bind(vec![6u8; 32])
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO audit_log (id, tenant_id, actor_type, action, object_type) \
+         VALUES ($1, $2, 'system', 'user_create', 'user')",
+    )
+    .bind(AuditLogId::new())
+    .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    let mut setup_hash = tenant.as_uuid().as_bytes().to_vec();
+    setup_hash[15] ^= 0x03;
+    sqlx::query(
+        "INSERT INTO setup_tokens (id, tenant_id, token_hash, expires_at) \
+         VALUES ($1, $2, $3, now() + interval '1 hour')",
+    )
+    .bind(SetupTokenId::new())
+    .bind(tenant)
+    .bind(&setup_hash)
+    .execute(tx.as_conn())
+    .await?;
+
+    tx.commit().await?;
+    Ok(Seed {
+        user,
+        session_id,
+        session_hash,
+        api_token_id,
+        api_hash,
+    })
+}
+
+/// Counts the rows of one tenant table.
+async fn count_rows(
+    tx: &mut TenantTx<'_>,
+    table: &'static str,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    let query = format!("SELECT count(*) FROM {table}");
+    let count: (i64,) = sqlx::query_as(AssertSqlSafe(query))
+        .fetch_one(tx.as_conn())
+        .await?;
+    Ok(count.0)
+}
+
+/// Returns a bootstrap input for a test tenant (N2).
+fn bootstrap(name: &str) -> crate::tenants::BootstrapTenant<'_> {
+    crate::tenants::BootstrapTenant {
+        id: TenantId::new(),
+        name,
+        key_version: 1,
+        kek_id: "kek-1",
+        wrapped_dek: &[3u8; 48],
+        nonce: &[4u8; 12],
+        actor: Actor::System,
+        source_ip: Some(
+            "203.0.113.7"
+                .parse()
+                .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+        ),
+        admin: Some(crate::tenants::BootstrapAdmin {
+            username: "admin",
+            password_hash: "phc$admin",
+            display_name: "Admin",
+        }),
+    }
+}
+
+/// Counts the rows of one tenant table in a tenant transaction.
+async fn count_in_tenant(
+    db: &Database,
+    tenant: TenantId,
+    table: &'static str,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    let mut tx = db.begin_tenant(tenant).await?;
+    let count = count_rows(&mut tx, table).await?;
+    tx.commit().await?;
+    Ok(count)
+}
+
+/// Returns an administrator (superuser) pool for a test.
+async fn admin_pool(db: &TestDatabase) -> Result<PgPool, Box<dyn std::error::Error>> {
+    Ok(PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(db.admin_options())
+        .await?)
+}
+
+/// Runs one statement as the administrator.
+async fn admin_query(admin: &PgPool, statement: &str) -> Result<(), Box<dyn std::error::Error>> {
+    sqlx::query(AssertSqlSafe(statement.to_owned()))
+        .execute(admin)
+        .await?;
+    Ok(())
+}
+
+/// Checks the tenant row through a platform transaction.
+async fn tenant_exists(
+    db: &Database,
+    tenant: TenantId,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut tx = db.begin_platform().await?;
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM tenants WHERE id = $1")
+        .bind(tenant)
+        .fetch_one(tx.as_conn())
+        .await?;
+    tx.commit().await?;
+    Ok(count.0 == 1)
+}
+
+/// Inserts one audit record in a tenant transaction.
+async fn insert_audit(
+    tx: &mut TenantTx<'_>,
+    action: AuditAction,
+) -> Result<AuditLogId, Box<dyn std::error::Error>> {
+    let mut event = AuditEvent::new(action, "user");
+    event.source_ip = Some("203.0.113.7".parse()?);
+    Ok(crate::audit::insert(tx, &event).await?)
+}
