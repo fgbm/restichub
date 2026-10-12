@@ -11,7 +11,7 @@ use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use super::audit::{Actor, AuditAction, AuditEvent, AuditFilter, AuditPage};
-use super::ids::{ApiTokenId, AuditLogId, SecretId, SessionId, UserId};
+use super::ids::{ApiTokenId, AuditLogId, SecretId, SessionId, SetupTokenId, UserId};
 use super::test_util::{TestDatabase, test_database};
 use super::users::NewUser;
 use super::{Database, PLATFORM_TENANT_ID, TenantId, audit, tenants, users};
@@ -27,7 +27,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 3] = [
 ];
 
 /// The tenant tables with the general tenant policy.
-const TENANT_TABLES: [&str; 7] = [
+const TENANT_TABLES: [&str; 8] = [
     "users",
     "memberships",
     "sessions",
@@ -35,6 +35,7 @@ const TENANT_TABLES: [&str; 7] = [
     "tenant_keys",
     "secrets",
     "audit_log",
+    "setup_tokens",
 ];
 
 /// The identifiers of one seeded tenant.
@@ -148,6 +149,18 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     )
     .bind(AuditLogId::new())
     .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    let mut setup_hash = tenant.as_uuid().as_bytes().to_vec();
+    setup_hash[15] ^= 0x03;
+    sqlx::query(
+        "INSERT INTO setup_tokens (id, tenant_id, token_hash, expires_at) \
+         VALUES ($1, $2, $3, now() + interval '1 hour')",
+    )
+    .bind(SetupTokenId::new())
+    .bind(tenant)
+    .bind(&setup_hash)
     .execute(tx.as_conn())
     .await?;
 

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::ids::{TenantId, UserId};
-use crate::tx::PlatformTx;
+use crate::tx::{PlatformTx, TenantTx};
 
 /// A tenant row.
 #[derive(Debug, Clone)]
@@ -137,4 +137,38 @@ pub async fn list(tx: &mut PlatformTx<'_>) -> Result<Vec<Tenant>, DbError> {
             status,
         })
         .collect())
+}
+
+/// Sets the status of a tenant. A platform operation (FR-TN-02).
+pub async fn set_status(
+    tx: &mut PlatformTx<'_>,
+    id: TenantId,
+    status: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query("UPDATE tenants SET status = $2, updated_at = now() WHERE id = $1")
+        .bind(id)
+        .bind(status)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Reads the row of the tenant of the transaction.
+///
+/// The policy `tenants_self_read` shows the own row only. The function returns `None` for another
+/// tenant.
+pub async fn get(tx: &mut TenantTx<'_>, id: TenantId) -> Result<Option<Tenant>, DbError> {
+    let row = sqlx::query_as::<_, (Uuid, String, String)>(
+        "SELECT id, name, status FROM tenants WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(|(id, name, status)| Tenant {
+        id: TenantId::from_uuid(id),
+        name,
+        status,
+    }))
 }

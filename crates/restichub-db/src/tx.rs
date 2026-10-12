@@ -40,6 +40,21 @@ impl<'a> TenantTx<'a> {
         self.tenant
     }
 
+    /// Takes a transaction-scoped advisory lock for the tenant and a scope.
+    ///
+    /// The lock serializes the changes that read a tenant-wide invariant and then write, for
+    /// example the rule "an Admin cannot remove the last Admin of a tenant". The scope separates
+    /// the purposes. PostgreSQL releases the lock at the end of the transaction.
+    pub async fn lock(&mut self, scope: &str) -> Result<(), DbError> {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1 || $2::text, 0))")
+            .bind(scope)
+            .bind(self.tenant.to_string())
+            .execute(&mut *self.tx)
+            .await
+            .map_err(DbError::Query)?;
+        Ok(())
+    }
+
     /// Returns the connection for a query.
     ///
     /// The method is crate-internal. Only the repository functions of this crate use it. The

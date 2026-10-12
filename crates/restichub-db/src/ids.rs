@@ -35,6 +35,11 @@ pub struct SecretId(Uuid);
 #[sqlx(transparent)]
 pub struct AuditLogId(Uuid);
 
+/// The identifier of a one-time setup token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct SetupTokenId(Uuid);
+
 /// The reserved platform tenant (ADR-0023, section Tenant isolation).
 ///
 /// The value is the constant `id` of the reserved row in the `tenants` table. The Platform Admin
@@ -102,3 +107,4 @@ id_type!(SessionId);
 id_type!(ApiTokenId);
 id_type!(SecretId);
 id_type!(AuditLogId);
+id_type!(SetupTokenId);

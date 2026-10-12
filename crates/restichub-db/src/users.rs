@@ -70,3 +70,119 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<User>, DbError> {
         })
         .collect())
 }
+
+/// The row of a user for sign-in.
+///
+/// The type holds the password hash. The control plane never sends it and never writes it to the
+/// audit log.
+#[derive(Debug, Clone)]
+pub struct AuthUser {
+    /// The identifier of the user.
+    pub id: UserId,
+    /// The password hash (Argon2id PHC string).
+    pub password_hash: String,
+    /// The flag that disables the user.
+    pub disabled: bool,
+}
+
+/// Finds a user by the username of the tenant of the transaction.
+///
+/// The comparison ignores the letter case, as the unique index `users_tenant_username_lower_unique`
+/// does (D6).
+pub async fn find_for_auth(
+    tx: &mut TenantTx<'_>,
+    username: &str,
+) -> Result<Option<AuthUser>, DbError> {
+    let row = sqlx::query_as::<_, (Uuid, String, bool)>(
+        "SELECT id, password_hash, disabled FROM users WHERE lower(username) = lower($1)",
+    )
+    .bind(username)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(|(id, password_hash, disabled)| AuthUser {
+        id: UserId::from_uuid(id),
+        password_hash,
+        disabled,
+    }))
+}
+
+/// Reads a user of the tenant of the transaction.
+pub async fn get(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<User>, DbError> {
+    let row = sqlx::query_as::<_, (Uuid, String, String, bool)>(
+        "SELECT id, username, display_name, disabled FROM users WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(|(id, username, display_name, disabled)| User {
+        id: UserId::from_uuid(id),
+        username,
+        display_name,
+        disabled,
+    }))
+}
+
+/// Reads the password hash and the flag of a user of the tenant of the transaction.
+pub async fn get_auth(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<AuthUser>, DbError> {
+    let row = sqlx::query_as::<_, (Uuid, String, bool)>(
+        "SELECT id, password_hash, disabled FROM users WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(|(id, password_hash, disabled)| AuthUser {
+        id: UserId::from_uuid(id),
+        password_hash,
+        disabled,
+    }))
+}
+
+/// Replaces the password hash of a user.
+pub async fn set_password(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    password_hash: &str,
+) -> Result<bool, DbError> {
+    let result =
+        sqlx::query("UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1")
+            .bind(id)
+            .bind(password_hash)
+            .execute(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Replaces the display name of a user.
+pub async fn set_display_name(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    display_name: &str,
+) -> Result<bool, DbError> {
+    let result =
+        sqlx::query("UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1")
+            .bind(id)
+            .bind(display_name)
+            .execute(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Sets the flag that disables a user.
+pub async fn set_disabled(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    disabled: bool,
+) -> Result<bool, DbError> {
+    let result = sqlx::query("UPDATE users SET disabled = $2, updated_at = now() WHERE id = $1")
+        .bind(id)
+        .bind(disabled)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}

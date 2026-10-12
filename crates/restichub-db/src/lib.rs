@@ -13,13 +13,20 @@ use std::time::Duration;
 use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 
+pub mod api_tokens;
 pub mod audit;
+pub mod auth;
 pub mod ids;
+pub mod memberships;
+pub mod sessions;
+pub mod setup;
 pub mod tenants;
 pub mod tx;
 pub mod users;
 
-pub use ids::{ApiTokenId, AuditLogId, PLATFORM_TENANT_ID, SecretId, SessionId, TenantId, UserId};
+pub use ids::{
+    ApiTokenId, AuditLogId, PLATFORM_TENANT_ID, SecretId, SessionId, SetupTokenId, TenantId, UserId,
+};
 pub use tx::{PlatformTx, TenantTx};
 
 /// The embedded migrations of the control plane database.
@@ -83,6 +90,29 @@ pub enum DbError {
         /// The expected version.
         expected: i64,
     },
+}
+
+impl DbError {
+    /// Returns true if the error is a unique constraint violation (SQLSTATE 23505).
+    pub fn is_unique_violation(&self) -> bool {
+        self.sqlstate().as_deref() == Some("23505")
+    }
+
+    /// Returns true if the error is a check constraint violation (SQLSTATE 23514).
+    pub fn is_check_violation(&self) -> bool {
+        self.sqlstate().as_deref() == Some("23514")
+    }
+
+    /// Returns the SQLSTATE of a query error.
+    fn sqlstate(&self) -> Option<String> {
+        match self {
+            Self::Query(error) => error
+                .as_database_error()
+                .and_then(|error| error.code())
+                .map(|code| code.to_string()),
+            _ => None,
+        }
+    }
 }
 
 /// The database of the control plane: a connection pool and the migrations.
@@ -465,6 +495,16 @@ pub mod test_util {
                 .await
         }
 
+        /// Opens a runtime database with a given pool size.
+        ///
+        /// A test uses this method to check the behavior of a small connection pool.
+        pub async fn database_with_max(&self, max: u32) -> Result<Database, sqlx::Error> {
+            let pool = super::with_session_reset(PgPoolOptions::new().max_connections(max))
+                .connect_with(self.runtime_options.clone())
+                .await?;
+            Ok(Database { pool })
+        }
+
         /// Removes the test database and the two logins.
         pub async fn cleanup(&self) {
             self.database.pool().close().await;
@@ -674,6 +714,24 @@ pub mod test_util {
             let _ = sqlx::query(AssertSqlSafe(statement)).execute(&pool).await;
         }
         pool.close().await;
+    }
+
+    /// Counts the rows of one table in a tenant transaction.
+    ///
+    /// The function is a test helper. The table name comes from a fixed list in the test only.
+    pub async fn count_rows(
+        database: &Database,
+        tenant: super::TenantId,
+        table: &str,
+    ) -> Result<i64, super::DbError> {
+        let mut tx = database.begin_tenant(tenant).await?;
+        let query = format!("SELECT count(*) FROM {table}");
+        let (count,): (i64,) = sqlx::query_as(AssertSqlSafe(query))
+            .fetch_one(tx.as_conn())
+            .await
+            .map_err(super::DbError::Query)?;
+        tx.commit().await?;
+        Ok(count)
     }
 }
 
