@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext, allowed_role, ensure_target_not_above_actor};
 use crate::error::ApiError;
+use crate::json::ApiJson;
 use crate::password;
 use crate::server::{AppState, RequestIdHeader};
 use crate::validation;
@@ -129,7 +130,7 @@ pub async fn create_user(
     State(state): State<AppState>,
     context: RequestContext,
     request_id: RequestIdHeader,
-    Json(body): Json<CreateUserRequest>,
+    ApiJson(body): ApiJson<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserView>), ApiError> {
     let request_id = request_id.0;
     context.authorize(Operation::UsersWrite, &request_id)?;
@@ -280,7 +281,7 @@ pub async fn update_user(
     context: RequestContext,
     request_id: RequestIdHeader,
     Path(id): Path<String>,
-    Json(body): Json<UpdateUserRequest>,
+    ApiJson(body): ApiJson<UpdateUserRequest>,
 ) -> Result<Json<UserView>, ApiError> {
     let request_id = request_id.0;
     context.authorize(Operation::UsersWrite, &request_id)?;
@@ -471,7 +472,7 @@ pub async fn reset_password(
     context: RequestContext,
     request_id: RequestIdHeader,
     Path(id): Path<String>,
-    Json(body): Json<ResetPasswordRequest>,
+    ApiJson(body): ApiJson<ResetPasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
     let request_id = request_id.0;
     context.authorize(Operation::UsersWrite, &request_id)?;

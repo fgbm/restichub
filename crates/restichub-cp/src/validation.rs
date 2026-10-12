@@ -12,6 +12,10 @@ pub const MAX_DISPLAY_NAME: usize = 128;
 pub const MAX_TENANT_NAME: usize = 63;
 /// The largest token name length in characters.
 pub const MAX_TOKEN_NAME: usize = 64;
+/// The largest secret name length in characters.
+pub const MAX_SECRET_NAME: usize = 64;
+/// The largest secret value length in bytes.
+pub const MAX_SECRET_VALUE: usize = 64 * 1024;
 /// The largest lifetime of an API token.
 pub const MAX_EXPIRY_DAYS: i64 = 2 * 365;
 
@@ -103,12 +107,45 @@ pub fn validate_expiry(
     Ok(())
 }
 
+/// Validates a secret name and returns the trimmed value.
+///
+/// A name holds 1 to [`MAX_SECRET_NAME`] characters from the set `a-z`, `0-9`, `.`, `_` and `-`
+/// (FR-RP-05). The unique index of the `secrets` table makes the name unique for the tenant, so a
+/// duplicate gives a conflict at the database.
+pub fn validate_secret_name(value: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    let count = value.chars().count();
+    if count == 0 || count > MAX_SECRET_NAME {
+        return Err(ValidationError);
+    }
+    if !value.chars().all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || matches!(character, '.' | '_' | '-')
+    }) {
+        return Err(ValidationError);
+    }
+    Ok(value.to_owned())
+}
+
+/// Checks that a secret value holds 1 to [`MAX_SECRET_VALUE`] bytes (FR-RP-05).
+///
+/// The function does not return the value, so a caller cannot log it by accident.
+pub fn validate_secret_value(value: &str) -> Result<(), ValidationError> {
+    let length = value.len();
+    if length == 0 || length > MAX_SECRET_VALUE {
+        return Err(ValidationError);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        MAX_DISPLAY_NAME, MAX_TENANT_NAME, MAX_USERNAME, validate_display_name, validate_expiry,
+        MAX_DISPLAY_NAME, MAX_SECRET_NAME, MAX_SECRET_VALUE, MAX_TENANT_NAME, MAX_USERNAME,
+        validate_display_name, validate_expiry, validate_secret_name, validate_secret_value,
         validate_tenant_name, validate_token_name, validate_username,
     };
 
@@ -151,6 +188,29 @@ mod tests {
     fn a_token_name_is_trimmed_and_checked() {
         assert_eq!(validate_token_name("  ci  ").as_deref(), Ok("ci"));
         assert!(validate_token_name("").is_err());
+    }
+
+    #[test]
+    fn a_secret_name_is_trimmed_and_checked() {
+        assert_eq!(
+            validate_secret_name("  repo.main  ").as_deref(),
+            Ok("repo.main")
+        );
+        assert_eq!(validate_secret_name("s3_key-1").as_deref(), Ok("s3_key-1"));
+        assert!(validate_secret_name("").is_err());
+        assert!(validate_secret_name("Upper").is_err());
+        assert!(validate_secret_name("with space").is_err());
+        assert!(validate_secret_name("semi;colon").is_err());
+        assert!(validate_secret_name(&"a".repeat(MAX_SECRET_NAME + 1)).is_err());
+        assert!(validate_secret_name(&"a".repeat(MAX_SECRET_NAME)).is_ok());
+    }
+
+    #[test]
+    fn a_secret_value_holds_one_to_64_kib() {
+        assert!(validate_secret_value("x").is_ok());
+        assert!(validate_secret_value(&"x".repeat(MAX_SECRET_VALUE)).is_ok());
+        assert!(validate_secret_value("").is_err());
+        assert!(validate_secret_value(&"x".repeat(MAX_SECRET_VALUE + 1)).is_err());
     }
 
     #[test]

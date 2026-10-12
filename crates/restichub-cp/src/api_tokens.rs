@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext, allowed_role};
 use crate::error::ApiError;
+use crate::json::ApiJson;
 use crate::server::{AppState, RequestIdHeader};
 use crate::token;
 
@@ -142,7 +143,7 @@ pub async fn create_token(
     State(state): State<AppState>,
     context: RequestContext,
     request_id: RequestIdHeader,
-    Json(body): Json<CreateTokenRequest>,
+    ApiJson(body): ApiJson<CreateTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateTokenResponse>), ApiError> {
     let request_id = request_id.0;
     context.authorize(Operation::ApiTokensWrite, &request_id)?;

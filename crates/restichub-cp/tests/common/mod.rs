@@ -66,6 +66,23 @@ pub fn request(
     request
 }
 
+/// Builds a request with a raw body string and a session cookie.
+///
+/// The function sends the body as it is, so a test can send a malformed JSON body or a body that is
+/// larger than the limit.
+pub fn raw_request(method: &str, uri: &str, cookie: &str, body: String) -> Request<Body> {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::COOKIE, cookie)
+        .header(CSRF.0, CSRF.1)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap_or_else(|error| panic!("cannot build the request: {error}"));
+    request.extensions_mut().insert(peer());
+    request
+}
+
 /// Builds a request with a bearer token.
 pub fn bearer_request(method: &str, uri: &str, token: &str, body: Option<Value>) -> Request<Body> {
     let mut builder = Request::builder()
@@ -167,6 +184,77 @@ pub async fn create_tenant(db: &Database, name: &str) -> TenantId {
         panic!("cannot commit the tenant: {error}");
     }
     tenant
+}
+
+/// Creates a tenant with a wrapped data encryption key.
+///
+/// The helper uses the fixed test key encryption key (KEK). A test that creates a secret needs the
+/// tenant to hold an active key row.
+pub async fn create_tenant_with_key(db: &Database, name: &str) -> TenantId {
+    let kek = test_kek();
+    let id = TenantId::new();
+    let dek = match restichub_secrets::generate_dek() {
+        Ok(dek) => dek,
+        Err(error) => panic!("cannot generate the DEK: {error}"),
+    };
+    let wrapped = match restichub_secrets::wrap_dek(kek.current(), id.as_uuid(), 1, &dek) {
+        Ok(wrapped) => wrapped,
+        Err(error) => panic!("cannot wrap the DEK: {error}"),
+    };
+    let mut tx = match db.begin_platform().await {
+        Ok(tx) => tx,
+        Err(error) => panic!("cannot begin the transaction: {error}"),
+    };
+    let input = tenants::BootstrapTenant {
+        id,
+        name,
+        key_version: 1,
+        kek_id: wrapped.kek_id.as_str(),
+        wrapped_dek: &wrapped.ciphertext,
+        nonce: wrapped.nonce.as_slice(),
+        actor: restichub_db::audit::Actor::System,
+        source_ip: None,
+        admin: None,
+    };
+    if let Err(error) = tenants::create_with_bootstrap(&mut tx, &input).await {
+        panic!("cannot create the tenant with a key: {error}");
+    }
+    if let Err(error) = tx.commit().await {
+        panic!("cannot commit the tenant with a key: {error}");
+    }
+    id
+}
+
+/// Inserts a secret row of a tenant and returns its identifier.
+///
+/// The ciphertext is a placeholder. A test uses this helper only for a route fixture, not for a
+/// decryption.
+pub async fn seed_secret(db: &Database, tenant: TenantId, name: &str) -> restichub_db::SecretId {
+    let mut tx = match db.begin_tenant(tenant).await {
+        Ok(tx) => tx,
+        Err(error) => panic!("cannot begin the transaction: {error}"),
+    };
+    let id = match restichub_db::secrets::create(
+        &mut tx,
+        &restichub_db::secrets::NewSecret {
+            id: restichub_db::SecretId::new(),
+            name,
+            purpose: "repository_password",
+            key_version: 1,
+            nonce: &[0_u8; 12],
+            ciphertext: &[0_u8; 16],
+            created_by: None,
+        },
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(error) => panic!("cannot create the secret: {error}"),
+    };
+    if let Err(error) = tx.commit().await {
+        panic!("cannot commit the secret: {error}");
+    }
+    id
 }
 
 /// Sets the status of a tenant through a platform transaction.

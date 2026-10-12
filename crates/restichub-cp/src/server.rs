@@ -6,7 +6,7 @@ use std::time::Duration;
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{HeaderName, HeaderValue, Method, StatusCode, Uri, request::Parts};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{MethodRouter, delete, get, patch, post};
+use axum::routing::{MethodRouter, delete, get, patch, post, put};
 use axum::{Json, Router};
 use restichub_db::Database;
 use tokio::sync::Semaphore;
@@ -33,6 +33,11 @@ const REQUEST_ID_HEADER: &str = "x-request-id";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// The largest request body of an authentication or a setup route.
 pub const BODY_LIMIT: usize = 16 * 1024;
+/// The largest request body of a secret route.
+///
+/// A secret value holds at most 64 KiB bytes. A request holds at most six of them and the metadata,
+/// so the limit is six values plus 4 KiB.
+pub const SECRET_BODY_LIMIT: usize = 6 * 64 * 1024 + 4 * 1024;
 
 /// The path of the tenant audit endpoint.
 pub const AUDIT_TENANT_PATH: &str = "/api/v1/audit";
@@ -250,6 +255,14 @@ fn method_router(method: &str, path: &str) -> MethodRouter<AppState> {
             post(crate::api_tokens::create_token).layer(DefaultBodyLimit::max(BODY_LIMIT))
         }
         ("delete", "/api/v1/api-tokens/{id}") => delete(crate::api_tokens::revoke_token),
+        ("get", "/api/v1/secrets") => get(crate::secrets::list_secrets),
+        ("post", "/api/v1/secrets") => {
+            post(crate::secrets::create_secret).layer(DefaultBodyLimit::max(SECRET_BODY_LIMIT))
+        }
+        ("get", "/api/v1/secrets/{id}") => get(crate::secrets::get_secret),
+        ("put", "/api/v1/secrets/{id}/value") => put(crate::secrets::replace_secret_value)
+            .layer(DefaultBodyLimit::max(SECRET_BODY_LIMIT)),
+        ("delete", "/api/v1/secrets/{id}") => delete(crate::secrets::delete_secret),
         _ => panic!("the route {method} {path} has no handler"),
     }
 }
@@ -321,7 +334,12 @@ async fn openapi() -> impl IntoResponse {
         crate::users::reset_password,
         crate::api_tokens::list_tokens,
         crate::api_tokens::create_token,
-        crate::api_tokens::revoke_token
+        crate::api_tokens::revoke_token,
+        crate::secrets::list_secrets,
+        crate::secrets::create_secret,
+        crate::secrets::get_secret,
+        crate::secrets::replace_secret_value,
+        crate::secrets::delete_secret
     ),
     modifiers(&SecurityAddon)
 )]
@@ -394,8 +412,14 @@ async fn method_not_allowed(request_id: RequestIdHeader) -> ApiError {
 ///
 /// The extractors use the function to build an error before the request reaches a handler.
 pub(crate) fn request_id_of(parts: &Parts) -> String {
-    parts
-        .headers
+    request_id_of_headers(&parts.headers)
+}
+
+/// Returns the request ID from a header map.
+///
+/// The JSON extractor uses the function before it consumes the request.
+pub(crate) fn request_id_of_headers(headers: &axum::http::HeaderMap) -> String {
+    headers
         .get(REQUEST_ID_HEADER)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
@@ -404,7 +428,7 @@ pub(crate) fn request_id_of(parts: &Parts) -> String {
 
 /// The request ID of the current request.
 ///
-/// The request ID comes from the `x-request-id` header. The middleware [`MakeRequestIdV7`] sets
+/// The request ID comes from the `x-request-id` header. The middleware `MakeRequestIdV7` sets
 /// the header if it is absent.
 #[derive(Debug, Clone)]
 pub struct RequestIdHeader(pub String);

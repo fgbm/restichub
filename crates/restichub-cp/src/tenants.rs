@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::client_ip::ClientIp;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
+use crate::json::ApiJson;
 use crate::password;
 use crate::server::{AppState, RequestIdHeader};
 use crate::validation;
@@ -128,7 +129,7 @@ pub async fn create_tenant(
     context: RequestContext,
     client: ClientIp,
     request_id: RequestIdHeader,
-    Json(body): Json<CreateTenantRequest>,
+    ApiJson(body): ApiJson<CreateTenantRequest>,
 ) -> Result<(StatusCode, Json<PlatformTenantView>), ApiError> {
     let request_id = request_id.0;
     context.authorize(Operation::PlatformTenantsWrite, &request_id)?;

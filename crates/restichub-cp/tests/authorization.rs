@@ -8,7 +8,8 @@ use restichub_db::{PLATFORM_TENANT_ID, api_tokens, audit, memberships};
 use serde_json::{Value, json};
 
 use common::{
-    app, app_with_kek, create_tenant, create_user, request, seed_api_token, seed_session, send,
+    app, app_with_kek, create_tenant, create_tenant_with_key, create_user, request, seed_api_token,
+    seed_session, send,
 };
 
 /// The four roles in the order of the requirements section 2.
@@ -47,6 +48,12 @@ fn body_for(method: &str, path: &str, index: usize, platform_admin: bool) -> Opt
             Some(json!({"new_password": "a long enough password"}))
         }
         ("POST", "/api/v1/api-tokens") => Some(json!({"name": "matrix", "role": role})),
+        ("POST", "/api/v1/secrets") => Some(json!({
+            "name": format!("matrix-secret-{index}"),
+            "purpose": "repository_password",
+            "value": "matrix-value",
+        })),
+        ("PUT", _) => Some(json!({"value": "matrix-value"})),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
             "first_admin": {
@@ -132,7 +139,7 @@ async fn ac_au_02_role_operation_matrix() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    let tenant = create_tenant(db.database(), "matrix").await;
+    let tenant = create_tenant_with_key(db.database(), "matrix").await;
     let app = app_with_kek(db.database());
     let id = uuid::Uuid::now_v7().to_string();
 
@@ -162,7 +169,15 @@ async fn ac_au_02_role_operation_matrix() {
             let (status, _, _) = send(&app, request(&method, &path, Some(&cookie), body)).await;
 
             let allowed_by_role = role.rank() >= minimum.rank();
-            let tenant_ok = !operation.is_platform() || role == Role::PlatformAdmin;
+            // A platform operation needs the platform tenant. A tenant-only operation is refused
+            // in the platform tenant.
+            let tenant_ok = if operation.is_platform() {
+                role == Role::PlatformAdmin
+            } else if operation.is_tenant_only() {
+                session_tenant != PLATFORM_TENANT_ID
+            } else {
+                true
+            };
             let expected_forbidden = !(allowed_by_role && tenant_ok);
             assert_eq!(
                 status == StatusCode::FORBIDDEN,
@@ -170,17 +185,33 @@ async fn ac_au_02_role_operation_matrix() {
                 "{method} {path} as {} gave {status}",
                 role.as_str()
             );
+            assert_ne!(
+                status,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "{method} {path} as {} gave an internal error",
+                role.as_str()
+            );
         }
     }
 
     // A Viewer gets 403 for every write operation.
-    for operation in [Operation::UsersWrite, Operation::ApiTokensWrite] {
+    for operation in [
+        Operation::UsersWrite,
+        Operation::ApiTokensWrite,
+        Operation::SecretsWrite,
+    ] {
         assert_eq!(minimum_role(operation), Role::Admin);
         assert!(!Role::Viewer.allows(minimum_role(operation)));
     }
-    // An Operator cannot manage users.
+    // An Operator cannot manage users. A Viewer reads the metadata of the secrets.
     assert!(!Role::Operator.allows(minimum_role(Operation::UsersRead)));
     assert!(!Role::Operator.allows(minimum_role(Operation::UsersWrite)));
+    assert_eq!(minimum_role(Operation::SecretsRead), Role::Viewer);
+    assert!(Role::Viewer.allows(minimum_role(Operation::SecretsRead)));
+    assert!(!Role::Operator.allows(minimum_role(Operation::SecretsWrite)));
+    assert!(Operation::SecretsRead.is_tenant_only());
+    assert!(Operation::SecretsWrite.is_tenant_only());
+    assert!(!Operation::UsersRead.is_tenant_only());
 
     // Only the Platform Admin manages the tenants, and only in the platform tenant.
     for operation in [

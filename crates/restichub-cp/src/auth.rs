@@ -16,6 +16,7 @@ use utoipa::ToSchema;
 use crate::client_ip::ClientIp;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
+use crate::json::ApiJson;
 use crate::password;
 use crate::rate_limit;
 use crate::server::{AppState, RequestIdHeader};
@@ -89,7 +90,7 @@ pub async fn sign_in(
     client: ClientIp,
     request_id: RequestIdHeader,
     headers: HeaderMap,
-    Json(body): Json<SignInRequest>,
+    ApiJson(body): ApiJson<SignInRequest>,
 ) -> Result<Response, ApiError> {
     let request_id = request_id.0;
     // Login CSRF: sign-in needs the header too.
@@ -383,7 +384,7 @@ pub async fn change_password(
     State(state): State<AppState>,
     context: RequestContext,
     request_id: RequestIdHeader,
-    Json(body): Json<ChangePasswordRequest>,
+    ApiJson(body): ApiJson<ChangePasswordRequest>,
 ) -> Result<Response, ApiError> {
     let request_id = request_id.0;
     context.authorize(Operation::AuthPasswordChange, &request_id)?;

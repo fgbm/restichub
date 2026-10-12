@@ -21,7 +21,7 @@ restichub-common = { workspace = true }
 restichub-compiler = { workspace = true }
 restichub-db = { workspace = true }
 restichub-proto = { workspace = true }
-restichub-secrets = { workspace = true }
+restichub-secrets = { workspace = true, features = ["serde"] }
 rust-embed = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

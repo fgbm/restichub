@@ -1,6 +1,6 @@
 //! The audit service and the audit read API (ADR-0023, section Audit log).
 //!
-//! The diff builder and the [`RedactedDiff`] type live in the database crate, so the value of a
+//! The diff builder and the `RedactedDiff` type live in the database crate, so the value of a
 //! diff can only come from that crate. A secret value never appears in a diff.
 //!
 //! The read API holds two endpoints: `GET /api/v1/audit` for one tenant and
@@ -12,9 +12,7 @@ use axum::extract::{FromRequestParts, Query, State};
 use axum::http::request::Parts;
 use restichub_db::DbError;
 use restichub_db::audit as repo;
-use restichub_db::audit::{
-    Actor, AuditAction, AuditEvent, AuditFilter, AuditPage, AuditRecord, diff,
-};
+use restichub_db::audit::{Actor, AuditAction, AuditEvent, AuditFilter, AuditPage, AuditRecord};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -49,7 +47,9 @@ impl AuditService {
     ///
     /// The tenant comes from the transaction only. The record holds the tenant, the agent, the
     /// job, the repository and the time. The function takes no secret value, so no secret value
-    /// can appear in the record.
+    /// can appear in the record. The delivery path
+    /// [`restichub_db::delivery::load_ciphertext_for_delivery`] uses the same builder, so the shape
+    /// of the record lives in one place.
     pub async fn record_secret_delivered(
         tx: &mut restichub_db::TenantTx<'_>,
         agent_id: Uuid,
@@ -57,17 +57,9 @@ impl AuditService {
         repository_id: Uuid,
         secret_id: restichub_db::SecretId,
     ) -> Result<(), DbError> {
-        let tenant = tx.tenant();
-        let after = serde_json::json!({
-            "tenant_id": tenant.to_string(),
-            "agent_id": agent_id.to_string(),
-            "job_id": job_id.to_string(),
-            "repository_id": repository_id.to_string(),
-        });
-        let mut event = AuditEvent::new(AuditAction::SecretDelivered, "secret");
-        event.object_id = Some(secret_id.as_uuid());
-        event.diff = Some(diff(None, Some(&after), &[]));
-        repo::insert(tx, &event).await.map(|_| ())
+        repo::insert_secret_delivered(tx, secret_id, agent_id, job_id, repository_id)
+            .await
+            .map(|_| ())
     }
 }
 

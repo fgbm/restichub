@@ -10,8 +10,8 @@ use restichub_cp::context::ROUTE_OPERATIONS;
 use serde_json::json;
 
 use common::{
-    app, create_tenant, create_user, list_tokens, list_users, request, seed_api_token,
-    seed_session, send, token_revoked, user_disabled,
+    app, create_tenant, create_tenant_with_key, create_user, list_tokens, list_users, request,
+    seed_api_token, seed_secret, seed_session, send, token_revoked, user_disabled,
 };
 
 /// The fixture of one `{id}` route: the body of an unsafe method.
@@ -27,12 +27,16 @@ const FIXTURES: &[(&str, &str)] = &[
     ("delete", "/api/v1/users/{id}"),
     ("post", "/api/v1/users/{id}/password"),
     ("delete", "/api/v1/api-tokens/{id}"),
+    ("get", "/api/v1/secrets/{id}"),
+    ("put", "/api/v1/secrets/{id}/value"),
+    ("delete", "/api/v1/secrets/{id}"),
 ];
 
 /// Returns the body of a fixture route.
 fn body_for(method: &str, path: &str) -> Option<serde_json::Value> {
     match (method, path) {
         ("patch", _) => Some(json!({"display_name": "changed"})),
+        ("put", _) => Some(json!({"value": "a new value"})),
         ("post", path) if path.ends_with("/password") => {
             Some(json!({"new_password": "a long enough password"}))
         }
@@ -46,11 +50,11 @@ async fn ac_tn_01_api_cross_tenant_ids_return_404() {
         return;
     };
     let tenant_a = create_tenant(db.database(), "cross-a").await;
-    let tenant_b = create_tenant(db.database(), "cross-b").await;
+    let tenant_b = create_tenant_with_key(db.database(), "cross-b").await;
 
     // Tenant A has an Admin session.
     let cookie_a = seed_session(db.database(), tenant_a, "admin-a", "admin").await;
-    // Tenant B has a user and an API token.
+    // Tenant B has a user, an API token and a secret.
     let user_b = create_user(db.database(), tenant_b, "bob", "phc", "viewer").await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
     let token_b = list_tokens(db.database(), tenant_b)
@@ -58,6 +62,7 @@ async fn ac_tn_01_api_cross_tenant_ids_return_404() {
         .first()
         .map(|token| token.id)
         .unwrap_or_default();
+    let secret_b = seed_secret(db.database(), tenant_b, "cross-secret").await;
 
     let app = app(db.database());
 
@@ -81,6 +86,8 @@ async fn ac_tn_01_api_cross_tenant_ids_return_404() {
     for (method, path) in FIXTURES {
         let id = if path.contains("api-tokens") {
             token_b.to_string()
+        } else if path.contains("secrets") {
+            secret_b.to_string()
         } else {
             user_b.to_string()
         };
@@ -115,6 +122,19 @@ async fn ac_tn_01_api_cross_tenant_ids_return_404() {
             .any(|user| user.id == user_b),
         "the user of tenant B must exist"
     );
+    let secret_exists = {
+        let mut tx = db
+            .database()
+            .begin_tenant(tenant_b)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let secret = restichub_db::secrets::get(&mut tx, secret_b)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        tx.commit().await.unwrap_or_else(|error| panic!("{error}"));
+        secret.is_some()
+    };
+    assert!(secret_exists, "the secret of tenant B must exist");
 
     db.cleanup().await;
 }

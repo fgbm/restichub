@@ -128,6 +128,36 @@ impl ApiError {
         )
     }
 
+    /// Creates a `413 payload_too_large` error.
+    ///
+    /// A request body that is larger than the body limit of the route gives this error. The
+    /// response holds no parser detail.
+    pub fn payload_too_large(request_id: &str) -> Self {
+        Self::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload_too_large",
+            "Payload Too Large",
+            request_id,
+        )
+    }
+
+    /// Creates a `500 tenant_key_missing` error.
+    ///
+    /// The tenant holds no active key row, so the control plane cannot encrypt a secret. The
+    /// function logs the cause with the request ID. The response body holds no internal detail.
+    pub fn tenant_key_missing(request_id: &str) -> Self {
+        tracing::error!(
+            request_id = %request_id,
+            "the tenant holds no active key row; cannot encrypt a secret value"
+        );
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "tenant_key_missing",
+            "Internal Server Error",
+            request_id,
+        )
+    }
+
     /// Creates a `400 ambiguous_credentials` error.
     ///
     /// A request holds a session cookie and a bearer token at the same time.

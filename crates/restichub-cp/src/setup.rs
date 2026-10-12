@@ -22,6 +22,7 @@ use utoipa::ToSchema;
 use crate::client_ip::ClientIp;
 use crate::clock::Clock;
 use crate::error::ApiError;
+use crate::json::ApiJson;
 use crate::password;
 use crate::rate_limit;
 use crate::server::{AppState, RequestIdHeader};
@@ -147,7 +148,7 @@ pub async fn setup(
     client: ClientIp,
     request_id: RequestIdHeader,
     headers: HeaderMap,
-    Json(body): Json<SetupRequest>,
+    ApiJson(body): ApiJson<SetupRequest>,
 ) -> Result<(StatusCode, Json<UserView>), ApiError> {
     let request_id = request_id.0;
     if !token::csrf_ok(&headers) {

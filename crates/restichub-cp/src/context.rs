@@ -99,6 +99,10 @@ pub enum Operation {
     ApiTokensRead,
     /// Create and revoke the API tokens of the tenant.
     ApiTokensWrite,
+    /// Read the metadata of the secrets of the tenant.
+    SecretsRead,
+    /// Create, replace and remove the secrets of the tenant.
+    SecretsWrite,
 }
 
 impl Operation {
@@ -116,6 +120,8 @@ impl Operation {
             Self::UsersWrite => "users.write",
             Self::ApiTokensRead => "api_tokens.read",
             Self::ApiTokensWrite => "api_tokens.write",
+            Self::SecretsRead => "secrets.read",
+            Self::SecretsWrite => "secrets.write",
         }
     }
 
@@ -125,6 +131,15 @@ impl Operation {
             self,
             Self::PlatformAuditRead | Self::PlatformTenantsRead | Self::PlatformTenantsWrite
         )
+    }
+
+    /// Returns true if the operation acts in one tenant only.
+    ///
+    /// The control plane refuses a tenant-only operation in the platform tenant (HTTP 403). The
+    /// secrets belong to a real tenant; the platform tenant holds the Platform Admin users and the
+    /// platform audit records (FR-TN-02).
+    pub fn is_tenant_only(self) -> bool {
+        matches!(self, Self::SecretsRead | Self::SecretsWrite)
     }
 }
 
@@ -142,6 +157,8 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::UsersWrite => Role::Admin,
         Operation::ApiTokensRead => Role::Admin,
         Operation::ApiTokensWrite => Role::Admin,
+        Operation::SecretsRead => Role::Viewer,
+        Operation::SecretsWrite => Role::Admin,
     }
 }
 
@@ -343,6 +360,31 @@ pub const ROUTE_OPERATIONS: &[RouteOperation] = &[
         path: "/api/v1/api-tokens/{id}",
         access: Access::Protected(Operation::ApiTokensWrite),
     },
+    RouteOperation {
+        method: "get",
+        path: "/api/v1/secrets",
+        access: Access::Protected(Operation::SecretsRead),
+    },
+    RouteOperation {
+        method: "post",
+        path: "/api/v1/secrets",
+        access: Access::Protected(Operation::SecretsWrite),
+    },
+    RouteOperation {
+        method: "get",
+        path: "/api/v1/secrets/{id}",
+        access: Access::Protected(Operation::SecretsRead),
+    },
+    RouteOperation {
+        method: "put",
+        path: "/api/v1/secrets/{id}/value",
+        access: Access::Protected(Operation::SecretsWrite),
+    },
+    RouteOperation {
+        method: "delete",
+        path: "/api/v1/secrets/{id}",
+        access: Access::Protected(Operation::SecretsWrite),
+    },
 ];
 
 /// The tenant, the actor, the role and the session of a request.
@@ -371,9 +413,13 @@ impl RequestContext {
 
     /// Checks the role of the context against the minimum role of the operation.
     ///
-    /// A platform operation needs the platform tenant too.
+    /// A platform operation needs the platform tenant too. A tenant-only operation is refused in
+    /// the platform tenant.
     pub fn authorize(&self, operation: Operation, request_id: &str) -> Result<(), ApiError> {
         if operation.is_platform() && self.tenant_id != restichub_db::PLATFORM_TENANT_ID {
+            return Err(ApiError::forbidden(request_id));
+        }
+        if operation.is_tenant_only() && self.tenant_id == restichub_db::PLATFORM_TENANT_ID {
             return Err(ApiError::forbidden(request_id));
         }
         if self.role.allows(minimum_role(operation)) {
