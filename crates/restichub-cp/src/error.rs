@@ -52,6 +52,57 @@ impl ApiError {
             request_id: request_id.to_owned(),
         }
     }
+
+    /// Creates a `500 internal_error` error with no cause.
+    pub fn internal_error(request_id: &str) -> Self {
+        tracing::error!(request_id = %request_id, "internal error");
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "internal_error",
+            title: "Internal Server Error",
+            request_id: request_id.to_owned(),
+        }
+    }
+
+    /// Creates a `401 unauthenticated` error.
+    pub fn unauthenticated(request_id: &str) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "unauthenticated",
+            title: "Unauthorized",
+            request_id: request_id.to_owned(),
+        }
+    }
+
+    /// Creates a `403 forbidden` error.
+    pub fn forbidden(request_id: &str) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "forbidden",
+            title: "Forbidden",
+            request_id: request_id.to_owned(),
+        }
+    }
+
+    /// Creates a `400 invalid_argument` error.
+    pub fn invalid_argument(request_id: &str) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_argument",
+            title: "Bad Request",
+            request_id: request_id.to_owned(),
+        }
+    }
+
+    /// Creates a `405 method_not_allowed` error.
+    pub fn method_not_allowed(request_id: &str) -> Self {
+        Self {
+            status: StatusCode::METHOD_NOT_ALLOWED,
+            code: "method_not_allowed",
+            title: "Method Not Allowed",
+            request_id: request_id.to_owned(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {

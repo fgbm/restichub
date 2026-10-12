@@ -882,6 +882,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ipnet"
+version = "2.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
+
+[[package]]
 name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1420,6 +1426,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "thiserror",
+ "time",
  "tokio",
  "toml",
  "tower",
@@ -1435,8 +1442,10 @@ name = "restichub-db"
 version = "0.0.0"
 dependencies = [
  "restichub-db",
+ "serde_json",
  "sqlx",
  "thiserror",
+ "time",
  "tokio",
  "tracing",
  "uuid",
@@ -1770,6 +1779,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "hashlink",
  "indexmap",
+ "ipnet",
  "log",
  "memchr",
  "percent-encoding",
@@ -1874,6 +1884,7 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
+ "ipnet",
  "itoa",
  "log",
  "md-5",

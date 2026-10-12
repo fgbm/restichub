@@ -10,10 +10,11 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
+use super::audit::{Actor, AuditAction, AuditEvent, AuditFilter, AuditPage};
 use super::ids::{ApiTokenId, AuditLogId, SecretId, SessionId, UserId};
 use super::test_util::{TestDatabase, test_database};
 use super::users::NewUser;
-use super::{Database, PLATFORM_TENANT_ID, TenantId, tenants, users};
+use super::{Database, PLATFORM_TENANT_ID, TenantId, audit, tenants, users};
 
 /// The error type of the tests.
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -143,7 +144,7 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
 
     sqlx::query(
         "INSERT INTO audit_log (id, tenant_id, actor_type, action, object_type) \
-         VALUES ($1, $2, 'system', 'create', 'user')",
+         VALUES ($1, $2, 'system', 'user_create', 'user')",
     )
     .bind(AuditLogId::new())
     .bind(tenant)
@@ -1137,6 +1138,307 @@ async fn db_the_auth_lookups_work_under_the_runtime_role() -> TestResult {
     assert!(cross.is_none());
 
     tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+/// Inserts one audit record in a tenant transaction.
+async fn insert_audit(
+    tx: &mut super::TenantTx<'_>,
+    action: AuditAction,
+) -> Result<AuditLogId, Box<dyn std::error::Error>> {
+    let mut event = AuditEvent::new(action, "user");
+    event.source_ip = Some("203.0.113.7".parse()?);
+    Ok(audit::insert(tx, &event).await?)
+}
+
+#[tokio::test]
+async fn db_audit_insert_and_list_in_a_tenant_scope() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let first = insert_audit(&mut tx, AuditAction::UserCreate).await?;
+    let second = insert_audit(&mut tx, AuditAction::SignIn).await?;
+    tx.commit().await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let records = audit::list(&mut tx, &AuditFilter::default(), &AuditPage::default())
+        .await?
+        .records;
+    tx.commit().await?;
+    assert_eq!(records.len(), 2);
+    let ids: Vec<AuditLogId> = records.iter().map(|record| record.id).collect();
+    assert!(ids.contains(&first));
+    assert!(ids.contains(&second));
+    assert!(records.iter().all(|record| record.tenant_id == tenant_a
+        && record.action == AuditAction::UserCreate
+        || record.action == AuditAction::SignIn));
+    assert!(records.iter().all(|record| record.source_ip.is_some()));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_audit_list_does_not_show_another_tenant() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    insert_audit(&mut tx, AuditAction::ConfigCreate).await?;
+    tx.commit().await?;
+
+    let mut tx = db.database().begin_tenant(tenant_b).await?;
+    let records = audit::list(&mut tx, &AuditFilter::default(), &AuditPage::default())
+        .await?
+        .records;
+    tx.commit().await?;
+    assert!(records.is_empty());
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_audit_platform_list_sees_every_tenant() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    insert_audit(&mut tx, AuditAction::JobRun).await?;
+    tx.commit().await?;
+    let mut tx = db.database().begin_tenant(tenant_b).await?;
+    insert_audit(&mut tx, AuditAction::JobCancel).await?;
+    tx.commit().await?;
+
+    let mut tx = db.database().begin_platform().await?;
+    let records = audit::list_platform(&mut tx, &AuditFilter::default(), &AuditPage::default())
+        .await?
+        .records;
+    tx.commit().await?;
+    let tenants: Vec<TenantId> = records.iter().map(|record| record.tenant_id).collect();
+    assert!(tenants.contains(&tenant_a));
+    assert!(tenants.contains(&tenant_b));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_audit_platform_insert_follows_the_policy() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (_, tenant_b) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_platform().await?;
+    let created = tenants::create(&mut tx, "audit-target").await?;
+    tx.enter_tenant(created).await?;
+    let event = AuditEvent::new(AuditAction::TenantCreate, "tenant");
+
+    // The entered tenant is accepted.
+    assert!(
+        audit::insert_platform(&mut tx, created, &event)
+            .await
+            .is_ok()
+    );
+    // The platform tenant is accepted.
+    assert!(
+        audit::insert_platform(&mut tx, PLATFORM_TENANT_ID, &event)
+            .await
+            .is_ok()
+    );
+    // Another tenant is refused (42501).
+    assert!(
+        audit::insert_platform(&mut tx, tenant_b, &event)
+            .await
+            .is_err()
+    );
+    drop(tx);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_audit_filter_selects_action_and_object() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    insert_audit(&mut tx, AuditAction::SignIn).await?;
+    insert_audit(&mut tx, AuditAction::UserCreate).await?;
+    tx.commit().await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let filter = AuditFilter {
+        action: Some(AuditAction::SignIn),
+        actor: Some(Actor::System),
+        ..AuditFilter::default()
+    };
+    let records = audit::list(&mut tx, &filter, &AuditPage::default())
+        .await?
+        .records;
+    tx.commit().await?;
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records.first().map(|record| &record.action),
+        Some(&AuditAction::SignIn)
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_audit_pagination_is_stable() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    for _ in 0..5 {
+        insert_audit(&mut tx, AuditAction::JobRun).await?;
+    }
+    tx.commit().await?;
+
+    let mut seen = Vec::new();
+    let mut after = None;
+    for _ in 0..3 {
+        let page = AuditPage { limit: 2, after };
+        let mut tx = db.database().begin_tenant(tenant_a).await?;
+        let records = audit::list(&mut tx, &AuditFilter::default(), &page)
+            .await?
+            .records;
+        tx.commit().await?;
+        if records.len() < 2 {
+            seen.extend(records.iter().map(|record| record.id));
+            break;
+        }
+        after = records.last().map(|record| audit::AuditCursor {
+            occurred_at: record.occurred_at,
+            id: record.id,
+        });
+        seen.extend(records.iter().map(|record| record.id));
+    }
+
+    // Every record appears once.
+    assert_eq!(seen.len(), 5);
+    let mut unique = seen.clone();
+    unique.sort_by_key(|id| id.as_uuid());
+    unique.dedup();
+    assert_eq!(unique.len(), 5, "the pages repeat a record");
+
+    // The first page is stable.
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let first = audit::list(
+        &mut tx,
+        &AuditFilter::default(),
+        &AuditPage {
+            limit: 2,
+            after: None,
+        },
+    )
+    .await?
+    .records;
+    tx.commit().await?;
+    assert_eq!(first.len(), 2);
+    assert_eq!(first.first().map(|record| record.id), seen.first().copied());
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_audit_list_keeps_an_unknown_action_and_actor() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+
+    // A row of a newer schema. The list must not fail and must keep the row (M5). The actor type
+    // is a known type with no id, and the action string is not known.
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    sqlx::query(
+        "INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action, object_type) \
+         VALUES ($1, $2, 'user', NULL, 'future_x', 'thing')",
+    )
+    .bind(AuditLogId::new())
+    .bind(tenant_a)
+    .execute(tx.as_conn())
+    .await?;
+    tx.commit().await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let records = audit::list(&mut tx, &AuditFilter::default(), &AuditPage::default())
+        .await?
+        .records;
+    tx.commit().await?;
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records.first().map(|record| record.action.as_str()),
+        Some("future_x")
+    );
+    assert_eq!(
+        records.first().map(|record| record.actor.actor_type()),
+        Some("user")
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_audit_page_reports_has_more() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    for _ in 0..3 {
+        insert_audit(&mut tx, AuditAction::JobRun).await?;
+    }
+    tx.commit().await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let first = audit::list(
+        &mut tx,
+        &AuditFilter::default(),
+        &AuditPage {
+            limit: 2,
+            after: None,
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    assert_eq!(first.records.len(), 2);
+    assert!(first.has_more);
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let last = audit::list(
+        &mut tx,
+        &AuditFilter::default(),
+        &AuditPage {
+            limit: 10,
+            after: None,
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    assert_eq!(last.records.len(), 3);
+    assert!(!last.has_more);
+
     db.cleanup().await;
     Ok(())
 }

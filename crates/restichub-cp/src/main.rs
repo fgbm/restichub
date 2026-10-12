@@ -1,5 +1,6 @@
 //! ResticHub control plane binary.
 
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -37,16 +38,21 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     database.verify_runtime_role().await?;
     database.verify_migrations().await?;
 
-    let app = server::router(AppState::new(database));
+    let app = server::router(
+        AppState::new(database).with_trusted_proxies(config.trusted_proxies.clone()),
+    );
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await
         .context("cannot bind the listen address")?;
     tracing::info!("the control plane is ready");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("the server stopped with an error")
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("the server stopped with an error")
 }
 
 /// Applies the migrations with the owner login and stops (N4).

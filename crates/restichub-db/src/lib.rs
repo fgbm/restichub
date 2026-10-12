@@ -13,6 +13,7 @@ use std::time::Duration;
 use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 
+pub mod audit;
 pub mod ids;
 pub mod tenants;
 pub mod tx;

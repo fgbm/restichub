@@ -6,7 +6,7 @@
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::ids::{AuditLogId, TenantId, UserId};
+use crate::ids::{TenantId, UserId};
 use crate::tx::PlatformTx;
 
 /// A tenant row.
@@ -113,15 +113,10 @@ pub async fn create_with_bootstrap(
             .map_err(DbError::Query)?;
     }
 
-    sqlx::query(
-        "INSERT INTO audit_log (id, tenant_id, actor_type, action, object_type, object_id) \
-         VALUES ($1, $2, 'system', 'tenant.create', 'tenant', $2)",
-    )
-    .bind(AuditLogId::new())
-    .bind(tenant)
-    .execute(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
+    let mut event =
+        crate::audit::AuditEvent::new(crate::audit::AuditAction::TenantCreate, "tenant");
+    event.object_id = Some(tenant.as_uuid());
+    crate::audit::insert_platform(tx, tenant, &event).await?;
 
     Ok(tenant)
 }

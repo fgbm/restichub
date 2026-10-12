@@ -12,6 +12,8 @@ use std::time::Duration;
 use restichub_secrets::{EnvReader, SecretString, SystemEnv, read_secret};
 use serde::Deserialize;
 
+use crate::client_ip::TrustedProxies;
+
 /// The name of the environment variable that holds the path of the configuration file.
 pub const CONFIG_PATH_ENV: &str = "RESTICHUB_CONFIG";
 /// The name of the environment variable that holds the listen address.
@@ -35,6 +37,10 @@ pub const DATABASE_MIGRATION_PASSWORD_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_
 pub const LOG_FORMAT_ENV: &str = "RESTICHUB_LOG_FORMAT";
 /// The name of the environment variable that holds the log level.
 pub const LOG_LEVEL_ENV: &str = "RESTICHUB_LOG_LEVEL";
+/// The name of the environment variable that holds the trusted proxy list.
+///
+/// The value is a comma-separated list of networks, for example `10.0.0.0/8,192.168.0.0/16`.
+pub const TRUSTED_PROXIES_ENV: &str = "RESTICHUB_TRUSTED_PROXIES";
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:8080";
 const DEFAULT_LOG_LEVEL: &str = "info";
@@ -138,6 +144,8 @@ pub struct Config {
     pub log_format: LogFormat,
     /// The tracing filter.
     pub log_level: String,
+    /// The networks whose `X-Forwarded-For` header the control plane trusts.
+    pub trusted_proxies: TrustedProxies,
 }
 
 impl Config {
@@ -171,6 +179,8 @@ impl Config {
             .get(LOG_LEVEL_ENV)
             .or(file.log_level)
             .unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned());
+
+        let trusted_proxies = trusted_proxies(env, file.server)?;
 
         let database_url = env
             .get(DATABASE_URL_ENV)
@@ -225,6 +235,7 @@ impl Config {
                 .unwrap_or(DEFAULT_ACQUIRE_TIMEOUT),
             log_format,
             log_level,
+            trusted_proxies,
         })
     }
 }
@@ -279,6 +290,14 @@ struct FileConfig {
     database_acquire_timeout_secs: Option<u64>,
     log_format: Option<String>,
     log_level: Option<String>,
+    server: Option<ServerConfig>,
+}
+
+/// The `[server]` section of the configuration file.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ServerConfig {
+    trusted_proxies: Option<Vec<String>>,
 }
 
 impl FileConfig {
@@ -310,6 +329,30 @@ fn log_format(value: Option<&str>) -> Result<LogFormat, ConfigError> {
             reason: format!("`{value}` is not `text` or `json`"),
         }),
     }
+}
+
+/// Reads the trusted proxy list (ADR-0023, section Audit log).
+///
+/// The environment overrides the file. The environment value is a comma-separated list.
+fn trusted_proxies(
+    env: &dyn EnvReader,
+    server: Option<ServerConfig>,
+) -> Result<TrustedProxies, ConfigError> {
+    let entries: Vec<String> = match env.get(TRUSTED_PROXIES_ENV) {
+        Some(value) => value
+            .split(',')
+            .map(|entry| entry.trim().to_owned())
+            .collect(),
+        None => server
+            .and_then(|server| server.trusted_proxies)
+            .unwrap_or_default(),
+    };
+    TrustedProxies::parse(entries.iter().map(String::as_str)).map_err(|reason| {
+        ConfigError::Invalid {
+            name: "server.trusted_proxies",
+            reason,
+        }
+    })
 }
 
 /// The configuration of the `migrate` command.
@@ -724,5 +767,34 @@ mod tests {
         let config = Config::load_with(&Cli::default(), &env);
         let text = format!("{config:?}");
         assert!(!text.contains("secret"), "{text}");
+    }
+
+    #[test]
+    fn the_trusted_proxy_list_comes_from_the_environment() {
+        let env = MapEnv::new(&[
+            ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+            ("RESTICHUB_TRUSTED_PROXIES", "10.0.0.0/8, 192.168.0.0/16"),
+        ]);
+        let config = Config::load_with(&Cli::default(), &env);
+        let address = "10.1.2.3"
+            .parse()
+            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+        assert!(config.is_ok_and(|config| config.trusted_proxies.contains(address)));
+    }
+
+    #[test]
+    fn a_bad_trusted_proxy_list_names_the_parameter() {
+        let env = MapEnv::new(&[
+            ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+            ("RESTICHUB_TRUSTED_PROXIES", "not-a-network"),
+        ]);
+        let error = Config::load_with(&Cli::default(), &env);
+        assert!(matches!(
+            error,
+            Err(ConfigError::Invalid {
+                name: "server.trusted_proxies",
+                ..
+            })
+        ));
     }
 }

@@ -26,10 +26,13 @@ sqlx = { version = "0.9", default-features = false, features = [
   "postgres",
   "uuid",
   "time",
+  "json",
+  "ipnet",
   "migrate",
   "macros",
 ] }
 thiserror = "2.0"
+time = "0.3"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
 toml = "1.1"
 tower = "0.5"

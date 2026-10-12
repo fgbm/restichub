@@ -17,21 +17,47 @@ use tracing::Span;
 use utoipa::OpenApi;
 use uuid::Uuid;
 
+use crate::client_ip::TrustedProxies;
 use crate::error::ApiError;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The path of the tenant audit endpoint.
+pub const AUDIT_TENANT_PATH: &str = "/api/v1/audit";
+/// The path of the platform audit endpoint.
+pub const AUDIT_PLATFORM_PATH: &str = "/api/v1/platform/audit";
+
 /// The application state of the HTTP server.
 #[derive(Debug, Clone)]
 pub struct AppState {
     db: Database,
+    trusted_proxies: TrustedProxies,
 }
 
 impl AppState {
-    /// Creates the application state.
+    /// Creates the application state with no trusted proxy.
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            trusted_proxies: TrustedProxies::default(),
+        }
+    }
+
+    /// Sets the trusted proxy list.
+    pub fn with_trusted_proxies(mut self, trusted_proxies: TrustedProxies) -> Self {
+        self.trusted_proxies = trusted_proxies;
+        self
+    }
+
+    /// Returns the database.
+    pub fn db(&self) -> &Database {
+        &self.db
+    }
+
+    /// Returns the trusted proxy list.
+    pub fn trusted_proxies(&self) -> &TrustedProxies {
+        &self.trusted_proxies
     }
 }
 
@@ -40,8 +66,11 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route(AUDIT_TENANT_PATH, get(crate::audit::list_tenant_audit))
+        .route(AUDIT_PLATFORM_PATH, get(crate::audit::list_platform_audit))
         .route("/api/v1/openapi.json", get(openapi))
         .fallback(not_found)
+        .method_not_allowed_fallback(method_not_allowed)
         .with_state(state)
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -93,13 +122,36 @@ async fn openapi() -> impl IntoResponse {
 #[derive(OpenApi)]
 #[openapi(
     info(title = "ResticHub API", version = env!("CARGO_PKG_VERSION")),
-    paths(healthz, readyz, openapi)
+    paths(
+        healthz,
+        readyz,
+        openapi,
+        crate::audit::list_tenant_audit,
+        crate::audit::list_platform_audit
+    )
 )]
 struct ApiDoc;
 
 /// The fallback handler for an unknown route.
 async fn not_found(request_id: RequestIdHeader) -> ApiError {
     ApiError::not_found(&request_id.0)
+}
+
+/// The fallback handler for a known route with a method that the route does not accept.
+async fn method_not_allowed(request_id: RequestIdHeader) -> ApiError {
+    ApiError::method_not_allowed(&request_id.0)
+}
+
+/// Returns the request ID of a request.
+///
+/// The extractors use the function to build an error before the request reaches a handler.
+pub(crate) fn request_id_of(parts: &Parts) -> String {
+    parts
+        .headers
+        .get(REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// The request ID of the current request.
