@@ -122,3 +122,13 @@ These notes refine section Tenant isolation. The decision itself does not change
 - A platform operation that writes audit records uses `PlatformTx`. The method `enter_tenant` sets the tenant id in the same transaction and accepts only a tenant that the transaction created. A tenant creation, its key row, its first user and its audit record then commit together or not at all. The repository function `tenants::create_with_bootstrap` does this sequence.
 - `FORCE ROW LEVEL SECURITY` also applies to the table owner. The authentication lookups `auth_find_tenant`, `auth_find_session` and `auth_find_api_token` are `SECURITY DEFINER` and owned by `restichub_auth`, a role with `BYPASSRLS`. Each function returns the named columns only and sets the search path. The runtime role gets `EXECUTE` and nothing else. The caller checks the session expiry, the token expiry and revocation, and the user `disabled` flag. The sign-in rate limit belongs to task #18.
 - The runtime role has no `DELETE` on `tenant_keys`. A tenant has one active key version.
+
+These notes also refine section Secrets. The record fixes the format of the encrypted values once.
+
+- A KEK is 32 bytes from the operating system random number generator. A KEK has a key ID. The key ID is the first 16 hexadecimal characters of the SHA-256 digest of the bytes `restichub-kek-id-v1` followed by the key bytes. The key ID identifies the KEK during a rotation.
+- The KEK file is a regular file. The control plane refuses a symbolic link and a file with the group or the other permission bits set. The condition is `mode & 0o077 == 0` on Unix. The control plane opens the file one time with `O_NOFOLLOW` and reads from the same handle.
+- A wrapped DEK uses AES-256-GCM with a random 96-bit nonce. The associated data is the bytes `restichub-dek-v1\0`, then the 16 tenant ID bytes, then the 4 key version bytes in big-endian order.
+- A secret value uses AES-256-GCM with a random 96-bit nonce. The associated data is the bytes `restichub-secret-v1\0`. Then come the 16 tenant ID bytes and the 16 secret ID bytes. Then come the 4 length bytes of the purpose in big-endian order and the purpose bytes.
+- The `kek_check` value uses AES-256-GCM with a fixed plaintext. The associated data is the bytes `restichub-kek-check-v1\0`.
+- The purpose of a secret value is one of `repository_password`, `s3_access_key`, `s3_secret_key` and `rest_server_password`. These strings are stable. A change makes every stored value of that purpose unreadable.
+- The control plane MUST NOT start a child process that inherits the environment while the KEK is in `RESTICHUB_KEK`. On Unix, another process of the same user can read the environment through `/proc`.
