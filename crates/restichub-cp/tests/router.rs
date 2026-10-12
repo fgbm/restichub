@@ -72,9 +72,9 @@ async fn the_openapi_document_holds_the_routes() -> Result<(), Box<dyn std::erro
 }
 
 #[tokio::test]
-async fn an_unknown_route_is_a_problem() -> Result<(), Box<dyn std::error::Error>> {
+async fn an_unknown_api_route_is_a_problem() -> Result<(), Box<dyn std::error::Error>> {
     let response = app()?
-        .oneshot(Request::builder().uri("/nope").body(Body::empty())?)
+        .oneshot(Request::builder().uri("/api/v1/nope").body(Body::empty())?)
         .await?;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let content_type = response

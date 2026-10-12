@@ -23,6 +23,7 @@ restichub-compiler = { path = "crates/restichub-compiler" }
 restichub-db = { path = "crates/restichub-db" }
 restichub-proto = { path = "crates/restichub-proto" }
 restichub-secrets = { path = "crates/restichub-secrets" }
+rust-embed = { version = "8", features = ["debug-embed"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"

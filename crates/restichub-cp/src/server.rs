@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{DefaultBodyLimit, Request, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, request::Parts};
+use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, request::Parts};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, delete, get, patch, post};
 use axum::{Json, Router};
@@ -348,9 +348,18 @@ impl Modify for SecurityAddon {
     }
 }
 
-/// The fallback handler for an unknown route.
-async fn not_found(request_id: RequestIdHeader) -> ApiError {
-    ApiError::not_found(&request_id.0)
+/// The fallback handler for a path with no route.
+///
+/// An unknown `/api/...` path keeps the RFC 9457 problem. Every other path serves the embedded web
+/// UI, so the single-page application router handles the route. The UI never shadows a registered
+/// route.
+async fn not_found(uri: Uri, request_id: RequestIdHeader) -> Response {
+    let path = uri.path();
+    if path == "/api" || path.starts_with("/api/") {
+        ApiError::not_found(&request_id.0).into_response()
+    } else {
+        crate::ui::serve(uri)
+    }
 }
 
 /// The fallback handler for a known route with a method that the route does not accept.

@@ -20,6 +20,7 @@ pub mod startup;
 pub mod telemetry;
 pub mod tenants;
 pub mod token;
+pub mod ui;
 pub mod users;
 pub mod validation;
 pub mod views;
