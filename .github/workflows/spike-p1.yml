@@ -1,0 +1,192 @@
+name: Spike P1 (Windows cancel)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'spikes/p1-windows-cancel/**'
+      - '.github/workflows/spike-p1.yml'
+
+permissions:
+  contents: read
+
+env:
+  RESTIC_VERSION: 0.19.1
+
+jobs:
+  windows:
+    name: Windows (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SPIKE_DIR: ${{ github.workspace }}\spikes\p1-windows-cancel
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          components: clippy
+
+      - name: Generate the repository password
+        run: |
+          # A new random password per run. The step masks it in the log. The
+          # password reaches restic only through the RESTIC_PASSWORD variable.
+          $bytes = [byte[]]::new(32)
+          [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+          $password = [Convert]::ToBase64String($bytes)
+          Write-Output "::add-mask::$password"
+          "RESTIC_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Prepare the working paths
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'p1'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          @(
+            "P1_DIR=$dir",
+            "P1_REPO=$dir\repo",
+            "P1_SRC=$dir\src",
+            "P1_REPORT_CONSOLE=$dir\report-console.json",
+            "P1_REPORT_SERVICE=$dir\report-service.json"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build the spike
+        working-directory: spikes/p1-windows-cancel
+        run: cargo build --release
+
+      - name: Download restic and verify the signature
+        run: |
+          $base = "https://github.com/restic/restic/releases/download/v${env:RESTIC_VERSION}"
+          $sumsFile = Join-Path $env:RUNNER_TEMP 'SHA256SUMS'
+          $ascFile = Join-Path $env:RUNNER_TEMP 'SHA256SUMS.asc'
+          Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile $sumsFile
+          Invoke-WebRequest -Uri "$base/SHA256SUMS.asc" -OutFile $ascFile
+          $sums = (Get-Content $sumsFile) | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+
+          # Verify the SHA256SUMS file with the restic release key. The key and
+          # its fingerprint come from the restic documentation
+          # (doc/020_installation.rst): the key file is at
+          # https://restic.net/gpg-key-alex.asc and the fingerprint is
+          # CF8F 18F2 8445 7597 3F79 D4E1 91A6 868B D3F7 A907.
+          $gpg = Get-Command gpg -ErrorAction SilentlyContinue
+          if ($gpg) {
+            $keyFile = Join-Path $env:RUNNER_TEMP 'restic-gpg-key.asc'
+            Invoke-WebRequest -Uri 'https://restic.net/gpg-key-alex.asc' -OutFile $keyFile
+            $fingerprint = 'CF8F18F2844575973F79D4E191A6868BD3F7A907'
+            $listing = (& gpg --with-colons --import-options show-only --import --dry-run $keyFile) -join "`n"
+            if ($listing -notmatch $fingerprint) {
+              throw "the restic release key fingerprint does not match $fingerprint"
+            }
+            & gpg --import $keyFile
+            if ($LASTEXITCODE -ne 0) { throw "gpg --import failed" }
+            & gpg --verify $ascFile $sumsFile
+            if ($LASTEXITCODE -ne 0) { throw "the SHA256SUMS signature is not valid" }
+          } else {
+            Write-Host "::warning::gpg is not available; the workflow compares the SHA-256 checksum only"
+          }
+
+          # restic 0.19.1 has no windows arm64 asset. An x64 build runs on
+          # Windows 11 Arm under emulation.
+          $arch = if ($env:RUNNER_ARCH -eq 'ARM64') { 'arm64' } else { 'amd64' }
+          $asset = "restic_${env:RESTIC_VERSION}_windows_${arch}.zip"
+          if (-not ($sums | Where-Object { $_ -match [regex]::Escape($asset) })) {
+            $asset = "restic_${env:RESTIC_VERSION}_windows_amd64.zip"
+          }
+          $zip = Join-Path $env:RUNNER_TEMP $asset
+          Invoke-WebRequest -Uri "$base/$asset" -OutFile $zip
+          $line = $sums | Where-Object { $_ -match [regex]::Escape($asset) } | Select-Object -First 1
+          if (-not $line) { throw "the checksum file has no line for $asset" }
+          $expected = ($line -split '\s+')[0].ToLower()
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          if ($actual -ne $expected) { throw "restic checksum mismatch: $actual" }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'restic'
+          Expand-Archive -Path $zip -DestinationPath $unpacked -Force
+          $exe = (Get-ChildItem $unpacked -Recurse -Filter restic.exe | Select-Object -First 1).FullName
+          "RESTIC=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & $exe version
+
+      - name: Generate test data
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:P1_SRC | Out-Null
+          $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+          $buffer = [byte[]]::new(16MB)
+          for ($file = 0; $file -lt 4; $file++) {
+            $path = Join-Path $env:P1_SRC ("blob-{0}.bin" -f $file)
+            $stream = [System.IO.File]::Create($path)
+            for ($block = 0; $block -lt 32; $block++) {
+              $random.GetBytes($buffer)
+              $stream.Write($buffer, 0, $buffer.Length)
+            }
+            $stream.Dispose()
+          }
+          Get-ChildItem $env:P1_SRC | Format-Table Name, Length
+
+      - name: Run the experiment in console mode
+        run: |
+          & "$env:SPIKE_DIR\target\release\p1-cancel.exe" run --mode console `
+            --restic $env:RESTIC --repo $env:P1_REPO --source $env:P1_SRC --report $env:P1_REPORT_CONSOLE
+
+      - name: Run the experiment as a LocalSystem service
+        run: |
+          $exe = "$env:SPIKE_DIR\target\release\p1-cancel.exe"
+          $arguments = 'run --mode service --restic "{0}" --repo "{1}" --source "{2}" --report "{3}"' -f `
+            $env:RESTIC, $env:P1_REPO, $env:P1_SRC, $env:P1_REPORT_SERVICE
+          sc.exe create P1CancelSpike binPath= "`"$exe`" $arguments" start= demand
+          if ($LASTEXITCODE -ne 0) { throw "sc.exe create failed" }
+          # A service does not inherit the workflow environment. Give the
+          # password to the service through the service Environment registry
+          # value, before sc.exe start. The password never goes on a command
+          # line. The service reads the repository path and the other paths from
+          # its own arguments.
+          $serviceKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\P1CancelSpike'
+          New-ItemProperty -Path $serviceKey -Name Environment -PropertyType MultiString `
+            -Value @("RESTIC_PASSWORD=$env:RESTIC_PASSWORD") -Force | Out-Null
+          sc.exe start P1CancelSpike
+          $deadline = (Get-Date).AddMinutes(20)
+          while (-not (Test-Path $env:P1_REPORT_SERVICE)) {
+            if ((Get-Date) -gt $deadline) { throw "the service report did not appear" }
+            Start-Sleep -Seconds 10
+          }
+
+      - name: Remove the service
+        if: always()
+        run: |
+          sc.exe stop P1CancelSpike
+          sc.exe delete P1CancelSpike
+
+      - name: Print the reports
+        if: always()
+        run: |
+          foreach ($report in @($env:P1_REPORT_CONSOLE, $env:P1_REPORT_SERVICE)) {
+            Write-Host "===== $report ====="
+            if (Test-Path $report) { Get-Content $report } else { Write-Host "(missing)" }
+          }
+
+      - name: Check the console result
+        if: always()
+        run: |
+          # The job fails when no mechanism stops restic in a graceful way in
+          # console mode.
+          if (-not (Test-Path $env:P1_REPORT_CONSOLE)) { throw "the console report is missing" }
+          $report = Get-Content $env:P1_REPORT_CONSOLE -Raw | ConvertFrom-Json
+          $graceful = @($report.mechanisms | Where-Object { $_.verdict -eq 'graceful_stop' })
+          if ($graceful.Count -eq 0) {
+            $verdicts = ($report.mechanisms | ForEach-Object { "$($_.mechanism)=$($_.verdict)" }) -join ', '
+            throw "no mechanism produced a valid graceful stop in console mode: $verdicts"
+          }
+          $names = ($graceful | ForEach-Object { $_.mechanism }) -join ', '
+          Write-Host "graceful stop mechanisms in console mode: $names"
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: p1-report-${{ matrix.os }}
+          path: ${{ runner.temp }}/p1/report-*.json
+          if-no-files-found: warn
