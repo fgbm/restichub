@@ -320,5 +320,5 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | The Rust WinRM client is not mature. | Spike P3 before 1.0. Fallbacks: SSH, MSI with GPO. |
 | Without high availability, no backups run while the CP is down. | Alert and documented recovery time for the CP. High availability is on the roadmap. |
 | restic memory usage on large repositories. | Concurrency limits on the agent. Guidance on how to split repositories. |
-| Ctrl+Break from a Windows service to restic can fail, because a service has no console. | Spike P1 before the agent implementation. |
+| Ctrl+Break from a Windows service to restic can fail, because a service has no console. | Resolved by spike P1: mechanism B. |
 | SFTP private key delivery without a file on the agent is not solved. | Spike P6 before the SFTP implementation. |

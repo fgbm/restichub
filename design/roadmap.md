@@ -16,8 +16,9 @@ Each spike gives a short report and a decision. Spikes run before the related im
 
 Spike P2 (MSSQL VDI) is cancelled. See ADR-0016.
 
-- P1: the implementation is ready in [`spikes/p1-windows-cancel/`](../spikes/p1-windows-cancel/). The results need a CI run on GitHub. See the [P1 report](spikes/p1-windows-cancel.md).
+- P1: the spike is complete. The decision is mechanism B (`AllocConsole` and `CTRL_BREAK_EVENT`). See the [P1 report](spikes/p1-windows-cancel.md).
 - P5: the spike is complete. The recommendation is `serde-saphyr`. See the [P5 report](spikes/p5-yaml-library.md) and [ADR-0019](adr/0019-yaml-library.md) (accepted).
+- P6: the spike is complete. See the [P6 report](spikes/p6-sftp-key-delivery.md). Decision pending: SFTP scope and rclone bundling.
 
 ## Milestone 1: MVP
 

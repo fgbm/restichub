@@ -1,6 +1,6 @@
 # Spike P1: cancel restic from a Windows service without a console
 
-Status: in progress. Date: 2026-10-12.
+Status: complete. Date: 2026-10-12.
 
 Related items: FR-AG-10, AC-AG-06, AC-AG-07. [roadmap.md](../roadmap.md) holds the entry for this spike. [discovery.md](../discovery.md) section 3.5 holds the background.
 
@@ -58,31 +58,69 @@ The report holds one record for each mechanism. A record holds the mechanism id,
 
 ## Results
 
-The cells stay "pending CI run" until the workflow completes.
+Workflow run 38256622004 ran on commit d1639f5. The run produced four reports. The workflow ran the program on two runners:
 
-| Mechanism | Mode | restic exits in time | Exit code | Locks after the stop | Verdict |
-|---|---|---|---|---|---|
-| A: direct Ctrl+Break | console | pending CI run | pending CI run | pending CI run | pending CI run |
-| A: direct Ctrl+Break | service | pending CI run | pending CI run | pending CI run | pending CI run |
-| B: AllocConsole, then Ctrl+Break | console | pending CI run | pending CI run | pending CI run | pending CI run |
-| B: AllocConsole, then Ctrl+Break | service | pending CI run | pending CI run | pending CI run | pending CI run |
-| C1: helper, CREATE_NO_WINDOW | console | pending CI run | pending CI run | pending CI run | pending CI run |
-| C1: helper, CREATE_NO_WINDOW | service | pending CI run | pending CI run | pending CI run | pending CI run |
-| C2: helper, hidden CREATE_NEW_CONSOLE | console | pending CI run | pending CI run | pending CI run | pending CI run |
-| C2: helper, hidden CREATE_NEW_CONSOLE | service | pending CI run | pending CI run | pending CI run | pending CI run |
-| D: job object hard kill | console | pending CI run | pending CI run | pending CI run | pending CI run |
-| D: job object hard kill | service | pending CI run | pending CI run | pending CI run | pending CI run |
+- `windows-latest` (x64).
+- `windows-11-arm` (arm64). restic has no arm64 Windows build. The arm64 runner runs the x64 binary under emulation.
+
+Both runners used restic 0.19.1 (go1.26.4, windows/amd64).
+
+The table holds one row for each mechanism, runner and mode. "Locks before/after" is the lock count before the stop and the lock count after the stop. All runs exited within 30 seconds.
+
+| Mechanism | Runner | Mode | Verdict | Exit code | Locks before/after | Elapsed (ms) |
+|---|---|---|---|---|---|---|
+| A: direct Ctrl+Break | x64 | console | graceful_stop | 130 | 1/0 | 100 |
+| A: direct Ctrl+Break | x64 | service | invalid_run | 0 | 1/0 | 7502 |
+| A: direct Ctrl+Break | arm | console | graceful_stop | 130 | 1/0 | 501 |
+| A: direct Ctrl+Break | arm | service | invalid_run | 0 | 1/0 | 14901 |
+| B: AllocConsole, then Ctrl+Break | x64 | console | graceful_stop | 130 | 1/0 | 200 |
+| B: AllocConsole, then Ctrl+Break | x64 | service | graceful_stop | 130 | 1/0 | 100 |
+| B: AllocConsole, then Ctrl+Break | arm | console | graceful_stop | 130 | 1/0 | 301 |
+| B: AllocConsole, then Ctrl+Break | arm | service | graceful_stop | 130 | 1/0 | 200 |
+| C1: helper, CREATE_NO_WINDOW | x64 | console | invalid_run | 0 | 1/0 | 8318 |
+| C1: helper, CREATE_NO_WINDOW | x64 | service | invalid_run | 0 | 1/0 | 7802 |
+| C1: helper, CREATE_NO_WINDOW | arm | console | invalid_run | 0 | 1/0 | 26001 |
+| C1: helper, CREATE_NO_WINDOW | arm | service | invalid_run | 0 | 1/0 | 17695 |
+| C2: helper, hidden CREATE_NEW_CONSOLE | x64 | console | invalid_run | 0 | 1/0 | 7821 |
+| C2: helper, hidden CREATE_NEW_CONSOLE | x64 | service | invalid_run | 0 | 1/0 | 7465 |
+| C2: helper, hidden CREATE_NEW_CONSOLE | arm | console | invalid_run | 0 | 1/0 | 19531 |
+| C2: helper, hidden CREATE_NEW_CONSOLE | arm | service | invalid_run | 0 | 1/0 | 19027 |
+| D: job object hard kill | x64 | console | stale_lock | 1 | 1/1 | 100 |
+| D: job object hard kill | x64 | service | stale_lock | 1 | 1/1 | 100 |
+| D: job object hard kill | arm | console | stale_lock | 1 | 1/1 | 602 |
+| D: job object hard kill | arm | service | stale_lock | 1 | 1/1 | 100 |
+
+Two runs record a failed Win32 call:
+
+- In mechanism B in console mode, `AllocConsole` failed with error 5 (access denied) on both runners. The process already had a console. The mechanism still worked.
+- In mechanism A in service mode, `GenerateConsoleCtrlEvent` failed with error 6 (invalid handle) on both runners. The service has no console.
+
+## Findings
+
+Mechanisms C1 and C2 did not stop restic. The stop did not reach restic. restic completed the backup itself and wrote a summary message. The elapsed time is the normal backup time (about 8 to 26 seconds). The verdict `invalid_run` records this fact.
+
+Mechanism A works in console mode and fails in service mode. Hypothesis A is confirmed. The service has no console, and `GenerateConsoleCtrlEvent` fails with error 6.
+
+Mechanism B works in both modes on both runners. restic exits with code 130. restic removes the lock.
 
 ## Decision
 
-Pending the CI run. The decision selects the mechanism for FR-AG-10.
+The agent uses mechanism B on Windows.
+
+At service start, the agent calls `AllocConsole` and hides the console window. The agent starts restic with `CREATE_NEW_PROCESS_GROUP` in a job object with `KILL_ON_JOB_CLOSE`. To cancel a step, the agent sends `CTRL_BREAK_EVENT` to the child process group. After the grace period, the agent calls `TerminateJobObject`. Then the agent reports `possible_stale_lock`.
+
+Mechanism D confirmed this last behavior. A hard kill leaves the lock in the repository. `restic list locks` shows the lock after the stop in all four D runs.
+
+The decision has these limits:
+
+- The result comes from hosted runners only.
+- The run used one restic version (0.19.1).
+- The console of a service is on a non-interactive desktop. No user sees the window.
 
 ## Effect on FR-AG-10
 
-FR-AG-10 requires two stages: a signal first, then a hard kill. On Unix the agent sends SIGINT. On Windows the agent needs a mechanism from this spike.
+FR-AG-10 requires two stages: a signal first, then a hard kill. Mechanism B gives the signal on Windows. `TerminateJobObject` gives the hard kill. The requirement is feasible as written. The team can implement AC-AG-06 and AC-AG-07 with this design.
 
-The result changes the agent design in these ways:
+On Unix the agent sends SIGINT. On Windows the agent uses mechanism B. The result changes the agent design in this way:
 
-- If mechanism B works, the agent calls `AllocConsole` in the service and sends `CTRL_BREAK_EVENT` to the child group. The agent needs no extra process.
-- If mechanism B fails and mechanism C works, the agent starts a helper process to send the event. The agent package holds the helper.
-- If no mechanism works, the agent skips the graceful stage. The agent reports "possible stale lock" after each cancel.
+- The agent calls `AllocConsole` in the service and sends `CTRL_BREAK_EVENT` to the child group. The agent needs no extra process. Do not implement mechanisms A, C1, C2 or D as a signal path.
