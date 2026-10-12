@@ -1,0 +1,16 @@
+[package]
+name = "restichub-agent"
+description = "ResticHub agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+restichub-common = { path = "../restichub-common" }
+restichub-proto = { path = "../restichub-proto" }
