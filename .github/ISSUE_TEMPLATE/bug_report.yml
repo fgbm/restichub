@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a problem in ResticHub.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not report security problems here. Read SECURITY.md.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options: [Agent, Control plane, Web UI, Installer, Documentation]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and restic version
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Write one step on each line.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Remove secrets from logs before you paste them.
+    validations:
+      required: true

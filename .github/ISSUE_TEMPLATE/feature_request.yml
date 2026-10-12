@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose a new function or a change.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Tell the problem that you have. Do not tell the solution here.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: input
+    id: requirements
+    attributes:
+      label: Related requirement IDs
+      description: For example FR-SC-04. See design/requirements.md.
