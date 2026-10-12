@@ -660,7 +660,9 @@ async fn db_the_runtime_login_cannot_escalate() -> TestResult {
 
     // The runtime login cannot become another role.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
-    let set_role = sqlx::query("SET ROLE postgres").execute(tx.as_conn()).await;
+    let set_role = sqlx::query("SET ROLE restichub_auth")
+        .execute(tx.as_conn())
+        .await;
     assert_code(set_role, "42501");
     drop(tx);
 
