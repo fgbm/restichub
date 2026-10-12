@@ -174,5 +174,5 @@ All sources opened on 2026-10-12.
 28. GitHub API for repository state, contributors and releases: https://api.github.com/repos/bourumir-wyngs/serde-saphyr and the same path for the other repositories
 29. `serde_yml` README: https://github.com/sebastienrousseau/serde_yml
 30. `noyalib` README: https://github.com/sebastienrousseau/noyalib
-31. Local probe program, `cargo tree` and `cargo deny check` run, 2026-10-12. Not published. Source in `/tmp/opencode/p5/probe`.
+31. Local probe program, `cargo tree` and `cargo deny check` run, 2026-10-12. Not published.
 32. Repository `deny.toml`: [deny.toml](../../deny.toml)

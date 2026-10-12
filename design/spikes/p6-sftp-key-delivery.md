@@ -170,7 +170,7 @@ Date opened: 2026-10-12 for all sources.
 21. rclone documentation, "Environment Variables" (`RCLONE_CONFIG_<NAME>_<OPTION>`): https://raw.githubusercontent.com/rclone/rclone/master/docs/content/docs.md
 22. rclone changelog, v1.75.0 of 2026-07-31 (`--sftp-pin-host-key`): https://raw.githubusercontent.com/rclone/rclone/master/docs/content/changelog.md
 23. rclone v1.75.2, released 2026-10-09: https://downloads.rclone.org/v1.75.2/rclone-v1.75.2-linux-amd64.zip
-24. Local tests on a Linux host: OpenSSH 10.2p1, restic 0.18.1 and 0.19.1, rclone v1.75.2, a user-level `sshd` on 127.0.0.1. Not published. Scripts in `/tmp/opencode/p6/lab` (`test_a.sh`, `test_b.sh`, `test_b2.sh`, `test_c2.py`, `test_ps.sh`).
+24. Local tests on a Linux host: OpenSSH 10.2p1, restic 0.18.1 and 0.19.1, rclone v1.75.2, a user-level `sshd` on 127.0.0.1. Not published.
 
 ## Not verified
 
