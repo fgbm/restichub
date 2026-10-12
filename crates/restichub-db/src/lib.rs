@@ -17,6 +17,7 @@ pub mod api_tokens;
 pub mod audit;
 pub mod auth;
 pub mod ids;
+pub mod kek;
 pub mod memberships;
 pub mod sessions;
 pub mod setup;

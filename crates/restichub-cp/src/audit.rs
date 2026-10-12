@@ -141,6 +141,8 @@ pub struct AuditQuery {
     pub object_type: Option<String>,
     /// The object identifier.
     pub object_id: Option<String>,
+    /// The tenant of the record. The platform list uses it.
+    pub tenant_id: Option<String>,
     /// The cursor of the next page.
     pub cursor: Option<String>,
     /// The number of records.
@@ -165,6 +167,12 @@ impl AuditQuery {
             actor,
             object_type: self.object_type.clone(),
             object_id: self.object_id.as_deref().map(parse_uuid).transpose()?,
+            tenant_id: self
+                .tenant_id
+                .as_deref()
+                .map(parse_uuid)
+                .transpose()?
+                .map(restichub_db::TenantId::from_uuid),
         })
     }
 

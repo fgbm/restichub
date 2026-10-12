@@ -4,8 +4,10 @@
 //! changes or removes an audit record (AC-AU-01).
 //!
 //! A tenant-scoped transaction writes and reads the records of its own tenant. A platform
-//! transaction reads every record. A platform write names the entered tenant or the platform
-//! tenant, because the policy of migration 0006 accepts these two tenants only.
+//! transaction reads every record. A platform write names the entered tenant (a tenant created in
+//! the same transaction), the platform tenant, or an existing tenant through the GUC
+//! `restichub.audit_tenant_id`. The policy `audit_log_platform_insert` of migration 0014 accepts
+//! these three cases only.
 //!
 //! The module also holds the diff builder and the [`RedactedDiff`] type. The type keeps its value
 //! private. Only [`diff`], [`RedactedDiff::empty`] and [`RedactedDiff::none`] build a value. A
@@ -447,6 +449,9 @@ pub struct AuditRecord {
 /// The filter of a list.
 #[derive(Debug, Clone, Default)]
 pub struct AuditFilter {
+    /// The tenant of the record. The platform list filters by it. A tenant list ignores it, because
+    /// Row-Level Security shows its own rows only.
+    pub tenant_id: Option<TenantId>,
     /// The start of the time range. It includes the value.
     pub from: Option<OffsetDateTime>,
     /// The end of the time range. It includes the value.
@@ -505,14 +510,51 @@ pub async fn insert(tx: &mut TenantTx<'_>, event: &AuditEvent) -> Result<AuditLo
 
 /// Inserts a record in a platform transaction.
 ///
-/// The policy of migration 0006 accepts the entered tenant or the platform tenant only. The caller
-/// passes the tenant. The caller enters the tenant first with [`PlatformTx::enter_tenant`].
+/// The policy `audit_log_platform_insert` of migration 0014 accepts the entered tenant, the
+/// platform tenant and the tenant of the GUC `restichub.audit_tenant_id`. The caller passes the
+/// tenant. The caller enters a created tenant first with [`PlatformTx::enter_tenant`], and it uses
+/// [`insert_platform_for`] for an existing tenant.
 pub async fn insert_platform(
     tx: &mut PlatformTx<'_>,
     tenant: TenantId,
     event: &AuditEvent,
 ) -> Result<AuditLogId, DbError> {
     insert_row(tx.as_conn(), tenant, event).await
+}
+
+/// Inserts a record for an existing tenant in a platform transaction (issue #20).
+///
+/// A platform operation on an existing tenant (suspend, resume or delete) uses this function. The
+/// function sets the GUC `restichub.audit_tenant_id` for one insert and clears it again, so the
+/// transaction keeps no tenant scope after the write. Only the policy `audit_log_platform_insert`
+/// of migration 0014 reads the GUC.
+pub async fn insert_platform_for(
+    tx: &mut PlatformTx<'_>,
+    tenant: TenantId,
+    event: &AuditEvent,
+) -> Result<AuditLogId, DbError> {
+    set_audit_tenant(tx.as_conn(), Some(tenant)).await?;
+    let result = insert_row(tx.as_conn(), tenant, event).await;
+    let cleared = set_audit_tenant(tx.as_conn(), None).await;
+    match (result, cleared) {
+        (Ok(id), Ok(())) => Ok(id),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    }
+}
+
+/// Sets or clears the GUC `restichub.audit_tenant_id` of the transaction.
+async fn set_audit_tenant(
+    conn: &mut PgConnection,
+    tenant: Option<TenantId>,
+) -> Result<(), DbError> {
+    let value = tenant.map(|tenant| tenant.to_string()).unwrap_or_default();
+    sqlx::query("SELECT set_config('restichub.audit_tenant_id', $1, true)")
+        .bind(value)
+        .execute(conn)
+        .await
+        .map_err(DbError::Query)?;
+    Ok(())
 }
 
 /// Inserts a record with a connection.
@@ -590,8 +632,9 @@ async fn list_rows(
            AND ($6::text IS NULL OR object_type = $6) \
            AND ($7::uuid IS NULL OR object_id = $7) \
            AND ($8::timestamptz IS NULL OR (occurred_at, id) < ($8::timestamptz, $9::uuid)) \
+           AND ($10::uuid IS NULL OR tenant_id = $10) \
          ORDER BY occurred_at DESC, id DESC \
-         LIMIT $10",
+         LIMIT $11",
     )
     .bind(filter.from)
     .bind(filter.to)
@@ -602,6 +645,7 @@ async fn list_rows(
     .bind(filter.object_id)
     .bind(cursor_time)
     .bind(cursor_id)
+    .bind(filter.tenant_id)
     .bind(limit + 1)
     .fetch_all(conn)
     .await

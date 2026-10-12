@@ -20,10 +20,11 @@ use super::{Database, PLATFORM_TENANT_ID, TenantId, audit, tenants, users};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// The SECURITY DEFINER functions that the schema allows (N9).
-const SECURITY_DEFINER_ALLOWED: [&str; 3] = [
+const SECURITY_DEFINER_ALLOWED: [&str; 4] = [
     "auth_find_tenant",
     "auth_find_session",
     "auth_find_api_token",
+    "tenant_user_counts",
 ];
 
 /// The tenant tables with the general tenant policy.
@@ -729,14 +730,287 @@ async fn db_a_tenant_creation_commits_atomically() -> TestResult {
     Ok(())
 }
 
+#[tokio::test]
+async fn db_a_tenant_creation_rolls_back_on_a_bad_audit_actor() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (_, _) = two_tenants(db.database()).await?;
+
+    // A failure inside `create_with_bootstrap`: the audit insert rejects an unknown actor type
+    // (23514). The tenant row, the key row, the first admin and the audit records must not persist
+    // (N2/D3).
+    let mut input = bootstrap("bad-audit");
+    input.actor = Actor::Unknown {
+        actor_type: "bogus".to_owned(),
+        actor_id: None,
+    };
+    let tenant = input.id;
+    let mut tx = db.database().begin_platform().await?;
+    let result = tenants::create_with_bootstrap(&mut tx, &input).await;
+    assert!(
+        result
+            .as_ref()
+            .is_err_and(|error| error.is_check_violation()),
+        "{result:?}"
+    );
+    drop(tx);
+
+    assert!(!tenant_exists(db.database(), tenant).await?);
+    assert_eq!(
+        count_in_tenant(db.database(), tenant, "tenant_keys").await?,
+        0
+    );
+    assert_eq!(count_in_tenant(db.database(), tenant, "users").await?, 0);
+    assert_eq!(
+        count_in_tenant(db.database(), tenant, "audit_log").await?,
+        0
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_insert_platform_for_clears_the_tenant_guc() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+    seed_tenant(db.database(), tenant_a).await?;
+
+    let mut tx = db.database().begin_platform().await?;
+    let event = AuditEvent::new(AuditAction::TenantSuspend, "tenant");
+    audit::insert_platform_for(&mut tx, tenant_a, &event).await?;
+
+    // The record is in tenant A.
+    let page = audit::list_platform(
+        &mut tx,
+        &AuditFilter {
+            action: Some(AuditAction::TenantSuspend),
+            ..AuditFilter::default()
+        },
+        &AuditPage::default(),
+    )
+    .await?;
+    assert_eq!(page.records.len(), 1);
+
+    // The function cleared the GUC: the transaction reads no row of tenant A (issue #20).
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(count.0, 0, "the transaction must hold no tenant scope");
+
+    // The transaction cannot write a row of tenant A either.
+    let write = sqlx::query(
+        "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
+         VALUES ($1, $2, 'mallory', 'phc', 'Mallory')",
+    )
+    .bind(UserId::new())
+    .bind(tenant_a)
+    .execute(tx.as_conn())
+    .await;
+    assert_code(write, "42501");
+    drop(tx);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_platform_audit_writes_an_existing_tenant_and_counts_users() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+    seed_tenant(db.database(), tenant_a).await?;
+
+    // Seed the platform tenant, so the visibility check below is meaningful.
+    let mut tx = db.database().begin_tenant(PLATFORM_TENANT_ID).await?;
+    users::create(
+        &mut tx,
+        &NewUser {
+            username: "root",
+            password_hash: "phc",
+            display_name: "Root",
+        },
+    )
+    .await?;
+    sqlx::query(
+        "INSERT INTO kek_check (tenant_id, kek_id, nonce, ciphertext) VALUES ($1, 'kek-1', $2, $3)",
+    )
+    .bind(PLATFORM_TENANT_ID)
+    .bind(vec![1u8; 12])
+    .bind(vec![2u8; 32])
+    .execute(tx.as_conn())
+    .await?;
+    sqlx::query(
+        "INSERT INTO setup_tokens (id, tenant_id, token_hash, expires_at) \
+         VALUES ($1, $2, $3, now() + interval '1 hour')",
+    )
+    .bind(SetupTokenId::new())
+    .bind(PLATFORM_TENANT_ID)
+    .bind(vec![3u8; 32])
+    .execute(tx.as_conn())
+    .await?;
+    tx.commit().await?;
+
+    // The user count function returns the count in a platform transaction.
+    let mut tx = db.database().begin_platform().await?;
+    let summary = tenants::get_platform(&mut tx, tenant_a).await?;
+    tx.commit().await?;
+    assert_eq!(summary.map(|tenant| tenant.user_count), Some(1));
+
+    // The count function returns no row in a tenant transaction (issue #20).
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let rows: Vec<(Uuid, i64)> =
+        sqlx::query_as("SELECT tenant_id, user_count FROM tenant_user_counts()")
+            .fetch_all(tx.as_conn())
+            .await?;
+    tx.commit().await?;
+    assert!(
+        rows.is_empty(),
+        "a tenant transaction must get no count row"
+    );
+
+    // A platform operation writes the audit record of an existing tenant and keeps no tenant scope.
+    let mut tx = db.database().begin_platform().await?;
+    let event = AuditEvent::new(AuditAction::TenantSuspend, "tenant");
+    let transition =
+        tenants::set_status_from(&mut tx, tenant_a, "active", "suspended", &event, &event).await?;
+    assert_eq!(transition, tenants::Transition::Changed);
+
+    // After the audit write, the transaction reads and writes no row of tenant A, and it sees no
+    // row of the platform tenant (issue #20).
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(count.0, 0, "the transaction must hold no tenant scope");
+    let platform_users: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(platform_users.0, 0);
+    let platform_keys: (i64,) = sqlx::query_as("SELECT count(*) FROM kek_check")
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(platform_keys.0, 0);
+    let platform_setup: (i64,) = sqlx::query_as("SELECT count(*) FROM setup_tokens")
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(platform_setup.0, 0);
+    tx.commit().await?;
+
+    // The audit record is in the affected tenant.
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let records = audit::list(
+        &mut tx,
+        &AuditFilter {
+            action: Some(AuditAction::TenantSuspend),
+            ..AuditFilter::default()
+        },
+        &AuditPage::default(),
+    )
+    .await?
+    .records;
+    tx.commit().await?;
+    assert_eq!(records.len(), 1);
+
+    // A repeated call is idempotent, and a wrong source status is refused.
+    let mut tx = db.database().begin_platform().await?;
+    let transition =
+        tenants::set_status_from(&mut tx, tenant_a, "active", "suspended", &event, &event).await?;
+    assert_eq!(transition, tenants::Transition::AlreadyInTarget);
+    let transition =
+        tenants::set_status_from(&mut tx, tenant_a, "deleted", "active", &event, &event).await?;
+    assert_eq!(transition, tenants::Transition::Refused);
+    tx.commit().await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_a_concurrent_delete_and_resume_never_end_active() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+
+    // The tenant starts suspended.
+    let mut tx = db.database().begin_platform().await?;
+    let suspend = AuditEvent::new(AuditAction::TenantSuspend, "tenant");
+    assert_eq!(
+        tenants::set_status_from(&mut tx, tenant_a, "active", "suspended", &suspend, &suspend)
+            .await?,
+        tenants::Transition::Changed
+    );
+    tx.commit().await?;
+
+    // A delete (suspended -> deleted) races a resume (suspended -> active). The update of the
+    // loser touches no row (issue #20).
+    let database = db.database();
+    let delete = async {
+        let mut tx = database.begin_platform().await?;
+        let event = AuditEvent::new(AuditAction::TenantDelete, "tenant");
+        let result =
+            tenants::set_status_from(&mut tx, tenant_a, "suspended", "deleted", &event, &event)
+                .await?;
+        tx.commit().await?;
+        Ok::<_, super::DbError>(result)
+    };
+    let resume = async {
+        let mut tx = database.begin_platform().await?;
+        let event = AuditEvent::new(AuditAction::TenantResume, "tenant");
+        let result =
+            tenants::set_status_from(&mut tx, tenant_a, "suspended", "active", &event, &event)
+                .await?;
+        tx.commit().await?;
+        Ok::<_, super::DbError>(result)
+    };
+    let (delete_result, resume_result) = tokio::join!(delete, resume);
+    let delete_result = delete_result?;
+    let resume_result = resume_result?;
+
+    // Exactly one transition changes the status. The tenant never ends active after a delete.
+    assert_ne!(
+        delete_result == tenants::Transition::Changed,
+        resume_result == tenants::Transition::Changed,
+        "exactly one transition must change the status"
+    );
+    let mut tx = db.database().begin_platform().await?;
+    let status = tenants::get_platform(&mut tx, tenant_a)
+        .await?
+        .map(|tenant| tenant.status)
+        .unwrap_or_default();
+    tx.commit().await?;
+    if delete_result == tenants::Transition::Changed {
+        assert_eq!(
+            status, "deleted",
+            "the tenant must not end active after a delete"
+        );
+    } else {
+        assert_eq!(status, "active");
+    }
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// Returns a bootstrap input for a test tenant (N2).
 fn bootstrap(name: &str) -> tenants::BootstrapTenant<'_> {
     tenants::BootstrapTenant {
+        id: TenantId::new(),
         name,
         key_version: 1,
         kek_id: "kek-1",
         wrapped_dek: &[3u8; 48],
         nonce: &[4u8; 12],
+        actor: Actor::System,
+        source_ip: Some(
+            "203.0.113.7"
+                .parse()
+                .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+        ),
         admin: Some(tenants::BootstrapAdmin {
             username: "admin",
             password_hash: "phc$admin",
