@@ -76,16 +76,37 @@ jobs:
           # CF8F 18F2 8445 7597 3F79 D4E1 91A6 868B D3F7 A907.
           $gpg = Get-Command gpg -ErrorAction SilentlyContinue
           if ($gpg) {
+            # GnuPG needs a key home. The Git-for-Windows gpg is an MSYS
+            # program, so give GNUPGHOME in a form that MSYS accepts: use
+            # cygpath when it is available, and a forward-slash Windows path
+            # otherwise. A dedicated home keeps the run independent of the
+            # runner profile.
+            $gnupgHome = Join-Path $env:RUNNER_TEMP 'gnupghome'
+            New-Item -ItemType Directory -Force -Path $gnupgHome | Out-Null
+            $cygpath = Get-Command cygpath -ErrorAction SilentlyContinue
+            if ($cygpath) {
+              $env:GNUPGHOME = (& cygpath -u $gnupgHome).Trim()
+            } else {
+              $env:GNUPGHOME = $gnupgHome -replace '\\', '/'
+            }
+            Write-Host "GNUPGHOME=$env:GNUPGHOME"
+
             $keyFile = Join-Path $env:RUNNER_TEMP 'restic-gpg-key.asc'
             Invoke-WebRequest -Uri 'https://restic.net/gpg-key-alex.asc' -OutFile $keyFile
+            & gpg --batch --import $keyFile
+            if ($LASTEXITCODE -ne 0) { throw "gpg --import failed" }
+
+            # The --with-colons output holds one record per line. An fpr record
+            # holds the fingerprint in field 10.
             $fingerprint = 'CF8F18F2844575973F79D4E191A6868BD3F7A907'
-            $listing = (& gpg --with-colons --import-options show-only --import --dry-run $keyFile) -join "`n"
-            if ($listing -notmatch $fingerprint) {
+            $records = (& gpg --batch --with-colons --fingerprint) -join "`n"
+            $fprs = @($records -split "`n" | Where-Object { $_ -like 'fpr:*' } |
+              ForEach-Object { ($_ -split ':')[9] })
+            if ($fprs -notcontains $fingerprint) {
               throw "the restic release key fingerprint does not match $fingerprint"
             }
-            & gpg --import $keyFile
-            if ($LASTEXITCODE -ne 0) { throw "gpg --import failed" }
-            & gpg --verify $ascFile $sumsFile
+
+            & gpg --batch --verify $ascFile $sumsFile
             if ($LASTEXITCODE -ne 0) { throw "the SHA256SUMS signature is not valid" }
           } else {
             Write-Host "::warning::gpg is not available; the workflow compares the SHA-256 checksum only"
@@ -157,8 +178,18 @@ jobs:
       - name: Remove the service
         if: always()
         run: |
-          sc.exe stop P1CancelSpike
-          sc.exe delete P1CancelSpike
+          # An earlier step can fail before the service exists. Query first, so
+          # this cleanup step does not fail on a missing service.
+          sc.exe query P1CancelSpike | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            sc.exe stop P1CancelSpike
+            sc.exe delete P1CancelSpike
+          } else {
+            Write-Host "the P1CancelSpike service is not installed; nothing to remove"
+          }
+          # A missing service makes sc.exe exit with code 1060. Keep this step
+          # green.
+          exit 0
 
       - name: Print the reports
         if: always()
@@ -172,8 +203,11 @@ jobs:
         if: always()
         run: |
           # The job fails when no mechanism stops restic in a graceful way in
-          # console mode.
-          if (-not (Test-Path $env:P1_REPORT_CONSOLE)) { throw "the console report is missing" }
+          # console mode. A missing report means that an earlier step failed
+          # before the console run wrote its result.
+          if (-not (Test-Path $env:P1_REPORT_CONSOLE)) {
+            throw "the console run wrote no report; an earlier step failed, so the console result cannot be checked"
+          }
           $report = Get-Content $env:P1_REPORT_CONSOLE -Raw | ConvertFrom-Json
           $graceful = @($report.mechanisms | Where-Object { $_.verdict -eq 'graceful_stop' })
           if ($graceful.Count -eq 0) {
