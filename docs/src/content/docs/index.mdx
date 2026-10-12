@@ -1,0 +1,20 @@
+---
+title: ResticHub
+description: Central control plane for restic backups on Windows, Linux and macOS hosts.
+---
+
+ResticHub is a central control plane for [restic](https://restic.net) backups on a fleet of hosts.
+
+:::caution
+ResticHub is in the design phase. There is no usable release yet.
+:::
+
+## What ResticHub does
+
+- The control plane keeps all profiles, schedules and secrets.
+- The control plane decides when a job starts.
+- An agent on each host runs restic and sends the results to the control plane.
+- The agent gets repository secrets for one job only.
+- Hooks run only from an allow-list on the host.
+
+Read [Concepts](concepts/overview/) to learn the main terms.
