@@ -20,6 +20,22 @@ Read this file before you change the repository.
 - Steps are typed messages. Do not add free-form argument maps to the protocol (FR-PR-01).
 - Each database table has `tenant_id` (ADR-0006).
 
+## Code rules
+
+- A comment explains only what the code cannot say. It gives a non-obvious reason, a security invariant, or a constraint with its FR, AC or ADR ID.
+- Do not restate a name or the code in a comment. Do not narrate steps. Do not refer to a review finding or the change history.
+- A doc comment is for the public library API only. One sentence is enough, unless the contract is subtle.
+- Do not add a doc comment to a field or a function whose name says everything.
+- An OpenAPI field description is only where it adds information: units, format, allowed values or invariants.
+- Use `?` with a `From` conversion for an error. Do not add a `map_err` chain that only wraps into an internal error.
+- Never drop the cause with `map_err(|_| ...)`.
+- A closed set (role, status, purpose, action, error code) is an enum, not a string. A string literal of these values appears only in SQL and migrations.
+- One source of truth for each route. Pass 2 introduces it. Until then, follow the existing table.
+- When the test database variable is set, a setup failure panics. It never skips. Use `expect` in tests.
+- A test helper does not live in a production module. Split a test file above about 500 lines by topic.
+- Do not add a dependency until the code uses it. `cargo machete` runs in CI.
+- Keep a file focused. Split a module above about 800 lines.
+
 ## Commands
 
 ```sh
