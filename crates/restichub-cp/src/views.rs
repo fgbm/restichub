@@ -1,6 +1,9 @@
 //! The response schemas that the API returns (ADR-0009).
 
+use restichub_db::tenants::TenantSummary;
 use serde::Serialize;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use utoipa::ToSchema;
 
 use restichub_db::{tenants::Tenant, users::User};
@@ -49,4 +52,38 @@ impl From<&Tenant> for TenantView {
             name: tenant.name.clone(),
         }
     }
+}
+
+/// A tenant in a platform administration response (issue #20, FR-TN-02).
+///
+/// The view holds the user count only. It never holds a user list or a secret of the tenant.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlatformTenantView {
+    /// The identifier of the tenant.
+    pub id: String,
+    /// The name of the tenant.
+    pub name: String,
+    /// The status: `active`, `suspended` or `deleted`.
+    pub status: String,
+    /// The time the tenant was created in RFC 3339.
+    pub created_at: String,
+    /// The number of users of the tenant.
+    pub user_count: i64,
+}
+
+impl From<&TenantSummary> for PlatformTenantView {
+    fn from(tenant: &TenantSummary) -> Self {
+        Self {
+            id: tenant.id.to_string(),
+            name: tenant.name.clone(),
+            status: tenant.status.clone(),
+            created_at: format_time(tenant.created_at),
+            user_count: tenant.user_count,
+        }
+    }
+}
+
+/// Formats a time as RFC 3339.
+fn format_time(value: OffsetDateTime) -> String {
+    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }

@@ -81,6 +81,10 @@ pub enum Operation {
     AuditRead,
     /// Read the audit records of the platform.
     PlatformAuditRead,
+    /// Read the tenants of the platform.
+    PlatformTenantsRead,
+    /// Create, suspend, resume and delete the tenants of the platform.
+    PlatformTenantsWrite,
     /// Read the own user and tenant.
     AuthMe,
     /// Sign out.
@@ -103,6 +107,8 @@ impl Operation {
         match self {
             Self::AuditRead => "audit.read",
             Self::PlatformAuditRead => "platform.audit.read",
+            Self::PlatformTenantsRead => "platform.tenants.read",
+            Self::PlatformTenantsWrite => "platform.tenants.write",
             Self::AuthMe => "auth.me",
             Self::AuthSignOut => "auth.sign_out",
             Self::AuthPasswordChange => "auth.password",
@@ -115,7 +121,10 @@ impl Operation {
 
     /// Returns true if the operation acts on the platform.
     pub fn is_platform(self) -> bool {
-        matches!(self, Self::PlatformAuditRead)
+        matches!(
+            self,
+            Self::PlatformAuditRead | Self::PlatformTenantsRead | Self::PlatformTenantsWrite
+        )
     }
 }
 
@@ -124,6 +133,8 @@ pub fn minimum_role(operation: Operation) -> Role {
     match operation {
         Operation::AuditRead => Role::Viewer,
         Operation::PlatformAuditRead => Role::PlatformAdmin,
+        Operation::PlatformTenantsRead => Role::PlatformAdmin,
+        Operation::PlatformTenantsWrite => Role::PlatformAdmin,
         Operation::AuthMe => Role::Viewer,
         Operation::AuthSignOut => Role::Viewer,
         Operation::AuthPasswordChange => Role::Viewer,
@@ -256,6 +267,36 @@ pub const ROUTE_OPERATIONS: &[RouteOperation] = &[
         method: "get",
         path: "/api/v1/platform/audit",
         access: Access::Protected(Operation::PlatformAuditRead),
+    },
+    RouteOperation {
+        method: "get",
+        path: "/api/v1/platform/tenants",
+        access: Access::Protected(Operation::PlatformTenantsRead),
+    },
+    RouteOperation {
+        method: "post",
+        path: "/api/v1/platform/tenants",
+        access: Access::Protected(Operation::PlatformTenantsWrite),
+    },
+    RouteOperation {
+        method: "get",
+        path: "/api/v1/platform/tenants/{id}",
+        access: Access::Protected(Operation::PlatformTenantsRead),
+    },
+    RouteOperation {
+        method: "post",
+        path: "/api/v1/platform/tenants/{id}/suspend",
+        access: Access::Protected(Operation::PlatformTenantsWrite),
+    },
+    RouteOperation {
+        method: "post",
+        path: "/api/v1/platform/tenants/{id}/resume",
+        access: Access::Protected(Operation::PlatformTenantsWrite),
+    },
+    RouteOperation {
+        method: "delete",
+        path: "/api/v1/platform/tenants/{id}",
+        access: Access::Protected(Operation::PlatformTenantsWrite),
     },
     RouteOperation {
         method: "get",

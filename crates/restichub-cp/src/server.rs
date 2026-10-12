@@ -27,6 +27,7 @@ use crate::clock::{Clock, SystemClock};
 use crate::config::AuthConfig;
 use crate::error::ApiError;
 use crate::rate_limit::RateLimiter;
+use restichub_secrets::KekProvider;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -114,15 +115,20 @@ pub struct AppState {
     db: Database,
     trusted_proxies: TrustedProxies,
     auth: AuthState,
+    kek: Option<Arc<dyn KekProvider>>,
 }
 
 impl AppState {
     /// Creates the application state with the default authentication settings.
+    ///
+    /// The state holds no key encryption key provider. A test that creates a tenant calls
+    /// [`AppState::with_kek`]. The production server always sets the provider.
     pub fn new(db: Database) -> Self {
         Self {
             db,
             trusted_proxies: TrustedProxies::default(),
             auth: AuthState::new(AuthConfig::default()),
+            kek: None,
         }
     }
 
@@ -132,12 +138,22 @@ impl AppState {
             db,
             trusted_proxies: TrustedProxies::default(),
             auth,
+            kek: None,
         }
     }
 
     /// Sets the trusted proxy list.
     pub fn with_trusted_proxies(mut self, trusted_proxies: TrustedProxies) -> Self {
         self.trusted_proxies = trusted_proxies;
+        self
+    }
+
+    /// Sets the key encryption key provider.
+    ///
+    /// The server loads the provider at start and passes it here. The provider wraps the data
+    /// encryption key of a new tenant (ADR-0023, section Secrets).
+    pub fn with_kek(mut self, kek: Arc<dyn KekProvider>) -> Self {
+        self.kek = Some(kek);
         self
     }
 
@@ -154,6 +170,13 @@ impl AppState {
     /// Returns the authentication state.
     pub fn auth(&self) -> &AuthState {
         &self.auth
+    }
+
+    /// Returns the key encryption key provider.
+    ///
+    /// The provider is absent only in a test that does not set it.
+    pub fn kek(&self) -> Option<&dyn KekProvider> {
+        self.kek.as_deref()
     }
 }
 
@@ -202,6 +225,14 @@ fn method_router(method: &str, path: &str) -> MethodRouter<AppState> {
         ("get", "/api/v1/setup/status") => get(crate::setup::status),
         ("get", AUDIT_TENANT_PATH) => get(crate::audit::list_tenant_audit),
         ("get", AUDIT_PLATFORM_PATH) => get(crate::audit::list_platform_audit),
+        ("get", "/api/v1/platform/tenants") => get(crate::tenants::list_tenants),
+        ("post", "/api/v1/platform/tenants") => {
+            post(crate::tenants::create_tenant).layer(DefaultBodyLimit::max(BODY_LIMIT))
+        }
+        ("get", "/api/v1/platform/tenants/{id}") => get(crate::tenants::get_tenant),
+        ("post", "/api/v1/platform/tenants/{id}/suspend") => post(crate::tenants::suspend_tenant),
+        ("post", "/api/v1/platform/tenants/{id}/resume") => post(crate::tenants::resume_tenant),
+        ("delete", "/api/v1/platform/tenants/{id}") => delete(crate::tenants::delete_tenant),
         ("get", "/api/v1/users") => get(crate::users::list_users),
         ("post", "/api/v1/users") => {
             post(crate::users::create_user).layer(DefaultBodyLimit::max(BODY_LIMIT))
@@ -270,6 +301,12 @@ async fn openapi() -> impl IntoResponse {
         openapi,
         crate::audit::list_tenant_audit,
         crate::audit::list_platform_audit,
+        crate::tenants::list_tenants,
+        crate::tenants::create_tenant,
+        crate::tenants::get_tenant,
+        crate::tenants::suspend_tenant,
+        crate::tenants::resume_tenant,
+        crate::tenants::delete_tenant,
         crate::auth::sign_in,
         crate::auth::sign_out,
         crate::auth::me,

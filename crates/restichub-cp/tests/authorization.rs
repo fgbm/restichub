@@ -7,7 +7,9 @@ use restichub_cp::context::{Access, Operation, ROUTE_OPERATIONS, Role, minimum_r
 use restichub_db::{PLATFORM_TENANT_ID, api_tokens, audit, memberships};
 use serde_json::{Value, json};
 
-use common::{app, create_tenant, create_user, request, seed_api_token, seed_session, send};
+use common::{
+    app, app_with_kek, create_tenant, create_user, request, seed_api_token, seed_session, send,
+};
 
 /// The four roles in the order of the requirements section 2.
 const ROLES: [Role; 4] = [
@@ -45,6 +47,14 @@ fn body_for(method: &str, path: &str, index: usize, platform_admin: bool) -> Opt
             Some(json!({"new_password": "a long enough password"}))
         }
         ("POST", "/api/v1/api-tokens") => Some(json!({"name": "matrix", "role": role})),
+        ("POST", "/api/v1/platform/tenants") => Some(json!({
+            "name": format!("matrix-{index}"),
+            "first_admin": {
+                "username": format!("admin-{index}"),
+                "display_name": "Matrix",
+                "password": "a long enough password",
+            },
+        })),
         ("POST", "/api/v1/auth/password") => Some(json!({
             "current_password": "wrong",
             "new_password": "a long enough password",
@@ -123,7 +133,7 @@ async fn ac_au_02_role_operation_matrix() {
         return;
     };
     let tenant = create_tenant(db.database(), "matrix").await;
-    let app = app(db.database());
+    let app = app_with_kek(db.database());
     let id = uuid::Uuid::now_v7().to_string();
 
     let mut index = 0;
@@ -171,6 +181,16 @@ async fn ac_au_02_role_operation_matrix() {
     // An Operator cannot manage users.
     assert!(!Role::Operator.allows(minimum_role(Operation::UsersRead)));
     assert!(!Role::Operator.allows(minimum_role(Operation::UsersWrite)));
+
+    // Only the Platform Admin manages the tenants, and only in the platform tenant.
+    for operation in [
+        Operation::PlatformTenantsRead,
+        Operation::PlatformTenantsWrite,
+    ] {
+        assert_eq!(minimum_role(operation), Role::PlatformAdmin);
+        assert!(operation.is_platform());
+        assert!(!Role::Admin.allows(minimum_role(operation)));
+    }
 
     db.cleanup().await;
 }

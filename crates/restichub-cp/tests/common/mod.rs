@@ -128,6 +128,31 @@ pub fn app_with_auth(db: &Database, config: AuthConfig, clock: Arc<dyn Clock>) -
     router(AppState::with_auth(db.clone(), auth))
 }
 
+/// A key encryption key provider that holds one fixed key. A test uses this type.
+#[derive(Debug)]
+pub struct TestKek(restichub_secrets::Kek);
+
+impl restichub_secrets::KekProvider for TestKek {
+    fn current(&self) -> &restichub_secrets::Kek {
+        &self.0
+    }
+
+    fn by_id(&self, id: &restichub_secrets::KekId) -> Option<&restichub_secrets::Kek> {
+        (self.0.id() == id).then_some(&self.0)
+    }
+}
+
+/// Returns a fixed key encryption key provider for a test.
+pub fn test_kek() -> Arc<dyn restichub_secrets::KekProvider> {
+    let mut bytes = [7_u8; 32];
+    Arc::new(TestKek(restichub_secrets::Kek::from_bytes(&mut bytes)))
+}
+
+/// Builds a router with the default authentication state and a key encryption key provider.
+pub fn app_with_kek(db: &Database) -> Router {
+    router(AppState::new(db.clone()).with_kek(test_kek()))
+}
+
 /// Creates a tenant through a platform transaction.
 pub async fn create_tenant(db: &Database, name: &str) -> TenantId {
     let mut tx = match db.begin_platform().await {

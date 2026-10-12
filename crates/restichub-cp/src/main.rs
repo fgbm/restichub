@@ -1,12 +1,14 @@
 //! ResticHub control plane binary.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 use restichub_cp::config::{Cli, Command, Config, MigrationConfig};
 use restichub_cp::server::{self, AppState};
 use restichub_cp::telemetry;
+use restichub_secrets::{KekConfig, KekProvider, SystemEnv, load_kek_provider};
 
 /// The timeout to connect the short-lived migration pool.
 const MIGRATION_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -44,6 +46,20 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     let database = connect_database(&config).await?;
     database.verify_runtime_role().await?;
     database.verify_migrations().await?;
+
+    // Load the key encryption key and verify the `kek_check` row (AC-RP-02).
+    let kek: Arc<dyn KekProvider> = load_kek_provider(
+        &KekConfig {
+            file_path: config.secrets.kek_file.clone(),
+        },
+        &SystemEnv,
+    )
+    .context("cannot load the key encryption key")?
+    .into();
+    restichub_cp::startup::ensure_kek_check(&database, kek.as_ref())
+        .await
+        .context("cannot verify the key encryption key")?;
+
     restichub_cp::setup::ensure_setup_token(&database, &restichub_cp::clock::SystemClock)
         .await
         .context("cannot prepare the initial setup")?;
@@ -61,7 +77,9 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         restichub_cp::maintenance::LIMITER_SWEEP_INTERVAL,
     );
     let app = server::router(
-        AppState::with_auth(database, auth).with_trusted_proxies(config.trusted_proxies.clone()),
+        AppState::with_auth(database, auth)
+            .with_trusted_proxies(config.trusted_proxies.clone())
+            .with_kek(kek),
     );
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await

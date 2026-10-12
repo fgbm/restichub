@@ -18,6 +18,10 @@ use common::{
 ///
 /// The key is `(method, path)`. The test fails when a `{id}` route has no entry.
 const FIXTURES: &[(&str, &str)] = &[
+    ("get", "/api/v1/platform/tenants/{id}"),
+    ("post", "/api/v1/platform/tenants/{id}/suspend"),
+    ("post", "/api/v1/platform/tenants/{id}/resume"),
+    ("delete", "/api/v1/platform/tenants/{id}"),
     ("get", "/api/v1/users/{id}"),
     ("patch", "/api/v1/users/{id}"),
     ("delete", "/api/v1/users/{id}"),
@@ -72,7 +76,8 @@ async fn ac_tn_01_api_cross_tenant_ids_return_404() {
         "a route with an {{id}} placeholder has no fixture"
     );
 
-    // Each fixture uses an identifier of tenant B and returns 404 for tenant A.
+    // Each fixture uses an identifier of tenant B. A tenant route returns 404 for tenant A. A
+    // platform route returns 403 for tenant A, because tenant A is not the platform tenant.
     for (method, path) in FIXTURES {
         let id = if path.contains("api-tokens") {
             token_b.to_string()
@@ -83,10 +88,14 @@ async fn ac_tn_01_api_cross_tenant_ids_return_404() {
         let http_method = method.to_ascii_uppercase();
         let body = body_for(method, path);
         let (status, _, _) = send(&app, request(&http_method, &uri, Some(&cookie_a), body)).await;
+        let expected = if path.starts_with("/api/v1/platform/") {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::NOT_FOUND
+        };
         assert_eq!(
-            status,
-            StatusCode::NOT_FOUND,
-            "{http_method} {path} with an identifier of tenant B must return 404"
+            status, expected,
+            "{http_method} {path} with an identifier of tenant B must return {expected}"
         );
     }
 

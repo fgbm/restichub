@@ -11,6 +11,7 @@ use axum::http::{Request, StatusCode};
 use restichub_cp::clock::ManualClock;
 use restichub_cp::config::AuthConfig;
 use restichub_cp::password;
+use restichub_cp::rate_limit::RateLimiter;
 use restichub_cp::server::AppState;
 use restichub_cp::server::AuthState;
 use restichub_cp::server::router;
@@ -542,11 +543,21 @@ async fn the_sign_in_rate_limit_ignores_the_case() {
         sign_in_ip_rate: 1000,
         ..AuthConfig::default()
     };
-    let app = app_with_auth(
-        db.database(),
-        config,
-        Arc::new(ManualClock::new(OffsetDateTime::now_utc())),
-    );
+    // Use a long refill window, so a slow or a loaded machine cannot refill a token during the
+    // test. The bucket then holds exactly the capacity.
+    let window = Duration::from_secs(3600);
+    let mut auth = AuthState::new(config.clone());
+    auth.user_limiter = Arc::new(RateLimiter::new(
+        config.sign_in_user_rate,
+        window,
+        restichub_cp::rate_limit::MAX_ENTRIES,
+    ));
+    auth.ip_limiter = Arc::new(RateLimiter::new(
+        config.sign_in_ip_rate,
+        window,
+        restichub_cp::rate_limit::MAX_ENTRIES,
+    ));
+    let app = router(AppState::with_auth(db.database().clone(), auth));
 
     // The same unknown user with alternating case uses one bucket.
     for index in 0..10 {

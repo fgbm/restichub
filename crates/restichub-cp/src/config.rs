@@ -33,6 +33,12 @@ pub const DATABASE_MIGRATION_URL_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_URL";
 pub const DATABASE_MIGRATION_PASSWORD_FILE_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_PASSWORD_FILE";
 /// The name of the environment variable that holds the migration password.
 pub const DATABASE_MIGRATION_PASSWORD_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_PASSWORD";
+/// The name of the environment variable that holds the path of the KEK file.
+///
+/// The key encryption key (KEK) comes from this file or from the environment variable
+/// `RESTICHUB_KEK` ([`restichub_secrets::KEK_ENV`]). If both are set, the start fails (ADR-0023,
+/// section Secrets).
+pub const KEK_FILE_ENV: &str = "RESTICHUB_KEK_FILE";
 /// The name of the environment variable that holds the log format.
 pub const LOG_FORMAT_ENV: &str = "RESTICHUB_LOG_FORMAT";
 /// The name of the environment variable that holds the log level.
@@ -207,6 +213,18 @@ pub struct Config {
     pub trusted_proxies: TrustedProxies,
     /// The local authentication settings.
     pub auth: AuthConfig,
+    /// The secret handling settings.
+    pub secrets: SecretsConfig,
+}
+
+/// The configuration of the secret handling (ADR-0023, section Secrets).
+#[derive(Debug, Clone, Default)]
+pub struct SecretsConfig {
+    /// The path of the file that holds the key encryption key (KEK).
+    ///
+    /// If the path is not set, the KEK comes from the environment variable `RESTICHUB_KEK`. If both
+    /// are set, the start fails.
+    pub kek_file: Option<PathBuf>,
 }
 
 impl Config {
@@ -243,6 +261,7 @@ impl Config {
 
         let trusted_proxies = trusted_proxies(env, file.server.as_ref())?;
         let auth = auth_config(env, file.auth.as_ref(), file.server.as_ref())?;
+        let secrets = secrets_config(env, file.secrets.as_ref());
 
         let database_url = env
             .get(DATABASE_URL_ENV)
@@ -299,6 +318,7 @@ impl Config {
             log_level,
             trusted_proxies,
             auth,
+            secrets,
         })
     }
 }
@@ -355,6 +375,7 @@ struct FileConfig {
     log_level: Option<String>,
     server: Option<ServerConfig>,
     auth: Option<AuthSection>,
+    secrets: Option<SecretsSection>,
 }
 
 /// The `[server]` section of the configuration file.
@@ -374,6 +395,13 @@ struct AuthSection {
     sign_in_user_rate: Option<u32>,
     sign_in_ip_rate: Option<u32>,
     max_concurrent_hashes: Option<u32>,
+}
+
+/// The `[secrets]` section of the configuration file.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SecretsSection {
+    kek_file: Option<PathBuf>,
 }
 
 impl FileConfig {
@@ -491,6 +519,19 @@ fn auth_config(
         insecure_cookies,
         max_concurrent_hashes,
     })
+}
+
+/// Reads the secret handling settings.
+///
+/// The environment overrides the file. The function does not reject both sources: the KEK provider
+/// [`restichub_secrets::load_kek_provider`] refuses a file and the environment variable at the same
+/// time with a clear cause.
+fn secrets_config(env: &dyn EnvReader, secrets: Option<&SecretsSection>) -> SecretsConfig {
+    let kek_file = env
+        .get(KEK_FILE_ENV)
+        .map(PathBuf::from)
+        .or_else(|| secrets.and_then(|section| section.kek_file.clone()));
+    SecretsConfig { kek_file }
 }
 
 /// Reads a number from the environment or from the file.
@@ -938,10 +979,16 @@ mod tests {
 
     #[test]
     fn debug_hides_the_database_password() {
-        let env = MapEnv::new(&[("RESTICHUB_DATABASE_URL", "postgres://user:secret@host/db")]);
+        // The password is a canary value. The test checks that no secret VALUE appears in the
+        // `Debug` output; the field names are not secret.
+        let canary = "canary-db-password-3f9a";
+        let env = MapEnv::new(&[(
+            "RESTICHUB_DATABASE_URL",
+            &format!("postgres://user:{canary}@host/db"),
+        )]);
         let config = Config::load_with(&Cli::default(), &env);
         let text = format!("{config:?}");
-        assert!(!text.contains("secret"), "{text}");
+        assert!(!text.contains(canary), "{text}");
     }
 
     #[test]
@@ -971,5 +1018,35 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn the_kek_file_comes_from_the_environment() {
+        let env = MapEnv::new(&[
+            ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+            ("RESTICHUB_KEK_FILE", "/etc/restichub/kek"),
+        ]);
+        let config = Config::load_with(&Cli::default(), &env);
+        assert_eq!(
+            config.ok().and_then(|config| config.secrets.kek_file),
+            Some(PathBuf::from("/etc/restichub/kek"))
+        );
+    }
+
+    #[test]
+    fn the_kek_file_comes_from_the_file() {
+        let path = temp_path("secrets");
+        std::fs::write(
+            &path,
+            "database_url = \"postgres://host/db\"\n[secrets]\nkek_file = \"/etc/restichub/kek\"\n",
+        )
+        .ok();
+        let env = MapEnv::new(&[("RESTICHUB_CONFIG", path.to_str().unwrap_or_default())]);
+        let config = Config::load_with(&Cli::default(), &env);
+        std::fs::remove_file(&path).ok();
+        assert_eq!(
+            config.ok().and_then(|config| config.secrets.kek_file),
+            Some(PathBuf::from("/etc/restichub/kek"))
+        );
     }
 }

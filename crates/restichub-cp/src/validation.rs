@@ -8,6 +8,8 @@ use time::{Duration, OffsetDateTime};
 pub const MAX_USERNAME: usize = 64;
 /// The largest display name length in characters.
 pub const MAX_DISPLAY_NAME: usize = 128;
+/// The largest tenant name length in characters.
+pub const MAX_TENANT_NAME: usize = 63;
 /// The largest token name length in characters.
 pub const MAX_TOKEN_NAME: usize = 64;
 /// The largest lifetime of an API token.
@@ -50,6 +52,30 @@ pub fn validate_display_name(value: &str) -> Result<String, ValidationError> {
     Ok(value.to_owned())
 }
 
+/// Validates a tenant name and returns the trimmed value.
+///
+/// A name holds 1 to [`MAX_TENANT_NAME`] characters from the set `a-z`, `0-9` and `-`. It starts
+/// with a letter. The reserved name `platform` is refused (FR-TN-02). The unique index of the
+/// `tenants` table makes the name unique and ignores the letter case, so a duplicate gives a
+/// conflict at the database.
+pub fn validate_tenant_name(value: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    let count = value.chars().count();
+    if count == 0 || count > MAX_TENANT_NAME {
+        return Err(ValidationError);
+    }
+    let valid = value.chars().all(|character| {
+        character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+    });
+    if !valid || !value.starts_with(|character: char| character.is_ascii_lowercase()) {
+        return Err(ValidationError);
+    }
+    if value.eq_ignore_ascii_case("platform") {
+        return Err(ValidationError);
+    }
+    Ok(value.to_owned())
+}
+
 /// Validates a token name and returns the trimmed value.
 pub fn validate_token_name(value: &str) -> Result<String, ValidationError> {
     let value = value.trim();
@@ -82,8 +108,8 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        MAX_DISPLAY_NAME, MAX_USERNAME, validate_display_name, validate_expiry,
-        validate_token_name, validate_username,
+        MAX_DISPLAY_NAME, MAX_TENANT_NAME, MAX_USERNAME, validate_display_name, validate_expiry,
+        validate_tenant_name, validate_token_name, validate_username,
     };
 
     #[test]
@@ -103,6 +129,22 @@ mod tests {
         assert!(validate_display_name("   ").is_err());
         assert!(validate_display_name(&"a".repeat(MAX_DISPLAY_NAME + 1)).is_err());
         assert!(validate_display_name("line\nbreak").is_err());
+    }
+
+    #[test]
+    fn a_tenant_name_is_trimmed_and_checked() {
+        assert_eq!(validate_tenant_name("  acme  ").as_deref(), Ok("acme"));
+        assert_eq!(validate_tenant_name("acme-1").as_deref(), Ok("acme-1"));
+        assert!(validate_tenant_name("").is_err());
+        assert!(validate_tenant_name("1acme").is_err());
+        assert!(validate_tenant_name("-acme").is_err());
+        assert!(validate_tenant_name("Acme").is_err());
+        assert!(validate_tenant_name("acme_1").is_err());
+        assert!(validate_tenant_name("with space").is_err());
+        assert!(validate_tenant_name("platform").is_err());
+        assert!(validate_tenant_name("PLATFORM").is_err());
+        assert!(validate_tenant_name(&"a".repeat(MAX_TENANT_NAME + 1)).is_err());
+        assert!(validate_tenant_name(&"a".repeat(MAX_TENANT_NAME)).is_ok());
     }
 
     #[test]
