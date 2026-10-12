@@ -72,7 +72,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-AG-01 | The agent runs as an operating system service: Windows service as LocalSystem, systemd unit, launchd daemon. | M (Windows, Linux), 1.0 (macOS) |
 | FR-AG-02 | The agent starts no action itself. The only exceptions are the connection to the CP, the heartbeat and the delivery of results. | M |
 | FR-AG-03 | The agent does not store schedules, profiles, repository secrets or job history. | M |
-| FR-AG-04 | The agent stores only the CP address, its private key and certificate, the CP root certificate and the public job signing key. It also stores the hook allow-list and an outbox of results that it did not send yet. The outbox contains no secrets. | M |
+| FR-AG-04 | The agent stores only the CP address, its private key and certificate, the CP root certificate and the public job signing key. It also stores the hook allow-list and an outbox of results that it did not send yet. The outbox contains no secrets. It also stores a job journal with accepted `job_id` values and their results (ADR-0020). The journal contains no secrets. | M |
 | FR-AG-05 | The agent executes steps in the specified sequence. Each step and each job has a timeout. | M |
 | FR-AG-06 | The agent starts restic as a child process. Secrets go to the child process only through environment variables or a pipe. Secrets never go into command-line arguments. | M |
 | FR-AG-07 | The agent erases secrets from memory after each step. The agent disables crash dumps during a job where the operating system permits it. | 1.0 |
@@ -104,14 +104,16 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-PR-01 | Steps are typed: one Protocol Buffers message for each step type in a `oneof`. The protocol has no free-form maps or raw restic argument strings. | M |
-| FR-PR-02 | Step types in the MVP: `backup`, `check`, `snapshots`, `ls`, `restore`, `unlock` (stale locks only), `forget`, `prune`, `stats`, `hook`. In 1.0: `find`, `dump`, `copy`, `init`, `key_add`, `key_remove`. | M, 1.0 |
-| FR-PR-03 | The CP signs each job with the job signing key (Ed25519). The signature covers `job_id`, `agent_id`, `tenant_id`, expiry time, nonce and a monotonic sequence number. The agent rejects a job with a bad signature, a different addressee, an expired time or a replay. | M |
+| FR-PR-02 | Step types in the MVP: `backup`, `check`, `snapshots`, `ls`, `restore`, `unlock` (stale locks only), `unlock_all` (repository ID only, only from an Admin action with confirmation, FR-SC-06), `forget`, `prune`, `stats`, `hook`. In 1.0: `find`, `dump`, `copy`, `init`, `key_add`, `key_remove`. | M, 1.0 |
+| FR-PR-03 | The CP signs each job with the job signing key (Ed25519). The signature covers `job_id`, `agent_id`, `tenant_id`, `issued_at` and `expires_at`. The signature input has the domain prefix `restichub-job-v1\0` before the serialized `Job` bytes. The agent rejects a job with a bad signature, a different addressee or a lifetime longer than 24 h. The agent also rejects a job with an `issued_at` more than 5 minutes in the future or an expired time. The agent keeps a job journal and returns the stored result of a known `job_id` (ADR-0020). | M |
 | FR-PR-04 | The job signing key is separate from the TLS key and from the database. It is in a file in the MVP and in an HSM or KMS later. | M (file), L (KMS) |
 | FR-PR-05 | Secrets go with the job, protected by mTLS. The agent gets only the secrets of the repositories in that job. | M |
 | FR-PR-06 | The agent acknowledges each job. The CP holds a lease. If the lease expires before the acknowledgement, the CP delivers the job again. | M |
 | FR-PR-07 | The agent keeps an outbox of results and sends them after it reconnects. | M |
 | FR-PR-08 | The CP does not trust any message from an agent. The agent and tenant identity come only from the mTLS certificate, never from the payload. | M |
 | FR-PR-09 | The protocol has a version. At connection time the agent and the CP agree on capabilities: agent version, restic version, supported step types. | M |
+| FR-PR-10 | The agent puts all positional restic arguments after `--`. The agent passes each option value in the attached form `--flag=value`, never as a separate argument. The CP validates the formats before it signs the job and the agent validates them before execution (ADR-0021). A duplicate or unknown hook parameter name causes `INVALID_HOOK_PARAMETERS`. A step without a known kind causes `UNSUPPORTED_STEP`. The agent never sets an option or environment variable that executes a program from job data. | M |
+| FR-PR-11 | A `KeyUpdate` message contains `key_id`, the public key, the signer key ID, `issued_at` and the revoked key IDs. The current key signs the message with the domain prefix `restichub-key-update-v1\0`. The agent never replaces an existing `key_id` and never adds a revoked key again. A revoked key cannot sign. | M |
 
 ### 3.4. Hooks
 
@@ -161,7 +163,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-SC-03 | Persistent queue in PostgreSQL: `SKIP LOCKED`, lease, retries with exponential delay, dead-letter state. | M |
 | FR-SC-04 | Serialization for each repository. Exclusive operations (`forget`, `prune`, `check`, `tag`, `rewrite`, `repair`, `key`) are barriers. While they run, no backup or read operation starts on that repository, and the opposite. More than one backup can run on one repository at the same time, up to a configurable limit. | M |
 | FR-SC-05 | The CP always sends `--retry-lock`. Exit code 11 causes a delayed retry, not a failure. | M |
-| FR-SC-06 | Stale lock recovery. The CP runs `unlock` without `--remove-all` only when it knows that no operation runs on the repository. The CP waits at least 30 minutes after it loses an agent that held a lock. Only an Admin can run `unlock --remove-all`, manually and after a confirmation. | M |
+| FR-SC-06 | Stale lock recovery. The CP runs `unlock` without `--remove-all` only when it knows that no operation runs on the repository. The CP waits at least 30 minutes after it loses an agent that held a lock. Only an Admin can run the `unlock_all` step, manually and after a confirmation. | M |
 | FR-SC-07 | Missed run policy for an offline agent: run all, run the latest only, skip. Each job has an expiry time. | M |
 | FR-SC-08 | Concurrency limits for each agent, each repository and globally. Maintenance windows and blackout periods. | M (limits), 1.0 (windows) |
 | FR-SC-09 | Manual run and cancellation from the UI. Cancellation on timeout. | M |
@@ -319,3 +321,4 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | Without high availability, no backups run while the CP is down. | Alert and documented recovery time for the CP. High availability is on the roadmap. |
 | restic memory usage on large repositories. | Concurrency limits on the agent. Guidance on how to split repositories. |
 | Ctrl+Break from a Windows service to restic can fail, because a service has no console. | Spike P1 before the agent implementation. |
+| SFTP private key delivery without a file on the agent is not solved. | Spike P6 before the SFTP implementation. |

@@ -74,13 +74,15 @@ Each automated test refers to its criterion ID in its name or in a comment.
 
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
-| AC-PR-01 | FR-PR-03 | Send jobs with a changed payload, a different `agent_id`, an expired time, a used nonce and a lower sequence number. **Expected:** the agent rejects all of them. No process starts. The CP receives the reason. The audit log contains the event. | S |
+| AC-PR-01 | FR-PR-03 | Send jobs with these faults: a changed payload, a different `agent_id`, a different `tenant_id`, an expired job and an unknown key. Also send a job with an `issued_at` more than 5 minutes in the future and a job with a lifetime longer than 24 h. Also deliver a known `job_id` again after an agent restart. **Expected:** the agent rejects all the faulty jobs. No process starts for them. The CP receives the reason. The audit log contains the event. For the known `job_id`, the job does not run a second time and the agent returns the stored result. | S |
 | AC-PR-02 | FR-PR-04 | Replace the job signing key in the CP configuration. Keep the database and TLS. **Expected:** agents reject all new jobs. A database dump does not contain the job signing key. | S |
 | AC-PR-03 | FR-PR-05 | A job uses repository A. Examine the received message with a debug build of the agent. **Expected:** the message contains only the secrets of repository A. | S |
 | AC-PR-04 | FR-PR-06 | The agent disconnects before the acknowledgement. **Expected:** after the lease expires, the CP delivers the job again. The job runs exactly once. | A |
 | AC-PR-05 | FR-PR-08 | Agent 1 sends a result or progress for a job of agent 2. **Expected:** the CP rejects the message and records it in the audit log. The status of the job of agent 2 does not change. | S |
 | AC-PR-06 | FR-PR-09 | Connect agents of version N−1 minor, N and the next major version. **Expected:** the first two work. The CP rejects the third with an incompatibility message. | A |
 | AC-PR-07 | FR-PR-07 | The CP is not available for 60 minutes during a job. **Expected:** the agent completes the job. The result and the logs arrive 60 s or less after the connection comes back. The final status and summary agree with the local data. | A |
+| AC-PR-08 | FR-PR-10 | Put `--password-command=cmd /c calc`, `-x` and a line break into each string field of each step type. **Expected:** validation rejects the value, or the argument builder puts it after `--` or in attached form. restic never receives the value as an option. | S |
+| AC-PR-09 | FR-PR-11 | Send a key update signed by a revoked key, a key update that changes an existing `key_id` and a replayed old key update. **Expected:** the agent rejects all three. The key ring does not change. | S |
 
 ## 5. Hooks
 
@@ -121,7 +123,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-SC-03 | FR-SC-04 | 3 backups run on repository R. A prune for R goes into the queue. **Expected:** the prune starts after all 3 backups end. Backups queued during the prune start after the prune ends. | A |
 | AC-SC-04 | FR-SC-04, FR-SC-05 | 7-day run: 20 agents, one repository, backup every 15 minutes, `forget` and `prune` every 2 hours, `check` every day. **Expected:** 0 jobs with status `failed` because of a lock. 0 errors from `restic check`. | L |
 | AC-SC-05 | FR-SC-05 | Fake restic returns code 11 five times. **Expected:** retries with increasing delay. After the limit, the job goes to the dead-letter state and an alert occurs. | A |
-| AC-SC-06 | FR-SC-06 | Kill restic with SIGKILL during a backup. **Expected:** when 30 minutes or more pass and the repository is idle, the CP runs `unlock`. The next backup succeeds without a person. Only an Admin can run `--remove-all`, after a confirmation. The audit log contains the event. | A |
+| AC-SC-06 | FR-SC-06 | Kill restic with SIGKILL during a backup. **Expected:** when 30 minutes or more pass and the repository is idle, the CP runs `unlock`. The next backup succeeds without a person. Only an Admin can run the `unlock_all` step after a confirmation. The audit log contains the event. | A |
 | AC-SC-07 | FR-SC-07 | An agent is offline for 3 plan intervals. **Expected:** the policies "run all", "run latest" and "skip" create 3, 1 and 0 jobs. Expired jobs get the status `expired`. | A |
 | AC-SC-08 | FR-SC-08 | Limit 1 job for each agent and 2 jobs for each repository. Start 10 jobs at the same time. **Expected:** the start log shows that no limit was exceeded. | A |
 | AC-SC-09 | FR-SC-09, NFR-PERF-02 | Manual run for an online agent. **Expected:** from the click to the restic start, 3 s or less (95th percentile of 100 runs). | L |

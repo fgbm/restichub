@@ -1,6 +1,6 @@
 # ADR-0005: Signed jobs with a dedicated signing key
 
-- Status: accepted
+- Status: partly superseded by ADR-0020 (replay protection)
 - Date: 2026-10-12
 - Requirements: FR-PR-03, FR-PR-04, NFR-SEC-04
 

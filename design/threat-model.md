@@ -30,7 +30,7 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | T1 | A compromised agent reads or deletes a repository during a job. | Secrets only for one job (ADR-0003). Dedicated maintenance agent. Storage controls in NFR-SEC-08. | **Accepted.** An attacker with root on the host during a job can delete the repository if the backend permits deletion. |
 | T2 | A compromised control plane executes code on all hosts. | Hook allow-list on agents (ADR-0004). Typed steps without raw arguments (FR-PR-01). | The control plane can still send restic steps, for example `forget` with a short retention. Storage controls in NFR-SEC-08 limit the damage. |
 | T3 | An attacker writes to the database and inserts jobs. | Job signatures with a key outside the database (ADR-0005). | None if the signing key stays safe. |
-| T4 | Replay of an old job. | Nonce, sequence number and expiry time in the signature. | None. |
+| T4 | Replay of an old job. | Job journal and maximum lifetime (ADR-0020). | A redelivered job returns the stored result. It does not run again. |
 | T5 | A database dump discloses secrets. | Envelope encryption with a KEK outside the database (ADR-0017). | If an attacker gets the KEK and the dump, all secrets are disclosed. |
 | T6 | One agent impersonates another agent or another tenant. | Identity only from the mTLS certificate (FR-PR-08). Row-Level Security (ADR-0006). | None. |
 | T7 | A user of one tenant reads data of another tenant. | Application checks, Row-Level Security, isolation test AC-TN-01. | Defects in new endpoints. AC-TN-01 fails on unchecked endpoints. |
@@ -38,6 +38,8 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | T9 | Secrets in process arguments, logs or crash dumps. | Environment variables or pipe only (FR-AG-06). Masking (NFR-SEC-05). Crash dumps disabled (FR-AG-07). | A local administrator can read the environment of a running process. |
 | T10 | A malicious update of the agent. | Release key separate from control plane keys (FR-AG-13). | Compromise of the release key. |
 | T11 | Denial of service through enrollment. | Rate limit (FR-ID-05). | A distributed attack. Use a reverse proxy with rate limits. |
+| T12 | Option injection through step string fields. | Argument construction and validation (ADR-0021, AC-PR-08). | Unknown restic behavior in new step types. |
+| T13 | A forged signing key update. | Key update rules (FR-PR-11, AC-PR-09). | The first public key needs a trusted delivery path. |
 
 ## 4. Recommendations for operators
 
