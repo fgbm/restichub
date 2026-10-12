@@ -132,3 +132,33 @@ These notes also refine section Secrets. The record fixes the format of the encr
 - The `kek_check` value uses AES-256-GCM with a fixed plaintext. The associated data is the bytes `restichub-kek-check-v1\0`.
 - The purpose of a secret value is one of `repository_password`, `s3_access_key`, `s3_secret_key` and `rest_server_password`. These strings are stable. A change makes every stored value of that purpose unreadable.
 - The control plane MUST NOT start a child process that inherits the environment while the KEK is in `RESTICHUB_KEK`. On Unix, another process of the same user can read the environment through `/proc`.
+
+These notes refine section Local authentication. Issue #18 puts them into the code.
+
+- The platform tenant holds the role `platform_admin` only (FR-TN-02). The roles Admin, Operator and Viewer apply in one tenant. Migration 0011 adds a check constraint to `memberships` and `api_tokens` for this rule. The API layer refuses the role too.
+- An actor cannot change, disable, delete or reset the password of a user whose role rank is above its own. An actor cannot grant a role above its own either.
+- The sign-in rate limiter is in memory and per process. A second control plane instance has its own buckets. This is acceptable while one instance runs (ADR-0018). A shared limiter arrives with high availability.
+- Each capped limiter map has a hard cap of 100 000 buckets. When a map is full, the limiter evicts the oldest buckets rather than grow. An inline sweep runs at most once per second, and a periodic sweep in the control plane removes the idle buckets. An IPv6 source is keyed by the /64 network.
+- The resolved `(tenant_id, user_id)` identities live in a separate uncapped map; its size is bounded by the number of real users.
+- The limiter keys the user bucket by the resolved `(tenant_id, user_id)` when the user is known. It keys the bucket by the normalized `tenant + username` otherwise.
+- A password hash never holds a database transaction. A handler reads the user, ends the transaction, verifies or hashes, and then opens a second transaction for the write.
+- A global semaphore bounds the number of concurrent Argon2id hashes to `auth.max_concurrent_hashes` (the number of CPUs by default). When the semaphore is saturated for two seconds, the request gets HTTP 503 `busy` with `Retry-After`.
+- The failed sign-in audit record never holds the attempted username.
+- For a known user the record holds the user identifier and the system actor.
+- For an unknown user the record holds the marker `user_known` set to false only.
+- A password typed into the username field cannot reach the append-only log.
+- The setup endpoint takes the CSRF header and uses the per-IP rate limit of sign-in. The platform tenant lock and the `FOR UPDATE` row lock of the setup token serialize two setup requests with the same token.
+- The one-time setup token is the only secret that the control plane ever logs.
+- The server generates it at start when the platform tenant has no user.
+- It stores only the SHA-256 hash and an expiry of 24 hours. It prints the value once at WARN level.
+- The alternative is a default password. Every installation would share it and no operator would change it.
+- The value expires and a restart generates a new one.
+- The token lives in the table `setup_tokens` (migration 0010). The server marks it used and never removes it.
+- The control plane maintenance task removes the sessions past the absolute lifetime and the expired and used setup tokens. It is not job scheduling (ADR-0002).
+- An API token is owned by the tenant, not by the user that created it. A token stays valid while the tenant is active, also when the creator is disabled. The endpoint `DELETE /api/v1/users/{id}` disables the user and removes its sessions, and it leaves the tokens in place.
+- For local development over plain HTTP, the setting `server.insecure_cookies` drops the `Secure` attribute and the `__Host-` prefix of the session cookie.
+- A plain HTTP network can then read the session.
+- Another host on the same parent domain can set a cookie with the same name. This is cookie tossing.
+- The server logs a loud warning when the setting is on. The default is off.
+
+
