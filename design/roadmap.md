@@ -12,8 +12,12 @@ Each spike gives a short report and a decision. Spikes run before the related im
 | P3 | WinRM from Linux | Does `winrm-rs` work against a real Active Directory with NTLM and Kerberos? | FR-IN-04 |
 | P4 | Stream load | Can one control plane process hold 500 to 2000 agent streams and survive a restart without false alerts? | NFR-PERF-01, AC-ID-06, AC-NFR-01 |
 | P5 | YAML library | Which maintained YAML library replaces the archived `serde_yaml`? | FR-PF-07 |
+| P6 | SFTP key delivery | How can the agent give an SFTP private key to restic without a file on the agent (ssh-agent, pipe)? | FR-RP-01, FR-AG-04, FR-AG-06 |
 
 Spike P2 (MSSQL VDI) is cancelled. See ADR-0016.
+
+- P1: the implementation is ready in [`spikes/p1-windows-cancel/`](../spikes/p1-windows-cancel/). The results need a CI run on GitHub. See the [P1 report](spikes/p1-windows-cancel.md).
+- P5: the spike is complete. The recommendation is `serde-saphyr`. See the [P5 report](spikes/p5-yaml-library.md) and [ADR-0019](adr/0019-yaml-library.md) (proposed).
 
 ## Milestone 1: MVP
 
