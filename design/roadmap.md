@@ -18,7 +18,7 @@ Spike P2 (MSSQL VDI) is cancelled. See ADR-0016.
 
 - P1: the spike is complete. The decision is mechanism B (`AllocConsole` and `CTRL_BREAK_EVENT`). See the [P1 report](spikes/p1-windows-cancel.md).
 - P5: the spike is complete. The recommendation is `serde-saphyr`. See the [P5 report](spikes/p5-yaml-library.md) and [ADR-0019](adr/0019-yaml-library.md) (accepted).
-- P6: the spike is complete. See the [P6 report](spikes/p6-sftp-key-delivery.md). Decision pending: SFTP scope and rclone bundling.
+- P6: the spike is complete. See the [P6 report](spikes/p6-sftp-key-delivery.md) and [ADR-0022](adr/0022-sftp-deferred-to-1-0.md) (accepted). SFTP is deferred to 1.0.
 - P4: the spike is complete. The 2000-agent run used 91 MiB RSS, CPU p95 of 2 percent or less, and an ack p95 below 1 ms. The restart of 500 agents returned all agents in 39 seconds with 0 false offline. Decision proposal: reconnect backoff with a base of 1 second, a maximum of 60 seconds, and full jitter. A lower maximum of 30 seconds is a candidate for the MVP restart test (AC-ID-06). The NFR-PERF-01 targets look reachable. Confirm with the 4-hour run of AC-NFR-01 on bench S2. See the [P4 report](spikes/p4-stream-load.md).
 
 Milestone 0 is complete except the P3 WinRM spike. P3 needs an Active Directory test environment.

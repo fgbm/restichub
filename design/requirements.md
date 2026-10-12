@@ -131,7 +131,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-RP-01 | Create, read, update and delete repositories. Backends: S3-compatible, rest-server, SFTP, local or SMB path, B2, Azure, GCS, rclone. | M (S3, rest, SFTP, local), 1.0 (others) |
+| FR-RP-01 | Create, read, update and delete repositories. Backends: S3-compatible, rest-server, SFTP, local or SMB path, B2, Azure, GCS, rclone. | M (S3, rest, local), 1.0 (SFTP, B2, Azure, GCS, rclone) |
 | FR-RP-02 | Initialize a repository and test access from a selected agent. | M |
 | FR-RP-03 | The CP encrypts secrets with AES-256-GCM. Envelope encryption: one data key for each tenant, encrypted by a key encryption key (KEK). The KEK is in a file or an environment variable outside the database. | M |
 | FR-RP-04 | Pluggable KEK providers: HashiCorp Vault Transit, OpenBao, cloud KMS. | L |
@@ -310,6 +310,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | Native steps for other databases | Same reason. Hooks cover these cases. | [0016](adr/0016-native-database-steps-deferred.md) |
 | High availability of the CP | Not necessary for the MVP. The design permits it. | [0018](adr/0018-high-availability-deferred.md) |
 | ConnectRPC for the public API | connect-rust is before version 1.0. The maintainers evaluate it again for 1.0. | [0009](adr/0009-public-api-rest-openapi-sse.md) |
+| SFTP repositories | Spike P6 found no SFTP key path without a file on the host that works on Linux and Windows. The rclone path adds about 86 MB and the Windows path is not verified. | [0022](adr/0022-sftp-deferred-to-1-0.md) |
 
 ## 6. Assumptions and risks
 
@@ -321,4 +322,4 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | Without high availability, no backups run while the CP is down. | Alert and documented recovery time for the CP. High availability is on the roadmap. |
 | restic memory usage on large repositories. | Concurrency limits on the agent. Guidance on how to split repositories. |
 | Ctrl+Break from a Windows service to restic can fail, because a service has no console. | Resolved by spike P1: mechanism B. |
-| SFTP private key delivery without a file on the agent is not solved. | Spike P6 before the SFTP implementation. |
+| SFTP private key delivery without a file on the agent is not solved. | Deferred to 1.0 (ADR-0022). |

@@ -32,7 +32,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 
 - CP: Docker Compose, PostgreSQL 16.
 - Agents: Windows Server 2022 x64, Windows 11 x64, Ubuntu 24.04 x64, Debian 12 arm64.
-- Repositories: MinIO (S3), rest-server 0.14, SFTP, local directory.
+- Repositories: MinIO (S3), rest-server 0.14, local directory (SFTP from 1.0).
 - restic versions: 0.18.1 and 0.19.1.
 
 **Load bench S2:**
@@ -99,7 +99,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
-| AC-RP-01 | FR-RP-01, FR-RP-02 | Initialize and test S3, rest, SFTP and local repositories. **Expected:** success. With an incorrect password: status `config_error` (code 12) and a clear message. | A |
+| AC-RP-01 | FR-RP-01, FR-RP-02 | Initialize and test S3, rest and local repositories (SFTP from 1.0). **Expected:** success. With an incorrect password: status `config_error` (code 12) and a clear message. | A |
 | AC-RP-02 | FR-RP-03, FR-RP-05 | Read a secret through the API and the UI. **Expected:** the value is masked. No endpoint returns the value. A database dump does not contain the canary. The CP does not start with an incorrect KEK and shows the cause. | S |
 | AC-RP-03 | FR-RP-05 | The CP sends a secret to an agent. **Expected:** the audit log has a record with tenant, agent, job, repository and time. The record does not contain the secret value. | A |
 | AC-RP-04 | FR-RP-08 | A plan with retention runs on 5 agents for 7 days. **Expected:** only the maintenance agent receives `forget`, `prune` and `check`. The message log shows no such steps for the backup agents. | A |

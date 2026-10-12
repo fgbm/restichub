@@ -27,3 +27,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0019](0019-yaml-library.md) | serde-saphyr for YAML profile import and export | accepted |
 | [0020](0020-replay-protection-job-journal.md) | Replay protection with a job journal | accepted |
 | [0021](0021-restic-argument-construction.md) | restic argument construction and validation | accepted |
+| [0022](0022-sftp-deferred-to-1-0.md) | SFTP is deferred to 1.0 | accepted |
