@@ -6,6 +6,8 @@ export {
 	locales,
 	setLocale,
 	t,
+	tAuditAction,
+	tAuditActorType,
 	tErrorCode,
 	type Locale
 } from './i18n.svelte';

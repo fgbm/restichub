@@ -33,4 +33,15 @@ describe('JsonDiff', () => {
 		render(JsonDiff, { props: { diff: null } });
 		expect(screen.getByText('This record has no change.')).toBeInTheDocument();
 	});
+
+	it('renders a create or delete record as one change', () => {
+		// The control plane writes one `{ old, new }` pair at the top level for a create or a
+		// delete.
+		const diff: AuditDiff = { old: null, new: { username: 'operator', role: 'viewer' } };
+		render(JsonDiff, { props: { diff } });
+
+		expect(screen.getByText('Record')).toBeInTheDocument();
+		expect(screen.getByText('null')).toBeInTheDocument();
+		expect(screen.getByText('{"username":"operator","role":"viewer"}')).toBeInTheDocument();
+	});
 });

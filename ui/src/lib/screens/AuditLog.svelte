@@ -15,7 +15,7 @@
 		TextField
 	} from '#lib/components/index.ts';
 	import type { Column, KeyValueItem, SelectOption } from '#lib/components/index.ts';
-	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
+	import { getLocale, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
 
 	let { scope = 'tenant' }: { scope?: 'tenant' | 'platform' } = $props();
 
@@ -70,13 +70,22 @@
 		return new Date(value).toLocaleString(getLocale());
 	}
 
+	function actorLabel(row: AuditRecord): string {
+		const type = tAuditActorType(row.actor_type);
+		return row.actor_id ? `${type}: ${row.actor_id}` : type;
+	}
+
+	function objectLabel(row: AuditRecord): string {
+		return row.object_id ? `${row.object_type}: ${row.object_id}` : row.object_type;
+	}
+
 	async function load(): Promise<void> {
 		loading = true;
 		error = null;
 		try {
 			const page = await fetchPage();
 			items = page.items;
-			nextCursor = page.next_cursor;
+			nextCursor = page.next_cursor ?? null;
 		} catch (problem) {
 			error = messageOf(problem);
 		} finally {
@@ -90,7 +99,7 @@
 		try {
 			const page = await fetchPage(nextCursor);
 			items = [...items, ...page.items];
-			nextCursor = page.next_cursor;
+			nextCursor = page.next_cursor ?? null;
 		} catch (problem) {
 			error = messageOf(problem);
 		} finally {
@@ -120,47 +129,64 @@
 		{
 			key: 'actor',
 			header: t('audit.columns.actor'),
-			cell: (row) => `${row.actor_type}:${row.actor_id}`,
+			cell: (row) => actorLabel(row),
 			mono: true
 		},
-		{ key: 'action', header: t('audit.columns.action'), mono: true },
+		{
+			key: 'action',
+			header: t('audit.columns.action'),
+			cell: (row) => tAuditAction(row.action),
+			mono: true
+		},
 		{
 			key: 'object',
 			header: t('audit.columns.object'),
-			cell: (row) => `${row.object_type}:${row.object_id}`,
+			cell: (row) => objectLabel(row),
 			mono: true
 		},
-		{ key: 'source_ip', header: t('audit.columns.sourceIp'), mono: true }
+		{
+			key: 'source_ip',
+			header: t('audit.columns.sourceIp'),
+			cell: (row) => row.source_ip ?? t('common.unknown'),
+			mono: true
+		}
 	]);
 
 	const actorTypeOptions = $derived<SelectOption[]>([
-		{ value: 'user', label: t('audit.actorType.user') },
-		{ value: 'token', label: t('audit.actorType.token') },
-		{ value: 'system', label: t('audit.actorType.system') }
+		{ value: 'user', label: tAuditActorType('user') },
+		{ value: 'api_token', label: tAuditActorType('api_token') },
+		{ value: 'agent', label: tAuditActorType('agent') },
+		{ value: 'system', label: tAuditActorType('system') }
 	]);
 
 	const detailItems = $derived<KeyValueItem[]>(
 		selected
 			? [
 					{ key: 'id', label: 'ID', value: selected.id, mono: true },
+					{ key: 'tenant', label: t('topbar.tenant'), value: selected.tenant_id, mono: true },
 					{ key: 'time', label: t('audit.columns.time'), value: formatTime(selected.occurred_at) },
 					{
 						key: 'actor',
 						label: t('audit.columns.actor'),
-						value: `${selected.actor_type}:${selected.actor_id}`,
+						value: actorLabel(selected),
 						mono: true
 					},
-					{ key: 'action', label: t('audit.columns.action'), value: selected.action, mono: true },
+					{
+						key: 'action',
+						label: t('audit.columns.action'),
+						value: tAuditAction(selected.action),
+						mono: true
+					},
 					{
 						key: 'object',
 						label: t('audit.columns.object'),
-						value: `${selected.object_type}:${selected.object_id}`,
+						value: objectLabel(selected),
 						mono: true
 					},
 					{
 						key: 'source_ip',
 						label: t('audit.columns.sourceIp'),
-						value: selected.source_ip,
+						value: selected.source_ip ?? t('common.unknown'),
 						mono: true
 					}
 				]
@@ -180,10 +206,14 @@
 		void load();
 	}}
 >
-	<FormField label={t('audit.filters.timeFrom')} for="audit-from">
+	<FormField
+		label={t('audit.filters.timeFrom')}
+		for="audit-from"
+		hint={t('audit.filters.timeHint')}
+	>
 		<TextField id="audit-from" type="datetime-local" bind:value={from} />
 	</FormField>
-	<FormField label={t('audit.filters.timeTo')} for="audit-to">
+	<FormField label={t('audit.filters.timeTo')} for="audit-to" hint={t('audit.filters.timeHint')}>
 		<TextField id="audit-to" type="datetime-local" bind:value={to} />
 	</FormField>
 	<FormField label={t('audit.filters.action')} for="audit-action">
@@ -257,7 +287,7 @@
 	{#if selected}
 		<KeyValue items={detailItems} />
 		<h3 class="detail-heading">{t('diff.title')}</h3>
-		<JsonDiff diff={selected.diff} />
+		<JsonDiff diff={selected.diff ?? null} />
 	{/if}
 	{#snippet footer()}
 		<Button onclick={() => (panelOpen = false)}>{t('common.close')}</Button>

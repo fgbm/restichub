@@ -1,8 +1,8 @@
 /*
  * Every API path of the UI in one module.
  *
- * The control plane API is not final (issues #18, #19, #20). When the paths
- * change, edit this file only.
+ * The paths follow the control plane API of issues #18 and #19. The tenant
+ * paths are the planned API of issue #20 and are not on the server yet.
  */
 export const API_PREFIX = '/api/v1';
 
@@ -10,7 +10,8 @@ export const endpoints = {
 	auth: {
 		signIn: '/auth/sign-in',
 		signOut: '/auth/sign-out',
-		me: '/auth/me'
+		me: '/auth/me',
+		password: '/auth/password'
 	},
 	setup: {
 		status: '/setup/status',
@@ -19,7 +20,8 @@ export const endpoints = {
 	users: {
 		list: '/users',
 		create: '/users',
-		byId: (id: string) => `/users/${encodeURIComponent(id)}`
+		byId: (id: string) => `/users/${encodeURIComponent(id)}`,
+		password: (id: string) => `/users/${encodeURIComponent(id)}/password`
 	},
 	apiTokens: {
 		list: '/api-tokens',
@@ -32,6 +34,7 @@ export const endpoints = {
 	platform: {
 		tenants: '/platform/tenants',
 		createTenant: '/platform/tenants',
+		byId: (id: string) => `/platform/tenants/${encodeURIComponent(id)}`,
 		suspendTenant: (id: string) => `/platform/tenants/${encodeURIComponent(id)}/suspend`,
 		resumeTenant: (id: string) => `/platform/tenants/${encodeURIComponent(id)}/resume`,
 		deleteTenant: (id: string) => `/platform/tenants/${encodeURIComponent(id)}`,

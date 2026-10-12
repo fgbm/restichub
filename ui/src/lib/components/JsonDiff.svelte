@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Badge from './Badge.svelte';
 	import { t } from '#lib/i18n/index.ts';
-	import type { AuditDiff } from '#lib/api/index.ts';
+	import type { AuditChange, AuditDiff } from '#lib/api/index.ts';
 
 	/** The control plane replaces a secret value with this marker. */
 	const REDACTED = '<redacted>';
@@ -14,6 +14,11 @@
 		empty: boolean;
 	}
 
+	interface Row {
+		field: string;
+		change: AuditChange;
+	}
+
 	function display(value: unknown): Cell {
 		if (value === REDACTED) return { text: '', redacted: true, empty: false };
 		if (value === null || value === undefined)
@@ -22,10 +27,37 @@
 		return { text: JSON.stringify(value), redacted: false, empty: false };
 	}
 
-	const entries = $derived(diff ? Object.entries(diff) : []);
+	/** True for a value of the shape `{ old, new }`. */
+	function isChange(value: unknown): value is AuditChange {
+		return typeof value === 'object' && value !== null && ('old' in value || 'new' in value);
+	}
+
+	/**
+	 * Normalize the two shapes of a diff into rows. An update holds one entry for
+	 * each changed field. A create or a delete holds one `{ old, new }` pair at
+	 * the top level.
+	 */
+	function normalize(value: AuditDiff | null): Row[] {
+		if (!value) return [];
+		const keys = Object.keys(value);
+		const wholeRecord =
+			keys.length === 2 &&
+			keys.includes('old') &&
+			keys.includes('new') &&
+			!(isChange(value.old) && isChange(value.new));
+		if (wholeRecord) {
+			return [{ field: t('diff.record'), change: { old: value.old, new: value.new } }];
+		}
+		return Object.entries(value).map(([field, change]) => ({
+			field,
+			change: isChange(change) ? change : { old: null, new: change }
+		}));
+	}
+
+	const rows = $derived(normalize(diff));
 </script>
 
-{#if entries.length === 0}
+{#if rows.length === 0}
 	<p class="diff__empty">{t('diff.empty')}</p>
 {:else}
 	<table class="diff">
@@ -37,11 +69,11 @@
 			</tr>
 		</thead>
 		<tbody>
-			{#each entries as [field, change] (field)}
-				{@const oldCell = display(change.old)}
-				{@const newCell = display(change.new)}
+			{#each rows as row (row.field)}
+				{@const oldCell = display(row.change.old)}
+				{@const newCell = display(row.change.new)}
 				<tr>
-					<th scope="row" class="diff__field">{field}</th>
+					<th scope="row" class="diff__field">{row.field}</th>
 					<td class:diff__empty-value={oldCell.empty}>
 						{#if oldCell.redacted}
 							<Badge tone="neutral">{t('diff.redacted')}</Badge>

@@ -13,6 +13,20 @@ export default defineConfig({
 			}),
 			paths: {
 				base: ''
+			},
+			// The control plane sends the same policy as an HTTP header. SvelteKit
+			// adds the SHA-256 hashes of the inline bootstrap scripts to
+			// `script-src`, so the policy needs no `unsafe-inline`.
+			csp: {
+				mode: 'hash',
+				directives: {
+					'default-src': ['self'],
+					'img-src': ['self', 'data:'],
+					'style-src': ['self', 'unsafe-inline'],
+					'script-src': ['self'],
+					'connect-src': ['self'],
+					'form-action': ['self']
+				}
 			}
 		})
 	],

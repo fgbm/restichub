@@ -72,3 +72,21 @@ export function tErrorCode(code: string | undefined): string | undefined {
 	if (key in en) return t(key);
 	return undefined;
 }
+
+/**
+ * Translate an audit action. The server stores a snake_case name. If the catalog
+ * has no message for the name, the function returns the raw name.
+ */
+export function tAuditAction(action: string): string {
+	const key = `audit.action.${action}` as MessageKey;
+	return key in en ? t(key) : action;
+}
+
+/**
+ * Translate an audit actor type. If the catalog has no message for the type, the
+ * function returns the raw type.
+ */
+export function tAuditActorType(actorType: string): string {
+	const key = `audit.actorType.${actorType}` as MessageKey;
+	return key in en ? t(key) : actorType;
+}

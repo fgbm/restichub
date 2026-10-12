@@ -21,6 +21,9 @@
 
 	let createOpen = $state(false);
 	let newName = $state('');
+	let newAdminUsername = $state('');
+	let newAdminDisplayName = $state('');
+	let newAdminPassword = $state('');
 	let creating = $state(false);
 	let createError = $state<string | null>(null);
 
@@ -63,10 +66,20 @@
 		creating = true;
 		createError = null;
 		try {
-			await service.createTenant({ name: newName });
+			await service.createTenant({
+				name: newName,
+				first_admin: {
+					username: newAdminUsername,
+					display_name: newAdminDisplayName,
+					password: newAdminPassword
+				}
+			});
 			pushToast('success', t('tenants.created'));
 			createOpen = false;
 			newName = '';
+			newAdminUsername = '';
+			newAdminDisplayName = '';
+			newAdminPassword = '';
 			await load();
 		} catch (problem) {
 			createError = messageOf(problem);
@@ -151,9 +164,36 @@
 			mono
 		/>
 	</FormField>
+	<FormField label={t('tenants.adminUsername')} for="tenant-admin-username" required>
+		<TextField id="tenant-admin-username" bind:value={newAdminUsername} mono autocomplete="off" />
+	</FormField>
+	<FormField label={t('tenants.adminDisplayName')} for="tenant-admin-display-name" required>
+		<TextField id="tenant-admin-display-name" bind:value={newAdminDisplayName} autocomplete="off" />
+	</FormField>
+	<FormField
+		label={t('tenants.adminPassword')}
+		for="tenant-admin-password"
+		hint={t('setup.passwordHint')}
+		required
+	>
+		<TextField
+			id="tenant-admin-password"
+			type="password"
+			bind:value={newAdminPassword}
+			autocomplete="new-password"
+		/>
+	</FormField>
 	<div class="dialog-actions">
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
-		<Button variant="primary" loading={creating} disabled={!newName} onclick={createTenant}>
+		<Button
+			variant="primary"
+			loading={creating}
+			disabled={!newName ||
+				!newAdminUsername ||
+				!newAdminDisplayName ||
+				newAdminPassword.length < 12}
+			onclick={createTenant}
+		>
 			{t('common.create')}
 		</Button>
 	</div>

@@ -30,6 +30,40 @@ VITE_USE_MOCK=true npm run dev
 
 The mock service holds test data in memory. Do not use it in production.
 
+## Run locally
+
+The Compose file at the repository root starts the full stack: PostgreSQL, the migrations and the control plane with the embedded UI.
+
+1. Create `.env` with random development secrets:
+
+   ```sh
+   ./scripts/dev-env.sh
+   ```
+
+2. Build and start the stack:
+
+   ```sh
+   docker compose up --build
+   ```
+
+3. Open `http://127.0.0.1:8080`.
+
+4. Read the one-time setup token from the control plane log:
+
+   ```sh
+   docker compose logs cp
+   ```
+
+   The token is on the line with `setup_token`. Use it on the setup page to create the first Platform Admin.
+
+5. Stop the stack and remove the data volume:
+
+   ```sh
+   docker compose down -v
+   ```
+
+The Compose file is for development only. It turns on insecure cookies and sets development passwords.
+
 ## Scripts
 
 | Script            | Function                                                     |
@@ -65,7 +99,7 @@ The mock service holds test data in memory. Do not use it in production.
 
 ## API client
 
-The file `src/lib/api/schema.d.ts` is a placeholder. The command `npm run gen:api` replaces it with the types from the OpenAPI document. Start the control plane before you run the command. The control plane serves the document at `/api/v1/openapi.json`. Set `OPENAPI_URL` to use another address. The endpoint paths live in `src/lib/api/endpoints.ts`.
+The file `src/lib/api/schema.d.ts` is generated from the OpenAPI document. The command `npm run gen:api` writes it. Start the control plane before you run the command. The control plane serves the document at `/api/v1/openapi.json`. Set `OPENAPI_URL` to use another address. The endpoint paths live in `src/lib/api/endpoints.ts`.
 
 The client sends the header `X-ResticHub-CSRF: 1` on POST, PUT, PATCH and DELETE. It sends the cookie with `credentials: 'same-origin'`. On status 401 it redirects to `/sign-in?next=...`.
 

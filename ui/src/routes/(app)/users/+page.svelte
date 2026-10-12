@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError, service } from '#lib/api/index.ts';
+	import { ApiError, assignableRoles, service } from '#lib/api/index.ts';
 	import type { Role, User } from '#lib/api/index.ts';
 	import {
 		Button,
@@ -14,6 +14,7 @@
 	} from '#lib/components/index.ts';
 	import type { Column, SelectOption } from '#lib/components/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let users = $state<User[]>([]);
@@ -37,11 +38,12 @@
 		viewer: t('users.role.viewer')
 	};
 
-	const roleOptions = $derived<SelectOption[]>([
-		{ value: 'admin', label: t('users.role.admin') },
-		{ value: 'operator', label: t('users.role.operator') },
-		{ value: 'viewer', label: t('users.role.viewer') }
-	]);
+	const roleOptions = $derived<SelectOption[]>(
+		assignableRoles(getSession()?.tenant?.id).map((role) => ({
+			value: role,
+			label: roleKeys[role]
+		}))
+	);
 
 	const columns = $derived<Column<User>[]>([
 		{ key: 'username', header: t('users.username'), mono: true },
@@ -82,7 +84,7 @@
 	function openCreate(): void {
 		newUsername = '';
 		newDisplayName = '';
-		newRole = 'viewer';
+		newRole = assignableRoles(getSession()?.tenant?.id)[0];
 		newPassword = '';
 		createError = null;
 		createOpen = true;

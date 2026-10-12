@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError, service } from '#lib/api/index.ts';
-	import type { ApiToken, ApiTokenCreated } from '#lib/api/index.ts';
+	import { ApiError, assignableRoles, service } from '#lib/api/index.ts';
+	import type { ApiToken, ApiTokenCreated, Role } from '#lib/api/index.ts';
 	import {
 		Button,
 		CopyField,
@@ -10,10 +10,12 @@
 		FormField,
 		InlineAlert,
 		PageHeader,
+		Select,
 		TextField
 	} from '#lib/components/index.ts';
-	import type { Column } from '#lib/components/index.ts';
+	import type { Column, SelectOption } from '#lib/components/index.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
+	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let tokens = $state<ApiToken[]>([]);
@@ -24,6 +26,7 @@
 	let creating = $state(false);
 	let createError = $state<string | null>(null);
 	let newName = $state('');
+	let newRole = $state<Role>('viewer');
 	let newExpiry = $state('');
 	let createdToken = $state<ApiTokenCreated | null>(null);
 
@@ -31,14 +34,34 @@
 	let revokeOpen = $state(false);
 	let revoking = $state(false);
 
-	function formatDate(value: string | null): string {
+	const roleKeys: Record<Role, string> = {
+		platform_admin: t('users.role.platformAdmin'),
+		admin: t('users.role.admin'),
+		operator: t('users.role.operator'),
+		viewer: t('users.role.viewer')
+	};
+
+	const roleOptions = $derived<SelectOption[]>(
+		assignableRoles(getSession()?.tenant?.id).map((role) => ({
+			value: role,
+			label: roleKeys[role]
+		}))
+	);
+
+	function formatDate(value: string | null | undefined): string {
 		if (!value) return t('common.never');
 		return new Date(value).toLocaleString(getLocale());
 	}
 
 	const columns = $derived<Column<ApiToken>[]>([
 		{ key: 'name', header: t('tokens.name') },
-		{ key: 'prefix', header: t('tokens.prefix'), mono: true },
+		{
+			key: 'role',
+			header: t('users.role'),
+			cell: (row) => roleKeys[row.role],
+			badge: (row) => (row.role === 'admin' ? 'info' : 'neutral')
+		},
+		{ key: 'display_prefix', header: t('tokens.prefix'), mono: true },
 		{ key: 'created_at', header: t('common.createdAt'), cell: (row) => formatDate(row.created_at) },
 		{ key: 'expires_at', header: t('tokens.expiresAt'), cell: (row) => formatDate(row.expires_at) },
 		{
@@ -69,6 +92,7 @@
 
 	function openCreate(): void {
 		newName = '';
+		newRole = assignableRoles(getSession()?.tenant?.id)[0];
 		newExpiry = '';
 		createError = null;
 		createdToken = null;
@@ -81,6 +105,7 @@
 		try {
 			createdToken = await service.createToken({
 				name: newName,
+				role: newRole,
 				expires_at: newExpiry ? new Date(newExpiry).toISOString() : null
 			});
 			pushToast('success', t('tokens.created'));
@@ -138,10 +163,8 @@
 	title={createdToken ? t('tokens.valueOnceTitle') : t('tokens.createTitle')}
 >
 	{#if createdToken}
-		<InlineAlert tone="warning" title={t('tokens.valueWarning')}>
-			{t('tokens.valueOnceBody')}
-		</InlineAlert>
-		<CopyField value={createdToken.value} label={t('tokens.value')} />
+		<InlineAlert tone="warning" title={t('tokens.valueOnceBody')} />
+		<CopyField value={createdToken.token} label={t('tokens.value')} />
 		<div class="dialog-actions">
 			<Button variant="primary" onclick={closeCreate}>{t('common.close')}</Button>
 		</div>
@@ -151,6 +174,9 @@
 		{/if}
 		<FormField label={t('tokens.name')} for="token-name" required>
 			<TextField id="token-name" bind:value={newName} placeholder={t('tokens.namePlaceholder')} />
+		</FormField>
+		<FormField label={t('users.role')} for="token-role" required>
+			<Select id="token-role" bind:value={newRole} options={roleOptions} />
 		</FormField>
 		<FormField label={t('tokens.expiresAt')} for="token-expiry">
 			<TextField id="token-expiry" type="date" bind:value={newExpiry} />
