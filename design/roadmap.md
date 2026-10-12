@@ -25,19 +25,21 @@ Milestone 0 is complete except the P3 WinRM spike. P3 needs an Active Directory 
 
 ## Milestone 1: MVP
 
-The MVP contains all requirements with priority M. The epics are:
+The MVP contains all requirements with priority M. [Issue #14](https://github.com/fgbm/restichub/issues/14) tracks the epics.
 
-1. Protocol: Protocol Buffers contract, signatures, enrollment, CA.
-2. Agent: service, step execution, restic runner, JSON parser, cancellation, outbox.
-3. Control plane core: tenants, database schema, secrets, audit.
-4. Scheduler and queue: cron, repository barriers, retries, stale lock recovery.
-5. Profiles and compiler: flat profiles, variables, validation, preview.
-6. Restore: snapshots, file tree, restore to another agent.
-7. Monitoring: dashboard, alerts, Prometheus.
-8. Web UI: all MVP sections, English and Russian.
-9. Installation: scripts with a token, Docker Compose for the control plane.
-10. Documentation: installation guide, threat model, resticprofile migration guide.
-11. Test benches S1 and S2, fake restic, agent emulator.
+1. [#4 Control plane core](https://github.com/fgbm/restichub/issues/4): tenants, database schema, secrets, audit.
+2. [#13 Test benches and release acceptance](https://github.com/fgbm/restichub/issues/13): benches S1 and S2, fake restic, agent emulator.
+3. [#1 Protocol and enrollment](https://github.com/fgbm/restichub/issues/1): Protocol Buffers contract, signatures, enrollment, CA.
+4. [#2 Agent core](https://github.com/fgbm/restichub/issues/2): service, step execution, restic runner, JSON parser, cancellation, outbox.
+5. [#3 Hook allow-list](https://github.com/fgbm/restichub/issues/3): allow-list file, parameter schemas, hook phases.
+6. [#5 Repositories](https://github.com/fgbm/restichub/issues/5): repository management, init and access test, maintenance agent.
+7. [#6 Profiles and compiler](https://github.com/fgbm/restichub/issues/6): flat profiles, variables, validation, preview.
+8. [#7 Scheduler and queue](https://github.com/fgbm/restichub/issues/7): cron, repository barriers, retries, stale lock recovery.
+9. [#8 Restore](https://github.com/fgbm/restichub/issues/8): snapshots, file tree, restore to another agent.
+10. [#9 Monitoring, alerts and job logs](https://github.com/fgbm/restichub/issues/9): dashboard, alerts, Prometheus, job logs.
+11. [#10 Public API and web UI](https://github.com/fgbm/restichub/issues/10): REST with OpenAPI, SSE, Svelte 5 SPA, English and Russian.
+12. [#11 Installation and packaging](https://github.com/fgbm/restichub/issues/11): scripts with a token, Docker Compose for the control plane.
+13. [#12 Documentation](https://github.com/fgbm/restichub/issues/12): installation guide, threat model, resticprofile migration guide.
 
 ## Milestone 2: 1.0
 
