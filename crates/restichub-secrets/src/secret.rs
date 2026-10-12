@@ -46,6 +46,22 @@ impl SecretPurpose {
             Self::RestServerPassword => "rest_server_password",
         }
     }
+
+    /// Parses the stable string of a purpose.
+    ///
+    /// The function returns `None` for a string that this version does not know. The strings are
+    /// stable and MUST NOT change: a change makes every stored ciphertext of that purpose
+    /// undecryptable.
+    pub fn parse(value: &str) -> Option<Self> {
+        let purpose = match value {
+            "repository_password" => Self::RepositoryPassword,
+            "s3_access_key" => Self::S3AccessKey,
+            "s3_secret_key" => Self::S3SecretKey,
+            "rest_server_password" => Self::RestServerPassword,
+            _ => return None,
+        };
+        Some(purpose)
+    }
 }
 
 /// An encrypted secret value.
@@ -137,6 +153,19 @@ mod tests {
 
     fn plaintext() -> SecretString {
         SecretString::new("s3cr3t-value".to_owned())
+    }
+
+    #[test]
+    fn a_purpose_round_trips_through_its_string() {
+        for purpose in [
+            SecretPurpose::RepositoryPassword,
+            SecretPurpose::S3AccessKey,
+            SecretPurpose::S3SecretKey,
+            SecretPurpose::RestServerPassword,
+        ] {
+            assert_eq!(SecretPurpose::parse(purpose.as_str()), Some(purpose));
+        }
+        assert_eq!(SecretPurpose::parse("not_a_purpose"), None);
     }
 
     #[test]

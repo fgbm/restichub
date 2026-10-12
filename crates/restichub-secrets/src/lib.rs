@@ -83,6 +83,22 @@ impl Drop for SecretString {
     }
 }
 
+/// Deserialises a [`SecretString`] from a JSON string.
+///
+/// The feature `serde` enables this implementation. The type zeroizes the value on drop, so the
+/// decoded value does not stay in a plain `String`. The request body bytes that `hyper` buffered
+/// before the deserialiser are not zeroized; ADR-0023 records this as an accepted residual risk.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SecretString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Ok(Self(value))
+    }
+}
+
 /// Reads environment variables.
 ///
 /// The control plane uses this trait to read configuration values and secrets. A test uses a
@@ -324,6 +340,14 @@ mod tests {
     fn debug_hides_the_value() {
         let secret = SecretString::new("hunter2".to_owned());
         assert_eq!(format!("{secret:?}"), "<redacted>");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_secret_string_deserialises_from_a_json_string() {
+        let secret: SecretString =
+            serde_json::from_str("\"hunter2\"").unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(secret.expose_secret(), "hunter2");
     }
 
     #[test]
