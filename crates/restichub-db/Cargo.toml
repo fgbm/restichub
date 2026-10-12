@@ -15,6 +15,10 @@ workspace = true
 # Enables the test database helper. A test enables this feature through a dev-dependency.
 test-util = []
 
+[dev-dependencies]
+# Enables the test database helper for the integration tests of this crate.
+restichub-db = { path = ".", features = ["test-util"] }
+
 [dependencies]
 sqlx = { workspace = true }
 thiserror = { workspace = true }

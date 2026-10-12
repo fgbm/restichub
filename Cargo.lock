@@ -1434,6 +1434,7 @@ dependencies = [
 name = "restichub-db"
 version = "0.0.0"
 dependencies = [
+ "restichub-db",
  "sqlx",
  "thiserror",
  "tokio",
