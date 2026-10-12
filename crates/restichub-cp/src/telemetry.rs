@@ -29,3 +29,12 @@ pub fn init(config: &Config) -> Result<(), TelemetryError> {
     };
     result.map_err(TelemetryError::Init)
 }
+
+/// Initializes a text tracing subscriber for a short command such as `migrate` (N4).
+pub fn init_command() -> Result<(), TelemetryError> {
+    let filter = EnvFilter::try_new("info").map_err(TelemetryError::Filter)?;
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .try_init()
+        .map_err(TelemetryError::Init)
+}

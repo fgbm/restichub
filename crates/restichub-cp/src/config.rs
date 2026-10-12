@@ -22,6 +22,15 @@ pub const DATABASE_URL_ENV: &str = "RESTICHUB_DATABASE_URL";
 pub const DATABASE_PASSWORD_FILE_ENV: &str = "RESTICHUB_DATABASE_PASSWORD_FILE";
 /// The name of the environment variable that holds the database password.
 pub const DATABASE_PASSWORD_ENV: &str = "RESTICHUB_DATABASE_PASSWORD";
+/// The name of the environment variable that holds the URL of the migration login.
+///
+/// The migration login is the owner of the installation database. It is optional. Without it the
+/// control plane does not run the migrations (D1).
+pub const DATABASE_MIGRATION_URL_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_URL";
+/// The name of the environment variable that holds the path of the migration password file.
+pub const DATABASE_MIGRATION_PASSWORD_FILE_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_PASSWORD_FILE";
+/// The name of the environment variable that holds the migration password.
+pub const DATABASE_MIGRATION_PASSWORD_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_PASSWORD";
 /// The name of the environment variable that holds the log format.
 pub const LOG_FORMAT_ENV: &str = "RESTICHUB_LOG_FORMAT";
 /// The name of the environment variable that holds the log level.
@@ -37,8 +46,10 @@ const DEFAULT_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum Command {
     /// Print the version and stop.
     Version,
-    /// Run the server.
-    Run(Box<Cli>),
+    /// Run the server. This is the default command.
+    Serve(Box<Cli>),
+    /// Apply the database migrations and stop (N4).
+    Migrate(Box<Cli>),
 }
 
 /// The command-line arguments of the control plane.
@@ -97,6 +108,11 @@ pub enum ConfigError {
         "the parameter `database_url` holds a password, but `database_password_file` is also set"
     )]
     PasswordFileWithUrlPassword,
+    /// The migration URL holds a password and a migration password file is also set.
+    #[error(
+        "the parameter `database_migration_url` holds a password, but `database_migration_password_file` is also set"
+    )]
+    MigrationPasswordFileWithUrlPassword,
     /// A secret read failed.
     #[error(transparent)]
     Secret(#[from] restichub_secrets::SecretError),
@@ -215,16 +231,20 @@ impl Config {
 
 /// Parses the command-line arguments.
 ///
-/// The function reads `--config <path>`, `--config=<path>`, `--version` and `-V`.
+/// The function reads the subcommands `serve` (the default) and `migrate`, and the arguments
+/// `--config <path>`, `--config=<path>`, `--version` and `-V`.
 pub fn parse_args<I>(args: I) -> Result<Command, ConfigError>
 where
     I: IntoIterator<Item = String>,
 {
     let mut config_path = None;
+    let mut migrate = false;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--version" | "-V" => return Ok(Command::Version),
+            "serve" => migrate = false,
+            "migrate" => migrate = true,
             "--config" => {
                 let value = args.next().ok_or(ConfigError::ConfigPathMissing)?;
                 config_path = Some(PathBuf::from(value));
@@ -238,7 +258,12 @@ where
             }
         }
     }
-    Ok(Command::Run(Box::new(Cli { config_path })))
+    let cli = Box::new(Cli { config_path });
+    Ok(if migrate {
+        Command::Migrate(cli)
+    } else {
+        Command::Serve(cli)
+    })
 }
 
 /// The configuration file. Each field is optional so that the environment can override it.
@@ -248,6 +273,8 @@ struct FileConfig {
     listen_addr: Option<String>,
     database_url: Option<String>,
     database_password_file: Option<PathBuf>,
+    database_migration_url: Option<String>,
+    database_migration_password_file: Option<PathBuf>,
     database_max_connections: Option<u32>,
     database_acquire_timeout_secs: Option<u64>,
     log_format: Option<String>,
@@ -285,6 +312,74 @@ fn log_format(value: Option<&str>) -> Result<LogFormat, ConfigError> {
     }
 }
 
+/// The configuration of the `migrate` command.
+///
+/// The command reads only the migration URL and the migration password. The server path does not
+/// accept migration credentials (N4).
+#[derive(Debug)]
+pub struct MigrationConfig {
+    /// The connection URL of the owner login. The URL holds no password.
+    pub url: String,
+    /// The password of the owner login from a file or from the environment.
+    pub password: Option<SecretString>,
+}
+
+impl MigrationConfig {
+    /// Loads the migration configuration from the process environment.
+    pub fn load(cli: &Cli) -> Result<Self, ConfigError> {
+        Self::load_with(cli, &SystemEnv)
+    }
+
+    /// Loads the migration configuration from a given environment. A test uses this function.
+    pub fn load_with(cli: &Cli, env: &dyn EnvReader) -> Result<Self, ConfigError> {
+        let file_path = cli
+            .config_path
+            .clone()
+            .or_else(|| env.get(CONFIG_PATH_ENV).map(PathBuf::from));
+        let file = match file_path {
+            Some(path) => FileConfig::from_path(&path)?,
+            None => FileConfig::default(),
+        };
+        let url = env
+            .get(DATABASE_MIGRATION_URL_ENV)
+            .or(file.database_migration_url)
+            .ok_or_else(|| ConfigError::Invalid {
+                name: "database_migration_url",
+                reason: "the value is not set".to_owned(),
+            })?;
+        let password_file = env
+            .get(DATABASE_MIGRATION_PASSWORD_FILE_ENV)
+            .map(PathBuf::from)
+            .or(file.database_migration_password_file);
+        let (url, url_password) = split_url_password(&url);
+        if password_file.is_some() && url_password.is_some() {
+            return Err(ConfigError::MigrationPasswordFileWithUrlPassword);
+        }
+        let password =
+            if password_file.is_some() || env.get(DATABASE_MIGRATION_PASSWORD_ENV).is_some() {
+                Some(read_secret(
+                    password_file.as_deref(),
+                    DATABASE_MIGRATION_PASSWORD_ENV,
+                    env,
+                )?)
+            } else {
+                None
+            };
+        let password = match (password, url_password) {
+            (Some(password), None) => Some(password),
+            (None, Some(password)) => Some(SecretString::new(password)),
+            (Some(_), Some(_)) => {
+                return Err(ConfigError::Invalid {
+                    name: "database_migration_url",
+                    reason: "a password is set in the URL and in the environment".to_owned(),
+                });
+            }
+            (None, None) => None,
+        };
+        Ok(Self { url, password })
+    }
+}
+
 /// Removes the password from a URL and returns the URL and the password.
 ///
 /// The control plane keeps the password out of `Debug` output. The function returns the URL
@@ -318,7 +413,7 @@ mod tests {
 
     use restichub_secrets::EnvReader;
 
-    use super::{Cli, Command, Config, ConfigError, LogFormat, parse_args};
+    use super::{Cli, Command, Config, ConfigError, LogFormat, MigrationConfig, parse_args};
 
     /// A test environment.
     struct MapEnv(HashMap<String, String>);
@@ -519,14 +614,108 @@ mod tests {
     fn parse_config_argument() {
         let command = parse_args(["--config".to_owned(), "/etc/restichub.toml".to_owned()]);
         assert!(
-            matches!(command, Ok(Command::Run(cli)) if cli.config_path == Some(PathBuf::from("/etc/restichub.toml")))
+            matches!(command, Ok(Command::Serve(cli)) if cli.config_path == Some(PathBuf::from("/etc/restichub.toml")))
         );
+    }
+
+    #[test]
+    fn parse_migrate_subcommand() {
+        let command = parse_args([
+            "migrate".to_owned(),
+            "--config".to_owned(),
+            "/etc/restichub.toml".to_owned(),
+        ]);
+        assert!(
+            matches!(command, Ok(Command::Migrate(cli)) if cli.config_path == Some(PathBuf::from("/etc/restichub.toml")))
+        );
+    }
+
+    #[test]
+    fn parse_serve_subcommand_is_the_default() {
+        let command = parse_args(["serve".to_owned()]);
+        assert!(matches!(command, Ok(Command::Serve(_))));
+        let command = parse_args(std::iter::empty::<String>());
+        assert!(matches!(command, Ok(Command::Serve(_))));
     }
 
     #[test]
     fn parse_unknown_argument() {
         let command = parse_args(["--nope".to_owned()]);
         assert!(matches!(command, Err(ConfigError::UnknownArgument(_))));
+    }
+
+    #[test]
+    fn the_migration_url_is_required_for_the_migrate_command() {
+        let env = MapEnv::new(&[("RESTICHUB_DATABASE_URL", "postgres://host/db")]);
+        let config = MigrationConfig::load_with(&Cli::default(), &env);
+        assert!(matches!(
+            config,
+            Err(ConfigError::Invalid {
+                name: "database_migration_url",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn the_migration_url_moves_the_password_out_of_the_url() {
+        let env = MapEnv::new(&[(
+            "RESTICHUB_DATABASE_MIGRATION_URL",
+            "postgres://owner:secret@host/db",
+        )]);
+        let config = MigrationConfig::load_with(&Cli::default(), &env);
+        let pair = config.ok().map(|config| {
+            (
+                config.url,
+                config
+                    .password
+                    .as_ref()
+                    .map(|password| password.expose_secret().to_owned()),
+            )
+        });
+        assert_eq!(
+            pair,
+            Some((
+                "postgres://owner@host/db".to_owned(),
+                Some("secret".to_owned())
+            ))
+        );
+    }
+
+    #[test]
+    fn a_migration_password_file_with_a_url_password_is_an_error() {
+        let password_file = temp_path("migration-pw");
+        std::fs::write(&password_file, "from-file").ok();
+        let env = MapEnv::new(&[
+            (
+                "RESTICHUB_DATABASE_MIGRATION_URL",
+                "postgres://owner:secret@host/db",
+            ),
+            (
+                "RESTICHUB_DATABASE_MIGRATION_PASSWORD_FILE",
+                password_file.to_str().unwrap_or_default(),
+            ),
+        ]);
+        let error = MigrationConfig::load_with(&Cli::default(), &env);
+        std::fs::remove_file(&password_file).ok();
+        assert!(matches!(
+            error,
+            Err(ConfigError::MigrationPasswordFileWithUrlPassword)
+        ));
+    }
+
+    #[test]
+    fn the_server_config_holds_no_migration_settings() {
+        // The server path does not read migration credentials (N4).
+        let env = MapEnv::new(&[
+            ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+            (
+                "RESTICHUB_DATABASE_MIGRATION_URL",
+                "postgres://owner@host/db",
+            ),
+        ]);
+        let config = Config::load_with(&Cli::default(), &env);
+        assert!(config.is_ok());
     }
 
     #[test]

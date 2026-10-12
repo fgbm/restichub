@@ -24,16 +24,18 @@ async fn readyz_is_ready_with_a_database() -> Result<(), Box<dyn std::error::Err
 }
 
 #[tokio::test]
-async fn the_migrations_create_the_schema_info_table() -> Result<(), Box<dyn std::error::Error>> {
+async fn the_migrations_create_the_platform_tenant() -> Result<(), Box<dyn std::error::Error>> {
     let Some(database) = test_database().await else {
         return Ok(());
     };
-    let count: (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'schema_info'",
-    )
-    .fetch_one(database.pool())
-    .await?;
-    assert_eq!(count.0, 1);
+    let mut transaction = database.database().begin_platform().await?;
+    let tenants = restichub_db::tenants::list(&mut transaction).await?;
+    transaction.commit().await?;
+    assert!(
+        tenants
+            .iter()
+            .any(|tenant| tenant.id == restichub_db::PLATFORM_TENANT_ID)
+    );
     database.cleanup().await;
     Ok(())
 }
