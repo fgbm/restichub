@@ -92,3 +92,40 @@ pub async fn read_tenant_key(
         }),
     )
 }
+
+/// Reads the active key row of the tenant of the transaction.
+///
+/// The function returns the wrapped data encryption key (DEK). The control plane unwraps it with
+/// the key encryption key (KEK) before it encrypts or decrypts a secret value (ADR-0017). A tenant
+/// has one active key version, so the function returns at most one row.
+pub async fn active_key(tx: &mut TenantTx<'_>) -> Result<Option<TenantKey>, DbError> {
+    read_tenant_key(tx, tx.tenant()).await
+}
+
+/// Reads the key row of the tenant of the transaction with a given version.
+///
+/// The function returns the row also when the version is not active. The delivery path uses it: a
+/// secret holds the key version that encrypted it, so a rotated tenant must still deliver a secret
+/// that an older version encrypted (ADR-0017).
+pub async fn key_by_version(
+    tx: &mut TenantTx<'_>,
+    version: i32,
+) -> Result<Option<TenantKey>, DbError> {
+    let row = sqlx::query_as::<_, (i32, String, Vec<u8>, Vec<u8>)>(
+        "SELECT key_version, kek_id, wrapped_dek, nonce \
+         FROM tenant_keys WHERE tenant_id = $1 AND key_version = $2",
+    )
+    .bind(tx.tenant())
+    .bind(version)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(
+        row.map(|(key_version, kek_id, wrapped_dek, nonce)| TenantKey {
+            key_version,
+            kek_id,
+            wrapped_dek,
+            nonce,
+        }),
+    )
+}

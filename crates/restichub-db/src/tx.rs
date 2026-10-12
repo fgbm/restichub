@@ -6,7 +6,7 @@
 //! Each transaction sets the runtime role `restichub_app`. The role is not the table owner and has
 //! no `BYPASSRLS`, so Row-Level Security applies to every query.
 //!
-//! The connection is crate-internal ([`TenantTx::as_conn`] and [`PlatformTx::as_conn`] are
+//! The connection is crate-internal (`TenantTx::as_conn` and `PlatformTx::as_conn` are
 //! `pub(crate)`). Only the repository functions of this crate run SQL with bind parameters. An API
 //! crate calls typed repository functions, never raw SQL (H1).
 

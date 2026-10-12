@@ -10,7 +10,7 @@
 //! these three cases only.
 //!
 //! The module also holds the diff builder and the [`RedactedDiff`] type. The type keeps its value
-//! private. Only [`diff`], [`RedactedDiff::empty`] and [`RedactedDiff::none`] build a value. A
+//! private. Only [`diff`] and [`RedactedDiff::empty`] build a value. A
 //! caller can therefore not write a diff that holds a secret.
 
 use std::collections::BTreeSet;
@@ -22,7 +22,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::ids::{ApiTokenId, AuditLogId, TenantId, UserId};
+use crate::ids::{ApiTokenId, AuditLogId, SecretId, TenantId, UserId};
 use crate::tx::{PlatformTx, TenantTx};
 
 /// The default number of records in one page.
@@ -237,8 +237,8 @@ impl AuditAction {
 
 /// A diff that holds no secret value.
 ///
-/// The type keeps the JSON private. Only [`diff`], [`RedactedDiff::empty`] and
-/// [`RedactedDiff::none`] build a value. A caller can therefore not pass raw secret data.
+/// The type keeps the JSON private. Only [`diff`] and [`RedactedDiff::empty`] build a value. A
+/// caller can therefore not pass raw secret data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactedDiff(Value);
 
@@ -508,11 +508,37 @@ pub async fn insert(tx: &mut TenantTx<'_>, event: &AuditEvent) -> Result<AuditLo
     insert_row(tx.as_conn(), tenant, event).await
 }
 
+/// Inserts the record of a secret delivery to an agent (AC-RP-03).
+///
+/// The record holds the tenant, the agent, the job, the repository and the time. The function
+/// takes no secret value, so no secret value can appear in the record. The delivery path
+/// [`crate::delivery::load_ciphertext_for_delivery`] and the audit service use this function, so
+/// the shape of the record lives in one place.
+pub async fn insert_secret_delivered(
+    tx: &mut TenantTx<'_>,
+    secret_id: SecretId,
+    agent_id: Uuid,
+    job_id: Uuid,
+    repository_id: Uuid,
+) -> Result<AuditLogId, DbError> {
+    let tenant = tx.tenant();
+    let after = serde_json::json!({
+        "tenant_id": tenant.to_string(),
+        "agent_id": agent_id.to_string(),
+        "job_id": job_id.to_string(),
+        "repository_id": repository_id.to_string(),
+    });
+    let mut event = AuditEvent::new(AuditAction::SecretDelivered, "secret");
+    event.object_id = Some(secret_id.as_uuid());
+    event.diff = Some(diff(None, Some(&after), &[]));
+    insert(tx, &event).await
+}
+
 /// Inserts a record in a platform transaction.
 ///
 /// The policy `audit_log_platform_insert` of migration 0014 accepts the entered tenant, the
 /// platform tenant and the tenant of the GUC `restichub.audit_tenant_id`. The caller passes the
-/// tenant. The caller enters a created tenant first with [`PlatformTx::enter_tenant`], and it uses
+/// tenant. The caller enters a created tenant first with `PlatformTx::enter_tenant`, and it uses
 /// [`insert_platform_for`] for an existing tenant.
 pub async fn insert_platform(
     tx: &mut PlatformTx<'_>,

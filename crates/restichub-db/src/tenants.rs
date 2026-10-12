@@ -142,7 +142,7 @@ pub struct BootstrapTenant<'a> {
 /// Creates a tenant and returns its identifier.
 ///
 /// The transaction records the tenant. Only this tenant is valid for
-/// [`PlatformTx::enter_tenant`].
+/// `PlatformTx::enter_tenant`.
 pub async fn create(tx: &mut PlatformTx<'_>, name: &str) -> Result<TenantId, DbError> {
     create_with_id(tx, TenantId::new(), name).await
 }
