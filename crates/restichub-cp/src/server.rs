@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{DefaultBodyLimit, Request, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, request::Parts};
+use axum::http::{HeaderName, HeaderValue, Method, StatusCode, Uri, request::Parts};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, delete, get, patch, post};
 use axum::{Json, Router};
@@ -350,16 +350,39 @@ impl Modify for SecurityAddon {
 
 /// The fallback handler for a path with no route.
 ///
-/// An unknown `/api/...` path keeps the RFC 9457 problem. Every other path serves the embedded web
-/// UI, so the single-page application router handles the route. The UI never shadows a registered
-/// route.
-async fn not_found(uri: Uri, request_id: RequestIdHeader) -> Response {
-    let path = uri.path();
-    if path == "/api" || path.starts_with("/api/") {
-        ApiError::not_found(&request_id.0).into_response()
-    } else {
-        crate::ui::serve(uri)
+/// An unknown `/api/...` path keeps the RFC 9457 problem. The comparison ignores the letter case
+/// and the repeated slashes, so `/API/v1/x` and `//api/v1/x` cannot reach the UI. A method other
+/// than GET and HEAD never serves the UI either. Every other path serves the embedded web UI, so
+/// the single-page application router handles the route. The UI never shadows a registered route.
+async fn not_found(method: Method, uri: Uri, request_id: RequestIdHeader) -> Response {
+    if is_api_path(uri.path()) {
+        return ApiError::not_found(&request_id.0).into_response();
     }
+    if method != Method::GET && method != Method::HEAD {
+        return ApiError::method_not_allowed(&request_id.0).into_response();
+    }
+    crate::ui::serve(uri)
+}
+
+/// Returns true for the API namespace.
+///
+/// The function collapses the repeated slashes and ignores the letter case.
+fn is_api_path(path: &str) -> bool {
+    let mut collapsed = String::with_capacity(path.len());
+    let mut previous_slash = false;
+    for character in path.chars() {
+        if character == '/' {
+            if previous_slash {
+                continue;
+            }
+            previous_slash = true;
+        } else {
+            previous_slash = false;
+        }
+        collapsed.push(character);
+    }
+    let lower = collapsed.to_ascii_lowercase();
+    lower == "/api" || lower.starts_with("/api/")
 }
 
 /// The fallback handler for a known route with a method that the route does not accept.
@@ -435,4 +458,32 @@ impl<B> MakeSpan<B> for RequestSpan {
 
 fn request_id_header() -> HeaderName {
     HeaderName::from_static(REQUEST_ID_HEADER)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_api_path;
+
+    #[test]
+    fn the_api_namespace_is_recognized() {
+        assert!(is_api_path("/api"));
+        assert!(is_api_path("/api/"));
+        assert!(is_api_path("/api/v1/users"));
+        // The repeated slashes are collapsed.
+        assert!(is_api_path("//api/v1/x"));
+        assert!(is_api_path("/api//v1/x"));
+        assert!(is_api_path("///api"));
+        // The letter case is ignored.
+        assert!(is_api_path("/API/v1/x"));
+        assert!(is_api_path("/Api"));
+    }
+
+    #[test]
+    fn a_ui_path_is_not_the_api_namespace() {
+        assert!(!is_api_path("/"));
+        assert!(!is_api_path("/users"));
+        assert!(!is_api_path("/api-docs"));
+        assert!(!is_api_path("/apix"));
+        assert!(!is_api_path("/platform/tenants"));
+    }
 }

@@ -66,6 +66,7 @@ pub fn serve(uri: Uri) -> Response {
     let request_path = uri.path();
     let (asset_path, fallback) = match embedded_path(request_path) {
         Some(path) => (path, false),
+        None if looks_like_asset(request_path) => return StatusCode::NOT_FOUND.into_response(),
         None => (INDEX.to_owned(), true),
     };
     let cache = cache_control(request_path, fallback);
@@ -100,6 +101,20 @@ fn embedded_path(request_path: &str) -> Option<String> {
         return Some(with_index);
     }
     None
+}
+
+/// Returns true when a request path names a file and not a single-page application route.
+///
+/// A missing build asset never falls back to `index.html`: a wrong `/_app/...` URL and a wrong URL
+/// with a file extension answer HTTP 404. A route of the application holds no extension.
+fn looks_like_asset(request_path: &str) -> bool {
+    let path = request_path.trim_start_matches('/');
+    if path.starts_with("_app/") {
+        return true;
+    }
+    path.rsplit('/')
+        .next()
+        .is_some_and(|segment| segment.contains('.'))
 }
 
 /// Returns the cache policy of a response.
@@ -137,14 +152,33 @@ fn csp() -> &'static str {
 ///
 /// A built UI holds a `<meta http-equiv="content-security-policy">` tag with the SHA-256 hashes of
 /// the inline bootstrap scripts (the SvelteKit CSP configuration). The function reuses that policy,
-/// so the header and the meta tag agree and the scripts need no `unsafe-inline`. The placeholder
-/// page holds no inline script, so the default policy applies.
+/// so the header and the meta tag agree and the scripts need no `unsafe-inline`. The directives
+/// `frame-ancestors` and `base-uri` are dropped from the meta tag, because SvelteKit ignores them
+/// for a prerendered page, and appended once. The placeholder page holds no inline script, so the
+/// default policy applies.
 fn build_csp() -> String {
     let policy = UiAssets::get(INDEX)
         .and_then(|file| meta_csp(&file.data))
         .unwrap_or_else(|| DEFAULT_CSP.to_owned());
-    let policy = policy.trim().trim_end_matches(';');
-    format!("{policy}; frame-ancestors 'none'; base-uri 'none'")
+    let base = strip_directives(&policy, &["frame-ancestors", "base-uri"]);
+    format!("{base}; frame-ancestors 'none'; base-uri 'none'")
+}
+
+/// Removes the named directives from a policy.
+///
+/// The function keeps one copy of each named directive out, so the caller can append it once.
+fn strip_directives(policy: &str, names: &[&str]) -> String {
+    policy
+        .split(';')
+        .map(str::trim)
+        .filter(|directive| {
+            !directive.is_empty()
+                && !names
+                    .iter()
+                    .any(|name| *directive == *name || directive.starts_with(&format!("{name} ")))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Reads the content of the content security policy meta tag.
@@ -185,7 +219,9 @@ pub fn asset_paths() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{IMMUTABLE_CACHE, NO_CACHE, cache_control, content_type};
+    use super::{
+        IMMUTABLE_CACHE, NO_CACHE, cache_control, content_type, looks_like_asset, strip_directives,
+    };
 
     #[test]
     fn an_immutable_asset_is_cached_for_one_year() {
@@ -217,5 +253,33 @@ mod tests {
         );
         assert_eq!(content_type("favicon.svg"), "image/svg+xml");
         assert_eq!(content_type("data.bin"), "application/octet-stream");
+    }
+
+    #[test]
+    fn a_build_asset_and_an_extension_are_not_application_routes() {
+        assert!(looks_like_asset("/_app/immutable/nope.js"));
+        assert!(looks_like_asset("/missing.js"));
+        assert!(looks_like_asset("/nope.png"));
+        assert!(looks_like_asset("//_app/x"));
+        assert!(!looks_like_asset("/"));
+        assert!(!looks_like_asset("/users"));
+        assert!(!looks_like_asset("/users/42"));
+        assert!(!looks_like_asset("/platform/tenants"));
+    }
+
+    #[test]
+    fn the_named_directives_are_removed_once() {
+        let policy =
+            "default-src 'self'; frame-ancestors 'self'; base-uri 'self'; script-src 'self'";
+        assert_eq!(
+            strip_directives(policy, &["frame-ancestors", "base-uri"]),
+            "default-src 'self'; script-src 'self'"
+        );
+        // A directive with a similar prefix stays.
+        let other = "default-src 'self'; frame-ancestors-extra 'self'";
+        assert_eq!(
+            strip_directives(other, &["frame-ancestors"]),
+            "default-src 'self'; frame-ancestors-extra 'self'"
+        );
     }
 }
