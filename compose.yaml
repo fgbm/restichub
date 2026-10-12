@@ -1,0 +1,82 @@
+# Local development environment. Development use only.
+#
+# Create `.env` first with `scripts/dev-env.sh`. It holds random passwords and the KEK. This file
+# is not for production: it turns on insecure cookies and sets development passwords.
+
+name: restichub
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # Creates the cluster roles once and sets the development passwords. Development use only: the
+  # passwords come from `.env` and `ALTER ROLE` stores them as SCRAM verifiers.
+  db-bootstrap:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE: ${POSTGRES_DB}
+      OWNER_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+      RUNTIME_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+    volumes:
+      - ./crates/restichub-db/sql/bootstrap-roles.sql:/bootstrap-roles.sql:ro
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=1 -d postgres \
+          -v app_role=restichub_app -v auth_role=restichub_auth \
+          -v owner_role=restichub_owner -v runtime_role=restichub_runtime \
+          -f /bootstrap-roles.sql
+        psql -v ON_ERROR_STOP=1 -d postgres -c "ALTER ROLE restichub_owner PASSWORD '$$OWNER_PASSWORD'"
+        psql -v ON_ERROR_STOP=1 -d postgres -c "ALTER ROLE restichub_runtime PASSWORD '$$RUNTIME_PASSWORD'"
+        psql -v ON_ERROR_STOP=1 -d postgres -c "ALTER DATABASE \"$$DATABASE\" OWNER TO restichub_owner"
+
+  # Applies the migrations as the owner login and stops.
+  migrate:
+    build: .
+    image: restichub-cp
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_DATABASE_MIGRATION_URL: postgres://restichub_owner@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_MIGRATION_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+    command: ['migrate']
+
+  # Serves the control plane and the embedded web UI.
+  cp:
+    build: .
+    image: restichub-cp
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_LISTEN_ADDR: 0.0.0.0:8080
+      RESTICHUB_DATABASE_URL: postgres://restichub_runtime@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+      # Development only: the session cookie drops the Secure attribute over plain HTTP.
+      RESTICHUB_SERVER_INSECURE_COOKIES: 'true'
+      # The KEK arrives with the secrets configuration (issue #20). It is harmless when unused.
+      RESTICHUB_KEK: ${RESTICHUB_KEK}
+    ports:
+      - '8080:8080'
+
+volumes:
+  pgdata:

@@ -23,5 +23,8 @@ styles/.vale-config/
 .DS_Store
 Thumbs.db
 
+# Playwright MCP output
+.playwright-mcp/
+
 # Local agent notes
 PAPERCUTS.md

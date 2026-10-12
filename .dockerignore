@@ -1,0 +1,8 @@
+# The build context of the Docker image.
+.git
+target
+ui/node_modules
+ui/build
+ui/.svelte-kit
+docs/node_modules
+docs/dist

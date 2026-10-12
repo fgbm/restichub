@@ -52,6 +52,40 @@ npm run build
 
 The published documentation site is at https://fgbm.github.io/restichub/.
 
+## Run locally
+
+The Compose file at the repository root starts a development stack: PostgreSQL, the database migrations and the control plane with the embedded web UI. You must have Docker.
+
+1. Create `.env` with random development secrets:
+
+   ```sh
+   ./scripts/dev-env.sh
+   ```
+
+2. Build and start the stack:
+
+   ```sh
+   docker compose up --build
+   ```
+
+3. Open `http://127.0.0.1:8080`.
+
+4. Read the one-time setup token from the control plane log:
+
+   ```sh
+   docker compose logs cp
+   ```
+
+   The token is on the line with `setup_token`. Use it on the setup page to create the first Platform Admin.
+
+5. Stop the stack and remove the data volume:
+
+   ```sh
+   docker compose down -v
+   ```
+
+The Compose file is for development only. It turns on insecure cookies and sets development passwords. Read [`ui/README.md`](ui/README.md) for the details.
+
 ## Contribute
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request. All participants must obey the [Code of Conduct](CODE_OF_CONDUCT.md).
