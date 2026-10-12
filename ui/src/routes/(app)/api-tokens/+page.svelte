@@ -34,12 +34,12 @@
 	let revokeOpen = $state(false);
 	let revoking = $state(false);
 
-	const roleKeys: Record<Role, string> = {
+	const roleKeys = $derived<Record<Role, string>>({
 		platform_admin: t('users.role.platformAdmin'),
 		admin: t('users.role.admin'),
 		operator: t('users.role.operator'),
 		viewer: t('users.role.viewer')
-	};
+	});
 
 	const roleOptions = $derived<SelectOption[]>(
 		assignableRoles(getSession()?.tenant?.id).map((role) => ({
@@ -121,6 +121,12 @@
 		createOpen = false;
 		createdToken = null;
 	}
+
+	// The token value is shown once. Clear it whenever the dialog closes, also
+	// with the Escape key or a click on the backdrop.
+	$effect(() => {
+		if (!createOpen) createdToken = null;
+	});
 
 	async function confirmRevoke(): Promise<void> {
 		if (!revokeTarget) return;

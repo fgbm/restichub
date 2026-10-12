@@ -170,6 +170,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the tenants of the platform. */
+        get: operations["list_tenants"];
+        put?: never;
+        /** Creates a tenant with its first administrator. */
+        post: operations["create_tenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one tenant of the platform. */
+        get: operations["get_tenant"];
+        put?: never;
+        post?: never;
+        /**
+         * Deletes a tenant (soft delete).
+         * @description The tenant must be suspended first. The endpoint sets the status to `deleted`; it removes no
+         *     row. The platform tenant cannot be deleted.
+         */
+        delete: operations["delete_tenant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resumes a tenant.
+         * @description The endpoint is idempotent. A deleted tenant cannot be resumed.
+         */
+        post: operations["resume_tenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspends a tenant.
+         * @description The endpoint is idempotent. The platform tenant cannot be suspended.
+         */
+        post: operations["suspend_tenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/setup": {
         parameters: {
             query?: never;
@@ -362,6 +442,25 @@ export interface components {
             /** @description The new password. It must hold at least 12 characters. */
             new_password: string;
         };
+        /** @description The first administrator of a new tenant. */
+        CreateTenantAdmin: {
+            /** @description The name of the administrator for the user interface. */
+            display_name: string;
+            /** @description The password of the administrator. It must hold at least 12 characters. */
+            password: string;
+            /** @description The username of the administrator. It is unique for the tenant and ignores the letter case. */
+            username: string;
+        };
+        /** @description The body of the create-tenant request. */
+        CreateTenantRequest: {
+            /** @description The first administrator of the tenant. */
+            first_admin: components["schemas"]["CreateTenantAdmin"];
+            /**
+             * @description The name of the tenant. It holds 1 to 63 characters from `a-z`, `0-9` and `-`, it starts
+             *     with a letter, and it is not `platform`.
+             */
+            name: string;
+        };
         /** @description The body of the create-token request. */
         CreateTokenRequest: {
             /** @description The optional expiry time in RFC 3339. */
@@ -404,6 +503,26 @@ export interface components {
             /** @description The tenant. */
             tenant: components["schemas"]["TenantView"];
             user?: components["schemas"]["UserView"] | null;
+        };
+        /**
+         * @description A tenant in a platform administration response (issue #20, FR-TN-02).
+         *
+         *     The view holds the user count only. It never holds a user list or a secret of the tenant.
+         */
+        PlatformTenantView: {
+            /** @description The time the tenant was created in RFC 3339. */
+            created_at: string;
+            /** @description The identifier of the tenant. */
+            id: string;
+            /** @description The name of the tenant. */
+            name: string;
+            /** @description The status: `active`, `suspended` or `deleted`. */
+            status: string;
+            /**
+             * Format: int64
+             * @description The number of users of the tenant.
+             */
+            user_count: number;
         };
         /** @description The body of an RFC 9457 problem response. */
         ProblemBody: {
@@ -459,6 +578,13 @@ export interface components {
             tenant: components["schemas"]["TenantView"];
             /** @description The user. */
             user: components["schemas"]["UserView"];
+        };
+        /** @description A page of tenants in the API. */
+        TenantListResponse: {
+            /** @description The tenants. */
+            items: components["schemas"]["PlatformTenantView"][];
+            /** @description The cursor of the next page. It is null when the table holds no later tenant. */
+            next_cursor?: string | null;
         };
         /** @description A tenant in a response. */
         TenantView: {
@@ -659,6 +785,8 @@ export interface operations {
                 object_type: string | null;
                 /** @description The object identifier. */
                 object_id: string | null;
+                /** @description The tenant of the record. The platform list uses it. */
+                tenant_id: string | null;
                 /** @description The cursor of the next page. */
                 cursor: string | null;
                 /** @description The number of records. */
@@ -936,6 +1064,8 @@ export interface operations {
                 object_type: string | null;
                 /** @description The object identifier. */
                 object_id: string | null;
+                /** @description The tenant of the record. The platform list uses it. */
+                tenant_id: string | null;
                 /** @description The cursor of the next page. */
                 cursor: string | null;
                 /** @description The number of records. */
@@ -974,6 +1104,350 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_tenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The status of the tenant: `active`, `suspended` or `deleted`. */
+                status: string | null;
+                /** @description The cursor of the next page. */
+                cursor: string | null;
+                /** @description The number of tenants. */
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenants of the platform. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantListResponse"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description The tenant is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenantView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The password work is busy. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the tenant. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenantView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The tenant is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the tenant. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant is deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The tenant is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The tenant is the platform tenant or it is not suspended. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    resume_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the tenant. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant is active. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The tenant is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The tenant is deleted. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    suspend_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the tenant. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant is suspended. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The tenant is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The tenant is the platform tenant or it is deleted. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
             };
         };
     };

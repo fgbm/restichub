@@ -3,5 +3,4 @@ export { ApiError, ForbiddenError, NetworkError, UnauthorizedError } from './err
 export { parseProblem, type ApiProblem } from './problem';
 export { API_PREFIX, endpoints, type Endpoints } from './endpoints';
 export { service, useMock, type ApiService } from './service';
-export { mockApi, MockApiService } from './mock';
 export * from './types';

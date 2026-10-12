@@ -1,8 +1,7 @@
 /*
  * Every API path of the UI in one module.
  *
- * The paths follow the control plane API of issues #18 and #19. The tenant
- * paths are the planned API of issue #20 and are not on the server yet.
+ * The paths follow the control plane API of issues #18, #19 and #20.
  */
 export const API_PREFIX = '/api/v1';
 

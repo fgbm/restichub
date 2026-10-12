@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient } from './client';
 import { ForbiddenError, UnauthorizedError, ApiError } from './errors';
 
@@ -8,6 +8,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 		headers: { 'content-type': 'application/json' }
 	});
 }
+
+afterEach(() => {
+	window.history.pushState({}, '', '/');
+});
 
 describe('ApiClient', () => {
 	it('adds the CSRF header on unsafe methods only', async () => {
@@ -63,6 +67,42 @@ describe('ApiClient', () => {
 		await expect(client.get('/auth/me')).rejects.toBeInstanceOf(UnauthorizedError);
 		expect(onUnauthorized).toHaveBeenCalledTimes(1);
 		expect(onUnauthorized.mock.calls[0][0]).toBe(window.location.pathname + window.location.search);
+	});
+
+	it('does not redirect on status 401 from the authentication endpoints', async () => {
+		const onUnauthorized = vi.fn();
+		const fetchFn = vi
+			.fn()
+			.mockResolvedValue(
+				jsonResponse({ title: 'Unauthorized', status: 401, code: 'invalid_credentials' }, 401)
+			);
+		const client = new ApiClient({
+			fetchFn: fetchFn as unknown as typeof fetch,
+			onUnauthorized
+		});
+
+		// The sign-in, the setup and the password change surface the problem to the form.
+		await expect(client.post('/auth/sign-in', {})).rejects.toBeInstanceOf(UnauthorizedError);
+		await expect(client.post('/setup', {})).rejects.toBeInstanceOf(UnauthorizedError);
+		await expect(client.post('/auth/password', {})).rejects.toBeInstanceOf(UnauthorizedError);
+		expect(onUnauthorized).not.toHaveBeenCalled();
+	});
+
+	it('does not redirect while the sign-in page is open', async () => {
+		window.history.pushState({}, '', '/sign-in');
+		const onUnauthorized = vi.fn();
+		const fetchFn = vi
+			.fn()
+			.mockResolvedValue(
+				jsonResponse({ title: 'Unauthorized', status: 401, code: 'unauthorized' }, 401)
+			);
+		const client = new ApiClient({
+			fetchFn: fetchFn as unknown as typeof fetch,
+			onUnauthorized
+		});
+
+		await expect(client.get('/auth/me')).rejects.toBeInstanceOf(UnauthorizedError);
+		expect(onUnauthorized).not.toHaveBeenCalled();
 	});
 
 	it('throws a forbidden error on status 403', async () => {

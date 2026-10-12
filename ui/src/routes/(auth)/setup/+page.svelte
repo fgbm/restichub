@@ -114,6 +114,10 @@
 	</Button>
 </form>
 
+<p class="back">
+	<a href={resolve('/(auth)/sign-in')}>{t('setup.backToSignIn')}</a>
+</p>
+
 <style>
 	.title {
 		margin: 0;
@@ -135,5 +139,10 @@
 		flex-direction: column;
 		gap: var(--rh-space-4);
 		margin-top: var(--rh-space-5);
+	}
+
+	.back {
+		margin: var(--rh-space-4) 0 0;
+		font-size: var(--rh-font-size-sm);
 	}
 </style>

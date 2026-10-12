@@ -67,6 +67,7 @@ export const ru: Record<MessageKey, string> = {
 	'common.enabled': 'Включён',
 	'common.disabled': 'Отключён',
 	'common.suspended': 'Приостановлен',
+	'common.deleted': 'Удалён',
 	'common.active': 'Активен',
 
 	// Pagination and table
@@ -104,6 +105,7 @@ export const ru: Record<MessageKey, string> = {
 	'setup.passwordMismatch': 'Пароли не совпадают.',
 	'setup.submit': 'Создать администратора платформы',
 	'setup.done': 'Администратор платформы готов. Войдите, чтобы продолжить.',
+	'setup.backToSignIn': 'Вернуться ко входу',
 
 	// Overview
 	'overview.title': 'Обзор',
@@ -117,6 +119,7 @@ export const ru: Record<MessageKey, string> = {
 	'tenants.createTitle': 'Создание арендатора',
 	'tenants.name': 'Имя',
 	'tenants.namePlaceholder': 'имя арендатора',
+	'tenants.users': 'Пользователи',
 	'tenants.adminUsername': 'Имя первого администратора',
 	'tenants.adminDisplayName': 'Отображаемое имя первого администратора',
 	'tenants.adminPassword': 'Пароль первого администратора',

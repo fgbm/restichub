@@ -2,12 +2,11 @@
  * The service layer. One place connects the screens to the API.
  *
  * Set `VITE_USE_MOCK=true` to use the in-memory mock (development and tests).
- * The tenant functions are the planned API of issue #20 and have no HTTP path
- * yet; the mock serves them until the endpoint exists.
+ * The mock is loaded with a dynamic import, so a production build holds no mock
+ * code: Vite replaces the flag with `false` and removes the import.
  */
 import { api } from './client';
 import { endpoints } from './endpoints';
-import { mockApi } from './mock';
 import type {
 	ApiToken,
 	ApiTokenCreated,
@@ -24,6 +23,7 @@ import type {
 	SetupStatus,
 	SignInRequest,
 	Tenant,
+	TenantListResponse,
 	UpdateUserRequest,
 	User,
 	UserListResponse
@@ -50,8 +50,8 @@ export interface ApiService {
 
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
-	suspendTenant(id: string): Promise<Tenant>;
-	resumeTenant(id: string): Promise<Tenant>;
+	suspendTenant(id: string): Promise<void>;
+	resumeTenant(id: string): Promise<void>;
 	deleteTenant(id: string): Promise<void>;
 
 	listAudit(query: AuditQuery): Promise<AuditPage>;
@@ -79,10 +79,11 @@ const httpService: ApiService = {
 	createToken: (request) => api.post<ApiTokenCreated>(endpoints.apiTokens.create, request),
 	revokeToken: (id) => api.delete<void>(endpoints.apiTokens.byId(id)),
 
-	listTenants: () => api.get<Tenant[]>(endpoints.platform.tenants),
+	listTenants: () =>
+		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),
 	createTenant: (request) => api.post<Tenant>(endpoints.platform.createTenant, request),
-	suspendTenant: (id) => api.post<Tenant>(endpoints.platform.suspendTenant(id)),
-	resumeTenant: (id) => api.post<Tenant>(endpoints.platform.resumeTenant(id)),
+	suspendTenant: (id) => api.post<void>(endpoints.platform.suspendTenant(id)),
+	resumeTenant: (id) => api.post<void>(endpoints.platform.resumeTenant(id)),
 	deleteTenant: (id) => api.delete<void>(endpoints.platform.deleteTenant(id)),
 
 	listAudit: (query) =>
@@ -98,4 +99,13 @@ const httpService: ApiService = {
 
 export const useMock = import.meta.env.VITE_USE_MOCK === 'true';
 
-export const service: ApiService = useMock ? (mockApi as unknown as ApiService) : httpService;
+/**
+ * The service of the application.
+ *
+ * The mock is loaded with a dynamic import and only when `VITE_USE_MOCK` is set.
+ * A production build replaces the flag with `false` and removes the import, so
+ * the mock code never reaches the bundle.
+ */
+export const service: ApiService = useMock
+	? ((await import('./mock')).mockApi as unknown as ApiService)
+	: httpService;

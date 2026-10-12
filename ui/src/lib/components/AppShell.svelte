@@ -20,12 +20,12 @@
 
 	let { children }: { children: Snippet } = $props();
 
-	const roleKeys: Record<Role, MessageKey> = {
+	const roleKeys = $derived<Record<Role, MessageKey>>({
 		platform_admin: 'users.role.platformAdmin',
 		admin: 'users.role.admin',
 		operator: 'users.role.operator',
 		viewer: 'users.role.viewer'
-	};
+	});
 
 	const session = $derived(getSession());
 	const sections = $derived(navSectionsForRole(session?.role ?? null));

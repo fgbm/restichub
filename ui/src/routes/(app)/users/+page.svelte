@@ -31,12 +31,12 @@
 	let newRole = $state<Role>('viewer');
 	let newPassword = $state('');
 
-	const roleKeys: Record<Role, string> = {
+	const roleKeys = $derived<Record<Role, string>>({
 		platform_admin: t('users.role.platformAdmin'),
 		admin: t('users.role.admin'),
 		operator: t('users.role.operator'),
 		viewer: t('users.role.viewer')
-	};
+	});
 
 	const roleOptions = $derived<SelectOption[]>(
 		assignableRoles(getSession()?.tenant?.id).map((role) => ({

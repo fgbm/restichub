@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -15,7 +16,27 @@
 	let errorCode = $state<string | undefined>();
 	let errorTitle = $state<string | undefined>();
 
-	const next = $derived(page.url.searchParams.get('next') ?? '/');
+	/**
+	 * Read the `next` parameter. Only a path inside the application is accepted,
+	 * so a crafted value cannot redirect to another site.
+	 */
+	function safeNext(value: string | null): string {
+		if (value && /^\/(?![/\\])/.test(value)) return value;
+		return '/';
+	}
+
+	const next = $derived(safeNext(page.url.searchParams.get('next')));
+
+	// An installation without a user needs the setup first. The sign-in form stays
+	// in place when the check fails.
+	onMount(async () => {
+		try {
+			const status = await service.setupStatus();
+			if (status.setup_required) await goto(resolve('/(auth)/setup'));
+		} catch {
+			// The sign-in form stays.
+		}
+	});
 
 	async function onSubmit(event: SubmitEvent): Promise<void> {
 		event.preventDefault();

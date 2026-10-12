@@ -32,8 +32,12 @@ export const navigation: NavSection[] = [
 		labelKey: 'nav.section.administration',
 		items: [
 			{ href: '/(app)', labelKey: 'nav.overview', roles: ALL_ROLES },
-			{ href: '/(app)/users', labelKey: 'nav.users', roles: ['admin'] },
-			{ href: '/(app)/api-tokens', labelKey: 'nav.apiTokens', roles: ['admin'] },
+			{ href: '/(app)/users', labelKey: 'nav.users', roles: ['platform_admin', 'admin'] },
+			{
+				href: '/(app)/api-tokens',
+				labelKey: 'nav.apiTokens',
+				roles: ['platform_admin', 'admin']
+			},
 			{ href: '/(app)/audit', labelKey: 'nav.audit', roles: ALL_ROLES }
 		]
 	},

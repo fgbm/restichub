@@ -5,7 +5,9 @@
  * - same origin only, with `credentials: 'same-origin'`;
  * - the header `X-ResticHub-CSRF: 1` on POST, PUT, PATCH and DELETE;
  * - a problem document becomes a typed `ApiError`;
- * - status 401 redirects to the sign-in page and keeps the current path in `next`;
+ * - status 401 redirects to the sign-in page and keeps the current path in `next`,
+ *   except on the authentication endpoints and while the sign-in page is open:
+ *   there the error is surfaced to the caller as an inline message;
  * - status 403 throws `ForbiddenError` for a clear message.
  */
 import { ApiError, ForbiddenError, NetworkError, UnauthorizedError } from './errors';
@@ -33,6 +35,26 @@ export interface ApiClientOptions {
 
 const CSRF_HEADER = 'X-ResticHub-CSRF';
 const UNSAFE_METHODS = new Set<HttpMethod>(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * The authentication endpoints whose status 401 is an inline message and never a
+ * redirect. A failed sign-in, a failed password change and a failed setup show
+ * the problem in the form.
+ */
+const NO_REDIRECT_PATHS = new Set(['/auth/sign-in', '/auth/password', '/setup']);
+
+/**
+ * Returns true when a status 401 redirects to the sign-in page.
+ *
+ * The authentication endpoints surface the problem to the caller. The client
+ * never redirects while the sign-in page is already open, so a failed sign-in
+ * shows the error inline and does not reload the page.
+ */
+function shouldRedirectToSignIn(path: string): boolean {
+	if (NO_REDIRECT_PATHS.has(path)) return false;
+	if (typeof window === 'undefined') return true;
+	return !window.location.pathname.startsWith('/sign-in');
+}
 
 function currentPath(): string {
 	if (typeof window === 'undefined') return '/';
@@ -111,7 +133,7 @@ export class ApiClient {
 
 		const problem = parseProblem(await readBody(response), response.status);
 		if (response.status === 401) {
-			this.onUnauthorized(currentPath());
+			if (shouldRedirectToSignIn(path)) this.onUnauthorized(currentPath());
 			throw new UnauthorizedError(problem);
 		}
 		if (response.status === 403) {

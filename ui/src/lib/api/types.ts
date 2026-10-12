@@ -2,10 +2,9 @@
  * Domain types of the UI.
  *
  * The types come from the generated OpenAPI schema (`schema.d.ts`, built by
- * `npm run gen:api`). The generated `role` fields are free strings and the
- * generated audit `diff` is an opaque object, so the UI narrows them to its own
- * types. The tenant types are the planned API of issue #20, which is not on the
- * server yet, so they stay hand-written.
+ * `npm run gen:api`). The generated `role` and `status` fields are free strings
+ * and the generated audit `diff` is an opaque object, so the UI narrows them to
+ * its own types.
  */
 import type { components } from './schema';
 
@@ -121,23 +120,21 @@ export interface AuditQuery {
 	limit?: number;
 }
 
-/**
- * A tenant. The tenant API is the planned API of issue #20 and is not on the
- * server yet, so the type is hand-written.
- */
-export interface Tenant {
-	id: string;
-	name: string;
-	status: 'active' | 'suspended';
-	created_at: string;
-}
+/** The status of a tenant (issue #20). */
+export type TenantStatus = 'active' | 'suspended' | 'deleted';
 
-/** The body of the planned create-tenant request (issue #20). */
-export interface CreateTenantRequest {
-	name: string;
-	first_admin: {
-		username: string;
-		display_name: string;
-		password: string;
-	};
-}
+/**
+ * A tenant in the platform administration (issue #20). The generated `status`
+ * is a free string; the UI knows the three statuses.
+ */
+export type Tenant = Omit<components['schemas']['PlatformTenantView'], 'status'> & {
+	status: TenantStatus;
+};
+
+/** A list of tenants. */
+export type TenantListResponse = Omit<components['schemas']['TenantListResponse'], 'items'> & {
+	items: Tenant[];
+};
+
+/** The body of the create-tenant request. */
+export type CreateTenantRequest = components['schemas']['CreateTenantRequest'];

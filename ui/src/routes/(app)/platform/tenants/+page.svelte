@@ -12,7 +12,7 @@
 		TextField
 	} from '#lib/components/index.ts';
 	import type { Column } from '#lib/components/index.ts';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let tenants = $state<Tenant[]>([]);
@@ -32,15 +32,36 @@
 	let deleting = $state(false);
 	let busyId = $state<string | null>(null);
 
+	function formatDate(value: string): string {
+		return new Date(value).toLocaleString(getLocale());
+	}
+
+	function statusLabel(status: Tenant['status']): string {
+		if (status === 'active') return t('common.active');
+		if (status === 'suspended') return t('common.suspended');
+		return t('common.deleted');
+	}
+
+	function statusBadge(status: Tenant['status']): 'success' | 'warning' | 'neutral' {
+		if (status === 'active') return 'success';
+		if (status === 'suspended') return 'warning';
+		return 'neutral';
+	}
+
 	const columns = $derived<Column<Tenant>[]>([
 		{ key: 'name', header: t('tenants.name'), mono: true },
 		{
 			key: 'status',
 			header: t('common.status'),
-			cell: (row) => (row.status === 'active' ? t('common.active') : t('common.suspended')),
-			badge: (row) => (row.status === 'active' ? 'success' : 'warning')
+			cell: (row) => statusLabel(row.status),
+			badge: (row) => statusBadge(row.status)
 		},
-		{ key: 'created_at', header: t('common.createdAt'), mono: true }
+		{
+			key: 'user_count',
+			header: t('tenants.users'),
+			cell: (row) => String(row.user_count)
+		},
+		{ key: 'created_at', header: t('common.createdAt'), cell: (row) => formatDate(row.created_at) }
 	]);
 
 	async function load(): Promise<void> {
@@ -130,24 +151,27 @@
 <DataTable {columns} rows={tenants} {loading} {error} rowKey={(tenant) => tenant.id}>
 	{#snippet rowActions(tenant)}
 		<div class="row-actions">
-			<Button
-				size="sm"
-				variant="ghost"
-				loading={busyId === tenant.id}
-				onclick={() => toggleStatus(tenant)}
-			>
-				{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
-			</Button>
-			<Button
-				size="sm"
-				variant="ghost"
-				onclick={() => {
-					deleteTarget = tenant;
-					deleteOpen = true;
-				}}
-			>
-				{t('common.delete')}
-			</Button>
+			{#if tenant.status !== 'deleted'}
+				<Button
+					size="sm"
+					variant="ghost"
+					loading={busyId === tenant.id}
+					onclick={() => toggleStatus(tenant)}
+				>
+					{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
+				</Button>
+				<Button
+					size="sm"
+					variant="ghost"
+					disabled={tenant.status !== 'suspended'}
+					onclick={() => {
+						deleteTarget = tenant;
+						deleteOpen = true;
+					}}
+				>
+					{t('common.delete')}
+				</Button>
+			{/if}
 		</div>
 	{/snippet}
 </DataTable>

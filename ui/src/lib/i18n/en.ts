@@ -66,6 +66,7 @@ export const en = {
 	'common.enabled': 'Enabled',
 	'common.disabled': 'Disabled',
 	'common.suspended': 'Suspended',
+	'common.deleted': 'Deleted',
 	'common.active': 'Active',
 
 	// Pagination and table
@@ -102,6 +103,7 @@ export const en = {
 	'setup.passwordMismatch': 'The passwords do not match.',
 	'setup.submit': 'Create the Platform Admin',
 	'setup.done': 'The Platform Admin is ready. Sign in to continue.',
+	'setup.backToSignIn': 'Back to sign in',
 
 	// Overview
 	'overview.title': 'Overview',
@@ -115,6 +117,7 @@ export const en = {
 	'tenants.createTitle': 'Create a tenant',
 	'tenants.name': 'Name',
 	'tenants.namePlaceholder': 'tenant name',
+	'tenants.users': 'Users',
 	'tenants.adminUsername': 'First admin user name',
 	'tenants.adminDisplayName': 'First admin display name',
 	'tenants.adminPassword': 'First admin password',

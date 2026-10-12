@@ -52,9 +52,15 @@ function makeUsers(): User[] {
 
 function makeTenants(): Tenant[] {
 	return [
-		{ id: 't_01', name: 'acme', status: 'active', created_at: iso(60 * 24 * 90) },
-		{ id: 't_02', name: 'globex', status: 'active', created_at: iso(60 * 24 * 60) },
-		{ id: 't_03', name: 'initech', status: 'suspended', created_at: iso(60 * 24 * 30) }
+		{ id: 't_01', name: 'acme', status: 'active', created_at: iso(60 * 24 * 90), user_count: 4 },
+		{ id: 't_02', name: 'globex', status: 'active', created_at: iso(60 * 24 * 60), user_count: 2 },
+		{
+			id: 't_03',
+			name: 'initech',
+			status: 'suspended',
+			created_at: iso(60 * 24 * 30),
+			user_count: 1
+		}
 	];
 }
 
@@ -291,22 +297,24 @@ export class MockApiService {
 			id: `t_${this.tenants.length + 1}`,
 			name: request.name,
 			status: 'active',
-			created_at: new Date().toISOString()
+			created_at: new Date().toISOString(),
+			user_count: 1
 		};
 		this.tenants = [...this.tenants, tenant];
 		return tenant;
 	}
 
-	async suspendTenant(id: string): Promise<Tenant> {
-		return this.setTenantStatus(id, 'suspended');
+	async suspendTenant(id: string): Promise<void> {
+		this.setTenantStatus(id, 'suspended');
 	}
 
-	async resumeTenant(id: string): Promise<Tenant> {
-		return this.setTenantStatus(id, 'active');
+	async resumeTenant(id: string): Promise<void> {
+		this.setTenantStatus(id, 'active');
 	}
 
 	async deleteTenant(id: string): Promise<void> {
-		this.tenants = this.tenants.filter((tenant) => tenant.id !== id);
+		// The control plane deletes a tenant with a status change, not with a row removal.
+		this.setTenantStatus(id, 'deleted');
 	}
 
 	private setTenantStatus(id: string, status: Tenant['status']): Tenant {
