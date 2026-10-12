@@ -1,0 +1,40 @@
+[package]
+name = "p4-stream-load"
+description = "Spike P4: one control plane process, 500 to 2000 agent streams, restart"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# The spike is a standalone project. This empty table keeps it out of the root
+# workspace (the root members are crates/*).
+[workspace]
+
+[lib]
+name = "p4_stream_load"
+path = "src/lib.rs"
+
+[[bin]]
+name = "p4-server"
+path = "src/bin/p4-server.rs"
+
+[[bin]]
+name = "p4-emulator"
+path = "src/bin/p4-emulator.rs"
+
+[dependencies]
+restichub-proto = { path = "../../crates/restichub-proto" }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tonic = { version = "0.14", features = ["tls-ring"] }
+prost = "0.14"
+prost-types = "0.14"
+ed25519-dalek = "3.0"
+rcgen = { version = "0.14", features = ["crypto", "pem", "ring"] }
+x509-parser = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.9"
+anyhow = "1"
+
+[profile.release]
+strip = "symbols"
