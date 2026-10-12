@@ -128,7 +128,10 @@ jobs:
           if ($actual -ne $expected) { throw "restic checksum mismatch: $actual" }
           $unpacked = Join-Path $env:RUNNER_TEMP 'restic'
           Expand-Archive -Path $zip -DestinationPath $unpacked -Force
-          $exe = (Get-ChildItem $unpacked -Recurse -Filter restic.exe | Select-Object -First 1).FullName
+          # The archive holds the executable under its release name, for
+          # example restic_0.19.1_windows_amd64.exe, not restic.exe.
+          $exe = (Get-ChildItem $unpacked -Recurse -Filter 'restic*.exe' | Select-Object -First 1).FullName
+          if (-not $exe) { throw "the restic archive holds no restic executable" }
           "RESTIC=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           & $exe version
 
