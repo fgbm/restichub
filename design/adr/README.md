@@ -29,3 +29,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0021](0021-restic-argument-construction.md) | restic argument construction and validation | accepted |
 | [0022](0022-sftp-deferred-to-1-0.md) | SFTP is deferred to 1.0 | accepted |
 | [0023](0023-control-plane-core.md) | Control plane core: storage, authentication and secret format | accepted |
+| [0024](0024-single-tenant-mode.md) | Single-tenant mode | accepted |

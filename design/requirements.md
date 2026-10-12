@@ -212,6 +212,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-TN-03 | The enrollment token belongs to one tenant. Each agent belongs to exactly one tenant, and the certificate contains the tenant ID. | M |
 | FR-TN-04 | Quotas for each tenant: agents, plans, concurrent jobs, log volume. | 1.0 |
 | FR-TN-05 | Metrics and audit records have a tenant label. Each API token belongs to one tenant. | M |
+| FR-TN-06 | The administrator can run the CP in single-tenant mode. In this mode the UI and the API do not show tenants. The administrator can switch to multi-tenant mode without data migration. | M |
 
 ### 3.12. Agent installation
 

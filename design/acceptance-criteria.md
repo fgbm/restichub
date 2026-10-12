@@ -159,6 +159,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-TN-03 | FR-TN-02 | The Platform Admin suspends a tenant. **Expected:** the CP dispatches no jobs. Users cannot sign in. Agents stay connected. The platform audit log contains the event. | A |
 | AC-TN-04 | FR-TN-05 | Use an API token of tenant A. **Expected:** no access to objects of tenant B. The audit log of tenant A has no events of tenant B. | A |
 | AC-TN-05 | FR-TN-04 (1.0) | Quota of 10 agents. **Expected:** the CP rejects the 11th enrollment with a clear error. | A |
+| AC-TN-06 | FR-TN-06 | Start the CP in single-tenant mode and complete the setup. **Expected:** sign-in has no tenant field, platform endpoints return 404, all objects belong to tenant `default`. Switch to multi-tenant mode and restart. **Expected:** the CP issues a setup token for the Platform Admin, and the data of `default` stays available. | A |
 
 ## 12. User interface, API, roles, audit
 
