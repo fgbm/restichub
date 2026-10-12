@@ -50,6 +50,8 @@ npm ci
 npm run build
 ```
 
+The published documentation site is at https://fgbm.github.io/restichub/.
+
 ## Contribute
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request. All participants must obey the [Code of Conduct](CODE_OF_CONDUCT.md).
