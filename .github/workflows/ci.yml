@@ -48,6 +48,31 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # The database tests are inside the crate behind the test-util feature. A build without the
+      # feature must still compile them (N8).
+      - name: Check that the database tests are compiled
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(cargo test -p restichub-db -- --list | grep -c 'tests::db_' || true)
+          echo "database tests: $count"
+          test "$count" -gt 0
+      # The test helper is a dev-only feature. No binary crate may enable it in the normal graph
+      # (D8, N11).
+      - name: Check that the test helper is not a normal dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          for crate_dir in crates/*; do
+            if [ -f "$crate_dir/src/main.rs" ]; then
+              crate=$(basename "$crate_dir")
+              if cargo tree -e normal -p "$crate" -f '{p} {f}' | grep -q 'restichub-db.*test-util'; then
+                echo "::error::$crate enables restichub-db test-util in the normal dependency graph"
+                exit 1
+              fi
+            fi
+          done
+          echo "no binary crate enables the test helper in the normal graph"
 
   rust-windows:
     name: Rust (windows-latest)
