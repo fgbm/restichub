@@ -4,6 +4,8 @@ import starlight from '@astrojs/starlight';
 
 // https://starlight.astro.build/reference/configuration/
 export default defineConfig({
+	site: 'https://fgbm.github.io',
+	base: '/restichub',
 	integrations: [
 		starlight({
 			title: 'ResticHub',
