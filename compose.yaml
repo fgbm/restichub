@@ -21,7 +21,8 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   # Creates the cluster roles once and sets the development passwords. Development use only: the
-  # passwords come from `.env` and `ALTER ROLE` stores them as SCRAM verifiers.
+  # passwords come from `.env`. The script reads them from the environment with `\getenv`, so a
+  # password never appears in the process arguments.
   db-bootstrap:
     image: postgres:16
     depends_on:
@@ -44,9 +45,14 @@ services:
           -v app_role=restichub_app -v auth_role=restichub_auth \
           -v owner_role=restichub_owner -v runtime_role=restichub_runtime \
           -f /bootstrap-roles.sql
-        psql -v ON_ERROR_STOP=1 -d postgres -c "ALTER ROLE restichub_owner PASSWORD '$$OWNER_PASSWORD'"
-        psql -v ON_ERROR_STOP=1 -d postgres -c "ALTER ROLE restichub_runtime PASSWORD '$$RUNTIME_PASSWORD'"
-        psql -v ON_ERROR_STOP=1 -d postgres -c "ALTER DATABASE \"$$DATABASE\" OWNER TO restichub_owner"
+        psql -v ON_ERROR_STOP=1 -d postgres <<'SQL'
+        \getenv owner_password OWNER_PASSWORD
+        \getenv runtime_password RUNTIME_PASSWORD
+        \getenv database DATABASE
+        ALTER ROLE restichub_owner PASSWORD :'owner_password';
+        ALTER ROLE restichub_runtime PASSWORD :'runtime_password';
+        ALTER DATABASE :"database" OWNER TO restichub_owner;
+        SQL
 
   # Applies the migrations as the owner login and stops.
   migrate:
@@ -73,10 +79,10 @@ services:
       RESTICHUB_DATABASE_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
       # Development only: the session cookie drops the Secure attribute over plain HTTP.
       RESTICHUB_SERVER_INSECURE_COOKIES: 'true'
-      # The KEK arrives with the secrets configuration (issue #20). It is harmless when unused.
+      # The key encryption key. The control plane verifies it against the stored check at start.
       RESTICHUB_KEK: ${RESTICHUB_KEK}
     ports:
-      - '8080:8080'
+      - '127.0.0.1:8080:8080'
 
 volumes:
   pgdata:

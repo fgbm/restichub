@@ -4,6 +4,7 @@
 # The values are for a local cluster only. The script refuses to overwrite an existing `.env`.
 
 set -eu
+umask 077
 
 target=".env"
 
@@ -12,10 +13,10 @@ if [ -e "$target" ]; then
 	exit 1
 fi
 
-# 32 random bytes in base64url without padding. The alphabet has no quote, so the value is safe in
-# a SQL string literal and in a connection URL.
+# 32 random bytes in standard base64. The key encryption key is decoded with the standard base64
+# engine and must hold 32 bytes, so the value keeps the padding.
 random() {
-	head -c 32 /dev/urandom | base64 | tr -d '=+/' | cut -c1-43
+	head -c 32 /dev/urandom | base64
 }
 
 cat > "$target" <<EOF

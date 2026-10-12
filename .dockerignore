@@ -6,3 +6,7 @@ ui/build
 ui/.svelte-kit
 docs/node_modules
 docs/dist
+
+# Local secrets
+.env
+.env.*
