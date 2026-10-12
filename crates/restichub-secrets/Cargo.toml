@@ -1,0 +1,16 @@
+[package]
+name = "restichub-secrets"
+description = "ResticHub secret handling: zeroizing values and secret sources"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+zeroize = { workspace = true }

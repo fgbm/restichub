@@ -1,0 +1,23 @@
+[package]
+name = "restichub-db"
+description = "ResticHub database: connection pool, migrations and readiness check"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Enables the test database helper. A test enables this feature through a dev-dependency.
+test-util = []
+
+[dependencies]
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }

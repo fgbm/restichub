@@ -1,0 +1,128 @@
+//! Router tests for the control plane HTTP server (issue #15).
+
+use std::time::Duration;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
+use http_body_util::BodyExt;
+use restichub_cp::server::{AppState, router};
+use restichub_db::{Database, DatabaseConfig};
+use serde_json::Value;
+use tower::ServiceExt;
+use uuid::Uuid;
+
+/// Builds a router with a lazy database. The database points to no server, so the readiness
+/// check fails. The liveness and the document tests do not touch the database.
+fn app() -> Result<Router, Box<dyn std::error::Error>> {
+    let config = DatabaseConfig {
+        url: "postgres://restichub@127.0.0.1:1/restichub".to_owned(),
+        max_connections: 1,
+        acquire_timeout: Duration::from_millis(100),
+    };
+    let database = Database::connect_lazy(&config, None)?;
+    Ok(router(AppState::new(database)))
+}
+
+async fn body_json(
+    response: axum::response::Response,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let bytes = response.into_body().collect().await?.to_bytes();
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+#[tokio::test]
+async fn healthz_is_alive() -> Result<(), Box<dyn std::error::Error>> {
+    let response = app()?
+        .oneshot(Request::builder().uri("/healthz").body(Body::empty())?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_openapi_document_holds_the_routes() -> Result<(), Box<dyn std::error::Error>> {
+    let response = app()?
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/openapi.json")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let document = body_json(response).await?;
+    assert_eq!(
+        document
+            .get("info")
+            .and_then(|info| info.get("title"))
+            .and_then(Value::as_str),
+        Some("ResticHub API")
+    );
+    assert_eq!(
+        document
+            .get("info")
+            .and_then(|info| info.get("version"))
+            .and_then(Value::as_str),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+    let paths = document.get("paths");
+    assert!(paths.and_then(|paths| paths.get("/healthz")).is_some());
+    assert!(paths.and_then(|paths| paths.get("/readyz")).is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_unknown_route_is_a_problem() -> Result<(), Box<dyn std::error::Error>> {
+    let response = app()?
+        .oneshot(Request::builder().uri("/nope").body(Body::empty())?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    assert_eq!(content_type.as_deref(), Some("application/problem+json"));
+    let problem = body_json(response).await?;
+    assert_eq!(
+        problem.get("code").and_then(Value::as_str),
+        Some("not_found")
+    );
+    assert!(problem.get("request_id").is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_request_id_is_echoed() -> Result<(), Box<dyn std::error::Error>> {
+    let response = app()?
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .header("x-request-id", "test-request-id")
+                .body(Body::empty())?,
+        )
+        .await?;
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    assert_eq!(request_id.as_deref(), Some("test-request-id"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_missing_request_id_is_generated_as_uuid_v7() -> Result<(), Box<dyn std::error::Error>> {
+    let response = app()?
+        .oneshot(Request::builder().uri("/healthz").body(Body::empty())?)
+        .await?;
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .ok_or("the response holds no request ID")?;
+    let version = Uuid::parse_str(&request_id)?.get_version_num();
+    assert_eq!(version, 7, "the request ID {request_id} is not UUIDv7");
+    Ok(())
+}

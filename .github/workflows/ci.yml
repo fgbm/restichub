@@ -17,13 +17,25 @@ env:
   VALE_VERSION: 3.24.0
 
 jobs:
-  rust:
-    name: Rust (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  rust-linux:
+    name: Rust (ubuntu-latest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: restichub
+          POSTGRES_PASSWORD: restichub
+          POSTGRES_DB: restichub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restichub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RESTICHUB_TEST_DATABASE_URL: postgres://restichub:restichub@localhost:5432/restichub
     steps:
       - uses: actions/checkout@v5
       # The action reads rust-toolchain.toml.
@@ -34,6 +46,23 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  rust-windows:
+    name: Rust (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The action reads rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # The database tests skip on Windows because RESTICHUB_TEST_DATABASE_URL is not set.
       - name: Test
         run: cargo test --workspace
 
