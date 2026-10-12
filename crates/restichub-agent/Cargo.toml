@@ -12,5 +12,4 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-restichub-common = { path = "../restichub-common" }
 restichub-proto = { path = "../restichub-proto" }

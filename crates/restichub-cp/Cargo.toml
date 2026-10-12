@@ -17,8 +17,6 @@ argon2 = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
 getrandom = { workspace = true }
-restichub-common = { workspace = true }
-restichub-compiler = { workspace = true }
 restichub-db = { workspace = true }
 restichub-proto = { workspace = true }
 restichub-secrets = { workspace = true, features = ["serde"] }

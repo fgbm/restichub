@@ -21,3 +21,8 @@ tonic-prost = "0.14"
 [build-dependencies]
 protox = "0.10"
 tonic-prost-build = "0.14"
+
+# `tonic-prost` is used only by the code that `tonic::include_proto!` generates.
+# cargo-machete does not read the generated code, so it reports a false positive.
+[package.metadata.cargo-machete]
+ignored = ["tonic-prost"]

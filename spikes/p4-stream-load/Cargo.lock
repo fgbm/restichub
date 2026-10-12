@@ -793,12 +793,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "ed25519-dalek",
- "prost",
  "prost-types",
  "rand",
  "rcgen",
  "restichub-proto",
- "serde",
  "serde_json",
  "tokio",
  "tokio-stream",

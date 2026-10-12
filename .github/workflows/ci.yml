@@ -17,8 +17,60 @@ env:
   VALE_VERSION: 3.24.0
 
 jobs:
-  rust-linux:
-    name: Rust (ubuntu-latest)
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      # The action reads rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: Clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # The database tests skip on Windows because RESTICHUB_TEST_DATABASE_URL is not set. The
+      # `database` job runs them on Linux.
+      - name: Test
+        run: cargo test --workspace
+      # The database tests are inside the crate behind the test-util feature. A build without the
+      # feature must still compile them (N8).
+      - name: Check that the database tests are compiled
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(cargo test -p restichub-db -- --list | grep -c '^tests::' || true)
+          echo "database tests: $count"
+          test "$count" -gt 0
+      # The test helper is a dev-only feature. No binary crate may enable it in the normal graph
+      # (D8, N11).
+      - name: Check that the test helper is not a normal dependency
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for crate_dir in crates/*; do
+            if [ -f "$crate_dir/src/main.rs" ]; then
+              crate=$(basename "$crate_dir")
+              if cargo tree -e normal -p "$crate" -f '{p} {f}' | grep -q 'restichub-db.*test-util'; then
+                echo "::error::$crate enables restichub-db test-util in the normal dependency graph"
+                exit 1
+              fi
+            fi
+          done
+          echo "no binary crate enables the test helper in the normal graph"
+
+  # A service container runs only on a Linux runner, so the database tests are their own job.
+  database:
+    name: Database (ubuntu-latest)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -42,52 +94,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           components: rustfmt, clippy
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --workspace
-      # The database tests are inside the crate behind the test-util feature. A build without the
-      # feature must still compile them (N8).
-      - name: Check that the database tests are compiled
-        shell: bash
-        run: |
-          set -euo pipefail
-          count=$(cargo test -p restichub-db -- --list | grep -c 'tests::db_' || true)
-          echo "database tests: $count"
-          test "$count" -gt 0
-      # The test helper is a dev-only feature. No binary crate may enable it in the normal graph
-      # (D8, N11).
-      - name: Check that the test helper is not a normal dependency
-        shell: bash
-        run: |
-          set -euo pipefail
-          for crate_dir in crates/*; do
-            if [ -f "$crate_dir/src/main.rs" ]; then
-              crate=$(basename "$crate_dir")
-              if cargo tree -e normal -p "$crate" -f '{p} {f}' | grep -q 'restichub-db.*test-util'; then
-                echo "::error::$crate enables restichub-db test-util in the normal dependency graph"
-                exit 1
-              fi
-            fi
-          done
-          echo "no binary crate enables the test helper in the normal graph"
-
-  rust-windows:
-    name: Rust (windows-latest)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      # The action reads rust-toolchain.toml.
-      - uses: actions-rust-lang/setup-rust-toolchain@v2
-        with:
-          components: rustfmt, clippy
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      # The database tests skip on Windows because RESTICHUB_TEST_DATABASE_URL is not set.
       - name: Test
         run: cargo test --workspace
 
@@ -97,6 +103,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Install cargo-machete
+        run: cargo install cargo-machete --version 0.9.2 --locked
+      - name: Check for unused dependencies
+        run: cargo machete
 
   proto:
     name: Protocol Buffers
