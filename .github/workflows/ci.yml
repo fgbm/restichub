@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       # The action reads rust-toolchain.toml.
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           components: rustfmt, clippy
       - name: Format
@@ -55,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       # The action reads rust-toolchain.toml.
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           components: rustfmt, clippy
       - name: Format
