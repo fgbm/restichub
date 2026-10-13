@@ -3,7 +3,7 @@
 //! An account is installation-wide and its row lives in the platform tenant (ADR-0025). The
 //! username is unique in the installation and the comparison ignores the letter case. A tenant
 //! transaction reads no account row directly: it calls the `SECURITY DEFINER` functions of
-//! migration 0016 through this module. Each function carries its own scope rule at the database
+//! migration 0017 through this module. Each function carries its own scope rule at the database
 //! level, so this module cannot widen the reach of a caller.
 
 use uuid::Uuid;
@@ -52,7 +52,7 @@ pub struct Member {
     pub shared: bool,
 }
 
-/// The result of an account write of the database functions (migration 0016).
+/// The result of an account write of the database functions (migration 0017).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteStatus {
     Ok,

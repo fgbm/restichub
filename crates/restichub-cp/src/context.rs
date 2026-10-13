@@ -285,7 +285,7 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
         return Err(ApiError::unauthenticated());
     }
     // The account lives in the platform tenant, so the member read goes through the definer
-    // function of migration 0016 (ADR-0025).
+    // function of migration 0017 (ADR-0025).
     let member = users::get_member(&mut tx, lookup.user_id).await?;
     let Some(member) = member else {
         return Err(ApiError::unauthenticated());

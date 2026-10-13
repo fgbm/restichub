@@ -7,7 +7,7 @@
 --
 -- The account rows keep `tenant_id`, so ADR-0006 holds and the RLS of every table stays. A tenant
 -- transaction reads no account row directly: it uses the SECURITY DEFINER functions of migration
--- 0016.
+-- 0017.
 --
 -- The migration merges nothing. A username that exists in two tenants stops the migration with a
 -- message that names the two tenants and the username.

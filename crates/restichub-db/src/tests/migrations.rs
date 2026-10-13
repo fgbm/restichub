@@ -58,10 +58,10 @@ async fn db_the_account_migration_refuses_a_duplicate_username() -> TestResult {
     // Apply the migrations that precede the account model.
     let before: Vec<_> = MIGRATOR
         .iter()
-        .filter(|migration| migration.version <= 14)
+        .filter(|migration| migration.version <= 15)
         .cloned()
         .collect();
-    let up_to_14 = Migrator {
+    let up_to_15 = Migrator {
         migrations: Cow::Owned(before),
         ignore_missing: false,
         locking: true,
@@ -69,7 +69,7 @@ async fn db_the_account_migration_refuses_a_duplicate_username() -> TestResult {
         table_name: Cow::Borrowed("_sqlx_migrations"),
         create_schemas: Cow::Owned(Vec::new()),
     };
-    up_to_14.run(&pool).await?;
+    up_to_15.run(&pool).await?;
 
     // Two tenants hold the same username, without the letter case.
     let tenant_a = uuid::Uuid::now_v7();
@@ -95,7 +95,7 @@ async fn db_the_account_migration_refuses_a_duplicate_username() -> TestResult {
     // The account migration stops and names the two tenants and the username.
     let sql = MIGRATOR
         .iter()
-        .find(|migration| migration.version == 15)
+        .find(|migration| migration.version == 16)
         .expect("the account migration is present")
         .sql
         .as_str()
