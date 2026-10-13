@@ -27,7 +27,8 @@ test('the built page carries the strict policy', async ({ page }) => {
 
 	const policy = response?.headers()['content-security-policy'] ?? '';
 	expect(policy).toContain("style-src 'self'");
-	expect(policy).not.toContain('unsafe-inline');
+	expect(policy).not.toContain("style-src 'self' 'unsafe-inline'");
+	expect(policy).toContain("style-src-attr 'self' 'unsafe-inline'");
 	expect(violations).toEqual([]);
 });
 

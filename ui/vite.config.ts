@@ -23,13 +23,11 @@ export default defineConfig({
 					'default-src': ['self'],
 					'img-src': ['self', 'data:'],
 					'style-src': ['self'],
-					// SvelteKit wraps the inline bootstrap script in a `display: contents` div.
-					// Its style attribute is allowed by hash only (ADR-0027).
-					'style-src-attr': [
-						'self',
-						'unsafe-hashes',
-						'sha256-tcbDxjMo+xKqM21aCGYbs/QAJqB7yUXC06oPWDapBgc='
-					],
+					// SvelteKit wraps the inline bootstrap script in a `display: contents` div. A hash
+					// with `unsafe-hashes` allows it in Chromium, but Firefox ignores `unsafe-hashes`
+					// for a style attribute, so the attribute source stays open. `style-src` still
+					// blocks a `<style>` element, so a component cannot inject a stylesheet (ADR-0027).
+					'style-src-attr': ['self', 'unsafe-inline'],
 					'script-src': ['self'],
 					'connect-src': ['self'],
 					'form-action': ['self']
