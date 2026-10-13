@@ -30,11 +30,23 @@ The control plane trusts the `X-Forwarded-For` header from the Caddy network alo
 
 1. Install Docker Engine and the Compose plugin. The server uses the official Docker repository.
 2. Allow port 80 and port 443 in `ufw`. Keep port 22 open.
-3. Add a DNS record for the domain. Use the type `A` and the address `200.169.190.217`:
+3. Add a DNS record for the domain. Use the type `A` and the address `203.0.113.10`:
 
    ```text
-   rh-stage.app.galen-is.ru.  A  200.169.190.217
+   stage.example.com.  A  203.0.113.10
    ```
+
+## The workstation file
+
+`deploy.sh` reads the host, the domain and the certificate email from the environment. A file `deploy/stage/stage.local.env` can set them. The file is not in the repository. It holds three lines:
+
+```sh
+RESTICHUB_STAGE_HOST=<stage-host>
+RESTICHUB_DOMAIN=stage.example.com
+RESTICHUB_ACME_EMAIL=admin@example.com
+```
+
+The host is the SSH alias of the staging server. The deploy script fails if the host is unset. The domain and the email are necessary for the first run alone.
 
 ## Deploy
 
@@ -49,12 +61,12 @@ The control plane trusts the `X-Forwarded-For` header from the Caddy network alo
 2. Read the one-time setup token on the server:
 
    ```sh
-   ssh restichub-cp-spb-1 'docker compose -f /opt/restichub/compose.yaml logs cp | grep setup_token'
+   ssh <stage-host> 'docker compose -f /opt/restichub/compose.yaml logs cp | grep setup_token'
    ```
 
    The token is a secret. Do not print it to a shared terminal.
 
-3. Open `https://rh-stage.app.galen-is.ru` in a browser. Use the token to create the Platform Admin.
+3. Open `https://stage.example.com` in a browser. Use the token to create the Platform Admin.
 
 ## The environment file
 
@@ -71,7 +83,7 @@ The staging stack uses the mode `multi`. The mode exercises the tenant path of t
 ## Stop the stack
 
 ```sh
-ssh restichub-cp-spb-1 'docker compose -f /opt/restichub/compose.yaml down'
+ssh <stage-host> 'docker compose -f /opt/restichub/compose.yaml down'
 ```
 
 Add the option `-v` to remove the data volumes. The command deletes the PostgreSQL data and the TLS certificates.

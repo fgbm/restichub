@@ -25,7 +25,7 @@ The status refers to the code, not to the plan. The check reads the routes in `c
 
 ## 4. The stage
 
-The stage server is https://rh-stage.app.galen-is.ru. It runs in multi-tenant mode with the image of the `main` branch. A Windows host with Docker is available for the benches.
+The stage address is given to the testers outside the repository. It runs in multi-tenant mode with the image of the `main` branch. A Windows host with Docker is available for the benches.
 
 The sign-in screen asks for the tenant name. The Platform Admin enters `platform` as the tenant name. Issue #44 removes the tenant field from the sign-in screen.
 

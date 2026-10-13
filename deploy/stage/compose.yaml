@@ -155,8 +155,8 @@ services:
       - '443:443'
       - '443:443/udp'
     environment:
-      RESTICHUB_DOMAIN: ${RESTICHUB_DOMAIN:-rh-stage.app.galen-is.ru}
-      RESTICHUB_ACME_EMAIL: ${RESTICHUB_ACME_EMAIL:-admin@galen-is.ru}
+      RESTICHUB_DOMAIN: ${RESTICHUB_DOMAIN:?set RESTICHUB_DOMAIN in .env}
+      RESTICHUB_ACME_EMAIL: ${RESTICHUB_ACME_EMAIL:?set RESTICHUB_ACME_EMAIL in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

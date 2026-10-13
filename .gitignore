@@ -16,6 +16,9 @@ styles/.vale-config/
 .env.*
 !.env.example
 
+# The workstation values for the stage deploy
+deploy/stage/stage.local.env
+
 # Editors and OS
 .idea/
 .vscode/

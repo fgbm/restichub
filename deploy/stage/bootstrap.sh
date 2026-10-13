@@ -2,7 +2,9 @@
 # Creates `.env` for the staging stack with random secrets.
 #
 # Run this script on the staging server, in the deployment directory. The
-# script refuses to overwrite an existing `.env`.
+# script refuses to overwrite an existing `.env`. It needs the domain and the
+# certificate email to create the file; it reads them from the environment or
+# from the second and third arguments.
 
 set -eu
 umask 077
@@ -12,6 +14,15 @@ target="${1:-.env}"
 if [ -e "$target" ]; then
 	echo "$target already exists; remove it to generate a new one" >&2
 	exit 0
+fi
+
+# The domain and the email are not secrets, so the deploy script passes them as
+# arguments. The environment wins.
+domain="${RESTICHUB_DOMAIN:-${2:-}}"
+acme_email="${RESTICHUB_ACME_EMAIL:-${3:-}}"
+if [ -z "$domain" ] || [ -z "$acme_email" ]; then
+	echo "set RESTICHUB_DOMAIN and RESTICHUB_ACME_EMAIL to create $target" >&2
+	exit 1
 fi
 
 # 32 random bytes in standard base64. The key encryption key is decoded with the
@@ -28,8 +39,8 @@ POSTGRES_DB=restichub
 RESTICHUB_OWNER_PASSWORD=$(random)
 RESTICHUB_RUNTIME_PASSWORD=$(random)
 RESTICHUB_KEK=$(random)
-RESTICHUB_DOMAIN=rh-stage.app.galen-is.ru
-RESTICHUB_ACME_EMAIL=admin@galen-is.ru
+RESTICHUB_DOMAIN=$domain
+RESTICHUB_ACME_EMAIL=$acme_email
 RESTICHUB_IMAGE_TAG=edge
 RESTICHUB_TENANCY_MODE=multi
 RESTICHUB_TRUSTED_PROXIES=172.28.0.0/24

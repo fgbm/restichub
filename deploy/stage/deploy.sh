@@ -7,11 +7,29 @@
 
 set -euo pipefail
 
-host="${RESTICHUB_STAGE_HOST:-restichub-cp-spb-1}"
+here="$(cd "$(dirname "$0")" && pwd)"
+
+# The workstation values. The gitignored file sets the host, the domain and the
+# certificate email, so they stay out of the repository.
+local_env="$here/stage.local.env"
+if [ -f "$local_env" ]; then
+	# shellcheck disable=SC1090
+	. "$local_env"
+fi
+
+host="${RESTICHUB_STAGE_HOST:-}"
+if [ -z "$host" ]; then
+	echo "set RESTICHUB_STAGE_HOST, or put it in $local_env" >&2
+	exit 1
+fi
+
+# The first run needs the domain and the email for `.env`. They are not secrets.
+domain="${RESTICHUB_DOMAIN:-}"
+acme_email="${RESTICHUB_ACME_EMAIL:-}"
+
 dir=/opt/restichub
 compose="$dir/compose.yaml"
 
-here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$here/../.." && pwd)"
 
 echo "== copy the deployment files to $host:$dir =="
@@ -21,7 +39,7 @@ scp -q "$repo_root/crates/restichub-db/sql/bootstrap-roles.sql" "$host:$dir/boot
 ssh "$host" "chmod 0700 '$dir/bootstrap.sh' && chmod 0644 '$dir/compose.yaml' '$dir/Caddyfile' '$dir/bootstrap-roles.sql'"
 
 echo "== create the environment file if it is missing =="
-ssh "$host" "cd '$dir' && { [ -e .env ] || ./bootstrap.sh; }"
+ssh "$host" "cd '$dir' && { [ -e .env ] || ./bootstrap.sh .env '$domain' '$acme_email'; }"
 
 echo "== pull the image and start the stack =="
 ssh "$host" "docker compose -f '$compose' pull"
@@ -46,10 +64,10 @@ fi
 echo "== status =="
 ssh "$host" "docker compose -f '$compose' ps"
 
-cat <<'EOF'
+cat <<EOF
 
 The stack is up. The control plane needs the first administrator.
 Read the setup token on the server. The token is a secret, so keep it off this terminal:
 
-  ssh restichub-cp-spb-1 'docker compose -f /opt/restichub/compose.yaml logs cp | grep setup_token'
+  ssh $host 'docker compose -f /opt/restichub/compose.yaml logs cp | grep setup_token'
 EOF

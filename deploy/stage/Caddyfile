@@ -6,10 +6,10 @@
 # plane trusts that header from the Caddy network alone.
 
 {
-	email {$RESTICHUB_ACME_EMAIL:admin@galen-is.ru}
+	email {$RESTICHUB_ACME_EMAIL}
 }
 
-{$RESTICHUB_DOMAIN:rh-stage.app.galen-is.ru} {
+{$RESTICHUB_DOMAIN} {
 	encode zstd gzip
 
 	header {
