@@ -11,6 +11,7 @@
 
 pub mod agent;
 pub mod cli;
+pub mod enroll;
 pub mod executor;
 pub mod identity;
 pub mod job;
