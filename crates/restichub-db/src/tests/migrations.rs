@@ -137,7 +137,7 @@ async fn db_the_platform_admin_migration_moves_the_membership_to_a_right() -> Te
     // Apply the migrations that precede the right.
     let before: Vec<_> = MIGRATOR
         .iter()
-        .filter(|migration| migration.version <= 21)
+        .filter(|migration| migration.version <= 23)
         .cloned()
         .collect();
     let up_to_20 = Migrator {
@@ -170,7 +170,7 @@ async fn db_the_platform_admin_migration_moves_the_membership_to_a_right() -> Te
     // Apply the right migration.
     let sql = MIGRATOR
         .iter()
-        .find(|migration| migration.version == 22)
+        .find(|migration| migration.version == 24)
         .expect("the platform admin right migration is present")
         .sql
         .as_str()
@@ -219,7 +219,7 @@ async fn db_the_right_migration_skips_a_revoked_membership_and_revokes_the_token
     // Apply the migrations that precede the right.
     let before: Vec<_> = MIGRATOR
         .iter()
-        .filter(|migration| migration.version <= 21)
+        .filter(|migration| migration.version <= 23)
         .cloned()
         .collect();
     let up_to_21 = Migrator {
@@ -270,7 +270,7 @@ async fn db_the_right_migration_skips_a_revoked_membership_and_revokes_the_token
     // Apply the right migration.
     let sql = MIGRATOR
         .iter()
-        .find(|migration| migration.version == 22)
+        .find(|migration| migration.version == 24)
         .expect("the platform admin right migration is present")
         .sql
         .as_str()

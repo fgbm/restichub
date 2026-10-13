@@ -311,7 +311,7 @@ pub struct NewPlatformAccount<'a> {
     pub platform_admin: bool,
 }
 
-/// The result of the platform account create (migration 0021).
+/// The result of the platform account create (migration 0023).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateAccountStatus {
     Ok,
