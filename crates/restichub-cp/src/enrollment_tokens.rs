@@ -32,14 +32,14 @@ const MIN_TTL_SECONDS: i64 = 60;
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateEnrollmentTokenRequest {
-    /// Carried to the enrolled agent row in the registry. Each holds 1 to 64 characters from
-    /// `a-z`, `0-9`, `.`, `_` and `-`.
+    /// Carried to the enrolled agent row in the registry. Each holds 1 to 63 characters from
+    /// `a-z`, `0-9` and `-`. Duplicates are removed.
     pub labels: Option<Vec<String>>,
-    /// The time to live in seconds. Between 60 and 86400. The default is 900.
+    /// The time to live in seconds. Between 60 and 86400. The default is 3600.
     pub ttl_seconds: Option<i64>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Serialize, ToSchema)]
 pub struct CreateEnrollmentTokenResponse {
     pub id: String,
     /// Returned only here.
@@ -51,6 +51,21 @@ pub struct CreateEnrollmentTokenResponse {
     pub created_at: String,
 }
 
+/// The manual `Debug` hides the token value, so a log line cannot print it by accident.
+impl std::fmt::Debug for CreateEnrollmentTokenResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CreateEnrollmentTokenResponse")
+            .field("id", &self.id)
+            .field("token", &"<redacted>")
+            .field("display_prefix", &self.display_prefix)
+            .field("labels", &self.labels)
+            .field("expires_at", &self.expires_at)
+            .field("created_at", &self.created_at)
+            .finish()
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct EnrollmentTokenView {
     pub id: String,
@@ -59,6 +74,8 @@ pub struct EnrollmentTokenView {
     /// In RFC 3339.
     pub expires_at: String,
     pub used_at: Option<String>,
+    pub revoked_at: Option<String>,
+    pub revoked_by_user_id: Option<String>,
     /// In RFC 3339.
     pub created_at: String,
     pub created_by: String,
@@ -72,6 +89,8 @@ impl From<&repo::EnrollmentToken> for EnrollmentTokenView {
             labels: entry.labels.clone(),
             expires_at: format_time(entry.expires_at),
             used_at: entry.used_at.map(format_time),
+            revoked_at: entry.revoked_at.map(format_time),
+            revoked_by_user_id: entry.revoked_by_user_id.map(|id| id.to_string()),
             created_at: format_time(entry.created_at),
             created_by: entry.created_by.to_string(),
         }
@@ -211,10 +230,11 @@ pub async fn list_enrollment_tokens(
     }))
 }
 
-/// Revokes an unused enrollment token of the tenant.
+/// Revokes an unused enrollment token of the tenant (a soft change).
 ///
-/// A used token gives HTTP 409 and changes nothing. A second call on a revoked token gives HTTP 404
-/// (the row is removed).
+/// A used or an already revoked token gives HTTP 409 and changes nothing. An unknown token gives
+/// HTTP 404. The conditional update and the re-read answer without a time-of-check gap, and a
+/// failed revoke writes no audit record.
 #[utoipa::path(
     delete,
     path = "/api/v1/enrollment-tokens/{id}",
@@ -224,7 +244,7 @@ pub async fn list_enrollment_tokens(
         (status = 204, description = "The token is revoked."),
         crate::error::ProtectedResponses,
         (status = 404, description = "The token is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The token is used.", body = crate::error::ProblemBody)
+        (status = 409, description = "The token is used or already revoked.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn revoke_enrollment_token(
@@ -234,28 +254,33 @@ pub async fn revoke_enrollment_token(
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::EnrollmentTokensWrite)?;
     let token_id = parse_token_id(&id)?;
+    let actor = context.actor_user(&state).await?;
+    let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    let changed = repo::revoke(&mut tx, token_id, actor, now).await?;
+    if !changed {
+        // The conditional update touched no row: the token is unknown, used or already revoked.
+        let existing = repo::get(&mut tx, token_id).await?;
+        return match existing {
+            None => Err(ApiError::not_found()),
+            Some(_) => Err(ApiError::conflict()),
+        };
+    }
     let existing = repo::get(&mut tx, token_id).await?;
     let Some(existing) = existing else {
         return Err(ApiError::not_found());
     };
-    if existing.used_at.is_some() {
-        return Err(ApiError::conflict());
-    }
-    let removed = repo::revoke_unused(&mut tx, token_id).await?;
-    if removed {
-        let mut event = context.audit_event(
-            AuditAction::EnrollmentTokenRevoke,
-            "enrollment_token",
-            token_id.as_uuid(),
-        );
-        event.diff = Some(diff(
-            Some(&serde_json::json!({"display_prefix": existing.display_prefix})),
-            None,
-            &[],
-        ));
-        restichub_db::audit::insert(&mut tx, &event).await?;
-    }
+    let mut event = context.audit_event(
+        AuditAction::EnrollmentTokenRevoke,
+        "enrollment_token",
+        token_id.as_uuid(),
+    );
+    event.diff = Some(diff(
+        Some(&serde_json::json!({"display_prefix": existing.display_prefix})),
+        Some(&serde_json::json!({"revoked_at": format_time(now)})),
+        &[],
+    ));
+    restichub_db::audit::insert(&mut tx, &event).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -263,7 +288,10 @@ pub async fn revoke_enrollment_token(
 fn labels(input: &Option<Vec<String>>) -> Result<Vec<String>, ApiError> {
     let mut labels = Vec::new();
     for value in input.as_deref().unwrap_or_default() {
-        labels.push(validation::validate_username("labels", value)?);
+        let label = validation::validate_label("labels", value)?;
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
     }
     Ok(labels)
 }

@@ -20,6 +20,11 @@ test('the hosts screen creates an enrollment token and shows it once', async ({ 
 	await page.locator('#host-labels').fill('web');
 	await page.getByRole('button', { name: 'Create token' }).click();
 
-	await expect(page.getByText('re_EXAMPLEONLYVALUE')).toBeVisible();
-	await expect(page.getByText('restichub-agent register --token')).toBeVisible();
+	await expect(
+		page.getByText('re_EXAMPLEONLYVALUE00000000000000000000000000', { exact: true })
+	).toBeVisible();
+	await expect(
+		page.getByText('restichub-agent register --url https://<control-plane> --token')
+	).toBeVisible();
+	await expect(page.getByText('The token works once and expires in one hour.')).toBeVisible();
 });

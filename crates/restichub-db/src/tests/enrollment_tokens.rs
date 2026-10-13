@@ -133,3 +133,102 @@ async fn ac_id_01_a_token_of_another_tenant_is_refused() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn ac_id_01_a_revoked_token_is_refused_and_a_second_revoke_changes_nothing() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, user) = tenant_with_admin(db.database(), "enroll-revoke").await?;
+    let now = OffsetDateTime::now_utc();
+    let hash = [4u8; 32];
+
+    let id = {
+        let mut tx = db.database().begin_tenant(tenant).await?;
+        let id = enrollment_tokens::create(
+            &mut tx,
+            &NewEnrollmentToken {
+                token_hash: &hash,
+                display_prefix: "ab12cd34",
+                labels: &["host".to_owned()],
+                expires_at: now + Duration::hours(1),
+                created_by: user,
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        id
+    };
+
+    // The revoke is soft: the row stays and the audit trail keeps the actor.
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    assert!(enrollment_tokens::revoke(&mut tx, id, user, now).await?);
+    assert_eq!(
+        enrollment_tokens::consume(&mut tx, &hash, now).await?,
+        ConsumeOutcome::Revoked
+    );
+    let token = enrollment_tokens::get(&mut tx, id)
+        .await?
+        .expect("the revoked token stays");
+    assert!(token.revoked_at.is_some());
+    assert_eq!(token.revoked_by_user_id, Some(user));
+    // Second revoke: no change.
+    assert!(!enrollment_tokens::revoke(&mut tx, id, user, now).await?);
+    tx.commit().await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// A concurrent revoke and exchange: one of the two wins, and only one.
+#[tokio::test]
+async fn ac_id_01_a_revoke_and_a_consume_race_resolves_to_one_winner() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, user) = tenant_with_admin(db.database(), "enroll-race").await?;
+    let now = OffsetDateTime::now_utc();
+    let hash = [5u8; 32];
+    let id = {
+        let mut tx = db.database().begin_tenant(tenant).await?;
+        let id = enrollment_tokens::create(
+            &mut tx,
+            &NewEnrollmentToken {
+                token_hash: &hash,
+                display_prefix: "ab12cd34",
+                labels: &["host".to_owned()],
+                expires_at: now + Duration::hours(1),
+                created_by: user,
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        id
+    };
+
+    let database = db.database();
+    let revoke_branch = async {
+        let mut tx = database.begin_tenant(tenant).await?;
+        let changed = enrollment_tokens::revoke(&mut tx, id, user, now).await?;
+        tx.commit().await?;
+        Ok::<bool, crate::DbError>(changed)
+    };
+    let consume_branch = async {
+        let mut tx = database.begin_tenant(tenant).await?;
+        let outcome = enrollment_tokens::consume(&mut tx, &hash, now).await?;
+        tx.commit().await?;
+        Ok::<ConsumeOutcome, crate::DbError>(outcome)
+    };
+    let (revoked, consumed) = tokio::join!(revoke_branch, consume_branch);
+    let revoked = revoked?;
+    let consumed = consumed?;
+
+    match (revoked, consumed) {
+        (true, ConsumeOutcome::Revoked) => {}
+        (false, ConsumeOutcome::Consumed) => {}
+        other => panic!("the race must have one winner: {other:?}"),
+    }
+
+    db.cleanup().await;
+    Ok(())
+}

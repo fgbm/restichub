@@ -252,8 +252,10 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.tokenBody': 'Это значение показывается один раз. Скопируйте его и сохраните.',
 	'hosts.tokenValue': 'Токен регистрации',
 	'hosts.tokenCreated': 'Токен регистрации создан.',
+	'hosts.tokenNote': 'Токен действует один раз и истекает через час.',
 	'hosts.installCommand': 'Команда установки',
-	'hosts.installPlaceholder': 'restichub-agent register --token <token>',
+	'hosts.installPlaceholder':
+		'restichub-agent register --url https://<control-plane> --token {token}',
 
 	// Audit log
 	'audit.title': 'Журнал аудита',
@@ -302,8 +304,9 @@ export const ru: Record<MessageKey, string> = {
 	'audit.action.job_cancel': 'Отмена задания',
 	'audit.action.restore_start': 'Запуск восстановления',
 	'audit.action.secret_delivered': 'Передача секрета',
-	'audit.action.agent_enrolled': 'Регистрация агента',
-	'audit.action.agent_revoked': 'Отзыв агента',
+	'audit.action.agent_enroll': 'Регистрация агента',
+	'audit.action.agent_revoke': 'Отзыв агента',
+	'audit.action.agent_update': 'Переименование агента',
 	'audit.action.remote_install': 'Удалённая установка',
 	'audit.action.tenant_create': 'Создание организации',
 	'audit.action.tenant_suspend': 'Приостановка организации',

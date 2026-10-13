@@ -16,6 +16,8 @@ pub const MAX_DISPLAY_NAME: usize = 128;
 pub const MAX_TENANT_NAME: usize = 63;
 /// Limit in characters.
 pub const MAX_TOKEN_NAME: usize = 64;
+/// Limit in characters of one enrollment token label.
+pub const MAX_LABEL: usize = 63;
 /// Limit in characters.
 pub const MAX_SECRET_NAME: usize = 64;
 /// Limit in bytes.
@@ -145,6 +147,24 @@ pub fn validate_token_name(field: &'static str, value: &str) -> Result<String, V
         return Err(ValidationError::new(field, Reason::TooLong));
     }
     if value.chars().any(char::is_control) {
+        return Err(ValidationError::new(field, Reason::InvalidCharacter));
+    }
+    Ok(value.to_owned())
+}
+
+/// A label holds 1 to [`MAX_LABEL`] characters from `a-z`, `0-9` and `-`.
+pub fn validate_label(field: &'static str, value: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    let count = value.chars().count();
+    if count == 0 {
+        return Err(ValidationError::new(field, Reason::Empty));
+    }
+    if count > MAX_LABEL {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    if !value.chars().all(|character| {
+        character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+    }) {
         return Err(ValidationError::new(field, Reason::InvalidCharacter));
     }
     Ok(value.to_owned())

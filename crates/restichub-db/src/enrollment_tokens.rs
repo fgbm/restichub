@@ -1,12 +1,13 @@
-//! The enrollment tokens (ADR-0026, FR-ID-01, FR-ID-05, FR-TN-03).
+//! The enrollment tokens (ADR-0026, ADR-0032, FR-ID-01, FR-ID-05, FR-TN-03).
 //!
 //! A token belongs to one tenant and carries optional agent labels. The database keeps only the
 //! SHA-256 hash and a short display prefix, in the manner of the API tokens of ADR-0023. The value
 //! appears once, at the create.
 //!
-//! A token is single use and it expires: [`consume`] marks the row used and refuses an expired or a
-//! used token. The enrollment exchange (#48) calls [`consume`]. The current lookup runs in the
-//! tenant transaction of the caller; #48 adds the cross-tenant lookup for the enrollment endpoint.
+//! A token is single use and it expires: [`consume`] marks the row used and refuses a used, an
+//! expired and a revoked token. A revoke is soft: [`revoke`] sets `revoked_at` and keeps the row.
+//! The enrollment exchange (#48) calls [`consume`]. The current lookup runs in the tenant
+//! transaction of the caller; #48 adds the cross-tenant lookup for the enrollment endpoint.
 
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -15,8 +16,8 @@ use crate::DbError;
 use crate::ids::{EnrollmentTokenId, UserId};
 use crate::tx::TenantTx;
 
-/// Default time to live of a token.
-pub const DEFAULT_TTL_SECONDS: i64 = 15 * 60;
+/// Default time to live of a token (ADR-0032: one hour).
+pub const DEFAULT_TTL_SECONDS: i64 = 60 * 60;
 
 /// Longest accepted time to live of a token.
 pub const MAX_TTL_SECONDS: i64 = 24 * 60 * 60;
@@ -43,6 +44,8 @@ pub struct EnrollmentToken {
     pub labels: Vec<String>,
     pub expires_at: OffsetDateTime,
     pub used_at: Option<OffsetDateTime>,
+    pub revoked_at: Option<OffsetDateTime>,
+    pub revoked_by_user_id: Option<UserId>,
     pub created_by: UserId,
     pub created_at: OffsetDateTime,
 }
@@ -56,7 +59,9 @@ pub enum ConsumeOutcome {
     Expired,
     /// Used before.
     AlreadyUsed,
-    /// No token holds this hash (a revoked, an unknown or a foreign token).
+    /// An Admin revoked the token before the exchange.
+    Revoked,
+    /// No token holds this hash (an unknown or a foreign token).
     Unknown,
 }
 
@@ -122,7 +127,8 @@ pub async fn list(
         None => (None, None),
     };
     let mut tokens: Vec<EnrollmentToken> = sqlx::query_as::<_, EnrollmentTokenRow>(
-        "SELECT id, display_prefix, labels, expires_at, used_at, created_by_user_id, created_at \
+        "SELECT id, display_prefix, labels, expires_at, used_at, revoked_at, revoked_by_user_id, \
+                created_by_user_id, created_at \
          FROM enrollment_tokens \
          WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
          ORDER BY created_at DESC, id DESC \
@@ -148,7 +154,8 @@ pub async fn get(
     id: EnrollmentTokenId,
 ) -> Result<Option<EnrollmentToken>, DbError> {
     let row = sqlx::query_as::<_, EnrollmentTokenRow>(
-        "SELECT id, display_prefix, labels, expires_at, used_at, created_by_user_id, created_at \
+        "SELECT id, display_prefix, labels, expires_at, used_at, revoked_at, revoked_by_user_id, \
+                created_by_user_id, created_at \
          FROM enrollment_tokens WHERE id = $1",
     )
     .bind(id)
@@ -158,55 +165,102 @@ pub async fn get(
     Ok(row.map(EnrollmentToken::from))
 }
 
-/// Removes an unused token of the tenant.
+/// Revokes an unused token of the tenant (a soft change).
 ///
-/// `true` when the row was removed. A used token is not removed (`false`); the caller reads the
-/// metadata first to tell a used token from a missing one.
-pub async fn revoke_unused(tx: &mut TenantTx<'_>, id: EnrollmentTokenId) -> Result<bool, DbError> {
-    let result = sqlx::query("DELETE FROM enrollment_tokens WHERE id = $1 AND used_at IS NULL")
-        .bind(id)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+/// Sets `revoked_at` and `revoked_by_user_id` in one conditional update. `true` when the row
+/// changed. A used or an already revoked token changes nothing (`false`); the caller reads the
+/// metadata to tell the cases apart.
+pub async fn revoke(
+    tx: &mut TenantTx<'_>,
+    id: EnrollmentTokenId,
+    actor: UserId,
+    now: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE enrollment_tokens SET revoked_at = $2, revoked_by_user_id = $3 \
+         WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL",
+    )
+    .bind(id)
+    .bind(now)
+    .bind(actor)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
 }
 
 /// Spends a token (FR-ID-01, AC-ID-01).
 ///
 /// Marks the row used and returns [`ConsumeOutcome::Consumed`]. An expired token gives
-/// [`ConsumeOutcome::Expired`] and a used token [`ConsumeOutcome::AlreadyUsed`]. A concurrent
-/// exchange loses the guard `used_at IS NULL` and gets [`ConsumeOutcome::AlreadyUsed`], so a token
-/// is spent once.
+/// [`ConsumeOutcome::Expired`], a used token [`ConsumeOutcome::AlreadyUsed`] and a revoked token
+/// [`ConsumeOutcome::Revoked`]. A concurrent exchange or revoke loses the guard and the function
+/// re-reads the row to answer the outcome.
 pub async fn consume(
     tx: &mut TenantTx<'_>,
     token_hash: &[u8],
     now: OffsetDateTime,
 ) -> Result<ConsumeOutcome, DbError> {
-    let existing: Option<(Option<OffsetDateTime>, OffsetDateTime)> =
-        sqlx::query_as("SELECT used_at, expires_at FROM enrollment_tokens WHERE token_hash = $1")
-            .bind(token_hash)
-            .fetch_optional(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
-    match existing {
-        None => Ok(ConsumeOutcome::Unknown),
-        Some((Some(_), _)) => Ok(ConsumeOutcome::AlreadyUsed),
-        Some((None, expires_at)) if expires_at <= now => Ok(ConsumeOutcome::Expired),
-        Some((None, _)) => {
-            let result = sqlx::query(
-                "UPDATE enrollment_tokens SET used_at = $2 \
-                 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2",
-            )
-            .bind(token_hash)
-            .bind(now)
-            .execute(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
-            if result.rows_affected() == 1 {
-                Ok(ConsumeOutcome::Consumed)
-            } else {
-                Ok(ConsumeOutcome::AlreadyUsed)
-            }
+    let existing: Option<EnrollmentTokenState> = sqlx::query_as(
+        "SELECT used_at, revoked_at, expires_at FROM enrollment_tokens WHERE token_hash = $1",
+    )
+    .bind(token_hash)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    let Some(state) = existing else {
+        return Ok(ConsumeOutcome::Unknown);
+    };
+    if let Some(outcome) = state.refusal(now) {
+        return Ok(outcome);
+    }
+    let result = sqlx::query(
+        "UPDATE enrollment_tokens SET used_at = $2 \
+         WHERE token_hash = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > $2",
+    )
+    .bind(token_hash)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    if result.rows_affected() == 1 {
+        return Ok(ConsumeOutcome::Consumed);
+    }
+    // A concurrent exchange or revoke changed the row since the read. Re-read and classify.
+    let after: Option<EnrollmentTokenState> = sqlx::query_as(
+        "SELECT used_at, revoked_at, expires_at FROM enrollment_tokens WHERE token_hash = $1",
+    )
+    .bind(token_hash)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(after
+        .and_then(|state| state.refusal(now))
+        .unwrap_or(ConsumeOutcome::AlreadyUsed))
+}
+
+/// The fields that decide whether a token is still spendable.
+type EnrollmentTokenState = (
+    Option<OffsetDateTime>,
+    Option<OffsetDateTime>,
+    OffsetDateTime,
+);
+
+trait Refusal {
+    /// `None` when the token is still spendable.
+    fn refusal(&self, now: OffsetDateTime) -> Option<ConsumeOutcome>;
+}
+
+impl Refusal for EnrollmentTokenState {
+    fn refusal(&self, now: OffsetDateTime) -> Option<ConsumeOutcome> {
+        let (used_at, revoked_at, expires_at) = self;
+        if used_at.is_some() {
+            Some(ConsumeOutcome::AlreadyUsed)
+        } else if revoked_at.is_some() {
+            Some(ConsumeOutcome::Revoked)
+        } else if *expires_at <= now {
+            Some(ConsumeOutcome::Expired)
+        } else {
+            None
         }
     }
 }
@@ -217,19 +271,33 @@ type EnrollmentTokenRow = (
     Vec<String>,
     OffsetDateTime,
     Option<OffsetDateTime>,
+    Option<OffsetDateTime>,
+    Option<Uuid>,
     Uuid,
     OffsetDateTime,
 );
 
 impl From<EnrollmentTokenRow> for EnrollmentToken {
     fn from(row: EnrollmentTokenRow) -> Self {
-        let (id, display_prefix, labels, expires_at, used_at, created_by, created_at) = row;
+        let (
+            id,
+            display_prefix,
+            labels,
+            expires_at,
+            used_at,
+            revoked_at,
+            revoked_by_user_id,
+            created_by,
+            created_at,
+        ) = row;
         Self {
             id: EnrollmentTokenId::from_uuid(id),
             display_prefix,
             labels,
             expires_at,
             used_at,
+            revoked_at,
+            revoked_by_user_id: revoked_by_user_id.map(UserId::from_uuid),
             created_by: UserId::from_uuid(created_by),
             created_at,
         }

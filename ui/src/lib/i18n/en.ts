@@ -249,8 +249,10 @@ export const en = {
 	'hosts.tokenBody': 'This value appears one time only. Copy it and keep it safe.',
 	'hosts.tokenValue': 'Enrollment token',
 	'hosts.tokenCreated': 'The enrollment token is created.',
+	'hosts.tokenNote': 'The token works once and expires in one hour.',
 	'hosts.installCommand': 'Install command',
-	'hosts.installPlaceholder': 'restichub-agent register --token <token>',
+	'hosts.installPlaceholder':
+		'restichub-agent register --url https://<control-plane> --token {token}',
 
 	// Audit log
 	'audit.title': 'Audit log',
@@ -299,8 +301,9 @@ export const en = {
 	'audit.action.job_cancel': 'Cancel job',
 	'audit.action.restore_start': 'Start restore',
 	'audit.action.secret_delivered': 'Deliver secret',
-	'audit.action.agent_enrolled': 'Enroll agent',
-	'audit.action.agent_revoked': 'Revoke agent',
+	'audit.action.agent_enroll': 'Enroll agent',
+	'audit.action.agent_revoke': 'Revoke agent',
+	'audit.action.agent_update': 'Rename agent',
 	'audit.action.remote_install': 'Remote install',
 	'audit.action.tenant_create': 'Create organization',
 	'audit.action.tenant_suspend': 'Suspend organization',
