@@ -8,6 +8,7 @@
 		Checkbox,
 		Dialog,
 		PageHeader,
+		PasswordField,
 		Select,
 		Table,
 		TextField
@@ -41,6 +42,14 @@
 	let manageTenantId = $state('');
 	let manageRole = $state<Role>('viewer');
 	let busyKey = $state<string | null>(null);
+
+	// A grant of the right asks for a new password: the old password may be known to a tenant Admin
+	// (ADR-0029).
+	let grantOpen = $state(false);
+	let grantUser = $state<PlatformUser | null>(null);
+	let grantPassword = $state('');
+	let granting = $state(false);
+	let grantError = $state<string | null>(null);
 
 	const createFields = ['username', 'display_name', 'email', 'password'];
 	const emailTaken = $derived(
@@ -214,14 +223,37 @@
 		manageUser = accounts.find((account) => account.id === manageUser?.id) ?? null;
 	}
 
-	async function togglePlatformAdmin(user: PlatformUser): Promise<void> {
+	function openGrant(user: PlatformUser): void {
+		grantUser = user;
+		grantPassword = '';
+		grantError = null;
+		grantOpen = true;
+	}
+
+	async function grantRight(): Promise<void> {
+		if (!grantUser) return;
+		granting = true;
+		grantError = null;
+		try {
+			await service.updatePlatformUser(grantUser.id, {
+				platform_admin: true,
+				password: grantPassword
+			});
+			pushToast('success', t('platformUsers.rightGranted'));
+			grantOpen = false;
+			await load();
+		} catch (problem) {
+			grantError = messageOf(problem);
+		} finally {
+			granting = false;
+		}
+	}
+
+	async function revokeRight(user: PlatformUser): Promise<void> {
 		busyKey = `right:${user.id}`;
 		try {
-			await service.updatePlatformUser(user.id, { platform_admin: !user.platform_admin });
-			pushToast(
-				'success',
-				user.platform_admin ? t('platformUsers.rightRemoved') : t('platformUsers.rightGranted')
-			);
+			await service.updatePlatformUser(user.id, { platform_admin: false });
+			pushToast('success', t('platformUsers.rightRemoved'));
 			await load();
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
@@ -262,7 +294,7 @@
 			variant="ghost"
 			loading={busyKey === `right:${user.id}`}
 			title={user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin')}
-			onclick={() => togglePlatformAdmin(user)}
+			onclick={() => (user.platform_admin ? revokeRight(user) : openGrant(user))}
 		>
 			{user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin')}
 		</Button>
@@ -404,6 +436,32 @@
 			</Button>
 		{/if}
 	{/if}
+</Dialog>
+
+<Dialog bind:open={grantOpen} title={t('platformUsers.grantTitle')}>
+	{#if grantError}
+		<Alert tone="danger" title={grantError} />
+	{/if}
+	<p>{t('platformUsers.grantHint', { name: grantUser?.username ?? '' })}</p>
+	<PasswordField
+		id="platform-user-grant-password"
+		label={t('setup.password')}
+		help={t('setup.passwordHint')}
+		bind:value={grantPassword}
+		autocomplete="new-password"
+		required
+	/>
+	{#snippet footer()}
+		<Button onclick={() => (grantOpen = false)}>{t('common.cancel')}</Button>
+		<Button
+			variant="primary"
+			loading={granting}
+			disabled={grantPassword.length < 12}
+			onclick={grantRight}
+		>
+			{t('platformUsers.grantAdmin')}
+		</Button>
+	{/snippet}
 </Dialog>
 
 <style>

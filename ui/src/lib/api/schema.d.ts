@@ -453,8 +453,8 @@ export interface paths {
         head?: never;
         /**
          * Changes an account itself (Platform Admin only).
-         * @description The endpoint refuses the caller's own account and the last active Platform Admin. At least one
-         *     field must be present.
+         * @description The endpoint refuses the caller's own account and the last active Platform Admin. A grant of the
+         *     right requires a new password and ends every session of the account (ADR-0029).
          */
         patch: operations["update_account"];
         trace?: never;
@@ -1117,6 +1117,11 @@ export interface components {
             disabled?: boolean | null;
             /** @description Written by the update; the MVP treats it as unverified. */
             email?: string | null;
+            /**
+             * @description The new password of a grant. It is required when `platform_admin` is true and it is not
+             *     used otherwise.
+             */
+            password?: string | null;
             /** @description True when the account holds the installation-wide right (ADR-0029). */
             platform_admin?: boolean | null;
         };
@@ -2565,7 +2570,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A field is not valid. */
+            /** @description A field is not valid, or a grant holds no password. */
             400: {
                 headers: {
                     [name: string]: unknown;

@@ -226,6 +226,9 @@ export const en = {
 	'platformUsers.emailTaken': 'This email is taken.',
 	'platformUsers.selectOrganization': 'Select an organization',
 	'platformUsers.platformAdmin': 'Platform Admin',
+	'platformUsers.grantTitle': 'Grant the Platform Admin right',
+	'platformUsers.grantHint':
+		'Set a new password for {name}. The old password and every session of the account stop.',
 	'platformUsers.grantAdmin': 'Grant the Platform Admin right',
 	'platformUsers.revokeAdmin': 'Remove the Platform Admin right',
 	'platformUsers.rightGranted': 'The Platform Admin right is granted.',

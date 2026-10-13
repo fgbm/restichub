@@ -230,6 +230,9 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.emailTaken': 'Этот адрес электронной почты занят.',
 	'platformUsers.selectOrganization': 'Выберите организацию',
 	'platformUsers.platformAdmin': 'Администратор платформы',
+	'platformUsers.grantTitle': 'Выдача права администратора платформы',
+	'platformUsers.grantHint':
+		'Задайте новый пароль для {name}. Прежний пароль и все сеансы учётной записи перестанут работать.',
 	'platformUsers.grantAdmin': 'Выдать право администратора платформы',
 	'platformUsers.revokeAdmin': 'Забрать право администратора платформы',
 	'platformUsers.rightGranted': 'Право администратора платформы выдано.',
