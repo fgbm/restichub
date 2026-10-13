@@ -90,8 +90,9 @@ export interface paths {
         /**
          * Changes the password of the current user (installation-wide).
          * @description The endpoint sets the account password and removes every other session of the account in every
-         *     tenant, and it keeps the current session. A wrong current password counts against the user rate
-         *     limit. The hash runs without a database transaction.
+         *     tenant, and it keeps the current session. The database function binds the write to the caller's
+         *     own session. A wrong current password counts against the user rate limit. The hash runs without
+         *     a database transaction.
          */
         post: operations["change_password"];
         delete?: never;
@@ -150,9 +151,10 @@ export interface paths {
         put?: never;
         /**
          * Switches the session to another tenant (ADR-0025).
-         * @description The endpoint checks the membership of the caller in the target tenant, creates a new session in
-         *     the target tenant, deletes the old session and rotates the cookie. It writes the audit record
-         *     `session_switch` in the source tenant and in the target tenant.
+         * @description The endpoint checks the membership of the caller in the target tenant, deletes the source
+         *     session, creates a new session in the target tenant with the source expiry and the source user
+         *     agent, and rotates the cookie. A source session that another request already removed gives HTTP
+         *     401. Switching to the current tenant gives HTTP 400.
          */
         post: operations["switch_tenant"];
         delete?: never;
@@ -331,7 +333,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Disables or enables an account itself (Platform Admin only). */
+        /**
+         * Disables or enables an account itself (Platform Admin only).
+         * @description The endpoint refuses the caller's own account and the last active Platform Admin.
+         */
         patch: operations["set_account_disabled"];
         trace?: never;
     };
@@ -344,7 +349,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Adds a membership for an existing account (Platform Admin only). */
+        /**
+         * Adds a membership for an existing account (Platform Admin only).
+         * @description The platform tenant is refused: a Platform Admin membership is created by the setup or by the
+         *     platform user create only.
+         */
         post: operations["add_membership"];
         delete?: never;
         options?: never;
@@ -551,7 +560,6 @@ export interface components {
     schemas: {
         AddMembershipRequest: {
             role: components["schemas"]["Role"];
-            /** @description The identifier of the target tenant. */
             tenant_id: string;
         };
         ApiTokenListResponse: {
@@ -804,7 +812,6 @@ export interface components {
             user: components["schemas"]["UserView"];
         };
         SwitchTenantRequest: {
-            /** @description The identifier of the tenant to switch to. */
             tenant_id: string;
         };
         /**
@@ -1283,7 +1290,7 @@ export interface operations {
                     "application/json": components["schemas"]["SignInResponse"];
                 };
             };
-            /** @description The request body is not valid. */
+            /** @description The target tenant is the current tenant. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1840,6 +1847,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
+            /** @description The account is the last active Platform Admin. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
         };
     };
     add_membership: {
@@ -1896,15 +1912,6 @@ export interface operations {
             };
             /** @description The account or the tenant is not found. */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The account is already a member. */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };

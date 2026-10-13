@@ -1,16 +1,26 @@
 /*
- * The tenant switcher (ADR-0025): the menu, the roles, the check mark, the filter and the keyboard.
+ * The tenant switcher (ADR-0025): the menu, the roles, the check mark, the filter, the keyboard,
+ * the reload on open, the error toast and the click outside.
  */
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setSession } from '#lib/stores/session.svelte.ts';
+import { getToasts } from '#lib/stores/toasts.svelte.ts';
 import TenantSwitcher from './TenantSwitcher.svelte';
 
 const mocks = vi.hoisted(() => ({
 	listMemberships: vi.fn(),
-	switchTenant: vi.fn()
+	switchTenant: vi.fn(),
+	invalidateAll: vi.fn(),
+	goto: vi.fn()
 }));
+
+vi.mock('$app/navigation', () => ({
+	goto: mocks.goto,
+	invalidateAll: mocks.invalidateAll
+}));
+vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
 
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
@@ -48,7 +58,10 @@ describe('the tenant switcher', () => {
 	beforeEach(() => {
 		mocks.listMemberships.mockReset();
 		mocks.switchTenant.mockReset();
+		mocks.invalidateAll.mockReset();
+		mocks.goto.mockReset();
 		mocks.listMemberships.mockResolvedValue(tenants);
+		mocks.invalidateAll.mockResolvedValue(undefined);
 		mocks.switchTenant.mockImplementation(async (id: string) =>
 			session(id, tenants.find((tenant) => tenant.id === id)?.name ?? '')
 		);
@@ -68,7 +81,19 @@ describe('the tenant switcher', () => {
 		expect(other).toHaveAttribute('aria-checked', 'false');
 	});
 
-	it('moves with the arrow keys and switches with Enter', async () => {
+	it('reloads the membership list on every open', async () => {
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+		const button = screen.getByRole('button', { name: 'Switch tenant' });
+
+		await user.click(button);
+		await waitFor(() => expect(mocks.listMemberships).toHaveBeenCalledTimes(1));
+		await user.keyboard('{Escape}');
+		await user.click(button);
+		await waitFor(() => expect(mocks.listMemberships).toHaveBeenCalledTimes(2));
+	});
+
+	it('moves with the arrow keys and switches with Enter on the active item', async () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
@@ -78,6 +103,7 @@ describe('the tenant switcher', () => {
 		await user.keyboard('{ArrowDown}');
 		await user.keyboard('{Enter}');
 		await waitFor(() => expect(mocks.switchTenant).toHaveBeenCalledWith('t_02'));
+		await waitFor(() => expect(mocks.invalidateAll).toHaveBeenCalled());
 	});
 
 	it('closes on Escape and returns the focus to the button', async () => {
@@ -91,6 +117,30 @@ describe('the tenant switcher', () => {
 		await user.keyboard('{Escape}');
 		await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
 		expect(button).toHaveFocus();
+	});
+
+	it('closes on a click outside', async () => {
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch tenant' }));
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+
+		await user.click(document.body);
+		await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+	});
+
+	it('shows an error toast when the switch fails', async () => {
+		mocks.switchTenant.mockRejectedValue(new Error('boom'));
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch tenant' }));
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+		await user.click(screen.getByRole('menuitemradio', { name: /globex/ }));
+
+		await waitFor(() => expect(getToasts().some((toast) => toast.tone === 'danger')).toBe(true));
+		expect(mocks.invalidateAll).not.toHaveBeenCalled();
 	});
 
 	it('filters the list when the caller holds more than seven memberships', async () => {

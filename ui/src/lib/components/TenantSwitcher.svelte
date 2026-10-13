@@ -3,24 +3,29 @@
 	 * The tenant switcher in the top bar (ADR-0025).
 	 *
 	 * The menu lists the memberships of the caller with the role and a check mark on the current
-	 * tenant. A filter appears when the caller holds more than seven memberships. A Platform Admin
-	 * gets a separate Platform entry. The keyboard moves with the arrows, selects with Enter and
-	 * closes with Escape; the focus returns to the button.
+	 * tenant. It reloads the list on every open. A filter appears when the caller holds more than
+	 * seven memberships. A Platform Admin gets a separate Platform entry.
+	 *
+	 * The keyboard moves with the arrows (`aria-activedescendant` names the active item), selects
+	 * with Enter and closes with Escape; the focus returns to the button. A click outside closes
+	 * the menu. A failed switch shows a toast; a lost session redirects to the sign-in screen.
 	 */
 	import { tick } from 'svelte';
-	import { service } from '#lib/api/index.ts';
+	import { goto, invalidateAll } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { ApiError, UnauthorizedError, service } from '#lib/api/index.ts';
 	import type { Role, TenantAccess } from '#lib/api/index.ts';
-	import { t, type MessageKey } from '#lib/i18n/index.ts';
-	import { getSession, setSession } from '#lib/stores/session.svelte.ts';
+	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
+	import { clearSession, getSession, setSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let open = $state(false);
 	let tenants = $state<TenantAccess[]>([]);
 	let filter = $state('');
 	let activeIndex = $state(0);
-	let loaded = $state(false);
 
 	let button = $state<HTMLButtonElement | null>(null);
+	let menu = $state<HTMLDivElement | null>(null);
 	let filterInput = $state<HTMLInputElement | null>(null);
 
 	const roleKeys = $derived<Record<Role, MessageKey>>({
@@ -46,6 +51,11 @@
 	);
 	const options = $derived([...regular, ...platform]);
 	const showFilter = $derived(tenants.length > 7);
+	const activeId = $derived(options[activeIndex] ? itemId(options[activeIndex]) : undefined);
+
+	function itemId(tenant: TenantAccess): string {
+		return `tenant-switch-item-${tenant.id}`;
+	}
 
 	async function load(): Promise<void> {
 		try {
@@ -53,19 +63,20 @@
 		} catch {
 			tenants = [];
 		}
-		loaded = true;
 	}
 
 	async function openMenu(): Promise<void> {
 		open = true;
 		filter = '';
+		// The list is reloaded on every open, so a membership added elsewhere shows up.
+		await load();
 		activeIndex = Math.max(
 			0,
 			tenants.findIndex((tenant) => tenant.id === currentId)
 		);
-		if (!loaded) await load();
 		await tick();
 		if (showFilter) filterInput?.focus();
+		else menu?.focus();
 	}
 
 	function close(): void {
@@ -85,11 +96,26 @@
 				const me = await service.switchTenant(tenant.id);
 				setSession(me);
 				pushToast('success', t('topbar.switched', { name: tenant.name }));
-			} catch {
-				// The switch failed; the session stays on the current tenant.
+				// Every screen reloads its data for the new tenant.
+				await invalidateAll();
+			} catch (error) {
+				if (error instanceof UnauthorizedError) {
+					clearSession();
+					await goto(resolve('/(auth)/sign-in'));
+					return;
+				}
+				const code = error instanceof ApiError ? error.code : undefined;
+				pushToast('danger', tErrorCode(code) ?? t('alert.problemTitle'));
 			}
 		}
 		close();
+	}
+
+	function onDocumentClick(event: MouseEvent): void {
+		const target = event.target as Node | null;
+		if (target && !menu?.contains(target) && !button?.contains(target)) {
+			close();
+		}
 	}
 
 	function onKeydown(event: KeyboardEvent): void {
@@ -118,6 +144,12 @@
 			}
 		}
 	}
+
+	$effect(() => {
+		if (!open) return;
+		document.addEventListener('click', onDocumentClick);
+		return () => document.removeEventListener('click', onDocumentClick);
+	});
 </script>
 
 <div class="switcher">
@@ -137,10 +169,12 @@
 
 	{#if open}
 		<div
+			bind:this={menu}
 			class="switcher__menu"
 			role="menu"
 			tabindex="-1"
 			aria-label={t('topbar.switchTenant')}
+			aria-activedescendant={activeId}
 			onkeydown={onKeydown}
 		>
 			<p class="switcher__group-title">{t('topbar.yourTenants')}</p>
@@ -157,6 +191,7 @@
 			{#each regular as tenant, index (tenant.id)}
 				<button
 					type="button"
+					id={itemId(tenant)}
 					class="switcher__item"
 					class:switcher__item--active={index === activeIndex}
 					role="menuitemradio"
@@ -177,6 +212,7 @@
 					{@const position = regular.length + index}
 					<button
 						type="button"
+						id={itemId(tenant)}
 						class="switcher__item"
 						class:switcher__item--active={position === activeIndex}
 						role="menuitemradio"
