@@ -383,14 +383,26 @@ mod tests {
     }
 
     #[test]
-    fn a_directory_that_another_account_owns_is_refused() {
+    fn a_directory_with_another_owner_is_refused() {
         // The base is SYSTEM and Administrators only, so the refusal names the inner directory.
-        let base = temp("base");
+        let base = temp("owner-base");
         create_protected_dir(&base).expect("cannot create the protected base");
         let dir = base.join("agent");
-        std::fs::create_dir_all(&dir).expect("cannot create the directory");
+        create_protected_dir(&dir).expect("cannot create the protected directory");
+        // An administrator of a Windows host owns a new directory through Administrators, so the
+        // test sets a different owner by hand.
+        set_owner(&dir, "BU").expect("cannot set the owner");
         assert!(ensure_config_dir(&dir).is_err());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_directory_with_a_write_ace_for_everyone_is_refused() {
+        let dir = temp("acl");
+        create_protected_dir(&dir).expect("cannot create the protected directory");
+        grant_everyone(&dir).expect("cannot add the access control entry");
+        assert!(check_admin_only(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -409,6 +421,47 @@ mod tests {
         create_protected_file(&file, b"key").expect("cannot write the protected file");
         check_admin_only(&file).expect("the key file must be SYSTEM and Administrators only");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Sets the owner of `path` to the SDDL identity, for a negative test.
+    fn set_owner(path: &Path, sid: &str) -> Result<()> {
+        let descriptor = descriptor(&format!("O:{sid}"))?;
+        let mut owner: PSID = std::ptr::null_mut();
+        let mut defaulted = 0;
+        // SAFETY: the descriptor is a valid security descriptor.
+        unsafe { GetSecurityDescriptorOwner(descriptor.0, &mut owner, &mut defaulted) };
+        let wide = wide_path(path);
+        // SAFETY: the path is a null-terminated UTF-16 string and the owner stays alive.
+        let status = unsafe {
+            SetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                owner,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            bail!("cannot set the owner (error {status})");
+        }
+        Ok(())
+    }
+
+    /// Adds a full-control access control entry for every account, for a negative test.
+    fn grant_everyone(dir: &Path) -> Result<()> {
+        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
+        let icacls = Path::new(&system_root).join("System32").join("icacls.exe");
+        let status = std::process::Command::new(icacls)
+            .arg(dir)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .status()
+            .context("cannot run icacls")?;
+        if !status.success() {
+            bail!("icacls failed with {status}");
+        }
+        Ok(())
     }
 
     #[test]
