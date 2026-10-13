@@ -67,3 +67,20 @@ test('the current organization leaves the platform mode for its overview', async
 	await expect(page).toHaveTitle(/^Overview · ResticHub$/);
 	expect(await tabNames(page)).toEqual(['Overview', 'Hosts', 'Audit', 'Settings']);
 });
+
+// ADR-0029: the Platform Admin right without a membership leaves no organization screen to open.
+test('a Platform Admin without an organization reaches the platform mode on every organization route', async ({
+	page
+}) => {
+	await page.addInitScript(() =>
+		localStorage.setItem('restichub.mock.session', 'platform-admin-no-org')
+	);
+
+	await signIn(page);
+	await expect(page).toHaveURL(/\/platform\/tenants$/);
+
+	await page.goto('/hosts');
+	await expect(page).toHaveURL(/\/platform\/tenants$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'Organizations' })).toBeVisible();
+	expect(await page.locator('.toast').count()).toBe(0);
+});

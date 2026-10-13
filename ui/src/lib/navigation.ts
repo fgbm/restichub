@@ -121,15 +121,28 @@ export function tabsForMode(mode: NavMode, role: Role | null, platformAdmin: boo
 	return role ? navigation.items.filter((item) => item.roles.includes(role)) : [];
 }
 
+// The address bar holds the resolved path, so the route group `(app)` is absent. The base path
+// is empty (ADR-0012).
+function isPlatformPath(pathname: string): boolean {
+	return platformNavigation.items.some((item) => {
+		const path = item.href.replace('/(app)', '');
+		return pathname === path || pathname.startsWith(`${path}/`);
+	});
+}
+
 /**
- * The first screen after the sign-in. A Platform Admin without a current organization has no
- * organization screen to open, so it starts in the platform screens. Single mode has none.
+ * The route a Platform Admin without a current organization must open in place of the address
+ * bar. An organization route needs an organization to show, and the right without a membership
+ * has none, so the route opens the platform mode (ADR-0029). Returns null for every other actor
+ * and for a platform route: an account without the right keeps its empty state.
  */
-export function landingHref(
-	me: { tenant?: unknown; platform_admin: boolean },
-	singleTenant: boolean
-): NavHref {
-	return me.platform_admin && !me.tenant && !singleTenant ? PLATFORM_HOME : '/(app)';
+export function platformRedirectFor(
+	me: { tenant?: unknown; platform_admin: boolean } | null,
+	singleTenant: boolean,
+	pathname: string
+): NavHref | null {
+	if (!me?.platform_admin || me.tenant || singleTenant || isPlatformPath(pathname)) return null;
+	return PLATFORM_HOME;
 }
 
 export function settingsGroupsForRole(role: Role | null): SettingsGroup[] {

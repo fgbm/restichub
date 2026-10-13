@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { landingHref, settingsGroupsForRole, tabsForMode, type NavMode } from './navigation';
+import {
+	platformRedirectFor,
+	settingsGroupsForRole,
+	tabsForMode,
+	type NavMode
+} from './navigation';
 
 function hrefs(
 	mode: NavMode,
@@ -64,15 +69,37 @@ describe('navigation', () => {
 		expect(hrefs('platform', 'admin', false)).toEqual([]);
 	});
 
-	it('lands a Platform Admin without an organization in the platform mode', () => {
-		expect(landingHref({ tenant: null, platform_admin: true }, false)).toBe(
-			'/(app)/platform/tenants'
-		);
-		expect(landingHref({ tenant: { id: 't', name: 'acme' }, platform_admin: true }, false)).toBe(
-			'/(app)'
-		);
-		expect(landingHref({ tenant: null, platform_admin: false }, false)).toBe('/(app)');
-		expect(landingHref({ tenant: null, platform_admin: true }, true)).toBe('/(app)');
+	it('sends a Platform Admin without an organization from an organization route to the platform mode', () => {
+		const me = { tenant: null, platform_admin: true };
+		for (const pathname of [
+			'/',
+			'/hosts',
+			'/audit',
+			'/settings/access/users',
+			'/settings/access/api-tokens',
+			'/users',
+			'/api-tokens',
+			'/a-bookmark'
+		]) {
+			expect(platformRedirectFor(me, false, pathname)).toBe('/(app)/platform/tenants');
+		}
+	});
+
+	it('keeps a platform route for a Platform Admin without an organization', () => {
+		const me = { tenant: null, platform_admin: true };
+		expect(platformRedirectFor(me, false, '/platform/tenants')).toBeNull();
+		expect(platformRedirectFor(me, false, '/platform/users')).toBeNull();
+		expect(platformRedirectFor(me, false, '/platform/audit')).toBeNull();
+	});
+
+	it('keeps an organization route for the other actors', () => {
+		const member = { tenant: { id: 't', name: 'acme' }, platform_admin: true };
+		expect(platformRedirectFor(member, false, '/hosts')).toBeNull();
+		expect(
+			platformRedirectFor({ tenant: null, platform_admin: false }, false, '/hosts')
+		).toBeNull();
+		expect(platformRedirectFor({ tenant: null, platform_admin: true }, true, '/hosts')).toBeNull();
+		expect(platformRedirectFor(null, false, '/hosts')).toBeNull();
 	});
 
 	it('puts users and API tokens under Settings, Access for an Admin', () => {

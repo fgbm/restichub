@@ -44,6 +44,20 @@ function iso(minutesAgo: number): string {
 // The mock starts without an agent. A review capture sets this storage key to see a filled list.
 const SAMPLE_AGENTS_KEY = 'restichub.mock.agents';
 
+// A review capture or an e2e test sets this storage key to drive the mock as a Platform Admin
+// without a membership. The sign-in then survives a full page load, so a direct visit to an
+// address keeps the session, the way a session cookie does.
+const SESSION_KEY = 'restichub.mock.session';
+const PLATFORM_ADMIN_NO_ORG = 'platform-admin-no-org';
+const SESSION_SIGNED_IN_KEY = 'restichub.mock.session.signed-in';
+
+function platformAdminNoOrg(): boolean {
+	return (
+		typeof localStorage !== 'undefined' &&
+		localStorage.getItem(SESSION_KEY) === PLATFORM_ADMIN_NO_ORG
+	);
+}
+
 function makeAgents(): Agent[] {
 	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_AGENTS_KEY) !== 'sample') {
 		return [];
@@ -309,11 +323,19 @@ export class MockApiService {
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
 	// The mock stands for a ready instance, so the setup screen stays reachable at its own route.
-	// A fresh page starts without a session, the way the real installation does.
+	// A fresh page starts without a session, the way the real installation does. With the session
+	// key set the sign-in state survives a page load, so a direct visit keeps the session.
 	private setupDone = true;
-	private signedIn = false;
+	private signedIn =
+		platformAdminNoOrg() &&
+		typeof sessionStorage !== 'undefined' &&
+		sessionStorage.getItem(SESSION_SIGNED_IN_KEY) === '1';
 
 	private me(): Me {
+		if (platformAdminNoOrg()) {
+			// A Platform Admin without a membership: no current organization (ADR-0029).
+			return { user: this.users[0], tenant: null, role: this.users[0].role, platform_admin: true };
+		}
 		const tenant = this.memberships.find((item) => item.id === this.currentTenant);
 		return {
 			user: this.users[0],
@@ -327,6 +349,7 @@ export class MockApiService {
 	}
 
 	async listMemberships(): Promise<TenantAccess[]> {
+		if (platformAdminNoOrg()) return [];
 		return [...this.memberships];
 	}
 
@@ -340,11 +363,15 @@ export class MockApiService {
 	async signIn(_request: SignInRequest): Promise<Me> {
 		void _request;
 		this.signedIn = true;
+		if (platformAdminNoOrg() && typeof sessionStorage !== 'undefined') {
+			sessionStorage.setItem(SESSION_SIGNED_IN_KEY, '1');
+		}
 		return this.me();
 	}
 
 	async signOut(): Promise<void> {
 		this.signedIn = false;
+		if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(SESSION_SIGNED_IN_KEY);
 		return undefined;
 	}
 
