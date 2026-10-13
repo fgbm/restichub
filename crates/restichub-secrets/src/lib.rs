@@ -9,6 +9,7 @@
 //! - [`kek`]: the KEK, the KEK providers and the key ID derivation;
 //! - [`envelope`]: the data encryption key (DEK), its generation and its wrapping;
 //! - [`ca`]: the wrapping of the certificate authority private keys;
+//! - [`signing`]: the wrapping of the job signing keys;
 //! - [`secret`]: the encryption of a secret value with the DEK of a tenant;
 //! - [`check`]: the `kek_check` value and the verification that refuses a wrong KEK;
 //! - [`error`]: the error types.
@@ -37,6 +38,7 @@ pub mod envelope;
 pub mod error;
 pub mod kek;
 pub mod secret;
+pub mod signing;
 
 mod crypto;
 
@@ -50,6 +52,7 @@ pub use kek::{
     KekProvider, generate_kek_encoded, load_kek_provider,
 };
 pub use secret::{EncryptedSecret, SecretPurpose, decrypt_secret, encrypt_secret};
+pub use signing::{WrappedSigningKey, unwrap_signing_key, wrap_signing_key};
 
 /// Hides the value in `Debug` and zeroizes it on drop.
 pub struct SecretString(String);

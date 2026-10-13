@@ -11,8 +11,8 @@ use restichub_emulator::control::AgentEvent;
 use restichub_emulator::executor::SimulatedProfile;
 use restichub_emulator::identity::{KEY_ID, TestPki, signing_key};
 use restichub_emulator::job::sample_job;
-use restichub_proto::agent::v1::{RejectReason, StepStatus};
-use restichub_proto::signing::sign_job;
+use restichub_proto::agent::v1::{KeyUpdate, RejectReason, StepStatus};
+use restichub_proto::signing::{sign_job, sign_key_update};
 
 const TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -108,6 +108,59 @@ async fn ac_pr_01_forged_job_is_refused() {
     assert!(reasons.contains(&(RejectReason::BadSignature as i32)));
     assert!(reasons.contains(&(RejectReason::UnknownKey as i32)));
     assert_eq!(plane.result_count(), 0, "no job may run");
+
+    let _ = shutdown.send(true);
+    for task in tasks {
+        let _ = task.await;
+    }
+}
+
+/// AC-PR-02: a replaced job signing key makes the agent reject the new jobs.
+///
+/// The agent accepts a job signed by a key that the control plane delivered in
+/// the key set, and refuses a job whose key it does not hold.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ac_pr_02_replaced_key_is_refused() {
+    let count = 1;
+    let pki = TestPki::generate(count).expect("generate the test certificates");
+    let plane = common::start(&pki, count).await;
+    let mut events = plane.subscribe();
+
+    let (shutdown, tasks) =
+        spawn_agents(&pki, &plane.url(), count, test_executor(), agent_backoff());
+    assert!(plane.wait_connected(count, TIMEOUT).await);
+    let id = plane.agents().into_iter().next().expect("one agent");
+
+    // The control plane delivers the next key of the set, signed by the current
+    // key.
+    let delivered = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+    let update = KeyUpdate {
+        key_id: "job-key-2".to_owned(),
+        public_key: delivered.verifying_key().to_bytes().to_vec(),
+        signer_key_id: KEY_ID.to_owned(),
+        issued_at: None,
+        revoked_key_ids: Vec::new(),
+    };
+    assert!(plane.deliver_key_update(&id, sign_key_update(&update, &signing_key())));
+
+    // A job signed by the delivered key is accepted and runs.
+    let signed = sign_job(&sample_job(&id, "job-delivered"), "job-key-2", &delivered);
+    assert!(plane.send_raw(&id, signed));
+    let results = collect(&mut events, 1, TIMEOUT).await;
+    assert_eq!(results.len(), 1, "the delivered key must sign a valid job");
+    assert_eq!(plane.rejected_count(), 0);
+
+    // A replaced key that the agent does not hold makes it reject the new job.
+    let replaced = ed25519_dalek::SigningKey::from_bytes(&[11u8; 32]);
+    let signed = sign_job(&sample_job(&id, "job-replaced"), "job-key-3", &replaced);
+    assert!(plane.send_raw(&id, signed));
+    let rejected = common::collect_rejected(&mut events, 1, TIMEOUT).await;
+    assert_eq!(rejected.len(), 1, "the replaced key must be refused");
+    assert!(
+        matches!(&rejected[0], AgentEvent::Rejected { reason, .. } if *reason == RejectReason::UnknownKey as i32),
+        "unexpected rejection: {:?}",
+        rejected[0]
+    );
 
     let _ = shutdown.send(true);
     for task in tasks {

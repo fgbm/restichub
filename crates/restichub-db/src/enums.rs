@@ -118,6 +118,36 @@ impl CaRole {
     }
 }
 
+/// The role of a job signing key (ADR-0026, section Job signing keys). The string value is part of
+/// the associated data of the wrapped key; do not change it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum SigningKeyRole {
+    /// Signs the jobs now.
+    Current,
+    /// Delivered to the agents and promoted on the next rotation.
+    Next,
+}
+
+impl SigningKeyRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Next => "next",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "current" => Some(Self::Current),
+            "next" => Some(Self::Next),
+            _ => None,
+        }
+    }
+}
+
 /// Audit actor type (ADR-0023, section Audit log).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -153,7 +183,7 @@ impl ActorType {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActorType, CaRole, Role, TenantStatus};
+    use super::{ActorType, CaRole, Role, SigningKeyRole, TenantStatus};
 
     #[test]
     fn the_role_strings_are_stable() {
@@ -186,6 +216,14 @@ mod tests {
             assert_eq!(CaRole::parse(role.as_str()), Some(role));
         }
         assert_eq!(CaRole::parse("nope"), None);
+    }
+
+    #[test]
+    fn the_signing_key_role_strings_are_stable() {
+        for role in [SigningKeyRole::Current, SigningKeyRole::Next] {
+            assert_eq!(SigningKeyRole::parse(role.as_str()), Some(role));
+        }
+        assert_eq!(SigningKeyRole::parse("nope"), None);
     }
 
     #[test]

@@ -65,6 +65,19 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .await
         .context("cannot prepare the certificate authority")?;
 
+    // Create the job signing key set on the first start, or load it and prove that the KEK opens
+    // the stored keys. The key identifiers are public; a key never reaches the log (AC-PR-02).
+    let job_signing = restichub_cp::job_signing::JobSigningService::new(kek.clone());
+    let key_set = job_signing
+        .ensure_initialized(&database)
+        .await
+        .context("cannot prepare the job signing keys")?;
+    tracing::info!(
+        current_key_id = %key_set.current_key_id(),
+        next_key_id = %key_set.next_key_id(),
+        "the job signing key set is ready"
+    );
+
     // Single mode refuses the start unless the database matches the mode (ADR-0024).
     restichub_cp::startup::ensure_tenancy_mode(&database, &config.tenancy)
         .await
