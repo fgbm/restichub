@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Users · ResticHub</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<script src="mockups.js"></script>
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="topbar-inner">
+				<a class="brand" href="index.html">
+					<span class="brandmark" aria-hidden="true">
+						<svg viewBox="0 0 20 20">
+							<path class="mark-solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
+							<path d="M2.5 10.6 10 14.5l7.5-3.9" />
+						</svg>
+					</span>
+					<span>ResticHub</span>
+				</a>
+				<span class="topbar-divider"></span>
+				<nav class="breadcrumb" aria-label="Breadcrumb">
+					<a href="#">acme</a>
+					<span class="breadcrumb-sep">/</span>
+					<span aria-current="page">Users</span>
+				</nav>
+				<div class="spacer"></div>
+				<label class="search search--topbar">
+					<svg class="icon"><use href="icons.svg#i-search" /></svg>
+					<input type="search" placeholder="Search hosts, jobs, snapshots" />
+					<span class="kbd">/</span>
+				</label>
+				<button class="btn btn--icon" data-theme-toggle aria-label="Switch theme">
+					<svg class="icon"><use href="icons.svg#i-moon" /></svg>
+				</button>
+				<div class="menu-wrap">
+					<button class="btn btn--icon" aria-label="Notifications" data-menu-toggle="menu-notify" aria-expanded="false" aria-haspopup="true">
+						<svg class="icon"><use href="icons.svg#i-bell" /></svg>
+						<span class="counter counter--danger" style="position: absolute; top: -6px; right: -6px">2</span>
+					</button>
+					<div class="menu menu--right" id="menu-notify" hidden>
+						<div class="menu-section">
+							<div class="menu-label">Notifications</div>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> mac-build-01 is offline</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-alert" /></svg> A certificate expires in 5 days</button>
+						</div>
+					</div>
+				</div>
+				<div class="menu-wrap">
+					<button class="btn btn--ghost" data-menu-toggle="menu-user" aria-expanded="false" aria-haspopup="true">
+						<span class="avatar">AP</span>
+						<span>Anna Petrova</span>
+						<svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg>
+					</button>
+					<div class="menu menu--right" id="menu-user" hidden style="min-width: 240px">
+						<div class="menu-section"><div class="menu-head"><div class="name">Anna Petrova</div><div class="sub">admin · acme</div></div></div>
+						<div class="menu-section">
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-user" /></svg> Account</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</button>
+							<button class="menu-item" data-theme-toggle><svg class="icon"><use href="icons.svg#i-moon" /></svg> Theme</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-external" /></svg> Documentation</button>
+						</div>
+						<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-arrow-right" /></svg> Sign out</button></div>
+					</div>
+				</div>
+			</div>
+		</header>
+		<div class="app-grid">
+			<nav class="sidenav" aria-label="Primary">
+				<div class="sidenav-group">
+					<div class="sidenav-group-label">Backup</div>
+					<a class="sidenav-link" href="empty-first-run.html"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Overview</a>
+					<a class="sidenav-link" href="hosts.html"><svg class="icon"><use href="icons.svg#i-host" /></svg> Hosts <span class="counter">24</span></a>
+					<a class="sidenav-link" href="repositories.html"><svg class="icon"><use href="icons.svg#i-repository" /></svg> Repositories</a>
+					<a class="sidenav-link" href="#"><svg class="icon"><use href="icons.svg#i-profile" /></svg> Profiles</a>
+					<a class="sidenav-link" href="#"><svg class="icon"><use href="icons.svg#i-clock" /></svg> Schedules</a>
+					<a class="sidenav-link" href="job.html"><svg class="icon"><use href="icons.svg#i-job" /></svg> Jobs <span class="counter">6</span></a>
+					<a class="sidenav-link" href="#"><svg class="icon"><use href="icons.svg#i-restore" /></svg> Restore</a>
+				</div>
+				<div class="sidenav-group">
+					<div class="sidenav-group-label">Access</div>
+					<a class="sidenav-link" href="users.html" aria-current="page"><svg class="icon"><use href="icons.svg#i-users" /></svg> Users</a>
+					<a class="sidenav-link" href="#"><svg class="icon"><use href="icons.svg#i-key" /></svg> API tokens</a>
+				</div>
+				<div class="sidenav-group">
+					<div class="sidenav-group-label">Compliance</div>
+					<a class="sidenav-link" href="audit.html"><svg class="icon"><use href="icons.svg#i-audit" /></svg> Audit log</a>
+				</div>
+				<div class="sidenav-group">
+					<a class="sidenav-link" href="settings.html"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</a>
+				</div>
+			</nav>
+		<main class="page">
+			<div class="page-header page-header--bordered">
+				<div>
+					<h1 class="page-title">Users <span class="counter">4</span></h1>
+					<p class="page-subtitle">Members of the tenant acme and their roles.</p>
+				</div>
+				<div class="page-actions">
+					<button class="btn btn--primary" data-open-dialog="d-create-user"><svg class="icon"><use href="icons.svg#i-plus" /></svg> Create user</button>
+				</div>
+			</div>
+
+			<div class="table-wrap">
+				<div class="table-toolbar">
+					<label class="search">
+						<svg class="icon"><use href="icons.svg#i-search" /></svg>
+						<input type="search" placeholder="Search users" />
+						<span class="kbd">/</span>
+					</label>
+					<span class="segmented" role="group" aria-label="Filter by state">
+						<a class="segmented-item" href="#" aria-selected="true">All</a>
+						<a class="segmented-item" href="#">Active</a>
+						<a class="segmented-item" href="#">Disabled</a>
+					</span>
+				</div>
+				<table class="table">
+					<thead>
+						<tr>
+							<th><button class="th-btn">User <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+							<th>Role</th>
+							<th>State</th>
+							<th>Last sign-in</th>
+							<th class="cell-actions"><span class="subtle t-xs">Actions</span></th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td><span class="row"><span class="avatar">AP</span> <span><span class="semibold">Anna Petrova</span><div class="muted t-sm mono">admin</div></span></span></td>
+							<td><span class="label">Admin</span></td>
+							<td><span class="status status--success">Active</span></td>
+							<td><span title="10 Oct 2026, 21:25">2 minutes ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<button class="btn btn--icon btn--sm" aria-label="Edit Anna Petrova"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg></button>
+									<button class="btn btn--icon btn--sm" aria-label="More actions for Anna Petrova"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+								</span>
+							</td>
+						</tr>
+						<tr>
+							<td><span class="row"><span class="avatar">BI</span> <span><span class="semibold">Boris Ivanov</span><div class="muted t-sm mono">operator</div></span></span></td>
+							<td><span class="label">Operator</span></td>
+							<td><span class="status status--success">Active</span></td>
+							<td><span title="09 Oct 2026, 21:14">1 day ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<button class="btn btn--icon btn--sm" aria-label="Edit Boris Ivanov"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg></button>
+									<button class="btn btn--icon btn--sm" aria-label="More actions for Boris Ivanov"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+								</span>
+							</td>
+						</tr>
+						<tr>
+							<td><span class="row"><span class="avatar">VS</span> <span><span class="semibold">Vera Sokolova</span><div class="muted t-sm mono">viewer</div></span></span></td>
+							<td><span class="label">Viewer</span></td>
+							<td><span class="status status--neutral">Disabled</span></td>
+							<td><span title="28 Sep 2026, 09:02">12 days ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<button class="btn btn--icon btn--sm" aria-label="Edit Vera Sokolova"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg></button>
+									<button class="btn btn--icon btn--sm" aria-label="More actions for Vera Sokolova"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+								</span>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="box" style="margin-top: var(--space-6)">
+				<div class="box-header"><span class="box-title">Roles</span></div>
+				<div class="box-row"><span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-shield" /></svg></span><span class="box-row-main"><span class="box-row-name">Admin</span><span class="box-row-sub">All tenant operations, including users, agent revocation and installation.</span></span></div>
+				<div class="box-row"><span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-shield" /></svg></span><span class="box-row-main"><span class="box-row-name">Operator</span><span class="box-row-sub">Profiles, plans, manual runs, cancellation and restore.</span></span></div>
+				<div class="box-row"><span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-eye" /></svg></span><span class="box-row-main"><span class="box-row-name">Viewer</span><span class="box-row-sub">Read only, including the tenant audit log.</span></span></div>
+			</div>
+
+			<dialog class="dialog" id="d-create-user" style="--dialog-width: 440px">
+				<div class="dialog-head">
+					<div class="dialog-title">Create a user</div>
+					<button class="btn btn--icon btn--sm dialog-close" aria-label="Close" data-close-dialog><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+				</div>
+				<div class="dialog-body">
+					<form class="stack">
+						<label class="field"><span class="field-label">User name <span class="req">*</span></span><input class="input" placeholder="user name" /><span class="field-hint">Lowercase letters, digits and dots.</span></label>
+						<label class="field"><span class="field-label">Display name</span><input class="input" placeholder="First and last name" /></label>
+						<label class="field"><span class="field-label">Role</span>
+							<span class="select-wrap"><select class="select"><option>Viewer</option><option>Operator</option><option>Admin</option></select><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></span>
+						</label>
+						<label class="checkbox"><input type="checkbox" checked /><span>Send an invitation email</span></label>
+					</form>
+				</div>
+				<div class="dialog-foot">
+					<button class="btn" data-close-dialog>Cancel</button>
+					<button class="btn btn--primary" data-close-dialog>Create user</button>
+				</div>
+			</dialog>
+		</main>
+		</div>
+	</body>
+</html>

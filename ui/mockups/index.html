@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>ResticHub UI mockups</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<script src="mockups.js"></script>
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="topbar-inner">
+				<a class="brand" href="index.html">
+					<span class="brandmark" aria-hidden="true">
+						<svg viewBox="0 0 20 20">
+							<path class="mark-solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
+							<path d="M2.5 10.6 10 14.5l7.5-3.9" />
+						</svg>
+					</span>
+					<span>ResticHub</span>
+				</a>
+				<span class="label">Mockups</span>
+				<div class="spacer"></div>
+				<button class="btn btn--icon" data-theme-toggle aria-label="Switch theme">
+					<svg class="icon"><use href="icons.svg#i-moon" /></svg>
+				</button>
+			</div>
+		</header>
+
+		<main class="page">
+			<div class="page-header page-header--bordered">
+				<div>
+					<h1 class="page-title">ResticHub UI mockups</h1>
+					<p class="page-subtitle">
+						Static pages that fix the visual language and every element before implementation.
+						Plain HTML and one stylesheet. No build step.
+					</p>
+				</div>
+			</div>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Foundations</h2>
+				</div>
+				<div class="index-grid">
+					<a class="index-card" href="principles.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-book" /></svg> Design principles</span>
+						<span class="desc"
+							>Color tokens for the light and the dark theme, type, spacing, radii, borders,
+							elevation, icons, motion, density, content and accessibility rules.</span
+						>
+						<span class="file">principles.html</span>
+					</a>
+					<a class="index-card" href="components.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-box" /></svg> Components</span>
+						<span class="desc"
+							>Every element in all states: buttons, forms, labels, banners, menus, dialogs,
+							tables, timeline, log viewer and more.</span
+						>
+						<span class="file">components.html</span>
+					</a>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Shells</h2>
+					<p class="section-sub">The same Hosts page in two navigation models, to choose one.</p>
+				</div>
+				<div class="index-grid">
+					<a class="index-card" href="shell-a.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Shell A: top tabs</span>
+						<span class="desc">Product mark, breadcrumb, search and one row of underline tabs under the top bar.</span>
+						<span class="file">shell-a.html</span>
+					</a>
+					<a class="index-card" href="shell-b.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-profile" /></svg> Shell B: left sidebar</span>
+						<span class="desc">The top bar stays, the sections group in a left sidebar instead of tabs.</span>
+						<span class="file">shell-b.html</span>
+					</a>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Screens</h2>
+					<p class="section-sub">Realistic data from one backup installation.</p>
+				</div>
+				<div class="index-grid">
+					<a class="index-card" href="hosts.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-host" /></svg> Hosts</span>
+						<span class="desc">List with status, operating system, agent version and last backup. Filters and bulk actions.</span>
+						<span class="file">hosts.html</span>
+					</a>
+					<a class="index-card" href="hosts-ru.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-host" /></svg> Hosts (Russian)</span>
+						<span class="desc">The same list in Russian, to check the label lengths.</span>
+						<span class="file">hosts-ru.html</span>
+					</a>
+					<a class="index-card" href="host.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-host" /></svg> Host detail</span>
+						<span class="desc">Header with status and actions, a certificate banner, tabs, recent jobs and a metadata column.</span>
+						<span class="file">host.html</span>
+					</a>
+					<a class="index-card" href="job.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-job" /></svg> Job run</span>
+						<span class="desc">Steps as a timeline, a live log, summary statistics and the cancel action.</span>
+						<span class="file">job.html</span>
+					</a>
+					<a class="index-card" href="repositories.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-repository" /></svg> Repositories</span>
+						<span class="desc">Backend, size, growth and the maintenance host for each repository.</span>
+						<span class="file">repositories.html</span>
+					</a>
+					<a class="index-card" href="audit.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-audit" /></svg> Audit log</span>
+						<span class="desc">Filters, a records table and a side panel with the change diff.</span>
+						<span class="file">audit.html</span>
+					</a>
+					<a class="index-card" href="users.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-users" /></svg> Users</span>
+						<span class="desc">Members, roles and the create-user dialog.</span>
+						<span class="file">users.html</span>
+					</a>
+					<a class="index-card" href="settings.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</span>
+						<span class="desc">Left sub-navigation, sections and a danger zone.</span>
+						<span class="file">settings.html</span>
+					</a>
+					<a class="index-card" href="empty-first-run.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-checklist" /></svg> First run</span>
+						<span class="desc">The Overview with an onboarding checklist before the first host.</span>
+						<span class="file">empty-first-run.html</span>
+					</a>
+					<a class="index-card" href="sign-in.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-lock" /></svg> Sign in</span>
+						<span class="desc">The narrow centered card for sign-in.</span>
+						<span class="file">sign-in.html</span>
+					</a>
+					<a class="index-card" href="setup.html">
+						<span class="title"><svg class="icon"><use href="icons.svg#i-key" /></svg> Setup</span>
+						<span class="desc">The one-time setup for the first Platform Admin.</span>
+						<span class="file">setup.html</span>
+					</a>
+				</div>
+			</section>
+		</main>
+	</body>
+</html>

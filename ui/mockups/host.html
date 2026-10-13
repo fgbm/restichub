@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>win-fs01 · ResticHub</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<script src="mockups.js"></script>
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="topbar-inner">
+				<a class="brand" href="index.html">
+					<span class="brandmark" aria-hidden="true">
+						<svg viewBox="0 0 20 20">
+							<path class="mark-solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
+							<path d="M2.5 10.6 10 14.5l7.5-3.9" />
+						</svg>
+					</span>
+					<span>ResticHub</span>
+				</a>
+				<span class="topbar-divider"></span>
+				<nav class="breadcrumb" aria-label="Breadcrumb">
+					<a href="#">acme</a>
+					<span class="breadcrumb-sep">/</span>
+					<a href="hosts.html">Hosts</a>
+					<span class="breadcrumb-sep">/</span>
+					<span aria-current="page">win-fs01</span>
+				</nav>
+				<div class="spacer"></div>
+				<label class="search search--topbar">
+					<svg class="icon"><use href="icons.svg#i-search" /></svg>
+					<input type="search" placeholder="Search hosts, jobs, snapshots" />
+					<span class="kbd">/</span>
+				</label>
+				<button class="btn btn--icon" data-theme-toggle aria-label="Switch theme">
+					<svg class="icon"><use href="icons.svg#i-moon" /></svg>
+				</button>
+				<div class="menu-wrap">
+					<button class="btn btn--icon" aria-label="Notifications" data-menu-toggle="menu-notify" aria-expanded="false" aria-haspopup="true">
+						<svg class="icon"><use href="icons.svg#i-bell" /></svg>
+						<span class="counter counter--danger" style="position: absolute; top: -6px; right: -6px">2</span>
+					</button>
+					<div class="menu menu--right" id="menu-notify" hidden>
+						<div class="menu-section">
+							<div class="menu-label">Notifications</div>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> mac-build-01 is offline</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-alert" /></svg> A certificate expires in 5 days</button>
+						</div>
+					</div>
+				</div>
+				<div class="menu-wrap">
+					<button class="btn btn--ghost" data-menu-toggle="menu-user" aria-expanded="false" aria-haspopup="true">
+						<span class="avatar">AP</span>
+						<span>Anna Petrova</span>
+						<svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg>
+					</button>
+					<div class="menu menu--right" id="menu-user" hidden style="min-width: 240px">
+						<div class="menu-section"><div class="menu-head"><div class="name">Anna Petrova</div><div class="sub">admin · acme</div></div></div>
+						<div class="menu-section">
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-user" /></svg> Account</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</button>
+							<button class="menu-item" data-theme-toggle><svg class="icon"><use href="icons.svg#i-moon" /></svg> Theme</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-external" /></svg> Documentation</button>
+						</div>
+						<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-arrow-right" /></svg> Sign out</button></div>
+					</div>
+				</div>
+			</div>
+		</header>
+		<nav class="tabs" aria-label="Primary">
+			<a class="tab" href="empty-first-run.html"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Overview</a>
+			<a class="tab" href="hosts.html" aria-current="page"><svg class="icon"><use href="icons.svg#i-host" /></svg> Hosts <span class="counter">24</span></a>
+			<a class="tab" href="job.html"><svg class="icon"><use href="icons.svg#i-job" /></svg> Jobs <span class="counter">6</span></a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-clock" /></svg> Schedules</a>
+			<a class="tab" href="repositories.html"><svg class="icon"><use href="icons.svg#i-repository" /></svg> Repositories</a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-profile" /></svg> Profiles</a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-restore" /></svg> Restore</a>
+			<a class="tab" href="audit.html"><svg class="icon"><use href="icons.svg#i-audit" /></svg> Audit</a>
+			<a class="tab" href="settings.html"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</a>
+		</nav>
+		<main class="page">
+			<div class="page-header page-header--bordered">
+				<div>
+					<div class="page-title">
+						<span class="avatar avatar--lg avatar--square">W1</span>
+						<span class="mono">win-fs01</span>
+						<span class="status status--success">Online</span>
+					</div>
+					<p class="page-subtitle">Windows Server 2022 · agent 0.4.2 · restic 0.19.1 · 10.20.0.11</p>
+				</div>
+				<div class="page-actions">
+					<button class="btn"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+					<span class="btn-group">
+						<button class="btn btn--primary"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup now</button>
+						<button class="btn btn--primary btn-caret" aria-label="More run options"><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></button>
+					</span>
+					<div class="menu-wrap">
+						<button class="btn btn--icon" aria-label="More actions for win-fs01" data-menu-toggle="host-more" aria-expanded="false" aria-haspopup="true"><svg class="icon"><use href="icons.svg#i-more" /></svg></button>
+						<div class="menu menu--right" id="host-more" hidden>
+							<div class="menu-section">
+								<button class="menu-item"><svg class="icon"><use href="icons.svg#i-download" /></svg> Download log</button>
+								<button class="menu-item"><svg class="icon"><use href="icons.svg#i-upload" /></svg> Update agent</button>
+								<button class="menu-item"><svg class="icon"><use href="icons.svg#i-terminal" /></svg> Open remote shell</button>
+							</div>
+							<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Revoke agent</button></div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="banner banner--attention">
+				<svg class="icon icon--lg banner-icon"><use href="icons.svg#i-alert" /></svg>
+				<div class="banner-body">
+					<div class="banner-title">The certificate expires in 5 days</div>
+					<div class="banner-text">The agent rotates its certificate at approximately two thirds of the lifetime. If the rotation fails, enroll the host again.</div>
+				</div>
+				<div class="banner-actions">
+					<button class="btn btn--sm">Rotate now</button>
+					<button class="btn btn--icon btn--sm" aria-label="Dismiss"><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+				</div>
+			</div>
+
+			<div class="tabs" role="tablist" aria-label="Host sections" style="padding: 0; margin-top: var(--space-4)">
+				<button class="tab" role="tab" id="ht-overview" aria-selected="true" aria-controls="hp-overview"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Overview</button>
+				<button class="tab" role="tab" id="ht-jobs" aria-selected="false" aria-controls="hp-jobs" tabindex="-1"><svg class="icon"><use href="icons.svg#i-job" /></svg> Jobs <span class="counter">6</span></button>
+				<button class="tab" role="tab" id="ht-snapshots" aria-selected="false" aria-controls="hp-snapshots" tabindex="-1"><svg class="icon"><use href="icons.svg#i-repository" /></svg> Snapshots</button>
+				<button class="tab" role="tab" id="ht-hooks" aria-selected="false" aria-controls="hp-hooks" tabindex="-1"><svg class="icon"><use href="icons.svg#i-flask" /></svg> Hooks</button>
+				<button class="tab" role="tab" id="ht-logs" aria-selected="false" aria-controls="hp-logs" tabindex="-1"><svg class="icon"><use href="icons.svg#i-terminal" /></svg> Logs</button>
+			</div>
+
+			<div id="hp-overview" role="tabpanel" aria-labelledby="ht-overview" style="margin-top: var(--space-6)">
+				<div class="layout-split">
+					<div>
+						<div class="box">
+							<div class="box-header">
+								<span class="box-title">Last backup</span>
+								<div class="box-actions">
+									<a class="btn btn--link" href="job.html">Open job j_4821</a>
+								</div>
+							</div>
+							<div class="box-body">
+								<div class="grid-4">
+									<div class="stat"><span class="stat-value tabular">1.4 GB</span><span class="stat-label">Data added</span></div>
+									<div class="stat"><span class="stat-value tabular">128</span><span class="stat-label">New files</span></div>
+									<div class="stat"><span class="stat-value tabular">3m 12s</span><span class="stat-label">Duration</span></div>
+									<div class="stat"><span class="stat-value mono t-sm">a1b2c3d4</span><span class="stat-label">Snapshot</span></div>
+								</div>
+							</div>
+						</div>
+
+						<div class="box">
+							<div class="box-header">
+								<span class="box-title">Recent jobs</span>
+								<div class="box-actions"><a class="btn btn--link" href="job.html">View all</a></div>
+							</div>
+							<a class="box-row" href="job.html">
+								<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-job" /></svg></span>
+								<span class="box-row-main"><span class="box-row-name">nightly-files</span><span class="box-row-sub">1.4 GB added · 128 new files · 3m 12s</span></span>
+								<span class="box-row-meta"><span class="status status--success">Success</span><span title="10 Oct 2026, 21:14">14 minutes ago</span></span>
+							</a>
+							<a class="box-row" href="job.html">
+								<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-job" /></svg></span>
+								<span class="box-row-main"><span class="box-row-name">weekly-check</span><span class="box-row-sub">read-data-subset 5% · no errors</span></span>
+								<span class="box-row-meta"><span class="status status--success">Success</span><span title="09 Oct 2026, 02:00">1 day ago</span></span>
+							</a>
+							<a class="box-row" href="job.html">
+								<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-job" /></svg></span>
+								<span class="box-row-main"><span class="box-row-name">nightly-files</span><span class="box-row-sub">restic exit code 12 · repository not found</span></span>
+								<span class="box-row-meta"><span class="status status--failed">Failed</span><span title="08 Oct 2026, 21:14">2 days ago</span></span>
+							</a>
+							<a class="box-row" href="job.html">
+								<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-job" /></svg></span>
+								<span class="box-row-main"><span class="box-row-name">nightly-files</span><span class="box-row-sub">1.1 GB added · 96 new files · 2m 58s</span></span>
+								<span class="box-row-meta"><span class="status status--success">Success</span><span title="07 Oct 2026, 21:14">3 days ago</span></span>
+							</a>
+						</div>
+					</div>
+
+					<aside>
+						<div class="box">
+							<div class="box-header"><span class="box-title">About this host</span></div>
+							<div class="box-body">
+								<div class="kv">
+									<div class="kv-row"><div class="kv-key">Host name</div><div class="kv-value mono">win-fs01</div></div>
+									<div class="kv-row"><div class="kv-key">Agent ID</div><div class="kv-value mono">ag_7f3a91c2</div></div>
+									<div class="kv-row"><div class="kv-key">Agent version</div><div class="kv-value">0.4.2</div></div>
+									<div class="kv-row"><div class="kv-key">restic version</div><div class="kv-value">0.19.1</div></div>
+									<div class="kv-row"><div class="kv-key">Operating system</div><div class="kv-value">Windows Server 2022 (x86_64)</div></div>
+									<div class="kv-row"><div class="kv-key">Certificate expires</div><div class="kv-value">15 Oct 2026</div></div>
+									<div class="kv-row"><div class="kv-key">Enrolled</div><div class="kv-value">12 Sep 2026</div></div>
+									<div class="kv-row"><div class="kv-key">Last seen</div><div class="kv-value" title="10 Oct 2026, 21:27">2 minutes ago</div></div>
+									<div class="kv-row"><div class="kv-key">Labels</div><div class="kv-value row wrap"><span class="topic">prod</span> <span class="topic">os=windows</span></div></div>
+								</div>
+							</div>
+							<div class="box-foot">
+								<button class="btn btn--sm">Edit labels</button>
+								<button class="btn btn--sm">Download log</button>
+							</div>
+						</div>
+
+						<div class="box">
+							<div class="box-header"><span class="box-title">Plans on this host</span></div>
+							<a class="box-row" href="#">
+								<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-profile" /></svg></span>
+								<span class="box-row-main"><span class="box-row-name">windows-files</span><span class="box-row-sub">Daily at 21:00 · Europe/Berlin</span></span>
+								<span class="box-row-meta"><span class="status status--success">Enabled</span></span>
+							</a>
+							<a class="box-row" href="#">
+								<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-profile" /></svg></span>
+								<span class="box-row-main"><span class="box-row-name">weekly-check</span><span class="box-row-sub">Sunday at 02:00</span></span>
+								<span class="box-row-meta"><span class="status status--success">Enabled</span></span>
+							</a>
+						</div>
+					</aside>
+				</div>
+			</div>
+
+			<div id="hp-jobs" role="tabpanel" aria-labelledby="ht-jobs" hidden style="margin-top: var(--space-6)">
+				<div class="table-wrap">
+					<table class="table">
+						<thead>
+							<tr><th>Job</th><th>Plan</th><th>Status</th><th>Started</th><th>Duration</th><th class="cell-actions"><span class="subtle t-xs">Actions</span></th></tr>
+						</thead>
+						<tbody>
+							<tr><td class="mono t-sm">j_4821</td><td><a href="job.html">nightly-files</a></td><td><span class="status status--running">Running</span></td><td title="10 Oct 2026, 21:11">17 minutes ago</td><td class="tabular">3m 12s</td><td class="cell-actions"><a class="btn btn--icon btn--sm" href="job.html" aria-label="Open job"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a></td></tr>
+							<tr><td class="mono t-sm">j_4795</td><td>nightly-files</td><td><span class="status status--success">Success</span></td><td title="09 Oct 2026, 21:00">1 day ago</td><td class="tabular">2m 58s</td><td class="cell-actions"><a class="btn btn--icon btn--sm" href="job.html" aria-label="Open job"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a></td></tr>
+							<tr><td class="mono t-sm">j_4770</td><td>nightly-files</td><td><span class="status status--failed">Failed</span></td><td title="08 Oct 2026, 21:00">2 days ago</td><td class="tabular">11s</td><td class="cell-actions"><a class="btn btn--icon btn--sm" href="job.html" aria-label="Open job"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a></td></tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<div id="hp-snapshots" role="tabpanel" aria-labelledby="ht-snapshots" hidden style="margin-top: var(--space-6)">
+				<div class="table-wrap">
+					<table class="table">
+						<thead>
+							<tr><th>Snapshot</th><th>Host</th><th>Tags</th><th>Paths</th><th>Size</th><th>Time</th></tr>
+						</thead>
+						<tbody>
+							<tr><td class="mono t-sm">a1b2c3d4</td><td>win-fs01</td><td><span class="topic">daily</span></td><td class="mono t-sm">C:\Data</td><td class="tabular">412 GB</td><td title="10 Oct 2026, 21:14">14 minutes ago</td></tr>
+							<tr><td class="mono t-sm">9f8e7d6c</td><td>win-fs01</td><td><span class="topic">daily</span></td><td class="mono t-sm">C:\Data</td><td class="tabular">410 GB</td><td title="09 Oct 2026, 21:02">1 day ago</td></tr>
+							<tr><td class="mono t-sm">5c4b3a29</td><td>win-fs01</td><td><span class="topic">daily</span></td><td class="mono t-sm">C:\Data</td><td class="tabular">409 GB</td><td title="07 Oct 2026, 21:00">3 days ago</td></tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<div id="hp-hooks" role="tabpanel" aria-labelledby="ht-hooks" hidden style="margin-top: var(--space-6)">
+				<div class="box">
+					<div class="box-header"><span class="box-title">Allow-list on this host</span><div class="box-actions"><span class="muted t-sm">D5: the control plane cannot change this list</span></div></div>
+					<div class="box-row"><span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-flask" /></svg></span><span class="box-row-main"><span class="box-row-name">vss_snapshot</span><span class="box-row-sub">before · timeout 120s · runs as LocalSystem</span></span><span class="box-row-meta"><span class="status status--success">Available</span></span></div>
+					<div class="box-row"><span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-flask" /></svg></span><span class="box-row-main"><span class="box-row-name">service_stop</span><span class="box-row-sub">before · parameter service_name</span></span><span class="box-row-meta"><span class="status status--success">Available</span></span></div>
+					<div class="box-row"><span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-flask" /></svg></span><span class="box-row-main"><span class="box-row-name">service_start</span><span class="box-row-sub">finally · parameter service_name</span></span><span class="box-row-meta"><span class="status status--success">Available</span></span></div>
+				</div>
+			</div>
+
+			<div id="hp-logs" role="tabpanel" aria-labelledby="ht-logs" hidden style="margin-top: var(--space-6)">
+				<div class="log">
+					<div class="log-head"><svg class="icon icon--xs"><use href="icons.svg#i-terminal" /></svg><span class="semibold">agent log</span><span class="muted">last 200 lines</span></div>
+					<div class="log-body">
+						<div class="log-line"><span class="log-no">1</span><span class="log-time">21:11:02</span><span class="log-level log-level--info">INFO</span><span class="log-msg">connected to the control plane</span></div>
+						<div class="log-line"><span class="log-no">2</span><span class="log-time">21:11:02</span><span class="log-level log-level--debug">DEBUG</span><span class="log-msg">job j_4821 accepted, signature valid</span></div>
+						<div class="log-line"><span class="log-no">3</span><span class="log-time">21:11:03</span><span class="log-level log-level--info">INFO</span><span class="log-msg">step backup started</span></div>
+						<div class="log-line"><span class="log-no">4</span><span class="log-time">21:14:12</span><span class="log-level log-level--info">INFO</span><span class="log-msg">step backup finished, exit code 0</span></div>
+					</div>
+				</div>
+			</div>
+		</main>
+	</body>
+</html>

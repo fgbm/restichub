@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Hosts · ResticHub</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<script src="mockups.js"></script>
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="topbar-inner">
+				<a class="brand" href="index.html">
+					<span class="brandmark" aria-hidden="true">
+						<svg viewBox="0 0 20 20">
+							<path class="mark-solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
+							<path d="M2.5 10.6 10 14.5l7.5-3.9" />
+						</svg>
+					</span>
+					<span>ResticHub</span>
+				</a>
+				<span class="topbar-divider"></span>
+				<nav class="breadcrumb" aria-label="Breadcrumb">
+					<a href="#">acme</a>
+					<span class="breadcrumb-sep">/</span>
+					<span aria-current="page">Hosts</span>
+				</nav>
+				<div class="spacer"></div>
+				<label class="search search--topbar">
+					<svg class="icon"><use href="icons.svg#i-search" /></svg>
+					<input type="search" placeholder="Search hosts, jobs, snapshots" />
+					<span class="kbd">/</span>
+				</label>
+				<button class="btn btn--icon" data-theme-toggle aria-label="Switch theme">
+					<svg class="icon"><use href="icons.svg#i-moon" /></svg>
+				</button>
+				<div class="menu-wrap">
+					<button class="btn btn--icon" aria-label="Notifications" data-menu-toggle="menu-notify" aria-expanded="false" aria-haspopup="true">
+						<svg class="icon"><use href="icons.svg#i-bell" /></svg>
+						<span class="counter counter--danger" style="position: absolute; top: -6px; right: -6px">2</span>
+					</button>
+					<div class="menu menu--right" id="menu-notify" hidden>
+						<div class="menu-section">
+							<div class="menu-label">Notifications</div>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> mac-build-01 is offline</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-alert" /></svg> A certificate expires in 5 days</button>
+						</div>
+					</div>
+				</div>
+				<div class="menu-wrap">
+					<button class="btn btn--ghost" data-menu-toggle="menu-user" aria-expanded="false" aria-haspopup="true">
+						<span class="avatar">AP</span>
+						<span>Anna Petrova</span>
+						<svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg>
+					</button>
+					<div class="menu menu--right" id="menu-user" hidden style="min-width: 240px">
+						<div class="menu-section"><div class="menu-head"><div class="name">Anna Petrova</div><div class="sub">admin · acme</div></div></div>
+						<div class="menu-section">
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-user" /></svg> Account</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</button>
+							<button class="menu-item" data-theme-toggle><svg class="icon"><use href="icons.svg#i-moon" /></svg> Theme</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-external" /></svg> Documentation</button>
+						</div>
+						<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-arrow-right" /></svg> Sign out</button></div>
+					</div>
+				</div>
+			</div>
+		</header>
+		<nav class="tabs" aria-label="Primary">
+			<a class="tab" href="empty-first-run.html"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Overview</a>
+			<a class="tab" href="hosts.html" aria-current="page"><svg class="icon"><use href="icons.svg#i-host" /></svg> Hosts <span class="counter">24</span></a>
+			<a class="tab" href="job.html"><svg class="icon"><use href="icons.svg#i-job" /></svg> Jobs <span class="counter">6</span></a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-clock" /></svg> Schedules</a>
+			<a class="tab" href="repositories.html"><svg class="icon"><use href="icons.svg#i-repository" /></svg> Repositories</a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-profile" /></svg> Profiles</a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-restore" /></svg> Restore</a>
+			<a class="tab" href="audit.html"><svg class="icon"><use href="icons.svg#i-audit" /></svg> Audit</a>
+			<a class="tab" href="settings.html"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</a>
+		</nav>
+		<main class="page">
+			<div class="page-header page-header--bordered">
+				<div>
+					<h1 class="page-title">Hosts <span class="counter">24</span></h1>
+					<p class="page-subtitle">Every computer with a ResticHub agent in the tenant.</p>
+				</div>
+				<div class="page-actions">
+					<span class="segmented" role="group" aria-label="View">
+						<a class="segmented-item" href="#" aria-selected="true">Table</a>
+						<a class="segmented-item" href="#">Cards</a>
+					</span>
+					<button class="btn"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh</button>
+					<button class="btn btn--primary"><svg class="icon"><use href="icons.svg#i-plus" /></svg> Enroll a host</button>
+				</div>
+			</div>
+
+			<div class="banner banner--attention">
+				<svg class="icon icon--lg banner-icon"><use href="icons.svg#i-alert" /></svg>
+				<div class="banner-body">
+					<div class="banner-title">2 hosts need attention</div>
+					<div class="banner-text">mac-build-01 is offline for 2 days. The certificate of srv-app-02 expires in 5 days.</div>
+				</div>
+				<div class="banner-actions">
+					<button class="btn btn--sm">Show these hosts</button>
+					<button class="btn btn--icon btn--sm" aria-label="Dismiss"><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+				</div>
+			</div>
+
+			<div class="row-3 wrap" style="margin: var(--space-4) 0">
+				<span class="muted t-sm row"><svg class="icon icon--xs"><use href="icons.svg#i-filter" /></svg> Filters</span>
+				<button class="label" aria-label="Remove the filter operating system: Windows">Windows <svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+				<button class="label" aria-label="Remove the filter status: online">Online <svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+				<button class="btn btn--link btn--sm">Clear all</button>
+			</div>
+
+			<div class="table-wrap">
+				<div class="table-toolbar">
+					<label class="search">
+						<svg class="icon"><use href="icons.svg#i-search" /></svg>
+						<input type="search" placeholder="Search hosts by name, address or label" />
+						<span class="kbd">/</span>
+					</label>
+					<button class="btn"><svg class="icon"><use href="icons.svg#i-filter" /></svg> Filters</button>
+					<button class="btn"><svg class="icon"><use href="icons.svg#i-grip" /></svg> Columns</button>
+				</div>
+
+				<div class="table-toolbar" style="background: var(--color-selected)">
+					<span class="semibold">3 selected</span>
+					<button class="btn btn--sm"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup</button>
+					<button class="btn btn--sm"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+					<button class="btn btn--sm"><svg class="icon"><use href="icons.svg#i-download" /></svg> Download logs</button>
+					<div class="spacer"></div>
+					<button class="btn btn--sm btn--link">Clear selection</button>
+				</div>
+
+				<table class="table table--hosts">
+					<thead>
+						<tr>
+							<th class="select-col"><label class="checkbox"><input type="checkbox" aria-label="Select all hosts" /></label></th>
+							<th aria-sort="ascending"><button class="th-btn">Host <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+							<th><button class="th-btn">Status <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+							<th class="hide-narrow"><button class="th-btn">Agent <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+							<th class="hide-narrow"><button class="th-btn">Last backup <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+							<th class="cell-actions"><span class="subtle t-xs">Actions</span></th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr class="is-selected">
+							<td class="select-col"><label class="checkbox"><input type="checkbox" checked aria-label="Select win-fs01" /></label></td>
+							<td><a class="semibold nowrap" href="host.html">win-fs01</a><div class="muted t-sm">Windows Server 2022 · 10.20.0.11</div></td>
+							<td><span class="status status--success">Online</span></td>
+							<td class="hide-narrow"><span class="mono t-sm">0.4.2</span></td>
+							<td class="hide-narrow"><span title="10 Oct 2026, 21:14">14 minutes ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<a class="btn btn--icon btn--sm" href="host.html" aria-label="Open win-fs01"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a>
+									<div class="menu-wrap">
+										<button class="btn btn--icon btn--sm" aria-label="More actions for win-fs01" data-menu-toggle="hm1" aria-expanded="false" aria-haspopup="true"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+										<div class="menu menu--right" id="hm1" hidden>
+											<div class="menu-section">
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup now</button>
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-download" /></svg> Download log</button>
+											</div>
+											<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Revoke agent</button></div>
+										</div>
+									</div>
+								</span>
+							</td>
+						</tr>
+						<tr class="is-selected">
+							<td class="select-col"><label class="checkbox"><input type="checkbox" checked aria-label="Select srv-db-01" /></label></td>
+							<td><a class="semibold nowrap" href="host.html">srv-db-01</a><div class="muted t-sm">Ubuntu 24.04 · 10.20.0.21</div></td>
+							<td><span class="status status--running">Backup running</span></td>
+							<td class="hide-narrow"><span class="mono t-sm">0.4.2</span></td>
+							<td class="hide-narrow"><span title="10 Oct 2026, 21:02">26 minutes ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<a class="btn btn--icon btn--sm" href="host.html" aria-label="Open srv-db-01"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a>
+									<div class="menu-wrap">
+										<button class="btn btn--icon btn--sm" aria-label="More actions for srv-db-01" data-menu-toggle="hm2" aria-expanded="false" aria-haspopup="true"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+										<div class="menu menu--right" id="hm2" hidden>
+											<div class="menu-section">
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup now</button>
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+											</div>
+											<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Revoke agent</button></div>
+										</div>
+									</div>
+								</span>
+							</td>
+						</tr>
+						<tr class="is-selected">
+							<td class="select-col"><label class="checkbox"><input type="checkbox" checked aria-label="Select win-dc01" /></label></td>
+							<td><a class="semibold nowrap" href="host.html">win-dc01</a><div class="muted t-sm">Windows Server 2019 · 10.20.0.5</div></td>
+							<td><span class="status status--success">Online</span></td>
+							<td class="hide-narrow"><span class="mono t-sm">0.4.1</span></td>
+							<td class="hide-narrow"><span title="10 Oct 2026, 20:14">1 hour ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<a class="btn btn--icon btn--sm" href="host.html" aria-label="Open win-dc01"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a>
+									<div class="menu-wrap">
+										<button class="btn btn--icon btn--sm" aria-label="More actions for win-dc01" data-menu-toggle="hm3" aria-expanded="false" aria-haspopup="true"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+										<div class="menu menu--right" id="hm3" hidden>
+											<div class="menu-section">
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup now</button>
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+											</div>
+											<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Revoke agent</button></div>
+										</div>
+									</div>
+								</span>
+							</td>
+						</tr>
+						<tr>
+							<td class="select-col"><label class="checkbox"><input type="checkbox" aria-label="Select nas-backup" /></label></td>
+							<td><a class="semibold nowrap" href="host.html">nas-backup</a><div class="muted t-sm">Debian 12 · 10.20.0.40</div></td>
+							<td><span class="status status--success">Online</span></td>
+							<td class="hide-narrow"><span class="mono t-sm">0.4.2</span></td>
+							<td class="hide-narrow"><span title="10 Oct 2026, 19:30">2 hours ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<a class="btn btn--icon btn--sm" href="host.html" aria-label="Open nas-backup"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a>
+									<div class="menu-wrap">
+										<button class="btn btn--icon btn--sm" aria-label="More actions for nas-backup" data-menu-toggle="hm4" aria-expanded="false" aria-haspopup="true"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+										<div class="menu menu--right" id="hm4" hidden>
+											<div class="menu-section">
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup now</button>
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+											</div>
+											<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Revoke agent</button></div>
+										</div>
+									</div>
+								</span>
+							</td>
+						</tr>
+						<tr>
+							<td class="select-col"><label class="checkbox"><input type="checkbox" aria-label="Select mac-build-01" /></label></td>
+							<td><a class="semibold nowrap" href="host.html">mac-build-01</a><div class="muted t-sm">macOS 14 · 10.20.0.60</div></td>
+							<td><span class="status status--neutral">Offline</span></td>
+							<td class="hide-narrow"><span class="mono t-sm">0.4.0</span></td>
+							<td class="hide-narrow"><span title="08 Oct 2026, 03:10">2 days ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<a class="btn btn--icon btn--sm" href="host.html" aria-label="Open mac-build-01"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a>
+									<div class="menu-wrap">
+										<button class="btn btn--icon btn--sm" aria-label="More actions for mac-build-01" data-menu-toggle="hm5" aria-expanded="false" aria-haspopup="true"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+										<div class="menu menu--right" id="hm5" hidden>
+											<div class="menu-section">
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup now</button>
+												<button class="menu-item is-disabled"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+											</div>
+											<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Revoke agent</button></div>
+										</div>
+									</div>
+								</span>
+							</td>
+						</tr>
+						<tr>
+							<td class="select-col"><label class="checkbox"><input type="checkbox" aria-label="Select srv-app-02" /></label></td>
+							<td><a class="semibold nowrap" href="host.html">srv-app-02</a><div class="muted t-sm">Ubuntu 22.04 · 10.20.0.30</div></td>
+							<td><span class="status status--warning">Certificate expiring</span></td>
+							<td class="hide-narrow"><span class="mono t-sm">0.3.9</span></td>
+							<td class="hide-narrow"><span title="10 Oct 2026, 18:05">3 hours ago</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<a class="btn btn--icon btn--sm" href="host.html" aria-label="Open srv-app-02"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></a>
+									<div class="menu-wrap">
+										<button class="btn btn--icon btn--sm" aria-label="More actions for srv-app-02" data-menu-toggle="hm6" aria-expanded="false" aria-haspopup="true"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+										<div class="menu menu--right" id="hm6" hidden>
+											<div class="menu-section">
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup now</button>
+												<button class="menu-item"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+											</div>
+											<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Revoke agent</button></div>
+										</div>
+									</div>
+								</span>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<nav class="pagination" aria-label="Pagination" style="margin-top: var(--space-4)">
+				<span class="summary">Showing 1 to 6 of 24 hosts</span>
+				<button class="page-btn" aria-label="Previous" disabled><svg class="icon icon--xs"><use href="icons.svg#i-chevron-left" /></svg></button>
+				<button class="page-btn" aria-current="page">1</button>
+				<button class="page-btn">2</button>
+				<button class="page-btn">3</button>
+				<button class="page-btn">4</button>
+				<button class="page-btn" aria-label="Next"><svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg></button>
+			</nav>
+		</main>
+	</body>
+</html>

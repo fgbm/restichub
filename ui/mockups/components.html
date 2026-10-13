@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Components · ResticHub mockups</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<script src="mockups.js"></script>
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="topbar-inner">
+				<a class="brand" href="index.html">
+					<span class="brandmark" aria-hidden="true">
+						<svg viewBox="0 0 20 20">
+							<path class="mark-solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
+							<path d="M2.5 10.6 10 14.5l7.5-3.9" />
+						</svg>
+					</span>
+					<span>ResticHub</span>
+				</a>
+				<span class="breadcrumb-sep">/</span>
+				<span class="muted">Components</span>
+				<div class="spacer"></div>
+				<button class="btn btn--icon" data-theme-toggle aria-label="Switch theme">
+					<svg class="icon"><use href="icons.svg#i-moon" /></svg>
+				</button>
+			</div>
+		</header>
+
+		<nav class="tabs" aria-label="Sections">
+			<a class="tab" href="#buttons">Buttons</a>
+			<a class="tab" href="#labels">Labels</a>
+			<a class="tab" href="#forms">Forms</a>
+			<a class="tab" href="#banners">Banners</a>
+			<a class="tab" href="#overlays">Overlays</a>
+			<a class="tab" href="#navigation">Navigation</a>
+			<a class="tab" href="#lists">Lists and tables</a>
+			<a class="tab" href="#feedback">Feedback</a>
+			<a class="tab" href="#dataviews">Data views</a>
+		</nav>
+
+		<main class="page page--wide">
+			<div class="page-header page-header--bordered">
+				<div>
+					<h1 class="page-title">Components</h1>
+					<p class="page-subtitle">
+						Every element in its states. Hover and focus are shown as frozen previews so the page
+						reads without interaction.
+					</p>
+				</div>
+			</div>
+
+			<!-- ------------------------------------------------------------ Buttons -->
+			<section class="section" id="buttons">
+				<div class="section-head"><h2 class="section-title">Buttons</h2></div>
+
+				<div class="demo-row">
+					<div class="demo-state"><span class="demo-label">default</span><button class="btn">Cancel</button></div>
+					<div class="demo-state"><span class="demo-label">hover</span><button class="btn is-hover">Cancel</button></div>
+					<div class="demo-state"><span class="demo-label">focus</span><button class="btn is-focus">Cancel</button></div>
+					<div class="demo-state"><span class="demo-label">disabled</span><button class="btn" disabled>Cancel</button></div>
+					<div class="demo-state"><span class="demo-label">loading</span><button class="btn" aria-busy="true"><span class="spinner spinner--sm"></span> Saving</button></div>
+					<div class="demo-state"><span class="demo-label">primary</span><button class="btn btn--primary">Run job</button></div>
+					<div class="demo-state"><span class="demo-label">primary hover</span><button class="btn btn--primary is-hover">Run job</button></div>
+					<div class="demo-state"><span class="demo-label">danger</span><button class="btn btn--danger">Revoke</button></div>
+					<div class="demo-state"><span class="demo-label">ghost</span><button class="btn btn--ghost">Refresh</button></div>
+					<div class="demo-state"><span class="demo-label">link</span><button class="btn btn--link">View log</button></div>
+					<div class="demo-state"><span class="demo-label">small</span><button class="btn btn--sm">Copy</button></div>
+					<div class="demo-state"><span class="demo-label">full width</span><button class="btn btn--primary" style="width: 160px">Sign in</button></div>
+				</div>
+
+				<div class="section-head" style="margin-top: var(--space-6)"><h3 class="section-title">Icon, counter and groups</h3></div>
+				<div class="demo-row">
+					<div class="demo-state"><span class="demo-label">icon only</span><button class="btn btn--icon" aria-label="Refresh"><svg class="icon"><use href="icons.svg#i-refresh" /></svg></button></div>
+					<div class="demo-state"><span class="demo-label">with icon</span><button class="btn"><svg class="icon"><use href="icons.svg#i-plus" /></svg> Add host</button></div>
+					<div class="demo-state"><span class="demo-label">with counter</span><button class="btn">Notifications <span class="counter">12</span></button></div>
+					<div class="demo-state"><span class="demo-label">primary + counter</span><button class="btn btn--primary">Jobs <span class="counter counter--accent">3</span></button></div>
+					<div class="demo-state">
+						<span class="demo-label">split button</span>
+						<span class="btn-group">
+							<button class="btn btn--primary"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run job</button>
+							<button class="btn btn--primary btn-caret" aria-label="More run options"><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></button>
+						</span>
+					</div>
+					<div class="demo-state">
+						<span class="demo-label">button group</span>
+						<span class="btn-group">
+							<button class="btn">Day</button>
+							<button class="btn">Week</button>
+							<button class="btn">Month</button>
+						</span>
+					</div>
+					<div class="demo-state">
+						<span class="demo-label">segmented</span>
+						<span class="btn-group btn-group--seg">
+							<button class="btn" aria-pressed="true">Table</button>
+							<button class="btn" aria-pressed="false">Cards</button>
+						</span>
+					</div>
+				</div>
+			</section>
+
+			<!-- ------------------------------------------------------------- Labels -->
+			<section class="section" id="labels">
+				<div class="section-head"><h2 class="section-title">Labels, status and counters</h2></div>
+				<div class="demo-row">
+					<span class="label">Windows Server 2022</span>
+					<span class="label"><svg class="icon icon--xs"><use href="icons.svg#i-tag" /></svg> prod</span>
+					<span class="topic">production</span>
+					<span class="topic">daily</span>
+					<span class="counter">7</span>
+					<span class="counter counter--accent">3</span>
+					<span class="counter counter--danger">1</span>
+				</div>
+				<div class="demo-row" style="margin-top: var(--space-3)">
+					<span class="status status--success">Success</span>
+					<span class="status status--running">Running</span>
+					<span class="status status--queued">Queued</span>
+					<span class="status status--warning">Warning</span>
+					<span class="status status--failed">Failed</span>
+					<span class="status status--cancelled">Cancelled</span>
+					<span class="status status--info">Online</span>
+					<span class="status status--neutral">Revoked</span>
+				</div>
+				<div class="demo-row" style="margin-top: var(--space-3)">
+					<div class="demo-state"><span class="demo-label">avatar</span><span class="avatar">AP</span></div>
+					<div class="demo-state"><span class="demo-label">large</span><span class="avatar avatar--lg">BI</span></div>
+					<div class="demo-state"><span class="demo-label">square</span><span class="avatar avatar--square">W1</span></div>
+					<div class="demo-state"><span class="demo-label">kbd</span><span class="row"><span class="kbd">/</span><span class="kbd">Ctrl</span><span class="kbd">K</span></span></div>
+					<div class="demo-state"><span class="demo-label">inline code</span><span><code>s3://backups-prod/restic</code></span></div>
+				</div>
+			</section>
+
+			<!-- -------------------------------------------------------------- Forms -->
+			<section class="section" id="forms">
+				<div class="section-head"><h2 class="section-title">Forms</h2></div>
+				<div class="grid-3">
+					<div class="demo-cell">
+						<span class="demo-label">Text input: default, focus, disabled, invalid</span>
+						<label class="field">
+							<span class="field-label">Display name</span>
+							<input class="input" value="Weekly file backup" />
+							<span class="field-hint">Shown in the plan list.</span>
+						</label>
+						<input class="input is-focus" value="Focused input" />
+						<input class="input" value="Disabled input" disabled />
+						<label class="field is-invalid">
+							<span class="field-label">Repository name</span>
+							<input class="input" value="s3 prod" aria-invalid="true" />
+							<span class="field-error"><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg> Use lowercase letters, digits and dashes.</span>
+						</label>
+					</div>
+
+					<div class="demo-cell">
+						<span class="demo-label">Input with prefix and suffix</span>
+						<div class="input-group">
+							<span class="affix">s3://</span>
+							<input value="backups-prod/restic" />
+							<span class="affix affix--suffix">.restic</span>
+						</div>
+						<span class="demo-label">Textarea</span>
+						<textarea class="textarea" rows="3">/srv/data
+/home/*/Documents</textarea>
+						<span class="demo-label">Search field</span>
+						<label class="search">
+							<svg class="icon"><use href="icons.svg#i-search" /></svg>
+							<input type="search" placeholder="Search hosts, jobs, snapshots" />
+							<span class="kbd">/</span>
+						</label>
+					</div>
+
+					<div class="demo-cell">
+						<span class="demo-label">Select</span>
+						<span class="select-wrap">
+							<select class="select">
+								<option>Windows Server 2022</option>
+								<option>Ubuntu 24.04</option>
+								<option>macOS 14</option>
+							</select>
+							<svg class="icon"><use href="icons.svg#i-chevron-down" /></svg>
+						</span>
+						<span class="demo-label">Combobox (static)</span>
+						<div class="combobox" data-combobox>
+							<input readonly value="srv-db-01" data-combobox-label />
+							<svg class="icon"><use href="icons.svg#i-chevron-down" /></svg>
+							<div class="combobox-list" data-combobox-list>
+								<div class="combobox-option" data-combobox-option role="option">srv-db-01 <span class="meta">Ubuntu 24.04</span></div>
+								<div class="combobox-option is-hover" data-combobox-option role="option" aria-selected="true">srv-db-02 <span class="meta">Ubuntu 24.04</span></div>
+								<div class="combobox-option" data-combobox-option role="option">win-fs01 <span class="meta">Windows Server 2022</span></div>
+							</div>
+						</div>
+					</div>
+
+					<div class="demo-cell">
+						<span class="demo-label">Checkbox</span>
+						<label class="checkbox"><input type="checkbox" /><span>Unchecked</span></label>
+						<label class="checkbox"><input type="checkbox" checked /><span>Checked</span></label>
+						<label class="checkbox"><input type="checkbox" data-indeterminate /><span>Mixed</span></label>
+						<label class="checkbox"><input type="checkbox" disabled /><span>Disabled</span></label>
+						<span class="demo-label">Radio</span>
+						<div class="radio-group">
+							<label class="radio"><input type="radio" name="r" checked /><span>Admin</span></label>
+							<label class="radio"><input type="radio" name="r" /><span>Operator</span></label>
+							<label class="radio"><input type="radio" name="r" /><span>Viewer</span></label>
+						</div>
+					</div>
+
+					<div class="demo-cell">
+						<span class="demo-label">Toggle switch</span>
+						<label class="switch"><input type="checkbox" checked /><span>Enabled</span></label>
+						<label class="switch"><input type="checkbox" /><span>Off</span></label>
+						<label class="switch"><input type="checkbox" disabled /><span>Disabled</span></label>
+					</div>
+
+					<div class="demo-cell span-2" style="grid-column: auto">
+						<span class="demo-label">Form layout with actions</span>
+						<form class="form-grid">
+							<label class="field">
+								<span class="field-label">Name <span class="req">*</span></span>
+								<input class="input" value="nightly-files" />
+							</label>
+							<label class="field">
+								<span class="field-label">Repository</span>
+								<span class="select-wrap">
+									<select class="select"><option>s3-prod-primary</option></select>
+									<svg class="icon"><use href="icons.svg#i-chevron-down" /></svg>
+								</span>
+							</label>
+							<label class="field span-2">
+								<span class="field-label">Paths</span>
+								<textarea class="textarea" rows="2">C:\Data
+C:\Users\*\Documents</textarea>
+							</label>
+							<div class="form-actions span-2">
+								<button class="btn btn--primary" type="submit">Save profile</button>
+								<button class="btn" type="reset">Cancel</button>
+								<button class="btn btn--link" type="button">Preview steps</button>
+							</div>
+						</form>
+					</div>
+				</div>
+			</section>
+
+			<!-- ------------------------------------------------------------ Banners -->
+			<section class="section" id="banners">
+				<div class="section-head"><h2 class="section-title">Banners, alerts and toasts</h2></div>
+				<div class="stack">
+					<div class="banner banner--info" role="status">
+						<svg class="icon icon--lg banner-icon"><use href="icons.svg#i-info" /></svg>
+						<div class="banner-body">
+							<div class="banner-title">A new agent version is available</div>
+							<div class="banner-text">Version 0.4.3 updates the restic binary to 0.19.1. Apply the update from the host page.</div>
+						</div>
+						<div class="banner-actions">
+							<button class="btn btn--sm">View hosts</button>
+							<button class="btn btn--icon btn--sm" aria-label="Dismiss"><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+						</div>
+					</div>
+					<div class="banner banner--success">
+						<svg class="icon icon--lg banner-icon"><use href="icons.svg#i-check-circle" /></svg>
+						<div class="banner-body"><div class="banner-title">The job completed</div></div>
+					</div>
+					<div class="banner banner--attention">
+						<svg class="icon icon--lg banner-icon"><use href="icons.svg#i-alert" /></svg>
+						<div class="banner-body">
+							<div class="banner-title">The certificate expires in 5 days</div>
+							<div class="banner-text">The agent rotates its certificate at two thirds of the lifetime.</div>
+						</div>
+						<div class="banner-actions"><button class="btn btn--sm">Rotate now</button></div>
+					</div>
+					<div class="banner banner--danger">
+						<svg class="icon icon--lg banner-icon"><use href="icons.svg#i-octagon" /></svg>
+						<div class="banner-body">
+							<div class="banner-title">The repository is locked</div>
+							<div class="banner-text">A stale lock blocks the backup. A maintenance agent can remove it after 30 minutes.</div>
+						</div>
+						<div class="banner-actions"><button class="btn btn--sm">Open repository</button></div>
+					</div>
+				</div>
+
+				<div class="grid-3" style="margin-top: var(--space-4)">
+					<div class="alert alert--danger">
+						<svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg>
+						<span>Correct the fields and try again. Code <span class="mono">validation_failed</span>.</span>
+					</div>
+					<div class="alert alert--success">
+						<svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg>
+						<span>The profile is saved.</span>
+					</div>
+					<div class="alert">
+						<svg class="icon icon--xs"><use href="icons.svg#i-info" /></svg>
+						<span>Log retention is 30 days for this tenant.</span>
+					</div>
+				</div>
+
+				<div class="grid-2" style="margin-top: var(--space-4)">
+					<div class="toast toast--success">
+						<svg class="icon icon--lg toast-icon"><use href="icons.svg#i-check-circle" /></svg>
+						<div class="toast-body"><div class="toast-title">Host enrolled</div><div class="toast-text">win-fs01 is online.</div></div>
+						<button class="btn btn--icon btn--sm" aria-label="Dismiss" data-toast-close><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+					</div>
+					<div class="toast toast--danger">
+						<svg class="icon icon--lg toast-icon"><use href="icons.svg#i-octagon" /></svg>
+						<div class="toast-body"><div class="toast-title">The job failed</div><div class="toast-text">restic exit code 12.</div></div>
+						<button class="btn btn--icon btn--sm" aria-label="Dismiss" data-toast-close><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+					</div>
+				</div>
+
+				<div class="demo-row" style="margin-top: var(--space-4)">
+					<div class="demo-state">
+						<span class="demo-label">tooltip</span>
+						<span class="tooltip">
+							<button class="btn btn--icon" aria-label="Copy"><svg class="icon"><use href="icons.svg#i-copy" /></svg></button>
+							<span class="tooltip__bubble" role="tooltip">Copy snapshot ID</span>
+						</span>
+					</div>
+				</div>
+			</section>
+
+			<!-- ----------------------------------------------------------- Overlays -->
+			<section class="section" id="overlays">
+				<div class="section-head"><h2 class="section-title">Menus, dialogs and side panel</h2></div>
+
+				<div class="grid-3">
+					<div class="demo-cell">
+						<span class="demo-label">Action menu (with sections and keyboard hints)</span>
+						<div class="menu menu--left" style="position: static; display: block">
+							<div class="menu-section">
+								<div class="menu-head"><div class="name">win-fs01</div><div class="sub">Windows Server 2022</div></div>
+							</div>
+							<div class="menu-section">
+								<button class="menu-item"><svg class="icon"><use href="icons.svg#i-eye" /></svg> Open<span class="menu-kbd"><span class="kbd">↵</span></span></button>
+								<button class="menu-item"><svg class="icon"><use href="icons.svg#i-job" /></svg> Run backup now<span class="menu-kbd"><span class="kbd">R</span></span></button>
+								<button class="menu-item"><svg class="icon"><use href="icons.svg#i-refresh" /></svg> Refresh certificate</button>
+								<button class="menu-item is-disabled"><svg class="icon"><use href="icons.svg#i-download" /></svg> Download log</button>
+							</div>
+							<div class="menu-section">
+								<button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Revoke agent</button>
+							</div>
+						</div>
+					</div>
+
+					<div class="demo-cell">
+						<span class="demo-label">Confirm dialog</span>
+						<div class="dialog dialog--static">
+							<div class="dialog-head"><div class="dialog-title">Cancel the job?</div></div>
+							<div class="dialog-body">The job <span class="mono">j_4821</span> stops after the current step. The snapshot stays in the repository.</div>
+							<div class="dialog-foot">
+								<button class="btn">Keep running</button>
+								<button class="btn btn--danger">Cancel job</button>
+							</div>
+						</div>
+						<span class="demo-label">Destructive dialog with typed confirmation</span>
+						<div class="dialog dialog--static">
+							<div class="dialog-head"><div class="dialog-title"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Delete the repository?</div></div>
+							<div class="dialog-body">
+								<p>This removes the configuration <span class="mono">s3-prod-primary</span>. The data in the bucket stays. Data loss can occur if the bucket is removed too.</p>
+								<label class="field" style="margin-top: var(--space-3)">
+									<span class="field-label">Type <span class="mono">s3-prod-primary</span> to confirm</span>
+									<input class="input" placeholder="repository name" />
+								</label>
+							</div>
+							<div class="dialog-foot">
+								<button class="btn">Cancel</button>
+								<button class="btn btn--danger" disabled>Delete</button>
+							</div>
+						</div>
+					</div>
+
+					<div class="demo-cell">
+						<span class="demo-label">Form dialog</span>
+						<div class="dialog dialog--static" style="--dialog-width: 380px">
+							<div class="dialog-head">
+								<div class="dialog-title">Create a user</div>
+								<button class="btn btn--icon btn--sm dialog-close" aria-label="Close"><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+							</div>
+							<div class="dialog-body stack">
+								<label class="field"><span class="field-label">User name <span class="req">*</span></span><input class="input" value="operator" /></label>
+								<label class="field"><span class="field-label">Display name</span><input class="input" value="Boris Ivanov" /></label>
+								<label class="field"><span class="field-label">Role</span>
+									<span class="select-wrap"><select class="select"><option>Operator</option><option>Viewer</option></select><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></span>
+								</label>
+							</div>
+							<div class="dialog-foot">
+								<button class="btn">Cancel</button>
+								<button class="btn btn--primary">Create user</button>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="demo-row" style="margin-top: var(--space-4)">
+					<button class="btn" data-open-dialog="d-confirm">Open a live dialog</button>
+					<button class="btn" data-open-dialog="d-typed">Open the typed dialog</button>
+					<button class="btn" data-open-dialog="p-detail">Open the side panel</button>
+				</div>
+
+				<div class="demo-cell" style="margin-top: var(--space-4)">
+					<span class="demo-label">Side panel (inline preview)</span>
+					<div class="panel panel--static">
+						<div class="panel-head">
+							<div class="title">Audit record a_04</div>
+							<button class="btn btn--icon btn--sm dialog-close" aria-label="Close"><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+						</div>
+						<div class="panel-body">
+							<div class="kv">
+								<div class="kv-row"><div class="kv-key">Time</div><div class="kv-value">10 Oct 2026, 21:14</div></div>
+								<div class="kv-row"><div class="kv-key">Actor</div><div class="kv-value">Anna Petrova</div></div>
+								<div class="kv-row"><div class="kv-key">Action</div><div class="kv-value">Change user</div></div>
+								<div class="kv-row"><div class="kv-key">Object</div><div class="kv-value mono">u_02</div></div>
+								<div class="kv-row"><div class="kv-key">Source IP</div><div class="kv-value mono">10.0.0.5</div></div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- --------------------------------------------------------- Navigation -->
+			<section class="section" id="navigation">
+				<div class="section-head"><h2 class="section-title">Navigation</h2></div>
+
+				<div class="demo-row">
+					<div class="demo-state">
+						<span class="demo-label">Breadcrumb</span>
+						<nav class="breadcrumb" aria-label="Breadcrumb">
+							<a href="#">acme</a><span class="breadcrumb-sep">/</span>
+							<a href="#">Hosts</a><span class="breadcrumb-sep">/</span>
+							<span aria-current="page">win-fs01</span>
+						</nav>
+					</div>
+					<div class="demo-state">
+						<span class="demo-label">Segmented control</span>
+						<div class="segmented" role="tablist">
+							<button class="segmented-item" role="tab" aria-selected="true">Overview</button>
+							<button class="segmented-item" role="tab" aria-selected="false">Logs</button>
+							<button class="segmented-item" role="tab" aria-selected="false">Statistics</button>
+						</div>
+					</div>
+				</div>
+
+				<div class="demo-state" style="margin-top: var(--space-5)">
+					<span class="demo-label">Underline tabs with icons and counters</span>
+					<div class="tabs" role="tablist" style="border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0 var(--space-2)">
+						<button class="tab" role="tab" aria-selected="true" aria-controls="tp-1"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Overview</button>
+						<button class="tab" role="tab" aria-selected="false" aria-controls="tp-2"><svg class="icon"><use href="icons.svg#i-job" /></svg> Jobs <span class="counter">12</span></button>
+						<button class="tab" role="tab" aria-selected="false" aria-controls="tp-3"><svg class="icon"><use href="icons.svg#i-file" /></svg> Files</button>
+						<button class="tab" role="tab" aria-selected="false" aria-controls="tp-4"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</button>
+					</div>
+					<div id="tp-1" style="padding: var(--space-4) 0">The Overview panel.</div>
+					<div id="tp-2" style="padding: var(--space-4) 0" hidden>The Jobs panel.</div>
+					<div id="tp-3" style="padding: var(--space-4) 0" hidden>The Files panel.</div>
+					<div id="tp-4" style="padding: var(--space-4) 0" hidden>The Settings panel.</div>
+				</div>
+
+				<div class="demo-state" style="margin-top: var(--space-5)">
+					<span class="demo-label">Pagination</span>
+					<nav class="pagination" aria-label="Pagination">
+						<span class="summary">Showing 1 to 20 of 128</span>
+						<button class="page-btn" aria-label="Previous"><svg class="icon icon--xs"><use href="icons.svg#i-chevron-left" /></svg></button>
+						<button class="page-btn" aria-current="page">1</button>
+						<button class="page-btn">2</button>
+						<button class="page-btn">3</button>
+						<button class="page-btn" aria-label="Next"><svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg></button>
+					</nav>
+				</div>
+			</section>
+
+			<!-- ------------------------------------------------------ Lists and tables -->
+			<section class="section" id="lists">
+				<div class="section-head"><h2 class="section-title">Box rows and tables</h2></div>
+				<div class="grid-2">
+					<div class="box">
+						<div class="box-header"><span class="box-title">Recent jobs</span><div class="box-actions"><a class="btn btn--link" href="#">View all</a></div></div>
+						<a class="box-row" href="#">
+							<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-job" /></svg></span>
+							<span class="box-row-main"><span class="box-row-name">nightly-files</span><span class="box-row-sub">Success · 1.4 GB added · 3m 12s</span></span>
+							<span class="box-row-meta"><span class="status status--success">Success</span><span title="10 Oct 2026, 21:14">14 minutes ago</span></span>
+						</a>
+						<a class="box-row is-hover" href="#">
+							<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-job" /></svg></span>
+							<span class="box-row-main"><span class="box-row-name">weekly-check</span><span class="box-row-sub">Running · step 2 of 4</span></span>
+							<span class="box-row-meta"><span class="status status--running">Running</span><span>now</span></span>
+						</a>
+						<a class="box-row" href="#">
+							<span class="box-row-icon"><svg class="icon"><use href="icons.svg#i-job" /></svg></span>
+							<span class="box-row-main"><span class="box-row-name">nightly-files</span><span class="box-row-sub">Failed · restic exit code 12</span></span>
+							<span class="box-row-meta"><span class="status status--failed">Failed</span><span>2 days ago</span></span>
+						</a>
+					</div>
+
+					<div class="table-wrap">
+						<div class="table-toolbar">
+							<label class="search"><svg class="icon"><use href="icons.svg#i-search" /></svg><input placeholder="Filter hosts" /></label>
+							<button class="btn"><svg class="icon"><use href="icons.svg#i-filter" /></svg> Filters</button>
+						</div>
+						<table class="table">
+							<thead>
+								<tr>
+									<th class="select-col"><label class="checkbox"><input type="checkbox" aria-label="Select all" /></label></th>
+									<th aria-sort="ascending"><button class="th-btn">Host <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+									<th><button class="th-btn">Status <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+									<th><button class="th-btn">Last backup <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+									<th class="cell-actions"><span class="subtle t-xs">Actions</span></th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr class="is-selected">
+									<td class="select-col"><label class="checkbox"><input type="checkbox" checked aria-label="Select win-fs01" /></label></td>
+									<td><span class="semibold">win-fs01</span><div class="muted t-sm">Windows Server 2022</div></td>
+									<td><span class="status status--success">Online</span></td>
+									<td><span title="10 Oct 2026, 21:14">14 minutes ago</span></td>
+									<td class="cell-actions"><span class="row-actions"><button class="btn btn--icon btn--sm" aria-label="Refresh"><svg class="icon icon--xs"><use href="icons.svg#i-refresh" /></svg></button><button class="btn btn--icon btn--sm" aria-label="More"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button></span></td>
+								</tr>
+								<tr>
+									<td class="select-col"><label class="checkbox"><input type="checkbox" aria-label="Select srv-db-01" /></label></td>
+									<td><span class="semibold">srv-db-01</span><div class="muted t-sm">Ubuntu 24.04</div></td>
+									<td><span class="status status--running">Running</span></td>
+									<td><span title="10 Oct 2026, 21:02">26 minutes ago</span></td>
+									<td class="cell-actions"><span class="row-actions"><button class="btn btn--icon btn--sm" aria-label="Refresh"><svg class="icon icon--xs"><use href="icons.svg#i-refresh" /></svg></button><button class="btn btn--icon btn--sm" aria-label="More"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button></span></td>
+								</tr>
+								<tr>
+									<td class="select-col"><label class="checkbox"><input type="checkbox" aria-label="Select mac-build-01" /></label></td>
+									<td><span class="semibold">mac-build-01</span><div class="muted t-sm">macOS 14</div></td>
+									<td><span class="status status--failed">Offline</span></td>
+									<td><span title="08 Oct 2026, 03:10">2 days ago</span></td>
+									<td class="cell-actions"><span class="row-actions"><button class="btn btn--icon btn--sm" aria-label="Refresh"><svg class="icon icon--xs"><use href="icons.svg#i-refresh" /></svg></button><button class="btn btn--icon btn--sm" aria-label="More"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button></span></td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+
+				<div class="grid-2" style="margin-top: var(--space-4)">
+					<div class="table-wrap">
+						<div class="table-toolbar"><span class="semibold">Loading state</span></div>
+						<table class="table">
+							<tbody>
+								<tr><td><span class="skeleton skeleton--text" style="width: 120px"></span></td><td><span class="skeleton skeleton--text" style="width: 70px"></span></td><td><span class="skeleton skeleton--text" style="width: 90px"></span></td></tr>
+								<tr><td><span class="skeleton skeleton--text" style="width: 140px"></span></td><td><span class="skeleton skeleton--text" style="width: 60px"></span></td><td><span class="skeleton skeleton--text" style="width: 100px"></span></td></tr>
+								<tr><td><span class="skeleton skeleton--text" style="width: 110px"></span></td><td><span class="skeleton skeleton--text" style="width: 80px"></span></td><td><span class="skeleton skeleton--text" style="width: 70px"></span></td></tr>
+							</tbody>
+						</table>
+					</div>
+					<div class="table-wrap">
+						<div class="table-toolbar"><span class="semibold">Empty state in a table</span></div>
+						<div class="empty">
+							<span class="empty-icon"><svg class="icon icon--xl"><use href="icons.svg#i-host" /></svg></span>
+							<span class="empty-title">No hosts yet</span>
+							<span class="empty-body">Enroll the first agent to start a backup. The installation script holds a one-time token.</span>
+							<span class="empty-actions"><button class="btn btn--primary">Enroll a host</button><button class="btn">Read the guide</button></span>
+						</div>
+					</div>
+				</div>
+
+				<div class="demo-cell" style="margin-top: var(--space-4)">
+					<span class="demo-label">Key-value list</span>
+					<div class="kv kv--box">
+						<div class="kv-row"><div class="kv-key">Host name</div><div class="kv-value mono">win-fs01</div></div>
+						<div class="kv-row"><div class="kv-key">Agent version</div><div class="kv-value">0.4.2 (restic 0.19.1)</div></div>
+						<div class="kv-row"><div class="kv-key">Operating system</div><div class="kv-value">Windows Server 2022 (x86_64)</div></div>
+						<div class="kv-row"><div class="kv-key">Certificate expires</div><div class="kv-value">15 Oct 2026</div></div>
+						<div class="kv-row"><div class="kv-key">Enrolled</div><div class="kv-value">12 Sep 2026</div></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- ----------------------------------------------------------- Feedback -->
+			<section class="section" id="feedback">
+				<div class="section-head"><h2 class="section-title">Progress and feedback</h2></div>
+				<div class="grid-2">
+					<div class="demo-cell">
+						<span class="demo-label">Progress: determinate 40%</span>
+						<div class="progress"><div class="progress-bar" style="width: 40%"></div></div>
+						<span class="demo-label">Indeterminate</span>
+						<div class="progress progress--indeterminate"><div class="progress-bar"></div></div>
+						<span class="demo-label">Spinners</span>
+						<div class="row"><span class="spinner"></span><span class="spinner spinner--sm"></span><span class="muted t-sm">Loading records</span></div>
+					</div>
+					<div class="demo-cell">
+						<span class="demo-label">Skeletons</span>
+						<div class="row-3"><span class="skeleton skeleton--avatar"></span><span class="skeleton skeleton--text" style="width: 160px"></span></div>
+						<span class="skeleton skeleton--row"></span>
+						<div class="stack-1" style="width: 240px"><span class="skeleton skeleton--text" style="width: 100%"></span><span class="skeleton skeleton--text" style="width: 70%"></span></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- --------------------------------------------------------- Data views -->
+			<section class="section" id="dataviews">
+				<div class="section-head"><h2 class="section-title">Data views</h2></div>
+
+				<div class="grid-2">
+					<div>
+						<p class="demo-label" style="margin-bottom: var(--space-3)">Timeline of job steps</p>
+						<div class="timeline">
+							<div class="timeline-item">
+								<span class="timeline-marker timeline-marker--success"><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg></span>
+								<div class="timeline-head"><span class="timeline-title">backup</span><span class="timeline-meta">3m 12s</span></div>
+								<div class="timeline-body">1.4 GB added, 128 new files. restic exit code 0.</div>
+							</div>
+							<div class="timeline-item">
+								<span class="timeline-marker timeline-marker--success"><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg></span>
+								<div class="timeline-head"><span class="timeline-title">hook: pg_dump</span><span class="timeline-meta">22s</span></div>
+								<div class="timeline-body">The before hook wrote the dump to the staging directory.</div>
+							</div>
+							<div class="timeline-item">
+								<span class="timeline-marker timeline-marker--running"><span class="spinner spinner--sm"></span></span>
+								<div class="timeline-head"><span class="timeline-title">forget</span><span class="timeline-meta">running</span></div>
+								<div class="timeline-body">Retention: keep 7 daily, 4 weekly, 6 monthly.</div>
+							</div>
+							<div class="timeline-item">
+								<span class="timeline-marker timeline-marker--queued"><span class="icon icon--xs"><use href="icons.svg#i-pause" /></span></span>
+								<div class="timeline-head"><span class="timeline-title">prune</span><span class="timeline-meta">queued</span></div>
+								<div class="timeline-body">A repository barrier. No backup runs at the same time.</div>
+							</div>
+						</div>
+					</div>
+
+					<div>
+						<p class="demo-label" style="margin-bottom: var(--space-3)">Log viewer</p>
+						<div class="log">
+							<div class="log-head"><svg class="icon icon--xs"><use href="icons.svg#i-terminal" /></svg><span class="semibold">job j_4821</span><span class="muted">following</span><span class="spacer"></span><span class="counter">3 lines/s</span></div>
+							<div class="log-body">
+								<div class="log-line"><span class="log-no">1</span><span class="log-time">21:11:02</span><span class="log-level log-level--info">INFO</span><span class="log-msg">starting backup step on win-fs01</span></div>
+								<div class="log-line"><span class="log-no">2</span><span class="log-time">21:11:02</span><span class="log-level log-level--debug">DEBUG</span><span class="log-msg">repository s3-prod-primary opened</span></div>
+								<div class="log-line"><span class="log-no">3</span><span class="log-time">21:12:40</span><span class="log-level log-level--info">INFO</span><span class="log-msg">1.4 GiB added, 128 files new</span></div>
+								<div class="log-line"><span class="log-no">4</span><span class="log-time">21:13:48</span><span class="log-level log-level--warn">WARN</span><span class="log-msg">file C:\Data\locks\.db-shm changed during backup</span></div>
+								<div class="log-line"><span class="log-no">5</span><span class="log-time">21:14:12</span><span class="log-level log-level--error">ERROR</span><span class="log-msg">step forget failed: restic exit code 12</span></div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="grid-2" style="margin-top: var(--space-5)">
+					<div>
+						<p class="demo-label" style="margin-bottom: var(--space-3)">JSON diff</p>
+						<div class="diff">
+							<div class="diff-line diff--ctx"><span class="sign"> </span>  "role": "operator",</div>
+							<div class="diff-line diff--del"><span class="sign">-</span>  "disabled": false,</div>
+							<div class="diff-line diff--add"><span class="sign">+</span>  "disabled": true,</div>
+							<div class="diff-line diff--ctx"><span class="sign"> </span>  "display_name": "Boris Ivanov"</div>
+						</div>
+					</div>
+					<div>
+						<p class="demo-label" style="margin-bottom: var(--space-3)">Copy field (secret shown once)</p>
+						<div class="banner banner--attention" style="margin-bottom: var(--space-3)">
+							<svg class="icon icon--lg banner-icon"><use href="icons.svg#i-key" /></svg>
+							<div class="banner-body"><div class="banner-title">Copy the token value</div><div class="banner-text">This value appears one time only.</div></div>
+						</div>
+						<div class="copyfield copyfield--secret">
+							<input class="input" id="secret-value" readonly value="rh_EXAMPLEONLYVALUE0000000000000000000000" />
+							<button class="btn" data-copy="secret-value"><svg class="icon"><use href="icons.svg#i-copy" /></svg><span class="btn-label">Copy</span></button>
+						</div>
+					</div>
+				</div>
+			</section>
+		</main>
+
+		<!-- Live dialogs and the side panel. -->
+		<dialog class="dialog" id="d-confirm" style="--dialog-width: 400px">
+			<div class="dialog-head"><div class="dialog-title">Cancel the job?</div></div>
+			<div class="dialog-body">The job <span class="mono">j_4821</span> stops after the current step. The snapshot stays in the repository.</div>
+			<div class="dialog-foot">
+				<button class="btn" data-close-dialog>Keep running</button>
+				<button class="btn btn--danger" data-close-dialog>Cancel job</button>
+			</div>
+		</dialog>
+
+		<dialog class="dialog" id="d-typed" style="--dialog-width: 440px">
+			<div class="dialog-head"><div class="dialog-title"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Delete the repository?</div></div>
+			<div class="dialog-body">
+				<p>This removes the configuration <span class="mono">s3-prod-primary</span>. The data in the bucket stays. Data loss can occur if the bucket is removed too.</p>
+				<label class="field" style="margin-top: var(--space-3)">
+					<span class="field-label">Type <span class="mono">s3-prod-primary</span> to confirm</span>
+					<input class="input" placeholder="repository name" data-typed-confirm="d-typed-delete" data-typed-value="s3-prod-primary" />
+				</label>
+			</div>
+			<div class="dialog-foot">
+				<button class="btn" data-close-dialog>Cancel</button>
+				<button class="btn btn--danger" id="d-typed-delete" disabled data-close-dialog>Delete</button>
+			</div>
+		</dialog>
+
+		<dialog class="panel" id="p-detail">
+			<div class="panel-head">
+				<div class="title">Snapshot a1b2c3d4</div>
+				<button class="btn btn--icon btn--sm dialog-close" aria-label="Close" data-close-dialog><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
+			</div>
+			<div class="panel-body">
+				<div class="kv">
+					<div class="kv-row"><div class="kv-key">Host</div><div class="kv-value mono">win-fs01</div></div>
+					<div class="kv-row"><div class="kv-key">Time</div><div class="kv-value">10 Oct 2026, 21:14</div></div>
+					<div class="kv-row"><div class="kv-key">Paths</div><div class="kv-value mono">C:\Data</div></div>
+					<div class="kv-row"><div class="kv-key">Tags</div><div class="kv-value"><span class="topic">daily</span> <span class="topic">prod</span></div></div>
+				</div>
+			</div>
+			<div class="panel-foot">
+				<button class="btn btn--primary">Restore</button>
+				<button class="btn" data-close-dialog>Close</button>
+			</div>
+		</dialog>
+	</body>
+</html>

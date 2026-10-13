@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Design principles · ResticHub mockups</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<script src="mockups.js"></script>
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="topbar-inner">
+				<a class="brand" href="index.html">
+					<span class="brandmark" aria-hidden="true">
+						<svg viewBox="0 0 20 20">
+							<path class="mark-solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
+							<path d="M2.5 10.6 10 14.5l7.5-3.9" />
+						</svg>
+					</span>
+					<span>ResticHub</span>
+				</a>
+				<span class="breadcrumb-sep">/</span>
+				<span class="muted">Design principles</span>
+				<div class="spacer"></div>
+				<button class="btn btn--icon" data-theme-toggle aria-label="Switch theme">
+					<svg class="icon"><use href="icons.svg#i-moon" /></svg>
+				</button>
+			</div>
+		</header>
+
+		<main class="page">
+			<div class="page-header page-header--bordered">
+				<div>
+					<h1 class="page-title">Design principles</h1>
+					<p class="page-subtitle">
+						A clean, restrained administration console. Every value lives in one stylesheet as a
+						custom property. Switch the theme in the top bar to see the dark values.
+					</p>
+				</div>
+			</div>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">In one sentence</h2>
+				</div>
+				<p class="lead">
+					A white or near-white canvas, neutral greys, 1px borders instead of shadows, one green
+					accent for the main action of a view, blue for links and focus, and semantic colors in
+					muted fills with strong borders. Shadows appear only on overlays. The console stays calm
+					and dense; it never shouts.
+				</p>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Color tokens</h2>
+					<p class="section-sub">Light values are shown. The table below lists both themes.</p>
+				</div>
+
+				<div class="stack">
+					<div>
+						<p class="demo-label">Canvas and surfaces</p>
+						<div class="token-grid">
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-canvas)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Canvas</div><div class="swatch-value">--color-canvas</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-canvas-subtle)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Subtle canvas</div><div class="swatch-value">--color-canvas-subtle</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-canvas-inset)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Inset canvas</div><div class="swatch-value">--color-canvas-inset</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-surface)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Surface</div><div class="swatch-value">--color-surface</div></div>
+							</div>
+						</div>
+					</div>
+
+					<div>
+						<p class="demo-label">Borders</p>
+						<div class="token-grid">
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-border)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Border</div><div class="swatch-value">--color-border</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-border-muted)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Muted border</div><div class="swatch-value">--color-border-muted</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-border-strong)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Strong border</div><div class="swatch-value">--color-border-strong</div></div>
+							</div>
+						</div>
+					</div>
+
+					<div>
+						<p class="demo-label">Text</p>
+						<div class="token-grid">
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-text)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Text</div><div class="swatch-value">--color-text</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-text-muted)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Muted text</div><div class="swatch-value">--color-text-muted</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-text-subtle)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Subtle text</div><div class="swatch-value">--color-text-subtle</div></div>
+							</div>
+						</div>
+					</div>
+
+					<div>
+						<p class="demo-label">Accent, the single main action</p>
+						<div class="token-grid">
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-accent)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Accent</div><div class="swatch-value">--color-accent</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-accent-hover)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Accent hover</div><div class="swatch-value">--color-accent-hover</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-accent-subtle)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Accent fill</div><div class="swatch-value">--color-accent-subtle</div></div>
+							</div>
+						</div>
+					</div>
+
+					<div>
+						<p class="demo-label">Links and focus</p>
+						<div class="token-grid">
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-link)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Link</div><div class="swatch-value">--color-link</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-link-hover)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Link hover</div><div class="swatch-value">--color-link-hover</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-focus)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Focus</div><div class="swatch-value">--color-focus</div></div>
+							</div>
+						</div>
+					</div>
+
+					<div>
+						<p class="demo-label">Semantic fills</p>
+						<div class="token-grid">
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-success-bg)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Success fill</div><div class="swatch-value">--color-success-bg</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-attention-bg)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Attention fill</div><div class="swatch-value">--color-attention-bg</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-danger-bg)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Danger fill</div><div class="swatch-value">--color-danger-bg</div></div>
+							</div>
+							<div class="swatch">
+								<div class="swatch-chip" style="background: var(--color-info-bg)"></div>
+								<div class="swatch-meta"><div class="swatch-name">Info fill</div><div class="swatch-value">--color-info-bg</div></div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Color values</h2>
+				</div>
+				<div class="table-wrap">
+					<table class="token-table">
+						<thead>
+							<tr><th>Token</th><th>Role</th><th>Light</th><th>Dark</th></tr>
+						</thead>
+						<tbody>
+							<tr><td><code>--color-canvas</code></td><td>Page canvas</td><td>#ffffff</td><td>#0f1216</td></tr>
+							<tr><td><code>--color-canvas-subtle</code></td><td>Panel, table header</td><td>#f6f8fa</td><td>#161b22</td></tr>
+							<tr><td><code>--color-canvas-inset</code></td><td>Inner track</td><td>#eff2f5</td><td>#0b0e12</td></tr>
+							<tr><td><code>--color-border</code></td><td>Default border</td><td>#d0d7de</td><td>#2b313a</td></tr>
+							<tr><td><code>--color-border-strong</code></td><td>Hover border</td><td>#b3bcc6</td><td>#3d444d</td></tr>
+							<tr><td><code>--color-text</code></td><td>Body text</td><td>#1f2328</td><td>#e6edf3</td></tr>
+							<tr><td><code>--color-text-muted</code></td><td>Secondary text</td><td>#59636e</td><td>#9aa4ae</td></tr>
+							<tr><td><code>--color-text-subtle</code></td><td>Tertiary text</td><td>#667079</td><td>#7d8590</td></tr>
+							<tr><td><code>--color-accent</code></td><td>Main action</td><td>#1f883d</td><td>#238636</td></tr>
+							<tr><td><code>--color-accent-hover</code></td><td>Main action hover</td><td>#1a7f37</td><td>#2ea043</td></tr>
+							<tr><td><code>--color-accent-subtle</code></td><td>Topic label fill</td><td>#dafbe1</td><td>#12261e</td></tr>
+							<tr><td><code>--color-link</code></td><td>Link</td><td>#0969da</td><td>#4493f8</td></tr>
+							<tr><td><code>--color-focus</code></td><td>Focus ring</td><td>#0969da</td><td>#4493f8</td></tr>
+							<tr><td><code>--color-success</code></td><td>Success mark</td><td>#1a7f37</td><td>#3fb950</td></tr>
+							<tr><td><code>--color-success-bg</code></td><td>Success fill</td><td>#dafbe1</td><td>#12261e</td></tr>
+							<tr><td><code>--color-attention</code></td><td>Attention mark</td><td>#9a6700</td><td>#d29922</td></tr>
+							<tr><td><code>--color-attention-bg</code></td><td>Attention fill</td><td>#fff8c5</td><td>#2b2611</td></tr>
+							<tr><td><code>--color-danger</code></td><td>Danger mark</td><td>#cf222e</td><td>#f85149</td></tr>
+							<tr><td><code>--color-danger-bg</code></td><td>Danger fill</td><td>#ffebe9</td><td>#2d1416</td></tr>
+							<tr><td><code>--color-info</code></td><td>Information mark</td><td>#0969da</td><td>#58a6ff</td></tr>
+							<tr><td><code>--color-info-bg</code></td><td>Information fill</td><td>#ddf4ff</td><td>#0c2d3f</td></tr>
+							<tr><td><code>--color-running</code></td><td>Running mark</td><td>#0969da</td><td>#58a6ff</td></tr>
+							<tr><td><code>--color-neutral-bg</code></td><td>Neutral label fill</td><td>#eff2f5</td><td>#21262d</td></tr>
+							<tr><td><code>--color-overlay</code></td><td>Dialog backdrop</td><td>rgba(31,35,40,.45)</td><td>rgba(1,4,9,.62)</td></tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Typography</h2>
+					<p class="section-sub">System stack only. Base 14px, line height 1.5, weights 400 and 600.</p>
+				</div>
+				<div class="table-wrap">
+					<table class="token-table">
+						<thead>
+							<tr><th>Role</th><th>Size</th><th>Line height</th><th>Weight</th><th>Example</th></tr>
+						</thead>
+						<tbody>
+							<tr><td>Page title</td><td>20px</td><td>1.25</td><td>600</td><td><span style="font-size: 20px; font-weight: 600">Host detail</span></td></tr>
+							<tr><td>Section title</td><td>16px</td><td>1.25</td><td>600</td><td><span style="font-size: 16px; font-weight: 600">Recent jobs</span></td></tr>
+							<tr><td>Body</td><td>14px</td><td>1.5</td><td>400</td><td>The agent is online.</td></tr>
+							<tr><td>Small</td><td>13px</td><td>1.5</td><td>400</td><td class="t-sm">Secondary line under a name.</td></tr>
+							<tr><td>Caption</td><td>12px</td><td>1.5</td><td>600</td><td><span class="t-xs semibold">Label</span></td></tr>
+							<tr><td>Micro</td><td>11px</td><td>1.25</td><td>600</td><td><span style="font-size: 11px; font-weight: 600">Counter</span></td></tr>
+							<tr><td>Mono</td><td>13px</td><td>1.5</td><td>400</td><td><span class="mono">a1b2c3d4e5f6</span></td></tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Spacing</h2>
+					<p class="section-sub">A 4px grid. Every margin and padding is a step on the scale.</p>
+				</div>
+				<div class="demo-row">
+					<div class="stack-1"><span class="demo-label">4</span><span style="display: block; width: var(--space-1); height: 16px; background: var(--color-accent)"></span></div>
+					<div class="stack-1"><span class="demo-label">8</span><span style="display: block; width: var(--space-2); height: 16px; background: var(--color-accent)"></span></div>
+					<div class="stack-1"><span class="demo-label">12</span><span style="display: block; width: var(--space-3); height: 16px; background: var(--color-accent)"></span></div>
+					<div class="stack-1"><span class="demo-label">16</span><span style="display: block; width: var(--space-4); height: 16px; background: var(--color-accent)"></span></div>
+					<div class="stack-1"><span class="demo-label">20</span><span style="display: block; width: var(--space-5); height: 16px; background: var(--color-accent)"></span></div>
+					<div class="stack-1"><span class="demo-label">24</span><span style="display: block; width: var(--space-6); height: 16px; background: var(--color-accent)"></span></div>
+					<div class="stack-1"><span class="demo-label">32</span><span style="display: block; width: var(--space-8); height: 16px; background: var(--color-accent)"></span></div>
+					<div class="stack-1"><span class="demo-label">40</span><span style="display: block; width: var(--space-10); height: 16px; background: var(--color-accent)"></span></div>
+					<div class="stack-1"><span class="demo-label">48</span><span style="display: block; width: var(--space-12); height: 16px; background: var(--color-accent)"></span></div>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Radii, borders and elevation</h2>
+				</div>
+				<div class="grid-3">
+					<div class="demo-cell">
+						<span class="demo-label">Radius 4px (small marks)</span>
+						<div style="width: 64px; height: 40px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-canvas-subtle)"></div>
+						<span class="demo-label">Radius 6px (controls, boxes)</span>
+						<div style="width: 96px; height: 40px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-canvas-subtle)"></div>
+						<span class="demo-label">Pill (labels, counters)</span>
+						<div style="width: 96px; height: 24px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-canvas-subtle)"></div>
+					</div>
+					<div class="demo-cell">
+						<span class="demo-label">1px border is the default edge</span>
+						<div style="padding: 16px; border: 1px solid var(--color-border); border-radius: 6px">
+							In-flow boxes use a border, not a shadow.
+						</div>
+						<span class="demo-label">2px is only the active tab underline and the focus outline</span>
+						<div style="border-bottom: 2px solid var(--color-accent); color: var(--color-text-muted); display: inline-block; padding-bottom: 4px">Active tab</div>
+					</div>
+					<div class="demo-cell">
+						<span class="demo-label">Shadows belong to overlays only</span>
+						<div class="menu" data-open="true" style="position: static; display: block">
+							<button class="menu-item">Rename</button>
+							<button class="menu-item">Re-run</button>
+						</div>
+						<span class="demo-label">Menus 0 4px 14px, dialogs 0 8px 24px</span>
+					</div>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Iconography</h2>
+					<p class="section-sub">One 16px outline set, drawn inline. 1.5px stroke, rounded joins, current color.</p>
+				</div>
+				<div class="demo-row">
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-overview" /></svg><span class="demo-label">overview</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-host" /></svg><span class="demo-label">host</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-job" /></svg><span class="demo-label">job</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-clock" /></svg><span class="demo-label">clock</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-repository" /></svg><span class="demo-label">repository</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-profile" /></svg><span class="demo-label">profile</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-restore" /></svg><span class="demo-label">restore</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-audit" /></svg><span class="demo-label">audit</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-settings" /></svg><span class="demo-label">settings</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-search" /></svg><span class="demo-label">search</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-bell" /></svg><span class="demo-label">bell</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-check" /></svg><span class="demo-label">check</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-x" /></svg><span class="demo-label">x</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-alert" /></svg><span class="demo-label">alert</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-info" /></svg><span class="demo-label">info</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-octagon" /></svg><span class="demo-label">octagon</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-plus" /></svg><span class="demo-label">plus</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-filter" /></svg><span class="demo-label">filter</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-copy" /></svg><span class="demo-label">copy</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-more" /></svg><span class="demo-label">more</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-download" /></svg><span class="demo-label">download</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-trash" /></svg><span class="demo-label">trash</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-sort" /></svg><span class="demo-label">sort</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-terminal" /></svg><span class="demo-label">terminal</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-file" /></svg><span class="demo-label">file</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-folder" /></svg><span class="demo-label">folder</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-key" /></svg><span class="demo-label">key</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-mail" /></svg><span class="demo-label">mail</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-shield" /></svg><span class="demo-label">shield</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-lock" /></svg><span class="demo-label">lock</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-eye" /></svg><span class="demo-label">eye</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-calendar" /></svg><span class="demo-label">calendar</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-cloud" /></svg><span class="demo-label">cloud</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-activity" /></svg><span class="demo-label">activity</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-tag" /></svg><span class="demo-label">tag</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-users" /></svg><span class="demo-label">users</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-user" /></svg><span class="demo-label">user</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-refresh" /></svg><span class="demo-label">refresh</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-external" /></svg><span class="demo-label">external</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-box" /></svg><span class="demo-label">box</span></span>
+					<span class="stack-1" style="align-items: center"><svg class="icon icon--lg"><use href="icons.svg#i-flask" /></svg><span class="demo-label">flask</span></span>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Motion</h2>
+				</div>
+				<ul class="hint-list">
+					<li><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg>80 to 150ms, ease out. Color, border and background only.</li>
+					<li><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg>No bounce, no elastic, no layout animation.</li>
+					<li><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg>A spinner turns at 700ms, an indeterminate bar sweeps at 1300ms.</li>
+					<li><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg>Reduced motion disables the loops and shortens every transition.</li>
+				</ul>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Density</h2>
+				</div>
+				<ul class="hint-list">
+					<li><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg>Top bar 56px. Tab row 44px. Control height 32px. Table cell padding 12px.</li>
+					<li><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg>A box row carries one line of name and one line of secondary text.</li>
+					<li><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg>Content column is at most 1280px wide; a detail page adds a 300px metadata column.</li>
+					<li><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg>Row hover gives a light tint, never a move or a scale.</li>
+				</ul>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Content rules</h2>
+				</div>
+				<div class="rule-list">
+					<div class="rule"><div class="rule-key">Case</div><div class="rule-val">Sentence case for titles, labels and buttons. Only the product name and proper names keep capitals.</div></div>
+					<div class="rule"><div class="rule-key">Labels</div><div class="rule-val">Short and concrete: "Create host", "Run job", "Revoke". One verb, one action.</div></div>
+					<div class="rule"><div class="rule-key">Time</div><div class="rule-val">A relative time in the row ("3 minutes ago"), the exact time in the <code>title</code> attribute and in the metadata column.</div></div>
+					<div class="rule"><div class="rule-key">Identifiers</div><div class="rule-val">Snapshot IDs, hashes, paths and host names use the monospace face and never wrap in the middle.</div></div>
+					<div class="rule"><div class="rule-key">Numbers</div><div class="rule-val">Tabular figures in tables, counters and statistics. Short units: "1.4 GB", "3m 12s".</div></div>
+					<div class="rule"><div class="rule-key">Voice</div><div class="rule-val">Active, plain, never apologetic. An error says what happened and how to correct it.</div></div>
+				</div>
+			</section>
+
+			<section class="section">
+				<div class="section-head">
+					<h2 class="section-title">Accessibility</h2>
+				</div>
+				<div class="rule-list">
+					<div class="rule"><div class="rule-key">Contrast</div><div class="rule-val">Text meets WCAG AA (4.5:1 for body, 3:1 for large text and for a control border).</div></div>
+					<div class="rule"><div class="rule-key">Focus</div><div class="rule-val">A visible 2px outline with an offset on every focusable element. Never remove it.</div></div>
+					<div class="rule"><div class="rule-key">Target</div><div class="rule-val">Every control is at least 32px high. An icon-only button is 32 by 32.</div></div>
+					<div class="rule"><div class="rule-key">Keyboard</div><div class="rule-val">Tabs move with the arrow keys. A menu closes on Escape. A dialog traps focus and returns it.</div></div>
+					<div class="rule"><div class="rule-key">Semantics</div><div class="rule-val">Native elements first: <code>button</code>, <code>dialog</code>, <code>table</code>. Roles and labels only where the element needs them.</div></div>
+					<div class="rule"><div class="rule-key">Status</div><div class="rule-val">A status is never color alone. It carries a dot, a word and a title.</div></div>
+				</div>
+			</section>
+		</main>
+	</body>
+</html>

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Repositories · ResticHub</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<script src="mockups.js"></script>
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="topbar-inner">
+				<a class="brand" href="index.html">
+					<span class="brandmark" aria-hidden="true">
+						<svg viewBox="0 0 20 20">
+							<path class="mark-solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
+							<path d="M2.5 10.6 10 14.5l7.5-3.9" />
+						</svg>
+					</span>
+					<span>ResticHub</span>
+				</a>
+				<span class="topbar-divider"></span>
+				<nav class="breadcrumb" aria-label="Breadcrumb">
+					<a href="#">acme</a>
+					<span class="breadcrumb-sep">/</span>
+					<span aria-current="page">Repositories</span>
+				</nav>
+				<div class="spacer"></div>
+				<label class="search search--topbar">
+					<svg class="icon"><use href="icons.svg#i-search" /></svg>
+					<input type="search" placeholder="Search hosts, jobs, snapshots" />
+					<span class="kbd">/</span>
+				</label>
+				<button class="btn btn--icon" data-theme-toggle aria-label="Switch theme">
+					<svg class="icon"><use href="icons.svg#i-moon" /></svg>
+				</button>
+				<div class="menu-wrap">
+					<button class="btn btn--icon" aria-label="Notifications" data-menu-toggle="menu-notify" aria-expanded="false" aria-haspopup="true">
+						<svg class="icon"><use href="icons.svg#i-bell" /></svg>
+						<span class="counter counter--danger" style="position: absolute; top: -6px; right: -6px">2</span>
+					</button>
+					<div class="menu menu--right" id="menu-notify" hidden>
+						<div class="menu-section">
+							<div class="menu-label">Notifications</div>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> mac-build-01 is offline</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-alert" /></svg> A certificate expires in 5 days</button>
+						</div>
+					</div>
+				</div>
+				<div class="menu-wrap">
+					<button class="btn btn--ghost" data-menu-toggle="menu-user" aria-expanded="false" aria-haspopup="true">
+						<span class="avatar">AP</span>
+						<span>Anna Petrova</span>
+						<svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg>
+					</button>
+					<div class="menu menu--right" id="menu-user" hidden style="min-width: 240px">
+						<div class="menu-section"><div class="menu-head"><div class="name">Anna Petrova</div><div class="sub">admin · acme</div></div></div>
+						<div class="menu-section">
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-user" /></svg> Account</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</button>
+							<button class="menu-item" data-theme-toggle><svg class="icon"><use href="icons.svg#i-moon" /></svg> Theme</button>
+							<button class="menu-item"><svg class="icon"><use href="icons.svg#i-external" /></svg> Documentation</button>
+						</div>
+						<div class="menu-section"><button class="menu-item menu-item--danger"><svg class="icon"><use href="icons.svg#i-arrow-right" /></svg> Sign out</button></div>
+					</div>
+				</div>
+			</div>
+		</header>
+		<nav class="tabs" aria-label="Primary">
+			<a class="tab" href="empty-first-run.html"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Overview</a>
+			<a class="tab" href="hosts.html"><svg class="icon"><use href="icons.svg#i-host" /></svg> Hosts <span class="counter">24</span></a>
+			<a class="tab" href="job.html"><svg class="icon"><use href="icons.svg#i-job" /></svg> Jobs <span class="counter">6</span></a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-clock" /></svg> Schedules</a>
+			<a class="tab" href="repositories.html" aria-current="page"><svg class="icon"><use href="icons.svg#i-repository" /></svg> Repositories</a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-profile" /></svg> Profiles</a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-restore" /></svg> Restore</a>
+			<a class="tab" href="audit.html"><svg class="icon"><use href="icons.svg#i-audit" /></svg> Audit</a>
+			<a class="tab" href="settings.html"><svg class="icon"><use href="icons.svg#i-settings" /></svg> Settings</a>
+		</nav>
+		<main class="page">
+			<div class="page-header page-header--bordered">
+				<div>
+					<h1 class="page-title">Repositories <span class="counter">4</span></h1>
+					<p class="page-subtitle">Each repository holds one restic backend. The control plane keeps the secrets and the maintenance host.</p>
+				</div>
+				<div class="page-actions">
+					<button class="btn"><svg class="icon"><use href="icons.svg#i-eye" /></svg> Test access</button>
+					<button class="btn btn--primary"><svg class="icon"><use href="icons.svg#i-plus" /></svg> Add repository</button>
+				</div>
+			</div>
+
+			<div class="box">
+				<div class="box-header"><span class="box-title">Storage in this tenant</span><div class="box-actions"><span class="muted t-sm">Values from the last check</span></div></div>
+				<div class="box-body">
+					<div class="grid-4">
+						<div class="stat"><span class="stat-value tabular">12.4 TB</span><span class="stat-label">Total size</span></div>
+						<div class="stat"><span class="stat-value tabular">8 420</span><span class="stat-label">Snapshots</span></div>
+						<div class="stat"><span class="stat-value tabular">3.1x</span><span class="stat-label">Deduplication</span></div>
+						<div class="stat"><span class="stat-value tabular">4</span><span class="stat-label">Repositories</span></div>
+					</div>
+				</div>
+			</div>
+
+			<div class="table-wrap" style="margin-top: var(--space-6)">
+				<div class="table-toolbar">
+					<label class="search">
+						<svg class="icon"><use href="icons.svg#i-search" /></svg>
+						<input type="search" placeholder="Search repositories" />
+						<span class="kbd">/</span>
+					</label>
+					<button class="btn"><svg class="icon"><use href="icons.svg#i-filter" /></svg> Filters</button>
+				</div>
+				<table class="table">
+					<thead>
+						<tr>
+							<th aria-sort="ascending"><button class="th-btn">Repository <svg class="icon icon--xs"><use href="icons.svg#i-sort" /></svg></button></th>
+							<th>Backend</th>
+							<th class="num">Size</th>
+							<th class="num">Growth</th>
+							<th>Maintenance host</th>
+							<th>Last check</th>
+							<th>Status</th>
+							<th class="cell-actions"><span class="subtle t-xs">Actions</span></th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td><a class="semibold" href="#">s3-prod-primary</a><div class="muted t-sm mono">s3://backups-prod/restic</div></td>
+							<td><span class="row"><svg class="icon icon--xs"><use href="icons.svg#i-cloud" /></svg> S3</span></td>
+							<td class="num tabular">8.2 TB</td>
+							<td class="num tabular">+1.4 GB/day</td>
+							<td><a href="host.html">nas-backup</a></td>
+							<td><span title="10 Oct 2026, 19:30">2 hours ago</span></td>
+							<td><span class="status status--success">Healthy</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<button class="btn btn--icon btn--sm" aria-label="Test the access"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></button>
+									<button class="btn btn--icon btn--sm" aria-label="More actions"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+								</span>
+							</td>
+						</tr>
+						<tr>
+							<td><a class="semibold" href="#">rest-main</a><div class="muted t-sm mono">rest:https://restic.example.net/main</div></td>
+							<td><span class="row"><svg class="icon icon--xs"><use href="icons.svg#i-cloud" /></svg> REST server</span></td>
+							<td class="num tabular">3.1 TB</td>
+							<td class="num tabular">+420 MB/day</td>
+							<td><a href="host.html">nas-backup</a></td>
+							<td><span title="10 Oct 2026, 15:00">6 hours ago</span></td>
+							<td><span class="status status--success">Healthy</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<button class="btn btn--icon btn--sm" aria-label="Test the access"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></button>
+									<button class="btn btn--icon btn--sm" aria-label="More actions"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+								</span>
+							</td>
+						</tr>
+						<tr>
+							<td><a class="semibold" href="#">nas-local</a><div class="muted t-sm mono">/mnt/backup/restic</div></td>
+							<td><span class="row"><svg class="icon icon--xs"><use href="icons.svg#i-repository" /></svg> Local path</span></td>
+							<td class="num tabular">900 GB</td>
+							<td class="num tabular">+120 MB/day</td>
+							<td><a href="host.html">nas-backup</a></td>
+							<td><span title="09 Oct 2026, 19:30">1 day ago</span></td>
+							<td><span class="status status--success">Healthy</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<button class="btn btn--icon btn--sm" aria-label="Test the access"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></button>
+									<button class="btn btn--icon btn--sm" aria-label="More actions"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+								</span>
+							</td>
+						</tr>
+						<tr>
+							<td><a class="semibold" href="#">azure-archive</a><div class="muted t-sm mono">azure:archive/restic</div></td>
+							<td><span class="row"><svg class="icon icon--xs"><use href="icons.svg#i-cloud" /></svg> Azure Blob</span></td>
+							<td class="num tabular">240 GB</td>
+							<td class="num tabular">0</td>
+							<td><a href="host.html">srv-app-02</a></td>
+							<td><span title="28 Sep 2026, 02:00">12 days ago</span></td>
+							<td><span class="status status--warning">Check overdue</span></td>
+							<td class="cell-actions">
+								<span class="row-actions">
+									<button class="btn btn--icon btn--sm" aria-label="Test the access"><svg class="icon icon--xs"><use href="icons.svg#i-eye" /></svg></button>
+									<button class="btn btn--icon btn--sm" aria-label="More actions"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+								</span>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="alert" style="margin-top: var(--space-4)">
+				<svg class="icon icon--xs"><use href="icons.svg#i-lock" /></svg>
+				<span>An agent holds the repository password only for the duration of one job. ResticHub shows the password never again after you save it. Replace it to rotate.</span>
+			</div>
+		</main>
+	</body>
+</html>
