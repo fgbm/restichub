@@ -24,12 +24,13 @@ async fn platform_admin(db: &restichub_db::Database) -> String {
     seed_session(db, PLATFORM_TENANT_ID, "root", "platform_admin").await
 }
 
-/// Builds a create-tenant body.
+/// Builds a create-tenant body. The first admin username is unique in the installation (ADR-0025).
 fn create_body(name: &str) -> Value {
+    let username: String = format!("admin-{}", name.chars().take(20).collect::<String>());
     json!({
         "name": name,
         "first_admin": {
-            "username": "admin",
+            "username": username,
             "display_name": "Admin",
             "password": "a long enough password",
         },
@@ -147,7 +148,7 @@ async fn create_list_and_get_a_tenant() {
     assert_eq!(status, StatusCode::OK, "{one}");
     assert_eq!(one.get("name").and_then(Value::as_str), Some("acme"));
 
-    let body = json!({"tenant": "acme", "username": "admin", "password": "a long enough password"});
+    let body = json!({"username": "admin-acme", "password": "a long enough password"});
     let (status, _, _) = send(
         &app,
         request("POST", "/api/v1/auth/sign-in", None, Some(body)),

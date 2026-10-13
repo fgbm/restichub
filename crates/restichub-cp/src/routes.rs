@@ -87,6 +87,21 @@ pub const ROUTES: &[Route] = &[
         },
     },
     Route {
+        method: "get",
+        path: "/api/v1/auth/tenants",
+        access: Access::Protected(Operation::AuthTenants),
+        handler: || routes!(crate::auth::list_tenants),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/auth/switch",
+        access: Access::Protected(Operation::AuthSwitch),
+        handler: || {
+            routes!(crate::auth::switch_tenant)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
         method: "post",
         path: "/api/v1/setup",
         access: Access::Public,
@@ -156,6 +171,24 @@ pub const ROUTES: &[Route] = &[
         path: "/api/v1/platform/tenants/{id}",
         access: Access::Protected(Operation::PlatformTenantsWrite),
         handler: || routes!(crate::tenants::delete_tenant),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/platform/users/{id}/memberships",
+        access: Access::Protected(Operation::PlatformUsersWrite),
+        handler: || {
+            routes!(crate::platform_users::add_membership)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "patch",
+        path: "/api/v1/platform/users/{id}",
+        access: Access::Protected(Operation::PlatformUsersWrite),
+        handler: || {
+            routes!(crate::platform_users::set_account_disabled)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
     },
     Route {
         method: "get",

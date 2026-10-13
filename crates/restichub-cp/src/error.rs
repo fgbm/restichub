@@ -42,6 +42,8 @@ pub enum ErrorCode {
     MethodNotAllowed,
     RateLimited,
     Busy,
+    SharedAccount,
+    UsernameTaken,
 }
 
 impl ErrorCode {
@@ -62,6 +64,8 @@ impl ErrorCode {
             Self::MethodNotAllowed => "method_not_allowed",
             Self::RateLimited => "rate_limited",
             Self::Busy => "busy",
+            Self::SharedAccount => "shared_account",
+            Self::UsernameTaken => "username_taken",
         }
     }
 }
@@ -242,6 +246,18 @@ impl ApiError {
         );
         error.retry_after = Some(retry_after.clamp(1, MAX_RETRY_AFTER));
         error
+    }
+
+    /// The account has an active membership in another tenant. Only the user or a Platform Admin
+    /// changes its password or its display name (ADR-0025).
+    pub fn shared_account() -> Self {
+        Self::new(StatusCode::FORBIDDEN, ErrorCode::SharedAccount, "Forbidden")
+    }
+
+    /// The username exists in the installation. The create endpoint of a tenant Admin answers with
+    /// it (ADR-0025).
+    pub fn username_taken() -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorCode::UsernameTaken, "Conflict")
     }
 }
 

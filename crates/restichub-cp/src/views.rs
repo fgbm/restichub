@@ -8,25 +8,29 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use utoipa::ToSchema;
 
-use restichub_db::{tenants::Tenant, users::User};
+use restichub_db::{tenants::Tenant, users::Member};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserView {
     pub id: String,
     pub username: String,
     pub display_name: String,
+    /// The membership is disabled in the current tenant, or the account is disabled.
     pub disabled: bool,
     pub role: Role,
+    /// The account holds an active membership in another active tenant.
+    pub shared: bool,
 }
 
 impl UserView {
-    pub fn new(user: &User, role: Role) -> Self {
+    pub fn from_member(member: &Member) -> Self {
         Self {
-            id: user.id.to_string(),
-            username: user.username.clone(),
-            display_name: user.display_name.clone(),
-            disabled: user.disabled,
-            role,
+            id: member.id.to_string(),
+            username: member.username.clone(),
+            display_name: member.display_name.clone(),
+            disabled: member.disabled || member.account_disabled,
+            role: member.role,
+            shared: member.shared,
         }
     }
 }

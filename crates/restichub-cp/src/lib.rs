@@ -18,6 +18,7 @@ pub mod json;
 pub mod maintenance;
 pub mod password;
 pub mod pki;
+pub mod platform_users;
 pub mod rate_limit;
 pub mod routes;
 pub mod secrets;

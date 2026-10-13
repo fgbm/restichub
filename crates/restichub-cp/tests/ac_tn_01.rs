@@ -71,6 +71,8 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/auth/sign-out", Fixture::Exempt),
     ("/api/v1/auth/me", Fixture::Exempt),
     ("/api/v1/auth/password", Fixture::Exempt),
+    ("/api/v1/auth/tenants", Fixture::Exempt),
+    ("/api/v1/auth/switch", Fixture::Exempt),
     ("/api/v1/setup", Fixture::Exempt),
     ("/api/v1/setup/status", Fixture::Exempt),
     ("/api/v1/instance", Fixture::Exempt),
@@ -80,6 +82,8 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/platform/tenants/{id}", Fixture::Platform),
     ("/api/v1/platform/tenants/{id}/suspend", Fixture::Platform),
     ("/api/v1/platform/tenants/{id}/resume", Fixture::Platform),
+    ("/api/v1/platform/users/{id}", Fixture::Platform),
+    ("/api/v1/platform/users/{id}/memberships", Fixture::Platform),
     ("/api/v1/users", Fixture::Collection),
     ("/api/v1/users/{id}", Fixture::Object(Object::User)),
     ("/api/v1/users/{id}/password", Fixture::Object(Object::User)),
@@ -259,7 +263,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                 panic!("the OpenAPI operation {method} {path} is not in the route table")
             });
         let http_method = method.to_ascii_uppercase();
-        let body = common::write_body(&http_method, &path, index, false);
+        let body = common::write_body(&http_method, &path, index, false, &tenant_b.to_string());
         match fixture_for(&method, &path) {
             Fixture::Exempt => {}
             Fixture::Platform => {

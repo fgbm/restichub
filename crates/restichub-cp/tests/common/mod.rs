@@ -100,7 +100,13 @@ pub fn bearer_request(method: &str, uri: &str, token: &str, body: Option<Value>)
 /// A malformed body would stop a request before the handler runs the authorization and the
 /// isolation checks, so the two tests send a valid body. A Platform Admin acts in the platform
 /// tenant, where the only valid role is `platform_admin`.
-pub fn write_body(method: &str, path: &str, index: usize, platform_admin: bool) -> Option<Value> {
+pub fn write_body(
+    method: &str,
+    path: &str,
+    index: usize,
+    platform_admin: bool,
+    tenant_id: &str,
+) -> Option<Value> {
     let role = if platform_admin {
         "platform_admin"
     } else {
@@ -132,10 +138,15 @@ pub fn write_body(method: &str, path: &str, index: usize, platform_admin: bool) 
                 "password": "a long enough password",
             },
         })),
+        ("POST", "/api/v1/platform/users/{id}/memberships") => {
+            Some(json!({"tenant_id": tenant_id, "role": "viewer"}))
+        }
+        ("PATCH", "/api/v1/platform/users/{id}") => Some(json!({"disabled": true})),
         ("POST", "/api/v1/auth/password") => Some(json!({
             "current_password": "wrong",
             "new_password": "a long enough password",
         })),
+        ("POST", "/api/v1/auth/switch") => Some(json!({"tenant_id": tenant_id})),
         ("POST", "/api/v1/auth/sign-out") => None,
         ("PATCH", _) => Some(json!({"display_name": "Matrix"})),
         _ => Some(json!({})),
@@ -366,7 +377,7 @@ pub async fn seed_session(db: &Database, tenant: TenantId, username: &str, role:
 }
 
 pub async fn seed_api_token(db: &Database, tenant: TenantId, role: &str) -> String {
-    let creator_name = format!("creator-{role}");
+    let creator_name = format!("creator-{role}-{tenant}");
     let creator = create_user(db, tenant, &creator_name, "phc", "admin").await;
     seed_token(db, tenant, role, creator).await
 }
@@ -392,7 +403,8 @@ pub async fn seed_platform_api_token(db: &Database) -> String {
 /// The token acts with the Admin role, but the creator does not count as an Admin. A test uses this
 /// method to keep a stable actor while it disables the two Admins of a tenant.
 pub async fn seed_admin_token_actor(db: &Database, tenant: TenantId) -> String {
-    let creator = create_user(db, tenant, "token-owner", "phc", "viewer").await;
+    let creator_name = format!("token-owner-{tenant}");
+    let creator = create_user(db, tenant, &creator_name, "phc", "viewer").await;
     seed_token(db, tenant, "admin", creator).await
 }
 
@@ -431,12 +443,14 @@ pub async fn count(db: &Database, tenant: TenantId, table: &'static str) -> i64 
         .expect("cannot count the rows")
 }
 
-pub async fn list_users(db: &Database, tenant: TenantId) -> Vec<users::User> {
+pub async fn list_users(db: &Database, tenant: TenantId) -> Vec<users::Member> {
     let mut tx = db
         .begin_tenant(tenant)
         .await
         .expect("cannot begin the transaction");
-    let result = users::list(&mut tx).await.expect("cannot list the users");
+    let result = users::list_members(&mut tx)
+        .await
+        .expect("cannot list the members");
     tx.commit().await.expect("cannot commit the list");
     result
 }
@@ -470,7 +484,7 @@ pub async fn user_disabled(db: &Database, tenant: TenantId, user: restichub_db::
         .await
         .iter()
         .find(|entry| entry.id == user)
-        .is_some_and(|entry| entry.disabled)
+        .is_some_and(|entry| entry.disabled || entry.account_disabled)
 }
 
 pub async fn token_revoked(

@@ -14,7 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use restichub_db::{TenantId, UserId};
+use restichub_db::UserId;
 
 pub const MAX_ENTRIES: usize = 100_000;
 
@@ -172,18 +172,14 @@ pub fn ip_key(ip: IpAddr) -> String {
     }
 }
 
-/// The tenant is trimmed and both values are lowercased, so the case of the input does not create a
-/// new bucket.
-pub fn synthetic_user_key(tenant: &str, username: &str) -> String {
-    format!(
-        "s:{}:{}",
-        tenant.trim().to_lowercase(),
-        username.to_lowercase()
-    )
+/// The username is trimmed and lowercased, so the case of the input does not create a new bucket.
+/// The key is installation-wide: sign-in has no tenant (ADR-0025).
+pub fn synthetic_user_key(username: &str) -> String {
+    format!("s:{}", username.trim().to_lowercase())
 }
 
-pub fn resolved_user_key(tenant: TenantId, user: UserId) -> String {
-    format!("u:{tenant}:{user}")
+pub fn resolved_user_key(user: UserId) -> String {
+    format!("u:{user}")
 }
 
 #[cfg(test)]
@@ -220,22 +216,19 @@ mod tests {
     fn the_user_and_the_ip_buckets_are_separate() {
         let limiter = RateLimiter::new(1, Duration::from_secs(60), 100);
         let now = Instant::now();
-        assert!(limiter.check(&synthetic_user_key("t", "u"), now).is_ok());
-        assert!(limiter.check(&synthetic_user_key("t", "u"), now).is_err());
+        assert!(limiter.check(&synthetic_user_key("u"), now).is_ok());
+        assert!(limiter.check(&synthetic_user_key("u"), now).is_err());
         let ip: IpAddr = "203.0.113.7"
             .parse()
             .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
         assert!(limiter.check(&ip_key(ip), now).is_ok());
         assert!(limiter.check(&ip_key(ip), now).is_err());
-        assert!(limiter.check(&synthetic_user_key("t", "v"), now).is_ok());
+        assert!(limiter.check(&synthetic_user_key("v"), now).is_ok());
     }
 
     #[test]
     fn the_synthetic_key_ignores_the_case_and_the_trim() {
-        assert_eq!(
-            synthetic_user_key(" Tenant ", "Alice"),
-            synthetic_user_key("tenant", "alice")
-        );
+        assert_eq!(synthetic_user_key(" Alice "), synthetic_user_key("alice"));
     }
 
     #[test]
@@ -255,12 +248,8 @@ mod tests {
 
     #[test]
     fn the_resolved_key_is_stable() {
-        let tenant = restichub_db::TenantId::from_uuid(uuid::Uuid::now_v7());
         let user = restichub_db::UserId::from_uuid(uuid::Uuid::now_v7());
-        assert_eq!(
-            resolved_user_key(tenant, user),
-            resolved_user_key(tenant, user)
-        );
+        assert_eq!(resolved_user_key(user), resolved_user_key(user));
     }
 
     #[test]

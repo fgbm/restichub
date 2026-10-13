@@ -226,7 +226,11 @@ async fn ac_au_01_audit_records_hold_no_secret() {
         "the audit log holds an attempted username"
     );
 
-    assert_eq!(count(db.database(), PLATFORM_TENANT_ID, "users").await, 1);
+    // The account lives in the platform tenant; the platform Admin holds one membership there.
+    assert_eq!(
+        count(db.database(), PLATFORM_TENANT_ID, "memberships").await,
+        1
+    );
 
     db.cleanup().await;
 }

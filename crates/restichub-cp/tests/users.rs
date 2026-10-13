@@ -517,7 +517,7 @@ async fn an_admin_password_reset_kills_the_sessions_of_the_user() {
 }
 
 #[tokio::test]
-async fn a_user_without_a_membership_is_an_internal_error() {
+async fn an_account_without_a_membership_is_not_found() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -525,7 +525,7 @@ async fn a_user_without_a_membership_is_an_internal_error() {
     let cookie = admin_cookie(&db, tenant).await;
     let app = app(db.database());
 
-    // A user row with no membership row. The control plane never creates this state.
+    // An account row with no membership in the tenant. The control plane never creates this state.
     let orphan = {
         let mut tx = db
             .database()
@@ -546,7 +546,7 @@ async fn a_user_without_a_membership_is_an_internal_error() {
         user
     };
 
-    // The read of the memberless user gives HTTP 500 `internal_error`.
+    // The account is not a member of the tenant, so the read gives HTTP 404 (ADR-0025).
     let (status, _, body) = send(
         &app,
         request(
@@ -557,15 +557,16 @@ async fn a_user_without_a_membership_is_an_internal_error() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
-    assert_eq!(
-        body.get("code").and_then(Value::as_str),
-        Some("internal_error")
-    );
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body.get("code").and_then(Value::as_str), Some("not_found"));
 
-    // The list holds the same user and gives the same error.
-    let (status, _, _) = send(&app, request("GET", "/api/v1/users", Some(&cookie), None)).await;
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    // The list holds no such account.
+    let (status, _, page) = send(&app, request("GET", "/api/v1/users", Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        page.get("items").and_then(Value::as_array).map(Vec::len),
+        Some(1)
+    );
 
     db.cleanup().await;
 }

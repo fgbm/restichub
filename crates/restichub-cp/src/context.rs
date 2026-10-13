@@ -19,7 +19,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use restichub_db::audit::{Actor, AuditAction, AuditEvent};
 use restichub_db::{
-    Role, SessionId, TenantId, TenantTx, api_tokens, auth, memberships, sessions, tenants, users,
+    Role, SessionId, TenantId, TenantTx, api_tokens, auth, sessions, tenants, users,
 };
 
 use crate::client_ip::ClientIp;
@@ -35,9 +35,12 @@ pub enum Operation {
     PlatformAuditRead,
     PlatformTenantsRead,
     PlatformTenantsWrite,
+    PlatformUsersWrite,
     AuthMe,
     AuthSignOut,
     AuthPasswordChange,
+    AuthTenants,
+    AuthSwitch,
     UsersRead,
     UsersWrite,
     ApiTokensRead,
@@ -50,7 +53,10 @@ impl Operation {
     pub fn is_platform(self) -> bool {
         matches!(
             self,
-            Self::PlatformAuditRead | Self::PlatformTenantsRead | Self::PlatformTenantsWrite
+            Self::PlatformAuditRead
+                | Self::PlatformTenantsRead
+                | Self::PlatformTenantsWrite
+                | Self::PlatformUsersWrite
         )
     }
 
@@ -71,9 +77,12 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::PlatformAuditRead => Role::PlatformAdmin,
         Operation::PlatformTenantsRead => Role::PlatformAdmin,
         Operation::PlatformTenantsWrite => Role::PlatformAdmin,
+        Operation::PlatformUsersWrite => Role::PlatformAdmin,
         Operation::AuthMe => Role::Viewer,
         Operation::AuthSignOut => Role::Viewer,
         Operation::AuthPasswordChange => Role::Viewer,
+        Operation::AuthTenants => Role::Viewer,
+        Operation::AuthSwitch => Role::Viewer,
         Operation::UsersRead => Role::Admin,
         Operation::UsersWrite => Role::Admin,
         Operation::ApiTokensRead => Role::Admin,
@@ -269,23 +278,21 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
     if tenant.is_none_or(|tenant| tenant.status != restichub_db::TenantStatus::Active) {
         return Err(ApiError::unauthenticated());
     }
-    let user = users::get(&mut tx, lookup.user_id).await?;
-    let Some(user) = user else {
+    // The account lives in the platform tenant, so the member read goes through the definer
+    // function of migration 0016 (ADR-0025).
+    let member = users::get_member(&mut tx, lookup.user_id).await?;
+    let Some(member) = member else {
         return Err(ApiError::unauthenticated());
     };
-    if user.disabled {
+    if member.account_disabled || member.disabled {
         return Err(ApiError::unauthenticated());
     }
-    let role = memberships::role_of(&mut tx, lookup.user_id).await?;
-    let Some(role) = role else {
-        return Err(ApiError::unauthenticated());
-    };
     sessions::touch(&mut tx, lookup.session_id, now).await?;
     tx.commit().await?;
     Ok(RequestContext {
         tenant_id: lookup.tenant_id,
         actor: Actor::User(lookup.user_id),
-        role,
+        role: member.role,
         session_id: Some(lookup.session_id),
         source_ip: None,
     })

@@ -40,7 +40,6 @@ use crate::views::UserView;
 pub const SETUP_TOKEN_TTL: time::Duration = time::Duration::hours(24);
 
 const PLATFORM_ADMIN_ROLE: Role = Role::PlatformAdmin;
-const DEFAULT_ADMIN_ROLE: Role = Role::Admin;
 
 const SETUP_LOCK: &str = "restichub.setup:";
 
@@ -269,12 +268,9 @@ async fn setup_single(
     // The token is consumed only after the tenant exists.
     consume_setup_token(state, token_id, now).await?;
 
-    let user = read_user(state, created, username).await?;
+    let member = read_member(state, created, username).await?;
     tracing::info!("the first Admin of the single-tenant installation is created");
-    Ok((
-        StatusCode::CREATED,
-        Json(UserView::new(&user, DEFAULT_ADMIN_ROLE)),
-    ))
+    Ok((StatusCode::CREATED, Json(UserView::from_member(&member))))
 }
 
 /// Creates the first Platform Admin (ADR-0023, section Local authentication).
@@ -330,18 +326,15 @@ async fn setup_multi(
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
-    let user = users::get(&mut tx, user_id).await?;
+    let member = users::get_member(&mut tx, user_id).await?;
     tx.commit().await?;
-    let Some(user) = user else {
+    let Some(member) = member else {
         return Err(ApiError::internal(
             "the created Platform Admin is not found after the read",
         ));
     };
     tracing::info!("the first Platform Admin is created");
-    Ok((
-        StatusCode::CREATED,
-        Json(UserView::new(&user, PLATFORM_ADMIN_ROLE)),
-    ))
+    Ok((StatusCode::CREATED, Json(UserView::from_member(&member))))
 }
 
 /// Finds the unused, unexpired setup token in the platform tenant.
@@ -387,16 +380,16 @@ async fn tenant_exists(state: &AppState, name: &str) -> Result<bool, ApiError> {
     Ok(tenant.is_some())
 }
 
-async fn read_user(
+async fn read_member(
     state: &AppState,
     tenant: TenantId,
     username: &str,
-) -> Result<users::User, ApiError> {
+) -> Result<users::Member, ApiError> {
     let mut tx = state.db().begin_tenant(tenant).await?;
-    let user = users::list(&mut tx)
+    let member = users::list_members(&mut tx)
         .await?
         .into_iter()
-        .find(|user| user.username.eq_ignore_ascii_case(username));
+        .find(|member| member.username.eq_ignore_ascii_case(username));
     tx.commit().await?;
-    user.ok_or_else(|| ApiError::internal("the created Admin is not found after the read"))
+    member.ok_or_else(|| ApiError::internal("the created Admin is not found after the read"))
 }

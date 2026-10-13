@@ -150,7 +150,13 @@ async fn ac_au_02_role_operation_matrix() {
             .await;
             let path = route.path.replace("{id}", &id);
             let method = route.method.to_ascii_uppercase();
-            let body = common::write_body(&method, route.path, index, role == Role::PlatformAdmin);
+            let body = common::write_body(
+                &method,
+                route.path,
+                index,
+                role == Role::PlatformAdmin,
+                &session_tenant.to_string(),
+            );
             let (status, _, _) = send(&app, request(&method, &path, Some(&cookie), body)).await;
 
             let allowed_by_role = role.rank() >= minimum.rank();

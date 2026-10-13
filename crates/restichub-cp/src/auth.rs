@@ -1,5 +1,11 @@
-//! Local authentication endpoints (ADR-0023, section Local authentication).
+//! Local authentication endpoints (ADR-0025).
+//!
+//! An account is installation-wide. Sign-in asks for the username and the password only. The
+//! control plane finds the account through the definer function `auth_find_account`, verifies the
+//! password (a dummy hash covers an absent account), then lists the active memberships of the
+//! account in active tenants and picks the session tenant.
 
+use std::net::IpAddr;
 use std::time::Instant;
 
 use axum::Json;
@@ -7,10 +13,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
-use restichub_db::{
-    PLATFORM_TENANT_ID, Role, TenantId, TenantStatus, UserId, auth, memberships, sessions, tenants,
-    users,
-};
+use restichub_db::{PLATFORM_TENANT_ID, Role, TenantId, UserId, auth, sessions, tenants, users};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -27,14 +30,14 @@ use crate::validation;
 use crate::validation::Reason;
 use crate::views::{TenantView, UserView};
 
-/// Limit of the tenant name and the username.
+/// Limit of the username.
 const MAX_SIGN_IN_FIELD: usize = 128;
 
+/// The sign-in body. It holds the username and the password only. An unknown field, for example
+/// `tenant`, is ignored (ADR-0025).
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SignInRequest {
-    /// Required in multi mode; ignored in single mode, which uses the tenant `default` (ADR-0024).
-    /// Ignores the letter case.
-    pub tenant: Option<String>,
+    /// Unique in the installation; ignores the letter case.
     pub username: String,
     pub password: String,
 }
@@ -61,10 +64,30 @@ pub struct MeResponse {
     pub role: Role,
 }
 
-/// Signs a user in.
+/// The memberships of the caller. Each item holds the tenant id, the tenant name and the role.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TenantAccessView {
+    pub id: String,
+    pub name: String,
+    pub role: Role,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TenantAccessListResponse {
+    pub items: Vec<TenantAccessView>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SwitchTenantRequest {
+    /// The identifier of the tenant to switch to.
+    pub tenant_id: String,
+}
+
+/// Signs a user in with the username and the password only.
 ///
-/// The endpoint returns the same error for an unknown tenant, an unknown user, a wrong password, a
-/// disabled user and a suspended tenant. The control plane logs the real reason.
+/// The endpoint returns the same error for an unknown account, a wrong password, a disabled
+/// account and an account with no active membership. An absent account is verified against a dummy
+/// hash, so the answer and the time are the same.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/sign-in",
@@ -90,140 +113,239 @@ pub async fn sign_in(
     }
     // The IP bucket is checked first, before the user map is touched.
     check_ip(&state, client.0)?;
-    // In multi mode the request names the tenant. In single mode the tenant is the default one.
-    let tenancy = state.tenancy();
-    let tenant_name = match tenancy.mode {
-        TenancyMode::Multi => match body.tenant.as_deref() {
-            Some(value) => value.to_owned(),
-            None => return Err(ApiError::invalid_field("tenant", Reason::Empty)),
-        },
-        TenancyMode::Single => tenancy.default_tenant.clone(),
-    };
-    // The length checks follow the IP bucket and give the generic error.
-    if tenant_name.len() > MAX_SIGN_IN_FIELD || body.username.len() > MAX_SIGN_IN_FIELD {
+    // The length check follows the IP bucket and gives the generic error.
+    if body.username.len() > MAX_SIGN_IN_FIELD {
         return Err(ApiError::invalid_credentials());
     }
 
     let now = state.auth().clock.now();
-    let lookup = auth::find_tenant(state.db(), &tenant_name).await?;
-    let active_id = lookup
+    let account = users::find_account(state.db(), &body.username).await?;
+
+    // The user bucket uses the resolved account id when the account is known and the normalized
+    // username otherwise. The sign-in has no tenant, so the bucket is installation-wide.
+    match &account {
+        Some(account) => check_resolved(&state, account.id)?,
+        None => check_synthetic(&state, &body.username)?,
+    }
+
+    // The hash runs without a database transaction. An absent account verifies a dummy hash.
+    let hash = account
         .as_ref()
-        .filter(|tenant| tenant.status == TenantStatus::Active)
-        .map(|tenant| tenant.id);
-
-    match active_id {
-        Some(tenant_id) => {
-            sign_in_tenant(
-                &state,
-                tenant_id,
-                &tenant_name,
-                &body,
-                client.0,
-                now,
-                &headers,
-            )
-            .await
-        }
-        None => {
-            // An unknown tenant and a suspended tenant are the same failure. The dummy
-            // verification keeps the time similar.
-            check_synthetic(&state, &tenant_name, &body.username)?;
-            let _ = password::verify_or_dummy(
-                &state.auth().hash_semaphore,
-                body.password.clone(),
-                None,
-            )
-            .await?;
-            audit_failed_platform(&state, client.0).await?;
-            tracing::info!("sign-in failed: the tenant is unknown or not active");
-            Err(ApiError::invalid_credentials())
-        }
-    }
-}
-
-/// The user is read in one transaction, then hashed without a transaction, then a second
-/// transaction opens for the session and the audit record. A hash never holds a database connection.
-async fn sign_in_tenant(
-    state: &AppState,
-    tenant_id: TenantId,
-    tenant_name: &str,
-    body: &SignInRequest,
-    client: std::net::IpAddr,
-    now: time::OffsetDateTime,
-    headers: &HeaderMap,
-) -> Result<Response, ApiError> {
-    let (user, role) = {
-        let mut tx = state.db().begin_tenant(tenant_id).await?;
-        let user = users::find_for_auth(&mut tx, &body.username).await?;
-        let role = match &user {
-            Some(user) => memberships::role_of(&mut tx, user.id).await?,
-            None => None,
-        };
-        tx.commit().await?;
-        (user, role)
-    };
-
-    // The user bucket uses the resolved identity when the user is known and the normalized input
-    // otherwise.
-    match &user {
-        Some(user) => check_resolved(state, tenant_id, user.id)?,
-        None => check_synthetic(state, tenant_name, &body.username)?,
-    }
-
-    let hash = user.as_ref().map(|user| user.password_hash.clone());
+        .map(|account| account.password_hash.clone());
     let password_ok =
         password::verify_or_dummy(&state.auth().hash_semaphore, body.password.clone(), hash)
             .await?;
-    let user_ok = user.as_ref().is_some_and(|user| !user.disabled) && role.is_some();
 
-    if !password_ok || !user_ok {
-        let mut tx = state.db().begin_tenant(tenant_id).await?;
-        audit_failed_in_tenant(&mut tx, user.as_ref(), client).await?;
-        tx.commit().await?;
+    let Some(account) = account else {
+        audit_failed_platform(&state, client.0).await?;
+        tracing::info!("sign-in failed: the account is unknown");
+        return Err(ApiError::invalid_credentials());
+    };
+    if !password_ok || account.disabled {
+        audit_failed_platform(&state, client.0).await?;
         tracing::info!("sign-in failed: the credentials are not valid");
         return Err(ApiError::invalid_credentials());
     }
 
-    let (Some(user), Some(role)) = (user, role) else {
+    // The active memberships of the account in active tenants.
+    let memberships = auth::list_memberships(state.db(), account.id).await?;
+    let memberships = visible_memberships(&state, memberships);
+    let Some(chosen) = choose_tenant(&memberships, account.last_used_tenant_id) else {
+        // Zero memberships and a suspended membership are the same failure, after the hash.
+        audit_failed_platform(&state, client.0).await?;
+        tracing::info!("sign-in failed: the account has no active membership");
         return Err(ApiError::invalid_credentials());
     };
+    let tenant_id = chosen.tenant_id;
+    let role = chosen.role;
 
     // The endpoint never reuses an incoming cookie value.
     let value = token::random_token()?;
     let token_hash = token::hash_token(&value);
     let expires_at = now + state.auth().config.session_absolute;
-    let user_agent = user_agent(headers);
+    let user_agent = user_agent(&headers);
 
     let mut tx = state.db().begin_tenant(tenant_id).await?;
     sessions::create(
         &mut tx,
-        user.id,
+        account.id,
         &token_hash,
         expires_at,
         now,
-        Some(client),
+        Some(client.0),
         user_agent.as_deref(),
     )
     .await?;
+    users::set_last_tenant(&mut tx, account.id, tenant_id).await?;
 
     let mut event = AuditEvent::new(AuditAction::SignIn, "user");
-    event.actor = Actor::User(user.id);
-    event.source_ip = Some(client);
-    event.object_id = Some(user.id.as_uuid());
+    event.actor = Actor::User(account.id);
+    event.source_ip = Some(client.0);
+    event.object_id = Some(account.id.as_uuid());
     restichub_db::audit::insert(&mut tx, &event).await?;
 
-    let full_user = users::get(&mut tx, user.id).await?;
+    let member = users::get_member(&mut tx, account.id).await?;
     let tenant = tenants::get(&mut tx, tenant_id).await?;
     tx.commit().await?;
 
-    let (Some(full_user), Some(tenant)) = (full_user, tenant) else {
+    let (Some(member), Some(tenant)) = (member, tenant) else {
         return Err(ApiError::invalid_credentials());
     };
     let insecure = state.auth().config.insecure_cookies;
     let name = token::session_cookie_name(insecure);
     let cookie = token::set_cookie_header(name, &value, !insecure);
     let response = SignInResponse {
-        user: UserView::new(&full_user, role),
+        user: UserView::from_member(&member),
+        tenant: TenantView::from(&tenant),
+        role,
+    };
+    Ok((
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(response),
+    )
+        .into_response())
+}
+
+/// Lists the memberships of the caller only (ADR-0025).
+///
+/// The platform tenant is included for a Platform Admin in multi mode. In single mode the platform
+/// tenant is hidden (ADR-0024).
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/tenants",
+    security(("cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, description = "The memberships of the caller.", body = TenantAccessListResponse),
+        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn list_tenants(
+    State(state): State<AppState>,
+    context: RequestContext,
+) -> Result<Json<TenantAccessListResponse>, ApiError> {
+    context.authorize(Operation::AuthTenants)?;
+    let items = match context.actor {
+        Actor::User(user_id) => {
+            let memberships = auth::list_memberships(state.db(), user_id).await?;
+            visible_memberships(&state, memberships)
+                .into_iter()
+                .map(|membership| TenantAccessView {
+                    id: membership.tenant_id.to_string(),
+                    name: membership.tenant_name,
+                    role: membership.role,
+                })
+                .collect()
+        }
+        // An API token holds one tenant and one role.
+        _ => vec![TenantAccessView {
+            id: context.tenant_id.to_string(),
+            name: tenant_name(&state, context.tenant_id).await,
+            role: context.role,
+        }],
+    };
+    Ok(Json(TenantAccessListResponse { items }))
+}
+
+async fn tenant_name(state: &AppState, tenant_id: TenantId) -> String {
+    let Ok(mut tx) = state.db().begin_tenant(tenant_id).await else {
+        return String::new();
+    };
+    let name = tenants::get(&mut tx, tenant_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|tenant| tenant.name)
+        .unwrap_or_default();
+    let _ = tx.commit().await;
+    name
+}
+
+/// Switches the session to another tenant (ADR-0025).
+///
+/// The endpoint checks the membership of the caller in the target tenant, creates a new session in
+/// the target tenant, deletes the old session and rotates the cookie. It writes the audit record
+/// `session_switch` in the source tenant and in the target tenant.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/switch",
+    security(("cookie" = []), ("bearer" = [])),
+    request_body = SwitchTenantRequest,
+    responses(
+        (status = 200, description = "The session moved to the target tenant.", body = SignInResponse),
+        (status = 400, description = "The request body is not valid.", body = crate::error::ProblemBody),
+        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
+        (status = 403, description = "The caller is not a member of the target tenant.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn switch_tenant(
+    State(state): State<AppState>,
+    context: RequestContext,
+    ApiJson(body): ApiJson<SwitchTenantRequest>,
+) -> Result<Response, ApiError> {
+    context.authorize(Operation::AuthSwitch)?;
+    let Actor::User(user_id) = context.actor else {
+        return Err(ApiError::forbidden());
+    };
+    let Some(session_id) = context.session_id else {
+        return Err(ApiError::forbidden());
+    };
+    let tenant_id = parse_tenant_id(&body.tenant_id)?;
+
+    // The membership check. A suspended or deleted tenant and a disabled membership are refused.
+    let memberships = auth::list_memberships(state.db(), user_id).await?;
+    let memberships = visible_memberships(&state, memberships);
+    let Some(target) = memberships
+        .iter()
+        .find(|membership| membership.tenant_id == tenant_id)
+    else {
+        return Err(ApiError::forbidden());
+    };
+    let role = target.role;
+
+    let now = state.auth().clock.now();
+    let value = token::random_token()?;
+    let token_hash = token::hash_token(&value);
+    let expires_at = now + state.auth().config.session_absolute;
+    let source_tenant = context.tenant_id;
+
+    // The new session in the target tenant defeats session fixation.
+    let mut tx = state.db().begin_tenant(tenant_id).await?;
+    sessions::create(
+        &mut tx,
+        user_id,
+        &token_hash,
+        expires_at,
+        now,
+        context.source_ip,
+        None,
+    )
+    .await?;
+    users::set_last_tenant(&mut tx, user_id, tenant_id).await?;
+    let event = context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    let member = users::get_member(&mut tx, user_id).await?;
+    let tenant = tenants::get(&mut tx, tenant_id).await?;
+    tx.commit().await?;
+
+    // The old session and its audit record belong to the source tenant.
+    let mut tx = state.db().begin_tenant(source_tenant).await?;
+    sessions::delete(&mut tx, session_id).await?;
+    if source_tenant != tenant_id {
+        let event =
+            context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
+        restichub_db::audit::insert(&mut tx, &event).await?;
+    }
+    tx.commit().await?;
+
+    let (Some(member), Some(tenant)) = (member, tenant) else {
+        return Err(ApiError::forbidden());
+    };
+    let insecure = state.auth().config.insecure_cookies;
+    let name = token::session_cookie_name(insecure);
+    let cookie = token::set_cookie_header(name, &value, !insecure);
+    let response = SignInResponse {
+        user: UserView::from_member(&member),
         tenant: TenantView::from(&tenant),
         role,
     };
@@ -281,8 +403,8 @@ pub async fn me(
     context.authorize(Operation::AuthMe)?;
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let tenant = tenants::get(&mut tx, context.tenant_id).await?;
-    let user = match context.actor {
-        Actor::User(user_id) => users::get(&mut tx, user_id).await?,
+    let member = match context.actor {
+        Actor::User(user_id) => users::get_member(&mut tx, user_id).await?,
         _ => None,
     };
     tx.commit().await?;
@@ -290,19 +412,17 @@ pub async fn me(
         return Err(ApiError::not_found());
     };
     Ok(Json(MeResponse {
-        user: user.map(|user| UserView::new(&user, context.role)),
+        user: member.as_ref().map(UserView::from_member),
         tenant: TenantView::from(&tenant),
         role: context.role,
     }))
 }
 
-/// Changes the password of the current user.
+/// Changes the password of the current user (installation-wide).
 ///
-/// Changes the password of the current user.
-///
-/// The endpoint removes every other session of the user and keeps the current session. A wrong
-/// current password counts against the user rate limit. The hash runs without a database
-/// transaction.
+/// The endpoint sets the account password and removes every other session of the account in every
+/// tenant, and it keeps the current session. A wrong current password counts against the user rate
+/// limit. The hash runs without a database transaction.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/password",
@@ -328,22 +448,17 @@ pub async fn change_password(
     };
     validation::validate_password("new_password", &body.new_password)?;
     // A wrong current password counts against the user bucket.
-    check_resolved(&state, context.tenant_id, user_id)?;
+    check_resolved(&state, user_id)?;
 
-    let user = {
-        let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-        let user = users::get_auth(&mut tx, user_id).await?;
-        tx.commit().await?;
-        user
-    };
-    let Some(user) = user else {
+    let auth_row = users::find_account_auth_by_id(state.db(), user_id).await?;
+    let Some(auth_row) = auth_row else {
         return Err(ApiError::not_found());
     };
 
     let current_ok = password::verify_password_limited(
         &state.auth().hash_semaphore,
         body.current_password.clone(),
-        user.password_hash.clone(),
+        auth_row.password_hash,
     )
     .await?;
     if !current_ok {
@@ -358,11 +473,9 @@ pub async fn change_password(
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     users::set_password(&mut tx, user_id, &hash).await?;
-    if let Some(session_id) = context.session_id {
-        sessions::delete_for_user_except(&mut tx, user_id, session_id).await?;
-    } else {
-        sessions::delete_for_user(&mut tx, user_id).await?;
-    }
+    // The password change is installation-wide: it ends the sessions in every tenant and keeps the
+    // current one (ADR-0025).
+    auth::delete_account_sessions(&mut tx, user_id, context.session_id).await?;
     let mut event = context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
     event.diff = Some(diff(
         None,
@@ -374,7 +487,42 @@ pub async fn change_password(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-fn check_ip(state: &AppState, ip: std::net::IpAddr) -> Result<(), ApiError> {
+/// Filters the memberships that the current mode can show.
+///
+/// Single mode hides the platform tenant (ADR-0024).
+fn visible_memberships(
+    state: &AppState,
+    memberships: Vec<auth::MembershipLookup>,
+) -> Vec<auth::MembershipLookup> {
+    if state.tenancy().mode == TenancyMode::Single {
+        memberships
+            .into_iter()
+            .filter(|membership| membership.tenant_id != PLATFORM_TENANT_ID)
+            .collect()
+    } else {
+        memberships
+    }
+}
+
+/// Picks the session tenant (ADR-0025).
+///
+/// The last used tenant wins when it is in the list. Otherwise the first membership by tenant name
+/// gives the session; the list is ordered by the tenant name.
+fn choose_tenant(
+    memberships: &[auth::MembershipLookup],
+    last_used: Option<TenantId>,
+) -> Option<&auth::MembershipLookup> {
+    if let Some(last_used) = last_used
+        && let Some(membership) = memberships
+            .iter()
+            .find(|membership| membership.tenant_id == last_used)
+    {
+        return Some(membership);
+    }
+    memberships.first()
+}
+
+fn check_ip(state: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     match state
         .auth()
         .ip_limiter
@@ -385,44 +533,27 @@ fn check_ip(state: &AppState, ip: std::net::IpAddr) -> Result<(), ApiError> {
     }
 }
 
-fn check_synthetic(state: &AppState, tenant: &str, username: &str) -> Result<(), ApiError> {
-    let key = rate_limit::synthetic_user_key(tenant, username);
+fn check_synthetic(state: &AppState, username: &str) -> Result<(), ApiError> {
+    let key = rate_limit::synthetic_user_key(username);
     match state.auth().user_limiter.check(&key, Instant::now()) {
         Ok(()) => Ok(()),
         Err(wait) => Err(ApiError::rate_limited(wait.as_secs().max(1))),
     }
 }
 
-fn check_resolved(state: &AppState, tenant: TenantId, user: UserId) -> Result<(), ApiError> {
-    let key = rate_limit::resolved_user_key(tenant, user);
+fn check_resolved(state: &AppState, user: UserId) -> Result<(), ApiError> {
+    let key = rate_limit::resolved_user_key(user);
     match state.auth().resolved_limiter.check(&key, Instant::now()) {
         Ok(()) => Ok(()),
         Err(wait) => Err(ApiError::rate_limited(wait.as_secs().max(1))),
     }
 }
 
-/// Writes a `sign_in_failed` record in the tenant transaction.
+/// Writes a `sign_in_failed` record in the platform tenant.
 ///
-/// The record holds the user id of a known user and the marker `user_known: false` for an unknown
-/// user. It never holds the attempted username, so a password typed into the username field cannot
-/// reach the append-only log.
-async fn audit_failed_in_tenant(
-    tx: &mut restichub_db::TenantTx<'_>,
-    user: Option<&users::AuthUser>,
-    ip: std::net::IpAddr,
-) -> Result<(), ApiError> {
-    let mut event = AuditEvent::new(AuditAction::SignInFailed, "user");
-    event.actor = Actor::System;
-    event.source_ip = Some(ip);
-    match user {
-        Some(user) => event.object_id = Some(user.id.as_uuid()),
-        None => event.diff = Some(diff(None, Some(&unknown_user_diff()), &[])),
-    }
-    restichub_db::audit::insert(tx, &event).await?;
-    Ok(())
-}
-
-async fn audit_failed_platform(state: &AppState, ip: std::net::IpAddr) -> Result<(), ApiError> {
+/// The record holds the marker `user_known: false` only. It never holds the attempted username, so
+/// a password typed into the username field cannot reach the append-only log.
+async fn audit_failed_platform(state: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     let mut tx = state.db().begin_platform().await?;
     let mut event = AuditEvent::new(AuditAction::SignInFailed, "user");
     event.actor = Actor::System;
@@ -443,4 +574,16 @@ fn user_agent(headers: &HeaderMap) -> Option<String> {
         .get(header::USER_AGENT)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned)
+}
+
+fn parse_tenant_id(value: &str) -> Result<TenantId, ApiError> {
+    uuid::Uuid::parse_str(value)
+        .map(TenantId::from_uuid)
+        .map_err(|error| {
+            ApiError::invalid_field_cause(
+                "tenant_id",
+                validation::Reason::InvalidFormat,
+                error.to_string(),
+            )
+        })
 }

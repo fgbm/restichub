@@ -134,10 +134,11 @@ async fn ac_tn_06_single_mode_setup_and_sign_in() {
     assert_eq!(status, StatusCode::CREATED, "{created}");
     assert_eq!(created.get("role").and_then(Value::as_str), Some("admin"));
 
-    // The tenant `default` holds a key row and one user.
+    // The tenant `default` holds a key row and one membership. The account lives in the platform
+    // tenant (ADR-0025).
     let tenant = tenant_by_name(db.database(), "default").await;
     assert_eq!(count(db.database(), tenant, "tenant_keys").await, 1);
-    assert_eq!(count(db.database(), tenant, "users").await, 1);
+    assert_eq!(count(db.database(), tenant, "memberships").await, 1);
 
     // The setup is done and the status reports the mode.
     let (_, _, body) = send(&app, request("GET", "/api/v1/setup/status", None, None)).await;
@@ -193,7 +194,7 @@ async fn ac_tn_06_single_mode_setup_and_sign_in() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(count(db.database(), tenant, "users").await, 2);
+    assert_eq!(count(db.database(), tenant, "memberships").await, 2);
 
     db.cleanup().await;
 }
@@ -435,27 +436,44 @@ async fn multi_to_single_refuses_with_two_active_tenants() {
 }
 
 #[tokio::test]
-async fn multi_mode_requires_the_tenant_on_sign_in() {
+async fn multi_mode_sign_in_ignores_the_tenant_field() {
     let Some(db) = common::test_db().await else {
         return;
     };
+    // An account with one membership in a real tenant.
+    let tenant = create_tenant(db.database(), "signin-ignore").await;
+    common::create_user(db.database(), tenant, "alice", "phc", "admin").await;
     let app = app(db.database());
+
+    // A body with no `tenant` field signs the account in (ADR-0025).
     let (status, _, problem) = send(
         &app,
         request(
             "POST",
             "/api/v1/auth/sign-in",
             None,
-            Some(sign_in_body(None, "admin")),
+            Some(json!({"username": "nobody", "password": "a long enough password"})),
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(
         problem.get("code").and_then(Value::as_str),
-        Some("invalid_argument")
+        Some("invalid_credentials")
     );
-    assert_eq!(problem.get("field").and_then(Value::as_str), Some("tenant"));
+
+    // A body with a `tenant` field is accepted: the field is ignored.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/auth/sign-in",
+            None,
+            Some(sign_in_body(Some("other"), "nobody")),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     db.cleanup().await;
 }
@@ -587,7 +605,7 @@ async fn two_concurrent_single_mode_setups_leave_one_tenant() {
     );
 
     let tenant = tenant_by_name(db.database(), "default").await;
-    assert_eq!(count(db.database(), tenant, "users").await, 1);
+    assert_eq!(count(db.database(), tenant, "memberships").await, 1);
     assert_eq!(tenants_named(db.database(), "default").await, 1);
 
     db.cleanup().await;
@@ -818,7 +836,7 @@ async fn ac_tn_06_single_mode_wrong_tokens_do_not_block_the_setup() {
         );
     }
     let tenant = tenant_by_name(db.database(), "default").await;
-    assert_eq!(count(db.database(), tenant, "users").await, 1);
+    assert_eq!(count(db.database(), tenant, "memberships").await, 1);
 
     db.cleanup().await;
 }

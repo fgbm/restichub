@@ -109,12 +109,34 @@ async fn sign_in_failures_are_identical() {
         "admin",
     )
     .await;
+    // An account with no membership in any active tenant.
+    let orphan_hash = password::hash_password("correct horse battery").unwrap_or_default();
+    {
+        let mut tx = db
+            .database()
+            .begin_tenant(tenant)
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
+        restichub_db::users::create(
+            &mut tx,
+            &restichub_db::users::NewUser {
+                username: "orphan",
+                password_hash: &orphan_hash,
+                display_name: "Orphan",
+            },
+        )
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+        tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
+    }
     let app = app(db.database());
 
-    let (s1, _, b1) = sign_in(&app, "unknown-tenant", "alice", "correct horse battery").await;
-    let (s2, _, b2) = sign_in(&app, "failures", "nobody", "correct horse battery").await;
-    let (s3, _, b3) = sign_in(&app, "failures", "alice", "wrong password value").await;
+    // An unknown account, a wrong password and an account with no active membership.
+    let (s1, _, b1) = sign_in(&app, "failures", "nobody", "correct horse battery").await;
+    let (s2, _, b2) = sign_in(&app, "failures", "alice", "wrong password value").await;
+    let (s3, _, b3) = sign_in(&app, "failures", "orphan", "correct horse battery").await;
 
+    // A disabled account.
     let mut tx = db
         .database()
         .begin_tenant(tenant)
@@ -126,6 +148,7 @@ async fn sign_in_failures_are_identical() {
     tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
     let (s4, _, b4) = sign_in(&app, "failures", "alice", "correct horse battery").await;
 
+    // A suspended tenant.
     set_tenant_status(db.database(), tenant, "suspended").await;
     let (s5, _, b5) = sign_in(&app, "failures", "alice", "correct horse battery").await;
 
