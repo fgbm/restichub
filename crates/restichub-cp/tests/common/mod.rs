@@ -370,11 +370,16 @@ pub async fn create_user(
     password_hash: &str,
     role: &str,
 ) -> restichub_db::UserId {
+    let role = Role::parse(role).expect("the role is known");
+    // The Platform Admin is an account right, not a membership (ADR-0029). The account holds the
+    // right and no membership; the session tenant is the internal platform tenant.
+    if role == Role::PlatformAdmin {
+        return create_platform_admin(db, username, password_hash).await;
+    }
     let mut tx = db
         .begin_tenant(tenant)
         .await
         .expect("cannot begin the transaction");
-    let role = Role::parse(role).expect("the role is known");
     let user = users::create_member(
         &mut tx,
         &users::NewUser {
@@ -388,6 +393,33 @@ pub async fn create_user(
     .expect("cannot create the user");
     tx.commit().await.expect("cannot commit the user");
     user
+}
+
+/// Creates an account with the Platform Admin right and no membership (ADR-0029).
+pub async fn create_platform_admin(
+    db: &Database,
+    username: &str,
+    password_hash: &str,
+) -> restichub_db::UserId {
+    let id = restichub_db::UserId::new();
+    let mut tx = db
+        .begin_tenant(PLATFORM_TENANT_ID)
+        .await
+        .expect("cannot begin the transaction");
+    let created = users::create_platform_admin(
+        &mut tx,
+        id,
+        &users::NewUser {
+            username,
+            password_hash,
+            display_name: username,
+        },
+    )
+    .await
+    .expect("cannot create the platform admin");
+    assert!(created, "the platform admin account must be created");
+    tx.commit().await.expect("cannot commit the platform admin");
+    id
 }
 
 pub async fn session_cookie(db: &Database, tenant: TenantId, user: restichub_db::UserId) -> String {
@@ -483,6 +515,28 @@ pub async fn count(db: &Database, tenant: TenantId, table: &'static str) -> i64 
     restichub_db::test_util::count_rows(db, tenant, table)
         .await
         .expect("cannot count the rows")
+}
+
+/// The identifier of an account by its username (ADR-0029).
+pub async fn find_account_id(db: &Database, username: &str) -> restichub_db::UserId {
+    users::find_account(db, username)
+        .await
+        .expect("cannot read the account")
+        .expect("the account exists")
+        .id
+}
+
+/// Reads the number of the active installation administrators (ADR-0029).
+pub async fn platform_admin_count(db: &Database) -> i64 {
+    let mut tx = db
+        .begin_tenant(PLATFORM_TENANT_ID)
+        .await
+        .expect("cannot begin the transaction");
+    let count = users::platform_admin_count(&mut tx)
+        .await
+        .expect("cannot count the platform admins");
+    tx.commit().await.expect("cannot commit the count");
+    count
 }
 
 pub async fn list_users(db: &Database, tenant: TenantId) -> Vec<users::Member> {

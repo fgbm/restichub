@@ -703,13 +703,18 @@ async fn a_deleted_tenant_is_refused_for_sign_in_session_and_token() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
+    // The deleted membership is skipped; the account signs in with no organization (ADR-0029).
     let body = json!({"tenant": "gone", "username": "alice", "password": "a long enough password"});
-    let (status, _, _) = send(
+    let (status, _, problem) = send(
         &app,
         request("POST", "/api/v1/auth/sign-in", None, Some(body)),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(status, StatusCode::OK, "{problem}");
+    assert!(
+        problem.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{problem}"
+    );
 
     let (status, _, _) = send(
         &app,
@@ -781,6 +786,44 @@ async fn an_organization_without_an_admin_has_the_derived_state() {
         one.get("admin_state").and_then(Value::as_str),
         Some("present")
     );
+
+    db.cleanup().await;
+}
+
+/// AC-TN-08: the internal platform tenant appears in no user-facing list (ADR-0029).
+#[tokio::test]
+async fn ac_tn_08_the_platform_tenant_is_hidden() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let cookie = platform_admin(db.database()).await;
+    let app = app_with_kek(db.database());
+    let _ = create_tenant_ok(&app, &cookie, "shown").await;
+
+    // No platform tenant appears in the list.
+    let (status, _, list) = send(
+        &app,
+        request("GET", "/api/v1/platform/tenants", Some(&cookie), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(
+        !list.to_string().contains(&PLATFORM_TENANT_ID.to_string()),
+        "the platform tenant must not appear in the list: {list}"
+    );
+
+    // The read of the platform tenant is not found.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "GET",
+            &format!("/api/v1/platform/tenants/{PLATFORM_TENANT_ID}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
     db.cleanup().await;
 }

@@ -226,11 +226,12 @@ async fn ac_au_01_audit_records_hold_no_secret() {
         "the audit log holds an attempted username"
     );
 
-    // The account lives in the platform tenant; the platform Admin holds one membership there.
+    // The Platform Admin holds the account right and no membership (ADR-0029).
     assert_eq!(
         count(db.database(), PLATFORM_TENANT_ID, "memberships").await,
-        1
+        0
     );
+    assert_eq!(common::platform_admin_count(db.database()).await, 1);
 
     db.cleanup().await;
 }

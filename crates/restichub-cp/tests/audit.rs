@@ -80,16 +80,33 @@ async fn sign_in(
     role: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut tx = db.database().begin_tenant(tenant).await?;
-    let user = users::create_member(
-        &mut tx,
-        &users::NewUser {
-            username: "tester",
-            password_hash: "phc",
-            display_name: "Tester",
-        },
-        restichub_db::Role::parse(role).ok_or("the role is known")?,
-    )
-    .await?;
+    let role = restichub_db::Role::parse(role).ok_or("the role is known")?;
+    // The Platform Admin is an account right with no membership (ADR-0029).
+    let user = if role == restichub_db::Role::PlatformAdmin {
+        let id = restichub_db::UserId::new();
+        users::create_platform_admin(
+            &mut tx,
+            id,
+            &users::NewUser {
+                username: "tester",
+                password_hash: "phc",
+                display_name: "Tester",
+            },
+        )
+        .await?;
+        id
+    } else {
+        users::create_member(
+            &mut tx,
+            &users::NewUser {
+                username: "tester",
+                password_hash: "phc",
+                display_name: "Tester",
+            },
+            role,
+        )
+        .await?
+    };
     let value = restichub_cp::token::random_token()?;
     let hash = restichub_cp::token::hash_token(&value);
     let now = OffsetDateTime::now_utc();

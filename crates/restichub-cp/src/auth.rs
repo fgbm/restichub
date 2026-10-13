@@ -47,8 +47,11 @@ pub struct SignInRequest {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SignInResponse {
     pub user: UserView,
-    pub tenant: TenantView,
+    /// Null for a session with no organization (ADR-0029).
+    pub tenant: Option<TenantView>,
     pub role: Role,
+    /// True when the account holds the installation-wide right (ADR-0029).
+    pub platform_admin: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -62,8 +65,11 @@ pub struct ChangePasswordRequest {
 pub struct MeResponse {
     /// Null for an API token.
     pub user: Option<UserView>,
-    pub tenant: TenantView,
+    /// Null for a session with no organization (ADR-0029).
+    pub tenant: Option<TenantView>,
     pub role: Role,
+    /// True when the account holds the installation-wide right (ADR-0029).
+    pub platform_admin: bool,
 }
 
 /// The memberships of the caller. Each item holds the tenant id, the tenant name and the role.
@@ -151,14 +157,20 @@ pub async fn sign_in(
     // The active memberships of the account in active tenants.
     let memberships = auth::list_memberships(state.db(), account.id).await?;
     let memberships = visible_memberships(&state, memberships);
-    let Some(chosen) = choose_tenant(&memberships, account.last_used_tenant_id) else {
-        // Zero memberships and a suspended membership are the same failure, after the hash.
-        audit_failed_platform(&state, client.0).await?;
-        tracing::info!("sign-in failed: the account has no active membership");
-        return Err(ApiError::invalid_credentials());
+    // An account with no active membership still signs in (ADR-0029). A Platform Admin reaches the
+    // platform screens; another account sees the empty state. The session tenant is the internal
+    // platform tenant, which the control plane never shows.
+    let (tenant_id, role) = match choose_tenant(&memberships, account.last_used_tenant_id) {
+        Some(chosen) => (chosen.tenant_id, chosen.role),
+        None => (
+            PLATFORM_TENANT_ID,
+            if account.platform_admin {
+                Role::PlatformAdmin
+            } else {
+                Role::Viewer
+            },
+        ),
     };
-    let tenant_id = chosen.tenant_id;
-    let role = chosen.role;
 
     // The endpoint never reuses an incoming cookie value.
     let value = token::random_token()?;
@@ -177,7 +189,9 @@ pub async fn sign_in(
         user_agent.as_deref(),
     )
     .await?;
-    users::set_last_tenant(&mut tx, account.id, session_id, tenant_id).await?;
+    if tenant_id != PLATFORM_TENANT_ID {
+        users::set_last_tenant(&mut tx, account.id, session_id, tenant_id).await?;
+    }
 
     let mut event = AuditEvent::new(AuditAction::SignIn, "user");
     event.actor = Actor::User(account.id);
@@ -189,7 +203,7 @@ pub async fn sign_in(
     // session behind.
     let member = users::get_member(&mut tx, account.id).await?;
     let tenant = tenants::get(&mut tx, tenant_id).await?;
-    let (Some(member), Some(tenant)) = (member, tenant) else {
+    let Some(tenant) = tenant else {
         return Err(ApiError::invalid_credentials());
     };
     tx.commit().await?;
@@ -197,10 +211,25 @@ pub async fn sign_in(
     let insecure = state.auth().config.insecure_cookies;
     let name = token::session_cookie_name(insecure);
     let cookie = token::set_cookie_header(name, &value, !insecure);
+    let user = match &member {
+        Some(member) => UserView::from_member(member),
+        None => {
+            let full = users::find_account_by_id(state.db(), account.id)
+                .await?
+                .ok_or_else(|| ApiError::internal("the signed-in account is not found"))?;
+            UserView::from_account(&full, role)
+        }
+    };
+    let tenant_view = if tenant_id == PLATFORM_TENANT_ID {
+        None
+    } else {
+        Some(TenantView::from(&tenant))
+    };
     let response = SignInResponse {
-        user: UserView::from_member(&member),
-        tenant: TenantView::from(&tenant),
+        user,
+        tenant: tenant_view,
         role,
+        platform_admin: account.platform_admin,
     };
     Ok((
         StatusCode::OK,
@@ -240,6 +269,8 @@ pub async fn list_tenants(
                 })
                 .collect()
         }
+        // A platform session and a platform API token hold no organization (ADR-0029).
+        _ if context.tenant_id == PLATFORM_TENANT_ID => vec![],
         // API tokens carry one tenant and one role.
         _ => vec![TenantAccessView {
             id: context.tenant_id.to_string(),
@@ -371,8 +402,9 @@ pub async fn switch_tenant(
     let cookie = token::set_cookie_header(name, &value, !insecure);
     let response = SignInResponse {
         user: UserView::from_member(&member),
-        tenant: TenantView::from(&tenant),
+        tenant: Some(TenantView::from(&tenant)),
         role,
+        platform_admin: context.platform_admin,
     };
     Ok((
         StatusCode::OK,
@@ -447,13 +479,26 @@ pub async fn me(
         _ => None,
     };
     tx.commit().await?;
-    let Some(tenant) = tenant else {
-        return Err(ApiError::not_found());
+    // A session with no organization has no membership; the account gives the user view (ADR-0029).
+    let account = match context.actor {
+        Actor::User(user_id) => users::find_account_by_id(state.db(), user_id).await?,
+        _ => None,
+    };
+    let user = match (&member, &account) {
+        (Some(member), _) => Some(UserView::from_member(member)),
+        (None, Some(account)) => Some(UserView::from_account(account, context.role)),
+        _ => None,
+    };
+    let tenant_view = if context.tenant_id == PLATFORM_TENANT_ID {
+        None
+    } else {
+        tenant.map(|tenant| TenantView::from(&tenant))
     };
     Ok(Json(MeResponse {
-        user: member.as_ref().map(UserView::from_member),
-        tenant: TenantView::from(&tenant),
+        user,
+        tenant: tenant_view,
         role: context.role,
+        platform_admin: context.platform_admin,
     }))
 }
 
