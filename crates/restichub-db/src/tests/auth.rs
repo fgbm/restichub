@@ -79,12 +79,12 @@ async fn db_the_auth_lookups_work_under_the_runtime_role() -> TestResult {
         .await?;
     assert!(unknown_tenant.is_none());
 
-    // The runtime role cannot read the other columns of tenant B directly.
-    let cross: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM users WHERE tenant_id = $1")
+    // The runtime role cannot read an account row directly (ADR-0025).
+    let cross = sqlx::query("SELECT id FROM users WHERE tenant_id = $1")
         .bind(tenant_b)
-        .fetch_optional(tx.as_conn())
-        .await?;
-    assert!(cross.is_none());
+        .execute(tx.as_conn())
+        .await;
+    assert_code(cross, "42501");
 
     tx.commit().await?;
     db.cleanup().await;
@@ -103,18 +103,30 @@ async fn member(
     role: Role,
 ) -> Result<UserId, Box<dyn std::error::Error>> {
     let mut tx = db.begin_tenant(tenant).await?;
-    let user = users::create(
+    let user = users::create_member(
         &mut tx,
         &NewUser {
             username: name,
             password_hash: "phc",
             display_name: name,
         },
+        role,
     )
     .await?;
-    memberships::set_role(&mut tx, user, role).await?;
     tx.commit().await?;
     Ok(user)
+}
+
+/// The `shared` flag of the member as the tenant reads it (ADR-0025).
+async fn is_shared(
+    db: &Database,
+    tenant: TenantId,
+    user: UserId,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut tx = db.begin_tenant(tenant).await?;
+    let member = users::get_member(&mut tx, user).await?;
+    tx.commit().await?;
+    Ok(member.is_some_and(|member| member.shared))
 }
 
 async fn set_status(
@@ -137,23 +149,23 @@ async fn db_a_shared_account_counts_a_suspended_tenant_and_a_disabled_membership
     };
     let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
     let user = member(db.database(), tenant_a, "shared", Role::Viewer).await?;
-    let mut tx = db.database().begin_tenant(tenant_b).await?;
-    memberships::set_role(&mut tx, user, Role::Viewer).await?;
+    let mut tx = db.database().begin_platform().await?;
+    assert!(auth::add_membership(&mut tx, user, tenant_b, Role::Viewer).await?);
     tx.commit().await?;
 
     // The account is a member of tenant A and tenant B, so it is shared.
-    assert!(auth::account_is_shared(db.database(), user, tenant_a).await?);
+    assert!(is_shared(db.database(), tenant_a, user).await?);
     set_status(db.database(), tenant_b, TenantStatus::Suspended).await?;
-    assert!(auth::account_is_shared(db.database(), user, tenant_a).await?);
+    assert!(is_shared(db.database(), tenant_a, user).await?);
 
     set_status(db.database(), tenant_b, TenantStatus::Active).await?;
     let mut tx = db.database().begin_tenant(tenant_b).await?;
     memberships::set_disabled(&mut tx, user, true).await?;
     tx.commit().await?;
-    assert!(auth::account_is_shared(db.database(), user, tenant_a).await?);
+    assert!(is_shared(db.database(), tenant_a, user).await?);
 
     set_status(db.database(), tenant_b, TenantStatus::Deleted).await?;
-    assert!(!auth::account_is_shared(db.database(), user, tenant_a).await?);
+    assert!(!is_shared(db.database(), tenant_a, user).await?);
 
     db.cleanup().await;
     Ok(())
@@ -169,9 +181,12 @@ async fn db_the_membership_insert_takes_the_account_row_lock() -> TestResult {
     let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
     let user = member(db.database(), tenant_a, "locked", Role::Viewer).await?;
 
-    // Hold the account row lock.
+    // Hold the account row lock through an administrator write that stays open.
     let mut tx_a = db.database().begin_tenant(tenant_a).await?;
-    assert!(users::lock_account(&mut tx_a, user).await?);
+    assert_eq!(
+        users::admin_set_password(&mut tx_a, user, "phc").await?,
+        users::WriteStatus::Ok
+    );
 
     // The platform membership insert waits for the lock.
     let blocked = tokio::time::timeout(std::time::Duration::from_millis(500), async {

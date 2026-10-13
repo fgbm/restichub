@@ -67,6 +67,8 @@ pub enum DbError {
     TenantNotCreated(TenantId),
     #[error("the database function returned an unknown write status: {0}")]
     UnknownWriteStatus(String),
+    #[error("the database refused the account create")]
+    AccountCreateRefused,
     #[error(
         "the database schema is behind (applied version {applied}, expected {expected}); run `restichub-cp migrate`"
     )]

@@ -13,7 +13,9 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
-use restichub_db::{PLATFORM_TENANT_ID, Role, TenantId, UserId, auth, sessions, tenants, users};
+use restichub_db::{
+    PLATFORM_TENANT_ID, Role, SessionId, TenantId, UserId, auth, sessions, tenants, users,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -345,11 +347,12 @@ pub async fn switch_tenant(
     };
     tx.commit().await?;
 
-    // Record the switch in the source tenant too.
-    let mut tx = state.db().begin_tenant(source_tenant).await?;
-    let event = context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
-    restichub_db::audit::insert(&mut tx, &event).await?;
-    tx.commit().await?;
+    // Record the switch in the source tenant too. The audit of another tenant cannot join the target
+    // transaction under the tenant policy, so a failure here must not deny the caller the new
+    // cookie: the switch is already committed.
+    if let Err(error) = write_switch_audit(&state, source_tenant, &context, session_id).await {
+        tracing::warn!(?error, "the source-tenant switch audit failed");
+    }
 
     let insecure = state.auth().config.insecure_cookies;
     let name = token::session_cookie_name(insecure);
@@ -365,6 +368,20 @@ pub async fn switch_tenant(
         Json(response),
     )
         .into_response())
+}
+
+/// Records a switch in one tenant. The caller treats a failure as a warning only.
+async fn write_switch_audit(
+    state: &AppState,
+    tenant_id: TenantId,
+    context: &RequestContext,
+    session_id: SessionId,
+) -> Result<(), ApiError> {
+    let mut tx = state.db().begin_tenant(tenant_id).await?;
+    let event = context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Signs the current session out.

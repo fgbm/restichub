@@ -187,6 +187,12 @@ pub fn create_user_key(tenant: TenantId, actor: &str) -> String {
     format!("c:{tenant}:{actor}")
 }
 
+/// The account create bucket of a tenant, in addition to the actor bucket: an actor cannot bypass
+/// the limit by minting many API tokens (threat T15).
+pub fn create_user_tenant_key(tenant: TenantId) -> String {
+    format!("ct:{tenant}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::IpAddr;

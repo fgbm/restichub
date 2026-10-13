@@ -148,22 +148,23 @@ pub async fn create_with_bootstrap(
 
     if let Some(admin) = &input.admin {
         let user = UserId::new();
-        // The account row lives in the platform tenant (ADR-0025). The definer function writes it
-        // while the transaction keeps the tenant scope of the new tenant.
-        sqlx::query("SELECT auth_create_account($1, $2, $3, $4)")
-            .bind(user)
-            .bind(admin.username)
-            .bind(admin.password_hash)
-            .bind(admin.display_name)
-            .execute(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
-        sqlx::query("INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')")
-            .bind(tenant)
-            .bind(user)
-            .execute(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
+        // The account row lives in the platform tenant (ADR-0025). The definer function creates the
+        // account and its first membership while the transaction keeps the tenant scope of the new
+        // tenant.
+        let (created,): (bool,) =
+            sqlx::query_as("SELECT auth_create_member($1, $2, $3, $4, $5, $6)")
+                .bind(user)
+                .bind(admin.username)
+                .bind(admin.password_hash)
+                .bind(admin.display_name)
+                .bind(tenant)
+                .bind("admin")
+                .fetch_one(tx.as_conn())
+                .await
+                .map_err(DbError::Query)?;
+        if !created {
+            return Err(DbError::AccountCreateRefused);
+        }
         let mut user_event =
             crate::audit::AuditEvent::new(crate::audit::AuditAction::UserCreate, "user");
         user_event.actor = input.actor.clone();

@@ -5,7 +5,8 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { setSession } from '#lib/stores/session.svelte.ts';
+import { UnauthorizedError } from '#lib/api/index.ts';
+import { getSession, setSession } from '#lib/stores/session.svelte.ts';
 import { getToasts } from '#lib/stores/toasts.svelte.ts';
 import TenantSwitcher from './TenantSwitcher.svelte';
 
@@ -91,6 +92,19 @@ describe('the tenant switcher', () => {
 		await user.keyboard('{Escape}');
 		await user.click(button);
 		await waitFor(() => expect(mocks.listMemberships).toHaveBeenCalledTimes(2));
+	});
+
+	it('redirects to the sign-in screen when the list call loses the session', async () => {
+		mocks.listMemberships.mockRejectedValue(
+			new UnauthorizedError({ status: 401, code: 'unauthenticated', title: 'Unauthorized' })
+		);
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+
+		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(auth)/sign-in'));
+		expect(getSession()).toBeNull();
 	});
 
 	it('moves with the arrow keys and switches with Enter on the active item', async () => {

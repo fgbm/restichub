@@ -150,21 +150,6 @@ pub async fn list_memberships(
         .collect())
 }
 
-/// True when the account has an active membership in an active tenant other than the given one.
-pub async fn account_is_shared(
-    db: &Database,
-    account_id: UserId,
-    tenant_id: TenantId,
-) -> Result<bool, DbError> {
-    let (shared,): (bool,) = sqlx::query_as("SELECT auth_account_is_shared($1, $2)")
-        .bind(account_id)
-        .bind(tenant_id)
-        .fetch_one(db.pool())
-        .await
-        .map_err(DbError::Query)?;
-    Ok(shared)
-}
-
 /// Deletes the sessions of an account. A password change keeps the current session.
 ///
 /// The database function reaches the whole installation only from the platform tenant, from the

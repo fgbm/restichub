@@ -90,6 +90,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         auth.user_limiter.clone(),
         auth.ip_limiter.clone(),
         auth.create_user_limiter.clone(),
+        auth.create_user_tenant_limiter.clone(),
         restichub_cp::maintenance::LIMITER_SWEEP_INTERVAL,
     );
     let app = server::router(

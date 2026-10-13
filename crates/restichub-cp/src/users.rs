@@ -11,7 +11,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use restichub_db::audit::{AuditAction, AuditEvent, diff};
+use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
 use restichub_db::users::WriteStatus;
 use restichub_db::{
     DbError, PLATFORM_TENANT_ID, Role, TenantTx, UserId, auth, memberships, sessions, users,
@@ -28,7 +28,9 @@ use crate::server::AppState;
 use crate::validation;
 use crate::views::UserView;
 
-const ADMIN_LOCK: &str = "restichub.tenant_admin:";
+/// The advisory lock that serializes a change of the administrator set of a tenant. The platform
+/// routes take the same lock in the platform tenant, so the two paths serialize there (ADR-0025).
+pub(crate) const ADMIN_LOCK: &str = "restichub.admin:";
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateUserRequest {
@@ -122,17 +124,17 @@ pub async fn create_user(
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     tx.lock(ADMIN_LOCK).await?;
-    let user_id = users::create(
+    let user_id = users::create_member(
         &mut tx,
         &users::NewUser {
             username: &username,
             password_hash: &password_hash,
             display_name: &display_name,
         },
+        role,
     )
     .await
     .map_err(map_username_taken)?;
-    memberships::set_role(&mut tx, user_id, role).await?;
     let mut event = context.audit_event(AuditAction::UserCreate, "user", user_id.as_uuid());
     event.diff = Some(diff(
         None,
@@ -189,7 +191,8 @@ pub async fn get_user(
 /// Changes a member of the tenant.
 ///
 /// A tenant Admin changes the role or disables the membership in its tenant. It cannot change the
-/// display name of a shared account (HTTP 403 `shared_account`).
+/// display name of a shared account (HTTP 403 `shared_account`) and cannot remove its own
+/// administrator rights (HTTP 409).
 #[utoipa::path(
     patch,
     path = "/api/v1/users/{id}",
@@ -233,10 +236,15 @@ pub async fn update_user(
     };
     ensure_target_not_above_actor(&context, member.role)?;
 
-    // The guard applies to an active Admin only. A disabled membership is not the last Admin.
-    let active_admin = member.role.is_admin() && !member.disabled && !member.account_disabled;
     let role_lost_admin = new_role.is_some_and(|role| !role.is_admin());
     let disabling = body.disabled == Some(true);
+    // The caller cannot remove its own administrator rights: the session would keep a role that the
+    // membership no longer grants (ADR-0025).
+    if context.actor == Actor::User(user_id) && (role_lost_admin || disabling) {
+        return Err(ApiError::conflict());
+    }
+    // The guard applies to an active Admin only. A disabled membership is not the last Admin.
+    let active_admin = member.role.is_admin() && !member.disabled && !member.account_disabled;
     if active_admin && (role_lost_admin || disabling) {
         guard_last_admin(&mut tx).await?;
     }
@@ -317,6 +325,11 @@ pub async fn delete_user(
         return Err(ApiError::not_found());
     };
     ensure_target_not_above_actor(&context, member.role)?;
+    // The caller cannot disable its own membership: the session would keep a role that the
+    // membership no longer grants (ADR-0025).
+    if context.actor == Actor::User(user_id) {
+        return Err(ApiError::conflict());
+    }
     let active_admin = member.role.is_admin() && !member.disabled && !member.account_disabled;
     if active_admin {
         guard_last_admin(&mut tx).await?;
@@ -421,22 +434,28 @@ async fn audit_platform(
     Ok(())
 }
 
-/// The create endpoint limit for each actor and tenant.
+/// The create endpoint limit for each actor and tenant, and for the tenant itself.
 fn check_create_user_limit(state: &AppState, context: &RequestContext) -> Result<(), ApiError> {
     let actor = match &context.actor {
-        restichub_db::audit::Actor::User(id) => format!("user:{id}"),
-        restichub_db::audit::Actor::ApiToken(id) => format!("api_token:{id}"),
+        Actor::User(id) => format!("user:{id}"),
+        Actor::ApiToken(id) => format!("api_token:{id}"),
         other => other.actor_type().to_owned(),
     };
+    let now = std::time::Instant::now();
     let key = crate::rate_limit::create_user_key(context.tenant_id, &actor);
-    match state
-        .auth()
-        .create_user_limiter
-        .check(&key, std::time::Instant::now())
-    {
-        Ok(()) => Ok(()),
-        Err(wait) => Err(ApiError::rate_limited(wait.as_secs().max(1))),
+    if let Err(wait) = state.auth().create_user_limiter.check(&key, now) {
+        return Err(ApiError::rate_limited(wait.as_secs().max(1)));
     }
+    // The tenant bucket bounds an actor that mints many API tokens (threat T15).
+    let tenant_key = crate::rate_limit::create_user_tenant_key(context.tenant_id);
+    if let Err(wait) = state
+        .auth()
+        .create_user_tenant_limiter
+        .check(&tenant_key, now)
+    {
+        return Err(ApiError::rate_limited(wait.as_secs().max(1)));
+    }
+    Ok(())
 }
 
 /// A duplicate username in the installation is HTTP 409 `username_taken`.

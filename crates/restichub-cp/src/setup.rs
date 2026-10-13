@@ -20,7 +20,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
 use restichub_db::tenants::{self as tenant_repo, BootstrapAdmin, BootstrapTenant};
-use restichub_db::{PLATFORM_TENANT_ID, Role, SetupTokenId, TenantId, memberships, setup, users};
+use restichub_db::{PLATFORM_TENANT_ID, Role, SetupTokenId, TenantId, setup, users};
 use restichub_secrets::{generate_dek, wrap_dek};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -297,16 +297,16 @@ async fn setup_multi(
     };
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, password.to_owned()).await?;
-    let user_id = users::create(
+    let user_id = users::create_member(
         &mut tx,
         &users::NewUser {
             username,
             password_hash: &password_hash,
             display_name,
         },
+        PLATFORM_ADMIN_ROLE,
     )
     .await?;
-    memberships::set_role(&mut tx, user_id, PLATFORM_ADMIN_ROLE).await?;
     let marked = setup::mark_used(&mut tx, token_id, now).await?;
     if !marked {
         return Err(ApiError::conflict());

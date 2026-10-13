@@ -78,11 +78,12 @@ pub fn spawn(db: Database, interval: Duration) -> tokio::task::JoinHandle<()> {
 /// Starts the periodic rate limiter sweep.
 ///
 /// The sweep removes the full and the idle buckets of the user map, the IP map and the account
-/// create map.
+/// create maps.
 pub fn spawn_limiter_sweep(
     user_limiter: Arc<RateLimiter>,
     ip_limiter: Arc<RateLimiter>,
     create_user_limiter: Arc<RateLimiter>,
+    create_user_tenant_limiter: Arc<RateLimiter>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -94,6 +95,7 @@ pub fn spawn_limiter_sweep(
             user_limiter.sweep(now);
             ip_limiter.sweep(now);
             create_user_limiter.sweep(now);
+            create_user_tenant_limiter.sweep(now);
         }
     })
 }

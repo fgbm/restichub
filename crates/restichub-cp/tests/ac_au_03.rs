@@ -53,18 +53,20 @@ async fn add_membership(
     user: restichub_db::UserId,
     role: &str,
 ) {
-    use restichub_db::memberships;
+    use restichub_db::auth;
     let mut tx = db
-        .begin_tenant(tenant)
+        .begin_platform()
         .await
         .expect("cannot begin the transaction");
-    memberships::set_role(
+    let added = auth::add_membership(
         &mut tx,
         user,
+        tenant,
         restichub_db::Role::parse(role).expect("the role"),
     )
     .await
-    .expect("cannot set the role");
+    .expect("cannot add the membership");
+    assert!(added, "the membership must be added");
     tx.commit().await.expect("cannot commit the membership");
 }
 
@@ -522,6 +524,16 @@ async fn a_suspended_tenant_is_skipped_and_refused() {
     )
     .await;
     add_membership(db.database(), beta, user, "viewer").await;
+    // An account whose only membership is in alpha. Alpha is suspended below, so the account cannot
+    // sign in.
+    account(
+        db.database(),
+        alpha,
+        "bob",
+        "correct horse battery",
+        "viewer",
+    )
+    .await;
     common::set_tenant_status(db.database(), alpha, "suspended").await;
     let app = app(db.database());
 
@@ -547,16 +559,7 @@ async fn a_suspended_tenant_is_skipped_and_refused() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // An account whose only membership is suspended cannot sign in.
-    let only_suspended = account(
-        db.database(),
-        alpha,
-        "bob",
-        "correct horse battery",
-        "viewer",
-    )
-    .await;
-    let _ = only_suspended;
+    // The account whose only membership is in the suspended tenant cannot sign in.
     let (status, _, body) = sign_in(&app, "bob", "correct horse battery").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert_eq!(
@@ -1077,6 +1080,291 @@ async fn add_membership_refuses_the_platform_tenant() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    db.cleanup().await;
+}
+
+/// The last active Platform Admin cannot lose its rights through the tenant route either: the
+/// account route and the platform route share the lock and the same active count (ADR-0025).
+#[tokio::test]
+async fn the_last_active_platform_admin_is_protected_on_the_tenant_route() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let first = create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "tenant-route-a",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let second = create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "tenant-route-b",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let cookie = session_cookie(db.database(), PLATFORM_TENANT_ID, first).await;
+    let app = app(db.database());
+
+    // The platform route disables the account of the second Platform Admin.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{second}"),
+            Some(&cookie),
+            Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // The first is the last active Platform Admin. The tenant route refuses to disable its own
+    // account, its own membership and its own session.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/users/{first}"),
+            Some(&cookie),
+            Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/users/{first}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    db.cleanup().await;
+}
+
+/// A disabled account does not count as an active Admin, so a stable actor cannot remove the last
+/// active Admin of a tenant (ADR-0025).
+#[tokio::test]
+async fn a_disabled_account_does_not_count_as_the_last_admin() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "ac-au-last-admin").await;
+    let disabled_admin = create_user(db.database(), tenant, "admin-a", "phc", "admin").await;
+    let active_admin = create_user(db.database(), tenant, "admin-b", "phc", "admin").await;
+    let platform = seed_session(db.database(), PLATFORM_TENANT_ID, "root", "platform_admin").await;
+    let app = app(db.database());
+
+    // A Platform Admin disables the account of the first Admin.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{disabled_admin}"),
+            Some(&platform),
+            Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // A stable Admin token, whose creator is not an Admin, is the actor. It cannot disable the last
+    // active Admin.
+    let token = common::seed_admin_token_actor(db.database(), tenant).await;
+    let (status, _, _) = send(
+        &app,
+        common::bearer_request(
+            "PATCH",
+            &format!("/api/v1/users/{active_admin}"),
+            &token,
+            Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    db.cleanup().await;
+}
+
+/// The self rule holds even when a second Admin keeps the last-admin guard quiet. A display name
+/// change of the caller itself stays allowed (ADR-0025).
+#[tokio::test]
+async fn an_admin_cannot_remove_its_own_rights() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "ac-au-self").await;
+    let admin = create_user(db.database(), tenant, "self-admin", "phc", "admin").await;
+    // A second Admin keeps the last-admin guard quiet, so the test reads the self rule alone.
+    create_user(db.database(), tenant, "other-admin", "phc", "admin").await;
+    let cookie = session_cookie(db.database(), tenant, admin).await;
+    let app = app(db.database());
+
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/users/{admin}"),
+            Some(&cookie),
+            Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/users/{admin}"),
+            Some(&cookie),
+            Some(json!({"role": "viewer"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/users/{admin}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/users/{admin}"),
+            Some(&cookie),
+            Some(json!({"display_name": "Renamed"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    db.cleanup().await;
+}
+
+/// Two platform routes that disable each other serialize on the same lock, so at most one wins and
+/// at least one Platform Admin stays active (ADR-0025).
+#[tokio::test]
+async fn a_concurrent_cross_route_disable_keeps_one_platform_admin() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let first = create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "cross-a",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let second = create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "cross-b",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let first_cookie = session_cookie(db.database(), PLATFORM_TENANT_ID, first).await;
+    let second_cookie = session_cookie(db.database(), PLATFORM_TENANT_ID, second).await;
+    let app = app(db.database());
+
+    // The first disables the second through the platform route; the second disables the first
+    // through the tenant route.
+    let (platform_route, tenant_route) = tokio::join!(
+        send(
+            &app,
+            request(
+                "PATCH",
+                &format!("/api/v1/platform/users/{second}"),
+                Some(&first_cookie),
+                Some(json!({"disabled": true})),
+            )
+        ),
+        send(
+            &app,
+            request(
+                "PATCH",
+                &format!("/api/v1/users/{first}"),
+                Some(&second_cookie),
+                Some(json!({"disabled": true})),
+            )
+        ),
+    );
+    let statuses = [platform_route.0, tenant_route.0];
+    assert!(
+        statuses.iter().filter(|status| status.is_success()).count() <= 1,
+        "at most one disable must succeed: {statuses:?}"
+    );
+
+    let active = common::list_users(db.database(), PLATFORM_TENANT_ID)
+        .await
+        .into_iter()
+        .filter(|member| member.role.is_admin() && !member.disabled && !member.account_disabled)
+        .count();
+    assert!(active >= 1, "at least one Platform Admin must stay active");
+
+    db.cleanup().await;
+}
+
+/// The account create limit counts the tenant too, so an actor cannot bypass it by minting many API
+/// tokens (threat T15).
+#[tokio::test]
+async fn the_account_create_limit_counts_the_tenant() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "ac-au-rate").await;
+    let first_token = common::seed_api_token(db.database(), tenant, "admin").await;
+    let second_token = common::seed_admin_token_actor(db.database(), tenant).await;
+    // A small per-tenant bucket, so the test reaches the limit quickly.
+    let app = common::app_with_tenant_create_rate(db.database(), 3);
+
+    let body = |index: usize| {
+        json!({
+            "username": format!("rate-{index}"),
+            "password": "a long enough password",
+            "display_name": "Rate",
+            "role": "viewer",
+        })
+    };
+    // Three creates fill the tenant bucket, whichever actor runs them.
+    for index in 1..=2 {
+        let (status, _, _) = send(
+            &app,
+            common::bearer_request("POST", "/api/v1/users", &first_token, Some(body(index))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+    let (status, _, _) = send(
+        &app,
+        common::bearer_request("POST", "/api/v1/users", &second_token, Some(body(3))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    // A second actor cannot bypass the tenant bucket.
+    let (status, _, body) = send(
+        &app,
+        common::bearer_request("POST", "/api/v1/users", &second_token, Some(body(4))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
 
     db.cleanup().await;
 }

@@ -155,15 +155,29 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewUser<'_>) -> Result<UserId, 
     Ok(id)
 }
 
-/// A membership insert calls it, so it serializes with the write of the same row.
-/// administrator write of the same account.
-pub async fn lock_account(tx: &mut TenantTx<'_>, id: UserId) -> Result<bool, DbError> {
-    let (locked,): (bool,) = sqlx::query_as("SELECT auth_lock_account($1)")
+/// Creates an account with its first membership in the tenant of the transaction (ADR-0025). The
+/// database function creates both rows in one step, takes the account row lock and applies the
+/// scope rule.
+pub async fn create_member(
+    tx: &mut TenantTx<'_>,
+    new: &NewUser<'_>,
+    role: Role,
+) -> Result<UserId, DbError> {
+    let id = UserId::new();
+    let (created,): (bool,) = sqlx::query_as("SELECT auth_create_member($1, $2, $3, $4, $5, $6)")
         .bind(id)
+        .bind(new.username)
+        .bind(new.password_hash)
+        .bind(new.display_name)
+        .bind(tx.tenant())
+        .bind(role.as_str())
         .fetch_one(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
-    Ok(locked)
+    if !created {
+        return Err(DbError::AccountCreateRefused);
+    }
+    Ok(id)
 }
 
 /// The password write of an administrator (ADR-0025). It needs a membership in the current tenant

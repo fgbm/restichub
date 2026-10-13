@@ -67,8 +67,9 @@ async fn db_a_tenant_creation_commits_atomically() -> TestResult {
         count_in_tenant(db.database(), committed, "tenant_keys").await?,
         1
     );
-    // The account lives in the platform tenant; the new tenant holds its membership (ADR-0025).
-    assert_eq!(count_in_tenant(db.database(), committed, "users").await?, 0);
+    // The account lives in the platform tenant, and the runtime role reads no account row directly
+    // (ADR-0025).
+    assert_tenant_table_read_refused(db.database(), committed, "users").await?;
     assert_eq!(
         count_in_tenant(db.database(), committed, "memberships").await?,
         1
@@ -118,7 +119,7 @@ async fn db_a_tenant_creation_rolls_back_on_a_bad_audit_actor() -> TestResult {
         count_in_tenant(db.database(), tenant, "tenant_keys").await?,
         0
     );
-    assert_eq!(count_in_tenant(db.database(), tenant, "users").await?, 0);
+    assert_tenant_table_read_refused(db.database(), tenant, "users").await?;
     assert_eq!(
         count_in_tenant(db.database(), tenant, "audit_log").await?,
         0

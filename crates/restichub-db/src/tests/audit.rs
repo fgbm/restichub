@@ -77,7 +77,7 @@ async fn db_insert_platform_for_clears_the_tenant_guc() -> TestResult {
     assert_eq!(page.records.len(), 1);
 
     // The function cleared the GUC: the transaction reads no row of tenant A.
-    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM memberships")
         .fetch_one(tx.as_conn())
         .await?;
     assert_eq!(count.0, 0, "the transaction must hold no tenant scope");
@@ -99,7 +99,7 @@ async fn db_insert_platform_for_clears_the_tenant_guc() -> TestResult {
 }
 
 #[tokio::test]
-async fn db_platform_audit_writes_an_existing_tenant_and_counts_users() -> TestResult {
+async fn db_platform_audit_writes_an_existing_tenant() -> TestResult {
     let Some(db) = test_database().await else {
         return Ok(());
     };
@@ -170,14 +170,14 @@ async fn db_platform_audit_writes_an_existing_tenant_and_counts_users() -> TestR
 
     // After the audit write, the transaction reads and writes no row of tenant A, and it sees no
     // row of the platform tenant.
-    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM memberships")
         .fetch_one(tx.as_conn())
         .await?;
     assert_eq!(count.0, 0, "the transaction must hold no tenant scope");
-    let platform_users: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+    let platform_members: (i64,) = sqlx::query_as("SELECT count(*) FROM memberships")
         .fetch_one(tx.as_conn())
         .await?;
-    assert_eq!(platform_users.0, 0);
+    assert_eq!(platform_members.0, 0);
     let platform_keys: (i64,) = sqlx::query_as("SELECT count(*) FROM kek_check")
         .fetch_one(tx.as_conn())
         .await?;

@@ -19,9 +19,8 @@ use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
 use crate::server::AppState;
+use crate::users::ADMIN_LOCK;
 use crate::validation;
-
-const ADMIN_LOCK: &str = "restichub.platform_admin:";
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AddMembershipRequest {

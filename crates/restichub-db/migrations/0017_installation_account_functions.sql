@@ -43,7 +43,7 @@ SET search_path = pg_catalog, pg_temp
 AS $$
     SELECT member.tenant_id, count(*)::bigint
     FROM public.memberships AS member
-    WHERE current_setting('restichub.scope', true) = 'platform'
+    WHERE current_setting('restichub.scope', true) IS NOT DISTINCT FROM 'platform'
     GROUP BY member.tenant_id
 $$;
 
@@ -123,25 +123,6 @@ AS $$
     ORDER BY tenant.name
 $$;
 
--- True when the account holds any membership in a tenant other than the given one, that is not
--- deleted. A disabled membership and a suspended tenant still count: the account is shared with
--- that tenant (ADR-0025, threat T14).
-CREATE FUNCTION auth_account_is_shared(account_id uuid, exclude_tenant_id uuid)
-RETURNS boolean
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp
-AS $$
-    SELECT EXISTS (
-        SELECT 1
-        FROM public.memberships AS member
-        JOIN public.tenants AS tenant ON tenant.id = member.tenant_id
-        WHERE member.user_id = account_id
-          AND member.tenant_id <> exclude_tenant_id
-          AND tenant.status <> 'deleted'
-    )
-$$;
-
 -- The members of the tenant of the transaction: the administrator read of the accounts of its
 -- members. It returns only accounts with a membership in the current tenant.
 CREATE FUNCTION auth_tenant_members()
@@ -211,8 +192,8 @@ AS $$
     LIMIT 1
 $$;
 
--- Creates an account in the platform tenant. The id comes from the caller (UUIDv7). A create and
--- the membership that follows take the account row lock, so no administrator write races with them.
+-- Creates an account in the platform tenant, with no membership. The id comes from the caller
+-- (UUIDv7). `auth_create_member` creates an account together with its first membership.
 CREATE FUNCTION auth_create_account(
     new_id uuid,
     account_name text,
@@ -237,17 +218,48 @@ BEGIN
 END
 $$;
 
--- Takes the account row lock. A membership insert calls it first, so it serializes with an
--- administrator write of the same account. `false` when the account is absent.
-CREATE FUNCTION auth_lock_account(account_id uuid)
+-- Creates an account and its first membership in one step. A tenant transaction creates the
+-- account in its own tenant only; the platform scope (the setup and the tenant creation) creates
+-- the first member of any active tenant (ADR-0025). The insert takes the account row lock, so no
+-- administrator write races with the create. `false` when the target tenant is absent, not active,
+-- or outside the scope of the caller.
+CREATE FUNCTION auth_create_member(
+    new_id uuid,
+    account_name text,
+    new_password_hash text,
+    new_display_name text,
+    target_tenant_id uuid,
+    member_role text
+)
 RETURNS boolean
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
+DECLARE
+    current_tenant uuid := NULLIF(current_setting('restichub.tenant_id', true), '')::uuid;
 BEGIN
-    PERFORM 1 FROM public.users WHERE id = account_id FOR UPDATE;
-    RETURN FOUND;
+    IF current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
+       AND target_tenant_id IS DISTINCT FROM current_tenant THEN
+        RETURN false;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.tenants WHERE id = target_tenant_id AND status = 'active'
+    ) THEN
+        RETURN false;
+    END IF;
+    INSERT INTO public.users (id, tenant_id, username, password_hash, display_name)
+    VALUES (
+        new_id,
+        '00000000-0000-7000-8000-000000000000'::uuid,
+        account_name,
+        new_password_hash,
+        new_display_name
+    );
+    PERFORM 1 FROM public.users WHERE id = new_id FOR UPDATE;
+    INSERT INTO public.memberships (tenant_id, user_id, role)
+    VALUES (target_tenant_id, new_id, member_role);
+    RETURN true;
 END
 $$;
 
@@ -275,7 +287,7 @@ BEGIN
         RETURN 'not_found';
     END IF;
     IF current_tenant <> '00000000-0000-7000-8000-000000000000'::uuid
-       AND current_setting('restichub.scope', true) <> 'platform'
+       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
        AND EXISTS (
            SELECT 1
            FROM public.memberships AS member
@@ -315,7 +327,7 @@ BEGIN
         RETURN 'not_found';
     END IF;
     IF current_tenant <> '00000000-0000-7000-8000-000000000000'::uuid
-       AND current_setting('restichub.scope', true) <> 'platform'
+       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
        AND EXISTS (
            SELECT 1
            FROM public.memberships AS member
@@ -372,10 +384,9 @@ AS $$
 DECLARE
     current_tenant uuid := NULLIF(current_setting('restichub.tenant_id', true), '')::uuid;
 BEGIN
-    IF NOT (
-        current_tenant = '00000000-0000-7000-8000-000000000000'::uuid
-        OR current_setting('restichub.scope', true) = 'platform'
-    ) THEN
+    IF current_tenant IS DISTINCT FROM '00000000-0000-7000-8000-000000000000'::uuid
+       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
+    THEN
         RETURN 'forbidden';
     END IF;
     UPDATE public.users
@@ -405,8 +416,8 @@ BEGIN
     own_session := keep_session IS NOT NULL AND EXISTS (
         SELECT 1 FROM public.sessions WHERE id = keep_session AND user_id = account_id
     );
-    IF current_setting('restichub.scope', true) = 'platform'
-       OR current_tenant = '00000000-0000-7000-8000-000000000000'::uuid
+    IF coalesce(current_setting('restichub.scope', true), '') = 'platform'
+       OR current_tenant IS NOT DISTINCT FROM '00000000-0000-7000-8000-000000000000'::uuid
        OR own_session THEN
         DELETE FROM public.sessions
         WHERE user_id = account_id AND (keep_session IS NULL OR id <> keep_session);
@@ -462,10 +473,11 @@ END
 $$;
 
 -- Adds a membership for an existing account (Platform Admin only). The platform scope is required,
--- so a tenant transaction cannot add an account to a tenant. The function takes the account row
--- lock, so it serializes with an administrator write of the same account. It refuses the platform
--- tenant: a Platform Admin membership is created by the setup or by the platform user create only.
--- It re-enables a disabled membership and sets the role.
+-- so a tenant transaction cannot add an account to a tenant; the create path of a tenant uses
+-- `auth_create_member`. The function takes the account row lock, so it serializes with an
+-- administrator write of the same account. It refuses the platform tenant: a Platform Admin
+-- membership is created by the setup or by the platform user create only. It re-enables a disabled
+-- membership and sets the role.
 CREATE FUNCTION auth_add_membership(account_id uuid, target_tenant_id uuid, role text)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -473,7 +485,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
-    IF current_setting('restichub.scope', true) <> 'platform' THEN
+    IF current_setting('restichub.scope', true) IS DISTINCT FROM 'platform' THEN
         RETURN false;
     END IF;
     PERFORM 1 FROM public.users WHERE id = account_id FOR UPDATE;
@@ -500,11 +512,10 @@ ALTER FUNCTION auth_find_account(text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_find_account_by_id(uuid) OWNER TO restichub_auth;
 ALTER FUNCTION auth_self_password_hash(uuid, uuid) OWNER TO restichub_auth;
 ALTER FUNCTION auth_list_memberships(uuid) OWNER TO restichub_auth;
-ALTER FUNCTION auth_account_is_shared(uuid, uuid) OWNER TO restichub_auth;
 ALTER FUNCTION auth_tenant_members() OWNER TO restichub_auth;
 ALTER FUNCTION auth_tenant_member(uuid) OWNER TO restichub_auth;
 ALTER FUNCTION auth_create_account(uuid, text, text, text) OWNER TO restichub_auth;
-ALTER FUNCTION auth_lock_account(uuid) OWNER TO restichub_auth;
+ALTER FUNCTION auth_create_member(uuid, text, text, text, uuid, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_admin_set_password(uuid, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_admin_set_display_name(uuid, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_self_set_password(uuid, uuid, text) OWNER TO restichub_auth;
@@ -519,11 +530,10 @@ REVOKE ALL ON FUNCTION auth_find_account(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_find_account_by_id(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_self_password_hash(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_list_memberships(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION auth_account_is_shared(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_tenant_members() FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_tenant_member(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_create_account(uuid, text, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION auth_lock_account(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION auth_create_member(uuid, text, text, text, uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_admin_set_password(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_admin_set_display_name(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_self_set_password(uuid, uuid, text) FROM PUBLIC;
@@ -538,11 +548,10 @@ GRANT EXECUTE ON FUNCTION auth_find_account(text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_find_account_by_id(uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_self_password_hash(uuid, uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_list_memberships(uuid) TO restichub_app;
-GRANT EXECUTE ON FUNCTION auth_account_is_shared(uuid, uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_tenant_members() TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_tenant_member(uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_create_account(uuid, text, text, text) TO restichub_app;
-GRANT EXECUTE ON FUNCTION auth_lock_account(uuid) TO restichub_app;
+GRANT EXECUTE ON FUNCTION auth_create_member(uuid, text, text, text, uuid, text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_admin_set_password(uuid, text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_admin_set_display_name(uuid, text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_self_set_password(uuid, uuid, text) TO restichub_app;
@@ -551,6 +560,13 @@ GRANT EXECUTE ON FUNCTION auth_delete_account_sessions(uuid, uuid) TO restichub_
 GRANT EXECUTE ON FUNCTION auth_delete_session(uuid, uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_set_last_tenant(uuid, uuid, uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_add_membership(uuid, uuid, text) TO restichub_app;
+
+-- The runtime role reads and writes an account through the functions above only (ADR-0025). A
+-- direct write could add an account to a tenant outside the scope rules, and a direct read could
+-- return a password hash. A membership insert runs through `auth_create_member` or
+-- `auth_add_membership`.
+REVOKE SELECT, INSERT, UPDATE, DELETE ON users FROM restichub_app;
+REVOKE INSERT ON memberships FROM restichub_app;
 
 -- The definer role creates no object after the migration (N5). It keeps USAGE.
 REVOKE CREATE ON SCHEMA public FROM restichub_auth;

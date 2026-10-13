@@ -60,8 +60,12 @@
 	async function load(): Promise<void> {
 		try {
 			tenants = await service.listMemberships();
-		} catch {
+		} catch (error) {
 			tenants = [];
+			if (error instanceof UnauthorizedError) {
+				clearSession();
+				await goto(resolve('/(auth)/sign-in'));
+			}
 		}
 	}
 

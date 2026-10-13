@@ -12,21 +12,25 @@ async fn ac_tn_01_db_tenant_a_cannot_read_tenant_b_rows() -> TestResult {
 
     let mut tx_b = db.database().begin_tenant(tenant_b).await?;
     for table in TENANT_TABLES {
-        // An account lives in the platform tenant, so a tenant holds no account row (ADR-0025).
-        let expected = if table == "users" { 0 } else { 1 };
-        assert_eq!(
-            count_rows(&mut tx_b, table).await?,
-            expected,
-            "tenant B: {table}"
-        );
+        if table == "users" {
+            continue;
+        }
+        assert_eq!(count_rows(&mut tx_b, table).await?, 1, "tenant B: {table}");
     }
     tx_b.commit().await?;
+    // An account lives in the platform tenant, and the runtime role reads no account row directly
+    // (ADR-0025).
+    assert_tenant_table_read_refused(db.database(), tenant_b, "users").await?;
 
     let mut tx_a = db.database().begin_tenant(tenant_a).await?;
     for table in TENANT_TABLES {
+        if table == "users" {
+            continue;
+        }
         assert_eq!(count_rows(&mut tx_a, table).await?, 0, "tenant A: {table}");
     }
     tx_a.commit().await?;
+    assert_tenant_table_read_refused(db.database(), tenant_a, "users").await?;
 
     db.cleanup().await;
     Ok(())
@@ -41,8 +45,9 @@ async fn db_a_foreign_tenant_id_write_is_rejected() -> TestResult {
     let seed_b = seed_tenant(db.database(), tenant_b).await?;
     let seed_a = seed_tenant(db.database(), tenant_a).await?;
 
-    // The `WITH CHECK` clause rejects a user row of tenant B (42501). Each negative write runs in
-    // its own transaction, so an aborted transaction does not hide the next result.
+    // The runtime role cannot write an account row directly (ADR-0025): the account table is
+    // reached through the definer functions only. Each negative write runs in its own transaction,
+    // so an aborted transaction does not hide the next result.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let write = sqlx::query(
         "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
@@ -55,8 +60,8 @@ async fn db_a_foreign_tenant_id_write_is_rejected() -> TestResult {
     assert_code(write, "42501");
     drop(tx);
 
-    // An account is installation-wide, so a membership in tenant A may reference the account of
-    // tenant B (a shared account, ADR-0025).
+    // A tenant transaction cannot add an account to a tenant: a membership insert runs through the
+    // definer functions only (ADR-0025).
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let reference =
         sqlx::query("INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'viewer')")
@@ -64,7 +69,26 @@ async fn db_a_foreign_tenant_id_write_is_rejected() -> TestResult {
             .bind(seed_b.user)
             .execute(tx.as_conn())
             .await;
-    assert!(reference.is_ok(), "{reference:?}");
+    assert_code(reference, "42501");
+    drop(tx);
+
+    // The database function refuses the foreign account to a tenant scope too.
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let (added,): (bool,) = sqlx::query_as("SELECT auth_add_membership($1, $2, $3)")
+        .bind(seed_b.user)
+        .bind(tenant_a)
+        .bind("viewer")
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert!(!added, "a tenant scope cannot add a membership");
+    drop(tx);
+
+    // A platform transaction cannot read a password hash (ADR-0025).
+    let mut tx = db.database().begin_platform().await?;
+    let hash = sqlx::query("SELECT password_hash FROM users")
+        .execute(tx.as_conn())
+        .await;
+    assert_code(hash, "42501");
     drop(tx);
 
     // A session of tenant A may reference the same installation-wide account.
@@ -104,7 +128,7 @@ async fn db_a_transaction_without_the_setting_sees_zero_rows() -> TestResult {
     sqlx::query("SET LOCAL ROLE restichub_app")
         .execute(&mut *tx)
         .await?;
-    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM sessions")
         .fetch_one(&mut *tx)
         .await?;
     drop(tx);
@@ -164,7 +188,7 @@ async fn db_a_delete_leaves_the_rows_of_the_other_tenant() -> TestResult {
 }
 
 #[tokio::test]
-async fn db_the_platform_scope_sees_no_user_rows() -> TestResult {
+async fn db_the_platform_scope_sees_no_other_tenant_rows() -> TestResult {
     let Some(db) = test_database().await else {
         return Ok(());
     };
@@ -172,7 +196,7 @@ async fn db_the_platform_scope_sees_no_user_rows() -> TestResult {
     seed_tenant(db.database(), tenant_b).await?;
 
     let mut tx = db.database().begin_platform().await?;
-    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM sessions")
         .fetch_one(tx.as_conn())
         .await?;
     tx.commit().await?;
@@ -246,8 +270,14 @@ async fn db_every_relation_has_forced_rls_and_a_policy() -> TestResult {
                 );
                 assert!(*policies >= 1, "{schema}.{name}: no policy");
                 let has_tenant: (i64,) = sqlx::query_as(
-                    "SELECT count(*) FROM information_schema.columns \
-                     WHERE table_schema = $1 AND table_name = $2 AND column_name = 'tenant_id'",
+                    // `information_schema` hides a column the runtime role cannot read, so the
+                    // PostgreSQL catalog answers instead.
+                    "SELECT count(*) \
+                     FROM pg_attribute a \
+                     JOIN pg_class c ON c.oid = a.attrelid \
+                     JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     WHERE n.nspname = $1 AND c.relname = $2 \
+                       AND a.attname = 'tenant_id' AND a.attnum > 0 AND NOT a.attisdropped",
                 )
                 .bind(schema)
                 .bind(name)
@@ -313,7 +343,7 @@ async fn db_every_relation_has_forced_rls_and_a_policy() -> TestResult {
 #[tokio::test]
 async fn db_the_account_functions_are_scoped_to_the_current_tenant() -> TestResult {
     use crate::enums::Role;
-    use crate::{auth, memberships, users};
+    use crate::{auth, users};
 
     let Some(db) = test_database().await else {
         return Ok(());
@@ -322,57 +352,51 @@ async fn db_the_account_functions_are_scoped_to_the_current_tenant() -> TestResu
 
     let local = {
         let mut tx = db.database().begin_tenant(tenant_a).await?;
-        let user = users::create(
+        let user = users::create_member(
             &mut tx,
             &NewUser {
                 username: "local",
                 password_hash: "phc",
                 display_name: "Local",
             },
+            Role::Admin,
         )
         .await?;
-        memberships::set_role(&mut tx, user, Role::Admin).await?;
         tx.commit().await?;
         user
     };
     let foreign = {
         let mut tx = db.database().begin_tenant(tenant_b).await?;
-        let user = users::create(
+        let user = users::create_member(
             &mut tx,
             &NewUser {
                 username: "foreign",
                 password_hash: "phc",
                 display_name: "Foreign",
             },
+            Role::Viewer,
         )
         .await?;
-        memberships::set_role(&mut tx, user, Role::Viewer).await?;
         tx.commit().await?;
         user
     };
     let platform = {
         let mut tx = db.database().begin_tenant(PLATFORM_TENANT_ID).await?;
-        let user = users::create(
+        let user = users::create_member(
             &mut tx,
             &NewUser {
                 username: "root",
                 password_hash: "phc",
                 display_name: "Root",
             },
+            Role::PlatformAdmin,
         )
         .await?;
-        memberships::set_role(&mut tx, user, Role::PlatformAdmin).await?;
         tx.commit().await?;
         user
     };
 
     let mut tx = db.database().begin_tenant(tenant_a).await?;
-
-    // A tenant transaction reads no account row directly.
-    let (direct,): (i64,) = sqlx::query_as("SELECT count(*) FROM users")
-        .fetch_one(tx.as_conn())
-        .await?;
-    assert_eq!(direct, 0);
 
     // The member reads return only the members of tenant A.
     assert!(users::get_member(&mut tx, foreign).await?.is_none());
@@ -428,6 +452,51 @@ async fn db_the_account_functions_are_scoped_to_the_current_tenant() -> TestResu
     assert!(!added);
 
     tx.commit().await?;
+
+    // A tenant transaction reads no account row directly (ADR-0025).
+    assert_tenant_table_read_refused(db.database(), tenant_a, "users").await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// A call with no tenant and no scope setting fails closed (ADR-0025). A `NULL` setting must not
+/// skip a scope guard.
+#[tokio::test]
+async fn db_an_account_function_without_the_settings_fails_closed() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+    let seed = seed_tenant(db.database(), tenant_a).await?;
+
+    // The runtime login without `SET ROLE` and without the settings.
+    let pool = db.pool();
+    let (added,): (bool,) = sqlx::query_as("SELECT auth_add_membership($1, $2, $3)")
+        .bind(seed.user)
+        .bind(tenant_a)
+        .bind("viewer")
+        .fetch_one(pool)
+        .await?;
+    assert!(!added, "an unset scope must refuse the membership");
+
+    let (status,): (String,) = sqlx::query_as("SELECT auth_set_account_disabled($1, true)")
+        .bind(seed.user)
+        .fetch_one(pool)
+        .await?;
+    assert_eq!(status, "forbidden");
+
+    let (created,): (bool,) = sqlx::query_as("SELECT auth_create_member($1, $2, $3, $4, $5, $6)")
+        .bind(UserId::new())
+        .bind("no-guc")
+        .bind("phc")
+        .bind("No Guc")
+        .bind(tenant_a)
+        .bind("viewer")
+        .fetch_one(pool)
+        .await?;
+    assert!(!created, "an unset tenant must refuse the create");
+
     db.cleanup().await;
     Ok(())
 }

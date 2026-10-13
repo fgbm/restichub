@@ -242,12 +242,13 @@ async fn a_second_admin_allows_the_change() {
         .find(|user| user.username == "admin")
         .map(|user| user.id)
         .unwrap_or_default();
+    // The actor demotes the second Admin. The guard allows it: the actor stays an active Admin.
     let body = json!({"role": "viewer"});
     let (status, _, _) = send(
         &app,
         request(
             "PATCH",
-            &format!("/api/v1/users/{first}"),
+            &format!("/api/v1/users/{second}"),
             Some(&cookie),
             Some(body),
         ),

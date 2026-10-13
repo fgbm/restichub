@@ -198,6 +198,13 @@ pub fn app_single(db: &Database) -> Router {
     router(AppState::new(db.clone()).with_tenancy(TenancyConfig::default()))
 }
 
+/// The same as [`app`], with a small per-tenant account create bucket, so a test reaches the limit
+/// quickly.
+pub fn app_with_tenant_create_rate(db: &Database, capacity: u32) -> Router {
+    let auth = AuthState::new(AuthConfig::default()).with_create_user_tenant_rate(capacity);
+    router(AppState::with_auth(db.clone(), auth).with_tenancy(TenancyConfig::multi()))
+}
+
 #[derive(Debug)]
 pub struct TestKek(restichub_secrets::Kek);
 
@@ -330,20 +337,18 @@ pub async fn create_user(
         .begin_tenant(tenant)
         .await
         .expect("cannot begin the transaction");
-    let user = users::create(
+    let role = Role::parse(role).expect("the role is known");
+    let user = users::create_member(
         &mut tx,
         &users::NewUser {
             username,
             password_hash,
             display_name: username,
         },
+        role,
     )
     .await
     .expect("cannot create the user");
-    let role = Role::parse(role).expect("the role is known");
-    memberships::set_role(&mut tx, user, role)
-        .await
-        .expect("cannot set the role");
     tx.commit().await.expect("cannot commit the user");
     user
 }

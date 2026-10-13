@@ -26,7 +26,7 @@ use crate::{Database, TenantId, TenantTx, users};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// The list of SECURITY DEFINER functions in the schema.
-const SECURITY_DEFINER_ALLOWED: [&str; 21] = [
+const SECURITY_DEFINER_ALLOWED: [&str; 20] = [
     "auth_find_tenant",
     "auth_find_session",
     "auth_find_api_token",
@@ -35,11 +35,10 @@ const SECURITY_DEFINER_ALLOWED: [&str; 21] = [
     "auth_find_account_by_id",
     "auth_self_password_hash",
     "auth_list_memberships",
-    "auth_account_is_shared",
     "auth_tenant_members",
     "auth_tenant_member",
     "auth_create_account",
-    "auth_lock_account",
+    "auth_create_member",
     "auth_admin_set_password",
     "auth_admin_set_display_name",
     "auth_self_set_password",
@@ -99,21 +98,16 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
 
     let mut tx = db.begin_tenant(tenant).await?;
     let username = format!("alice-{tenant}");
-    let user = users::create(
+    let user = users::create_member(
         &mut tx,
         &NewUser {
             username: &username,
             password_hash: "phc$secret",
             display_name: "Alice",
         },
+        crate::Role::Admin,
     )
     .await?;
-
-    sqlx::query("INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')")
-        .bind(tenant)
-        .bind(user)
-        .execute(tx.as_conn())
-        .await?;
 
     let session_id = SessionId::new();
     sqlx::query(
@@ -202,6 +196,25 @@ async fn count_rows(
         .fetch_one(tx.as_conn())
         .await?;
     Ok(count.0)
+}
+
+/// Asserts that the runtime role cannot read the table directly. The table name comes from a fixed
+/// list in the test only.
+async fn assert_tenant_table_read_refused(
+    db: &Database,
+    tenant: TenantId,
+    table: &'static str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut tx = db.begin_tenant(tenant).await?;
+    let query = format!("SELECT count(*) FROM {table}");
+    let result = sqlx::query(AssertSqlSafe(query))
+        .execute(tx.as_conn())
+        .await;
+    match result {
+        Ok(_) => panic!("the read of {table} must fail"),
+        Err(error) => assert_eq!(code(&error).as_deref(), Some("42501"), "{error}"),
+    }
+    Ok(())
 }
 
 fn bootstrap(name: &str) -> crate::tenants::BootstrapTenant<'_> {

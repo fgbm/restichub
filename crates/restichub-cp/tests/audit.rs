@@ -16,8 +16,7 @@ use restichub_cp::server::{AppState, router};
 use restichub_db::audit::{self, Actor, AuditAction, AuditEvent, AuditFilter, AuditPage};
 use restichub_db::test_util::{TestDatabase, test_database};
 use restichub_db::{
-    Database, DatabaseConfig, PLATFORM_TENANT_ID, SecretId, TenantId, memberships, sessions,
-    tenants, users,
+    Database, DatabaseConfig, PLATFORM_TENANT_ID, SecretId, TenantId, sessions, tenants, users,
 };
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -81,18 +80,13 @@ async fn sign_in(
     role: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut tx = db.database().begin_tenant(tenant).await?;
-    let user = users::create(
+    let user = users::create_member(
         &mut tx,
         &users::NewUser {
             username: "tester",
             password_hash: "phc",
             display_name: "Tester",
         },
-    )
-    .await?;
-    memberships::set_role(
-        &mut tx,
-        user,
         restichub_db::Role::parse(role).ok_or("the role is known")?,
     )
     .await?;

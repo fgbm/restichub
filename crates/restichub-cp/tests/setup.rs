@@ -201,7 +201,12 @@ async fn two_parallel_setup_calls_leave_exactly_one_admin() {
         1,
         "exactly one setup call must succeed: {statuses:?}"
     );
-    assert_eq!(count(db.database(), PLATFORM_TENANT_ID, "users").await, 1);
+    assert_eq!(
+        common::list_users(db.database(), PLATFORM_TENANT_ID)
+            .await
+            .len(),
+        1
+    );
 
     db.cleanup().await;
 }

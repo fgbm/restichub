@@ -41,7 +41,11 @@ pub const SECRET_BODY_LIMIT: usize = 6 * 64 * 1024 + 4 * 1024;
 /// The account create limit for each actor and tenant in one minute (threat T15).
 pub const CREATE_USER_RATE: u32 = 20;
 
-/// The type holds the configuration, the sign-in rate limiters, the account create limiter and the
+/// The account create limit for each tenant in one minute. An actor cannot bypass the limit by
+/// minting many API tokens, so a second bucket counts the tenant (threat T15).
+pub const CREATE_USER_TENANT_RATE: u32 = 60;
+
+/// The type holds the configuration, the sign-in rate limiters, the account create limiters and the
 /// clock. A `Debug` shows the configuration only.
 #[derive(Clone)]
 pub struct AuthState {
@@ -50,6 +54,7 @@ pub struct AuthState {
     pub ip_limiter: Arc<RateLimiter>,
     pub resolved_limiter: Arc<RateLimiter>,
     pub create_user_limiter: Arc<RateLimiter>,
+    pub create_user_tenant_limiter: Arc<RateLimiter>,
     pub clock: Arc<dyn Clock>,
     pub hash_semaphore: Arc<Semaphore>,
 }
@@ -79,6 +84,11 @@ impl AuthState {
         let resolved_limiter = RateLimiter::new(config.sign_in_user_rate, window, 0);
         let create_user_limiter =
             RateLimiter::new(CREATE_USER_RATE, window, crate::rate_limit::MAX_ENTRIES);
+        let create_user_tenant_limiter = RateLimiter::new(
+            CREATE_USER_TENANT_RATE,
+            window,
+            crate::rate_limit::MAX_ENTRIES,
+        );
         let hash_semaphore = Arc::new(Semaphore::new(config.max_concurrent_hashes as usize));
         Self {
             config,
@@ -86,6 +96,7 @@ impl AuthState {
             ip_limiter: Arc::new(ip_limiter),
             resolved_limiter: Arc::new(resolved_limiter),
             create_user_limiter: Arc::new(create_user_limiter),
+            create_user_tenant_limiter: Arc::new(create_user_tenant_limiter),
             clock: Arc::new(SystemClock),
             hash_semaphore,
         }
@@ -96,6 +107,17 @@ impl AuthState {
         self.user_limiter = Arc::new(RateLimiter::new(self.config.sign_in_user_rate, window, cap));
         self.ip_limiter = Arc::new(RateLimiter::new(self.config.sign_in_ip_rate, window, cap));
         self.create_user_limiter = Arc::new(RateLimiter::new(CREATE_USER_RATE, window, cap));
+        self
+    }
+
+    /// Replaces the per-tenant account create bucket, so a test can reach its limit quickly.
+    pub fn with_create_user_tenant_rate(mut self, capacity: u32) -> Self {
+        let window = Duration::from_secs(60);
+        self.create_user_tenant_limiter = Arc::new(RateLimiter::new(
+            capacity,
+            window,
+            crate::rate_limit::MAX_ENTRIES,
+        ));
         self
     }
 
