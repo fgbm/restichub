@@ -295,9 +295,13 @@
 		align-items: stretch;
 		gap: var(--rh-space-1);
 		padding: 0 var(--rh-space-4);
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
 		background-color: var(--rh-color-canvas);
+		/* The bar border is an inset shadow, so the active tab border covers it instead of a
+		   negative margin that would add 1px of vertical overflow and a scrollbar (classic ones). */
+		box-shadow: inset 0 calc(-1 * var(--rh-border-width)) 0 var(--rh-color-border);
 		overflow-x: auto;
+		overflow-y: hidden;
+		scrollbar-width: thin;
 	}
 
 	.tab {
@@ -305,7 +309,6 @@
 		align-items: center;
 		height: 44px;
 		padding: 0 var(--rh-space-3);
-		margin-bottom: -1px;
 		border-bottom: 2px solid transparent;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-base);
