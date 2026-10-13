@@ -148,6 +148,7 @@ fn a_status_without_an_identity_is_refused() {
     assert!(commands::status(&dir).is_err());
 }
 
+#[cfg(unix)]
 fn sample_identity() -> StoredIdentity {
     StoredIdentity {
         agent_id: "0192f1e0-0000-7000-8000-000000000001".to_owned(),
