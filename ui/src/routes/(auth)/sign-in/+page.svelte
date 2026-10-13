@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { ApiError, NetworkError, service } from '#lib/api/index.ts';
+	import AuthCard from '#lib/components/AuthCard.svelte';
 	import { Alert, Button, PasswordField, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSetupRequired, loadInstance } from '#lib/stores/instance.svelte.ts';
@@ -77,55 +78,35 @@
 	<title>{t('signIn.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<h1 class="title">{t('signIn.title')}</h1>
-<p class="description">{t('signIn.description')}</p>
-
-{#if errorTitle}
-	<div class="alert">
-		<Alert tone="danger" title={errorTitle} code={errorCode} />
-	</div>
-{/if}
-
-<form class="form" onsubmit={onSubmit}>
-	<TextField
-		id="signin-username"
-		label={t('signIn.username')}
-		bind:value={username}
-		autocomplete="username"
-		required
-	/>
-	<PasswordField
-		id="signin-password"
-		label={t('signIn.password')}
-		bind:value={password}
-		autocomplete="current-password"
-		required
-	/>
-	<Button type="submit" variant="primary" loading={submitting}>
-		{submitting ? t('signIn.submitting') : t('signIn.submit')}
-	</Button>
-</form>
+<AuthCard title={t('signIn.heading')} description={t('signIn.description')}>
+	<form class="form" onsubmit={onSubmit}>
+		{#if errorTitle}
+			<Alert variant="inline" tone="danger" title={errorTitle} code={errorCode} />
+		{/if}
+		<TextField
+			id="signin-username"
+			label={t('signIn.username')}
+			bind:value={username}
+			autocomplete="username"
+			required
+		/>
+		<PasswordField
+			id="signin-password"
+			label={t('signIn.password')}
+			bind:value={password}
+			autocomplete="current-password"
+			required
+		/>
+		<Button type="submit" variant="primary" full loading={submitting}>
+			{submitting ? t('signIn.submitting') : t('signIn.submit')}
+		</Button>
+	</form>
+</AuthCard>
 
 <style>
-	.title {
-		margin: 0;
-		font-size: var(--rh-font-size-xl);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.description {
-		margin: var(--rh-space-1) 0 0;
-		color: var(--rh-color-text-muted);
-	}
-
-	.alert {
-		margin-top: var(--rh-space-4);
-	}
-
 	.form {
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-4);
-		margin-top: var(--rh-space-5);
 	}
 </style>

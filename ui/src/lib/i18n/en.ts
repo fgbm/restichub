@@ -28,6 +28,8 @@ export const en = {
 	'topbar.theme.light': 'Light',
 	'topbar.theme.dark': 'Dark',
 	'topbar.theme.system': 'System',
+	'theme.switchToDark': 'Switch to the dark theme',
+	'theme.switchToLight': 'Switch to the light theme',
 	'topbar.signOut': 'Sign out',
 	'topbar.role': 'Role',
 	'topbar.yourTenants': 'Your organizations',
@@ -93,6 +95,7 @@ export const en = {
 	'signIn.submit': 'Sign in',
 	'signIn.submitting': 'Signing in',
 	'signIn.invalid': 'The user name or the password is not correct.',
+	'signIn.heading': 'Sign in to ResticHub',
 
 	// Setup
 	'setup.title': 'Initial setup',
@@ -111,11 +114,46 @@ export const en = {
 	'setup.done': 'The Platform Admin is ready. Sign in to continue.',
 	'setup.doneSingle': 'The administrator is ready. Sign in to continue.',
 	'setup.backToSignIn': 'Back to sign in',
+	'setup.tokenNotice':
+		'The control plane wrote the setup token to its log. The token is valid one time only.',
 
 	// Overview
 	'overview.title': 'Overview',
-	'overview.description': 'The state of the installation.',
-	'overview.placeholder': 'This section shows the state of the installation in a later version.',
+	'overview.description':
+		'The state of the installation. This page fills with data after the first host.',
+	'overview.welcomeTitle': 'Welcome to ResticHub',
+	'overview.welcomeBody':
+		'Three steps connect the first host, the first repository and the first backup. Each step takes a few minutes.',
+	'overview.getStarted': 'Get started',
+	'overview.progress': '{done} of {total} done',
+	'overview.step.admin.title': 'Create the Platform Admin',
+	'overview.step.admin.body': 'The account {name} manages the installation.',
+	'overview.step.agent.title': 'Enroll the first agent',
+	'overview.step.agent.body':
+		'Run the installation script on a host. The script holds a one-time token.',
+	'overview.step.agent.action': 'Enroll a host',
+	'overview.step.repository.title': 'Add a repository',
+	'overview.step.repository.body':
+		'A restic repository holds the snapshots. The control plane keeps its password and the maintenance agent.',
+	'overview.step.repository.action': 'Add repository',
+	'overview.step.profile.title': 'Create a profile',
+	'overview.step.profile.body':
+		'A profile is the backup definition. Assign it to a host and set a schedule.',
+	'overview.step.profile.action': 'Create a profile',
+	'overview.empty.hosts.title': 'No hosts yet',
+	'overview.empty.hosts.body':
+		'Enrolled hosts appear here with their status and their last backup.',
+	'overview.empty.jobs.title': 'No jobs yet',
+	'overview.empty.jobs.body': 'Jobs appear here with their steps and their live log.',
+	'overview.empty.repositories.title': 'No repositories yet',
+	'overview.empty.repositories.body': 'Repositories appear here with their size and their growth.',
+	'overview.how.title': 'How ResticHub works',
+	'overview.how.schedule':
+		'The control plane decides when a job runs. The agent runs restic and sends the result.',
+	'overview.how.data':
+		'The agent reaches the repository directly. The control plane never holds the backup data.',
+	'overview.how.maintenance':
+		'One maintenance agent runs forget, prune and check for each repository.',
 
 	// Organizations
 	'tenants.title': 'Organizations',
@@ -204,6 +242,14 @@ export const en = {
 	'audit.detailSubtitle': 'Record {id}',
 	'audit.noMore': 'No more records.',
 	'audit.loaded': 'Loaded {count} records.',
+	'audit.filters.title': 'Filters',
+	'audit.filters.clearAll': 'Clear all',
+	'audit.filters.allTypes': 'All types',
+	'audit.filters.allActions': 'All actions',
+	'audit.copyJson': 'Copy as JSON',
+	'audit.details': 'Details',
+	'audit.recordTitle': 'Audit record {id}',
+	'audit.oldAndNew': 'Old and new',
 	'audit.actorType.user': 'User',
 	'audit.actorType.api_token': 'API token',
 	'audit.actorType.agent': 'Agent',

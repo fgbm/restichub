@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, NetworkError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem } from '#lib/api/index.ts';
+	import AuthCard from '#lib/components/AuthCard.svelte';
 	import { Alert, Button, PasswordField, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSetupRequired, isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
@@ -82,93 +83,78 @@
 	<title>{t('setup.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<h1 class="title">{t('setup.title')}</h1>
-<p class="description">{t(single ? 'setup.descriptionSingle' : 'setup.description')}</p>
-
-{#if errorTitle}
-	<div class="alert">
-		<Alert tone="danger" title={errorTitle} code={errorCode} />
+<AuthCard
+	title={t('setup.title')}
+	description={t(single ? 'setup.descriptionSingle' : 'setup.description')}
+	wide
+>
+	<div class="notice">
+		<Alert variant="inline" title={t('setup.tokenNotice')} />
 	</div>
-{/if}
-
-<form class="form" onsubmit={onSubmit}>
-	<TextField
-		id="setup-token"
-		label={t('setup.setupToken')}
-		help={t('setup.tokenHint')}
-		error={fieldError(problem, 'setup_token')}
-		bind:value={setupToken}
-		mono
-		autocomplete="off"
-		required
-	/>
-	<TextField
-		id="setup-username"
-		label={t('setup.username')}
-		error={fieldError(problem, 'username')}
-		bind:value={username}
-		autocomplete="username"
-		required
-	/>
-	<TextField
-		id="setup-display-name"
-		label={t('setup.displayName')}
-		error={fieldError(problem, 'display_name')}
-		bind:value={displayName}
-		autocomplete="name"
-		required
-	/>
-	<PasswordField
-		id="setup-password"
-		label={t('setup.password')}
-		help={t('setup.passwordHint')}
-		error={passwordTooShort ? t('setup.passwordHint') : fieldError(problem, 'password')}
-		bind:value={password}
-		autocomplete="new-password"
-		required
-	/>
-	<PasswordField
-		id="setup-confirm"
-		label={t('setup.confirmPassword')}
-		error={passwordMismatch ? t('setup.passwordMismatch') : undefined}
-		bind:value={confirmPassword}
-		autocomplete="new-password"
-		required
-	/>
-	<Button type="submit" variant="primary" loading={submitting} disabled={!canSubmit}>
-		{t(single ? 'setup.submitSingle' : 'setup.submit')}
-	</Button>
-</form>
-
-<p class="back">
-	<a href={resolve('/(auth)/sign-in')}>{t('setup.backToSignIn')}</a>
-</p>
+	<form class="form" onsubmit={onSubmit}>
+		{#if errorTitle}
+			<Alert variant="inline" tone="danger" title={errorTitle} code={errorCode} />
+		{/if}
+		<TextField
+			id="setup-token"
+			label={t('setup.setupToken')}
+			help={t('setup.tokenHint')}
+			error={fieldError(problem, 'setup_token')}
+			bind:value={setupToken}
+			mono
+			autocomplete="off"
+			required
+		/>
+		<TextField
+			id="setup-username"
+			label={t('setup.username')}
+			error={fieldError(problem, 'username')}
+			bind:value={username}
+			autocomplete="username"
+			required
+		/>
+		<TextField
+			id="setup-display-name"
+			label={t('setup.displayName')}
+			error={fieldError(problem, 'display_name')}
+			bind:value={displayName}
+			autocomplete="name"
+			required
+		/>
+		<PasswordField
+			id="setup-password"
+			label={t('setup.password')}
+			help={t('setup.passwordHint')}
+			error={passwordTooShort ? t('setup.passwordHint') : fieldError(problem, 'password')}
+			bind:value={password}
+			autocomplete="new-password"
+			required
+		/>
+		<PasswordField
+			id="setup-confirm"
+			label={t('setup.confirmPassword')}
+			error={passwordMismatch ? t('setup.passwordMismatch') : undefined}
+			bind:value={confirmPassword}
+			autocomplete="new-password"
+			required
+		/>
+		<Button type="submit" variant="primary" full loading={submitting} disabled={!canSubmit}>
+			{t(single ? 'setup.submitSingle' : 'setup.submit')}
+		</Button>
+	</form>
+	{#snippet foot()}
+		<a href={resolve('/(auth)/sign-in')}>{t('setup.backToSignIn')}</a>
+	{/snippet}
+</AuthCard>
 
 <style>
-	.title {
-		margin: 0;
-		font-size: var(--rh-font-size-xl);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.description {
-		margin: var(--rh-space-1) 0 0;
-		color: var(--rh-color-text-muted);
-	}
-
-	.alert {
-		margin-top: var(--rh-space-4);
+	.notice {
+		margin-bottom: var(--rh-space-4);
 	}
 
 	.form {
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-4);
-		margin-top: var(--rh-space-5);
-	}
-
-	.back {
-		margin: var(--rh-space-4) 0 0;
-		font-size: var(--rh-font-size-sm);
 	}
 </style>

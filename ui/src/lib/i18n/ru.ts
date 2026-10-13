@@ -29,6 +29,8 @@ export const ru: Record<MessageKey, string> = {
 	'topbar.theme.light': 'Светлая',
 	'topbar.theme.dark': 'Тёмная',
 	'topbar.theme.system': 'Как в системе',
+	'theme.switchToDark': 'Включить тёмную тему',
+	'theme.switchToLight': 'Включить светлую тему',
 	'topbar.signOut': 'Выйти',
 	'topbar.role': 'Роль',
 	'topbar.yourTenants': 'Ваши организации',
@@ -94,6 +96,7 @@ export const ru: Record<MessageKey, string> = {
 	'signIn.submit': 'Войти',
 	'signIn.submitting': 'Вход',
 	'signIn.invalid': 'Имя пользователя или пароль указаны неверно.',
+	'signIn.heading': 'Вход в ResticHub',
 
 	// Setup
 	'setup.title': 'Первоначальная настройка',
@@ -114,11 +117,45 @@ export const ru: Record<MessageKey, string> = {
 	'setup.done': 'Администратор платформы готов. Войдите, чтобы продолжить.',
 	'setup.doneSingle': 'Администратор готов. Войдите, чтобы продолжить.',
 	'setup.backToSignIn': 'Вернуться ко входу',
+	'setup.tokenNotice':
+		'Сервер управления записал токен настройки в свой журнал. Токен действует один раз.',
 
 	// Overview
 	'overview.title': 'Обзор',
-	'overview.description': 'Состояние установки.',
-	'overview.placeholder': 'Этот раздел покажет состояние установки в следующей версии.',
+	'overview.description': 'Состояние установки. Страница заполнится данными после первого хоста.',
+	'overview.welcomeTitle': 'Добро пожаловать в ResticHub',
+	'overview.welcomeBody':
+		'Три шага подключают первый хост, первый репозиторий и первую резервную копию. Каждый шаг занимает несколько минут.',
+	'overview.getStarted': 'Начало работы',
+	'overview.progress': 'Готово: {done} из {total}',
+	'overview.step.admin.title': 'Создать администратора платформы',
+	'overview.step.admin.body': 'Учётная запись {name} управляет установкой.',
+	'overview.step.agent.title': 'Зарегистрировать первый агент',
+	'overview.step.agent.body':
+		'Запустите сценарий установки на хосте. Сценарий содержит одноразовый токен.',
+	'overview.step.agent.action': 'Зарегистрировать хост',
+	'overview.step.repository.title': 'Добавить репозиторий',
+	'overview.step.repository.body':
+		'Репозиторий restic хранит снимки. Сервер управления хранит его пароль и агент обслуживания.',
+	'overview.step.repository.action': 'Добавить репозиторий',
+	'overview.step.profile.title': 'Создать профиль',
+	'overview.step.profile.body':
+		'Профиль описывает резервное копирование. Назначьте его хосту и задайте расписание.',
+	'overview.step.profile.action': 'Создать профиль',
+	'overview.empty.hosts.title': 'Хостов пока нет',
+	'overview.empty.hosts.body':
+		'Здесь появятся зарегистрированные хосты с состоянием и последней резервной копией.',
+	'overview.empty.jobs.title': 'Заданий пока нет',
+	'overview.empty.jobs.body': 'Здесь появятся задания с шагами и журналом в реальном времени.',
+	'overview.empty.repositories.title': 'Репозиториев пока нет',
+	'overview.empty.repositories.body': 'Здесь появятся репозитории с размером и ростом.',
+	'overview.how.title': 'Как работает ResticHub',
+	'overview.how.schedule':
+		'Сервер управления решает, когда запустить задание. Агент запускает restic и отправляет результат.',
+	'overview.how.data':
+		'Агент обращается к репозиторию напрямую. Сервер управления никогда не хранит данные резервных копий.',
+	'overview.how.maintenance':
+		'Один агент обслуживания выполняет forget, prune и check для каждого репозитория.',
 
 	// Tenants
 	'tenants.title': 'Организации',
@@ -207,6 +244,14 @@ export const ru: Record<MessageKey, string> = {
 	'audit.detailSubtitle': 'Запись {id}',
 	'audit.noMore': 'Записей больше нет.',
 	'audit.loaded': 'Загружено записей: {count}.',
+	'audit.filters.title': 'Фильтры',
+	'audit.filters.clearAll': 'Сбросить все',
+	'audit.filters.allTypes': 'Все типы',
+	'audit.filters.allActions': 'Все действия',
+	'audit.copyJson': 'Копировать как JSON',
+	'audit.details': 'Подробности',
+	'audit.recordTitle': 'Запись аудита {id}',
+	'audit.oldAndNew': 'Старое и новое',
 	'audit.actorType.user': 'Пользователь',
 	'audit.actorType.api_token': 'Токен API',
 	'audit.actorType.agent': 'Агент',

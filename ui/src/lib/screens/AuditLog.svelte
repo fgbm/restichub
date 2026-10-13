@@ -5,16 +5,23 @@
 	import {
 		Alert,
 		Button,
+		Icon,
 		JsonDiff,
 		KeyValue,
 		PageHeader,
+		Panel,
 		Select,
 		SidePanel,
 		Table,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { KeyValueItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
-	import { getLocale, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
+	import type {
+		IconName,
+		KeyValueItem,
+		SelectOption,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { en, getLocale, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
 
 	let { scope = 'tenant' }: { scope?: 'tenant' | 'platform' } = $props();
 
@@ -71,13 +78,53 @@
 		return new Date(value).toLocaleString(getLocale());
 	}
 
-	function actorLabel(row: AuditRecord): string {
-		const type = tAuditActorType(row.actor_type);
-		return row.actor_id ? `${type}: ${row.actor_id}` : type;
+	const relativeSteps: [Intl.RelativeTimeFormatUnit, number][] = [
+		['second', 60],
+		['minute', 60],
+		['hour', 24],
+		['day', 30],
+		['month', 12],
+		['year', Infinity]
+	];
+
+	function relativeTime(value: string): string {
+		let amount = (new Date(value).getTime() - Date.now()) / 1000;
+		const format = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' });
+		for (const [unit, size] of relativeSteps) {
+			if (Math.abs(amount) < size) return format.format(Math.round(amount), unit);
+			amount /= size;
+		}
+		return formatTime(value);
 	}
 
+	function actorLabel(row: AuditRecord): string {
+		const type = tAuditActorType(row.actor_type);
+		return row.actor_id ? `${type} · ${row.actor_id}` : type;
+	}
+
+	const actorIcons: Record<string, IconName> = {
+		user: 'user',
+		api_token: 'key',
+		agent: 'host',
+		system: 'settings'
+	};
+
 	function objectLabel(row: AuditRecord): string {
-		return row.object_id ? `${row.object_type}: ${row.object_id}` : row.object_type;
+		return row.object_id ? `${row.object_type} ${row.object_id}` : row.object_type;
+	}
+
+	function openRecord(record: AuditRecord): void {
+		selected = record;
+		panelOpen = true;
+	}
+
+	async function copyRecord(): Promise<void> {
+		if (!selected) return;
+		try {
+			await navigator.clipboard.writeText(JSON.stringify(selected, null, 2));
+		} catch {
+			// The clipboard needs a secure context and a permission; nothing else to do.
+		}
 	}
 
 	async function load(): Promise<void> {
@@ -125,35 +172,48 @@
 		{
 			key: 'occurred_at',
 			header: t('audit.columns.time'),
-			cell: (row) => formatTime(row.occurred_at)
+			value: (row) => row.occurred_at,
+			render: timeCell
 		},
 		{
 			key: 'actor',
 			header: t('audit.columns.actor'),
-			cell: (row) => actorLabel(row),
-			mono: true
+			value: (row) => actorLabel(row),
+			sortable: false,
+			render: actorCell
 		},
 		{
 			key: 'action',
 			header: t('audit.columns.action'),
 			cell: (row) => tAuditAction(row.action),
-			mono: true
+			sortable: false
 		},
 		{
 			key: 'object',
 			header: t('audit.columns.object'),
 			cell: (row) => objectLabel(row),
-			mono: true
+			mono: true,
+			sortable: false
 		},
 		{
 			key: 'source_ip',
 			header: t('audit.columns.sourceIp'),
 			cell: (row) => row.source_ip ?? t('common.unknown'),
-			mono: true
+			mono: true,
+			sortable: false
 		}
 	]);
 
+	const actionOptions = $derived<SelectOption[]>([
+		{ value: '', label: t('audit.filters.allActions') },
+		...Object.keys(en)
+			.filter((key) => key.startsWith('audit.action.'))
+			.map((key) => key.slice('audit.action.'.length))
+			.map((value) => ({ value, label: tAuditAction(value) }))
+	]);
+
 	const actorTypeOptions = $derived<SelectOption[]>([
+		{ value: '', label: t('audit.filters.allTypes') },
 		{ value: 'user', label: tAuditActorType('user') },
 		{ value: 'api_token', label: tAuditActorType('api_token') },
 		{ value: 'agent', label: tAuditActorType('agent') },
@@ -163,21 +223,9 @@
 	const detailItems = $derived<KeyValueItem[]>(
 		selected
 			? [
-					{ key: 'id', label: 'ID', value: selected.id, mono: true },
-					{ key: 'tenant', label: t('topbar.tenant'), value: selected.tenant_id, mono: true },
 					{ key: 'time', label: t('audit.columns.time'), value: formatTime(selected.occurred_at) },
-					{
-						key: 'actor',
-						label: t('audit.columns.actor'),
-						value: actorLabel(selected),
-						mono: true
-					},
-					{
-						key: 'action',
-						label: t('audit.columns.action'),
-						value: tAuditAction(selected.action),
-						mono: true
-					},
+					{ key: 'actor', label: t('audit.columns.actor'), value: actorLabel(selected) },
+					{ key: 'action', label: t('audit.columns.action'), value: tAuditAction(selected.action) },
 					{
 						key: 'object',
 						label: t('audit.columns.object'),
@@ -189,7 +237,17 @@
 						label: t('audit.columns.sourceIp'),
 						value: selected.source_ip ?? t('common.unknown'),
 						mono: true
-					}
+					},
+					...(scope === 'platform'
+						? [
+								{
+									key: 'tenant',
+									label: t('topbar.tenant'),
+									value: selected.tenant_id,
+									mono: true
+								}
+							]
+						: [])
 				]
 			: []
 	);
@@ -199,62 +257,85 @@
 	<title>{title} · {t('app.name')}</title>
 </svelte:head>
 
-<PageHeader {title} description={t('audit.description')} />
+{#snippet timeCell(row: AuditRecord)}
+	<time datetime={row.occurred_at} title={formatTime(row.occurred_at)}>
+		{relativeTime(row.occurred_at)}
+	</time>
+{/snippet}
 
-<form
-	class="filters"
-	onsubmit={(event) => {
-		event.preventDefault();
-		void load();
-	}}
->
-	<TextField
-		id="audit-from"
-		label={t('audit.filters.timeFrom')}
-		help={t('audit.filters.timeHint')}
-		type="datetime-local"
-		bind:value={from}
-	/>
-	<TextField
-		id="audit-to"
-		label={t('audit.filters.timeTo')}
-		help={t('audit.filters.timeHint')}
-		type="datetime-local"
-		bind:value={to}
-	/>
-	<TextField id="audit-action" label={t('audit.filters.action')} bind:value={action} mono />
-	<Select
-		id="audit-actor-type"
-		label={t('audit.filters.actorType')}
-		bind:value={actorType}
-		options={actorTypeOptions}
-		placeholder={t('common.all')}
-	/>
-	<TextField
-		id="audit-actor-id"
-		label={t('audit.filters.actorId')}
-		bind:value={actorId}
-		placeholder={t('audit.filters.actorPlaceholder')}
-		mono
-	/>
-	<TextField
-		id="audit-object-type"
-		label={t('audit.filters.objectType')}
-		bind:value={objectType}
-		mono
-	/>
-	<TextField
-		id="audit-object-id"
-		label={t('audit.filters.objectId')}
-		bind:value={objectId}
-		placeholder={t('audit.filters.objectPlaceholder')}
-		mono
-	/>
-	<div class="filters__actions">
-		<Button variant="primary" type="submit">{t('common.apply')}</Button>
-		<Button type="button" onclick={reset}>{t('common.reset')}</Button>
-	</div>
-</form>
+{#snippet actorCell(row: AuditRecord)}
+	<span class="actor">
+		<span class="avatar" class:avatar--square={row.actor_type !== 'user'}>
+			<Icon name={actorIcons[row.actor_type] ?? 'user'} size="xs" />
+		</span>
+		{tAuditActorType(row.actor_type)}
+	</span>
+	{#if row.actor_id}
+		<div class="actor__id">{row.actor_type} · {row.actor_id}</div>
+	{/if}
+{/snippet}
+
+<PageHeader {title} description={t('audit.description')} bordered />
+
+<Panel title={t('audit.filters.title')}>
+	{#snippet actions()}
+		<Button variant="link" onclick={reset}>{t('audit.filters.clearAll')}</Button>
+	{/snippet}
+	<form
+		class="filters"
+		onsubmit={(event) => {
+			event.preventDefault();
+			void load();
+		}}
+	>
+		<TextField
+			id="audit-from"
+			label={t('audit.filters.timeFrom')}
+			help={t('audit.filters.timeHint')}
+			type="datetime-local"
+			bind:value={from}
+		/>
+		<TextField
+			id="audit-to"
+			label={t('audit.filters.timeTo')}
+			type="datetime-local"
+			bind:value={to}
+		/>
+		<Select
+			id="audit-action"
+			label={t('audit.filters.action')}
+			bind:value={action}
+			options={actionOptions}
+		/>
+		<Select
+			id="audit-actor-type"
+			label={t('audit.filters.actorType')}
+			bind:value={actorType}
+			options={actorTypeOptions}
+		/>
+		<TextField
+			id="audit-actor-id"
+			label={t('audit.filters.actorId')}
+			bind:value={actorId}
+			placeholder={t('audit.filters.actorPlaceholder')}
+		/>
+		<TextField
+			id="audit-object-type"
+			label={t('audit.filters.objectType')}
+			bind:value={objectType}
+		/>
+		<TextField
+			id="audit-object-id"
+			label={t('audit.filters.objectId')}
+			bind:value={objectId}
+			placeholder={t('audit.filters.objectPlaceholder')}
+		/>
+		<div class="filters__actions">
+			<Button variant="primary" type="submit">{t('common.apply')}</Button>
+			<Button type="button" onclick={reset}>{t('common.reset')}</Button>
+		</div>
+	</form>
+</Panel>
 
 {#if error && !loading}
 	<div class="alert">
@@ -262,38 +343,47 @@
 	</div>
 {/if}
 
-<Table
-	{columns}
-	rows={items}
-	{loading}
-	filterable={false}
-	paginated={false}
-	rowKey={(record) => record.id}
-	onRowClick={(record) => {
-		selected = record;
-		panelOpen = true;
-	}}
-/>
+<div class="records">
+	<Table
+		{columns}
+		rows={items}
+		{loading}
+		filterable={false}
+		paginated={false}
+		sort={{ key: 'occurred_at', direction: 'desc' }}
+		emptyIcon="audit"
+		rowKey={(record) => record.id}
+	>
+		{#snippet rowActions(record)}
+			<Button size="sm" icon="eye" onclick={() => openRecord(record)}>{t('audit.details')}</Button>
+		{/snippet}
+	</Table>
+</div>
 
 <div class="load-more">
 	{#if nextCursor}
 		<Button loading={loadingMore} onclick={loadMore}>{t('common.loadMore')}</Button>
-	{:else if !loading && items.length > 0}
-		<p class="load-more__end">{t('audit.noMore')}</p>
+	{/if}
+	{#if !loading && items.length > 0}
+		<p class="load-more__text">
+			{nextCursor ? t('audit.loaded', { count: items.length }) : t('audit.noMore')}
+		</p>
 	{/if}
 </div>
 
 <SidePanel
 	bind:open={panelOpen}
-	title={t('audit.detailTitle')}
-	subtitle={selected ? t('audit.detailSubtitle', { id: selected.id }) : undefined}
+	title={selected ? t('audit.recordTitle', { id: selected.id }) : ''}
 >
 	{#if selected}
 		<KeyValue items={detailItems} />
 		<h3 class="detail-heading">{t('diff.title')}</h3>
+		<JsonDiff diff={selected.diff ?? null} variant="lines" />
+		<h3 class="detail-heading">{t('audit.oldAndNew')}</h3>
 		<JsonDiff diff={selected.diff ?? null} />
 	{/if}
 	{#snippet footer()}
+		<Button icon="copy" onclick={copyRecord}>{t('audit.copyJson')}</Button>
 		<Button onclick={() => (panelOpen = false)}>{t('common.close')}</Button>
 	{/snippet}
 </SidePanel>
@@ -301,40 +391,76 @@
 <style>
 	.filters {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-		gap: var(--rh-space-3);
-		margin-bottom: var(--rh-space-4);
-		padding: var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
-		background-color: var(--rh-color-canvas-subtle);
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: var(--rh-space-4);
+	}
+
+	@media (max-width: 720px) {
+		.filters {
+			grid-template-columns: minmax(0, 1fr);
+		}
 	}
 
 	.filters__actions {
 		display: flex;
-		align-items: flex-end;
+		grid-column: 1 / -1;
+		align-items: center;
 		gap: var(--rh-space-2);
 	}
 
 	.alert {
-		margin-bottom: var(--rh-space-4);
+		margin-top: var(--rh-space-4);
+	}
+
+	.records {
+		margin-top: var(--rh-space-6);
+	}
+
+	.actor {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.avatar {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-pill);
+		background-color: var(--rh-color-neutral-bg);
+		color: var(--rh-color-text-muted);
+	}
+
+	.avatar--square {
+		border-radius: var(--rh-radius-sm);
+	}
+
+	.actor__id {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.load-more {
 		display: flex;
-		justify-content: center;
+		align-items: center;
+		gap: var(--rh-space-2);
 		margin-top: var(--rh-space-4);
 	}
 
-	.load-more__end {
+	.load-more__text {
 		margin: 0;
-		color: var(--rh-color-text-subtle);
+		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 	}
 
 	.detail-heading {
-		margin: var(--rh-space-5) 0 var(--rh-space-2);
-		font-size: var(--rh-font-size-md);
+		margin: var(--rh-space-5) 0 var(--rh-space-3);
+		font-size: var(--rh-font-size-lg);
 		font-weight: var(--rh-font-weight-semibold);
+		line-height: var(--rh-line-height-tight);
 	}
 </style>
