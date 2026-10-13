@@ -7,15 +7,27 @@ use anyhow::{Context, Result, bail};
 
 pub const SERVICE_NAME: &str = "restichub-agent";
 
+/// The writable cache directory that systemd creates for the unit.
+pub const CACHE_DIR: &str = "/var/cache/restichub-agent";
+
+/// The capabilities restic needs on a backup source and on a local repository.
+///
+/// Restic runs as `root`, so the capability bounding set is the only limit. It drops every other
+/// capability. Without these five, restic cannot read a file of another account (CAP_DAC_READ_SEARCH,
+/// CAP_DAC_OVERRIDE) or keep an ownership and a mode of a restored file (CAP_CHOWN, CAP_FOWNER,
+/// CAP_FSETID).
+const CAPABILITIES: &str = "CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_FSETID";
+
 fn unit_path() -> PathBuf {
     PathBuf::from("/etc/systemd/system").join(format!("{SERVICE_NAME}.service"))
 }
 
 /// The systemd unit text for the running agent (FR-AG-01, AC-IN-03).
 ///
-/// `ProtectSystem=strict` makes the whole file system read-only except the identity directory.
-/// Restic reads the backup sources, which the read-only view permits, but it cannot write to a
-/// local repository. The operator adds every local repository path to `ReadWritePaths`.
+/// `ProtectSystem=strict` makes the whole file system read-only except the identity directory and
+/// the cache directory. A read of a backup source stays possible. A write to a local repository
+/// fails, so the operator adds every local repository path to `ReadWritePaths`. `ProtectHome` stays
+/// off, because a backup source is often below `/home`.
 #[must_use]
 pub fn unit_contents(exe: &Path, config_dir: &Path) -> String {
     format!(
@@ -33,7 +45,6 @@ pub fn unit_contents(exe: &Path, config_dir: &Path) -> String {
          LimitCORE=0\n\
          NoNewPrivileges=true\n\
          ProtectSystem=strict\n\
-         ProtectHome=true\n\
          PrivateTmp=true\n\
          PrivateDevices=true\n\
          ProtectKernelTunables=true\n\
@@ -48,14 +59,17 @@ pub fn unit_contents(exe: &Path, config_dir: &Path) -> String {
          LockPersonality=true\n\
          MemoryDenyWriteExecute=true\n\
          SystemCallArchitectures=native\n\
-         CapabilityBoundingSet=\n\
-         AmbientCapabilities=\n\
+         CapabilityBoundingSet={capabilities}\n\
          RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX\n\
+         CacheDirectory=restichub-agent\n\
+         Environment=RESTIC_CACHE_DIR={cache}\n\
          ReadWritePaths=\"{config}\"\n\
          \n\
          [Install]\n\
          WantedBy=multi-user.target\n",
         exe = exe.display(),
+        capabilities = CAPABILITIES,
+        cache = CACHE_DIR,
         config = config_dir.display(),
     )
 }
@@ -67,6 +81,8 @@ pub fn unit_contents(exe: &Path, config_dir: &Path) -> String {
 /// Returns an error when the unit cannot be written or `systemctl` fails.
 pub fn install() -> Result<()> {
     let exe = std::env::current_exe().context("cannot find the agent executable")?;
+    // A binary that another account can replace defeats the service hardening (T20).
+    super::location::check(&exe)?;
     let config = crate::paths::config_dir();
     let path = unit_path();
     std::fs::write(&path, unit_contents(&exe, &config))
@@ -116,14 +132,35 @@ mod tests {
     #[test]
     fn ac_in_03_the_unit_runs_the_agent_and_hardens_it() {
         let unit = unit_contents(
-            Path::new("/usr/local/bin/restichub-agent"),
+            Path::new("/opt/restichub-agent/restichub-agent"),
             Path::new("/etc/restichub-agent"),
         );
-        assert!(unit.contains("ExecStart=\"/usr/local/bin/restichub-agent\" run"));
+        assert!(unit.contains("ExecStart=\"/opt/restichub-agent/restichub-agent\" run"));
         assert!(unit.contains("ReadWritePaths=\"/etc/restichub-agent\""));
         assert!(unit.contains("NoNewPrivileges=true"));
         assert!(unit.contains("ProtectSystem=strict"));
         assert!(unit.contains("PrivateTmp=true"));
         assert!(unit.contains("WantedBy=multi-user.target"));
+    }
+
+    #[test]
+    fn ac_in_03_the_unit_keeps_the_restic_capabilities() {
+        let unit = unit_contents(
+            Path::new("/opt/restichub-agent/restichub-agent"),
+            Path::new("/etc/restichub-agent"),
+        );
+        // A backup source below /home must stay readable, so ProtectHome must be absent.
+        assert!(
+            !unit.contains("ProtectHome"),
+            "ProtectHome breaks a source under /home"
+        );
+        for capability in CAPABILITIES.split_whitespace() {
+            assert!(
+                unit.contains(capability),
+                "the bounding set drops {capability}"
+            );
+        }
+        assert!(unit.contains("CacheDirectory=restichub-agent"));
+        assert!(unit.contains("RESTIC_CACHE_DIR=/var/cache/restichub-agent"));
     }
 }

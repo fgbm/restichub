@@ -28,13 +28,20 @@ pub fn config_dir() -> PathBuf {
 ///
 /// Returns an error when the directory cannot be created or its access cannot be restricted.
 pub fn ensure_config_dir(dir: &Path) -> Result<()> {
-    std::fs::create_dir_all(dir).with_context(|| {
-        format!(
-            "cannot create the configuration directory {}",
-            dir.display()
-        )
-    })?;
-    restrict(dir)
+    #[cfg(windows)]
+    {
+        crate::winsec::ensure_config_dir(dir)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::create_dir_all(dir).with_context(|| {
+            format!(
+                "cannot create the configuration directory {}",
+                dir.display()
+            )
+        })?;
+        restrict(dir)
+    }
 }
 
 /// Writes a file that only the service account can read (FR-AG-04).
@@ -43,7 +50,14 @@ pub fn ensure_config_dir(dir: &Path) -> Result<()> {
 ///
 /// Returns an error when the file cannot be written.
 pub fn create_protected_file(path: &Path, contents: &[u8]) -> Result<()> {
-    write_owner_only(path, contents)
+    #[cfg(windows)]
+    {
+        crate::winsec::create_protected_file(path, contents)
+    }
+    #[cfg(not(windows))]
+    {
+        write_owner_only(path, contents)
+    }
 }
 
 #[cfg(unix)]
@@ -69,42 +83,29 @@ fn write_owner_only(path: &Path, contents: &[u8]) -> Result<()> {
     // The mode above applies at creation only; an overwritten file keeps its old mode.
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .with_context(|| format!("cannot set the mode of {}", path.display()))?;
-    Ok(())
+    // The identity must survive a power loss, so the data and the metadata are flushed.
+    file.sync_all()
+        .with_context(|| format!("cannot flush {}", path.display()))
 }
 
-#[cfg(windows)]
-fn restrict(dir: &Path) -> Result<()> {
-    restrict_acl(dir)
-}
-
-#[cfg(windows)]
-fn write_owner_only(path: &Path, contents: &[u8]) -> Result<()> {
-    std::fs::write(path, contents).with_context(|| format!("cannot write {}", path.display()))
-}
-
-/// Grants full control to SYSTEM and Administrators only, and removes the inherited entries.
+/// Flushes a directory entry change, so a rename of the identity survives a power loss.
 ///
-/// The well-known security identifiers avoid the localized account names; `icacls` accepts the
-/// `*SID` form. The `(OI)(CI)` flags apply the entry to the directory and to its children.
+/// Windows has no directory handle to flush; the move is durable enough there.
 ///
 /// # Errors
 ///
-/// Fails when `icacls` fails.
-#[cfg(windows)]
-pub fn restrict_acl(dir: &Path) -> Result<()> {
-    let status = std::process::Command::new("icacls")
-        .arg(dir)
-        .args([
-            "/inheritance:r",
-            "/grant:r",
-            "*S-1-5-18:(OI)(CI)F",
-            "*S-1-5-32-544:(OI)(CI)F",
-        ])
-        .status()
-        .with_context(|| format!("cannot run icacls on {}", dir.display()))?;
-    if !status.success() {
-        anyhow::bail!("icacls failed on {} with {status}", dir.display());
-    }
+/// Returns an error when the directory cannot be opened or flushed.
+#[cfg(unix)]
+pub fn sync_dir(dir: &Path) -> Result<()> {
+    let file = std::fs::File::open(dir)
+        .with_context(|| format!("cannot open the directory {}", dir.display()))?;
+    file.sync_all()
+        .with_context(|| format!("cannot flush the directory {}", dir.display()))
+}
+
+/// Flushes a directory entry change, so a rename of the identity survives a power loss.
+#[cfg(not(unix))]
+pub fn sync_dir(_dir: &Path) -> Result<()> {
     Ok(())
 }
 
@@ -155,32 +156,6 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn the_acl_grants_only_system_and_administrators() {
-        let dir = std::env::temp_dir().join(format!("restichub-agent-acl-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("cannot create the directory");
-        restrict_acl(&dir).expect("cannot set the ACL");
-        let output = std::process::Command::new("icacls")
-            .arg(&dir)
-            .output()
-            .expect("cannot run icacls");
-        let text = String::from_utf8_lossy(&output.stdout);
-        assert!(text.contains("SYSTEM"), "the ACL must grant SYSTEM: {text}");
-        assert!(
-            text.contains("Administrators") || text.contains("S-1-5-32-544"),
-            "the ACL must grant Administrators: {text}"
-        );
-        for unexpected in ["Everyone", "BUILTIN\\Users", "Authenticated Users"] {
-            assert!(
-                !text.contains(unexpected),
-                "the ACL must not grant {unexpected}: {text}"
-            );
-        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
