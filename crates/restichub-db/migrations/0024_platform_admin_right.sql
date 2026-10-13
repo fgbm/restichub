@@ -133,7 +133,9 @@ BEGIN
         RETURN NEW;
     END IF;
     target := CASE WHEN TG_OP = 'DELETE' THEN OLD.user_id ELSE NEW.user_id END;
-    IF EXISTS (SELECT 1 FROM public.users WHERE id = target AND platform_admin) THEN
+    -- The shared lock serializes the read with a concurrent grant or removal of the right (T25).
+    PERFORM 1 FROM public.users WHERE id = target AND platform_admin FOR SHARE;
+    IF FOUND THEN
         RAISE EXCEPTION
             'the organization scope may not change the membership of the Platform Admin %',
             target
@@ -535,7 +537,38 @@ BEGIN
 END
 $$;
 
+-- Grants the Platform Admin right to an existing account. The grant sets a new password that only
+-- the Platform Admin chooses and ends every session of the account, so a password that a tenant
+-- Admin may know gives no access (ADR-0029, T25). The three writes commit in one transaction. The
+-- status is `ok`, `not_found` or `forbidden`.
+CREATE FUNCTION auth_grant_platform_admin(account_id uuid, new_password_hash text)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    current_tenant uuid := NULLIF(current_setting('restichub.tenant_id', true), '')::uuid;
+BEGIN
+    IF current_tenant IS DISTINCT FROM '00000000-0000-7000-8000-000000000000'::uuid
+       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
+    THEN
+        RETURN 'forbidden';
+    END IF;
+    PERFORM 1 FROM public.users WHERE id = account_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN 'not_found';
+    END IF;
+    UPDATE public.users
+    SET password_hash = new_password_hash, platform_admin = true, updated_at = now()
+    WHERE id = account_id;
+    DELETE FROM public.sessions WHERE user_id = account_id;
+    RETURN 'ok';
+END
+$$;
+
 ALTER FUNCTION check_platform_admin_membership() OWNER TO restichub_auth;
+ALTER FUNCTION auth_grant_platform_admin(uuid, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_admin_set_password(uuid, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_admin_set_display_name(uuid, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_tenant_members() OWNER TO restichub_auth;
@@ -564,6 +597,7 @@ REVOKE ALL ON FUNCTION auth_create_platform_admin(uuid, text, text, text) FROM P
 REVOKE ALL ON FUNCTION auth_platform_admin_count() FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_is_platform_admin(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_set_platform_admin(uuid, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION auth_grant_platform_admin(uuid, text) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION auth_admin_set_password(uuid, text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_admin_set_display_name(uuid, text) TO restichub_app;
@@ -578,6 +612,7 @@ GRANT EXECUTE ON FUNCTION auth_create_platform_admin(uuid, text, text, text) TO 
 GRANT EXECUTE ON FUNCTION auth_platform_admin_count() TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_is_platform_admin(uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_set_platform_admin(uuid, boolean) TO restichub_app;
+GRANT EXECUTE ON FUNCTION auth_grant_platform_admin(uuid, text) TO restichub_app;
 
 -- The definer role creates no object after the migration (N5). It keeps USAGE.
 REVOKE CREATE ON SCHEMA public FROM restichub_auth;

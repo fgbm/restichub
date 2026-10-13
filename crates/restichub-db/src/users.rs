@@ -441,6 +441,23 @@ pub async fn set_platform_admin(
     WriteStatus::parse(&status)
 }
 
+/// Grants the Platform Admin right to an existing account with a new password and ends every
+/// session of the account (ADR-0029). It needs the platform tenant or the platform scope and takes
+/// the account row lock.
+pub async fn grant_platform_admin(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    password_hash: &str,
+) -> Result<WriteStatus, DbError> {
+    let (status,): (String,) = sqlx::query_as("SELECT auth_grant_platform_admin($1, $2)")
+        .bind(id)
+        .bind(password_hash)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    WriteStatus::parse(&status)
+}
+
 /// Writes the email address of an account for the platform administration.
 ///
 /// The unique index of the email makes a duplicate a database error with SQLSTATE 23505.

@@ -552,13 +552,17 @@ async fn db_a_tenant_scope_cannot_change_a_platform_admin_membership() -> TestRe
     );
     tx.commit().await?;
 
-    // The tenant transaction cannot change or remove the membership.
+    // The tenant transaction cannot change or remove the membership. The trigger raises
+    // `insufficient_privilege` (42501) and names the Platform Admin.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let role = crate::memberships::set_role(&mut tx, platform_admin, crate::Role::Viewer).await;
+    let error = role.expect_err("the tenant scope must not change the role");
+    assert_eq!(error.sqlstate().as_deref(), Some("42501"), "{error:?}");
     assert!(
-        crate::memberships::set_role(&mut tx, platform_admin, crate::Role::Viewer)
-            .await
-            .is_err(),
-        "the tenant scope must not change the role"
+        error
+            .database_message()
+            .is_some_and(|message| message.contains(&platform_admin.to_string())),
+        "the message must name the Platform Admin: {error:?}"
     );
     assert!(
         crate::memberships::set_disabled(&mut tx, platform_admin, true)

@@ -108,12 +108,22 @@ impl DbError {
         self.sqlstate().as_deref() == Some("23514")
     }
 
-    fn sqlstate(&self) -> Option<String> {
+    pub(crate) fn sqlstate(&self) -> Option<String> {
         match self {
             Self::Query(error) => error
                 .as_database_error()
                 .and_then(|error| error.code())
                 .map(|code| code.to_string()),
+            _ => None,
+        }
+    }
+
+    /// The message of the database error, when the driver reports it.
+    pub fn database_message(&self) -> Option<String> {
+        match self {
+            Self::Query(error) => error
+                .as_database_error()
+                .map(|error| error.message().to_owned()),
             _ => None,
         }
     }
