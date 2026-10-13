@@ -51,6 +51,7 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | T22 | A Platform Admin reads the tenant data of an organization through the platform right. | The right is an account attribute and gives no tenant data access (ADR-0029). A platform operation runs in the platform scope; the tenant data needs a membership and its role (ADR-0006, ADR-0025). AC-AU-17 checks it. | None for the right alone. The operator grants a membership on purpose. |
 | T23 | A Platform Admin adds a membership for itself and hides the change. | The write needs the Platform Admin right, and it is an audit record in the platform audit and in the target organization's audit (ADR-0029). | A Platform Admin can add itself to any active organization. The operator reads the platform audit. |
 | T24 | A user-facing list shows the internal platform tenant. | The organization list, the switcher and the tenant API exclude the platform tenant (ADR-0029). AC-TN-08 checks it. | None. |
+| T25 | An organization Admin takes over an account that holds the Platform Admin right, also when the account is a member of that organization only. | A tenant-scope write on such an account is refused (ADR-0029): the password, the display name, the disable, the role change and the membership removal. The guard is in the administrator functions and in a trigger on `memberships`. AC-AU-07 checks it. | None. |
 
 ## 4. Recommendations for operators
 
