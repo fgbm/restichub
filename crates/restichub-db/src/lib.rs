@@ -40,7 +40,7 @@ pub use ids::{
     AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, PLATFORM_TENANT_ID, SecretId, SessionId,
     SetupTokenId, TenantId, UserId,
 };
-pub use tx::{PlatformTx, TenantTx};
+pub use tx::{EnrollmentTx, PlatformTx, TenantTx};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
@@ -69,8 +69,12 @@ pub enum DbError {
     InsecureRuntimeRole { cause: String },
     #[error("the platform transaction did not create the tenant {0}")]
     TenantNotCreated(TenantId),
+    #[error("the enrollment transaction holds no tenant; the token lookup must run first")]
+    EnrollmentTenantUnset,
     #[error("the database function returned an unknown write status: {0}")]
     UnknownWriteStatus(String),
+    #[error("the enrollment function returned an unknown outcome: {0}")]
+    UnknownEnrollmentOutcome(String),
     #[error("the database refused the account create")]
     AccountCreateRefused,
     #[error(
@@ -153,6 +157,12 @@ impl Database {
     /// The transaction sets the runtime role and the platform scope.
     pub async fn begin_platform(&self) -> Result<PlatformTx<'_>, DbError> {
         PlatformTx::begin(&self.pool).await
+    }
+
+    /// The transaction sets the runtime role and no tenant scope, for the enrollment exchange that
+    /// reads the token before it knows the tenant (FR-ID-01, FR-TN-03).
+    pub async fn begin_enrollment(&self) -> Result<EnrollmentTx<'_>, DbError> {
+        EnrollmentTx::begin(&self.pool).await
     }
 
     /// Applies the embedded migrations and logs the applied version.

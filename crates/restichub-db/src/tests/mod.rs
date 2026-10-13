@@ -27,7 +27,7 @@ use crate::{Database, TenantId, TenantTx, users};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// The list of SECURITY DEFINER functions in the schema.
-const SECURITY_DEFINER_ALLOWED: [&str; 19] = [
+const SECURITY_DEFINER_ALLOWED: [&str; 20] = [
     "auth_find_tenant",
     "auth_find_session",
     "auth_find_api_token",
@@ -47,6 +47,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 19] = [
     "auth_delete_session",
     "auth_set_last_tenant",
     "auth_add_membership",
+    "enroll_consume_token",
 ];
 
 const TENANT_TABLES: [&str; 10] = [

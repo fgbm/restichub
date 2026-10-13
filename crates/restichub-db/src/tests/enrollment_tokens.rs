@@ -4,7 +4,9 @@ use time::Duration;
 use time::OffsetDateTime;
 
 use super::*;
-use crate::enrollment_tokens::{self, ConsumeOutcome, NewEnrollmentToken};
+use crate::enrollment_tokens::{
+    self, ConsumeOutcome, EnrollmentConsume, EnrollmentRefusal, NewEnrollmentToken,
+};
 use crate::test_util::test_database;
 
 async fn tenant_with_admin(
@@ -174,6 +176,77 @@ async fn ac_id_01_a_revoked_token_is_refused_and_a_second_revoke_changes_nothing
     assert_eq!(token.revoked_by_user_id, Some(user));
     // Second revoke: no change.
     assert!(!enrollment_tokens::revoke(&mut tx, id, user, now).await?);
+    tx.commit().await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// The enrollment exchange consumes a token before it knows the tenant, and the `SECURITY DEFINER`
+/// lookup returns the tenant of the token (FR-ID-01, FR-TN-03).
+#[tokio::test]
+async fn ac_id_01_the_exchange_consumes_a_token_across_tenants_and_returns_its_tenant() -> TestResult
+{
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, user_a) = tenant_with_admin(db.database(), "exchange-a").await?;
+    let (tenant_b, user_b) = tenant_with_admin(db.database(), "exchange-b").await?;
+    let now = OffsetDateTime::now_utc();
+    let hash_b = [7u8; 32];
+    let hash_a = [8u8; 32];
+
+    for (tenant, user, hash) in [(tenant_b, user_b, hash_b), (tenant_a, user_a, hash_a)] {
+        let mut tx = db.database().begin_tenant(tenant).await?;
+        enrollment_tokens::create(
+            &mut tx,
+            &NewEnrollmentToken {
+                token_hash: &hash,
+                display_prefix: "ab12cd34",
+                labels: &["host".to_owned()],
+                expires_at: now + Duration::hours(1),
+                created_by: user,
+            },
+        )
+        .await?;
+        tx.commit().await?;
+    }
+
+    // The exchange starts without a tenant. The function consumes the token of tenant B and the
+    // transaction continues as a tenant transaction of tenant B.
+    let mut tx = db.database().begin_enrollment().await?;
+    match enrollment_tokens::consume_for_enrollment(&mut tx, &hash_b, now).await? {
+        EnrollmentConsume::Consumed {
+            tenant_id, labels, ..
+        } => {
+            assert_eq!(tenant_id, tenant_b);
+            assert_eq!(labels, ["host".to_owned()]);
+        }
+        other => panic!("the exchange must consume the token: {other:?}"),
+    }
+    let tx = tx.into_tenant_tx()?;
+    assert_eq!(tx.tenant(), tenant_b);
+    tx.commit().await?;
+
+    // A second exchange sees the used token and still names the tenant for the audit.
+    let mut tx = db.database().begin_enrollment().await?;
+    match enrollment_tokens::consume_for_enrollment(&mut tx, &hash_b, now).await? {
+        EnrollmentConsume::Refused {
+            tenant_id, reason, ..
+        } => {
+            assert_eq!(tenant_id, tenant_b);
+            assert_eq!(reason, EnrollmentRefusal::Used);
+        }
+        other => panic!("the used token must be refused: {other:?}"),
+    }
+    tx.commit().await?;
+
+    // An unknown hash names no tenant, so the exchange writes no audit record.
+    let mut tx = db.database().begin_enrollment().await?;
+    assert!(matches!(
+        enrollment_tokens::consume_for_enrollment(&mut tx, &[9u8; 32], now).await?,
+        EnrollmentConsume::Unknown
+    ));
     tx.commit().await?;
 
     db.cleanup().await;
