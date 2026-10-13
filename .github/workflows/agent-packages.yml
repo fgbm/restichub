@@ -86,6 +86,16 @@ jobs:
         id: restic
         shell: bash
         run: echo "sha256=$(cat restic/restic.sha256)" >> "$GITHUB_OUTPUT"
+      # The build embeds the hash and the build script refuses a malformed value. The check runs
+      # here too, so a bad packaging step fails before the build and names this step (ADR-0031).
+      - name: Check the restic hash
+        shell: bash
+        env:
+          RESTICHUB_RESTIC_SHA256: ${{ steps.restic.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "$RESTICHUB_RESTIC_SHA256"
+          grep -Eq '^[0-9a-f]{64}$' <<<"$RESTICHUB_RESTIC_SHA256"
       # The build embeds the expected restic hash for its target (FR-AG-11).
       - name: Build the agent
         env:
