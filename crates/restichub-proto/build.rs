@@ -11,9 +11,8 @@ const PROTO_FILES: &[&str] = &[
     "restichub/agent/v1/steps.proto",
 ];
 
-/// Messages that carry secrets. The build does not generate `Debug` for them;
-/// the crate implements `Debug` and prints "***" for each secret (FR-PR-10,
-/// AC-AG-03).
+/// The build generates no `Debug` for these messages; the crate implements
+/// `Debug` and prints "***" for each secret (FR-PR-10, AC-AG-03).
 const SECRET_MESSAGES: &[&str] = &[
     ".restichub.agent.v1.SignedJob",
     ".restichub.agent.v1.RepositoryAccess",

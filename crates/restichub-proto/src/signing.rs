@@ -177,8 +177,8 @@ pub struct Rejection {
     pub job_id: Option<String>,
 }
 
-/// Signs a job with `key`. The signature covers the context prefix and the
-/// serialized [`Job`] bytes (ADR-0005, ADR-0020).
+/// The signature covers the context prefix and the serialized [`Job`] bytes
+/// (ADR-0005, ADR-0020).
 #[must_use]
 pub fn sign_job(job: &Job, key_id: impl Into<String>, key: &SigningKey) -> SignedJob {
     let bytes = job.encode_to_vec();
@@ -193,10 +193,9 @@ pub fn sign_job(job: &Job, key_id: impl Into<String>, key: &SigningKey) -> Signe
     }
 }
 
-/// Signs a key update with `key`. The signature covers the context prefix and
-/// the serialized [`KeyUpdate`] bytes (FR-PR-11). The envelope carries the
-/// `signer_key_id` so the agent looks up the signer before it decodes the
-/// update (ADR-0005).
+/// The signature covers the context prefix and the serialized [`KeyUpdate`]
+/// bytes (FR-PR-11). The envelope carries the `signer_key_id` so the agent looks
+/// up the signer before it decodes the update (ADR-0005).
 #[must_use]
 pub fn sign_key_update(update: &KeyUpdate, key: &SigningKey) -> SigningKeyUpdate {
     let bytes = update.encode_to_vec();
@@ -349,9 +348,7 @@ impl JobJournal for InMemoryJournal {
     }
 }
 
-/// Admits a job into the journal (ADR-0020).
-///
-/// A new job is recorded as accepted; an accepted job is not run a second time; a completed job returns its stored result.
+/// A new job is recorded as accepted; an accepted job is not run a second time; a completed job returns its stored result (ADR-0020).
 #[must_use]
 pub fn admit(job: &Job, journal: &mut impl JobJournal, now: Timestamp) -> Admission {
     match journal.lookup(&job.job_id) {

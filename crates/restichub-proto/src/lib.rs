@@ -4,12 +4,12 @@
 //! code. See ADR-0008. Job signing is in [`signing`], and argument validation
 //! is in [`validate`].
 
-/// Major version of the agent protocol. The agent and the control plane compare
-/// it at connection time. A different major version is incompatible.
+/// The agent and the control plane compare it at connection time. A different
+/// major version is incompatible.
 pub const PROTOCOL_VERSION_MAJOR: u32 = 1;
 
-/// Minor version of the agent protocol. The control plane adds capabilities
-/// only. See `AgentHello` and `ServerHello`.
+/// The control plane adds capabilities only. See `AgentHello` and
+/// `ServerHello`.
 pub const PROTOCOL_VERSION_MINOR: u32 = 0;
 
 pub mod agent {
