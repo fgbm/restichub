@@ -24,7 +24,7 @@
 	} = $props();
 </script>
 
-<Dialog bind:open {title} description={message}>
+<Dialog bind:open {title} description={message} size="sm" closable={false}>
 	{#snippet footer()}
 		<Button variant="secondary" onclick={() => (open = false)}>{cancelLabel}</Button>
 		<Button variant={tone} {loading} onclick={() => onConfirm?.()}>{confirmLabel}</Button>
