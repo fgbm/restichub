@@ -1,16 +1,11 @@
-//! The tracing setup of the control plane.
-
 use tracing_subscriber::EnvFilter;
 
 use crate::config::{Config, LogFormat};
 
-/// The error of the tracing setup.
 #[derive(Debug, thiserror::Error)]
 pub enum TelemetryError {
-    /// The log filter is not valid.
     #[error("the log filter is not valid")]
     Filter(#[source] tracing_subscriber::filter::ParseError),
-    /// The tracing subscriber is already set.
     #[error("cannot set the tracing subscriber")]
     Init(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
@@ -30,7 +25,7 @@ pub fn init(config: &Config) -> Result<(), TelemetryError> {
     result.map_err(TelemetryError::Init)
 }
 
-/// Initializes a text tracing subscriber for a short command such as `migrate` (N4).
+/// Initializes a text tracing subscriber for a short command such as `migrate`.
 pub fn init_command() -> Result<(), TelemetryError> {
     let filter = EnvFilter::try_new("info").map_err(TelemetryError::Filter)?;
     tracing_subscriber::fmt()

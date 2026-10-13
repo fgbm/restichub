@@ -1,4 +1,4 @@
-//! AC-AU-01: the audit records hold no secret value (issue #18).
+//! AC-AU-01: the audit records hold no secret value.
 //!
 //! The test drives every authentication and user operation and then dumps the whole audit log. The
 //! dump must hold none of the canary password, the API token value and the setup token value.
@@ -41,7 +41,6 @@ async fn ac_au_01_audit_records_hold_no_secret() {
     let tenant = create_tenant(db.database(), "canary").await;
     let admin = seed_session(db.database(), tenant, "admin", "admin").await;
 
-    // A user with the canary password.
     let hash = password::hash_password(CANARY).unwrap_or_default();
     common::create_user(db.database(), tenant, "alice", &hash, "viewer").await;
 
@@ -112,7 +111,6 @@ async fn ac_au_01_audit_records_hold_no_secret() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // A self password change.
     let (status, alice_cookie) = sign_in(&app, "canary", "alice", CANARY).await;
     assert_eq!(status, StatusCode::OK);
     let alice_cookie = alice_cookie.unwrap_or_default();
@@ -205,7 +203,7 @@ async fn ac_au_01_audit_records_hold_no_secret() {
         );
     }
 
-    // The whole dump holds none of the secrets.
+    // Dump holds none of the secrets.
     let dump = audit_dump(&db).await;
     assert!(
         !dump.contains(CANARY),
@@ -228,13 +226,12 @@ async fn ac_au_01_audit_records_hold_no_secret() {
         "the audit log holds an attempted username"
     );
 
-    // The setup created exactly one platform user.
     assert_eq!(count(db.database(), PLATFORM_TENANT_ID, "users").await, 1);
 
     db.cleanup().await;
 }
 
-/// Returns the number of records for each action.
+/// Counts records for each action.
 async fn audit_actions(
     db: &restichub_db::test_util::TestDatabase,
 ) -> std::collections::HashMap<String, i64> {
@@ -256,7 +253,6 @@ async fn audit_actions(
     rows.into_iter().collect()
 }
 
-/// Returns the text of every audit record.
 async fn audit_dump(db: &restichub_db::test_util::TestDatabase) -> String {
     let mut tx = db
         .owner_pool()

@@ -1,4 +1,4 @@
-//! The periodic maintenance of the control plane (issue #18).
+//! The periodic maintenance of the control plane.
 //!
 //! The task removes the sessions past the absolute lifetime and the expired and used setup tokens.
 //! It is a maintenance task of the control plane, not job scheduling (ADR-0002). It runs in one
@@ -12,10 +12,8 @@ use time::OffsetDateTime;
 
 use crate::rate_limit::RateLimiter;
 
-/// The time between two maintenance runs.
 pub const CLEANUP_INTERVAL: Duration = Duration::from_secs(3600);
 
-/// The time between two rate limiter sweeps.
 pub const LIMITER_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Removes the expired sessions and the expired and used setup tokens.
@@ -41,7 +39,6 @@ pub async fn cleanup(db: &Database, now: OffsetDateTime) -> Result<(), DbError> 
     Ok(())
 }
 
-/// Removes the expired sessions of one tenant.
 async fn cleanup_tenant(
     db: &Database,
     tenant: restichub_db::TenantId,
@@ -53,7 +50,6 @@ async fn cleanup_tenant(
     Ok(())
 }
 
-/// Removes the expired and used setup tokens of the platform tenant.
 async fn cleanup_setup(db: &Database, now: OffsetDateTime) -> Result<(), DbError> {
     let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
     setup::delete_expired_or_used(&mut tx, now).await?;

@@ -39,23 +39,18 @@ use crate::validation;
 use crate::validation::Reason;
 use crate::views::{SecretDetailView, SecretView};
 
-/// The body of the create-secret request.
-///
 /// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
 /// a [`SecretString`], so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 pub struct CreateSecretRequest {
     /// The name of the secret. It holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`.
     pub name: String,
-    /// The purpose of the value.
     pub purpose: SecretPurpose,
     /// The value. It holds 1 to 64 KiB bytes.
     #[schema(value_type = String)]
     pub value: SecretString,
 }
 
-/// The body of the replace-secret request.
-///
 /// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
 /// a [`SecretString`], so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
@@ -65,20 +60,16 @@ pub struct ReplaceSecretRequest {
     pub value: SecretString,
 }
 
-/// A list of secret metadata.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SecretListResponse {
-    /// The metadata of the secrets. The list never holds a value.
+    /// Never holds a value.
     pub items: Vec<SecretView>,
 }
 
-/// The outcome of the encryption of one secret value.
 struct Encrypted {
-    /// The version of the tenant key that encrypted the value.
     key_version: i32,
-    /// The 96-bit nonce of the encryption.
+    /// 96-bit nonce of the encryption.
     nonce: [u8; NONCE_LEN],
-    /// The authenticated ciphertext of the value.
     ciphertext: Vec<u8>,
 }
 
@@ -104,12 +95,11 @@ pub async fn list_secrets(
     Ok(Json(SecretListResponse { items }))
 }
 
-/// Creates a secret in the tenant.
-///
-/// The response holds the metadata only. The control plane never returns the value (AC-RP-02).
 #[utoipa::path(
     post,
     path = "/api/v1/secrets",
+    summary = "Creates a secret in the tenant.",
+    description = "The response holds the metadata only. The control plane never returns the value (AC-RP-02).",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateSecretRequest,
     responses(
@@ -132,7 +122,7 @@ pub async fn create_secret(
         .kek()
         .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
 
-    // The value lives in a `SecretString` only.
+    // Plaintext lives only in a `SecretString`.
     let plaintext = body.value;
     // The identifier comes first: it is part of the associated data of the encryption.
     let secret_id = SecretId::new();
@@ -174,6 +164,8 @@ pub async fn create_secret(
     Ok((StatusCode::CREATED, Json(SecretView::from(&metadata))))
 }
 
+/// Reads the metadata of one secret of the tenant.
+///
 /// Reads the metadata of one secret of the tenant.
 ///
 /// The response holds the metadata and the marker `set`. It never holds the value (AC-RP-02).
@@ -261,9 +253,6 @@ pub async fn replace_secret_value(
 }
 
 /// Removes a secret of the tenant.
-///
-/// Epic #5 adds the reference check: the endpoint will return HTTP 409 when a repository references
-/// the secret.
 #[utoipa::path(
     delete,
     path = "/api/v1/secrets/{id}",
@@ -335,7 +324,6 @@ async fn encrypt_for_tenant(
     })
 }
 
-/// Builds the wrapped data encryption key (DEK) from the stored key row.
 fn wrapped_dek(key: &kek::TenantKey) -> Result<WrappedDek, ApiError> {
     let kek_id = KekId::parse(&key.kek_id)?;
     let nonce =
@@ -352,7 +340,7 @@ fn wrapped_dek(key: &kek::TenantKey) -> Result<WrappedDek, ApiError> {
     })
 }
 
-/// Returns the user of an actor, or `None` for an API token actor.
+/// `None` for an API token actor.
 fn actor_user(actor: &Actor) -> Option<UserId> {
     match actor {
         Actor::User(id) => Some(*id),
@@ -360,7 +348,6 @@ fn actor_user(actor: &Actor) -> Option<UserId> {
     }
 }
 
-/// Parses a secret identifier from a path parameter.
 fn parse_secret_id(value: &str) -> Result<SecretId, ApiError> {
     Uuid::parse_str(value)
         .map(SecretId::from_uuid)

@@ -38,12 +38,10 @@ impl TrustedProxies {
         Ok(Self { nets })
     }
 
-    /// Returns true if the list holds no network.
     pub fn is_empty(&self) -> bool {
         self.nets.is_empty()
     }
 
-    /// Returns true if the address is in a trusted network.
     pub fn contains(&self, address: IpAddr) -> bool {
         let address = address.to_canonical();
         self.nets
@@ -52,7 +50,6 @@ impl TrustedProxies {
     }
 }
 
-/// Parses one network entry. The function canonicalizes the address.
 fn parse_net(entry: &str) -> Result<(IpAddr, u8), String> {
     let (address, prefix) = match entry.split_once('/') {
         Some((address, prefix)) => (address, Some(prefix)),
@@ -75,7 +72,6 @@ fn parse_net(entry: &str) -> Result<(IpAddr, u8), String> {
     Ok((address, prefix))
 }
 
-/// Returns true if the address is in the network.
 fn in_net(address: IpAddr, net: IpAddr, prefix: u8) -> bool {
     match (address, net) {
         (IpAddr::V4(address), IpAddr::V4(net)) => {
@@ -88,7 +84,6 @@ fn in_net(address: IpAddr, net: IpAddr, prefix: u8) -> bool {
     }
 }
 
-/// Compares the top `prefix` bits of two values.
 fn mask_matches<T>(address: T, net: T, prefix: u8, width: u8) -> bool
 where
     T: BitAndMask,
@@ -97,7 +92,6 @@ where
     address.masked(shift) == net.masked(shift)
 }
 
-/// A value with a bit mask.
 trait BitAndMask: Copy + PartialEq {
     /// Returns the value with the low `shift` bits cleared.
     ///
@@ -120,8 +114,6 @@ impl BitAndMask for u128 {
     }
 }
 
-/// The client IP address of a request.
-///
 /// The extractor reads the socket peer. If the peer is a trusted proxy, it reads the
 /// `X-Forwarded-For` header and takes the right-most address that is not a trusted proxy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,13 +191,12 @@ pub fn resolve_client_ip(
     candidate
 }
 
-/// Parses one header entry. The function removes a port and canonicalizes the address.
 fn parse_address(entry: &str) -> Option<IpAddr> {
     let entry = entry.trim();
     if entry.is_empty() {
         return None;
     }
-    // The bracketed IPv6 form `[2001:db8::1]:443`.
+    // Bracketed IPv6 form, for example `[2001:db8::1]:443`.
     if let Some(rest) = entry.strip_prefix('[') {
         let (address, _) = rest.split_once(']')?;
         return address.parse::<IpAddr>().ok().map(|ip| ip.to_canonical());

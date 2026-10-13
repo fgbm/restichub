@@ -1,5 +1,3 @@
-//! The HTTP server of the control plane.
-
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -33,31 +31,22 @@ use crate::routes::ROUTES;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-/// The largest request body of an authentication or a setup route.
 pub const BODY_LIMIT: usize = 16 * 1024;
-/// The largest request body of a secret route.
+/// Largest request body of a secret route.
 ///
 /// A secret value holds at most 64 KiB bytes. A request holds at most six of them and the metadata,
 /// so the limit is six values plus 4 KiB.
 pub const SECRET_BODY_LIMIT: usize = 6 * 64 * 1024 + 4 * 1024;
 
-/// The authentication state of the server.
-///
 /// The type holds the configuration, the two sign-in rate limiters and the clock. A `Debug` shows
 /// the configuration only.
 #[derive(Clone)]
 pub struct AuthState {
-    /// The local authentication settings.
     pub config: AuthConfig,
-    /// The capped limiter for the synthetic sign-in identities.
     pub user_limiter: Arc<RateLimiter>,
-    /// The capped limiter for each source IP network.
     pub ip_limiter: Arc<RateLimiter>,
-    /// The uncapped limiter for the resolved `(tenant_id, user_id)` identities.
     pub resolved_limiter: Arc<RateLimiter>,
-    /// The clock of the session and token checks.
     pub clock: Arc<dyn Clock>,
-    /// The semaphore that bounds the number of concurrent password hashes.
     pub hash_semaphore: Arc<Semaphore>,
 }
 
@@ -71,7 +60,6 @@ impl std::fmt::Debug for AuthState {
 }
 
 impl AuthState {
-    /// Creates the authentication state from the configuration.
     pub fn new(config: AuthConfig) -> Self {
         let window = Duration::from_secs(60);
         let user_limiter = RateLimiter::new(
@@ -96,7 +84,6 @@ impl AuthState {
         }
     }
 
-    /// Replaces the cap of the synthetic and the IP maps. A test uses this method.
     pub fn with_bucket_cap(mut self, cap: usize) -> Self {
         let window = Duration::from_secs(60);
         self.user_limiter = Arc::new(RateLimiter::new(self.config.sign_in_user_rate, window, cap));
@@ -104,14 +91,12 @@ impl AuthState {
         self
     }
 
-    /// Replaces the clock. A test uses this method.
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
         self
     }
 }
 
-/// The application state of the HTTP server.
 #[derive(Debug, Clone)]
 pub struct AppState {
     db: Database,
@@ -134,7 +119,6 @@ impl AppState {
         }
     }
 
-    /// Creates the application state with a given authentication state.
     pub fn with_auth(db: Database, auth: AuthState) -> Self {
         Self {
             db,
@@ -144,14 +128,11 @@ impl AppState {
         }
     }
 
-    /// Sets the trusted proxy list.
     pub fn with_trusted_proxies(mut self, trusted_proxies: TrustedProxies) -> Self {
         self.trusted_proxies = trusted_proxies;
         self
     }
 
-    /// Sets the key encryption key provider.
-    ///
     /// The server loads the provider at start and passes it here. The provider wraps the data
     /// encryption key of a new tenant (ADR-0023, section Secrets).
     pub fn with_kek(mut self, kek: Arc<dyn KekProvider>) -> Self {
@@ -159,23 +140,18 @@ impl AppState {
         self
     }
 
-    /// Returns the database.
     pub fn db(&self) -> &Database {
         &self.db
     }
 
-    /// Returns the trusted proxy list.
     pub fn trusted_proxies(&self) -> &TrustedProxies {
         &self.trusted_proxies
     }
 
-    /// Returns the authentication state.
     pub fn auth(&self) -> &AuthState {
         &self.auth
     }
 
-    /// Returns the key encryption key provider.
-    ///
     /// The provider is absent only in a test that does not set it.
     pub fn kek(&self) -> Option<&dyn KekProvider> {
         self.kek.as_deref()
@@ -202,7 +178,6 @@ pub fn router(state: AppState) -> Router {
         .layer(SetRequestIdLayer::new(request_id_header(), MakeRequestIdV7))
 }
 
-/// Builds the router and the OpenAPI document from the routes table.
 fn openapi_router() -> OpenApiRouter<AppState> {
     let mut router = OpenApiRouter::with_openapi(base_openapi());
     for route in ROUTES {
@@ -211,7 +186,6 @@ fn openapi_router() -> OpenApiRouter<AppState> {
     router
 }
 
-/// Returns the OpenAPI document of the control plane API.
 pub fn openapi_document() -> OpenApiDocument {
     static DOCUMENT: OnceLock<OpenApiDocument> = OnceLock::new();
     DOCUMENT
@@ -219,7 +193,6 @@ pub fn openapi_document() -> OpenApiDocument {
         .clone()
 }
 
-/// Builds the OpenAPI document with the info and the security schemes.
 fn base_openapi() -> OpenApiDocument {
     let mut document = utoipa::openapi::OpenApiBuilder::new()
         .info(
@@ -263,7 +236,6 @@ async fn finalize_problem(request: Request, next: Next) -> Response {
     }
 }
 
-/// Returns true if the response is an RFC 9457 problem response.
 fn is_problem(response: &Response) -> bool {
     response
         .headers()
@@ -272,7 +244,6 @@ fn is_problem(response: &Response) -> bool {
         == Some(PROBLEM_CONTENT_TYPE)
 }
 
-/// Writes the request ID into the body of a problem response.
 async fn inject_request_id(response: Response, request_id: &str) -> Response {
     let (mut parts, body) = response.into_parts();
     let Ok(bytes) = body.collect().await.map(|body| body.to_bytes()) else {
@@ -321,10 +292,10 @@ pub(crate) async fn readyz(State(state): State<AppState>) -> Response {
     }
 }
 
-/// The OpenAPI document.
 #[utoipa::path(
     get,
     path = "/api/v1/openapi.json",
+    summary = "The OpenAPI document.",
     responses((status = 200, description = "The OpenAPI document."))
 )]
 pub(crate) async fn openapi() -> impl IntoResponse {
@@ -368,8 +339,6 @@ async fn not_found(method: Method, uri: Uri) -> Response {
     crate::ui::serve(uri)
 }
 
-/// Returns true for the API namespace.
-///
 /// The function collapses the repeated slashes and ignores the letter case.
 fn is_api_path(path: &str) -> bool {
     let mut collapsed = String::with_capacity(path.len());
@@ -389,12 +358,10 @@ fn is_api_path(path: &str) -> bool {
     lower == "/api" || lower.starts_with("/api/")
 }
 
-/// The fallback handler for a known route with a method that the route does not accept.
 async fn method_not_allowed() -> ApiError {
     ApiError::method_not_allowed()
 }
 
-/// Creates a request ID with UUIDv7.
 #[derive(Debug, Clone, Copy)]
 struct MakeRequestIdV7;
 
@@ -405,7 +372,6 @@ impl MakeRequestId for MakeRequestIdV7 {
     }
 }
 
-/// Makes a tracing span with the request ID.
 #[derive(Debug, Clone, Copy)]
 struct RequestSpan;
 
@@ -438,11 +404,11 @@ mod tests {
         assert!(is_api_path("/api"));
         assert!(is_api_path("/api/"));
         assert!(is_api_path("/api/v1/users"));
-        // The repeated slashes are collapsed.
+        // Repeated slashes are collapsed.
         assert!(is_api_path("//api/v1/x"));
         assert!(is_api_path("/api//v1/x"));
         assert!(is_api_path("///api"));
-        // The letter case is ignored.
+        // Letter case is ignored.
         assert!(is_api_path("/API/v1/x"));
         assert!(is_api_path("/Api"));
     }

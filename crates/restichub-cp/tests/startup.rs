@@ -1,4 +1,4 @@
-//! AC-RP-02: the control plane refuses to start with an incorrect KEK (issue #20).
+//! AC-RP-02: the control plane refuses to start with an incorrect KEK.
 //!
 //! The test runs the startup function directly. The first start creates the `kek_check` row, a
 //! correct start verifies it and an incorrect key is refused with the cause.
@@ -35,7 +35,6 @@ async fn ac_rp_02_the_cp_refuses_to_start_with_an_incorrect_kek() {
         return;
     };
 
-    // The first start creates the row.
     let correct = provider(1);
     assert!(ensure_kek_check(db.database(), &correct).await.is_ok());
     let row = {
@@ -53,10 +52,9 @@ async fn ac_rp_02_the_cp_refuses_to_start_with_an_incorrect_kek() {
     let row = row.unwrap_or_else(|| panic!("the first start must create the row"));
     assert_eq!(row.kek_id, correct.current().id().as_str());
 
-    // A correct start verifies the row.
     assert!(ensure_kek_check(db.database(), &provider(1)).await.is_ok());
 
-    // An incorrect key is refused with the cause.
+    // Refuse an incorrect key with the cause.
     let wrong = provider(2);
     let error = ensure_kek_check(db.database(), &wrong).await;
     let message = error

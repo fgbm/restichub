@@ -1,4 +1,4 @@
-//! The sign-in, sign-out, self and password endpoints (ADR-0023, section Local authentication).
+//! Local authentication endpoints (ADR-0023, section Local authentication).
 
 use std::time::Instant;
 
@@ -26,48 +26,36 @@ use crate::validation;
 use crate::validation::Reason;
 use crate::views::{TenantView, UserView};
 
-/// The largest length of the tenant name and the username of a sign-in request.
+/// Limit of the tenant name and the username.
 const MAX_SIGN_IN_FIELD: usize = 128;
 
-/// The body of the sign-in request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SignInRequest {
-    /// The name of the tenant. The comparison ignores the letter case.
+    /// Ignores the letter case.
     pub tenant: String,
-    /// The username.
     pub username: String,
-    /// The password.
     pub password: String,
 }
 
-/// The body of the sign-in response.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SignInResponse {
-    /// The user.
     pub user: UserView,
-    /// The tenant.
     pub tenant: TenantView,
-    /// The role of the user in the tenant.
     pub role: Role,
 }
 
-/// The body of the self password change request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ChangePasswordRequest {
-    /// The current password.
     pub current_password: String,
-    /// The new password. It must hold at least 12 characters.
+    /// At least 12 characters.
     pub new_password: String,
 }
 
-/// The body of the self response.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MeResponse {
-    /// The user. It is null for an API token.
+    /// Null for an API token.
     pub user: Option<UserView>,
-    /// The tenant.
     pub tenant: TenantView,
-    /// The role of the actor in the tenant.
     pub role: Role,
 }
 
@@ -144,7 +132,6 @@ async fn sign_in_tenant(
     now: time::OffsetDateTime,
     headers: &HeaderMap,
 ) -> Result<Response, ApiError> {
-    // Read the user and the role.
     let (user, role) = {
         let mut tx = state.db().begin_tenant(tenant_id).await?;
         let user = users::find_for_auth(&mut tx, &body.username).await?;
@@ -163,7 +150,6 @@ async fn sign_in_tenant(
         None => check_synthetic(state, &body.tenant, &body.username)?,
     }
 
-    // Verify without a transaction.
     let hash = user.as_ref().map(|user| user.password_hash.clone());
     let password_ok =
         password::verify_or_dummy(&state.auth().hash_semaphore, body.password.clone(), hash)
@@ -182,13 +168,12 @@ async fn sign_in_tenant(
         return Err(ApiError::invalid_credentials());
     };
 
-    // A new session token. The endpoint never reuses an incoming cookie value.
+    // The endpoint never reuses an incoming cookie value.
     let value = token::random_token()?;
     let token_hash = token::hash_token(&value);
     let expires_at = now + state.auth().config.session_absolute;
     let user_agent = user_agent(headers);
 
-    // Write the session and the audit record in a second transaction.
     let mut tx = state.db().begin_tenant(tenant_id).await?;
     sessions::create(
         &mut tx,
@@ -293,6 +278,8 @@ pub async fn me(
 
 /// Changes the password of the current user.
 ///
+/// Changes the password of the current user.
+///
 /// The endpoint removes every other session of the user and keeps the current session. A wrong
 /// current password counts against the user rate limit. The hash runs without a database
 /// transaction.
@@ -323,7 +310,6 @@ pub async fn change_password(
     // A wrong current password counts against the user bucket.
     check_resolved(&state, context.tenant_id, user_id)?;
 
-    // Read the current hash.
     let user = {
         let mut tx = state.db().begin_tenant(context.tenant_id).await?;
         let user = users::get_auth(&mut tx, user_id).await?;
@@ -334,7 +320,6 @@ pub async fn change_password(
         return Err(ApiError::not_found());
     };
 
-    // Verify and hash without a transaction.
     let current_ok = password::verify_password_limited(
         &state.auth().hash_semaphore,
         body.current_password.clone(),
@@ -351,7 +336,6 @@ pub async fn change_password(
         password::hash_password_limited(&state.auth().hash_semaphore, body.new_password.clone())
             .await?;
 
-    // Write the new hash and remove the other sessions.
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     users::set_password(&mut tx, user_id, &hash).await?;
     if let Some(session_id) = context.session_id {
@@ -370,7 +354,6 @@ pub async fn change_password(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-/// Applies the IP rate limit.
 fn check_ip(state: &AppState, ip: std::net::IpAddr) -> Result<(), ApiError> {
     match state
         .auth()
@@ -382,7 +365,6 @@ fn check_ip(state: &AppState, ip: std::net::IpAddr) -> Result<(), ApiError> {
     }
 }
 
-/// Applies the synthetic user rate limit.
 fn check_synthetic(state: &AppState, tenant: &str, username: &str) -> Result<(), ApiError> {
     let key = rate_limit::synthetic_user_key(tenant, username);
     match state.auth().user_limiter.check(&key, Instant::now()) {
@@ -391,7 +373,6 @@ fn check_synthetic(state: &AppState, tenant: &str, username: &str) -> Result<(),
     }
 }
 
-/// Applies the resolved user rate limit.
 fn check_resolved(state: &AppState, tenant: TenantId, user: UserId) -> Result<(), ApiError> {
     let key = rate_limit::resolved_user_key(tenant, user);
     match state.auth().resolved_limiter.check(&key, Instant::now()) {
@@ -421,7 +402,6 @@ async fn audit_failed_in_tenant(
     Ok(())
 }
 
-/// Writes a `sign_in_failed` record in the platform tenant.
 async fn audit_failed_platform(state: &AppState, ip: std::net::IpAddr) -> Result<(), ApiError> {
     let mut tx = state.db().begin_platform().await?;
     let mut event = AuditEvent::new(AuditAction::SignInFailed, "user");
@@ -433,12 +413,11 @@ async fn audit_failed_platform(state: &AppState, ip: std::net::IpAddr) -> Result
     Ok(())
 }
 
-/// Returns the diff of a failed sign-in against an unknown user. It holds no username.
+/// Holds no username.
 fn unknown_user_diff() -> serde_json::Value {
     serde_json::json!({ "user_known": false })
 }
 
-/// Returns the `User-Agent` header value.
 fn user_agent(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::USER_AGENT)

@@ -12,30 +12,20 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 
-/// The name of the session cookie over HTTPS.
 pub const SESSION_COOKIE: &str = "__Host-restichub_session";
-/// The name of the session cookie when `server.insecure_cookies` is on.
 pub const INSECURE_SESSION_COOKIE: &str = "restichub_session";
-/// The name of the CSRF header.
 pub const CSRF_HEADER: &str = "x-restichub-csrf";
-/// The value of the CSRF header.
 pub const CSRF_VALUE: &str = "1";
-/// The prefix of an API token value.
 pub const API_TOKEN_PREFIX: &str = "rh_";
-/// The number of characters of the display prefix.
 pub const DISPLAY_PREFIX_LEN: usize = 8;
-/// The number of random bytes of a token.
 const TOKEN_BYTES: usize = 32;
 
-/// The error of the token operations.
 #[derive(Debug, thiserror::Error)]
 pub enum TokenError {
-    /// The operating system random number generator failed.
     #[error("cannot read random bytes")]
     Random(#[source] getrandom::Error),
 }
 
-/// Returns the name of the session cookie.
 pub fn session_cookie_name(insecure: bool) -> &'static str {
     if insecure {
         INSECURE_SESSION_COOKIE
@@ -44,7 +34,6 @@ pub fn session_cookie_name(insecure: bool) -> &'static str {
     }
 }
 
-/// Reads the session cookie value from the `Cookie` header.
 pub fn session_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
     let header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
     for pair in header.split(';') {
@@ -58,7 +47,6 @@ pub fn session_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<Str
     None
 }
 
-/// Returns the value of the `Authorization: Bearer` header.
 pub fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
     let header = headers
         .get(axum::http::header::AUTHORIZATION)?
@@ -77,7 +65,7 @@ pub fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
     }
 }
 
-/// Generates a random token value (32 random bytes in base64url).
+/// 32 random bytes in base64url.
 pub fn random_token() -> Result<String, TokenError> {
     let mut bytes = [0u8; TOKEN_BYTES];
     getrandom::fill(&mut bytes).map_err(TokenError::Random)?;
@@ -93,26 +81,22 @@ pub fn random_api_token() -> Result<(String, String), TokenError> {
     Ok((format!("{API_TOKEN_PREFIX}{value}"), prefix))
 }
 
-/// Returns the SHA-256 hash of a token value.
 pub fn hash_token(value: &str) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
     hasher.finalize().to_vec()
 }
 
-/// Returns the `Set-Cookie` header value of a session cookie.
 pub fn set_cookie_header(name: &str, value: &str, secure: bool) -> String {
     let secure_attribute = if secure { "; Secure" } else { "" };
     format!("{name}={value}; HttpOnly; SameSite=Strict; Path=/{secure_attribute}")
 }
 
-/// Returns the `Set-Cookie` header value that removes a session cookie.
 pub fn clear_cookie_header(name: &str, secure: bool) -> String {
     let secure_attribute = if secure { "; Secure" } else { "" };
     format!("{name}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{secure_attribute}")
 }
 
-/// Returns true for an unsafe HTTP method.
 pub fn is_unsafe_method(method: &axum::http::Method) -> bool {
     matches!(
         *method,
@@ -123,7 +107,6 @@ pub fn is_unsafe_method(method: &axum::http::Method) -> bool {
     )
 }
 
-/// Returns true if the request holds the CSRF header with the required value.
 pub fn csrf_ok(headers: &axum::http::HeaderMap) -> bool {
     headers
         .get(CSRF_HEADER)

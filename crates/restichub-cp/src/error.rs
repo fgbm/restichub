@@ -22,47 +22,29 @@ use crate::password::PasswordError;
 use crate::token::TokenError;
 use crate::validation::{Reason, ValidationError};
 
-/// The content type of an RFC 9457 problem response.
 pub const PROBLEM_CONTENT_TYPE: &str = "application/problem+json";
 
-/// The stable code of a problem response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
-    /// HTTP 404. The resource is not found.
     NotFound,
-    /// HTTP 503. The database is not ready.
     ServiceUnavailable,
-    /// HTTP 500. An internal operation failed.
     InternalError,
-    /// HTTP 401. The request holds no credential.
     Unauthenticated,
-    /// HTTP 401. The sign-in credentials are not valid.
     InvalidCredentials,
-    /// HTTP 403. The role is not sufficient.
     Forbidden,
-    /// HTTP 403. The CSRF header is missing.
     CsrfRequired,
-    /// HTTP 409. The change conflicts with the current state.
     Conflict,
-    /// HTTP 400. A field of the request is not valid.
     InvalidArgument,
-    /// HTTP 413. The request body is too large.
     PayloadTooLarge,
-    /// HTTP 500. The tenant holds no active key row.
     TenantKeyMissing,
-    /// HTTP 400. The request holds a cookie and a bearer token at the same time.
     AmbiguousCredentials,
-    /// HTTP 405. The route does not accept the method.
     MethodNotAllowed,
-    /// HTTP 429. The rate limit is exhausted.
     RateLimited,
-    /// HTTP 503. The password work is busy.
     Busy,
 }
 
 impl ErrorCode {
-    /// Returns the stable string of the code.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::NotFound => "not_found",
@@ -84,10 +66,8 @@ impl ErrorCode {
     }
 }
 
-/// An API error.
-///
 /// The type holds no request ID. The response mapper of the server adds the request ID to the body
-/// and logs [`ApiError::cause`] once.
+/// and logs the internal cause once.
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
@@ -103,7 +83,6 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    /// Creates an error with no `Retry-After` header, no field and no cause.
     fn new(status: StatusCode, code: ErrorCode, title: &'static str) -> Self {
         Self {
             status,
@@ -116,12 +95,10 @@ impl ApiError {
         }
     }
 
-    /// Creates a `404 not_found` error.
     pub fn not_found() -> Self {
         Self::new(StatusCode::NOT_FOUND, ErrorCode::NotFound, "Not Found")
     }
 
-    /// Creates a `503 service_unavailable` error.
     pub fn service_unavailable() -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -143,7 +120,6 @@ impl ApiError {
         error
     }
 
-    /// Creates a `401 unauthenticated` error.
     pub fn unauthenticated() -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
@@ -152,8 +128,6 @@ impl ApiError {
         )
     }
 
-    /// Creates a `401 invalid_credentials` error.
-    ///
     /// Sign-in returns this error for every failure: an unknown tenant, an unknown user, a wrong
     /// password, a disabled user and a suspended tenant. The control plane logs the real reason and
     /// never puts it in the response.
@@ -165,19 +139,15 @@ impl ApiError {
         )
     }
 
-    /// Creates a `403 forbidden` error.
     pub fn forbidden() -> Self {
         Self::new(StatusCode::FORBIDDEN, ErrorCode::Forbidden, "Forbidden")
     }
 
-    /// Creates a `403 csrf_required` error.
-    ///
     /// A cookie-authenticated unsafe request needs the header `X-ResticHub-CSRF: 1`.
     pub fn csrf_required() -> Self {
         Self::new(StatusCode::FORBIDDEN, ErrorCode::CsrfRequired, "Forbidden")
     }
 
-    /// Creates a `409 conflict` error.
     pub fn conflict() -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::Conflict, "Conflict")
     }
@@ -195,7 +165,6 @@ impl ApiError {
         error
     }
 
-    /// Creates a `400 invalid_argument` error for a field with a reason code.
     pub fn invalid_field(field: &'static str, reason: Reason) -> Self {
         let mut error = Self::invalid_argument(field);
         error.reason = Some(reason);
@@ -216,8 +185,6 @@ impl ApiError {
         error
     }
 
-    /// Creates a `413 payload_too_large` error.
-    ///
     /// A request body that is larger than the body limit of the route gives this error. The
     /// response holds no parser detail.
     pub fn payload_too_large() -> Self {
@@ -228,8 +195,6 @@ impl ApiError {
         )
     }
 
-    /// Creates a `500 tenant_key_missing` error.
-    ///
     /// The tenant holds no active key row, so the control plane cannot encrypt a secret.
     pub fn tenant_key_missing() -> Self {
         let mut error = Self::new(
@@ -241,8 +206,6 @@ impl ApiError {
         error
     }
 
-    /// Creates a `400 ambiguous_credentials` error.
-    ///
     /// A request holds a session cookie and a bearer token at the same time.
     pub fn ambiguous_credentials() -> Self {
         Self::new(
@@ -252,7 +215,6 @@ impl ApiError {
         )
     }
 
-    /// Creates a `405 method_not_allowed` error.
     pub fn method_not_allowed() -> Self {
         Self::new(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -261,7 +223,6 @@ impl ApiError {
         )
     }
 
-    /// Creates a `429 rate_limited` error with a `Retry-After` header.
     pub fn rate_limited(retry_after: u64) -> Self {
         let mut error = Self::new(
             StatusCode::TOO_MANY_REQUESTS,
@@ -286,7 +247,7 @@ impl ApiError {
     }
 }
 
-/// The largest `Retry-After` value in seconds.
+/// In seconds.
 const MAX_RETRY_AFTER: u64 = 3600;
 
 /// Returns the full cause chain of an error as one message.
@@ -390,24 +351,19 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// The body of an RFC 9457 problem response.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ProblemBody {
-    /// The type of the problem.
     #[serde(rename = "type")]
     pub type_: String,
-    /// The title of the problem.
     pub title: String,
-    /// The HTTP status code.
     pub status: u16,
-    /// The stable code in snake_case.
+    /// In snake_case.
     pub code: ErrorCode,
-    /// The request ID of the request.
     pub request_id: String,
-    /// The field of the request that is not valid. Only `invalid_argument` sets it.
+    /// Only `invalid_argument` sets it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
-    /// The reason code in snake_case. Only `invalid_argument` sets it.
+    /// In snake_case; only `invalid_argument` sets it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -418,10 +374,8 @@ pub struct ProblemBody {
 /// definition.
 #[derive(utoipa::IntoResponses)]
 pub enum ProtectedResponses {
-    /// The request is not authenticated.
     #[response(status = 401, description = "The request is not authenticated.")]
     Unauthenticated(ProblemBody),
-    /// The role is not sufficient.
     #[response(status = 403, description = "The role is not sufficient.")]
     Forbidden(ProblemBody),
 }

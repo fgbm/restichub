@@ -1,4 +1,4 @@
-//! The initial setup (FR-AU-03).
+//! Initial setup (FR-AU-03).
 //!
 //! At start, when the platform tenant has no user, the server generates a one-time setup token. It
 //! stores only the SHA-256 hash with an expiry of 24 hours and prints the value once at WARN level.
@@ -30,22 +30,16 @@ use crate::token;
 use crate::validation;
 use crate::views::UserView;
 
-/// The lifetime of a setup token.
 pub const SETUP_TOKEN_TTL: time::Duration = time::Duration::hours(24);
 
-/// The role of the first user of the platform tenant.
 const PLATFORM_ADMIN_ROLE: Role = Role::PlatformAdmin;
 
-/// The advisory lock scope of the initial setup.
 const SETUP_LOCK: &str = "restichub.setup:";
 
-/// The error of the setup token generation.
 #[derive(Debug, thiserror::Error)]
 pub enum SetupError {
-    /// A database operation failed.
     #[error(transparent)]
     Database(#[from] restichub_db::DbError),
-    /// The random token generation failed.
     #[error(transparent)]
     Token(#[from] token::TokenError),
 }
@@ -77,7 +71,6 @@ pub async fn ensure_setup_token(
     Ok(())
 }
 
-/// The body of the setup status response.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SetupStatusResponse {
     /// True while the platform tenant has no user.
@@ -99,27 +92,20 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<SetupStatusRes
     }))
 }
 
-/// The body of the setup request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SetupRequest {
-    /// The one-time setup token from the server log.
     pub setup_token: String,
-    /// The username of the Platform Admin.
     pub username: String,
-    /// The password of the Platform Admin. It must hold at least 12 characters.
+    /// At least 12 characters.
     pub password: String,
-    /// The name for the user interface.
     pub display_name: String,
 }
 
-/// Creates the first Platform Admin.
-///
-/// The endpoint needs the CSRF header and it is rate-limited for each source IP, as sign-in is. The
-/// platform tenant lock and the row lock of the token serialize two setup requests with the same
-/// token, so exactly one succeeds.
 #[utoipa::path(
     post,
     path = "/api/v1/setup",
+    summary = "Creates the first Platform Admin.",
+    description = "The endpoint needs the CSRF header and it is rate-limited for each source IP, as sign-in is. The platform tenant lock and the row lock of the token serialize two setup requests with the same token, so exactly one succeeds.",
     request_body = SetupRequest,
     responses(
         (status = 201, description = "The Platform Admin is created.", body = UserView),

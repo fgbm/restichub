@@ -22,52 +22,34 @@ use crate::server::AppState;
 use crate::token;
 use crate::validation::Reason;
 
-/// The body of the create-token request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateTokenRequest {
-    /// The name for the user interface.
     pub name: String,
-    /// The role of the token in the tenant.
     pub role: String,
-    /// The optional expiry time in RFC 3339.
+    /// In RFC 3339.
     pub expires_at: Option<String>,
 }
 
-/// The body of the create-token response. The value appears here only once.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CreateTokenResponse {
-    /// The identifier of the token.
     pub id: String,
-    /// The token value. The control plane returns it only here.
+    /// Returned only here.
     pub token: String,
-    /// The name for the user interface.
     pub name: String,
-    /// The role of the token.
     pub role: Role,
-    /// The display prefix of the token.
     pub display_prefix: String,
-    /// The optional expiry time.
     pub expires_at: Option<String>,
 }
 
-/// A token in a list response.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ApiTokenView {
-    /// The identifier of the token.
     pub id: String,
-    /// The name for the user interface.
     pub name: String,
-    /// The role of the token.
     pub role: Role,
-    /// The display prefix of the token.
     pub display_prefix: String,
-    /// The creation time.
     pub created_at: String,
-    /// The optional expiry time.
     pub expires_at: Option<String>,
-    /// The time of the last use.
     pub last_used_at: Option<String>,
-    /// The revocation time.
     pub revoked_at: Option<String>,
 }
 
@@ -86,10 +68,8 @@ impl From<&api_tokens::ApiToken> for ApiTokenView {
     }
 }
 
-/// A list of API tokens.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ApiTokenListResponse {
-    /// The tokens.
     pub items: Vec<ApiTokenView>,
 }
 
@@ -116,10 +96,10 @@ pub async fn list_tokens(
     }))
 }
 
-/// Creates an API token in the tenant.
 #[utoipa::path(
     post,
     path = "/api/v1/api-tokens",
+    summary = "Creates an API token in the tenant.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateTokenRequest,
     responses(
@@ -199,6 +179,8 @@ pub async fn create_token(
 
 /// Revokes an API token of the tenant.
 ///
+/// Revokes an API token of the tenant.
+///
 /// A second call on the same token changes nothing (idempotent).
 #[utoipa::path(
     delete,
@@ -238,7 +220,6 @@ pub async fn revoke_token(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Reads the creator of an API token.
 async fn creator_of(
     state: &AppState,
     tenant: restichub_db::TenantId,
@@ -254,7 +235,6 @@ async fn creator_of(
     })
 }
 
-/// Formats a time as RFC 3339.
 fn format_time(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }

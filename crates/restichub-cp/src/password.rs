@@ -20,43 +20,34 @@ use tokio::sync::Semaphore;
 
 /// The memory cost of Argon2id in 1 KiB blocks (19456 KiB = 19 MiB).
 const M_COST: u32 = 19456;
-/// The time cost of Argon2id.
 const T_COST: u32 = 2;
-/// The degree of parallelism of Argon2id.
 const P_COST: u32 = 1;
 
-/// The minimum password length in characters.
+/// Limit in characters.
 pub const MIN_PASSWORD_LEN: usize = 12;
-/// The maximum password length in bytes.
+/// Limit in bytes.
 pub const MAX_PASSWORD_BYTES: usize = 1024;
 
-/// The time to wait for a free hash slot before the caller gets [`PasswordError::Busy`].
+/// Wait before [`PasswordError::Busy`].
 pub const HASH_WAIT: Duration = Duration::from_secs(2);
 
-/// The password of the dummy hash. The value is never a real password.
+/// Never a real password.
 const DUMMY_PASSWORD: &str = "restichub-dummy-password-not-a-real-secret";
 
-/// The error of the password operations.
 #[derive(Debug, thiserror::Error)]
 pub enum PasswordError {
-    /// The password is shorter than [`MIN_PASSWORD_LEN`] characters.
     #[error("the password must hold at least {MIN_PASSWORD_LEN} characters")]
     TooShort,
-    /// The password is longer than [`MAX_PASSWORD_BYTES`] bytes.
     #[error("the password must hold at most {MAX_PASSWORD_BYTES} bytes")]
     TooLong,
-    /// The hashing failed.
     #[error("cannot hash the password")]
     Hash,
-    /// The blocking task failed.
     #[error("the password task stopped")]
     Task(#[source] tokio::task::JoinError),
-    /// The hash semaphore is saturated.
     #[error("the password work is busy")]
     Busy,
 }
 
-/// Checks the length of a password.
 pub fn validate_password(password: &str) -> Result<(), PasswordError> {
     if password.chars().count() < MIN_PASSWORD_LEN {
         return Err(PasswordError::TooShort);
@@ -67,13 +58,12 @@ pub fn validate_password(password: &str) -> Result<(), PasswordError> {
     Ok(())
 }
 
-/// Builds the Argon2id hasher.
 fn hasher() -> Result<Argon2<'static>, PasswordError> {
     let params = Params::new(M_COST, T_COST, P_COST, None).map_err(|_| PasswordError::Hash)?;
     Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
 }
 
-/// Hashes a password into a PHC string. This function blocks the caller.
+/// Blocks the caller.
 pub fn hash_password(password: &str) -> Result<String, PasswordError> {
     validate_password(password)?;
     let hasher = hasher()?;
@@ -93,20 +83,16 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     hasher.verify_password(password.as_bytes(), hash).is_ok()
 }
 
-/// Returns the fixed dummy hash.
-///
 /// The value is built once. The caller uses it when the user or the tenant is unknown, so the time
 /// of the failure is similar to a wrong password. The function blocks the caller.
 pub fn dummy_hash() -> &'static str {
     DUMMY_HASH.get_or_init(|| hash_password(DUMMY_PASSWORD).unwrap_or_default())
 }
 
-/// Builds the dummy hash at start. The function blocks the caller.
 pub fn warm_dummy() {
     let _ = dummy_hash();
 }
 
-/// The cached dummy hash.
 static DUMMY_HASH: OnceLock<String> = OnceLock::new();
 
 /// Runs a blocking password task under the hash semaphore.
@@ -129,7 +115,6 @@ where
     result
 }
 
-/// Hashes a password in a blocking task under the hash semaphore.
 pub async fn hash_password_limited(
     semaphore: &Semaphore,
     password: String,
@@ -137,7 +122,6 @@ pub async fn hash_password_limited(
     with_permit(semaphore, move || hash_password(&password)).await?
 }
 
-/// Verifies a password in a blocking task under the hash semaphore.
 pub async fn verify_password_limited(
     semaphore: &Semaphore,
     password: String,

@@ -25,12 +25,9 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use tower::ServiceExt;
 
-/// The session cookie name over HTTPS.
 pub const COOKIE_NAME: &str = "__Host-restichub_session";
-/// The CSRF header and its value.
 pub const CSRF: (&str, &str) = ("x-restichub-csrf", "1");
 
-/// Returns the socket peer of a test request.
 pub fn peer() -> ConnectInfo<SocketAddr> {
     ConnectInfo(
         "203.0.113.7:1234"
@@ -39,7 +36,6 @@ pub fn peer() -> ConnectInfo<SocketAddr> {
     )
 }
 
-/// Builds a request with the socket peer and an optional cookie and body.
 pub fn request(
     method: &str,
     uri: &str,
@@ -66,8 +62,6 @@ pub fn request(
     request
 }
 
-/// Builds a request with a raw body string and a session cookie.
-///
 /// The function sends the body as it is, so a test can send a malformed JSON body or a body that is
 /// larger than the limit.
 pub fn raw_request(method: &str, uri: &str, cookie: &str, body: String) -> Request<Body> {
@@ -83,7 +77,6 @@ pub fn raw_request(method: &str, uri: &str, cookie: &str, body: String) -> Reque
     request
 }
 
-/// Builds a request with a bearer token.
 pub fn bearer_request(method: &str, uri: &str, token: &str, body: Option<Value>) -> Request<Body> {
     let mut builder = Request::builder()
         .method(method)
@@ -101,7 +94,6 @@ pub fn bearer_request(method: &str, uri: &str, token: &str, body: Option<Value>)
     request
 }
 
-/// Reads the JSON body of a response.
 pub async fn body_json(response: axum::response::Response) -> Value {
     let bytes = response
         .into_body()
@@ -112,7 +104,6 @@ pub async fn body_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).unwrap_or(Value::Null)
 }
 
-/// Sends a request and returns the status, the session cookie pair and the JSON body.
 pub async fn send(app: &Router, request: Request<Body>) -> (StatusCode, Option<String>, Value) {
     let response = app
         .clone()
@@ -129,23 +120,19 @@ pub async fn send(app: &Router, request: Request<Body>) -> (StatusCode, Option<S
     (status, cookie, body)
 }
 
-/// Returns the `name=value` part of a `Set-Cookie` header value.
 fn cookie_pair(header: &str) -> Option<String> {
     header.split(';').next().map(str::to_owned)
 }
 
-/// Builds a router with the default authentication state.
 pub fn app(db: &Database) -> Router {
     router(AppState::new(db.clone()))
 }
 
-/// Builds a router with a given authentication configuration and clock.
 pub fn app_with_auth(db: &Database, config: AuthConfig, clock: Arc<dyn Clock>) -> Router {
     let auth = AuthState::new(config).with_clock(clock);
     router(AppState::with_auth(db.clone(), auth))
 }
 
-/// A key encryption key provider that holds one fixed key. A test uses this type.
 #[derive(Debug)]
 pub struct TestKek(restichub_secrets::Kek);
 
@@ -159,18 +146,15 @@ impl restichub_secrets::KekProvider for TestKek {
     }
 }
 
-/// Returns a fixed key encryption key provider for a test.
 pub fn test_kek() -> Arc<dyn restichub_secrets::KekProvider> {
     let mut bytes = [7_u8; 32];
     Arc::new(TestKek(restichub_secrets::Kek::from_bytes(&mut bytes)))
 }
 
-/// Builds a router with the default authentication state and a key encryption key provider.
 pub fn app_with_kek(db: &Database) -> Router {
     router(AppState::new(db.clone()).with_kek(test_kek()))
 }
 
-/// Creates a tenant through a platform transaction.
 pub async fn create_tenant(db: &Database, name: &str) -> TenantId {
     let mut tx = db
         .begin_platform()
@@ -244,7 +228,6 @@ pub async fn seed_secret(db: &Database, tenant: TenantId, name: &str) -> restich
     id
 }
 
-/// Sets the status of a tenant through a platform transaction.
 pub async fn set_tenant_status(db: &Database, tenant: TenantId, status: &str) {
     let status = TenantStatus::parse(status).expect("the status is known");
     let mut tx = db
@@ -257,7 +240,6 @@ pub async fn set_tenant_status(db: &Database, tenant: TenantId, status: &str) {
     tx.commit().await.expect("cannot commit the status");
 }
 
-/// Creates a user with a role and a password hash.
 pub async fn create_user(
     db: &Database,
     tenant: TenantId,
@@ -287,7 +269,6 @@ pub async fn create_user(
     user
 }
 
-/// Creates a session for a user and returns the cookie header value.
 pub async fn session_cookie(db: &Database, tenant: TenantId, user: restichub_db::UserId) -> String {
     let value = restichub_cp::token::random_token().expect("cannot build the token");
     let hash = restichub_cp::token::hash_token(&value);
@@ -311,15 +292,11 @@ pub async fn session_cookie(db: &Database, tenant: TenantId, user: restichub_db:
     format!("{COOKIE_NAME}={value}")
 }
 
-/// Creates a user with a role and a session, and returns the cookie header value.
 pub async fn seed_session(db: &Database, tenant: TenantId, username: &str, role: &str) -> String {
     let user = create_user(db, tenant, username, "phc", role).await;
     session_cookie(db, tenant, user).await
 }
 
-/// Creates an API token with a role and returns its value.
-///
-/// The creator is a user with the Admin role.
 pub async fn seed_api_token(db: &Database, tenant: TenantId, role: &str) -> String {
     let creator_name = format!("creator-{role}");
     let creator = create_user(db, tenant, &creator_name, "phc", "admin").await;
@@ -335,7 +312,6 @@ pub async fn seed_admin_token_actor(db: &Database, tenant: TenantId) -> String {
     seed_token(db, tenant, "admin", creator).await
 }
 
-/// Inserts an API token with a role and a creator.
 async fn seed_token(
     db: &Database,
     tenant: TenantId,
@@ -365,14 +341,12 @@ async fn seed_token(
     value
 }
 
-/// Returns the number of rows of a table in a tenant transaction.
 pub async fn count(db: &Database, tenant: TenantId, table: &'static str) -> i64 {
     restichub_db::test_util::count_rows(db, tenant, table)
         .await
         .expect("cannot count the rows")
 }
 
-/// Lists the users of a tenant.
 pub async fn list_users(db: &Database, tenant: TenantId) -> Vec<users::User> {
     let mut tx = db
         .begin_tenant(tenant)
@@ -383,7 +357,6 @@ pub async fn list_users(db: &Database, tenant: TenantId) -> Vec<users::User> {
     result
 }
 
-/// Returns the role of a user in a tenant.
 pub async fn role_of(db: &Database, tenant: TenantId, user: restichub_db::UserId) -> Option<Role> {
     let mut tx = db
         .begin_tenant(tenant)
@@ -396,7 +369,6 @@ pub async fn role_of(db: &Database, tenant: TenantId, user: restichub_db::UserId
     result
 }
 
-/// Lists the API tokens of a tenant.
 pub async fn list_tokens(db: &Database, tenant: TenantId) -> Vec<api_tokens::ApiToken> {
     let mut tx = db
         .begin_tenant(tenant)
@@ -409,7 +381,6 @@ pub async fn list_tokens(db: &Database, tenant: TenantId) -> Vec<api_tokens::Api
     result
 }
 
-/// Returns true if a user of a tenant is disabled.
 pub async fn user_disabled(db: &Database, tenant: TenantId, user: restichub_db::UserId) -> bool {
     list_users(db, tenant)
         .await
@@ -418,7 +389,6 @@ pub async fn user_disabled(db: &Database, tenant: TenantId, user: restichub_db::
         .is_some_and(|entry| entry.disabled)
 }
 
-/// Returns true if an API token of a tenant is revoked.
 pub async fn token_revoked(
     db: &Database,
     tenant: TenantId,
@@ -431,7 +401,6 @@ pub async fn token_revoked(
         .is_some_and(|entry| entry.revoked_at.is_some())
 }
 
-/// Sends a request and returns the raw response.
 pub async fn send_response(app: &Router, request: Request<Body>) -> axum::response::Response {
     app.clone()
         .oneshot(request)
@@ -439,7 +408,6 @@ pub async fn send_response(app: &Router, request: Request<Body>) -> axum::respon
         .expect("the request failed")
 }
 
-/// Reads the `Retry-After` header of a response.
 pub fn retry_after(response: &axum::response::Response) -> Option<String> {
     response
         .headers()
@@ -448,7 +416,6 @@ pub fn retry_after(response: &axum::response::Response) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// A test database or a skip.
 pub async fn test_db() -> Option<TestDatabase> {
     test_database().await
 }

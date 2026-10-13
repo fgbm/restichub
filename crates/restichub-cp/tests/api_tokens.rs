@@ -1,4 +1,4 @@
-//! API token tests (issue #18, ADR-0023).
+//! API token tests (ADR-0023).
 
 mod common;
 
@@ -9,7 +9,6 @@ use time::OffsetDateTime;
 
 use common::{app, bearer_request, create_tenant, request, seed_api_token, seed_session, send};
 
-/// Creates an Admin session.
 async fn admin_cookie(db: &restichub_db::test_util::TestDatabase, tenant: TenantId) -> String {
     seed_session(db.database(), tenant, "admin", "admin").await
 }
@@ -54,7 +53,6 @@ async fn an_admin_creates_lists_and_revokes_a_token() {
     let cookie = admin_cookie(&db, tenant).await;
     let app = app(db.database());
 
-    // Create.
     let body = json!({"name": "ci", "role": "operator"});
     let (status, _, created) = send(
         &app,
@@ -78,7 +76,6 @@ async fn an_admin_creates_lists_and_revokes_a_token() {
         value.get(3..11)
     );
 
-    // The token works for a request.
     let (status, _, me) = send(&app, bearer_request("GET", "/api/v1/auth/me", &value, None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(me.get("role").and_then(Value::as_str), Some("operator"));
@@ -109,10 +106,8 @@ async fn an_admin_creates_lists_and_revokes_a_token() {
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    // The revoked token is refused.
     let (status, _, _) = send(&app, bearer_request("GET", "/api/v1/auth/me", &value, None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    // A second revoke is idempotent.
     let (status, _, _) = send(
         &app,
         request(

@@ -1,4 +1,4 @@
-//! Sign-in, session and self-password tests (issue #18, AC-AU-02).
+//! Sign-in, session and self-password tests (AC-AU-02).
 
 mod common;
 
@@ -24,7 +24,7 @@ use common::{
     send_response, session_cookie, set_tenant_status,
 };
 
-/// Creates a user with a real password hash.
+/// Builds a user with a real password hash.
 async fn user_with_password(
     db: &restichub_db::Database,
     tenant: TenantId,
@@ -88,7 +88,6 @@ async fn sign_in_sets_a_cookie_and_returns_the_actor() {
         Some("sign-in")
     );
 
-    // The session works for /auth/me.
     let (status, _, me) = send(&app, request("GET", "/api/v1/auth/me", Some(&cookie), None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(me.get("role").and_then(Value::as_str), Some("admin"));
@@ -112,14 +111,10 @@ async fn sign_in_failures_are_identical() {
     .await;
     let app = app(db.database());
 
-    // An unknown tenant.
     let (s1, _, b1) = sign_in(&app, "unknown-tenant", "alice", "correct horse battery").await;
-    // An unknown user.
     let (s2, _, b2) = sign_in(&app, "failures", "nobody", "correct horse battery").await;
-    // A wrong password.
     let (s3, _, b3) = sign_in(&app, "failures", "alice", "wrong password value").await;
 
-    // A disabled user.
     let mut tx = db
         .database()
         .begin_tenant(tenant)
@@ -131,7 +126,6 @@ async fn sign_in_failures_are_identical() {
     tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
     let (s4, _, b4) = sign_in(&app, "failures", "alice", "correct horse battery").await;
 
-    // A suspended tenant.
     set_tenant_status(db.database(), tenant, "suspended").await;
     let (s5, _, b5) = sign_in(&app, "failures", "alice", "correct horse battery").await;
 
@@ -358,13 +352,10 @@ async fn a_password_change_keeps_the_current_session_and_kills_the_others() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // The current session stays.
     let (status, _, _) = send(&app, request("GET", "/api/v1/auth/me", Some(&first), None)).await;
     assert_eq!(status, StatusCode::OK);
-    // The other session is removed.
     let (status, _, _) = send(&app, request("GET", "/api/v1/auth/me", Some(&second), None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    // The new password works.
     let _ = sign_in_ok(&app, "password", "alice", "a new long password").await;
 
     db.cleanup().await;

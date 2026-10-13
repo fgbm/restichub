@@ -1,4 +1,4 @@
-//! The embedded web UI.
+//! Embedded web UI.
 //!
 //! The build output of `ui/build` is embedded at compile time. A build without the UI embeds an
 //! empty set and serves a placeholder page instead, so the Rust build never needs Node.
@@ -17,8 +17,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 
-/// The embedded UI files.
-///
 /// `allow_missing` keeps the build working when `ui/build` does not exist. The build script of the
 /// release image runs the UI build first, so a released binary always holds the files.
 #[derive(RustEmbed)]
@@ -26,10 +24,8 @@ use rust_embed::RustEmbed;
 #[allow_missing = true]
 struct UiAssets;
 
-/// The entry point of the single-page application.
 const INDEX: &str = "index.html";
 
-/// The page that a build without the UI serves.
 const PLACEHOLDER: &str = "<!doctype html>\n\
 <html lang=\"en\">\n\
 <head>\n\
@@ -43,12 +39,9 @@ const PLACEHOLDER: &str = "<!doctype html>\n\
 </body>\n\
 </html>\n";
 
-/// The path prefix of the immutable build output.
 const IMMUTABLE_PREFIX: &str = "/_app/immutable/";
 
-/// The cache policy of an immutable asset (one year).
 const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
-/// The cache policy of the HTML entry point and of the fallback.
 const NO_CACHE: &str = "no-cache";
 
 /// The policy of a build without the SvelteKit inline scripts.
@@ -86,7 +79,6 @@ pub fn serve(uri: Uri) -> Response {
     response
 }
 
-/// Returns the embedded path of a request path, or `None` when the request path is not a file.
 fn embedded_path(request_path: &str) -> Option<String> {
     let path = request_path.trim_start_matches('/').trim_end_matches('/');
     if path.is_empty() {
@@ -117,7 +109,6 @@ fn looks_like_asset(request_path: &str) -> bool {
         .is_some_and(|segment| segment.contains('.'))
 }
 
-/// Returns the cache policy of a response.
 fn cache_control(request_path: &str, fallback: bool) -> &'static str {
     if fallback || !request_path.starts_with(IMMUTABLE_PREFIX) {
         NO_CACHE
@@ -126,7 +117,6 @@ fn cache_control(request_path: &str, fallback: bool) -> &'static str {
     }
 }
 
-/// Adds the security headers to a UI response.
 fn add_security_headers(headers: &mut HeaderMap) {
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
@@ -142,7 +132,6 @@ fn add_security_headers(headers: &mut HeaderMap) {
     );
 }
 
-/// Returns the content security policy of a UI response.
 fn csp() -> &'static str {
     static CSP: OnceLock<String> = OnceLock::new();
     CSP.get_or_init(build_csp)
@@ -181,7 +170,6 @@ fn strip_directives(policy: &str, names: &[&str]) -> String {
         .join("; ")
 }
 
-/// Reads the content of the content security policy meta tag.
 fn meta_csp(html: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(html).ok()?;
     let marker = "http-equiv=\"content-security-policy\"";
@@ -190,7 +178,6 @@ fn meta_csp(html: &[u8]) -> Option<String> {
     Some(content[..content.find('"')?].to_owned())
 }
 
-/// Returns the content type of an embedded path.
 fn content_type(path: &str) -> &'static str {
     match path.rsplit('.').next() {
         Some("html") => "text/html; charset=utf-8",
@@ -212,7 +199,6 @@ fn content_type(path: &str) -> &'static str {
     }
 }
 
-/// Returns the embedded asset paths. A test uses this function.
 pub fn asset_paths() -> Vec<String> {
     UiAssets::iter().map(|path| path.into_owned()).collect()
 }
@@ -275,7 +261,7 @@ mod tests {
             strip_directives(policy, &["frame-ancestors", "base-uri"]),
             "default-src 'self'; script-src 'self'"
         );
-        // A directive with a similar prefix stays.
+        // Keep a directive with a similar prefix.
         let other = "default-src 'self'; frame-ancestors-extra 'self'";
         assert_eq!(
             strip_directives(other, &["frame-ancestors"]),

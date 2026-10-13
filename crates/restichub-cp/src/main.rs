@@ -1,5 +1,3 @@
-//! ResticHub control plane binary.
-
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +8,6 @@ use restichub_cp::server::{self, AppState};
 use restichub_cp::telemetry;
 use restichub_secrets::{KekConfig, KekProvider, SystemEnv, load_kek_provider};
 
-/// The timeout to connect the short-lived migration pool.
 const MIGRATION_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[tokio::main]
@@ -30,7 +27,6 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-/// Runs the server. This is the default command.
 async fn serve(cli: Cli) -> anyhow::Result<()> {
     let config = Config::load(&cli)?;
     telemetry::init(&config)?;
@@ -95,7 +91,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     .context("the server stopped with an error")
 }
 
-/// Applies the migrations with the owner login and stops (N4).
+/// Applies the migrations with the owner login and stops.
 async fn migrate(cli: Cli) -> anyhow::Result<()> {
     telemetry::init_command()?;
     let migration = MigrationConfig::load(&cli)?;
@@ -128,7 +124,6 @@ async fn connect_database(config: &Config) -> anyhow::Result<restichub_db::Datab
     Ok(database)
 }
 
-/// Waits for SIGTERM or Ctrl+C.
 async fn shutdown_signal() {
     let ctrl_c = async {
         match tokio::signal::ctrl_c().await {

@@ -14,20 +14,15 @@ use utoipa_axum::routes;
 use crate::context::{Access, Operation};
 use crate::server::{AppState, BODY_LIMIT, SECRET_BODY_LIMIT};
 
-/// One route and its access rule.
 #[derive(Debug)]
 pub struct Route {
-    /// The HTTP method in lower case, as the OpenAPI document holds it.
+    /// Lower case, as the OpenAPI document holds it.
     pub method: &'static str,
-    /// The path template, as the OpenAPI document holds it.
     pub path: &'static str,
-    /// The access rule.
     pub access: Access,
-    /// Builds the method router and the OpenAPI paths of the handler.
     pub handler: fn() -> UtoipaMethodRouter<AppState>,
 }
 
-/// Every route of the control plane.
 pub const ROUTES: &[Route] = &[
     Route {
         method: "get",

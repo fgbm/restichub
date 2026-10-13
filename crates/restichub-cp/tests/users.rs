@@ -1,4 +1,4 @@
-//! User management tests (issue #18, FR-AU-03).
+//! User management tests (FR-AU-03).
 
 mod common;
 
@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use common::{app, count, create_tenant, create_user, request, seed_session, send};
 
-/// Creates an Admin session and returns the cookie.
+/// Builds an Admin session and returns the cookie.
 async fn admin_cookie(
     db: &restichub_db::test_util::TestDatabase,
     tenant: restichub_db::TenantId,
@@ -25,7 +25,6 @@ async fn an_admin_creates_lists_changes_and_disables_a_user() {
     let cookie = admin_cookie(&db, tenant).await;
     let app = app(db.database());
 
-    // Create.
     let body = json!({
         "username": "bob",
         "password": "a long enough password",
@@ -56,7 +55,6 @@ async fn an_admin_creates_lists_changes_and_disables_a_user() {
         Some(2)
     );
 
-    // Get.
     let (status, _, user) = send(
         &app,
         request(
@@ -89,7 +87,7 @@ async fn an_admin_creates_lists_changes_and_disables_a_user() {
     );
     assert_eq!(changed.get("role").and_then(Value::as_str), Some("viewer"));
 
-    // A session of bob and then a disable.
+    // Seed a session of bob, then a disable.
     let bob_id: restichub_db::UserId = user_id.parse().unwrap_or_default();
     let bob_session = common::session_cookie(db.database(), tenant, bob_id).await;
     let (status, _, _) = send(
@@ -179,7 +177,6 @@ async fn the_last_admin_cannot_be_removed() {
     let admin_id = admin.first().map(|user| user.id).unwrap_or_default();
     let app = app(db.database());
 
-    // A disable is refused.
     let (status, _, _) = send(
         &app,
         request(
@@ -218,7 +215,6 @@ async fn a_second_admin_allows_the_change() {
     let cookie = admin_cookie(&db, tenant).await;
     let app = app(db.database());
 
-    // Create a second Admin.
     let body = json!({
         "username": "admin2",
         "password": "a long enough password",
@@ -236,7 +232,6 @@ async fn a_second_admin_allows_the_change() {
         .and_then(Value::as_str)
         .unwrap_or_default();
 
-    // Now the first Admin can be demoted.
     let list = common::list_users(db.database(), tenant).await;
     let first = list
         .iter()
@@ -490,7 +485,7 @@ async fn an_admin_password_reset_kills_the_sessions_of_the_user() {
     let admin = admin_cookie(&db, tenant).await;
     let app = app(db.database());
 
-    // Create a user and sign it in through a session.
+    // Seed a user and sign it in through a session.
     let hash = password::hash_password("a long enough password").unwrap_or_default();
     let user = common::create_user(db.database(), tenant, "bob", &hash, "viewer").await;
     let bob_session = common::session_cookie(db.database(), tenant, user).await;
@@ -515,7 +510,6 @@ async fn an_admin_password_reset_kills_the_sessions_of_the_user() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // The membership is unchanged.
     let role = common::role_of(db.database(), tenant, user).await;
     assert_eq!(role, Some(restichub_db::Role::Viewer));
 

@@ -10,22 +10,16 @@ use restichub_secrets::{
     CryptoError, KekCheck, KekError, KekId, KekProvider, make_kek_check, verify_kek_check,
 };
 
-/// The advisory lock scope of the `kek_check` row.
 const KEK_CHECK_LOCK: &str = "restichub.kek_check:";
 
-/// The error of the start checks.
 #[derive(Debug, thiserror::Error)]
 pub enum StartupError {
-    /// A database operation failed.
     #[error(transparent)]
     Database(#[from] restichub_db::DbError),
-    /// The key encryption key does not match the stored check. The control plane refuses to start.
     #[error(transparent)]
     Kek(#[from] KekError),
-    /// The random number generator failed.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
-    /// The stored `kek_check` row is not valid.
     #[error("the stored kek_check row is not valid")]
     BadCheck,
 }

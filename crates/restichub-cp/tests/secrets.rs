@@ -1,4 +1,4 @@
-//! The write-only secret API and the encrypted storage (issue #17, FR-RP-03, FR-RP-05).
+//! The write-only secret API and the encrypted storage (FR-RP-03, FR-RP-05).
 //!
 //! The tests cover the metadata API, the encryption round trip, the isolation between the tenants,
 //! the authorization, the audit records and the canary checks of AC-RP-02 and AC-RP-03.
@@ -31,7 +31,6 @@ use common::{
 
 /// The canary value. It must never appear in a response, a log or a database dump.
 const CANARY: &str = "RESTICHUB-CANARY-7f3a91c2d4e5";
-/// The purpose of the test secret.
 const PURPOSE: &str = "repository_password";
 
 /// Builds a create-secret body.
@@ -133,7 +132,7 @@ async fn audit_records(
     Ok(records)
 }
 
-/// Returns the hexadecimal form of a byte slice.
+/// Builds the hexadecimal form of a byte slice.
 fn hex(bytes: &[u8]) -> String {
     let mut text = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -222,7 +221,6 @@ async fn dump_all(
 /// The buffer that captures the tracing output of the test process.
 static LOGS: OnceLock<Arc<Mutex<Vec<u8>>>> = OnceLock::new();
 
-/// Returns the shared log buffer.
 fn logs() -> &'static Arc<Mutex<Vec<u8>>> {
     LOGS.get_or_init(|| Arc::new(Mutex::new(Vec::new())))
 }
@@ -266,7 +264,6 @@ fn install_log_capture() {
     });
 }
 
-/// Returns the captured tracing output.
 fn captured_logs() -> String {
     let guard = logs().lock().unwrap_or_else(|error| error.into_inner());
     String::from_utf8_lossy(&guard).into_owned()
@@ -642,7 +639,6 @@ async fn ac_rp_02_invalid_bodies_are_problem_responses_without_the_canary()
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
     let app = app_with_kek(db.database());
 
-    // The value is a number.
     let (status, content_type, body) = send_problem(
         &app,
         request(
@@ -661,7 +657,6 @@ async fn ac_rp_02_invalid_bodies_are_problem_responses_without_the_canary()
     );
     assert!(!body.to_string().contains("12345678"), "{body}");
 
-    // The value is a boolean.
     let (status, content_type, body) = send_problem(
         &app,
         request(
@@ -897,7 +892,7 @@ async fn ac_rp_03_the_delivery_decrypts_with_the_stored_key_version()
     let tenant = create_tenant_with_key(db.database(), "secrets-version").await;
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
     let app = app_with_kek(db.database());
-    // The secret is encrypted under key version 1.
+    // Encrypt the secret under key version 1.
     let id = create_secret(&app, &cookie, "version-1", CANARY).await;
     let secret_id = id.parse::<SecretId>()?;
 

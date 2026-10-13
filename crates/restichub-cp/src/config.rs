@@ -14,50 +14,29 @@ use serde::Deserialize;
 
 use crate::client_ip::TrustedProxies;
 
-/// The name of the environment variable that holds the path of the configuration file.
 pub const CONFIG_PATH_ENV: &str = "RESTICHUB_CONFIG";
-/// The name of the environment variable that holds the listen address.
 pub const LISTEN_ADDR_ENV: &str = "RESTICHUB_LISTEN_ADDR";
-/// The name of the environment variable that holds the database URL.
 pub const DATABASE_URL_ENV: &str = "RESTICHUB_DATABASE_URL";
-/// The name of the environment variable that holds the path of the database password file.
 pub const DATABASE_PASSWORD_FILE_ENV: &str = "RESTICHUB_DATABASE_PASSWORD_FILE";
-/// The name of the environment variable that holds the database password.
 pub const DATABASE_PASSWORD_ENV: &str = "RESTICHUB_DATABASE_PASSWORD";
-/// The name of the environment variable that holds the URL of the migration login.
-///
 /// The migration login is the owner of the installation database. It is optional. Without it the
-/// control plane does not run the migrations (D1).
+/// control plane does not run the migrations.
 pub const DATABASE_MIGRATION_URL_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_URL";
-/// The name of the environment variable that holds the path of the migration password file.
 pub const DATABASE_MIGRATION_PASSWORD_FILE_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_PASSWORD_FILE";
-/// The name of the environment variable that holds the migration password.
 pub const DATABASE_MIGRATION_PASSWORD_ENV: &str = "RESTICHUB_DATABASE_MIGRATION_PASSWORD";
-/// The name of the environment variable that holds the path of the KEK file.
-///
 /// The key encryption key (KEK) comes from this file or from the environment variable
 /// `RESTICHUB_KEK` ([`restichub_secrets::KEK_ENV`]). If both are set, the start fails (ADR-0023,
 /// section Secrets).
 pub const KEK_FILE_ENV: &str = "RESTICHUB_KEK_FILE";
-/// The name of the environment variable that holds the log format.
 pub const LOG_FORMAT_ENV: &str = "RESTICHUB_LOG_FORMAT";
-/// The name of the environment variable that holds the log level.
 pub const LOG_LEVEL_ENV: &str = "RESTICHUB_LOG_LEVEL";
-/// The name of the environment variable that holds the trusted proxy list.
-///
 /// The value is a comma-separated list of networks, for example `10.0.0.0/8,192.168.0.0/16`.
 pub const TRUSTED_PROXIES_ENV: &str = "RESTICHUB_TRUSTED_PROXIES";
-/// The name of the environment variable that holds the session idle timeout in seconds.
 pub const SESSION_IDLE_ENV: &str = "RESTICHUB_AUTH_SESSION_IDLE_SECS";
-/// The name of the environment variable that holds the session absolute lifetime in seconds.
 pub const SESSION_ABSOLUTE_ENV: &str = "RESTICHUB_AUTH_SESSION_ABSOLUTE_SECS";
-/// The name of the environment variable that holds the per-user sign-in rate per minute.
 pub const SIGN_IN_USER_RATE_ENV: &str = "RESTICHUB_AUTH_SIGN_IN_USER_RATE";
-/// The name of the environment variable that holds the per-IP sign-in rate per minute.
 pub const SIGN_IN_IP_RATE_ENV: &str = "RESTICHUB_AUTH_SIGN_IN_IP_RATE";
-/// The name of the environment variable that turns on insecure cookies.
 pub const INSECURE_COOKIES_ENV: &str = "RESTICHUB_SERVER_INSECURE_COOKIES";
-/// The name of the environment variable that holds the largest number of concurrent password hashes.
 pub const MAX_CONCURRENT_HASHES_ENV: &str = "RESTICHUB_AUTH_MAX_CONCURRENT_HASHES";
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:8080";
@@ -69,93 +48,65 @@ const DEFAULT_SESSION_ABSOLUTE: Duration = Duration::from_secs(12 * 60 * 60);
 const DEFAULT_SIGN_IN_USER_RATE: u32 = 10;
 const DEFAULT_SIGN_IN_IP_RATE: u32 = 30;
 
-/// The command of the control plane binary.
 #[derive(Debug, Clone)]
 pub enum Command {
-    /// Print the version and stop.
     Version,
-    /// Run the server. This is the default command.
     Serve(Box<Cli>),
-    /// Apply the database migrations and stop (N4).
+    /// Apply the database migrations and stop.
     Migrate(Box<Cli>),
 }
 
-/// The command-line arguments of the control plane.
 #[derive(Debug, Default, Clone)]
 pub struct Cli {
-    /// The path of the configuration file (`--config`).
     pub config_path: Option<PathBuf>,
 }
 
-/// The log output format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFormat {
-    /// Human-readable text.
     Text,
-    /// JSON objects.
     Json,
 }
 
-/// The error of the configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    /// An unknown command-line argument.
     #[error("the argument `{0}` is not known")]
     UnknownArgument(String),
-    /// The `--config` argument has no value.
     #[error("the argument `--config` needs a path")]
     ConfigPathMissing,
-    /// The configuration file cannot be read.
     #[error("cannot read the configuration file `{path}`")]
     ReadFile {
-        /// The path of the file.
         path: PathBuf,
-        /// The cause.
         #[source]
         source: std::io::Error,
     },
-    /// The configuration file cannot be parsed.
     #[error("cannot parse the configuration file `{path}`")]
     ParseFile {
-        /// The path of the file.
         path: PathBuf,
-        /// The cause.
         #[source]
         source: toml::de::Error,
     },
-    /// A parameter has a value that is not valid.
     #[error("the parameter `{name}` is not valid: {reason}")]
-    Invalid {
-        /// The name of the parameter.
-        name: &'static str,
-        /// The reason.
-        reason: String,
-    },
-    /// The database URL holds a password and a password file is also set.
+    Invalid { name: &'static str, reason: String },
     #[error(
         "the parameter `database_url` holds a password, but `database_password_file` is also set"
     )]
     PasswordFileWithUrlPassword,
-    /// The migration URL holds a password and a migration password file is also set.
     #[error(
         "the parameter `database_migration_url` holds a password, but `database_migration_password_file` is also set"
     )]
     MigrationPasswordFileWithUrlPassword,
-    /// A secret read failed.
     #[error(transparent)]
     Secret(#[from] restichub_secrets::SecretError),
 }
 
-/// The configuration of the local authentication (ADR-0023, section Local authentication).
+/// Local authentication configuration (ADR-0023, section Local authentication).
 #[derive(Debug, Clone)]
 pub struct AuthConfig {
-    /// The session idle timeout.
     pub session_idle: Duration,
-    /// The session absolute lifetime.
     pub session_absolute: Duration,
-    /// The number of sign-in attempts for each `(tenant, username)` pair in one minute.
+    /// Sign-in attempts for each `(tenant, username)` pair in one minute.
     pub sign_in_user_rate: u32,
-    /// The number of sign-in attempts for each source IP address in one minute.
+    /// Sign-in attempts for each source IP address in one minute.
     pub sign_in_ip_rate: u32,
     /// Turns off the `Secure` attribute and the `__Host-` prefix of the session cookie.
     ///
@@ -181,7 +132,6 @@ impl Default for AuthConfig {
     }
 }
 
-/// Returns the default number of concurrent password hashes.
 fn default_max_concurrent_hashes() -> u32 {
     std::thread::available_parallelism()
         .map(|count| count.get() as u32)
@@ -195,29 +145,20 @@ fn default_max_concurrent_hashes() -> u32 {
 /// field `database_url` holds no password.
 #[derive(Debug)]
 pub struct Config {
-    /// The address the HTTP server listens on.
     pub listen_addr: SocketAddr,
-    /// The database connection URL. The URL holds no password.
+    /// Holds no password.
     pub database_url: String,
-    /// The database password from a file or from the environment.
     pub database_password: Option<SecretString>,
-    /// The maximum number of database connections.
     pub database_max_connections: u32,
-    /// The time to wait for a database connection.
     pub database_acquire_timeout: Duration,
-    /// The log output format.
     pub log_format: LogFormat,
-    /// The tracing filter.
     pub log_level: String,
-    /// The networks whose `X-Forwarded-For` header the control plane trusts.
     pub trusted_proxies: TrustedProxies,
-    /// The local authentication settings.
     pub auth: AuthConfig,
-    /// The secret handling settings.
     pub secrets: SecretsConfig,
 }
 
-/// The configuration of the secret handling (ADR-0023, section Secrets).
+/// Secret handling configuration (ADR-0023, section Secrets).
 #[derive(Debug, Clone, Default)]
 pub struct SecretsConfig {
     /// The path of the file that holds the key encryption key (KEK).
@@ -228,7 +169,6 @@ pub struct SecretsConfig {
 }
 
 impl Config {
-    /// Loads the configuration from the process environment.
     pub fn load(cli: &Cli) -> Result<Self, ConfigError> {
         Self::load_with(cli, &SystemEnv)
     }
@@ -360,7 +300,7 @@ where
     })
 }
 
-/// The configuration file. Each field is optional so that the environment can override it.
+/// Each field is optional so that the environment can override it.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
@@ -378,7 +318,6 @@ struct FileConfig {
     secrets: Option<SecretsSection>,
 }
 
-/// The `[server]` section of the configuration file.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ServerConfig {
@@ -386,7 +325,6 @@ struct ServerConfig {
     insecure_cookies: Option<bool>,
 }
 
-/// The `[auth]` section of the configuration file.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AuthSection {
@@ -397,7 +335,6 @@ struct AuthSection {
     max_concurrent_hashes: Option<u32>,
 }
 
-/// The `[secrets]` section of the configuration file.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SecretsSection {
@@ -437,7 +374,7 @@ fn log_format(value: Option<&str>) -> Result<LogFormat, ConfigError> {
 
 /// Reads the trusted proxy list (ADR-0023, section Audit log).
 ///
-/// The environment overrides the file. The environment value is a comma-separated list.
+/// Environment values override the file. The environment value is a comma-separated list.
 fn trusted_proxies(
     env: &dyn EnvReader,
     server: Option<&ServerConfig>,
@@ -461,7 +398,7 @@ fn trusted_proxies(
 
 /// Reads the local authentication settings.
 ///
-/// The environment overrides the file.
+/// Environment values override the file.
 fn auth_config(
     env: &dyn EnvReader,
     auth: Option<&AuthSection>,
@@ -523,7 +460,7 @@ fn auth_config(
 
 /// Reads the secret handling settings.
 ///
-/// The environment overrides the file. The function does not reject both sources: the KEK provider
+/// Environment values override the file. The function does not reject both sources: the KEK provider
 /// [`restichub_secrets::load_kek_provider`] refuses a file and the environment variable at the same
 /// time with a clear cause.
 fn secrets_config(env: &dyn EnvReader, secrets: Option<&SecretsSection>) -> SecretsConfig {
@@ -534,7 +471,6 @@ fn secrets_config(env: &dyn EnvReader, secrets: Option<&SecretsSection>) -> Secr
     SecretsConfig { kek_file }
 }
 
-/// Reads a number from the environment or from the file.
 fn number<T: std::str::FromStr>(
     env: &dyn EnvReader,
     name: &'static str,
@@ -552,7 +488,6 @@ fn number<T: std::str::FromStr>(
     }
 }
 
-/// Reads a boolean from the environment or from the file.
 fn boolean(
     env: &dyn EnvReader,
     name: &'static str,
@@ -571,25 +506,20 @@ fn boolean(
     }
 }
 
-/// The configuration of the `migrate` command.
-///
 /// The command reads only the migration URL and the migration password. The server path does not
-/// accept migration credentials (N4).
+/// accept migration credentials.
 #[derive(Debug)]
 pub struct MigrationConfig {
-    /// The connection URL of the owner login. The URL holds no password.
+    /// Holds no password.
     pub url: String,
-    /// The password of the owner login from a file or from the environment.
     pub password: Option<SecretString>,
 }
 
 impl MigrationConfig {
-    /// Loads the migration configuration from the process environment.
     pub fn load(cli: &Cli) -> Result<Self, ConfigError> {
         Self::load_with(cli, &SystemEnv)
     }
 
-    /// Loads the migration configuration from a given environment. A test uses this function.
     pub fn load_with(cli: &Cli, env: &dyn EnvReader) -> Result<Self, ConfigError> {
         let file_path = cli
             .config_path

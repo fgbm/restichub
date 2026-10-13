@@ -21,7 +21,7 @@ const ROLES: [Role; 4] = [
     Role::Viewer,
 ];
 
-/// Returns a unique username for a fresh session.
+/// Builds a unique username for a fresh session.
 fn unique(role: Role, index: usize) -> String {
     format!("user-{}-{index}", role.as_str())
 }
@@ -88,7 +88,6 @@ async fn ac_au_02_the_router_route_list_matches_the_openapi_paths() {
         .and_then(Value::as_object)
         .unwrap_or_else(|| panic!("the document holds no paths"));
 
-    // The document holds the two security schemes.
     let schemes = document
         .pointer("/components/securitySchemes")
         .unwrap_or_else(|| panic!("the document holds no security schemes"));
@@ -326,7 +325,7 @@ async fn ac_tn_04_api_token_of_tenant_a_cannot_access_tenant_b() {
     let tenant_a = create_tenant(db.database(), "tenant-a").await;
     let tenant_b = create_tenant(db.database(), "tenant-b").await;
 
-    // A user and an audit record of tenant B.
+    // Seed a user and an audit record of tenant B.
     let user_b = create_user(db.database(), tenant_b, "bob", "phc", "admin").await;
     let mut tx = db
         .database()
@@ -340,7 +339,7 @@ async fn ac_tn_04_api_token_of_tenant_a_cannot_access_tenant_b() {
         .unwrap_or_else(|e| panic!("{e}"));
     tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
 
-    // A user and an audit record of tenant A.
+    // Seed a user and an audit record of tenant A.
     let user_a = create_user(db.database(), tenant_a, "alice", "phc", "admin").await;
     let mut tx = db
         .database()

@@ -28,41 +28,25 @@ use crate::server::AppState;
 use crate::token;
 use crate::validation::Reason;
 
-/// An operation of the API.
-///
 /// The authorization table gives the minimum role of each operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
-    /// Read the audit records of one tenant.
     AuditRead,
-    /// Read the audit records of the platform.
     PlatformAuditRead,
-    /// Read the tenants of the platform.
     PlatformTenantsRead,
-    /// Create, suspend, resume and delete the tenants of the platform.
     PlatformTenantsWrite,
-    /// Read the own user and tenant.
     AuthMe,
-    /// Sign out.
     AuthSignOut,
-    /// Change the own password.
     AuthPasswordChange,
-    /// Read the users of the tenant.
     UsersRead,
-    /// Create, change and disable the users of the tenant.
     UsersWrite,
-    /// Read the API tokens of the tenant.
     ApiTokensRead,
-    /// Create and revoke the API tokens of the tenant.
     ApiTokensWrite,
-    /// Read the metadata of the secrets of the tenant.
     SecretsRead,
-    /// Create, replace and remove the secrets of the tenant.
     SecretsWrite,
 }
 
 impl Operation {
-    /// Returns true if the operation acts on the platform.
     pub fn is_platform(self) -> bool {
         matches!(
             self,
@@ -80,7 +64,7 @@ impl Operation {
     }
 }
 
-/// Returns the minimum role of an operation (ADR-0023, section Roles).
+/// Minimum role of an operation (ADR-0023, section Roles).
 pub fn minimum_role(operation: Operation) -> Role {
     match operation {
         Operation::AuditRead => Role::Viewer,
@@ -137,32 +121,23 @@ pub fn ensure_target_not_above_actor(
     Ok(())
 }
 
-/// The access rule of one route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
-    /// The route needs no authentication.
     Public,
-    /// The route needs the minimum role of the operation.
     Protected(Operation),
 }
 
-/// The tenant, the actor, the role, the session and the source IP of a request.
 #[derive(Debug, Clone)]
 pub struct RequestContext {
-    /// The tenant of the request.
     pub tenant_id: TenantId,
-    /// The actor of the request.
     pub actor: Actor,
-    /// The role of the actor.
     pub role: Role,
-    /// The session of the request. It is absent for an API token.
+    /// Absent for an API token.
     pub session_id: Option<SessionId>,
-    /// The source IP address of the request.
     pub source_ip: Option<IpAddr>,
 }
 
 impl RequestContext {
-    /// Creates a request context with no session and no source IP.
     pub fn new(tenant_id: TenantId, actor: Actor, role: Role) -> Self {
         Self {
             tenant_id,
@@ -191,7 +166,6 @@ impl RequestContext {
         }
     }
 
-    /// Builds an audit event with the actor and the source IP of the request.
     pub fn audit_event(
         &self,
         action: AuditAction,
@@ -253,7 +227,6 @@ impl FromRequestParts<AppState> for RequestContext {
     }
 }
 
-/// Authenticates a request from a session cookie value.
 async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestContext, ApiError> {
     let hash = token::hash_token(value);
     let lookup = auth::find_session(state.db(), &hash).await?;
@@ -295,7 +268,6 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
     })
 }
 
-/// Authenticates a request from a bearer token value.
 async fn authenticate_bearer(state: &AppState, value: &str) -> Result<RequestContext, ApiError> {
     let hash = token::hash_token(value);
     let lookup = auth::find_api_token(state.db(), &hash).await?;
@@ -335,7 +307,6 @@ mod tests {
 
     use super::{RequestContext, ensure_target_not_above_actor};
 
-    /// Builds a request context with a role.
     fn context(role: Role) -> RequestContext {
         RequestContext::new(TenantId::from_uuid(Uuid::now_v7()), Actor::System, role)
     }

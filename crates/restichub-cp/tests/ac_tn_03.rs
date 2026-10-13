@@ -1,4 +1,4 @@
-//! AC-TN-03: a suspended tenant (issue #20, FR-TN-02; partial).
+//! AC-TN-03: a suspended tenant (FR-TN-02; partial).
 //!
 //! The Platform Admin suspends a tenant. Users cannot sign in, the API tokens fail and the existing
 //! sessions stop working. The platform audit holds the event. The agents stay connected (epic #1);
@@ -42,7 +42,6 @@ async fn ac_tn_03_a_suspended_tenant_cannot_sign_in_and_the_platform_audit_has_t
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    // The Platform Admin suspends the tenant.
     let (status, _, _) = send(
         &app,
         request(
@@ -55,7 +54,6 @@ async fn ac_tn_03_a_suspended_tenant_cannot_sign_in_and_the_platform_audit_has_t
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // A sign-in fails.
     let body =
         json!({"tenant": "suspend-ac", "username": "alice", "password": "correct horse battery"});
     let (status, _, _) = send(
@@ -65,7 +63,6 @@ async fn ac_tn_03_a_suspended_tenant_cannot_sign_in_and_the_platform_audit_has_t
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // The API token fails.
     let (status, _, _) = send(
         &app,
         common::bearer_request("GET", "/api/v1/users", &token, None),
@@ -73,11 +70,9 @@ async fn ac_tn_03_a_suspended_tenant_cannot_sign_in_and_the_platform_audit_has_t
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // The existing session stops working.
     let (status, _, _) = send(&app, request("GET", "/api/v1/auth/me", Some(&cookie), None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // The platform audit holds the event.
     let uri = format!("/api/v1/platform/audit?tenant_id={tenant}&action=tenant_suspend");
     let (status, _, page) = send(&app, request("GET", &uri, Some(&admin), None)).await;
     assert_eq!(status, StatusCode::OK);

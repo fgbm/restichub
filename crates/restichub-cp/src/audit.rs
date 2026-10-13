@@ -26,17 +26,13 @@ use crate::error::ApiError;
 use crate::server::AppState;
 use crate::validation::Reason;
 
-/// The highest number of records of the audit API.
 const MAX_PAGE_LIMIT: i64 = repo::MAX_PAGE_LIMIT;
 
-/// The audit service of the control plane.
-///
 /// The service writes records for the later epics. It holds no state.
 #[derive(Debug, Clone, Copy)]
 pub struct AuditService;
 
 impl AuditService {
-    /// Writes an audit event in the tenant of the transaction.
     pub async fn record(
         tx: &mut restichub_db::TenantTx<'_>,
         event: AuditEvent,
@@ -64,28 +60,18 @@ impl AuditService {
     }
 }
 
-/// One audit record in the API.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AuditItem {
-    /// The identifier of the record.
     pub id: String,
-    /// The tenant of the record.
     pub tenant_id: String,
-    /// The time of the record in RFC 3339.
+    /// In RFC 3339.
     pub occurred_at: String,
-    /// The actor type.
     pub actor_type: String,
-    /// The actor identifier.
     pub actor_id: Option<String>,
-    /// The source IP address.
     pub source_ip: Option<String>,
-    /// The action.
     pub action: AuditAction,
-    /// The object type.
     pub object_type: String,
-    /// The object identifier.
     pub object_id: Option<String>,
-    /// The diff.
     #[schema(value_type = Option<Object>)]
     pub diff: Option<Value>,
 }
@@ -107,43 +93,33 @@ impl From<&AuditRecord> for AuditItem {
     }
 }
 
-/// A page of audit records in the API.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AuditPageResponse {
-    /// The records.
     pub items: Vec<AuditItem>,
-    /// The cursor of the next page. It is null when the table holds no later record.
+    /// Null when the table holds no later record.
     pub next_cursor: Option<String>,
 }
 
-/// The query of the audit API.
 #[derive(Debug, Default, Deserialize, IntoParams)]
 #[serde(deny_unknown_fields)]
 pub struct AuditQuery {
-    /// The start of the time range in RFC 3339.
+    /// Start of the time range in RFC 3339.
     pub from: Option<String>,
-    /// The end of the time range in RFC 3339.
+    /// End of the time range in RFC 3339.
     pub to: Option<String>,
-    /// The action.
     pub action: Option<String>,
-    /// The actor type.
     pub actor_type: Option<String>,
-    /// The actor identifier. It needs `actor_type`.
+    /// Needs `actor_type`.
     pub actor_id: Option<String>,
-    /// The object type.
     pub object_type: Option<String>,
-    /// The object identifier.
     pub object_id: Option<String>,
-    /// The tenant of the record. The platform list uses it.
+    /// Used by the platform list.
     pub tenant_id: Option<String>,
-    /// The cursor of the next page.
     pub cursor: Option<String>,
-    /// The number of records.
     pub limit: Option<i64>,
 }
 
 impl AuditQuery {
-    /// Builds the filter. The function returns an error on a bad value.
     fn filter(&self) -> Result<AuditFilter, ApiError> {
         if self.actor_id.is_some() && self.actor_type.is_none() {
             return Err(invalid_query("`actor_id` needs `actor_type`"));
@@ -188,7 +164,6 @@ impl AuditQuery {
         })
     }
 
-    /// Builds the actor of the filter.
     fn actor(&self) -> Result<Option<Actor>, ApiError> {
         let Some(actor_type) = self.actor_type.as_deref() else {
             return Ok(None);
@@ -208,12 +183,10 @@ impl AuditQuery {
         Ok(Some(actor))
     }
 
-    /// Parses the `actor_id` of the filter. It needs `actor_type`.
     fn actor_id(&self) -> Result<Uuid, String> {
         parse_uuid(self.actor_id.as_deref().ok_or("`actor_id` is missing")?)
     }
 
-    /// Builds the page.
     fn page(&self) -> Result<AuditPage, ApiError> {
         let limit = self
             .limit
@@ -229,18 +202,14 @@ impl AuditQuery {
     }
 }
 
-/// Builds an `invalid_argument` error of the audit query, with the cause of the failure.
 fn invalid_query(cause: impl Into<String>) -> ApiError {
     ApiError::invalid_field_cause("query", Reason::InvalidFormat, cause)
 }
 
-/// Builds an `invalid_argument` error of the audit cursor, with the cause of the failure.
 fn invalid_cursor(cause: impl Into<String>) -> ApiError {
     ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
 }
 
-/// The query extractor of the audit API.
-///
 /// A bad query gives an RFC 9457 problem with the code `invalid_argument`.
 pub struct AuditParams(pub AuditQuery);
 
@@ -261,22 +230,18 @@ impl FromRequestParts<AppState> for AuditParams {
     }
 }
 
-/// Formats a time as RFC 3339.
 fn format_time(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
-/// Parses an RFC 3339 time. The error holds the cause of the failure.
 fn parse_time(value: &str) -> Result<OffsetDateTime, String> {
     OffsetDateTime::parse(value, &Rfc3339).map_err(|error| error.to_string())
 }
 
-/// Parses a UUID. The error holds the cause of the failure.
 fn parse_uuid(value: &str) -> Result<Uuid, String> {
     Uuid::parse_str(value).map_err(|error| error.to_string())
 }
 
-/// Encodes the cursor of a page.
 fn encode_cursor(cursor: repo::AuditCursor) -> String {
     format!(
         "{};{}",
@@ -285,7 +250,6 @@ fn encode_cursor(cursor: repo::AuditCursor) -> String {
     )
 }
 
-/// Decodes the cursor of a page. The error holds the cause of the failure.
 fn decode_cursor(value: &str) -> Result<repo::AuditCursor, String> {
     let (time, id) = value
         .split_once(';')
@@ -398,11 +362,8 @@ mod tests {
 
     #[test]
     fn a_bad_cursor_is_refused() {
-        // A bad format.
         assert!(decode_cursor("nope").is_err());
-        // A bad identifier.
         assert!(decode_cursor("0;not-a-uuid").is_err());
-        // A time before 1970.
         let old = time("1900-01-01T00:00:00Z");
         let cursor = format!("{};{}", old.unix_timestamp_nanos(), Uuid::nil());
         assert!(decode_cursor(&cursor).is_err());

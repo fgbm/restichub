@@ -30,44 +30,35 @@ use crate::server::AppState;
 use crate::validation;
 use crate::views::PlatformTenantView;
 
-/// The body of the create-tenant request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateTenantRequest {
     /// The name of the tenant. It holds 1 to 63 characters from `a-z`, `0-9` and `-`, it starts
     /// with a letter, and it is not `platform`.
     pub name: String,
-    /// The first administrator of the tenant.
     pub first_admin: CreateTenantAdmin,
 }
 
-/// The first administrator of a new tenant.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateTenantAdmin {
-    /// The username of the administrator. It is unique for the tenant and ignores the letter case.
+    /// Unique for the tenant; ignores the letter case.
     pub username: String,
-    /// The name of the administrator for the user interface.
     pub display_name: String,
-    /// The password of the administrator. It must hold at least 12 characters.
+    /// At least 12 characters.
     pub password: String,
 }
 
-/// The query of the tenant list.
 #[derive(Debug, Default, Deserialize, IntoParams)]
 pub struct TenantListQuery {
-    /// The status of the tenant: `active`, `suspended` or `deleted`.
+    /// `active`, `suspended` or `deleted`.
     pub status: Option<String>,
-    /// The cursor of the next page.
     pub cursor: Option<String>,
-    /// The number of tenants.
     pub limit: Option<i64>,
 }
 
-/// A page of tenants in the API.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TenantListResponse {
-    /// The tenants.
     pub items: Vec<PlatformTenantView>,
-    /// The cursor of the next page. It is null when the table holds no later tenant.
+    /// Null when the table holds no later tenant.
     pub next_cursor: Option<String>,
 }
 
@@ -100,10 +91,10 @@ pub async fn list_tenants(
     Ok(Json(response(result)))
 }
 
-/// Creates a tenant with its first administrator.
 #[utoipa::path(
     post,
     path = "/api/v1/platform/tenants",
+    summary = "Creates a tenant with its first administrator.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateTenantRequest,
     responses(
@@ -212,6 +203,8 @@ pub async fn get_tenant(
 
 /// Suspends a tenant.
 ///
+/// Suspends a tenant.
+///
 /// The endpoint is idempotent. The platform tenant cannot be suspended.
 #[utoipa::path(
     post,
@@ -248,6 +241,8 @@ pub async fn suspend_tenant(
 
 /// Resumes a tenant.
 ///
+/// Resumes a tenant.
+///
 /// The endpoint is idempotent. A deleted tenant cannot be resumed.
 #[utoipa::path(
     post,
@@ -279,6 +274,8 @@ pub async fn resume_tenant(
     .await
 }
 
+/// Deletes a tenant (soft delete).
+///
 /// Deletes a tenant (soft delete).
 ///
 /// The tenant must be suspended first. The endpoint sets the status to `deleted`; it removes no
@@ -338,7 +335,6 @@ async fn transition(
     }
 }
 
-/// Builds the filter of the list. The function returns an error on a bad status.
 fn filter(query: &TenantListQuery) -> Result<TenantFilter, ApiError> {
     let status = match query.status.as_deref() {
         None => None,
@@ -350,7 +346,6 @@ fn filter(query: &TenantListQuery) -> Result<TenantFilter, ApiError> {
     Ok(TenantFilter { status })
 }
 
-/// Builds the page of the list. The function returns an error on a bad cursor.
 fn page(query: &TenantListQuery) -> Result<TenantPage, ApiError> {
     let limit = query
         .limit
@@ -367,7 +362,6 @@ fn page(query: &TenantListQuery) -> Result<TenantPage, ApiError> {
     Ok(TenantPage { limit, after })
 }
 
-/// Builds the API page response.
 fn response(result: repo::TenantPageResult) -> TenantListResponse {
     let next_cursor = if result.has_more {
         result.tenants.last().map(encode_cursor)
@@ -384,12 +378,10 @@ fn response(result: repo::TenantPageResult) -> TenantListResponse {
     }
 }
 
-/// Encodes the cursor of a page.
 fn encode_cursor(tenant: &TenantSummary) -> String {
     format!("{};{}", tenant.created_at.unix_timestamp_nanos(), tenant.id)
 }
 
-/// Decodes the cursor of a page. The error holds the cause of the failure.
 fn decode_cursor(value: &str) -> Result<repo::TenantCursor, String> {
     let (time, id) = value
         .split_once(';')
@@ -406,7 +398,6 @@ fn decode_cursor(value: &str) -> Result<repo::TenantCursor, String> {
     })
 }
 
-/// Parses a tenant identifier from a path parameter.
 fn parse_tenant_id(value: &str) -> Result<TenantId, ApiError> {
     Uuid::parse_str(value)
         .map(TenantId::from_uuid)

@@ -1,4 +1,4 @@
-//! Audit API and audit service tests (issue #19, AC-AU-01, AC-RP-03).
+//! Audit API and audit service tests (AC-AU-01, AC-RP-03).
 //!
 //! A test builds its authentication through a real session in the database. The extractor no longer
 //! accepts a context from the request extensions.
@@ -26,12 +26,9 @@ use uuid::Uuid;
 /// The plaintext marker that must never appear in an audit row.
 const CANARY: &str = "canary-secret-value";
 
-/// The path of the tenant audit endpoint.
 const AUDIT_TENANT_PATH: &str = "/api/v1/audit";
-/// The path of the platform audit endpoint.
 const AUDIT_PLATFORM_PATH: &str = "/api/v1/platform/audit";
 
-/// The socket peer of a test request.
 fn peer() -> ConnectInfo<std::net::SocketAddr> {
     ConnectInfo(
         "203.0.113.7:1234"
@@ -341,7 +338,6 @@ async fn a_viewer_reads_the_tenant_audit_records() -> Result<(), Box<dyn std::er
             .and_then(Value::as_str),
         Some("config_update")
     );
-    // The last page holds no next cursor.
     assert!(page.get("next_cursor").is_some_and(Value::is_null));
 
     db.cleanup().await;

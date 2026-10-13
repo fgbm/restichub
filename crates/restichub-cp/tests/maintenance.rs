@@ -1,4 +1,4 @@
-//! The periodic maintenance tests (issue #18).
+//! Periodic maintenance tests.
 
 mod common;
 
@@ -17,7 +17,6 @@ async fn the_maintenance_removes_the_expired_rows() {
     let user = create_user(db.database(), tenant, "alice", "phc", "admin").await;
     let now = OffsetDateTime::now_utc();
 
-    // An expired session and a live session.
     let mut tx = db
         .database()
         .begin_tenant(tenant)

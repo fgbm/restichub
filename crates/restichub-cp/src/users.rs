@@ -24,44 +24,34 @@ use crate::server::AppState;
 use crate::validation;
 use crate::views::UserView;
 
-/// The advisory lock scope of the tenant user administration.
 const ADMIN_LOCK: &str = "restichub.tenant_admin:";
 
-/// The body of the create-user request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateUserRequest {
-    /// The username. It is unique for the tenant and ignores the letter case.
+    /// Unique for the tenant; ignores the letter case.
     pub username: String,
-    /// The password. It must hold at least 12 characters.
+    /// At least 12 characters.
     pub password: String,
-    /// The name for the user interface.
     pub display_name: String,
-    /// The role in the tenant.
     pub role: String,
 }
 
-/// The body of the update-user request. An absent field does not change.
+/// Absent fields leave the value unchanged.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateUserRequest {
-    /// The new display name.
     pub display_name: Option<String>,
-    /// The new disabled flag.
     pub disabled: Option<bool>,
-    /// The new role.
     pub role: Option<String>,
 }
 
-/// The body of the admin password reset request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ResetPasswordRequest {
-    /// The new password. It must hold at least 12 characters.
+    /// At least 12 characters.
     pub new_password: String,
 }
 
-/// A list of users.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserListResponse {
-    /// The users.
     pub items: Vec<UserView>,
 }
 
@@ -101,10 +91,10 @@ pub async fn list_users(
     Ok(Json(UserListResponse { items }))
 }
 
-/// Creates a user in the tenant.
 #[utoipa::path(
     post,
     path = "/api/v1/users",
+    summary = "Creates a user in the tenant.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateUserRequest,
     responses(
@@ -126,7 +116,6 @@ pub async fn create_user(
     let display_name = validation::validate_display_name("display_name", &body.display_name)?;
     validation::validate_password("password", &body.password)?;
 
-    // Check the username in one transaction.
     {
         let mut tx = state.db().begin_tenant(context.tenant_id).await?;
         let existing = users::find_for_auth(&mut tx, &username).await?;
@@ -136,12 +125,10 @@ pub async fn create_user(
         }
     }
 
-    // Hash without a transaction.
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, body.password.clone())
             .await?;
 
-    // Write the user under the tenant lock.
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     tx.lock(ADMIN_LOCK).await?;
     let user_id = users::create(
@@ -376,7 +363,6 @@ pub async fn reset_password(
     let user_id = parse_uuid(&id)?;
     validation::validate_password("new_password", &body.new_password)?;
 
-    // Read the target.
     let (user, target_role) = context
         .tenant_tx(&state, async |tx| {
             let user = users::get(tx, user_id).await?;
@@ -391,12 +377,10 @@ pub async fn reset_password(
         ensure_target_not_above_actor(&context, role)?;
     }
 
-    // Hash without a transaction.
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, body.new_password.clone())
             .await?;
 
-    // Write the new hash.
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     users::set_password(&mut tx, user_id, &password_hash).await?;
     sessions::delete_for_user(&mut tx, user_id).await?;
@@ -411,7 +395,6 @@ pub async fn reset_password(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Refuses the change when it would remove the last active Admin of the tenant.
 async fn guard_last_admin(tx: &mut TenantTx<'_>) -> Result<(), ApiError> {
     if memberships::count_admins(tx).await? <= 1 {
         return Err(ApiError::conflict());
@@ -419,7 +402,6 @@ async fn guard_last_admin(tx: &mut TenantTx<'_>) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Parses a UUID from a path parameter.
 fn parse_uuid(value: &str) -> Result<UserId, ApiError> {
     Uuid::parse_str(value)
         .map(UserId::from_uuid)

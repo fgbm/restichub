@@ -1,4 +1,4 @@
-//! The platform tenant administration endpoints (issue #20, FR-TN-02).
+//! The platform tenant administration endpoints (FR-TN-02).
 //!
 //! The tests cover the create, the list, the read, the suspend, the resume and the delete. They
 //! check the name rules, the state machine, the platform tenant protections, the authorization, the
@@ -117,7 +117,7 @@ async fn create_list_and_get_a_tenant() {
         .unwrap_or_default()
         .to_owned();
 
-    // The list holds the tenant and the count.
+    // The list holds the tenant and the user count.
     let (status, _, list) = send(
         &app,
         request("GET", "/api/v1/platform/tenants", Some(&cookie), None),
@@ -134,7 +134,6 @@ async fn create_list_and_get_a_tenant() {
         .unwrap_or_else(|| panic!("the list holds no created tenant: {list}"));
     assert_eq!(found.get("user_count").and_then(Value::as_u64), Some(1));
 
-    // The read returns the tenant.
     let (status, _, one) = send(
         &app,
         request(
@@ -148,7 +147,6 @@ async fn create_list_and_get_a_tenant() {
     assert_eq!(status, StatusCode::OK, "{one}");
     assert_eq!(one.get("name").and_then(Value::as_str), Some("acme"));
 
-    // The first administrator can sign in.
     let body = json!({"tenant": "acme", "username": "admin", "password": "a long enough password"});
     let (status, _, _) = send(
         &app,
@@ -200,7 +198,6 @@ async fn the_name_rules_are_enforced() {
         );
     }
 
-    // The longest name is accepted.
     let long = "a".repeat(63);
     let _ = create_tenant_ok(&app, &cookie, &long).await;
 
@@ -217,7 +214,6 @@ async fn a_duplicate_name_is_a_conflict() {
 
     let _ = create_tenant_ok(&app, &cookie, "duplicate").await;
 
-    // The comparison ignores the letter case.
     let (status, _, body) = send(
         &app,
         request(
@@ -254,7 +250,6 @@ async fn suspend_resume_and_delete_follow_the_state_machine() {
     let app = app_with_kek(db.database());
     let id = create_tenant_ok(&app, &cookie, "flow").await;
 
-    // An active tenant cannot be deleted.
     let (status, _, _) = send(
         &app,
         request(
@@ -554,7 +549,7 @@ async fn the_audit_records_are_in_both_tenants() {
         1,
         "the tenant_suspend of the tenant is missing"
     );
-    // The suspend record holds the source IP too.
+    // The suspend record holds the source IP as well.
     assert_eq!(
         platform_events[0].get("source_ip").and_then(Value::as_str),
         Some("203.0.113.7")
@@ -712,7 +707,6 @@ async fn a_deleted_tenant_is_refused_for_sign_in_session_and_token() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // The sign-in fails.
     let body = json!({"tenant": "gone", "username": "alice", "password": "a long enough password"});
     let (status, _, _) = send(
         &app,
@@ -721,7 +715,6 @@ async fn a_deleted_tenant_is_refused_for_sign_in_session_and_token() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // The existing session stops working.
     let (status, _, _) = send(
         &app,
         request("GET", "/api/v1/auth/me", Some(&session), None),
@@ -729,7 +722,6 @@ async fn a_deleted_tenant_is_refused_for_sign_in_session_and_token() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // The API token fails.
     let (status, _, _) = send(
         &app,
         common::bearer_request("GET", "/api/v1/users", &token, None),

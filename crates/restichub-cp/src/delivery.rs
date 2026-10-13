@@ -22,30 +22,21 @@ use restichub_secrets::{
     SecretString, WrappedDek, decrypt_secret, unwrap_dek,
 };
 
-/// The error of a secret delivery.
-///
-/// The type holds no plaintext and no key.
+/// Holds no plaintext and no key.
 #[derive(Debug, thiserror::Error)]
 pub enum DeliveryError {
-    /// A database operation failed.
     #[error(transparent)]
     Database(#[from] DbError),
-    /// The key encryption key (KEK) operation failed.
     #[error(transparent)]
     Kek(#[from] KekError),
-    /// The authenticated decryption failed.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
-    /// The secret does not exist for the tenant of the transaction.
     #[error("the secret does not exist")]
     NotFound,
-    /// The tenant holds no key row with the version of the secret.
     #[error("the tenant holds no key row with the version of the secret")]
     KeyMissing,
-    /// The stored purpose is not one of the known values.
     #[error("the stored purpose of the secret is not known")]
     BadPurpose,
-    /// The stored key row or the stored ciphertext is not valid.
     #[error("the stored secret material is not valid")]
     BadMaterial,
 }
@@ -56,12 +47,10 @@ pub enum DeliveryError {
 /// record in the transaction of the caller. The caller MUST commit before it sends the value to the
 /// agent.
 pub struct SecretReader<'a> {
-    /// The key encryption key (KEK) provider that unwraps the data encryption key (DEK).
     provider: &'a dyn KekProvider,
 }
 
 impl<'a> SecretReader<'a> {
-    /// Creates a reader with a key encryption key (KEK) provider.
     pub fn new(provider: &'a dyn KekProvider) -> Self {
         Self { provider }
     }
@@ -111,7 +100,6 @@ impl<'a> SecretReader<'a> {
     }
 }
 
-/// Builds the wrapped data encryption key (DEK) from the stored key row.
 fn wrapped_dek(key: &TenantKey) -> Result<WrappedDek, DeliveryError> {
     let kek_id = KekId::parse(&key.kek_id)?;
     let nonce: [u8; NONCE_LEN] = key

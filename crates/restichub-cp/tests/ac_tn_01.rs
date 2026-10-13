@@ -1,4 +1,4 @@
-//! AC-TN-01: a cross-tenant object identifier returns 404 (issue #18).
+//! AC-TN-01: a cross-tenant object identifier returns 404.
 //!
 //! The test is table-driven. It reads [`ROUTES`] and covers every route with an `{id}`
 //! placeholder. A new `{id}` route without a fixture stops the test.
@@ -32,7 +32,6 @@ const FIXTURES: &[(&str, &str)] = &[
     ("delete", "/api/v1/secrets/{id}"),
 ];
 
-/// Returns the body of a fixture route.
 fn body_for(method: &str, path: &str) -> Option<serde_json::Value> {
     match (method, path) {
         ("patch", _) => Some(json!({"display_name": "changed"})),
@@ -106,7 +105,6 @@ async fn ac_tn_01_api_cross_tenant_ids_return_404() {
         );
     }
 
-    // The rows of tenant B are unchanged.
     assert!(
         !user_disabled(db.database(), tenant_b, user_b).await,
         "the user of tenant B must not be disabled"

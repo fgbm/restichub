@@ -5,7 +5,6 @@ use restichub_secrets::EnvReader;
 
 use super::{Cli, Command, Config, ConfigError, LogFormat, MigrationConfig, parse_args};
 
-/// A test environment.
 struct MapEnv(HashMap<String, String>);
 
 impl MapEnv {
@@ -296,7 +295,7 @@ fn a_migration_password_file_with_a_url_password_is_an_error() {
 
 #[test]
 fn the_server_config_holds_no_migration_settings() {
-    // The server path does not read migration credentials (N4).
+    // The server path does not read migration credentials.
     let env = MapEnv::new(&[
         ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
         (

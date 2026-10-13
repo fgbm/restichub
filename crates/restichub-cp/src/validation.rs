@@ -2,56 +2,44 @@
 //!
 //! The functions trim the value and check the length. A caller stores the returned, trimmed value.
 //! A failure gives a [`ValidationError`] that names the field of the request and a reason code.
-//! The response echoes no user input.
+//! Responses echo no user input.
 
 use time::{Duration, OffsetDateTime};
 
 use crate::password::{self, PasswordError};
 
-/// The largest username length in characters.
+/// Limit in characters.
 pub const MAX_USERNAME: usize = 64;
-/// The largest display name length in characters.
+/// Limit in characters.
 pub const MAX_DISPLAY_NAME: usize = 128;
-/// The largest tenant name length in characters.
+/// Limit in characters.
 pub const MAX_TENANT_NAME: usize = 63;
-/// The largest token name length in characters.
+/// Limit in characters.
 pub const MAX_TOKEN_NAME: usize = 64;
-/// The largest secret name length in characters.
+/// Limit in characters.
 pub const MAX_SECRET_NAME: usize = 64;
-/// The largest secret value length in bytes.
+/// Limit in bytes.
 pub const MAX_SECRET_VALUE: usize = 64 * 1024;
-/// The largest lifetime of an API token.
+/// Limit in days.
 pub const MAX_EXPIRY_DAYS: i64 = 2 * 365;
 
-/// The reason code of a validation failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reason {
-    /// The value is empty.
     Empty,
-    /// The value is shorter than its minimum.
     TooShort,
-    /// The value is longer than its limit.
     TooLong,
-    /// The value holds a character outside its set.
     InvalidCharacter,
-    /// The value is reserved.
     Reserved,
-    /// The value is not known.
     Unknown,
-    /// The value does not have the expected format.
     InvalidFormat,
-    /// The request body is not valid.
     InvalidBody,
-    /// The credentials are not correct.
     InvalidCredentials,
-    /// The time is not in the future.
     NotInFuture,
-    /// The time is later than the allowed lifetime.
     TooFarInFuture,
 }
 
 impl Reason {
-    /// Returns the stable snake_case string of the reason.
+    /// In snake_case; stable.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Empty => "empty",
@@ -69,18 +57,15 @@ impl Reason {
     }
 }
 
-/// The error of an input validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the field `{field}` is not valid")]
 pub struct ValidationError {
-    /// The field of the request. It is a stable identifier, not user input.
+    /// Stable identifier; not user input.
     pub field: &'static str,
-    /// The reason code.
     pub reason: Reason,
 }
 
 impl ValidationError {
-    /// Creates a validation error.
     pub fn new(field: &'static str, reason: Reason) -> Self {
         Self { field, reason }
     }
@@ -89,7 +74,7 @@ impl ValidationError {
 /// Validates a username and returns the trimmed value.
 ///
 /// A username holds 1 to [`MAX_USERNAME`] characters from the set `a-z`, `0-9`, `.`, `_` and `-`.
-/// The comparison ignores the letter case.
+/// Ignores the letter case.
 pub fn validate_username(field: &'static str, value: &str) -> Result<String, ValidationError> {
     let value = value.trim();
     let count = value.chars().count();
@@ -108,7 +93,6 @@ pub fn validate_username(field: &'static str, value: &str) -> Result<String, Val
     Ok(value.to_owned())
 }
 
-/// Validates a display name and returns the trimmed value.
 pub fn validate_display_name(field: &'static str, value: &str) -> Result<String, ValidationError> {
     let value = value.trim();
     let count = value.chars().count();
@@ -151,7 +135,6 @@ pub fn validate_tenant_name(field: &'static str, value: &str) -> Result<String, 
     Ok(value.to_owned())
 }
 
-/// Validates a token name and returns the trimmed value.
 pub fn validate_token_name(field: &'static str, value: &str) -> Result<String, ValidationError> {
     let value = value.trim();
     let count = value.chars().count();
@@ -167,7 +150,6 @@ pub fn validate_token_name(field: &'static str, value: &str) -> Result<String, V
     Ok(value.to_owned())
 }
 
-/// Checks that an API token expiry is in the future and within two years.
 pub fn validate_expiry(
     field: &'static str,
     expires_at: OffsetDateTime,
@@ -220,7 +202,6 @@ pub fn validate_secret_value(field: &'static str, value: &str) -> Result<(), Val
     Ok(())
 }
 
-/// Checks the length of a password and names the field.
 pub fn validate_password(field: &'static str, value: &str) -> Result<(), ValidationError> {
     password::validate_password(value).map_err(|error| {
         let reason = match error {

@@ -1,4 +1,4 @@
-//! Tests for the embedded web UI fallback (issue #21).
+//! Tests for the embedded web UI fallback.
 //!
 //! The tests build a router with a lazy database. They never touch the database. The tests that
 //! need a UI build print a message and do nothing without one, as the database tests do without

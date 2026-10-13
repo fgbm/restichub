@@ -1,4 +1,4 @@
-//! Router tests for the control plane HTTP server (issue #15).
+//! Router tests for the control plane HTTP server.
 
 use std::time::Duration;
 

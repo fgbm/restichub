@@ -1,4 +1,4 @@
-//! The initial setup tests (issue #18, FR-AU-03).
+//! Initial setup tests (FR-AU-03).
 
 mod common;
 
@@ -95,7 +95,6 @@ async fn the_setup_creates_the_first_platform_admin_once() {
         Some(true)
     );
 
-    // The setup creates the Platform Admin.
     let body = json!({
         "setup_token": value,
         "username": "root",
@@ -109,14 +108,12 @@ async fn the_setup_creates_the_first_platform_admin_once() {
         Some("platform_admin")
     );
 
-    // The setup is no longer required.
     let (_, _, body) = send(&app, request("GET", "/api/v1/setup/status", None, None)).await;
     assert_eq!(
         body.get("setup_required").and_then(Value::as_bool),
         Some(false)
     );
 
-    // A second call is refused.
     let body = json!({
         "setup_token": value,
         "username": "root2",

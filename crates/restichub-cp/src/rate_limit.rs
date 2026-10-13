@@ -19,40 +19,28 @@ use std::time::{Duration, Instant};
 
 use restichub_db::{TenantId, UserId};
 
-/// The largest number of buckets of a capped map.
 pub const MAX_ENTRIES: usize = 100_000;
 
-/// The smallest time between two inline sweeps.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 
-/// One token bucket.
 #[derive(Debug, Clone, Copy)]
 struct Bucket {
-    /// The remaining tokens.
     tokens: f64,
-    /// The time of the last refill.
     last: Instant,
 }
 
-/// The mutable state of a limiter.
 #[derive(Debug)]
 struct State {
-    /// The buckets, keyed by the identity or the IP network.
     buckets: HashMap<String, Bucket>,
-    /// The time of the last inline sweep.
     last_sweep: Instant,
 }
 
-/// The rate limiter.
 #[derive(Debug)]
 pub struct RateLimiter {
-    /// The number of tokens of a full bucket.
     capacity: f64,
-    /// The window over which a full bucket refills.
     window: Duration,
-    /// The largest number of buckets. Zero means no cap.
+    /// Zero means no cap.
     max_entries: usize,
-    /// The mutable state.
     state: Mutex<State>,
 }
 
@@ -118,7 +106,6 @@ impl RateLimiter {
         }
     }
 
-    /// Removes the full and the idle buckets.
     pub fn sweep(&self, now: Instant) {
         let mut state = match self.state.lock() {
             Ok(state) => state,
@@ -128,7 +115,6 @@ impl RateLimiter {
         state.last_sweep = now;
     }
 
-    /// Returns the number of buckets. A test uses this method.
     pub fn len(&self) -> usize {
         let state = match self.state.lock() {
             Ok(state) => state,
@@ -137,7 +123,6 @@ impl RateLimiter {
         state.buckets.len()
     }
 
-    /// Returns true if the limiter holds no bucket. A test uses this method.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -154,7 +139,6 @@ fn sweep(buckets: &mut HashMap<String, Bucket>, capacity: f64, window: Duration,
     });
 }
 
-/// Removes the oldest buckets from a map.
 fn evict_oldest(buckets: &mut HashMap<String, Bucket>, count: usize) {
     if count == 0 || buckets.is_empty() {
         return;
@@ -173,7 +157,7 @@ fn evict_oldest(buckets: &mut HashMap<String, Bucket>, count: usize) {
     }
 }
 
-/// Returns the bucket key of a source IP address.
+/// Bucket key of a source IP address.
 ///
 /// An IPv6 address is keyed by the /64 network, so one host cannot rotate through the addresses of
 /// one network to avoid the limit.
@@ -209,7 +193,6 @@ pub fn synthetic_user_key(tenant: &str, username: &str) -> String {
     )
 }
 
-/// Returns the bucket key of a resolved user.
 pub fn resolved_user_key(tenant: TenantId, user: UserId) -> String {
     format!("u:{tenant}:{user}")
 }

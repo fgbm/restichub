@@ -1,4 +1,4 @@
-//! Database tests for the readiness endpoint and the migrations (issue #15).
+//! Database tests for the readiness endpoint and the migrations.
 //!
 //! The tests read `RESTICHUB_TEST_DATABASE_URL`. If the variable is not set, the helper prints a
 //! message and the tests do nothing.
