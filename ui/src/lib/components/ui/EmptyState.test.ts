@@ -16,4 +16,11 @@ describe('EmptyState', () => {
 		expect(screen.getByText('Add the first host.')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Add host' })).toBeInTheDocument();
 	});
+
+	it('draws the icon as decoration', () => {
+		const { container } = render(EmptyState, { props: { title: 'No hosts', icon: 'host' } });
+		const icon = container.querySelector('svg[data-icon="host"]');
+		expect(icon).toHaveAttribute('aria-hidden', 'true');
+		expect(icon).toHaveClass('icon--xl');
+	});
 });

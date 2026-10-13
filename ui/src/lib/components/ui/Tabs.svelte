@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { Tabs as Primitive } from 'bits-ui';
+	import Icon from './Icon.svelte';
 	import type { TabItem } from './types';
 
 	let {
@@ -20,6 +21,7 @@
 	<Primitive.List class="rh-tabs" aria-label={label}>
 		{#each items as item (item.value)}
 			<Primitive.Trigger class="rh-tab" value={item.value}>
+				{#if item.icon}<Icon name={item.icon} />{/if}
 				{item.label}
 				{#if item.count !== undefined}
 					<span class="rh-tab__count">{item.count}</span>

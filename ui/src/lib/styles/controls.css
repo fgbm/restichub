@@ -110,6 +110,7 @@
 }
 
 .rh-select-wrap__icon {
+	display: inline-flex;
 	position: absolute;
 	right: var(--rh-space-3);
 	top: 50%;
@@ -121,32 +122,59 @@
 .rh-input-affix {
 	display: flex;
 	align-items: center;
-	gap: var(--rh-space-2);
+	height: var(--rh-control-height);
+	border: var(--rh-border-width) solid var(--rh-color-border);
+	border-radius: var(--rh-radius-md);
+	background-color: var(--rh-color-input-bg);
+	overflow: hidden;
+	transition:
+		border-color var(--rh-transition-fast),
+		box-shadow var(--rh-transition-fast);
 }
 
-.rh-input-affix .rh-input {
+.rh-input-affix:focus-within {
+	border-color: var(--rh-color-focus);
+	box-shadow: 0 0 0 3px var(--rh-color-focus-ring);
+}
+
+.rh-field--invalid .rh-input-affix {
+	border-color: var(--rh-color-danger);
+}
+
+.rh-input-affix .rh-input,
+.rh-input-affix .rh-input:focus {
 	flex: 1 1 auto;
 	width: auto;
 	min-width: 0;
+	height: 100%;
+	border: 0;
+	background: none;
+	box-shadow: none;
 }
 
 .rh-input-affix__button {
 	display: inline-flex;
+	flex: none;
 	align-items: center;
 	justify-content: center;
-	height: var(--rh-control-height);
-	padding: 0 var(--rh-space-2);
-	border: var(--rh-border-width) solid var(--rh-color-border);
+	width: 28px;
+	height: 28px;
+	margin-right: 1px;
+	padding: 0;
+	border: 0;
 	border-radius: var(--rh-radius-md);
-	background-color: var(--rh-color-control-bg);
+	background: transparent;
 	color: var(--rh-color-text-muted);
-	font-size: var(--rh-font-size-sm);
 	cursor: pointer;
 }
 
 .rh-input-affix__button:hover {
-	background-color: var(--rh-color-control-bg-hover);
+	background-color: var(--rh-color-hover);
 	color: var(--rh-color-text);
+}
+
+.rh-input-affix__button:focus-visible {
+	outline-offset: -2px;
 }
 
 .rh-checkbox {

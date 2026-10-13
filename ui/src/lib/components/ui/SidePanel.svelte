@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { Dialog as Primitive } from 'bits-ui';
 	import { t } from '#lib/i18n/index.ts';
+	import Icon from './Icon.svelte';
 
 	let {
 		open = $bindable(false),
@@ -29,7 +30,9 @@
 						<Primitive.Description class="rh-panel__subtitle">{subtitle}</Primitive.Description>
 					{/if}
 				</div>
-				<Primitive.Close class="rh-panel__close" aria-label={t('common.close')}>✕</Primitive.Close>
+				<Primitive.Close class="rh-panel__close" aria-label={t('common.close')}>
+					<Icon name="x" size="xs" />
+				</Primitive.Close>
 			</header>
 			<div class="rh-panel__body">{@render children()}</div>
 			{#if footer}
@@ -65,7 +68,7 @@
 
 	:global(.rh-panel__head) {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		gap: var(--rh-space-3);
 		padding: var(--rh-space-3) var(--rh-space-4);
 		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
@@ -78,6 +81,7 @@
 
 	:global(.rh-panel__title) {
 		margin: 0;
+		line-height: var(--rh-line-height-base);
 		font-size: var(--rh-font-size-lg);
 		font-weight: var(--rh-font-weight-semibold);
 	}
@@ -90,21 +94,29 @@
 
 	:global(.rh-panel__close) {
 		display: inline-flex;
+		flex: none;
 		align-items: center;
 		justify-content: center;
 		width: 28px;
 		height: 28px;
-		border: 0;
+		padding: 0;
+		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
-		background: transparent;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-base);
+		background-color: var(--rh-color-control-bg);
+		color: var(--rh-color-text);
 		cursor: pointer;
+		transition:
+			background-color var(--rh-transition-fast),
+			border-color var(--rh-transition-fast);
 	}
 
 	:global(.rh-panel__close:hover) {
-		background-color: var(--rh-color-hover);
-		color: var(--rh-color-text);
+		background-color: var(--rh-color-control-bg-hover);
+		border-color: var(--rh-color-border-strong);
+	}
+
+	:global(.rh-panel:focus-visible) {
+		outline: none;
 	}
 
 	:global(.rh-panel__body) {
@@ -116,7 +128,6 @@
 	:global(.rh-panel__foot) {
 		display: flex;
 		align-items: center;
-		justify-content: flex-end;
 		gap: var(--rh-space-2);
 		padding: var(--rh-space-3) var(--rh-space-4);
 		border-top: var(--rh-border-width) solid var(--rh-color-border);

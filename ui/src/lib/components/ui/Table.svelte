@@ -4,8 +4,9 @@
 	import Badge from './Badge.svelte';
 	import Button from './Button.svelte';
 	import EmptyState from './EmptyState.svelte';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 	import Skeleton from './Skeleton.svelte';
-	import TextField from './TextField.svelte';
 	import type { TableColumn } from './types';
 
 	let {
@@ -20,6 +21,8 @@
 		caption,
 		emptyTitle,
 		emptyDescription,
+		emptyIcon,
+		sort,
 		onRowClick,
 		rowActions
 	}: {
@@ -35,6 +38,9 @@
 		caption?: string;
 		emptyTitle?: string;
 		emptyDescription?: string;
+		emptyIcon?: IconName;
+		/** The order the rows already have, shown in the header until a person sorts. */
+		sort?: { key: string; direction: 'asc' | 'desc' };
 		onRowClick?: (row: T) => void;
 		rowActions?: Snippet<[T]>;
 	} = $props();
@@ -43,6 +49,9 @@
 
 	let sortKey = $state<string | null>(null);
 	let sortDirection = $state<'asc' | 'desc'>('asc');
+	let userSorted = $state(false);
+	const activeKey = $derived(userSorted ? sortKey : (sort?.key ?? null));
+	const activeDirection = $derived(userSorted ? sortDirection : (sort?.direction ?? 'asc'));
 	let filter = $state('');
 	let page = $state(1);
 
@@ -65,7 +74,7 @@
 	});
 
 	const sorted = $derived.by(() => {
-		if (!sortKey) return filtered;
+		if (!sortKey || !userSorted) return filtered;
 		const column = columns.find((item) => item.key === sortKey);
 		if (!column) return filtered;
 		const factor = sortDirection === 'asc' ? 1 : -1;
@@ -84,17 +93,18 @@
 
 	function toggleSort(column: TableColumn<T>): void {
 		if (column.sortable === false) return;
-		if (sortKey === column.key) {
-			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+		if (activeKey === column.key) {
+			sortDirection = activeDirection === 'asc' ? 'desc' : 'asc';
 		} else {
-			sortKey = column.key;
 			sortDirection = 'asc';
 		}
+		sortKey = column.key;
+		userSorted = true;
 	}
 
 	function ariaSort(column: TableColumn<T>): 'ascending' | 'descending' | 'none' {
-		if (sortKey !== column.key) return 'none';
-		return sortDirection === 'asc' ? 'ascending' : 'descending';
+		if (activeKey !== column.key) return 'none';
+		return activeDirection === 'asc' ? 'ascending' : 'descending';
 	}
 
 	function onRowKeydown(event: KeyboardEvent, row: T): void {
@@ -109,14 +119,15 @@
 <div class="table-wrap">
 	{#if filterable}
 		<div class="table-toolbar">
-			<div class="table-toolbar__filter">
-				<TextField
+			<label class="table-search">
+				<Icon name="search" />
+				<input
 					type="search"
 					bind:value={filter}
 					placeholder={t('table.filterPlaceholder')}
 					aria-label={t('common.filter')}
 				/>
-			</div>
+			</label>
 		</div>
 	{/if}
 
@@ -139,15 +150,15 @@
 							{:else}
 								<button type="button" class="th-btn" onclick={() => toggleSort(column)}>
 									{column.header}
-									<span class="th-btn__icon" aria-hidden="true">
-										{sortKey === column.key ? (sortDirection === 'asc' ? '▲' : '▼') : ''}
-									</span>
+									<Icon name="sort" size="xs" />
 								</button>
 							{/if}
 						</th>
 					{/each}
 					{#if rowActions}
-						<th scope="col" class="table__cell--actions">{t('common.actions')}</th>
+						<th scope="col" class="table__cell--actions">
+							<span class="table__actions-head">{t('common.actions')}</span>
+						</th>
 					{/if}
 				</tr>
 			</thead>
@@ -175,6 +186,7 @@
 							<EmptyState
 								title={emptyTitle ?? t('table.empty.title')}
 								description={emptyDescription ?? t('table.empty.description')}
+								icon={emptyIcon}
 							/>
 						</td>
 					</tr>
@@ -193,7 +205,9 @@
 									class:table__cell--center={column.align === 'center'}
 									class:table__cell--mono={column.mono}
 								>
-									{#if tone}
+									{#if column.render}
+										{@render column.render(row)}
+									{:else if tone}
 										<Badge {tone}>{cellOf(row, column)}</Badge>
 									{:else}
 										{cellOf(row, column)}
@@ -220,10 +234,9 @@
 					size="sm"
 					disabled={currentPage <= 1}
 					onclick={() => (page = currentPage - 1)}
+					icon="chevron-left"
 					aria-label={t('pagination.previous')}
-				>
-					{t('pagination.previous')}
-				</Button>
+				/>
 				<span class="table-footer__page">
 					{t('pagination.pageOf', { page: currentPage, pages: pageCount })}
 				</span>
@@ -231,10 +244,9 @@
 					size="sm"
 					disabled={currentPage >= pageCount}
 					onclick={() => (page = currentPage + 1)}
+					icon="chevron-right"
 					aria-label={t('pagination.next')}
-				>
-					{t('pagination.next')}
-				</Button>
+				/>
 			</div>
 		</div>
 	{/if}
@@ -249,12 +261,45 @@
 	}
 
 	.table-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--rh-space-3);
 		padding: var(--rh-space-3);
 		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
+		background-color: var(--rh-color-canvas);
 	}
 
-	.table-toolbar__filter {
-		max-width: 20rem;
+	.table-search {
+		display: inline-flex;
+		flex: 0 1 320px;
+		align-items: center;
+		gap: var(--rh-space-2);
+		height: var(--rh-control-height);
+		padding: 0 var(--rh-space-3);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+		background-color: var(--rh-color-input-bg);
+		color: var(--rh-color-text-muted);
+	}
+
+	.table-search:focus-within {
+		border-color: var(--rh-color-focus);
+		box-shadow: 0 0 0 3px var(--rh-color-focus-ring);
+	}
+
+	.table-search input {
+		width: 100%;
+		border: 0;
+		outline: 0;
+		background: none;
+		color: var(--rh-color-text);
+		font-family: inherit;
+		font-size: var(--rh-font-size-base);
+	}
+
+	.table-search input::placeholder {
+		color: var(--rh-color-text-subtle);
 	}
 
 	.table-scroll {
@@ -289,10 +334,14 @@
 		white-space: nowrap;
 	}
 
+	th:not(:has(.th-btn)) {
+		padding: var(--rh-space-2) var(--rh-space-3);
+	}
+
 	.th-btn {
 		display: inline-flex;
 		align-items: center;
-		gap: var(--rh-space-1);
+		gap: 6px;
 		width: 100%;
 		padding: var(--rh-space-2) var(--rh-space-3);
 		border: 0;
@@ -304,12 +353,24 @@
 		cursor: pointer;
 	}
 
-	.th-btn:hover {
+	.th-btn :global(.icon) {
+		color: var(--rh-color-text-subtle);
+		opacity: 0;
+	}
+
+	.th-btn:hover :global(.icon),
+	th[aria-sort='ascending'] .th-btn :global(.icon),
+	th[aria-sort='descending'] .th-btn :global(.icon) {
+		opacity: 1;
+	}
+
+	th[aria-sort='ascending'] .th-btn,
+	th[aria-sort='descending'] .th-btn {
 		color: var(--rh-color-text);
 	}
 
-	.th-btn__icon {
-		font-size: var(--rh-font-size-xs);
+	.table__actions-head {
+		color: var(--rh-color-text-subtle);
 	}
 
 	td {

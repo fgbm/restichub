@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { t } from '#lib/i18n/index.ts';
+	import Icon from './Icon.svelte';
 
 	let {
 		page = $bindable(1),
@@ -26,7 +27,7 @@
 		aria-label={t('pagination.previous')}
 		onclick={() => go(current - 1)}
 	>
-		‹
+		<Icon name="chevron-left" />
 	</button>
 	<span class="pagination__page">{t('pagination.pageOf', { page: current, pages: last })}</span>
 	<button
@@ -36,7 +37,7 @@
 		aria-label={t('pagination.next')}
 		onclick={() => go(current + 1)}
 	>
-		›
+		<Icon name="chevron-right" />
 	</button>
 </nav>
 

@@ -2,6 +2,7 @@
 	import type { HTMLInputAttributes } from 'svelte/elements';
 	import { t } from '#lib/i18n/index.ts';
 	import Field from './Field.svelte';
+	import Icon from './Icon.svelte';
 
 	let {
 		value = $bindable(''),
@@ -45,9 +46,10 @@
 			type="button"
 			class="rh-input-affix__button"
 			aria-pressed={visible}
+			aria-label={visible ? t('common.hide') : t('common.show')}
 			onclick={() => (visible = !visible)}
 		>
-			{visible ? t('common.hide') : t('common.show')}
+			<Icon name={visible ? 'eye-off' : 'eye'} />
 		</button>
 	</div>
 </Field>

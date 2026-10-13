@@ -1,8 +1,21 @@
 <script lang="ts">
 	import Button from './Button.svelte';
 	import { t } from '#lib/i18n/index.ts';
+	import '#lib/styles/controls.css';
 
-	let { value, label }: { value: string; label?: string } = $props();
+	let {
+		value,
+		label,
+		secret = false
+	}: {
+		value: string;
+		label?: string;
+		/** A value shown one time only, such as a token. */
+		secret?: boolean;
+	} = $props();
+
+	const uid = $props.id();
+	const inputId = `rh-copy-${uid}`;
 
 	let copied = $state(false);
 
@@ -19,46 +32,26 @@
 	}
 </script>
 
-<div class="copy-field">
+<div class="rh-field">
 	{#if label}
-		<span class="copy-field__label">{label}</span>
+		<label class="rh-field__label" for={inputId}>{label}</label>
 	{/if}
-	<div class="copy-field__row">
-		<code class="copy-field__value">{value}</code>
-		<Button size="sm" onclick={copy}>{copied ? t('common.copied') : t('common.copy')}</Button>
+	<div class="copy-field" class:copy-field--secret={secret}>
+		<input id={inputId} class="rh-input rh-input--mono" readonly {value} />
+		<Button icon={copied ? 'check' : 'copy'} onclick={copy}>
+			{copied ? t('common.copied') : t('common.copy')}
+		</Button>
 	</div>
 </div>
 
 <style>
 	.copy-field {
 		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-1);
-	}
-
-	.copy-field__label {
-		font-size: var(--rh-font-size-sm);
-		font-weight: var(--rh-font-weight-semibold);
-		color: var(--rh-color-text);
-	}
-
-	.copy-field__row {
-		display: flex;
-		align-items: center;
+		align-items: stretch;
 		gap: var(--rh-space-2);
 	}
 
-	.copy-field__value {
-		flex: 1;
-		min-width: 0;
-		padding: var(--rh-space-2) var(--rh-space-3);
-		border: var(--rh-border-width) solid var(--rh-color-border-strong);
-		border-radius: var(--rh-radius-md);
+	.copy-field--secret :global(.rh-input) {
 		background-color: var(--rh-color-canvas-subtle);
-		color: var(--rh-color-text);
-		font-family: var(--rh-font-mono);
-		font-size: var(--rh-font-size-sm);
-		overflow-x: auto;
-		white-space: nowrap;
 	}
 </style>

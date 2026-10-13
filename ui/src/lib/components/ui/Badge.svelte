@@ -1,11 +1,20 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 	import type { BadgeTone } from './types';
 
-	let { tone = 'neutral', children }: { tone?: BadgeTone; children: Snippet } = $props();
+	let {
+		tone = 'neutral',
+		icon,
+		children
+	}: { tone?: BadgeTone; icon?: IconName; children: Snippet } = $props();
 </script>
 
-<span class="badge badge--{tone}">{@render children()}</span>
+<span class="badge badge--{tone}">
+	{#if icon}<Icon name={icon} size="xs" />{/if}
+	{@render children()}
+</span>
 
 <style>
 	.badge {

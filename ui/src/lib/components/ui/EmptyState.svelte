@@ -1,22 +1,26 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
 	let {
 		title,
 		description,
 		icon,
+		bordered = false,
 		children
 	}: {
 		title: string;
 		description?: string;
-		icon?: Snippet;
+		icon?: IconName;
+		bordered?: boolean;
 		children?: Snippet;
 	} = $props();
 </script>
 
-<div class="empty">
+<div class="empty" class:empty--bordered={bordered}>
 	{#if icon}
-		<span class="empty__icon" aria-hidden="true">{@render icon()}</span>
+		<span class="empty__icon"><Icon name={icon} size="xl" /></span>
 	{/if}
 	<p class="empty__title">{title}</p>
 	{#if description}
@@ -36,6 +40,11 @@
 		padding: var(--rh-space-10) var(--rh-space-4);
 		color: var(--rh-color-text-muted);
 		text-align: center;
+	}
+
+	.empty--bordered {
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
 	}
 
 	.empty__icon {

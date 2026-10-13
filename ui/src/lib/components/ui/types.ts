@@ -1,3 +1,6 @@
+import type { Snippet } from 'svelte';
+import type { IconName } from './icons';
+
 export interface SelectOption {
 	value: string;
 	label: string;
@@ -11,11 +14,13 @@ export type StatusTone =
 export interface TabItem {
 	value: string;
 	label: string;
+	icon?: IconName;
 	count?: number;
 }
 
 export interface MenuItem {
 	label: string;
+	icon?: IconName;
 	/** A menu item without an action is a heading, not a command. */
 	onSelect?: () => void;
 	tone?: 'default' | 'danger';
@@ -39,6 +44,8 @@ export interface TableColumn<T> {
 	/** Cell text. Default: the value. */
 	cell?: (row: T) => string;
 	badge?: (row: T) => BadgeTone | null;
+	/** Cell markup; wins over `cell` and `badge`. */
+	render?: Snippet<[T]>;
 }
 
 export interface KeyValueItem {

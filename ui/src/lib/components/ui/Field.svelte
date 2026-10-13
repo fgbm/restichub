@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import '#lib/styles/controls.css';
+	import Icon from './Icon.svelte';
 
 	let {
 		label,
@@ -32,7 +33,9 @@
 	{/if}
 	{@render children()}
 	{#if error}
-		<p class="rh-field__error" id={errorId} role="alert">{error}</p>
+		<p class="rh-field__error" id={errorId} role="alert">
+			<Icon name="alert" size="xs" />{error}
+		</p>
 	{:else if help}
 		<p class="rh-field__help" id={helpId}>{help}</p>
 	{/if}

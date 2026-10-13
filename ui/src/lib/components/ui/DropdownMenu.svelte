@@ -1,16 +1,23 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { DropdownMenu as Primitive } from 'bits-ui';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 	import type { MenuItem } from './types';
 
 	let {
 		items = [],
 		align = 'start',
+		icon,
+		label,
 		children
 	}: {
 		items?: MenuItem[];
 		align?: 'start' | 'center' | 'end';
-		children: Snippet;
+		/** Without children the trigger is a small icon button and needs `label`. */
+		icon?: IconName;
+		label?: string;
+		children?: Snippet;
 	} = $props();
 
 	interface Block {
@@ -38,7 +45,13 @@
 </script>
 
 <Primitive.Root>
-	<Primitive.Trigger class="rh-menu__trigger">{@render children()}</Primitive.Trigger>
+	<Primitive.Trigger
+		class="rh-menu__trigger{children ? '' : ' rh-menu__trigger--icon'}"
+		aria-label={label}
+	>
+		{#if icon}<Icon name={icon} size={children ? 'md' : 'xs'} />{/if}
+		{@render children?.()}
+	</Primitive.Trigger>
 	<Primitive.Portal>
 		<Primitive.Content class="rh-menu" {align} sideOffset={6}>
 			{#each blocks as block, blockIndex (blockIndex)}
@@ -54,8 +67,11 @@
 								disabled={item.disabled}
 								onSelect={item.onSelect}
 							>
-								<span class="rh-menu__check" aria-hidden="true">{item.checked ? '✓' : ''}</span>
+								{#if item.icon}<Icon name={item.icon} />{/if}
 								{item.label}
+								{#if item.checked}
+									<span class="rh-menu__check"><Icon name="check" /></span>
+								{/if}
 							</Primitive.RadioItem>
 						{/each}
 					</Primitive.RadioGroup>
@@ -69,6 +85,7 @@
 							disabled={item.disabled}
 							onSelect={item.onSelect}
 						>
+							{#if item.icon}<Icon name={item.icon} />{/if}
 							{item.label}
 						</Primitive.Item>
 					{/each}
@@ -97,6 +114,21 @@
 	:global(.rh-menu__trigger:hover),
 	:global(.rh-menu__trigger[data-state='open']) {
 		background-color: var(--rh-color-hover);
+	}
+
+	:global(.rh-menu__trigger--icon) {
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		border-color: var(--rh-color-border);
+		background-color: var(--rh-color-control-bg);
+	}
+
+	:global(.rh-menu__trigger--icon:hover),
+	:global(.rh-menu__trigger--icon[data-state='open']) {
+		border-color: var(--rh-color-border-strong);
+		background-color: var(--rh-color-control-bg-hover);
 	}
 
 	:global(.rh-menu) {
@@ -144,7 +176,8 @@
 	}
 
 	:global(.rh-menu__check) {
-		width: 1ch;
+		display: inline-flex;
+		margin-left: auto;
 		color: var(--rh-color-accent);
 	}
 

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { HTMLButtonAttributes } from 'svelte/elements';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
-	type Variant = 'primary' | 'secondary' | 'danger' | 'ghost';
+	type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'link';
 	type Size = 'sm' | 'md';
 
 	let {
@@ -10,6 +12,8 @@
 		size = 'md',
 		loading = false,
 		disabled = false,
+		icon,
+		full = false,
 		type = 'button',
 		onclick,
 		children,
@@ -19,15 +23,22 @@
 		size?: Size;
 		loading?: boolean;
 		disabled?: boolean;
+		/** Leading icon. Without children the button is icon-only and needs `aria-label`. */
+		icon?: IconName;
+		full?: boolean;
 		type?: HTMLButtonAttributes['type'];
 		onclick?: (event: MouseEvent) => void;
-		children: Snippet;
+		children?: Snippet;
 	} & HTMLButtonAttributes = $props();
+
+	const iconOnly = $derived(Boolean(icon) && !children);
 </script>
 
 <button
 	{type}
 	class="btn btn--{variant} btn--{size}"
+	class:btn--icon={iconOnly}
+	class:btn--full={full}
 	disabled={disabled || loading}
 	aria-busy={loading ? 'true' : undefined}
 	{onclick}
@@ -35,8 +46,12 @@
 >
 	{#if loading}
 		<span class="btn__spinner" aria-hidden="true"></span>
+	{:else if icon}
+		<Icon name={icon} size={iconOnly && size === 'sm' ? 'xs' : 'md'} />
 	{/if}
-	<span class="btn__label">{@render children()}</span>
+	{#if children}
+		<span class="btn__label">{@render children()}</span>
+	{/if}
 </button>
 
 <style>
@@ -116,16 +131,52 @@
 		color: var(--rh-color-text);
 	}
 
+	.btn--link {
+		height: auto;
+		padding: 0;
+		border-color: transparent;
+		background: none;
+		color: var(--rh-color-link);
+		font-weight: var(--rh-font-weight-regular);
+	}
+
+	.btn--link:hover:not(:disabled),
+	.btn--link:active:not(:disabled) {
+		border-color: transparent;
+		background: none;
+		color: var(--rh-color-link-hover);
+		text-decoration: underline;
+	}
+
+	.btn--icon {
+		width: var(--rh-control-height);
+		padding: 0;
+	}
+
+	.btn--icon.btn--sm {
+		width: 28px;
+	}
+
+	.btn--full {
+		width: 100%;
+	}
+
 	.btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
 
+	.btn[aria-busy='true']:disabled {
+		opacity: 1;
+		cursor: progress;
+	}
+
 	.btn__spinner {
-		width: 0.9em;
-		height: 0.9em;
-		border: 2px solid currentColor;
-		border-right-color: transparent;
+		flex: none;
+		width: 12px;
+		height: 12px;
+		border: 2px solid var(--rh-color-border);
+		border-top-color: currentColor;
 		border-radius: 50%;
 		animation: btn-spin 0.7s linear infinite;
 	}

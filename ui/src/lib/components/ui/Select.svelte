@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { HTMLSelectAttributes } from 'svelte/elements';
 	import Field from './Field.svelte';
+	import Icon from './Icon.svelte';
 	import type { SelectOption } from './types';
 
 	let {
@@ -49,6 +50,6 @@
 				<option value={option.value}>{option.label}</option>
 			{/each}
 		</select>
-		<span class="rh-select-wrap__icon" aria-hidden="true">▾</span>
+		<span class="rh-select-wrap__icon"><Icon name="chevron-down" /></span>
 	</div>
 </Field>

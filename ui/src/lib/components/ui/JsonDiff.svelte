@@ -5,7 +5,14 @@
 
 	const REDACTED = '<redacted>';
 
-	let { diff }: { diff: AuditDiff | null } = $props();
+	let {
+		diff,
+		variant = 'table'
+	}: {
+		diff: AuditDiff | null;
+		/** `lines` shows a unified diff; `table` shows a box with the old and the new value of each field. */
+		variant?: 'table' | 'lines';
+	} = $props();
 
 	interface Cell {
 		text: string;
@@ -53,79 +60,164 @@
 	}
 
 	const rows = $derived(normalize(diff));
+
+	interface Line {
+		sign: ' ' | '-' | '+';
+		text: string;
+	}
+
+	function literal(value: unknown): string {
+		if (value === REDACTED) return t('diff.redacted');
+		return JSON.stringify(value ?? null);
+	}
+
+	const lines = $derived.by(() => {
+		const body: Line[] = [];
+		for (const row of rows) {
+			const label = `  ${JSON.stringify(row.field)}: `;
+			const { old: before, new: after } = row.change;
+			if (before === REDACTED && after === REDACTED) {
+				body.push({ sign: ' ', text: label + literal(after) });
+				continue;
+			}
+			if (before !== undefined && before !== null) {
+				body.push({ sign: '-', text: label + literal(before) });
+			}
+			if (after !== undefined && after !== null) {
+				body.push({ sign: '+', text: label + literal(after) });
+			}
+		}
+		const last = body.length - 1;
+		return [
+			{ sign: ' ', text: '{' },
+			...body.map((line, index) => (index < last ? { ...line, text: line.text + ',' } : line)),
+			{ sign: ' ', text: '}' }
+		] satisfies Line[];
+	});
 </script>
 
 {#if rows.length === 0}
 	<p class="diff__empty">{t('diff.empty')}</p>
+{:else if variant === 'lines'}
+	<div class="diff-lines">
+		{#each lines as line, index (index)}
+			<div
+				class="diff-line"
+				class:diff-line--add={line.sign === '+'}
+				class:diff-line--del={line.sign === '-'}
+			>
+				<span class="diff-line__sign" aria-hidden="true">{line.sign}</span>{line.text}
+			</div>
+		{/each}
+	</div>
 {:else}
-	<table class="diff">
-		<thead>
-			<tr>
-				<th scope="col">{t('diff.field')}</th>
-				<th scope="col">{t('diff.old')}</th>
-				<th scope="col">{t('diff.new')}</th>
-			</tr>
-		</thead>
-		<tbody>
-			{#each rows as row (row.field)}
-				{@const oldCell = display(row.change.old)}
-				{@const newCell = display(row.change.new)}
-				<tr>
-					<th scope="row" class="diff__field">{row.field}</th>
-					<td class:diff__empty-value={oldCell.empty}>
-						{#if oldCell.redacted}
-							<Badge tone="neutral">{t('diff.redacted')}</Badge>
-						{:else}
-							{oldCell.text}
-						{/if}
-					</td>
-					<td class:diff__empty-value={newCell.empty}>
-						{#if newCell.redacted}
-							<Badge tone="neutral">{t('diff.redacted')}</Badge>
-						{:else}
-							{newCell.text}
-						{/if}
-					</td>
-				</tr>
-			{/each}
-		</tbody>
-	</table>
+	<div class="diff">
+		{#each rows as row (row.field)}
+			{@const oldCell = display(row.change.old)}
+			{@const newCell = display(row.change.new)}
+			<dl class="diff__box">
+				<dt>{t('diff.field')}</dt>
+				<dd class="diff__mono">{row.field}</dd>
+				<dt>{t('diff.old')}</dt>
+				<dd class="diff__mono" class:diff__empty-value={oldCell.empty}>
+					{#if oldCell.redacted}
+						<Badge tone="neutral">{t('diff.redacted')}</Badge>
+					{:else}
+						{oldCell.text}
+					{/if}
+				</dd>
+				<dt>{t('diff.new')}</dt>
+				<dd class="diff__mono" class:diff__empty-value={newCell.empty}>
+					{#if newCell.redacted}
+						<Badge tone="neutral">{t('diff.redacted')}</Badge>
+					{:else}
+						{newCell.text}
+					{/if}
+				</dd>
+			</dl>
+		{/each}
+	</div>
 {/if}
 
 <style>
 	.diff {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: var(--rh-font-size-sm);
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-2);
 	}
 
-	.diff th,
-	.diff td {
-		padding: var(--rh-space-1) var(--rh-space-2);
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border-muted);
-		text-align: left;
-		vertical-align: top;
-		overflow-wrap: anywhere;
+	.diff__box {
+		display: grid;
+		grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+		margin: 0;
+		padding: 0 var(--rh-space-4);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
 	}
 
-	.diff thead th {
+	.diff__box dt,
+	.diff__box dd {
+		margin: 0;
+		padding: var(--rh-space-2) 0;
+		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
+	}
+
+	.diff__box dt:first-of-type,
+	.diff__box dd:first-of-type {
+		border-top: 0;
+	}
+
+	.diff__box dt {
+		padding-right: var(--rh-space-4);
 		color: var(--rh-color-text-muted);
-		font-weight: var(--rh-font-weight-medium);
 	}
 
-	.diff__field {
+	.diff__mono {
+		min-width: 0;
 		font-family: var(--rh-font-mono);
-		font-weight: var(--rh-font-weight-regular);
-		color: var(--rh-color-text);
+		font-size: var(--rh-font-size-sm);
+		overflow-wrap: anywhere;
 	}
 
 	.diff__empty-value {
 		color: var(--rh-color-text-subtle);
-		font-family: var(--rh-font-mono);
 	}
 
 	.diff__empty {
 		margin: 0;
 		color: var(--rh-color-text-subtle);
+	}
+
+	.diff-lines {
+		overflow: auto;
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+		background-color: var(--rh-color-code-bg);
+		font-family: var(--rh-font-mono);
+		font-size: var(--rh-font-size-xs);
+	}
+
+	.diff-line {
+		display: flex;
+		gap: var(--rh-space-3);
+		padding: 2px var(--rh-space-3);
+		color: var(--rh-color-text-muted);
+		white-space: pre;
+	}
+
+	.diff-line__sign {
+		flex: none;
+		width: 10px;
+		color: var(--rh-color-text-subtle);
+	}
+
+	.diff-line--add {
+		background-color: var(--rh-color-success-subtle);
+		color: var(--rh-color-success-text);
+	}
+
+	.diff-line--del {
+		background-color: var(--rh-color-danger-subtle);
+		color: var(--rh-color-danger-text);
 	}
 </style>
