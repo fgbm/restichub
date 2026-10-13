@@ -21,7 +21,8 @@
 		SelectOption,
 		TableColumn
 	} from '#lib/components/ui/index.ts';
-	import { en, getLocale, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
+	import { en, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
+	import { formatTime, relativeTime } from '#lib/format.ts';
 
 	let { scope = 'tenant' }: { scope?: 'tenant' | 'platform' } = $props();
 
@@ -72,29 +73,6 @@
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
 		return t('table.error');
-	}
-
-	function formatTime(value: string): string {
-		return new Date(value).toLocaleString(getLocale());
-	}
-
-	const relativeSteps: [Intl.RelativeTimeFormatUnit, number][] = [
-		['second', 60],
-		['minute', 60],
-		['hour', 24],
-		['day', 30],
-		['month', 12],
-		['year', Infinity]
-	];
-
-	function relativeTime(value: string): string {
-		let amount = (new Date(value).getTime() - Date.now()) / 1000;
-		const format = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' });
-		for (const [unit, size] of relativeSteps) {
-			if (Math.abs(amount) < size) return format.format(Math.round(amount), unit);
-			amount /= size;
-		}
-		return formatTime(value);
 	}
 
 	function actorLabel(row: AuditRecord): string {
