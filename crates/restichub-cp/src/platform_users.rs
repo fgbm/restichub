@@ -23,7 +23,6 @@ use crate::validation;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AddMembershipRequest {
-    /// The identifier of the target tenant.
     pub tenant_id: String,
     pub role: Role,
 }
@@ -68,14 +67,12 @@ pub async fn add_membership(
         return Err(ApiError::forbidden());
     }
 
-    // The account must exist in the installation.
     if users::find_account_by_id(state.db(), user_id)
         .await?
         .is_none()
     {
         return Err(ApiError::not_found());
     }
-    // The target tenant must exist and be active.
     let tenant = {
         let mut tx = state.db().begin_platform().await?;
         let tenant = tenant_repo::get_platform(&mut tx, tenant_id).await?;

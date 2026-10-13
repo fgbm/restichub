@@ -79,7 +79,6 @@ pub struct TenantAccessListResponse {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SwitchTenantRequest {
-    /// The identifier of the tenant to switch to.
     pub tenant_id: String,
 }
 
@@ -237,7 +236,7 @@ pub async fn list_tenants(
                 })
                 .collect()
         }
-        // An API token holds one tenant and one role.
+        // API tokens carry one tenant and one role.
         _ => vec![TenantAccessView {
             id: context.tenant_id.to_string(),
             name: tenant_name(&state, context.tenant_id).await,

@@ -136,7 +136,7 @@ async fn sign_in_failures_are_identical() {
     let (s2, _, b2) = sign_in(&app, "failures", "alice", "wrong password value").await;
     let (s3, _, b3) = sign_in(&app, "failures", "orphan", "correct horse battery").await;
 
-    // A disabled account.
+    // Disabled account.
     let mut tx = db
         .database()
         .begin_tenant(tenant)
@@ -148,7 +148,7 @@ async fn sign_in_failures_are_identical() {
     tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
     let (s4, _, b4) = sign_in(&app, "failures", "alice", "correct horse battery").await;
 
-    // A suspended tenant.
+    // Suspended tenant.
     set_tenant_status(db.database(), tenant, "suspended").await;
     let (s5, _, b5) = sign_in(&app, "failures", "alice", "correct horse battery").await;
 

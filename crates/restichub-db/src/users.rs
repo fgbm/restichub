@@ -13,19 +13,19 @@ use crate::enums::Role;
 use crate::ids::{TenantId, UserId};
 use crate::tx::TenantTx;
 
-/// An account row.
+/// Installation-wide identity that a person signs in with.
 #[derive(Debug, Clone)]
 pub struct Account {
     pub id: UserId,
     pub username: String,
     pub display_name: String,
-    /// The account itself is disabled. Only a Platform Admin sets it.
+    /// A Platform Admin set it for the whole installation.
     pub disabled: bool,
     /// The tenant that was last used through this account.
     pub last_used_tenant_id: Option<TenantId>,
 }
 
-/// An account row with the password hash. The control plane never sends it.
+/// Carries the password hash. The control plane never sends it.
 #[derive(Debug, Clone)]
 pub struct AccountAuth {
     pub id: UserId,
@@ -43,9 +43,9 @@ pub struct Member {
     pub username: String,
     pub display_name: String,
     pub role: Role,
-    /// The membership is disabled in this tenant.
+    /// Off in this tenant only; the identity stays usable elsewhere.
     pub disabled: bool,
-    /// The account itself is disabled in the installation.
+    /// A Platform Admin set it for the whole installation.
     pub account_disabled: bool,
     /// The account holds an active membership in another active tenant.
     pub shared: bool,
@@ -60,7 +60,7 @@ pub struct NewUser<'a> {
     pub display_name: &'a str,
 }
 
-/// Finds the account by the username of the installation. Ignores the letter case.
+/// Resolves a username for the sign-in, ignoring the letter case.
 pub async fn find_account(db: &Database, username: &str) -> Result<Option<AccountAuth>, DbError> {
     let row = sqlx::query_as::<_, (Uuid, String, bool, Option<Uuid>)>(
         "SELECT id, password_hash, disabled, last_used_tenant_id FROM auth_find_account($1)",
@@ -136,7 +136,7 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewUser<'_>) -> Result<UserId, 
     Ok(id)
 }
 
-/// Sets the password of the account (installation-wide).
+/// The new password applies to the whole installation.
 pub async fn set_password(
     tx: &mut TenantTx<'_>,
     id: UserId,

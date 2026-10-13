@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use common::{app, create_tenant, create_user, request, seed_session, send, session_cookie};
 
-/// Signs in with the username and the password only.
+/// Builds the request body for the tests.
 async fn sign_in(
     app: &axum::Router,
     username: &str,
@@ -34,7 +34,7 @@ async fn sign_in(
     .await
 }
 
-/// Creates an account with a real password and a membership in the tenant.
+/// Adds a member with a real password hash to a tenant.
 async fn account(
     db: &restichub_db::Database,
     tenant: TenantId,
@@ -46,7 +46,7 @@ async fn account(
     create_user(db, tenant, username, &hash, role).await
 }
 
-/// Adds a membership of an existing account in a tenant.
+/// Gives an existing identity a role in a tenant.
 async fn add_membership(
     db: &restichub_db::Database,
     tenant: TenantId,
@@ -68,7 +68,7 @@ async fn add_membership(
     tx.commit().await.expect("cannot commit the membership");
 }
 
-/// The actions of the audit records of a tenant.
+/// Reads the recorded events of a tenant for the assertions.
 async fn audit_actions(db: &restichub_db::Database, tenant: TenantId) -> Vec<String> {
     let mut tx = db
         .begin_tenant(tenant)
@@ -226,14 +226,14 @@ async fn ac_au_05_switch_rotates_the_session_and_audits_both_tenants() {
         Some("ac-au-switch-b")
     );
 
-    // The old cookie is dead.
+    // Old cookie rejected after the rotation.
     let (status, _, _) = send(
         &app,
         request("GET", "/api/v1/auth/me", Some(&old_cookie), None),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    // The new cookie works.
+    // New cookie accepted.
     let (status, _, me) = send(
         &app,
         request("GET", "/api/v1/auth/me", Some(&new_cookie), None),
@@ -492,7 +492,7 @@ async fn ac_au_05_a_concurrent_switch_keeps_one_session() {
         first.0 == StatusCode::OK || second.0 == StatusCode::OK,
         "at least one switch must succeed"
     );
-    // The old cookie is dead.
+    // Old cookie rejected after the rotation.
     let (status, _, _) = send(&app, request("GET", "/api/v1/auth/me", Some(&cookie), None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
@@ -568,7 +568,7 @@ async fn a_tenant_admin_reads_only_its_members() {
     let alpha = create_tenant(db.database(), "ac-au-read-a").await;
     let beta = create_tenant(db.database(), "ac-au-read-b").await;
     let admin = seed_session(db.database(), alpha, "admin", "admin").await;
-    // A member of tenant beta only.
+    // Member of tenant beta only.
     account(
         db.database(),
         beta,

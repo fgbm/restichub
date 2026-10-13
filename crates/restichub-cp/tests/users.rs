@@ -560,7 +560,7 @@ async fn an_account_without_a_membership_is_not_found() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body.get("code").and_then(Value::as_str), Some("not_found"));
 
-    // The list holds no such account.
+    // No such account appears in the list.
     let (status, _, page) = send(&app, request("GET", "/api/v1/users", Some(&cookie), None)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(

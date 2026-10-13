@@ -401,7 +401,7 @@ async fn guard_last_admin(tx: &mut TenantTx<'_>) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Writes the account change in the platform audit (ADR-0025).
+/// Records an account change for the platform administration too.
 async fn audit_platform(
     state: &AppState,
     context: &RequestContext,
