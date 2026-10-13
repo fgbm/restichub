@@ -33,7 +33,7 @@ pub struct CreateUserRequest {
     /// At least 12 characters.
     pub password: String,
     pub display_name: String,
-    pub role: String,
+    pub role: Role,
 }
 
 /// Absent fields leave the value unchanged.
@@ -41,7 +41,7 @@ pub struct CreateUserRequest {
 pub struct UpdateUserRequest {
     pub display_name: Option<String>,
     pub disabled: Option<bool>,
-    pub role: Option<String>,
+    pub role: Option<Role>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -111,7 +111,8 @@ pub async fn create_user(
     ApiJson(body): ApiJson<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserView>), ApiError> {
     context.authorize(Operation::UsersWrite)?;
-    let role = allowed_role(&context, &body.role)?;
+    allowed_role(&context, body.role)?;
+    let role = body.role;
     let username = validation::validate_username("username", &body.username)?;
     let display_name = validation::validate_display_name("display_name", &body.display_name)?;
     validation::validate_password("password", &body.password)?;
@@ -223,8 +224,11 @@ pub async fn update_user(
 ) -> Result<Json<UserView>, ApiError> {
     context.authorize(Operation::UsersWrite)?;
     let user_id = parse_uuid(&id)?;
-    let new_role = match &body.role {
-        Some(role) => Some(allowed_role(&context, role)?),
+    let new_role = match body.role {
+        Some(role) => {
+            allowed_role(&context, role)?;
+            Some(role)
+        }
         None => None,
     };
     let display_name = match &body.display_name {

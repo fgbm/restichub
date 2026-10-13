@@ -26,7 +26,6 @@ use crate::client_ip::ClientIp;
 use crate::error::ApiError;
 use crate::server::AppState;
 use crate::token;
-use crate::validation::Reason;
 
 /// The authorization table gives the minimum role that each operation needs (ADR-0023, section
 /// Roles).
@@ -84,7 +83,7 @@ pub fn minimum_role(operation: Operation) -> Role {
     }
 }
 
-/// Returns the role of a request body, or an error when the role is not allowed.
+/// Checks the role of a request body against the tenant and the actor.
 ///
 /// The function applies the rules:
 ///
@@ -93,9 +92,7 @@ pub fn minimum_role(operation: Operation) -> Role {
 /// - The role `platform_admin` is valid in the platform tenant only.
 /// - An actor cannot grant a role above its own. A token cannot create a token with a higher role
 ///   than its own, and a user cannot either.
-pub fn allowed_role(context: &RequestContext, value: &str) -> Result<Role, ApiError> {
-    let role =
-        Role::parse(value).ok_or_else(|| ApiError::invalid_field("role", Reason::Unknown))?;
+pub fn allowed_role(context: &RequestContext, role: Role) -> Result<(), ApiError> {
     let platform = context.tenant_id == restichub_db::PLATFORM_TENANT_ID;
     if platform && role != Role::PlatformAdmin {
         return Err(ApiError::forbidden());
@@ -106,7 +103,7 @@ pub fn allowed_role(context: &RequestContext, value: &str) -> Result<Role, ApiEr
     if !context.role.allows(role) {
         return Err(ApiError::forbidden());
     }
-    Ok(role)
+    Ok(())
 }
 
 /// Refuses an operation on a target whose role rank is above the actor's.

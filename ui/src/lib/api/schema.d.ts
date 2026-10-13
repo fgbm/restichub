@@ -34,7 +34,9 @@ export interface paths {
         post?: never;
         /**
          * Revokes an API token of the tenant.
-         * @description A second call on the same token changes nothing (idempotent).
+         * @description Revokes an API token of the tenant.
+         *
+         *     A second call on the same token changes nothing (idempotent).
          */
         delete: operations["revoke_token"];
         options?: never;
@@ -87,7 +89,9 @@ export interface paths {
         put?: never;
         /**
          * Changes the password of the current user.
-         * @description The endpoint removes every other session of the user and keeps the current session. A wrong
+         * @description Changes the password of the current user.
+         *
+         *     The endpoint removes every other session of the user and keeps the current session. A wrong
          *     current password counts against the user rate limit. The hash runs without a database
          *     transaction.
          */
@@ -201,7 +205,9 @@ export interface paths {
         post?: never;
         /**
          * Deletes a tenant (soft delete).
-         * @description The tenant must be suspended first. The endpoint sets the status to `deleted`; it removes no
+         * @description Deletes a tenant (soft delete).
+         *
+         *     The tenant must be suspended first. The endpoint sets the status to `deleted`; it removes no
          *     row. The platform tenant cannot be deleted.
          */
         delete: operations["delete_tenant"];
@@ -221,7 +227,9 @@ export interface paths {
         put?: never;
         /**
          * Resumes a tenant.
-         * @description The endpoint is idempotent. A deleted tenant cannot be resumed.
+         * @description Resumes a tenant.
+         *
+         *     The endpoint is idempotent. A deleted tenant cannot be resumed.
          */
         post: operations["resume_tenant"];
         delete?: never;
@@ -241,7 +249,9 @@ export interface paths {
         put?: never;
         /**
          * Suspends a tenant.
-         * @description The endpoint is idempotent. The platform tenant cannot be suspended.
+         * @description Suspends a tenant.
+         *
+         *     The endpoint is idempotent. The platform tenant cannot be suspended.
          */
         post: operations["suspend_tenant"];
         delete?: never;
@@ -280,16 +290,14 @@ export interface paths {
         };
         /**
          * Reads the metadata of one secret of the tenant.
-         * @description The response holds the metadata and the marker `set`. It never holds the value (AC-RP-02).
+         * @description Reads the metadata of one secret of the tenant.
+         *
+         *     The response holds the metadata and the marker `set`. It never holds the value (AC-RP-02).
          */
         get: operations["get_secret"];
         put?: never;
         post?: never;
-        /**
-         * Removes a secret of the tenant.
-         * @description Epic #5 adds the reference check: the endpoint will return HTTP 409 when a repository references
-         *     the secret.
-         */
+        /** Removes a secret of the tenant. */
         delete: operations["delete_secret"];
         options?: never;
         head?: never;
@@ -324,9 +332,7 @@ export interface paths {
         put?: never;
         /**
          * Creates the first Platform Admin.
-         * @description The endpoint needs the CSRF header and it is rate-limited for each source IP, as sign-in is. The
-         *     platform tenant lock and the row lock of the token serialize two setup requests with the same
-         *     token, so exactly one succeeds.
+         * @description The endpoint needs the CSRF header and it is rate-limited for each source IP, as sign-in is. The platform tenant lock and the row lock of the token serialize two setup requests with the same token, so exactly one succeeds.
          */
         post: operations["setup"];
         delete?: never;
@@ -444,28 +450,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description A list of API tokens. */
         ApiTokenListResponse: {
-            /** @description The tokens. */
             items: components["schemas"]["ApiTokenView"][];
         };
-        /** @description A token in a list response. */
         ApiTokenView: {
-            /** @description The creation time. */
             created_at: string;
-            /** @description The display prefix of the token. */
             display_prefix: string;
-            /** @description The optional expiry time. */
             expires_at?: string | null;
-            /** @description The identifier of the token. */
             id: string;
-            /** @description The time of the last use. */
             last_used_at?: string | null;
-            /** @description The name for the user interface. */
             name: string;
-            /** @description The revocation time. */
             revoked_at?: string | null;
-            /** @description The role of the token. */
             role: components["schemas"]["Role"];
         };
         /**
@@ -496,121 +491,82 @@ export interface components {
          * @example secret_delete
          */
         AuditAction: string;
-        /** @description One audit record in the API. */
         AuditItem: {
-            /** @description The action. */
             action: components["schemas"]["AuditAction"];
-            /** @description The actor identifier. */
             actor_id?: string | null;
-            /** @description The actor type. */
             actor_type: string;
-            /** @description The diff. */
             diff?: Record<string, never> | null;
-            /** @description The identifier of the record. */
             id: string;
-            /** @description The object identifier. */
             object_id?: string | null;
-            /** @description The object type. */
             object_type: string;
-            /** @description The time of the record in RFC 3339. */
+            /** @description In RFC 3339. */
             occurred_at: string;
-            /** @description The source IP address. */
             source_ip?: string | null;
-            /** @description The tenant of the record. */
             tenant_id: string;
         };
-        /** @description A page of audit records in the API. */
         AuditPageResponse: {
-            /** @description The records. */
             items: components["schemas"]["AuditItem"][];
-            /** @description The cursor of the next page. It is null when the table holds no later record. */
+            /** @description Null when the table holds no later record. */
             next_cursor?: string | null;
         };
-        /** @description The body of the self password change request. */
         ChangePasswordRequest: {
-            /** @description The current password. */
             current_password: string;
-            /** @description The new password. It must hold at least 12 characters. */
+            /** @description At least 12 characters. */
             new_password: string;
         };
         /**
-         * @description The body of the create-secret request.
-         *
-         *     The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
+         * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
          *     a [`SecretString`], so the buffer is zeroized on drop.
          */
         CreateSecretRequest: {
-            /** @description The name of the secret. It holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
+            /** @description Holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
             name: string;
-            /** @description The purpose of the value. */
             purpose: components["schemas"]["SecretPurpose"];
-            /** @description The value. It holds 1 to 64 KiB bytes. */
+            /** @description Holds 1 to 64 KiB bytes. */
             value: string;
         };
-        /** @description The first administrator of a new tenant. */
         CreateTenantAdmin: {
-            /** @description The name of the administrator for the user interface. */
             display_name: string;
-            /** @description The password of the administrator. It must hold at least 12 characters. */
+            /** @description At least 12 characters. */
             password: string;
-            /** @description The username of the administrator. It is unique for the tenant and ignores the letter case. */
+            /** @description Unique for the tenant; ignores the letter case. */
             username: string;
         };
-        /** @description The body of the create-tenant request. */
         CreateTenantRequest: {
-            /** @description The first administrator of the tenant. */
             first_admin: components["schemas"]["CreateTenantAdmin"];
             /**
-             * @description The name of the tenant. It holds 1 to 63 characters from `a-z`, `0-9` and `-`, it starts
-             *     with a letter, and it is not `platform`.
+             * @description Holds 1 to 63 characters from `a-z`, `0-9` and `-`, starts with a letter, and is not
+             *     `platform`.
              */
             name: string;
         };
-        /** @description The body of the create-token request. */
         CreateTokenRequest: {
-            /** @description The optional expiry time in RFC 3339. */
+            /** @description In RFC 3339. */
             expires_at?: string | null;
-            /** @description The name for the user interface. */
             name: string;
-            /** @description The role of the token in the tenant. */
-            role: string;
-        };
-        /** @description The body of the create-token response. The value appears here only once. */
-        CreateTokenResponse: {
-            /** @description The display prefix of the token. */
-            display_prefix: string;
-            /** @description The optional expiry time. */
-            expires_at?: string | null;
-            /** @description The identifier of the token. */
-            id: string;
-            /** @description The name for the user interface. */
-            name: string;
-            /** @description The role of the token. */
             role: components["schemas"]["Role"];
-            /** @description The token value. The control plane returns it only here. */
+        };
+        CreateTokenResponse: {
+            display_prefix: string;
+            expires_at?: string | null;
+            id: string;
+            name: string;
+            role: components["schemas"]["Role"];
+            /** @description Returned only here. */
             token: string;
         };
-        /** @description The body of the create-user request. */
         CreateUserRequest: {
-            /** @description The name for the user interface. */
             display_name: string;
-            /** @description The password. It must hold at least 12 characters. */
+            /** @description At least 12 characters. */
             password: string;
-            /** @description The role in the tenant. */
-            role: string;
-            /** @description The username. It is unique for the tenant and ignores the letter case. */
+            role: components["schemas"]["Role"];
+            /** @description Unique for the tenant; ignores the letter case. */
             username: string;
         };
-        /**
-         * @description The stable code of a problem response.
-         * @enum {string}
-         */
+        /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy";
-        /** @description The body of the self response. */
         MeResponse: {
-            /** @description The role of the actor in the tenant. */
             role: components["schemas"]["Role"];
-            /** @description The tenant. */
             tenant: components["schemas"]["TenantView"];
             user?: components["schemas"]["UserView"] | null;
         };
@@ -620,53 +576,37 @@ export interface components {
          *     The view holds the user count only. It never holds a user list or a secret of the tenant.
          */
         PlatformTenantView: {
-            /** @description The time the tenant was created in RFC 3339. */
+            /** @description In RFC 3339. */
             created_at: string;
-            /** @description The identifier of the tenant. */
             id: string;
-            /** @description The name of the tenant. */
             name: string;
-            /** @description The status of the tenant. */
             status: components["schemas"]["TenantStatus"];
-            /**
-             * Format: int64
-             * @description The number of users of the tenant.
-             */
+            /** Format: int64 */
             user_count: number;
         };
-        /** @description The body of an RFC 9457 problem response. */
         ProblemBody: {
-            /** @description The stable code in snake_case. */
+            /** @description In snake_case. */
             code: components["schemas"]["ErrorCode"];
-            /** @description The field of the request that is not valid. Only `invalid_argument` sets it. */
+            /** @description Only `invalid_argument` sets it. */
             field?: string | null;
-            /** @description The reason code in snake_case. Only `invalid_argument` sets it. */
+            /** @description In snake_case; only `invalid_argument` sets it. */
             reason?: string | null;
-            /** @description The request ID of the request. */
             request_id: string;
-            /**
-             * Format: int32
-             * @description The HTTP status code.
-             */
+            /** Format: int32 */
             status: number;
-            /** @description The title of the problem. */
             title: string;
-            /** @description The type of the problem. */
             type: string;
         };
         /**
-         * @description The body of the replace-secret request.
-         *
-         *     The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
+         * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
          *     a [`SecretString`], so the buffer is zeroized on drop.
          */
         ReplaceSecretRequest: {
-            /** @description The new value. It holds 1 to 64 KiB bytes. */
+            /** @description Holds 1 to 64 KiB bytes. */
             value: string;
         };
-        /** @description The body of the admin password reset request. */
         ResetPasswordRequest: {
-            /** @description The new password. It must hold at least 12 characters. */
+            /** @description At least 12 characters. */
             new_password: string;
         };
         /**
@@ -680,31 +620,24 @@ export interface components {
          *     The field `value` holds the marker `set` only. The API never returns the value (AC-RP-02).
          */
         SecretDetailView: {
-            /** @description The time the secret was created in RFC 3339. */
+            /** @description In RFC 3339. */
             created_at: string;
-            /** @description The identifier of the user that created the secret. It is null for an API token actor. */
+            /** @description Null for an API token actor. */
             created_by?: string | null;
-            /** @description The identifier of the secret. */
             id: string;
-            /** @description The name of the secret. */
             name: string;
-            /** @description The stable purpose of the value. */
             purpose: string;
-            /** @description The time the value was last replaced in RFC 3339. */
+            /** @description In RFC 3339. */
             updated_at: string;
-            /** @description The marker `set`. The value itself never leaves the control plane. */
             value: string;
         };
-        /** @description A list of secret metadata. */
         SecretListResponse: {
-            /** @description The metadata of the secrets. The list never holds a value. */
+            /** @description Never holds a value. */
             items: components["schemas"]["SecretView"][];
         };
         /**
-         * @description The purpose of a secret value.
-         *
-         *     The purpose is a part of the associated data. The string value of each variant is stable and
-         *     MUST NOT change: a change makes every stored ciphertext of that purpose undecryptable.
+         * @description A part of the associated data. The string value of each variant is stable and MUST NOT
+         *     change: a change makes every stored ciphertext of that purpose undecryptable.
          * @enum {string}
          */
         SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password";
@@ -715,97 +648,66 @@ export interface components {
          *     (AC-RP-02).
          */
         SecretView: {
-            /** @description The time the secret was created in RFC 3339. */
+            /** @description In RFC 3339. */
             created_at: string;
-            /** @description The identifier of the user that created the secret. It is null for an API token actor. */
+            /** @description Null for an API token actor. */
             created_by?: string | null;
-            /** @description The identifier of the secret. */
             id: string;
-            /** @description The name of the secret. */
             name: string;
-            /** @description The stable purpose of the value. */
             purpose: string;
-            /** @description The time the value was last replaced in RFC 3339. */
+            /** @description In RFC 3339. */
             updated_at: string;
         };
-        /** @description The body of the setup request. */
         SetupRequest: {
-            /** @description The name for the user interface. */
             display_name: string;
-            /** @description The password of the Platform Admin. It must hold at least 12 characters. */
+            /** @description At least 12 characters. */
             password: string;
-            /** @description The one-time setup token from the server log. */
             setup_token: string;
-            /** @description The username of the Platform Admin. */
             username: string;
         };
-        /** @description The body of the setup status response. */
         SetupStatusResponse: {
             /** @description True while the platform tenant has no user. */
             setup_required: boolean;
         };
-        /** @description The body of the sign-in request. */
         SignInRequest: {
-            /** @description The password. */
             password: string;
-            /** @description The name of the tenant. The comparison ignores the letter case. */
+            /** @description Ignores the letter case. */
             tenant: string;
-            /** @description The username. */
             username: string;
         };
-        /** @description The body of the sign-in response. */
         SignInResponse: {
-            /** @description The role of the user in the tenant. */
             role: components["schemas"]["Role"];
-            /** @description The tenant. */
             tenant: components["schemas"]["TenantView"];
-            /** @description The user. */
             user: components["schemas"]["UserView"];
         };
-        /** @description A page of tenants in the API. */
         TenantListResponse: {
-            /** @description The tenants. */
             items: components["schemas"]["PlatformTenantView"][];
-            /** @description The cursor of the next page. It is null when the table holds no later tenant. */
+            /** @description Null when the table holds no later tenant. */
             next_cursor?: string | null;
         };
         /**
-         * @description The status of a tenant (FR-TN-02).
+         * @description Tenant status (FR-TN-02).
          * @enum {string}
          */
         TenantStatus: "active" | "suspended" | "deleted";
-        /** @description A tenant in a response. */
         TenantView: {
-            /** @description The identifier of the tenant. */
             id: string;
-            /** @description The name of the tenant. */
             name: string;
         };
-        /** @description The body of the update-user request. An absent field does not change. */
+        /** @description Absent fields leave the value unchanged. */
         UpdateUserRequest: {
-            /** @description The new disabled flag. */
             disabled?: boolean | null;
-            /** @description The new display name. */
             display_name?: string | null;
-            /** @description The new role. */
-            role?: string | null;
+            role?: components["schemas"]["Role"] | null;
         };
-        /** @description A list of users. */
         UserListResponse: {
-            /** @description The users. */
             items: components["schemas"]["UserView"][];
         };
-        /** @description A user in a response. */
         UserView: {
-            /** @description True if the user is disabled. */
             disabled: boolean;
-            /** @description The name for the user interface. */
             display_name: string;
-            /** @description The identifier of the user. */
             id: string;
-            /** @description The role of the user in the tenant. */
             role: components["schemas"]["Role"];
-            /** @description The username. */
             username: string;
         };
     };
@@ -959,25 +861,19 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The start of the time range in RFC 3339. */
+                /** @description Start of the time range in RFC 3339. */
                 from: string | null;
-                /** @description The end of the time range in RFC 3339. */
+                /** @description End of the time range in RFC 3339. */
                 to: string | null;
-                /** @description The action. */
                 action: string | null;
-                /** @description The actor type. */
                 actor_type: string | null;
-                /** @description The actor identifier. It needs `actor_type`. */
+                /** @description Needs `actor_type`. */
                 actor_id: string | null;
-                /** @description The object type. */
                 object_type: string | null;
-                /** @description The object identifier. */
                 object_id: string | null;
-                /** @description The tenant of the record. The platform list uses it. */
+                /** @description Used by the platform list. */
                 tenant_id: string | null;
-                /** @description The cursor of the next page. */
                 cursor: string | null;
-                /** @description The number of records. */
                 limit: number | null;
             };
             cookie?: never;
@@ -1242,25 +1138,19 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The start of the time range in RFC 3339. */
+                /** @description Start of the time range in RFC 3339. */
                 from: string | null;
-                /** @description The end of the time range in RFC 3339. */
+                /** @description End of the time range in RFC 3339. */
                 to: string | null;
-                /** @description The action. */
                 action: string | null;
-                /** @description The actor type. */
                 actor_type: string | null;
-                /** @description The actor identifier. It needs `actor_type`. */
+                /** @description Needs `actor_type`. */
                 actor_id: string | null;
-                /** @description The object type. */
                 object_type: string | null;
-                /** @description The object identifier. */
                 object_id: string | null;
-                /** @description The tenant of the record. The platform list uses it. */
+                /** @description Used by the platform list. */
                 tenant_id: string | null;
-                /** @description The cursor of the next page. */
                 cursor: string | null;
-                /** @description The number of records. */
                 limit: number | null;
             };
             cookie?: never;
@@ -1308,11 +1198,9 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The status of the tenant: `active`, `suspended` or `deleted`. */
+                /** @description `active`, `suspended` or `deleted`. */
                 status: string | null;
-                /** @description The cursor of the next page. */
                 cursor: string | null;
-                /** @description The number of tenants. */
                 limit: number | null;
             };
             cookie?: never;

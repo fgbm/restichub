@@ -39,12 +39,38 @@ where
     }
 }
 
+/// The fixed prefix of the message of a data error. The `serde_path_to_error` path follows it.
+const JSON_DATA_ERROR_PREFIX: &str = "Failed to deserialize the JSON body into the target type: ";
+
 /// A body that is larger than the limit gives HTTP 413. Every other rejection gives HTTP 400. The
-/// response holds no parser detail.
+/// response holds no parser detail. A data error names the field of the schema that failed, so a
+/// form can show the message next to the input.
 fn map_rejection(rejection: JsonRejection) -> ApiError {
     if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
-        ApiError::payload_too_large()
-    } else {
-        ApiError::invalid_field("body", Reason::InvalidBody)
+        return ApiError::payload_too_large();
     }
+    let field = match &rejection {
+        JsonRejection::JsonDataError(error) => body_error_field(&error.body_text()),
+        _ => None,
+    };
+    ApiError::invalid_field(
+        field.unwrap_or_else(|| "body".to_owned()),
+        Reason::InvalidBody,
+    )
+}
+
+/// Reads the schema path from the message of a data error.
+///
+/// The path comes from the request type, not from user input. The function accepts only a path of
+/// letters, digits, `_` and `.`, so an unexpected value falls back to `body`.
+fn body_error_field(message: &str) -> Option<String> {
+    let rest = message.strip_prefix(JSON_DATA_ERROR_PREFIX)?;
+    let path = rest.split_once(": ").map_or(rest, |(path, _)| path).trim();
+    if path.is_empty() || path == "." {
+        return None;
+    }
+    let valid = path
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.'));
+    valid.then(|| path.to_owned())
 }

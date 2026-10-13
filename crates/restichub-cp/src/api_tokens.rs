@@ -25,7 +25,7 @@ use crate::validation::Reason;
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateTokenRequest {
     pub name: String,
-    pub role: String,
+    pub role: Role,
     /// In RFC 3339.
     pub expires_at: Option<String>,
 }
@@ -114,7 +114,8 @@ pub async fn create_token(
     ApiJson(body): ApiJson<CreateTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateTokenResponse>), ApiError> {
     context.authorize(Operation::ApiTokensWrite)?;
-    let role = allowed_role(&context, &body.role)?;
+    allowed_role(&context, body.role)?;
+    let role = body.role;
     let name = crate::validation::validate_token_name("name", &body.name)?;
     let now = state.auth().clock.now();
     let expires_at = match &body.expires_at {

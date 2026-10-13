@@ -73,7 +73,7 @@ pub struct ApiError {
     status: StatusCode,
     code: ErrorCode,
     title: &'static str,
-    field: Option<&'static str>,
+    field: Option<String>,
     reason: Option<Reason>,
     /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
     retry_after: Option<u64>,
@@ -154,18 +154,18 @@ impl ApiError {
 
     /// Creates a `400 invalid_argument` error for a field.
     ///
-    /// The field name is a stable identifier of the request, not user input.
-    pub fn invalid_argument(field: &'static str) -> Self {
+    /// The field name is a stable identifier of the request schema, not user input.
+    pub fn invalid_argument(field: impl Into<String>) -> Self {
         let mut error = Self::new(
             StatusCode::BAD_REQUEST,
             ErrorCode::InvalidArgument,
             "Bad Request",
         );
-        error.field = Some(field);
+        error.field = Some(field.into());
         error
     }
 
-    pub fn invalid_field(field: &'static str, reason: Reason) -> Self {
+    pub fn invalid_field(field: impl Into<String>, reason: Reason) -> Self {
         let mut error = Self::invalid_argument(field);
         error.reason = Some(reason);
         error
@@ -176,7 +176,7 @@ impl ApiError {
     /// The cause is the message of a parse failure. The response mapper logs it with the request
     /// ID; the body never holds it.
     pub fn invalid_field_cause(
-        field: &'static str,
+        field: impl Into<String>,
         reason: Reason,
         cause: impl Into<String>,
     ) -> Self {
@@ -326,7 +326,7 @@ impl IntoResponse for ApiError {
             code: self.code,
             // The response mapper fills the request ID from the request extension.
             request_id: String::new(),
-            field: self.field.map(str::to_owned),
+            field: self.field,
             reason: self.reason.map(|reason| reason.as_str().to_owned()),
         };
         let mut response = (
