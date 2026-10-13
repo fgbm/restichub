@@ -15,7 +15,7 @@ use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, AuditEvent};
 use restichub_db::tenants as repo;
 use restichub_db::tenants::{TenantFilter, TenantPage, TenantSummary};
-use restichub_db::{PLATFORM_TENANT_ID, TenantId, TenantStatus, users};
+use restichub_db::{PLATFORM_TENANT_ID, TenantId, TenantStatus};
 use restichub_secrets::{generate_dek, wrap_dek};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -25,7 +25,6 @@ use uuid::Uuid;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
-use crate::password;
 use crate::server::AppState;
 use crate::validation;
 use crate::views::PlatformTenantView;
@@ -35,16 +34,6 @@ pub struct CreateTenantRequest {
     /// Holds 1 to 63 characters from `a-z`, `0-9` and `-`, starts with a letter, and is not
     /// `platform`.
     pub name: String,
-    pub first_admin: CreateTenantAdmin,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct CreateTenantAdmin {
-    /// Unique for the tenant; ignores the letter case.
-    pub username: String,
-    pub display_name: String,
-    /// At least 12 characters.
-    pub password: String,
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
@@ -94,15 +83,14 @@ pub async fn list_tenants(
 #[utoipa::path(
     post,
     path = "/api/v1/platform/tenants",
-    summary = "Creates a tenant with its first administrator.",
+    summary = "Creates a tenant by name only.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateTenantRequest,
     responses(
         (status = 201, description = "The tenant is created.", body = PlatformTenantView),
         (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody),
-        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn create_tenant(
@@ -112,30 +100,10 @@ pub async fn create_tenant(
 ) -> Result<(StatusCode, Json<PlatformTenantView>), ApiError> {
     context.authorize(Operation::PlatformTenantsWrite)?;
     let name = validation::validate_tenant_name("name", &body.name)?;
-    let username =
-        validation::validate_username("first_admin.username", &body.first_admin.username)?;
-    let display_name = validation::validate_display_name(
-        "first_admin.display_name",
-        &body.first_admin.display_name,
-    )?;
-    validation::validate_password("first_admin.password", &body.first_admin.password)?;
-
-    // The username is unique in the installation (ADR-0025). A taken name gives HTTP 409
-    // `username_taken` with the request field.
-    if users::find_account(state.db(), &username).await?.is_some() {
-        return Err(ApiError::username_taken_field("first_admin.username"));
-    }
 
     let kek = state
         .kek()
         .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
-
-    // Hash the password before the transaction (ADR-0023: a hash never holds a transaction).
-    let password_hash = password::hash_password_limited(
-        &state.auth().hash_semaphore,
-        body.first_admin.password.clone(),
-    )
-    .await?;
 
     // A fresh DEK, wrapped by the current KEK. The associated data holds the tenant id, so the id
     // comes first (ADR-0023, section Secrets).
@@ -143,6 +111,8 @@ pub async fn create_tenant(
     let dek = generate_dek()?;
     let wrapped = wrap_dek(kek.current(), tenant_id.as_uuid(), 1, &dek)?;
 
+    // The create writes the tenant row, the key row and the `tenant_create` record only. The first
+    // Admin is added through the platform user management (ADR-0028).
     let input = repo::BootstrapTenant {
         id: tenant_id,
         name: &name,
@@ -152,11 +122,7 @@ pub async fn create_tenant(
         nonce: wrapped.nonce.as_slice(),
         actor: context.actor.clone(),
         source_ip: context.source_ip,
-        admin: Some(repo::BootstrapAdmin {
-            username: &username,
-            password_hash: &password_hash,
-            display_name: &display_name,
-        }),
+        admin: None,
     };
 
     let mut tx = state.db().begin_platform().await?;
@@ -433,6 +399,7 @@ mod tests {
             status: TenantStatus::Active,
             created_at: OffsetDateTime::now_utc(),
             user_count: 1,
+            admin_state: restichub_db::AdminState::Present,
         };
         let decoded = decode_cursor(&encode_cursor(&tenant));
         assert_eq!(

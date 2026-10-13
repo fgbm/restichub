@@ -44,6 +44,7 @@ pub enum ErrorCode {
     Busy,
     SharedAccount,
     UsernameTaken,
+    EmailTaken,
 }
 
 impl ErrorCode {
@@ -66,6 +67,7 @@ impl ErrorCode {
             Self::Busy => "busy",
             Self::SharedAccount => "shared_account",
             Self::UsernameTaken => "username_taken",
+            Self::EmailTaken => "email_taken",
         }
     }
 }
@@ -265,6 +267,12 @@ impl ApiError {
         let mut error = Self::username_taken();
         error.field = Some(field.into());
         error
+    }
+
+    /// The email exists in the installation. The platform account create and update answer with it
+    /// (ADR-0028).
+    pub fn email_taken() -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorCode::EmailTaken, "Conflict")
     }
 }
 

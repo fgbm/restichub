@@ -82,8 +82,13 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/platform/tenants/{id}", Fixture::Platform),
     ("/api/v1/platform/tenants/{id}/suspend", Fixture::Platform),
     ("/api/v1/platform/tenants/{id}/resume", Fixture::Platform),
+    ("/api/v1/platform/users", Fixture::Platform),
     ("/api/v1/platform/users/{id}", Fixture::Platform),
     ("/api/v1/platform/users/{id}/memberships", Fixture::Platform),
+    (
+        "/api/v1/platform/users/{id}/memberships/{tenant_id}",
+        Fixture::Platform,
+    ),
     ("/api/v1/users", Fixture::Collection),
     ("/api/v1/users/{id}", Fixture::Object(Object::User)),
     ("/api/v1/users/{id}/password", Fixture::Object(Object::User)),

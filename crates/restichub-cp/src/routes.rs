@@ -173,6 +173,21 @@ pub const ROUTES: &[Route] = &[
         handler: || routes!(crate::tenants::delete_tenant),
     },
     Route {
+        method: "get",
+        path: "/api/v1/platform/users",
+        access: Access::Protected(Operation::PlatformUsersRead),
+        handler: || routes!(crate::platform_users::list_accounts),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/platform/users",
+        access: Access::Protected(Operation::PlatformUsersWrite),
+        handler: || {
+            routes!(crate::platform_users::create_account)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
         method: "post",
         path: "/api/v1/platform/users/{id}/memberships",
         access: Access::Protected(Operation::PlatformUsersWrite),
@@ -183,10 +198,25 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "patch",
+        path: "/api/v1/platform/users/{id}/memberships/{tenant_id}",
+        access: Access::Protected(Operation::PlatformUsersWrite),
+        handler: || {
+            routes!(crate::platform_users::set_membership_role)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "delete",
+        path: "/api/v1/platform/users/{id}/memberships/{tenant_id}",
+        access: Access::Protected(Operation::PlatformUsersWrite),
+        handler: || routes!(crate::platform_users::remove_membership),
+    },
+    Route {
+        method: "patch",
         path: "/api/v1/platform/users/{id}",
         access: Access::Protected(Operation::PlatformUsersWrite),
         handler: || {
-            routes!(crate::platform_users::set_account_disabled)
+            routes!(crate::platform_users::update_account)
                 .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
         },
     },

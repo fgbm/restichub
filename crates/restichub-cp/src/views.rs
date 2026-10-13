@@ -1,8 +1,10 @@
 //! Response schemas of the API (ADR-0009).
 
+use restichub_db::memberships::PlatformMembership;
 use restichub_db::secrets::SecretMetadata;
 use restichub_db::tenants::TenantSummary;
-use restichub_db::{Role, TenantStatus};
+use restichub_db::users::PlatformAccount;
+use restichub_db::{AdminState, Role, TenantStatus};
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -61,6 +63,8 @@ pub struct PlatformTenantView {
     /// In RFC 3339.
     pub created_at: String,
     pub user_count: i64,
+    /// Derived from the memberships: `none` when the tenant has no active Admin (ADR-0028).
+    pub admin_state: AdminState,
 }
 
 impl From<&TenantSummary> for PlatformTenantView {
@@ -71,6 +75,57 @@ impl From<&TenantSummary> for PlatformTenantView {
             status: tenant.status,
             created_at: format_time(tenant.created_at),
             user_count: tenant.user_count,
+            admin_state: tenant.admin_state,
+        }
+    }
+}
+
+/// One membership of an account in the platform account list (ADR-0028).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlatformMembershipView {
+    pub tenant_id: String,
+    pub tenant_name: String,
+    pub role: Role,
+    /// Off in this organization only.
+    pub disabled: bool,
+}
+
+impl From<&PlatformMembership> for PlatformMembershipView {
+    fn from(membership: &PlatformMembership) -> Self {
+        Self {
+            tenant_id: membership.tenant_id.to_string(),
+            tenant_name: membership.tenant_name.clone(),
+            role: membership.role,
+            disabled: membership.disabled,
+        }
+    }
+}
+
+/// An installation account with its memberships (ADR-0028).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlatformUserView {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+    /// Unique in the installation when it is set.
+    pub email: Option<String>,
+    /// False until an invitation verifies the address; the MVP leaves it false.
+    pub email_verified: bool,
+    /// A Platform Admin set it for the whole installation.
+    pub disabled: bool,
+    pub memberships: Vec<PlatformMembershipView>,
+}
+
+impl PlatformUserView {
+    pub fn new(account: &PlatformAccount, memberships: Vec<PlatformMembershipView>) -> Self {
+        Self {
+            id: account.id.to_string(),
+            username: account.username.clone(),
+            display_name: account.display_name.clone(),
+            email: account.email.clone(),
+            email_verified: account.email_verified,
+            disabled: account.disabled,
+            memberships,
         }
     }
 }
