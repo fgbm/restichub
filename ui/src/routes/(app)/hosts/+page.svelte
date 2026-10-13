@@ -147,7 +147,7 @@
 
 <PageHeader title={t('hosts.title')} description={t('hosts.description')}>
 	{#if canWrite}
-		<Button variant="primary" onclick={openAdd}>{t('hosts.add')}</Button>
+		<Button variant="primary" icon="plus" onclick={openAdd}>{t('hosts.add')}</Button>
 	{/if}
 </PageHeader>
 
@@ -157,6 +157,7 @@
 	{loading}
 	{error}
 	rowKey={(agent) => agent.id}
+	emptyIcon="host"
 	emptyTitle={t('hosts.emptyTitle')}
 	emptyDescription={t('hosts.emptyDescription')}
 >
@@ -165,6 +166,7 @@
 			<Button
 				size="sm"
 				variant="ghost"
+				icon="octagon"
 				onclick={() => {
 					revokeTarget = agent;
 					revokeOpen = true;
@@ -176,10 +178,14 @@
 	{/snippet}
 </Table>
 
-<Dialog bind:open={addOpen} title={createdToken ? t('hosts.tokenTitle') : t('hosts.addTitle')}>
+<Dialog
+	bind:open={addOpen}
+	icon="host"
+	title={createdToken ? t('hosts.tokenTitle') : t('hosts.addTitle')}
+>
 	{#if createdToken}
 		<Alert tone="attention" title={t('hosts.tokenBody')} />
-		<CopyField value={createdToken.token} label={t('hosts.tokenValue')} />
+		<CopyField value={createdToken.token} label={t('hosts.tokenValue')} secret />
 		<CopyField value={installCommand} label={t('hosts.installCommand')} />
 		<p>{t('hosts.tokenNote')}</p>
 	{:else}
@@ -206,7 +212,7 @@
 	{/snippet}
 </Dialog>
 
-<Dialog bind:open={revokeOpen} title={t('hosts.revokeTitle')}>
+<Dialog bind:open={revokeOpen} icon="octagon" title={t('hosts.revokeTitle')}>
 	<p>
 		{t('hosts.revokeBody', { name: revokeTarget?.hostname ?? '' })}
 	</p>
