@@ -1,11 +1,16 @@
 /*
  * Design tokens for the ResticHub web UI.
  *
- * One file holds every value: colors, spacing, type, radii and z-index.
+ * One file holds every value: colors, spacing, type, radii, shadows and z-index.
  * Components use these custom properties only. Do not put raw values in components.
  *
- * Style: a restrained administration console. Neutral gray palette, one accent
- * color, thin borders, small radii, no gradients and almost no shadows.
+ * The values come from `ui/mockups/mockups.css` (ADR-0027), so the built UI and the
+ * mockups agree and a screenshot comparison is meaningful. The mockups use the
+ * unprefixed names; the UI keeps the `--rh-` prefix.
+ *
+ * Style: a restrained administration console. Neutral gray canvas, one green accent
+ * for the main action, blue for links and focus, thin borders, small radii, no
+ * gradients, shadows on overlays only.
  *
  * Themes: the attribute `data-theme` on the `<html>` element selects the theme.
  * The values are `light`, `dark` and `system`. The theme store writes the
@@ -19,6 +24,7 @@
 		ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
 	/* Type scale (px) and line heights */
+	--rh-font-size-2xs: 11px;
 	--rh-font-size-xs: 12px;
 	--rh-font-size-sm: 13px;
 	--rh-font-size-base: 14px;
@@ -35,7 +41,7 @@
 	--rh-font-weight-medium: 500;
 	--rh-font-weight-semibold: 600;
 
-	/* Spacing scale (px) */
+	/* Spacing scale (px): a 4px grid. */
 	--rh-space-1: 4px;
 	--rh-space-2: 8px;
 	--rh-space-3: 12px;
@@ -49,15 +55,17 @@
 	/* Radii (px) */
 	--rh-radius-sm: 4px;
 	--rh-radius-md: 6px;
+	--rh-radius-lg: 8px;
 	--rh-radius-pill: 999px;
 
 	/* Borders */
 	--rh-border-width: 1px;
 
 	/* Layout */
-	--rh-layout-topbar-height: 48px;
-	--rh-layout-nav-width: 232px;
-	--rh-layout-content-max-width: 1200px;
+	--rh-layout-topbar-height: 56px;
+	--rh-layout-nav-width: 240px;
+	--rh-layout-content-max-width: 1280px;
+	--rh-control-height: 32px;
 
 	/* z-index scale */
 	--rh-z-content: 0;
@@ -70,151 +78,259 @@
 
 	/* Motion */
 	--rh-transition-fast: 120ms ease;
+	--rh-transition-slow: 150ms ease;
 }
 
 /* Light theme (default) */
 :root,
 :root[data-theme='light'] {
-	--rh-color-bg: #f6f7f8;
+	--rh-color-canvas: #ffffff;
+	--rh-color-canvas-subtle: #f6f8fa;
+	--rh-color-canvas-inset: #eff2f5;
+	--rh-color-bg: #ffffff;
 	--rh-color-surface: #ffffff;
-	--rh-color-surface-muted: #f1f2f4;
-	--rh-color-surface-sunken: #eceef1;
-	--rh-color-border: #d8dbe0;
-	--rh-color-border-strong: #b9bec6;
-	--rh-color-text: #1c1f24;
-	--rh-color-text-muted: #525860;
-	--rh-color-text-subtle: #6b7280;
+	--rh-color-surface-muted: #f6f8fa;
+	--rh-color-surface-sunken: #eff2f5;
+
+	--rh-color-border: #d0d7de;
+	--rh-color-border-muted: #dde2e7;
+	--rh-color-border-strong: #b3bcc6;
+
+	--rh-color-text: #1f2328;
+	--rh-color-text-muted: #59636e;
+	--rh-color-text-subtle: #667079;
 	--rh-color-text-inverse: #ffffff;
+	--rh-color-text-on-accent: #ffffff;
 
-	--rh-color-accent: #2563a8;
-	--rh-color-accent-hover: #1d4f8a;
-	--rh-color-accent-active: #17406f;
+	/* Green accent: the main action and the active tab underline. */
+	--rh-color-accent: #1f883d;
+	--rh-color-accent-hover: #1a7f37;
+	--rh-color-accent-active: #16702f;
 	--rh-color-accent-text: #ffffff;
-	--rh-color-accent-subtle: #e8f0f9;
-	--rh-color-accent-subtle-text: #1d4f8a;
+	--rh-color-accent-subtle: #dafbe1;
+	--rh-color-accent-subtle-border: #a2e0b1;
+	--rh-color-accent-subtle-text: #116329;
 
-	--rh-color-danger: #b3261e;
-	--rh-color-danger-hover: #8f1d17;
-	--rh-color-danger-text: #ffffff;
-	--rh-color-danger-subtle: #fbeae9;
-	--rh-color-danger-subtle-text: #8f1d17;
+	/* Blue links and focus. */
+	--rh-color-link: #0969da;
+	--rh-color-link-hover: #0550ae;
+	--rh-color-focus: #0969da;
+	--rh-color-focus-ring: rgba(9, 105, 218, 0.32);
 
-	--rh-color-success: #157347;
-	--rh-color-success-text: #ffffff;
-	--rh-color-success-subtle: #e6f2ec;
-	--rh-color-success-subtle-text: #0f5636;
+	--rh-color-control-bg: #f6f8fa;
+	--rh-color-control-bg-hover: #eef1f4;
+	--rh-color-control-bg-active: #e6eaee;
+	--rh-color-input-bg: #ffffff;
 
-	--rh-color-warning: #8a5a00;
-	--rh-color-warning-text: #ffffff;
-	--rh-color-warning-subtle: #fbf1df;
-	--rh-color-warning-subtle-text: #6d4700;
+	--rh-color-danger: #cf222e;
+	--rh-color-danger-hover: #a40e26;
+	--rh-color-danger-text: #a40e26;
+	--rh-color-danger-subtle: #ffebe9;
+	--rh-color-danger-subtle-border: #ffb3ad;
+	--rh-color-danger-subtle-text: #a40e26;
 
-	--rh-color-info: #1f5f8b;
-	--rh-color-info-subtle: #e7f1f7;
-	--rh-color-info-subtle-text: #164a6c;
+	--rh-color-success: #1a7f37;
+	--rh-color-success-text: #0f5323;
+	--rh-color-success-subtle: #dafbe1;
+	--rh-color-success-subtle-border: #a2e0b1;
+	--rh-color-success-subtle-text: #0f5323;
 
-	--rh-color-focus: #2563a8;
-	--rh-color-overlay: rgba(18, 20, 24, 0.45);
-	--rh-shadow-overlay: 0 4px 16px rgba(18, 20, 24, 0.16);
-	--rh-color-hover: rgba(18, 20, 24, 0.04);
-	--rh-color-skeleton: #e3e6ea;
-	--rh-color-skeleton-shine: #eef0f3;
+	--rh-color-warning: #9a6700;
+	--rh-color-warning-text: #7d4e00;
+	--rh-color-warning-subtle: #fff8c5;
+	--rh-color-warning-subtle-border: #d4a72c;
+	--rh-color-warning-subtle-text: #7d4e00;
+
+	--rh-color-info: #0969da;
+	--rh-color-info-text: #0a4d8c;
+	--rh-color-info-subtle: #ddf4ff;
+	--rh-color-info-subtle-border: #8cc8f5;
+	--rh-color-info-subtle-text: #0a4d8c;
+
+	--rh-color-running: #0969da;
+	--rh-color-running-text: #0a4d8c;
+	--rh-color-running-subtle: #ddf4ff;
+	--rh-color-running-subtle-border: #8cc8f5;
+	--rh-color-running-subtle-text: #0a4d8c;
+
+	--rh-color-neutral-bg: #eff2f5;
+	--rh-color-neutral-border: #d0d7de;
+	--rh-color-neutral-text: #59636e;
+
+	--rh-color-hover: rgba(31, 35, 40, 0.055);
+	--rh-color-selected: rgba(9, 105, 218, 0.08);
+	--rh-color-overlay: rgba(31, 35, 40, 0.45);
+	--rh-shadow-overlay: 0 8px 24px rgba(31, 35, 40, 0.18);
+	--rh-shadow-menu: 0 4px 14px rgba(31, 35, 40, 0.14);
+	--rh-color-skeleton: #e4e8ed;
+	--rh-color-skeleton-shine: #eef1f4;
+	--rh-color-code-bg: #f6f8fa;
 }
 
 /* Dark theme. The same values apply for the explicit theme and for `system`. */
 :root[data-theme='dark'] {
-	--rh-color-bg: #16181c;
-	--rh-color-surface: #1e2126;
-	--rh-color-surface-muted: #262a30;
-	--rh-color-surface-sunken: #121317;
-	--rh-color-border: #34383f;
-	--rh-color-border-strong: #4a4f57;
-	--rh-color-text: #e6e8eb;
-	--rh-color-text-muted: #a8aeb8;
-	--rh-color-text-subtle: #8b929c;
-	--rh-color-text-inverse: #16181c;
+	--rh-color-canvas: #0f1216;
+	--rh-color-canvas-subtle: #161b22;
+	--rh-color-canvas-inset: #0b0e12;
+	--rh-color-bg: #0f1216;
+	--rh-color-surface: #161b22;
+	--rh-color-surface-muted: #161b22;
+	--rh-color-surface-sunken: #0b0e12;
 
-	--rh-color-accent: #6ea8dd;
-	--rh-color-accent-hover: #8bbce9;
-	--rh-color-accent-active: #a5cbf0;
-	--rh-color-accent-text: #16181c;
-	--rh-color-accent-subtle: #1d2b3a;
-	--rh-color-accent-subtle-text: #a5cbf0;
+	--rh-color-border: #2b313a;
+	--rh-color-border-muted: #232a33;
+	--rh-color-border-strong: #3d444d;
 
-	--rh-color-danger: #f2b8b5;
-	--rh-color-danger-hover: #f7cdcb;
-	--rh-color-danger-text: #16181c;
-	--rh-color-danger-subtle: #3a1f1e;
-	--rh-color-danger-subtle-text: #f2b8b5;
+	--rh-color-text: #e6edf3;
+	--rh-color-text-muted: #9aa4ae;
+	--rh-color-text-subtle: #7d8590;
+	--rh-color-text-inverse: #0f1216;
+	--rh-color-text-on-accent: #ffffff;
 
-	--rh-color-success: #7fd0a6;
-	--rh-color-success-text: #16181c;
-	--rh-color-success-subtle: #16301f;
-	--rh-color-success-subtle-text: #9fe0bd;
+	--rh-color-accent: #238636;
+	--rh-color-accent-hover: #2ea043;
+	--rh-color-accent-active: #3fb950;
+	--rh-color-accent-text: #ffffff;
+	--rh-color-accent-subtle: #12261e;
+	--rh-color-accent-subtle-border: #2f6b3d;
+	--rh-color-accent-subtle-text: #56d364;
 
-	--rh-color-warning: #e6c27a;
-	--rh-color-warning-text: #16181c;
-	--rh-color-warning-subtle: #33280f;
-	--rh-color-warning-subtle-text: #e6c27a;
+	--rh-color-link: #4493f8;
+	--rh-color-link-hover: #6cb6ff;
+	--rh-color-focus: #4493f8;
+	--rh-color-focus-ring: rgba(68, 147, 248, 0.4);
 
-	--rh-color-info: #8bc1e0;
-	--rh-color-info-subtle: #162a36;
-	--rh-color-info-subtle-text: #a9d3ec;
+	--rh-color-control-bg: #21262d;
+	--rh-color-control-bg-hover: #2a2f37;
+	--rh-color-control-bg-active: #30363d;
+	--rh-color-input-bg: #0d1014;
 
-	--rh-color-focus: #8bbce9;
-	--rh-color-overlay: rgba(0, 0, 0, 0.6);
-	--rh-shadow-overlay: 0 4px 16px rgba(0, 0, 0, 0.5);
+	--rh-color-danger: #f85149;
+	--rh-color-danger-hover: #da3633;
+	--rh-color-danger-text: #ff7b72;
+	--rh-color-danger-subtle: #2d1416;
+	--rh-color-danger-subtle-border: #7d2b28;
+	--rh-color-danger-subtle-text: #ff7b72;
+
+	--rh-color-success: #3fb950;
+	--rh-color-success-text: #56d364;
+	--rh-color-success-subtle: #12261e;
+	--rh-color-success-subtle-border: #2f6b3d;
+	--rh-color-success-subtle-text: #56d364;
+
+	--rh-color-warning: #d29922;
+	--rh-color-warning-text: #e3b341;
+	--rh-color-warning-subtle: #2b2611;
+	--rh-color-warning-subtle-border: #9e6a03;
+	--rh-color-warning-subtle-text: #e3b341;
+
+	--rh-color-info: #58a6ff;
+	--rh-color-info-text: #79c0ff;
+	--rh-color-info-subtle: #0c2d3f;
+	--rh-color-info-subtle-border: #1f6feb;
+	--rh-color-info-subtle-text: #79c0ff;
+
+	--rh-color-running: #58a6ff;
+	--rh-color-running-text: #79c0ff;
+	--rh-color-running-subtle: #0c2d3f;
+	--rh-color-running-subtle-border: #1f6feb;
+	--rh-color-running-subtle-text: #79c0ff;
+
+	--rh-color-neutral-bg: #21262d;
+	--rh-color-neutral-border: #30363d;
+	--rh-color-neutral-text: #9aa4ae;
+
 	--rh-color-hover: rgba(255, 255, 255, 0.06);
-	--rh-color-skeleton: #2b2f36;
-	--rh-color-skeleton-shine: #363b43;
+	--rh-color-selected: rgba(68, 147, 248, 0.14);
+	--rh-color-overlay: rgba(1, 4, 9, 0.62);
+	--rh-shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.55);
+	--rh-shadow-menu: 0 4px 14px rgba(0, 0, 0, 0.45);
+	--rh-color-skeleton: #21262d;
+	--rh-color-skeleton-shine: #2b313a;
+	--rh-color-code-bg: #0b0e12;
 }
 
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme='light']):not([data-theme='dark']) {
-		--rh-color-bg: #16181c;
-		--rh-color-surface: #1e2126;
-		--rh-color-surface-muted: #262a30;
-		--rh-color-surface-sunken: #121317;
-		--rh-color-border: #34383f;
-		--rh-color-border-strong: #4a4f57;
-		--rh-color-text: #e6e8eb;
-		--rh-color-text-muted: #a8aeb8;
-		--rh-color-text-subtle: #8b929c;
-		--rh-color-text-inverse: #16181c;
+		--rh-color-canvas: #0f1216;
+		--rh-color-canvas-subtle: #161b22;
+		--rh-color-canvas-inset: #0b0e12;
+		--rh-color-bg: #0f1216;
+		--rh-color-surface: #161b22;
+		--rh-color-surface-muted: #161b22;
+		--rh-color-surface-sunken: #0b0e12;
 
-		--rh-color-accent: #6ea8dd;
-		--rh-color-accent-hover: #8bbce9;
-		--rh-color-accent-active: #a5cbf0;
-		--rh-color-accent-text: #16181c;
-		--rh-color-accent-subtle: #1d2b3a;
-		--rh-color-accent-subtle-text: #a5cbf0;
+		--rh-color-border: #2b313a;
+		--rh-color-border-muted: #232a33;
+		--rh-color-border-strong: #3d444d;
 
-		--rh-color-danger: #f2b8b5;
-		--rh-color-danger-hover: #f7cdcb;
-		--rh-color-danger-text: #16181c;
-		--rh-color-danger-subtle: #3a1f1e;
-		--rh-color-danger-subtle-text: #f2b8b5;
+		--rh-color-text: #e6edf3;
+		--rh-color-text-muted: #9aa4ae;
+		--rh-color-text-subtle: #7d8590;
+		--rh-color-text-inverse: #0f1216;
+		--rh-color-text-on-accent: #ffffff;
 
-		--rh-color-success: #7fd0a6;
-		--rh-color-success-text: #16181c;
-		--rh-color-success-subtle: #16301f;
-		--rh-color-success-subtle-text: #9fe0bd;
+		--rh-color-accent: #238636;
+		--rh-color-accent-hover: #2ea043;
+		--rh-color-accent-active: #3fb950;
+		--rh-color-accent-text: #ffffff;
+		--rh-color-accent-subtle: #12261e;
+		--rh-color-accent-subtle-border: #2f6b3d;
+		--rh-color-accent-subtle-text: #56d364;
 
-		--rh-color-warning: #e6c27a;
-		--rh-color-warning-text: #16181c;
-		--rh-color-warning-subtle: #33280f;
-		--rh-color-warning-subtle-text: #e6c27a;
+		--rh-color-link: #4493f8;
+		--rh-color-link-hover: #6cb6ff;
+		--rh-color-focus: #4493f8;
+		--rh-color-focus-ring: rgba(68, 147, 248, 0.4);
 
-		--rh-color-info: #8bc1e0;
-		--rh-color-info-subtle: #162a36;
-		--rh-color-info-subtle-text: #a9d3ec;
+		--rh-color-control-bg: #21262d;
+		--rh-color-control-bg-hover: #2a2f37;
+		--rh-color-control-bg-active: #30363d;
+		--rh-color-input-bg: #0d1014;
 
-		--rh-color-focus: #8bbce9;
-		--rh-color-overlay: rgba(0, 0, 0, 0.6);
-		--rh-shadow-overlay: 0 4px 16px rgba(0, 0, 0, 0.5);
+		--rh-color-danger: #f85149;
+		--rh-color-danger-hover: #da3633;
+		--rh-color-danger-text: #ff7b72;
+		--rh-color-danger-subtle: #2d1416;
+		--rh-color-danger-subtle-border: #7d2b28;
+		--rh-color-danger-subtle-text: #ff7b72;
+
+		--rh-color-success: #3fb950;
+		--rh-color-success-text: #56d364;
+		--rh-color-success-subtle: #12261e;
+		--rh-color-success-subtle-border: #2f6b3d;
+		--rh-color-success-subtle-text: #56d364;
+
+		--rh-color-warning: #d29922;
+		--rh-color-warning-text: #e3b341;
+		--rh-color-warning-subtle: #2b2611;
+		--rh-color-warning-subtle-border: #9e6a03;
+		--rh-color-warning-subtle-text: #e3b341;
+
+		--rh-color-info: #58a6ff;
+		--rh-color-info-text: #79c0ff;
+		--rh-color-info-subtle: #0c2d3f;
+		--rh-color-info-subtle-border: #1f6feb;
+		--rh-color-info-subtle-text: #79c0ff;
+
+		--rh-color-running: #58a6ff;
+		--rh-color-running-text: #79c0ff;
+		--rh-color-running-subtle: #0c2d3f;
+		--rh-color-running-subtle-border: #1f6feb;
+		--rh-color-running-subtle-text: #79c0ff;
+
+		--rh-color-neutral-bg: #21262d;
+		--rh-color-neutral-border: #30363d;
+		--rh-color-neutral-text: #9aa4ae;
+
 		--rh-color-hover: rgba(255, 255, 255, 0.06);
-		--rh-color-skeleton: #2b2f36;
-		--rh-color-skeleton-shine: #363b43;
+		--rh-color-selected: rgba(68, 147, 248, 0.14);
+		--rh-color-overlay: rgba(1, 4, 9, 0.62);
+		--rh-shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.55);
+		--rh-shadow-menu: 0 4px 14px rgba(0, 0, 0, 0.45);
+		--rh-color-skeleton: #21262d;
+		--rh-color-skeleton-shine: #2b313a;
+		--rh-color-code-bg: #0b0e12;
 	}
 }
 
@@ -230,17 +346,18 @@ html {
 	font-size: var(--rh-font-size-base);
 	line-height: var(--rh-line-height-base);
 	color: var(--rh-color-text);
-	background-color: var(--rh-color-bg);
+	background-color: var(--rh-color-canvas);
 	-webkit-text-size-adjust: 100%;
 }
 
 body {
 	margin: 0;
 	min-height: 100vh;
+	background-color: var(--rh-color-canvas);
 }
 
 a {
-	color: var(--rh-color-accent);
+	color: var(--rh-color-link);
 	text-decoration: none;
 }
 
