@@ -49,7 +49,8 @@ const NO_CACHE: &str = "no-cache";
 /// A built UI replaces the `script-src` directive with the hashes of its inline scripts. See
 /// [`build_csp`].
 const DEFAULT_CSP: &str = "default-src 'self'; img-src 'self' data:; \
-style-src 'self'; script-src 'self'; connect-src 'self'; \
+style-src 'self'; style-src-attr 'self' 'unsafe-hashes' \
+'sha256-tcbDxjMo+xKqM21aCGYbs/QAJqB7yUXC06oPWDapBgc='; script-src 'self'; connect-src 'self'; \
 frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 /// Serves the embedded UI for one request.
