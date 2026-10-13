@@ -41,6 +41,7 @@ The platform tenant row stays internal. The `ca_keys` table (ADR-0026) and the s
 - The last active Platform Admin cannot lose the right. The operation gives HTTP 409.
 - A Platform Admin cannot remove the right from itself. The operation gives HTTP 403.
 - A tenant-scope write on an account that holds the right is refused (HTTP 403). The Admin of an organization must not reset the password or the display name of such an account. It must not disable the account, and it must not change, disable or remove its membership. Only the platform scope manages such an account. The guard lives in the administrator database functions and in a trigger on `memberships`. The API repeats it.
+- A grant of the right to an existing account requires a new password that only the Platform Admin chooses. The grant sets the password hash, sets the right and ends every session of the account in one transaction. A "must change at the next sign-in" flag is not enough. The Admin of an organization knows the old password and signs in before the first change. The account create sets the right with the password of the create, so it needs no extra password.
 - Only a `SECURITY DEFINER` function owned by `restichub_auth` writes the right. The function sets the search path and a fail-closed scope check, and it takes the account row lock. The runtime role gets `EXECUTE` only. The rules of migrations 0016 to 0019 apply.
 
 ### The platform tenant row

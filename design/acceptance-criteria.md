@@ -188,6 +188,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-AU-16 | FR-TN-02 | Remove the Platform Admin right from the last active Platform Admin, or from itself. **Expected:** HTTP 409 for the last one and HTTP 403 for the own account. | A |
 | AC-AU-17 | FR-AU-04 | A Platform Admin holds the Viewer role in organization A and reads the tenant data of A. **Expected:** the answer agrees with the Viewer role. The right adds no access (ADR-0006). | A |
 | AC-AU-18 | FR-TN-02 | Apply the migration to an installation with `platform_admin` memberships. **Expected:** every such account holds the right and the memberships are gone. | A |
+| AC-AU-19 | FR-TN-02 | Grant the Platform Admin right to an existing account without a password, then with a new password. **Expected:** HTTP 400 for the first. After the grant the old password gives HTTP 401, the old sessions are gone, and the new password signs in. | A |
 | AC-TN-08 | FR-TN-01 | List the organizations and open the switcher. **Expected:** the internal platform tenant appears in no user-facing list and is no membership target. | A |
 
 ## 13. Non-functional requirements
