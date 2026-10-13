@@ -23,8 +23,9 @@ test('the hosts screen creates an enrollment token and shows it once', async ({ 
 	await expect(
 		page.getByText('re_EXAMPLEONLYVALUE00000000000000000000000000', { exact: true })
 	).toBeVisible();
-	await expect(
-		page.getByText('restichub-agent register --url https://<control-plane> --token')
-	).toBeVisible();
+	// The command carries this installation URL, not a placeholder (ADR-0032).
+	const origin = await page.evaluate(() => window.location.origin);
+	await expect(page.getByText(`restichub-agent register --url ${origin} --token`)).toBeVisible();
 	await expect(page.getByText('The token works once and expires in one hour.')).toBeVisible();
+	await expect(page.getByText('<control-plane>')).toHaveCount(0);
 });

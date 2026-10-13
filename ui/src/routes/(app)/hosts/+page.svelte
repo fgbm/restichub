@@ -32,8 +32,13 @@
 	let revoking = $state(false);
 
 	const canWrite = $derived(getSession()?.role === 'admin');
+	// The registration command carries this installation URL (ADR-0032).
+	let origin = $state('');
+	onMount(() => {
+		origin = window.location.origin;
+	});
 	const installCommand = $derived(
-		t('hosts.installPlaceholder', { token: createdToken?.token ?? '<token>' })
+		t('hosts.installPlaceholder', { url: origin, token: createdToken?.token ?? '<token>' })
 	);
 
 	function formatDate(value: string | null | undefined): string {

@@ -254,8 +254,7 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.tokenCreated': 'Токен регистрации создан.',
 	'hosts.tokenNote': 'Токен действует один раз и истекает через час.',
 	'hosts.installCommand': 'Команда установки',
-	'hosts.installPlaceholder':
-		'restichub-agent register --url https://<control-plane> --token {token}',
+	'hosts.installPlaceholder': 'restichub-agent register --url {url} --token {token}',
 
 	// Audit log
 	'audit.title': 'Журнал аудита',

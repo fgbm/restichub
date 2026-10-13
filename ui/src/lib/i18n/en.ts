@@ -251,8 +251,7 @@ export const en = {
 	'hosts.tokenCreated': 'The enrollment token is created.',
 	'hosts.tokenNote': 'The token works once and expires in one hour.',
 	'hosts.installCommand': 'Install command',
-	'hosts.installPlaceholder':
-		'restichub-agent register --url https://<control-plane> --token {token}',
+	'hosts.installPlaceholder': 'restichub-agent register --url {url} --token {token}',
 
 	// Audit log
 	'audit.title': 'Audit log',
