@@ -17,7 +17,6 @@
 	import type { KeyValueItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
-	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let tokens = $state<ApiToken[]>([]);
@@ -49,7 +48,7 @@
 	});
 
 	// The least privilege comes first and is the default.
-	const roles = $derived([...assignableRoles(getSession()?.role)].reverse());
+	const roles = $derived([...assignableRoles()].reverse());
 
 	const roleOptions = $derived<SelectOption[]>(
 		roles.map((role) => ({

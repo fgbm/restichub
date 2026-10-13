@@ -59,7 +59,7 @@
 	});
 
 	// The least privilege comes first and is the default.
-	const roles = $derived([...assignableRoles(getSession()?.role)].reverse());
+	const roles = $derived([...assignableRoles()].reverse());
 
 	const roleOptions = $derived<SelectOption[]>(
 		roles.map((role) => ({

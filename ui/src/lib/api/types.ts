@@ -18,12 +18,9 @@ export type Instance = components['schemas']['InstanceResponse'];
 /**
  * The roles that a new user or API token may hold.
  *
- * The platform tenant holds the role `platform_admin` only (FR-TN-02). The
- * other roles apply in one tenant. The actor role tells which tenant it is: the
- * role `platform_admin` exists in the platform tenant only.
+ * No membership holds `platform_admin`; it is an account right (ADR-0029).
  */
-export function assignableRoles(role: Role | null | undefined): Role[] {
-	if (role === 'platform_admin') return ['platform_admin'];
+export function assignableRoles(): Role[] {
 	return ['admin', 'operator', 'viewer'];
 }
 
