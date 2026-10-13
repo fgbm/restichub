@@ -181,7 +181,7 @@ The sign-in screen asks for the username and the password only. The account is i
   5. The agent generates its key pair and sends the certificate signing request and the token to the control plane.
   6. The control plane signs the certificate and returns it. The agent stores its identity in the protected configuration directory.
   7. Run `restichub-agent install-service` to register the operating system service.
-- **Expected result:** the host appears in the "Agents" list with the status "Active". The certificate holds the agent ID and the tenant ID. The audit log holds `agent_enrolled`.
+- **Expected result:** the host appears in the "Agents" list with the status "Active". The certificate holds the agent ID and the tenant ID. The audit log holds `agent_enroll`.
 - **Alternative flows:**
   - A used or an expired token is refused with a clear error.
   - The 11th enrollment request from one address in one minute gives HTTP 429.
