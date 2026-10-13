@@ -35,7 +35,7 @@ pub mod users;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 
-pub use enums::{ActorType, AgentStatus, CaRole, Role, SigningKeyRole, TenantStatus};
+pub use enums::{ActorType, AdminState, AgentStatus, CaRole, Role, SigningKeyRole, TenantStatus};
 pub use ids::{
     AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, PLATFORM_TENANT_ID, SecretId, SessionId,
     SetupTokenId, TenantId, UserId,

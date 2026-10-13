@@ -7,7 +7,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::enums::TenantStatus;
+use crate::enums::{AdminState, TenantStatus};
 use crate::ids::{TenantId, UserId};
 use crate::tx::{PlatformTx, TenantTx};
 
@@ -34,6 +34,8 @@ pub struct TenantSummary {
     pub status: TenantStatus,
     pub created_at: OffsetDateTime,
     pub user_count: i64,
+    /// Derived from the active administrator count of the memberships (ADR-0028).
+    pub admin_state: AdminState,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -300,9 +302,10 @@ pub async fn get_platform(
 ) -> Result<Option<TenantSummary>, DbError> {
     let row = sqlx::query_as::<_, SummaryRow>(
         "SELECT tenant.id, tenant.name, tenant.status, tenant.created_at, \
-                coalesce(counts.user_count, 0) \
+                coalesce(counts.user_count, 0), coalesce(admins.admin_count, 0) \
          FROM tenants AS tenant \
          LEFT JOIN public.tenant_user_counts() AS counts ON counts.tenant_id = tenant.id \
+         LEFT JOIN public.tenant_admin_counts() AS admins ON admins.tenant_id = tenant.id \
          WHERE tenant.id = $1",
     )
     .bind(id)
@@ -328,9 +331,10 @@ pub async fn list_platform(
     };
     let rows = sqlx::query_as::<_, SummaryRow>(
         "SELECT tenant.id, tenant.name, tenant.status, tenant.created_at, \
-                coalesce(counts.user_count, 0) \
+                coalesce(counts.user_count, 0), coalesce(admins.admin_count, 0) \
          FROM tenants AS tenant \
          LEFT JOIN public.tenant_user_counts() AS counts ON counts.tenant_id = tenant.id \
+         LEFT JOIN public.tenant_admin_counts() AS admins ON admins.tenant_id = tenant.id \
          WHERE (($1::text IS NULL AND tenant.status <> 'deleted') OR tenant.status = $1) \
            AND ($2::timestamptz IS NULL \
                 OR (tenant.created_at, tenant.id) < ($2::timestamptz, $3::uuid)) \
@@ -350,17 +354,18 @@ pub async fn list_platform(
     Ok(TenantPageResult { tenants, has_more })
 }
 
-type SummaryRow = (Uuid, String, TenantStatus, OffsetDateTime, i64);
+type SummaryRow = (Uuid, String, TenantStatus, OffsetDateTime, i64, i64);
 
 impl From<SummaryRow> for TenantSummary {
     fn from(row: SummaryRow) -> Self {
-        let (id, name, status, created_at, user_count) = row;
+        let (id, name, status, created_at, user_count, admin_count) = row;
         Self {
             id: TenantId::from_uuid(id),
             name,
             status,
             created_at,
             user_count,
+            admin_state: AdminState::from_active_admins(admin_count),
         }
     }
 }
