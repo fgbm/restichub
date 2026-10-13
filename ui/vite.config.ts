@@ -22,7 +22,7 @@ export default defineConfig({
 				directives: {
 					'default-src': ['self'],
 					'img-src': ['self', 'data:'],
-					'style-src': ['self', 'unsafe-inline'],
+					'style-src': ['self'],
 					'script-src': ['self'],
 					'connect-src': ['self'],
 					'form-action': ['self']

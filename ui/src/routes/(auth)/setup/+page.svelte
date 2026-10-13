@@ -4,7 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, NetworkError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem } from '#lib/api/index.ts';
-	import { Button, FormField, InlineAlert, TextField } from '#lib/components/index.ts';
+	import { Alert, Button, PasswordField, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -73,96 +73,63 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{t('setup.title')} · {t('app.name')}</title>
+</svelte:head>
+
 <h1 class="title">{t('setup.title')}</h1>
 <p class="description">{t(single ? 'setup.descriptionSingle' : 'setup.description')}</p>
 
 {#if errorTitle}
 	<div class="alert">
-		<InlineAlert tone="danger" title={errorTitle} code={errorCode} />
+		<Alert tone="danger" title={errorTitle} code={errorCode} />
 	</div>
 {/if}
 
 <form class="form" onsubmit={onSubmit}>
-	<FormField
+	<TextField
+		id="setup-token"
 		label={t('setup.setupToken')}
-		for="setup-token"
-		hint={t('setup.tokenHint')}
+		help={t('setup.tokenHint')}
 		error={fieldError(problem, 'setup_token')}
+		bind:value={setupToken}
+		mono
+		autocomplete="off"
 		required
-	>
-		<TextField
-			id="setup-token"
-			bind:value={setupToken}
-			invalid={Boolean(fieldError(problem, 'setup_token'))}
-			mono
-			autocomplete="off"
-			required
-		/>
-	</FormField>
-
-	<FormField
+	/>
+	<TextField
+		id="setup-username"
 		label={t('setup.username')}
-		for="setup-username"
 		error={fieldError(problem, 'username')}
+		bind:value={username}
+		autocomplete="username"
 		required
-	>
-		<TextField
-			id="setup-username"
-			bind:value={username}
-			invalid={Boolean(fieldError(problem, 'username'))}
-			autocomplete="username"
-			required
-		/>
-	</FormField>
-
-	<FormField
+	/>
+	<TextField
+		id="setup-display-name"
 		label={t('setup.displayName')}
-		for="setup-display-name"
 		error={fieldError(problem, 'display_name')}
+		bind:value={displayName}
+		autocomplete="name"
 		required
-	>
-		<TextField
-			id="setup-display-name"
-			bind:value={displayName}
-			invalid={Boolean(fieldError(problem, 'display_name'))}
-			autocomplete="name"
-			required
-		/>
-	</FormField>
-
-	<FormField
+	/>
+	<PasswordField
+		id="setup-password"
 		label={t('setup.password')}
-		for="setup-password"
-		hint={t('setup.passwordHint')}
+		help={t('setup.passwordHint')}
 		error={passwordTooShort ? t('setup.passwordHint') : fieldError(problem, 'password')}
+		bind:value={password}
+		autocomplete="new-password"
 		required
-	>
-		<TextField
-			id="setup-password"
-			type="password"
-			bind:value={password}
-			autocomplete="new-password"
-			invalid={passwordTooShort || Boolean(fieldError(problem, 'password'))}
-			required
-		/>
-	</FormField>
-
-	<FormField
+	/>
+	<PasswordField
+		id="setup-confirm"
 		label={t('setup.confirmPassword')}
-		for="setup-confirm"
 		error={passwordMismatch ? t('setup.passwordMismatch') : undefined}
+		bind:value={confirmPassword}
+		autocomplete="new-password"
 		required
-	>
-		<TextField
-			id="setup-confirm"
-			type="password"
-			bind:value={confirmPassword}
-			autocomplete="new-password"
-			invalid={passwordMismatch}
-			required
-		/>
-	</FormField>
-
+	/>
 	<Button type="submit" variant="primary" loading={submitting} disabled={!canSubmit}>
 		{t(single ? 'setup.submitSingle' : 'setup.submit')}
 	</Button>

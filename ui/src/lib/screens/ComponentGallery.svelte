@@ -3,9 +3,7 @@
 	 * Component gallery: every element of `ui/` in its states.
 	 *
 	 * This is a development tool, so the labels are English and it is not part of a
-	 * production screen. A route does not mount it yet: any new page route adds a
-	 * pathname to the generated `$app/types` union and breaks the `resolve` cast in
-	 * the sign-in page. Mount it from a dev route after #44 rewrites that page.
+	 * production screen. The route `(dev)/components` mounts it in a dev build only.
 	 */
 	import {
 		Alert,

@@ -2,16 +2,8 @@
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Tenant } from '#lib/api/index.ts';
-	import {
-		Button,
-		DataTable,
-		Dialog,
-		FormField,
-		InlineAlert,
-		PageHeader,
-		TextField
-	} from '#lib/components/index.ts';
-	import type { Column } from '#lib/components/index.ts';
+	import { Alert, Button, Dialog, PageHeader, Table, TextField } from '#lib/components/ui/index.ts';
+	import type { TableColumn } from '#lib/components/ui/index.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -58,7 +50,7 @@
 		return 'neutral';
 	}
 
-	const columns = $derived<Column<Tenant>[]>([
+	const columns = $derived<TableColumn<Tenant>[]>([
 		{ key: 'name', header: t('tenants.name'), mono: true },
 		{
 			key: 'status',
@@ -156,99 +148,81 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{t('tenants.title')} · {t('app.name')}</title>
+</svelte:head>
+
 <PageHeader title={t('tenants.title')} description={t('tenants.description')}>
 	<Button variant="primary" onclick={() => (createOpen = true)}>{t('tenants.create')}</Button>
 </PageHeader>
 
-<DataTable {columns} rows={tenants} {loading} {error} rowKey={(tenant) => tenant.id}>
+<Table {columns} rows={tenants} {loading} {error} rowKey={(tenant) => tenant.id}>
 	{#snippet rowActions(tenant)}
-		<div class="row-actions">
-			{#if tenant.status !== 'deleted'}
-				<Button
-					size="sm"
-					variant="ghost"
-					loading={busyId === tenant.id}
-					onclick={() => toggleStatus(tenant)}
-				>
-					{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
-				</Button>
-				<Button
-					size="sm"
-					variant="ghost"
-					disabled={tenant.status !== 'suspended'}
-					onclick={() => {
-						deleteTarget = tenant;
-						deleteOpen = true;
-					}}
-				>
-					{t('common.delete')}
-				</Button>
-			{/if}
-		</div>
+		{#if tenant.status !== 'deleted'}
+			<Button
+				size="sm"
+				variant="ghost"
+				loading={busyId === tenant.id}
+				onclick={() => toggleStatus(tenant)}
+			>
+				{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
+			</Button>
+			<Button
+				size="sm"
+				variant="ghost"
+				disabled={tenant.status !== 'suspended'}
+				onclick={() => {
+					deleteTarget = tenant;
+					deleteOpen = true;
+				}}
+			>
+				{t('common.delete')}
+			</Button>
+		{/if}
 	{/snippet}
-</DataTable>
+</Table>
 
 <Dialog bind:open={createOpen} title={t('tenants.createTitle')}>
 	{#if createError}
-		<InlineAlert tone="danger" title={createError} />
+		<Alert tone="danger" title={createError} />
 	{/if}
-	<FormField
+	<TextField
+		id="tenant-name"
 		label={t('tenants.name')}
-		for="tenant-name"
 		error={fieldError(createProblem, 'name')}
+		bind:value={newName}
+		placeholder={t('tenants.namePlaceholder')}
+		mono
 		required
-	>
-		<TextField
-			id="tenant-name"
-			bind:value={newName}
-			invalid={Boolean(fieldError(createProblem, 'name'))}
-			placeholder={t('tenants.namePlaceholder')}
-			mono
-		/>
-	</FormField>
-	<FormField
+	/>
+	<TextField
+		id="tenant-admin-username"
 		label={t('tenants.adminUsername')}
-		for="tenant-admin-username"
 		error={fieldError(createProblem, 'first_admin.username')}
+		bind:value={newAdminUsername}
+		mono
+		autocomplete="off"
 		required
-	>
-		<TextField
-			id="tenant-admin-username"
-			bind:value={newAdminUsername}
-			invalid={Boolean(fieldError(createProblem, 'first_admin.username'))}
-			mono
-			autocomplete="off"
-		/>
-	</FormField>
-	<FormField
+	/>
+	<TextField
+		id="tenant-admin-display-name"
 		label={t('tenants.adminDisplayName')}
-		for="tenant-admin-display-name"
 		error={fieldError(createProblem, 'first_admin.display_name')}
+		bind:value={newAdminDisplayName}
+		autocomplete="off"
 		required
-	>
-		<TextField
-			id="tenant-admin-display-name"
-			bind:value={newAdminDisplayName}
-			invalid={Boolean(fieldError(createProblem, 'first_admin.display_name'))}
-			autocomplete="off"
-		/>
-	</FormField>
-	<FormField
+	/>
+	<TextField
+		id="tenant-admin-password"
 		label={t('tenants.adminPassword')}
-		for="tenant-admin-password"
-		hint={t('setup.passwordHint')}
+		help={t('setup.passwordHint')}
 		error={fieldError(createProblem, 'first_admin.password')}
+		bind:value={newAdminPassword}
+		type="password"
+		autocomplete="new-password"
 		required
-	>
-		<TextField
-			id="tenant-admin-password"
-			type="password"
-			bind:value={newAdminPassword}
-			invalid={Boolean(fieldError(createProblem, 'first_admin.password'))}
-			autocomplete="new-password"
-		/>
-	</FormField>
-	<div class="dialog-actions">
+	/>
+	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
 		<Button
 			variant="primary"
@@ -261,30 +235,17 @@
 		>
 			{t('common.create')}
 		</Button>
-	</div>
+	{/snippet}
 </Dialog>
 
 <Dialog bind:open={deleteOpen} title={t('tenants.deleteTitle')}>
 	<p>
 		{t('tenants.deleteBody', { name: deleteTarget?.name ?? '' })}
 	</p>
-	<div class="dialog-actions">
+	{#snippet footer()}
 		<Button onclick={() => (deleteOpen = false)}>{t('common.cancel')}</Button>
 		<Button variant="danger" loading={deleting} onclick={confirmDelete}>
 			{t('common.delete')}
 		</Button>
-	</div>
+	{/snippet}
 </Dialog>
-
-<style>
-	.row-actions {
-		display: inline-flex;
-		gap: var(--rh-space-1);
-	}
-
-	.dialog-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: var(--rh-space-2);
-	}
-</style>

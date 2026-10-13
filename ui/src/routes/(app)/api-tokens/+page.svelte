@@ -3,17 +3,16 @@
 	import { ApiError, assignableRoles, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, ApiToken, ApiTokenCreated, Role } from '#lib/api/index.ts';
 	import {
+		Alert,
 		Button,
 		CopyField,
-		DataTable,
 		Dialog,
-		FormField,
-		InlineAlert,
 		PageHeader,
 		Select,
+		Table,
 		TextField
-	} from '#lib/components/index.ts';
-	import type { Column, SelectOption } from '#lib/components/index.ts';
+	} from '#lib/components/ui/index.ts';
+	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -58,7 +57,7 @@
 		return new Date(value).toLocaleString(getLocale());
 	}
 
-	const columns = $derived<Column<ApiToken>[]>([
+	const columns = $derived<TableColumn<ApiToken>[]>([
 		{ key: 'name', header: t('tokens.name') },
 		{
 			key: 'role',
@@ -153,11 +152,15 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{t('tokens.title')} · {t('app.name')}</title>
+</svelte:head>
+
 <PageHeader title={t('tokens.title')} description={t('tokens.description')}>
 	<Button variant="primary" onclick={openCreate}>{t('tokens.create')}</Button>
 </PageHeader>
 
-<DataTable {columns} rows={tokens} {loading} {error} rowKey={(token) => token.id}>
+<Table {columns} rows={tokens} {loading} {error} rowKey={(token) => token.id}>
 	{#snippet rowActions(token)}
 		<Button
 			size="sm"
@@ -170,85 +173,63 @@
 			{t('tokens.revoke')}
 		</Button>
 	{/snippet}
-</DataTable>
+</Table>
 
 <Dialog
 	bind:open={createOpen}
 	title={createdToken ? t('tokens.valueOnceTitle') : t('tokens.createTitle')}
 >
 	{#if createdToken}
-		<InlineAlert tone="warning" title={t('tokens.valueOnceBody')} />
+		<Alert tone="attention" title={t('tokens.valueOnceBody')} />
 		<CopyField value={createdToken.token} label={t('tokens.value')} />
-		<div class="dialog-actions">
-			<Button variant="primary" onclick={closeCreate}>{t('common.close')}</Button>
-		</div>
 	{:else}
 		{#if createError}
-			<InlineAlert tone="danger" title={createError} />
+			<Alert tone="danger" title={createError} />
 		{/if}
-		<FormField
+		<TextField
+			id="token-name"
 			label={t('tokens.name')}
-			for="token-name"
 			error={fieldError(createProblem, 'name')}
+			bind:value={newName}
+			placeholder={t('tokens.namePlaceholder')}
 			required
-		>
-			<TextField
-				id="token-name"
-				bind:value={newName}
-				invalid={Boolean(fieldError(createProblem, 'name'))}
-				placeholder={t('tokens.namePlaceholder')}
-			/>
-		</FormField>
-		<FormField
+		/>
+		<Select
+			id="token-role"
 			label={t('users.role')}
-			for="token-role"
 			error={fieldError(createProblem, 'role')}
+			bind:value={newRole}
+			options={roleOptions}
 			required
-		>
-			<Select
-				id="token-role"
-				bind:value={newRole}
-				options={roleOptions}
-				invalid={Boolean(fieldError(createProblem, 'role'))}
-			/>
-		</FormField>
-		<FormField
+		/>
+		<TextField
+			id="token-expiry"
 			label={t('tokens.expiresAt')}
-			for="token-expiry"
 			error={fieldError(createProblem, 'expires_at')}
-		>
-			<TextField
-				id="token-expiry"
-				type="date"
-				bind:value={newExpiry}
-				invalid={Boolean(fieldError(createProblem, 'expires_at'))}
-			/>
-		</FormField>
-		<div class="dialog-actions">
+			type="date"
+			bind:value={newExpiry}
+		/>
+	{/if}
+	{#snippet footer()}
+		{#if createdToken}
+			<Button variant="primary" onclick={closeCreate}>{t('common.close')}</Button>
+		{:else}
 			<Button onclick={closeCreate}>{t('common.cancel')}</Button>
 			<Button variant="primary" loading={creating} disabled={!newName} onclick={createToken}>
 				{t('common.create')}
 			</Button>
-		</div>
-	{/if}
+		{/if}
+	{/snippet}
 </Dialog>
 
 <Dialog bind:open={revokeOpen} title={t('tokens.revokeTitle')}>
 	<p>
 		{t('tokens.revokeBody', { name: revokeTarget?.name ?? '' })}
 	</p>
-	<div class="dialog-actions">
+	{#snippet footer()}
 		<Button onclick={() => (revokeOpen = false)}>{t('common.cancel')}</Button>
 		<Button variant="danger" loading={revoking} onclick={confirmRevoke}>
 			{t('tokens.revoke')}
 		</Button>
-	</div>
+	{/snippet}
 </Dialog>
-
-<style>
-	.dialog-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: var(--rh-space-2);
-	}
-</style>

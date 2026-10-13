@@ -4,30 +4,16 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { service } from '#lib/api/index.ts';
-	import type { Role } from '#lib/api/index.ts';
-	import {
-		getLocale,
-		locales,
-		setLocale,
-		t,
-		type Locale,
-		type MessageKey
-	} from '#lib/i18n/index.ts';
+	import { getLocale, setLocale, t } from '#lib/i18n/index.ts';
 	import { navSectionsForRole, type NavHref } from '#lib/navigation.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
-	import { getTheme, setTheme, themes, type Theme } from '#lib/stores/theme.svelte.ts';
-	import Toast from './Toast.svelte';
+	import { getTheme, setTheme } from '#lib/stores/theme.svelte.ts';
+	import { DropdownMenu, ToastRegion } from './ui/index.ts';
+	import type { MenuItem } from './ui/index.ts';
 	import TenantSwitcher from './TenantSwitcher.svelte';
 
 	let { children }: { children: Snippet } = $props();
-
-	const roleKeys = $derived<Record<Role, MessageKey>>({
-		platform_admin: 'users.role.platformAdmin',
-		admin: 'users.role.admin',
-		operator: 'users.role.operator',
-		viewer: 'users.role.viewer'
-	});
 
 	const session = $derived(getSession());
 	// Single mode hides the platform section (ADR-0024).
@@ -40,9 +26,63 @@
 	const locale = $derived(getLocale());
 	const theme = $derived(getTheme());
 
+	const displayName = $derived(session?.user?.display_name ?? t('topbar.account'));
+	const initials = $derived(
+		displayName
+			.split(/\s+/)
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((part) => part[0]?.toUpperCase() ?? '')
+			.join('')
+	);
+
+	const accountItems = $derived<MenuItem[]>([
+		{
+			label: t('topbar.theme.light'),
+			group: 'theme',
+			checked: theme === 'light',
+			onSelect: () => setTheme('light')
+		},
+		{
+			label: t('topbar.theme.dark'),
+			group: 'theme',
+			checked: theme === 'dark',
+			onSelect: () => setTheme('dark')
+		},
+		{
+			label: t('topbar.theme.system'),
+			group: 'theme',
+			checked: theme === 'system',
+			onSelect: () => setTheme('system')
+		},
+		{
+			label: 'English',
+			group: 'language',
+			checked: locale === 'en',
+			separatorBefore: true,
+			onSelect: () => setLocale('en')
+		},
+		{
+			label: 'Русский',
+			group: 'language',
+			checked: locale === 'ru',
+			onSelect: () => setLocale('ru')
+		},
+		{
+			label: t('topbar.signOut'),
+			tone: 'danger',
+			separatorBefore: true,
+			onSelect: signOut
+		}
+	]);
+
 	function isActive(href: NavHref): boolean {
 		const target = resolve(href);
 		return target === '/' ? pathname === '/' : pathname.startsWith(target);
+	}
+
+	function toggleTheme(): void {
+		setTheme(theme === 'dark' ? 'light' : 'dark');
 	}
 
 	async function signOut(): Promise<void> {
@@ -60,94 +100,64 @@
 
 <div class="shell">
 	<header class="topbar">
-		<div class="topbar__brand">
-			<span class="topbar__product">{t('app.name')}</span>
-			{#if isSingleTenant()}
-				<span class="topbar__tenant">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
-			{:else}
-				<TenantSwitcher />
-			{/if}
-		</div>
+		<a class="brand" href={resolve('/(app)')}>
+			<span class="brandmark" aria-hidden="true">
+				<svg viewBox="0 0 20 20">
+					<path class="brandmark__solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
+					<path d="M2.5 10.6 10 14.5l7.5-3.9" />
+				</svg>
+			</span>
+			<span>{t('app.name')}</span>
+		</a>
 
-		<details class="menu">
-			<summary class="menu__summary" aria-label={t('topbar.account')}>
-				<span class="menu__user">{session?.user?.display_name ?? t('topbar.account')}</span>
-				{#if session}
-					<span class="menu__role">{t(roleKeys[session.role])}</span>
-				{/if}
-			</summary>
-			<div class="menu__panel">
-				<p class="menu__group-title">{t('topbar.theme')}</p>
-				<div class="menu__group" role="group" aria-label={t('topbar.theme')}>
-					{#each themes as option (option)}
-						<button
-							type="button"
-							class="menu__option"
-							aria-pressed={theme === option}
-							onclick={() => setTheme(option as Theme)}
-						>
-							{t(`topbar.theme.${option}` as MessageKey)}
-						</button>
-					{/each}
-				</div>
+		<span class="topbar__divider"></span>
 
-				<p class="menu__group-title">{t('topbar.language')}</p>
-				<div class="menu__group" role="group" aria-label={t('topbar.language')}>
-					{#each locales as option (option)}
-						<button
-							type="button"
-							class="menu__option"
-							aria-pressed={locale === option}
-							onclick={() => setLocale(option as Locale)}
-						>
-							{option === 'ru' ? 'Русский' : 'English'}
-						</button>
-					{/each}
-				</div>
+		{#if isSingleTenant()}
+			<span class="topbar__tenant">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
+		{:else}
+			<TenantSwitcher />
+		{/if}
 
-				<hr class="menu__divider" />
-				<button type="button" class="menu__option menu__option--action" onclick={signOut}>
-					{t('topbar.signOut')}
-				</button>
-			</div>
-		</details>
+		<div class="spacer"></div>
+
+		<button type="button" class="icon-btn" aria-label={t('topbar.theme')} onclick={toggleTheme}>
+			<span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+		</button>
+
+		<DropdownMenu items={accountItems} align="end">
+			<span class="account">
+				<span class="avatar" aria-hidden="true">{initials}</span>
+				<span class="account__name">{displayName}</span>
+				<span aria-hidden="true">▾</span>
+			</span>
+		</DropdownMenu>
 	</header>
 
-	<div class="shell__body">
-		<nav class="nav" aria-label={t('nav.primary')}>
-			{#each sections as section (section.labelKey)}
-				<div class="nav__section">
-					<p class="nav__section-title">{t(section.labelKey)}</p>
-					<ul class="nav__list">
-						{#each section.items as item (item.href)}
-							<li>
-								<a
-									class="nav__link"
-									class:nav__link--active={isActive(item.href)}
-									href={resolve(item.href)}
-									aria-current={isActive(item.href) ? 'page' : undefined}
-								>
-									{t(item.labelKey)}
-								</a>
-							</li>
-						{/each}
-					</ul>
-				</div>
+	<nav class="tabs" aria-label={t('nav.primary')}>
+		{#each sections as section (section.labelKey)}
+			{#each section.items as item (item.href)}
+				<a
+					class="tab"
+					href={resolve(item.href)}
+					aria-current={isActive(item.href) ? 'page' : undefined}
+				>
+					{t(item.labelKey)}
+				</a>
 			{/each}
-		</nav>
+		{/each}
+	</nav>
 
-		<main id="main" class="content">
-			<div class="content__inner">
-				<!-- A tenant switch remounts the screen, so its data reloads for the new tenant. -->
-				{#key session?.tenant?.id}
-					{@render children()}
-				{/key}
-			</div>
-		</main>
-	</div>
+	<main id="main" class="page">
+		<div class="page__inner">
+			<!-- A tenant switch remounts the screen, so its data reloads for the new tenant. -->
+			{#key session?.tenant?.id}
+				{@render children()}
+			{/key}
+		</div>
+	</main>
 </div>
 
-<Toast />
+<ToastRegion />
 
 <style>
 	.skip-link {
@@ -177,194 +187,151 @@
 		z-index: var(--rh-z-topbar);
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: var(--rh-space-4);
+		gap: var(--rh-space-3);
 		height: var(--rh-layout-topbar-height);
 		padding: 0 var(--rh-space-4);
-		background-color: var(--rh-color-surface);
+		background-color: var(--rh-color-canvas);
 		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
 	}
 
-	.topbar__brand {
-		display: flex;
-		align-items: baseline;
-		gap: var(--rh-space-3);
-	}
-
-	.topbar__product {
-		font-size: var(--rh-font-size-lg);
+	.brand {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
 	}
 
-	.topbar__tenant {
-		font-size: var(--rh-font-size-sm);
-		color: var(--rh-color-text-muted);
-	}
-
-	.menu {
-		position: relative;
-	}
-
-	.menu__summary {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-		padding: var(--rh-space-1) var(--rh-space-2);
-		border: var(--rh-border-width) solid transparent;
-		border-radius: var(--rh-radius-sm);
-		cursor: pointer;
-		list-style: none;
-	}
-
-	.menu__summary::-webkit-details-marker {
-		display: none;
-	}
-
-	.menu__summary:hover {
-		background-color: var(--rh-color-hover);
-	}
-
-	.menu__user {
-		font-weight: var(--rh-font-weight-medium);
-	}
-
-	.menu__role {
-		font-size: var(--rh-font-size-xs);
-		color: var(--rh-color-text-muted);
-	}
-
-	.menu__panel {
-		position: absolute;
-		right: 0;
-		top: calc(100% + var(--rh-space-1));
-		min-width: 14rem;
-		padding: var(--rh-space-2);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
-		background-color: var(--rh-color-surface);
-		box-shadow: var(--rh-shadow-overlay);
-	}
-
-	.menu__group-title {
-		margin: var(--rh-space-2) var(--rh-space-2) var(--rh-space-1);
-		font-size: var(--rh-font-size-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--rh-color-text-subtle);
-	}
-
-	.menu__group {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--rh-space-1);
-		padding: 0 var(--rh-space-2);
-	}
-
-	.menu__option {
-		padding: var(--rh-space-1) var(--rh-space-2);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-sm);
-		background-color: var(--rh-color-surface);
-		color: var(--rh-color-text);
-		font-size: var(--rh-font-size-sm);
-		cursor: pointer;
-	}
-
-	.menu__option[aria-pressed='true'] {
-		border-color: var(--rh-color-accent);
-		background-color: var(--rh-color-accent-subtle);
-		color: var(--rh-color-accent-subtle-text);
-	}
-
-	.menu__option--action {
-		width: 100%;
-		border: 0;
-		background: transparent;
-		text-align: left;
-	}
-
-	.menu__option--action:hover {
-		background-color: var(--rh-color-hover);
-	}
-
-	.menu__divider {
-		margin: var(--rh-space-2) 0;
-		border: 0;
-		border-top: var(--rh-border-width) solid var(--rh-color-border);
-	}
-
-	.shell__body {
-		display: flex;
-		flex: 1;
-		align-items: stretch;
-	}
-
-	.nav {
-		width: var(--rh-layout-nav-width);
-		flex-shrink: 0;
-		padding: var(--rh-space-4) var(--rh-space-3);
-		border-right: var(--rh-border-width) solid var(--rh-color-border);
-		background-color: var(--rh-color-surface);
-	}
-
-	.nav__section + .nav__section {
-		margin-top: var(--rh-space-5);
-	}
-
-	.nav__section-title {
-		margin: 0 0 var(--rh-space-1);
-		padding: 0 var(--rh-space-2);
-		font-size: var(--rh-font-size-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--rh-color-text-subtle);
-	}
-
-	.nav__list {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.nav__link {
-		display: block;
-		padding: var(--rh-space-2);
-		border-radius: var(--rh-radius-sm);
-		color: var(--rh-color-text);
-		font-size: var(--rh-font-size-base);
-	}
-
-	.nav__link:hover {
-		background-color: var(--rh-color-hover);
+	.brand:hover {
 		text-decoration: none;
 	}
 
-	.nav__link--active {
-		background-color: var(--rh-color-accent-subtle);
-		color: var(--rh-color-accent-subtle-text);
+	.brandmark {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 26px;
+		height: 26px;
+		border-radius: 7px;
+		background-color: var(--rh-color-accent);
+		color: var(--rh-color-text-on-accent);
+	}
+
+	.brandmark svg {
+		width: 16px;
+		height: 16px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.7;
+		stroke-linejoin: round;
+		stroke-linecap: round;
+	}
+
+	.brandmark__solid {
+		fill: currentColor;
+		stroke: none;
+	}
+
+	.topbar__divider {
+		width: 1px;
+		height: 22px;
+		background-color: var(--rh-color-border);
+	}
+
+	.topbar__tenant {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-base);
+	}
+
+	.spacer {
+		flex: 1 1 auto;
+	}
+
+	.icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: var(--rh-control-height);
+		height: var(--rh-control-height);
+		border: var(--rh-border-width) solid transparent;
+		border-radius: var(--rh-radius-md);
+		background: transparent;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-md);
+		cursor: pointer;
+	}
+
+	.icon-btn:hover {
+		background-color: var(--rh-color-hover);
+		color: var(--rh-color-text);
+	}
+
+	.account {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.avatar {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-pill);
+		background-color: var(--rh-color-neutral-bg);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-2xs);
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.account__name {
 		font-weight: var(--rh-font-weight-medium);
 	}
 
-	.content {
+	.tabs {
+		display: flex;
+		align-items: stretch;
+		gap: var(--rh-space-1);
+		padding: 0 var(--rh-space-4);
+		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
+		background-color: var(--rh-color-canvas);
+		overflow-x: auto;
+	}
+
+	.tab {
+		display: inline-flex;
+		align-items: center;
+		height: 44px;
+		padding: 0 var(--rh-space-3);
+		margin-bottom: -1px;
+		border-bottom: 2px solid transparent;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-base);
+		white-space: nowrap;
+	}
+
+	.tab:hover {
+		color: var(--rh-color-text);
+		border-bottom-color: var(--rh-color-border-strong);
+		text-decoration: none;
+	}
+
+	.tab[aria-current='page'] {
+		color: var(--rh-color-text);
+		font-weight: var(--rh-font-weight-semibold);
+		border-bottom-color: var(--rh-color-accent);
+	}
+
+	.page {
 		flex: 1;
 		min-width: 0;
-		padding: var(--rh-space-6) var(--rh-space-6);
+		padding: var(--rh-space-6) var(--rh-space-4) var(--rh-space-12);
 	}
 
-	.content__inner {
+	.page__inner {
 		max-width: var(--rh-layout-content-max-width);
 		margin: 0 auto;
-	}
-
-	@media (max-width: 720px) {
-		.shell__body {
-			flex-direction: column;
-		}
-
-		.nav {
-			width: 100%;
-			border-right: 0;
-			border-bottom: var(--rh-border-width) solid var(--rh-color-border);
-		}
 	}
 </style>

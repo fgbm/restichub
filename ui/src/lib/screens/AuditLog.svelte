@@ -3,18 +3,17 @@
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { AuditActorType, AuditQuery, AuditRecord } from '#lib/api/index.ts';
 	import {
+		Alert,
 		Button,
-		DataTable,
-		FormField,
-		InlineAlert,
 		JsonDiff,
 		KeyValue,
 		PageHeader,
 		Select,
 		SidePanel,
+		Table,
 		TextField
-	} from '#lib/components/index.ts';
-	import type { Column, KeyValueItem, SelectOption } from '#lib/components/index.ts';
+	} from '#lib/components/ui/index.ts';
+	import type { KeyValueItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { getLocale, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
 
 	let { scope = 'tenant' }: { scope?: 'tenant' | 'platform' } = $props();
@@ -36,6 +35,8 @@
 	let actorId = $state('');
 	let objectType = $state('');
 	let objectId = $state('');
+
+	const title = $derived(scope === 'platform' ? t('nav.platformAudit') : t('audit.title'));
 
 	function isoOrUndefined(value: string): string | undefined {
 		return value ? new Date(value).toISOString() : undefined;
@@ -120,7 +121,7 @@
 
 	onMount(load);
 
-	const columns = $derived<Column<AuditRecord>[]>([
+	const columns = $derived<TableColumn<AuditRecord>[]>([
 		{
 			key: 'occurred_at',
 			header: t('audit.columns.time'),
@@ -194,10 +195,11 @@
 	);
 </script>
 
-<PageHeader
-	title={scope === 'platform' ? t('nav.platformAudit') : t('audit.title')}
-	description={t('audit.description')}
-/>
+<svelte:head>
+	<title>{title} · {t('app.name')}</title>
+</svelte:head>
+
+<PageHeader {title} description={t('audit.description')} />
 
 <form
 	class="filters"
@@ -206,46 +208,48 @@
 		void load();
 	}}
 >
-	<FormField
+	<TextField
+		id="audit-from"
 		label={t('audit.filters.timeFrom')}
-		for="audit-from"
-		hint={t('audit.filters.timeHint')}
-	>
-		<TextField id="audit-from" type="datetime-local" bind:value={from} />
-	</FormField>
-	<FormField label={t('audit.filters.timeTo')} for="audit-to" hint={t('audit.filters.timeHint')}>
-		<TextField id="audit-to" type="datetime-local" bind:value={to} />
-	</FormField>
-	<FormField label={t('audit.filters.action')} for="audit-action">
-		<TextField id="audit-action" bind:value={action} mono />
-	</FormField>
-	<FormField label={t('audit.filters.actorType')} for="audit-actor-type">
-		<Select
-			id="audit-actor-type"
-			bind:value={actorType}
-			options={actorTypeOptions}
-			placeholder={t('common.all')}
-		/>
-	</FormField>
-	<FormField label={t('audit.filters.actorId')} for="audit-actor-id">
-		<TextField
-			id="audit-actor-id"
-			bind:value={actorId}
-			placeholder={t('audit.filters.actorPlaceholder')}
-			mono
-		/>
-	</FormField>
-	<FormField label={t('audit.filters.objectType')} for="audit-object-type">
-		<TextField id="audit-object-type" bind:value={objectType} mono />
-	</FormField>
-	<FormField label={t('audit.filters.objectId')} for="audit-object-id">
-		<TextField
-			id="audit-object-id"
-			bind:value={objectId}
-			placeholder={t('audit.filters.objectPlaceholder')}
-			mono
-		/>
-	</FormField>
+		help={t('audit.filters.timeHint')}
+		type="datetime-local"
+		bind:value={from}
+	/>
+	<TextField
+		id="audit-to"
+		label={t('audit.filters.timeTo')}
+		help={t('audit.filters.timeHint')}
+		type="datetime-local"
+		bind:value={to}
+	/>
+	<TextField id="audit-action" label={t('audit.filters.action')} bind:value={action} mono />
+	<Select
+		id="audit-actor-type"
+		label={t('audit.filters.actorType')}
+		bind:value={actorType}
+		options={actorTypeOptions}
+		placeholder={t('common.all')}
+	/>
+	<TextField
+		id="audit-actor-id"
+		label={t('audit.filters.actorId')}
+		bind:value={actorId}
+		placeholder={t('audit.filters.actorPlaceholder')}
+		mono
+	/>
+	<TextField
+		id="audit-object-type"
+		label={t('audit.filters.objectType')}
+		bind:value={objectType}
+		mono
+	/>
+	<TextField
+		id="audit-object-id"
+		label={t('audit.filters.objectId')}
+		bind:value={objectId}
+		placeholder={t('audit.filters.objectPlaceholder')}
+		mono
+	/>
 	<div class="filters__actions">
 		<Button variant="primary" type="submit">{t('common.apply')}</Button>
 		<Button type="button" onclick={reset}>{t('common.reset')}</Button>
@@ -254,11 +258,11 @@
 
 {#if error && !loading}
 	<div class="alert">
-		<InlineAlert tone="danger" title={error} />
+		<Alert tone="danger" title={error} />
 	</div>
 {/if}
 
-<DataTable
+<Table
 	{columns}
 	rows={items}
 	{loading}
@@ -303,7 +307,7 @@
 		padding: var(--rh-space-4);
 		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
-		background-color: var(--rh-color-surface);
+		background-color: var(--rh-color-canvas-subtle);
 	}
 
 	.filters__actions {

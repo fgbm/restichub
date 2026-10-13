@@ -43,7 +43,7 @@ describe('Table', () => {
 		const { container } = render(Table, {
 			props: { columns, rows: [], rowKey: (row) => row.id, loading: true }
 		});
-		expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
+		expect(container.querySelectorAll('tbody tr')).toHaveLength(10);
 	});
 
 	it('renders the row actions', () => {
