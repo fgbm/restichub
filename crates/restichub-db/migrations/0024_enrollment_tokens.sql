@@ -1,9 +1,13 @@
--- The enrollment tokens (ADR-0026, FR-ID-01, FR-ID-05, FR-TN-03).
+-- The enrollment tokens (ADR-0026, ADR-0032, FR-ID-01, FR-ID-05, FR-TN-03).
 --
 -- One token per row, under the tenant policy of ADR-0023. The control plane stores only the SHA-256
 -- hash and a short display prefix (ADR-0023, section API tokens). The value appears once, at the
 -- create. A token is single use and it expires. The exchange that spends the token is the
--- enrollment endpoint (#48). A revoke removes an unused row.
+-- enrollment endpoint (#48).
+--
+-- A revoke is a soft change: it sets `revoked_at` and keeps the row, so the audit trail and the
+-- status stay. `consume` refuses a used, an expired and a revoked token. The runtime role has no
+-- DELETE on this table (T17).
 
 CREATE TABLE enrollment_tokens (
     id uuid NOT NULL PRIMARY KEY,
@@ -13,10 +17,13 @@ CREATE TABLE enrollment_tokens (
     labels text[] NOT NULL DEFAULT '{}',
     expires_at timestamptz NOT NULL,
     used_at timestamptz,
+    revoked_at timestamptz,
     created_by_user_id uuid NOT NULL,
+    revoked_by_user_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT enrollment_tokens_tenant_id_fk FOREIGN KEY (tenant_id) REFERENCES tenants (id),
-    CONSTRAINT enrollment_tokens_created_by_fk FOREIGN KEY (created_by_user_id) REFERENCES users (id)
+    CONSTRAINT enrollment_tokens_created_by_fk FOREIGN KEY (created_by_user_id) REFERENCES users (id),
+    CONSTRAINT enrollment_tokens_revoked_by_fk FOREIGN KEY (revoked_by_user_id) REFERENCES users (id)
 );
 
 -- The hash is unique in the installation, so a lookup by hash returns one row.
@@ -33,4 +40,4 @@ CREATE POLICY enrollment_tokens_tenant ON enrollment_tokens
     USING (tenant_id = NULLIF(current_setting('restichub.tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('restichub.tenant_id', true), '')::uuid);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON enrollment_tokens TO restichub_app;
+GRANT SELECT, INSERT, UPDATE ON enrollment_tokens TO restichub_app;

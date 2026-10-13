@@ -82,7 +82,7 @@ async fn an_admin_creates_lists_and_revokes_an_unused_token() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // A second revoke finds no token (the row is removed).
+    // A second revoke finds the revoked row and gives HTTP 409.
     let (status, _, _) = send(
         &app,
         request(
@@ -93,7 +93,7 @@ async fn an_admin_creates_lists_and_revokes_an_unused_token() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(status, StatusCode::CONFLICT);
 
     // The audit log holds the create and the revoke.
     let (status, _, page) = send(
@@ -252,6 +252,189 @@ async fn a_viewer_reads_the_metadata_and_a_bad_ttl_is_refused() {
         problem.get("field").and_then(Value::as_str),
         Some("ttl_seconds")
     );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_id_01_a_revoked_token_is_refused_by_the_exchange() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-revoke").await;
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let app = app(db.database());
+
+    let (status, _, created) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/enrollment-tokens",
+            Some(&cookie),
+            Some(json!({"labels": ["host"]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let value = created
+        .get("token")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+
+    // An Admin revokes the unused token (a soft change).
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/enrollment-tokens/{id}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // The metadata keeps the row and holds the revoke.
+    let (status, _, page) = send(
+        &app,
+        request("GET", "/api/v1/enrollment-tokens", Some(&cookie), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = page
+        .get("items")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("no items"));
+    assert_eq!(items.len(), 1);
+    assert!(items[0].get("revoked_at").and_then(Value::as_str).is_some());
+
+    // Refuse the revoked token at the exchange.
+    let hash = restichub_cp::token::hash_token(&value);
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        enrollment_tokens::consume(&mut tx, &hash, OffsetDateTime::now_utc())
+            .await
+            .unwrap_or_else(|e| panic!("{e}")),
+        ConsumeOutcome::Revoked
+    );
+    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
+
+    // The audit log holds the revoke with the revoking user.
+    let (status, _, page) = send(
+        &app,
+        request(
+            "GET",
+            "/api/v1/audit?action=enrollment_token_revoke",
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        page.get("items").and_then(Value::as_array).map(Vec::len),
+        Some(1)
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_default_token_expires_in_one_hour() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-ttl").await;
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let app = app(db.database());
+
+    // No ttl_seconds: the default is one hour (ADR-0032).
+    let (status, _, created) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/enrollment-tokens",
+            Some(&cookie),
+            Some(json!({})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let expires_at = created
+        .get("expires_at")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let created_at = created
+        .get("created_at")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let expires_at =
+        OffsetDateTime::parse(&expires_at, &time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|e| panic!("{e}"));
+    let created_at =
+        OffsetDateTime::parse(&created_at, &time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        (expires_at - created_at).whole_seconds(),
+        3600,
+        "the default time to live is one hour"
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_labels_are_deduplicated_and_a_bad_label_is_refused() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-labels").await;
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let app = app(db.database());
+
+    // Duplicates are removed.
+    let (status, _, created) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/enrollment-tokens",
+            Some(&cookie),
+            Some(json!({"labels": ["web", "web", "prod"]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let labels = created
+        .get("labels")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("no labels"));
+    assert_eq!(labels.len(), 2);
+
+    // A label outside `a-z`, `0-9` and `-` is refused.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/enrollment-tokens",
+            Some(&cookie),
+            Some(json!({"labels": ["Web"]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(problem.get("field").and_then(Value::as_str), Some("labels"));
 
     db.cleanup().await;
 }

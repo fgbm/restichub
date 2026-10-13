@@ -393,6 +393,8 @@ export class MockApiService {
 			labels: created.labels,
 			expires_at: created.expires_at,
 			used_at: null,
+			revoked_at: null,
+			revoked_by_user_id: null,
 			created_at: created.created_at,
 			created_by: this.users[0].id
 		};
@@ -401,7 +403,11 @@ export class MockApiService {
 	}
 
 	async revokeEnrollmentToken(id: string): Promise<void> {
-		this.enrollmentTokens = this.enrollmentTokens.filter((token) => token.id !== id);
+		const token = this.enrollmentTokens.find((item) => item.id === id);
+		if (!token) throw new Error('not found');
+		if (token.used_at || token.revoked_at) throw new Error('conflict');
+		token.revoked_at = new Date().toISOString();
+		token.revoked_by_user_id = this.users[0].id;
 	}
 
 	async listTenants(): Promise<Tenant[]> {

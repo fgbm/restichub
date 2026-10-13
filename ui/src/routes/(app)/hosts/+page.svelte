@@ -176,6 +176,7 @@
 		<Alert tone="attention" title={t('hosts.tokenBody')} />
 		<CopyField value={createdToken.token} label={t('hosts.tokenValue')} />
 		<CopyField value={installCommand} label={t('hosts.installCommand')} />
+		<p>{t('hosts.tokenNote')}</p>
 	{:else}
 		{#if createError}
 			<Alert tone="danger" title={createError} />

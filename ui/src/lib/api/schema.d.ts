@@ -269,9 +269,10 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Revokes an unused enrollment token of the tenant.
-         * @description A used token gives HTTP 409 and changes nothing. A second call on a revoked token gives HTTP 404
-         *     (the row is removed).
+         * Revokes an unused enrollment token of the tenant (a soft change).
+         * @description A used or an already revoked token gives HTTP 409 and changes nothing. An unknown token gives
+         *     HTTP 404. The conditional update and the re-read answer without a time-of-check gap, and a
+         *     failed revoke writes no audit record.
          */
         delete: operations["revoke_enrollment_token"];
         options?: never;
@@ -709,8 +710,9 @@ export interface components {
          * @example job_cancel
          * @example restore_start
          * @example secret_delivered
-         * @example agent_enrolled
-         * @example agent_revoked
+         * @example agent_enroll
+         * @example agent_revoke
+         * @example agent_update
          * @example remote_install
          * @example tenant_create
          * @example tenant_suspend
@@ -755,13 +757,13 @@ export interface components {
         };
         CreateEnrollmentTokenRequest: {
             /**
-             * @description Carried to the enrolled agent row in the registry. Each holds 1 to 64 characters from
-             *     `a-z`, `0-9`, `.`, `_` and `-`.
+             * @description Carried to the enrolled agent row in the registry. Each holds 1 to 63 characters from
+             *     `a-z`, `0-9` and `-`. Duplicates are removed.
              */
             labels?: string[] | null;
             /**
              * Format: int64
-             * @description The time to live in seconds. Between 60 and 86400. The default is 900.
+             * @description The time to live in seconds. Between 60 and 86400. The default is 3600.
              */
             ttl_seconds?: number | null;
         };
@@ -841,6 +843,8 @@ export interface components {
             expires_at: string;
             id: string;
             labels: string[];
+            revoked_at?: string | null;
+            revoked_by_user_id?: string | null;
             used_at?: string | null;
         };
         /** @enum {string} */
@@ -1875,7 +1879,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The token is used. */
+            /** @description The token is used or already revoked. */
             409: {
                 headers: {
                     [name: string]: unknown;
