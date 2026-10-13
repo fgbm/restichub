@@ -155,6 +155,22 @@ jobs:
       - name: Check text
         run: vale --minAlertLevel=error README.md CONTRIBUTING.md SECURITY.md design docs/src
 
+  comments:
+    name: Style (comments)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+      # The second run proves that the check is not a no-op: the fixture must be flagged.
+      - name: Check comments
+        run: |
+          scripts/check-comments.sh
+          if COMMENT_CHECK_DIRS=scripts/testdata/comments scripts/check-comments.sh; then
+            echo "::error::check-comments.sh did not flag the fixture"
+            exit 1
+          fi
+
   ui:
     name: Web UI
     runs-on: ubuntu-latest

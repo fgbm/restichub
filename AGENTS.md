@@ -35,6 +35,7 @@ Read this file before you change the repository.
 - A test helper does not live in a production module. Split a test file above about 500 lines by topic.
 - Do not add a dependency until the code uses it. `cargo machete` runs in CI.
 - Keep a file focused. Split a module above about 800 lines.
+- `scripts/check-comments.sh` runs in CI.
 
 ## Commands
 
