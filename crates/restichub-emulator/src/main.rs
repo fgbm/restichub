@@ -1,10 +1,14 @@
-//! ResticHub agent emulator for load tests (bench S2).
+//! The emulator binary. The options are in the crate README.
 
-fn main() {
-    println!(
-        "restichub-emulator {} (protocol {}.{})",
-        env!("CARGO_PKG_VERSION"),
-        restichub_proto::PROTOCOL_VERSION_MAJOR,
-        restichub_proto::PROTOCOL_VERSION_MINOR
-    );
+use std::process::ExitCode;
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    match restichub_emulator::cli::run_from_env().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("restichub-emulator: {error:#}");
+            ExitCode::FAILURE
+        }
+    }
 }

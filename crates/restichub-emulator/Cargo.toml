@@ -11,5 +11,33 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Enables the in-process test control plane. A test enables this feature through
+# a dev-dependency, and the test server binary requires it.
+test-util = []
+
+[[bin]]
+name = "restichub-emulator"
+path = "src/main.rs"
+
+[[bin]]
+name = "restichub-emulator-test-server"
+path = "src/bin/test_server.rs"
+required-features = ["test-util"]
+
+[dev-dependencies]
+# Enables the in-process test control plane for the integration tests.
+restichub-emulator = { path = ".", features = ["test-util"] }
+
 [dependencies]
+anyhow = { workspace = true }
+getrandom = { workspace = true }
 restichub-proto = { path = "../restichub-proto" }
+tokio = { workspace = true, features = ["process"] }
+async-trait = "0.1"
+ed25519-dalek = "3.0"
+prost-types = "0.14"
+rcgen = { version = "0.14", features = ["crypto", "pem", "ring"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = { version = "0.14", features = ["tls-ring"] }
+x509-parser = "0.18"
