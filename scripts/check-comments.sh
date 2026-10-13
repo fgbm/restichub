@@ -52,11 +52,125 @@ review_id='^\s*//.*\b[NDMHL][0-9]+\b'
 review_text='^\s*//.*(per (the )?review|review finding|issue #[0-9]+)'
 # A comment that narrates a step.
 narration='^\s*//\s*(Now|Then|First|Next|Finally|Step [0-9])\b'
+# Boilerplate that names the code item instead of the contract.
+boilerplate='^\s*//[/!]?\s*The function (returns|selects|takes|checks)\b'
 
 emit 0 < <(scan "$restatement" "${dirs[@]}")
 emit 0 < <(scan "$review_id" "${dirs[@]}")
 emit 0 < <(scan "$review_text" "${dirs[@]}")
 emit 0 < <(scan "$narration" "${dirs[@]}")
+emit 0 < <(scan "$boilerplate" "${dirs[@]}")
+
+# The doc-comment rules need the item that the block documents, so they run in awk.
+# Rule 1: the first sentence of a doc block restates the item name.
+# Rule 3: three or more sentences of one doc block start with the same subject.
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  awk_findings="$(
+    awk '
+      function clean(w) { gsub(/[^A-Za-z0-9_]/, "", w); return w }
+      function stem(w,   n) {
+        w = tolower(w); n = length(w)
+        if (n > 4 && w ~ /ing$/) return substr(w, 1, n - 3)
+        if (n > 3 && w ~ /ed$/)  return substr(w, 1, n - 2)
+        if (n > 3 && w ~ /es$/)  return substr(w, 1, n - 2)
+        if (n > 2 && w ~ /s$/)   return substr(w, 1, n - 1)
+        return w
+      }
+      function is_item(line,   rest, name) {
+        if (line ~ /^[ \t]*(pub(\([^)]*\))?[ \t]+)?(async[ \t]+)?(unsafe[ \t]+)?(fn|struct|enum|const|type|trait|mod|union)[ \t]+[A-Za-z_]/) {
+          rest = line
+          sub(/^[ \t]*(pub(\([^)]*\))?[ \t]+)?(async[ \t]+)?(unsafe[ \t]+)?(fn|struct|enum|const|type|trait|mod|union)[ \t]+/, "", rest)
+          sub(/[^A-Za-z0-9_].*$/, "", rest)
+          return rest
+        }
+        if (line ~ /^[ \t]*(pub(\([^)]*\))?[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*:/) {
+          rest = line
+          sub(/^[ \t]*(pub(\([^)]*\))?[ \t]+)?/, "", rest)
+          sub(/[ \t]*:.*$/, "", rest)
+          return rest
+        }
+        return ""
+      }
+      { line[NR] = $0 }
+      END {
+        n = NR; i = 1
+        while (i <= n) {
+          if (line[i] !~ /^[ \t]*\/\/\//) { i++; continue }
+          start = i
+          while (i <= n && line[i] ~ /^[ \t]*\/\/\//) i++
+          bend = i - 1
+          allowed = 0
+          text = ""
+          for (k = start; k <= bend; k++) {
+            if (line[k] ~ /comment-check: allow/) allowed = 1
+            t = line[k]
+            sub(/^[ \t]*\/\/\//, "", t); sub(/^ /, "", t)
+            if (t != "") text = (text == "" ? t : text " " t)
+          }
+          if (allowed) continue
+          j = i; utoipa = 0
+          while (j <= n && line[j] ~ /^[ \t]*#\[/) {
+            depth = 0
+            do {
+              if (line[j] ~ /utoipa::path/) utoipa = 1
+              tmp = line[j]
+              depth += gsub(/\[/, "[", tmp)
+              depth -= gsub(/\]/, "]", tmp)
+              j++
+            } while (j <= n && depth > 0)
+          }
+          itemline = (j <= n) ? line[j] : ""
+          # Rule 1.
+          if (!utoipa) {
+            name = is_item(itemline)
+            if (name != "") {
+              s = text
+              p = index(s, ".")
+              s = (p > 0) ? substr(s, 1, p - 1) : ""
+              if (s != "") {
+                nw = split(s, sw, /[ \t]+/)
+                if (nw <= 10) {
+                  for (k = 1; k <= nw; k++) sw[k] = stem(clean(sw[k]))
+                  nm = name
+                  gsub(/([a-z0-9])([A-Z])/, "\\1_\\2", nm)
+                  cnt = split(nm, np, "_")
+                  all = (cnt > 0)
+                  for (k = 1; k <= cnt; k++) {
+                    w = stem(clean(np[k]))
+                    if (w == "") continue
+                    hit = 0
+                    for (m = 1; m <= nw; m++) if (sw[m] == w) { hit = 1; break }
+                    if (!hit) { all = 0; break }
+                  }
+                  if (all) print FILENAME ":" start ": doc first sentence restates the item name"
+                }
+              }
+            }
+          }
+          # Rule 3.
+          c_caller = 0; c_function = 0; c_plane = 0
+          rest = text
+          while (rest != "") {
+            p = index(rest, ".")
+            if (p == 0) { sent = rest; rest = "" }
+            else { sent = substr(rest, 1, p - 1); rest = substr(rest, p + 1) }
+            sent = clean(sent)
+            if (sent ~ /^Thecaller/) c_caller++
+            else if (sent ~ /^Thefunction/) c_function++
+            else if (sent ~ /^Thecontrolplane/) c_plane++
+          }
+          if (c_caller >= 3 || c_function >= 3 || c_plane >= 3)
+            print FILENAME ":" start ": doc block repeats the same subject"
+        }
+      }
+    ' "$file"
+  )"
+  if [ -n "$awk_findings" ]; then
+    printf '%s\n' "$awk_findings"
+    findings=$((findings + $(printf '%s\n' "$awk_findings" | wc -l)))
+  fi
+done < <(rg --files -g '*.rs' -g '!**/generated/**' -g '!**/*.pb.rs' "${dirs[@]}")
 
 if [ "$findings" -gt 0 ]; then
   echo "check-comments: $findings finding(s)" >&2

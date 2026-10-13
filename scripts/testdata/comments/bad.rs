@@ -20,3 +20,12 @@ fn third() {}
 
 // Then return the identifier.
 fn fourth() {}
+
+/// Lists the users of the tenant.
+pub fn list_users() {}
+
+/// The function returns the number of rows.
+fn count_rows() {}
+
+/// The caller opens the file. The caller reads the value. The caller closes the file.
+fn load_value() {}
