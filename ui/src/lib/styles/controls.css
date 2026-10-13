@@ -1,0 +1,273 @@
+/*
+ * Shared styles for the form controls of `ui/`.
+ *
+ * The input, select and checkbox chrome is the same in more than one component, so
+ * the class rules live here and each control imports this file. The classes are
+ * global by design. The values come from the design tokens.
+ */
+
+.rh-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--rh-space-2);
+}
+
+.rh-field__label {
+	font-size: var(--rh-font-size-base);
+	font-weight: var(--rh-font-weight-semibold);
+	color: var(--rh-color-text);
+}
+
+.rh-field__req {
+	margin-inline-start: 2px;
+	color: var(--rh-color-danger);
+}
+
+.rh-field__help {
+	margin: 0;
+	font-size: var(--rh-font-size-sm);
+	color: var(--rh-color-text-muted);
+}
+
+.rh-field__error {
+	display: flex;
+	align-items: center;
+	gap: var(--rh-space-1);
+	margin: 0;
+	font-size: var(--rh-font-size-sm);
+	color: var(--rh-color-danger-text);
+}
+
+.rh-field--invalid .rh-input,
+.rh-field--invalid .rh-select {
+	border-color: var(--rh-color-danger);
+}
+
+.rh-field--invalid .rh-input:focus,
+.rh-field--invalid .rh-select:focus {
+	box-shadow: 0 0 0 3px var(--rh-color-danger-subtle);
+}
+
+.rh-input,
+.rh-select,
+.rh-textarea {
+	width: 100%;
+	height: var(--rh-control-height);
+	padding: 0 var(--rh-space-3);
+	border: var(--rh-border-width) solid var(--rh-color-border);
+	border-radius: var(--rh-radius-md);
+	background-color: var(--rh-color-input-bg);
+	color: var(--rh-color-text);
+	font-family: inherit;
+	font-size: var(--rh-font-size-base);
+	transition:
+		border-color var(--rh-transition-fast),
+		box-shadow var(--rh-transition-fast);
+}
+
+.rh-input::placeholder,
+.rh-textarea::placeholder {
+	color: var(--rh-color-text-subtle);
+}
+
+.rh-input:focus,
+.rh-select:focus,
+.rh-textarea:focus {
+	outline: none;
+	border-color: var(--rh-color-focus);
+	box-shadow: 0 0 0 3px var(--rh-color-focus-ring);
+}
+
+.rh-input:disabled,
+.rh-select:disabled,
+.rh-textarea:disabled {
+	background-color: var(--rh-color-canvas-subtle);
+	color: var(--rh-color-text-subtle);
+	cursor: not-allowed;
+}
+
+.rh-input--mono {
+	font-family: var(--rh-font-mono);
+	font-size: var(--rh-font-size-sm);
+}
+
+.rh-textarea {
+	height: auto;
+	min-height: 84px;
+	padding: var(--rh-space-2) var(--rh-space-3);
+	line-height: var(--rh-line-height-base);
+	resize: vertical;
+}
+
+.rh-select {
+	appearance: none;
+	padding-right: var(--rh-space-8);
+}
+
+.rh-select-wrap {
+	position: relative;
+	display: block;
+}
+
+.rh-select-wrap__icon {
+	position: absolute;
+	right: var(--rh-space-3);
+	top: 50%;
+	transform: translateY(-50%);
+	pointer-events: none;
+	color: var(--rh-color-text-muted);
+}
+
+.rh-input-affix {
+	display: flex;
+	align-items: center;
+	gap: var(--rh-space-2);
+}
+
+.rh-input-affix .rh-input {
+	flex: 1 1 auto;
+	width: auto;
+	min-width: 0;
+}
+
+.rh-input-affix__button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: var(--rh-control-height);
+	padding: 0 var(--rh-space-2);
+	border: var(--rh-border-width) solid var(--rh-color-border);
+	border-radius: var(--rh-radius-md);
+	background-color: var(--rh-color-control-bg);
+	color: var(--rh-color-text-muted);
+	font-size: var(--rh-font-size-sm);
+	cursor: pointer;
+}
+
+.rh-input-affix__button:hover {
+	background-color: var(--rh-color-control-bg-hover);
+	color: var(--rh-color-text);
+}
+
+.rh-checkbox {
+	display: inline-flex;
+	align-items: flex-start;
+	gap: var(--rh-space-2);
+	font-size: var(--rh-font-size-base);
+	cursor: pointer;
+}
+
+.rh-checkbox input {
+	appearance: none;
+	position: relative;
+	flex: none;
+	width: 16px;
+	height: 16px;
+	margin: 3px 0 0;
+	border: var(--rh-border-width) solid var(--rh-color-border-strong);
+	border-radius: var(--rh-radius-sm);
+	background-color: var(--rh-color-input-bg);
+	cursor: pointer;
+}
+
+.rh-checkbox input:checked,
+.rh-checkbox input:indeterminate {
+	background-color: var(--rh-color-accent);
+	border-color: var(--rh-color-accent);
+}
+
+.rh-checkbox input:checked::after {
+	content: '';
+	position: absolute;
+	left: 4.5px;
+	top: 1.5px;
+	width: 4px;
+	height: 8px;
+	border: solid var(--rh-color-text-on-accent);
+	border-width: 0 2px 2px 0;
+	transform: rotate(45deg);
+}
+
+.rh-checkbox input:indeterminate::after {
+	content: '';
+	position: absolute;
+	left: 3px;
+	top: 6px;
+	width: 8px;
+	height: 2px;
+	background-color: var(--rh-color-text-on-accent);
+}
+
+.rh-checkbox input:focus-visible {
+	outline: 2px solid var(--rh-color-focus);
+	outline-offset: 2px;
+}
+
+.rh-checkbox input:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.rh-checkbox__label {
+	color: var(--rh-color-text);
+}
+
+.rh-checkbox__help {
+	display: block;
+	font-size: var(--rh-font-size-sm);
+	color: var(--rh-color-text-muted);
+}
+
+.rh-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--rh-space-3);
+	cursor: pointer;
+}
+
+.rh-switch__track {
+	position: relative;
+	flex: none;
+	width: 36px;
+	height: 20px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: var(--rh-radius-pill);
+	background-color: var(--rh-color-border-strong);
+	cursor: pointer;
+	transition: background-color var(--rh-transition-fast);
+}
+
+.rh-switch__track[data-state='checked'] {
+	background-color: var(--rh-color-accent);
+}
+
+.rh-switch__track:focus-visible {
+	outline: 2px solid var(--rh-color-focus);
+	outline-offset: 2px;
+}
+
+.rh-switch__track:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.rh-switch__thumb {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background-color: var(--rh-color-canvas);
+	transition: transform var(--rh-transition-fast);
+}
+
+.rh-switch__track[data-state='checked'] .rh-switch__thumb {
+	transform: translateX(16px);
+}
+
+.rh-switch__label {
+	color: var(--rh-color-text);
+}
