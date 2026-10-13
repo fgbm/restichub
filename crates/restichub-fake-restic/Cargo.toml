@@ -15,3 +15,17 @@ workspace = true
 # The recorded restic messages use the restic field names and the omitted defaults.
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The signal layer: SIGINT/SIGTERM/SIGHUP on Unix and Ctrl+C/Ctrl+Break on Windows.
+ctrlc = { workspace = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+# The cancel test sends SIGINT to the process group, as the agent does (FR-AG-10).
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+# The cancel test sends CTRL_BREAK_EVENT, as the agent does (FR-AG-10).
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Console",
+  "Win32_System_Threading",
+] }

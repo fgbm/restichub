@@ -49,6 +49,7 @@ fn run(args: &[&str], env: &[(&str, &str)]) -> Output {
         "FAKE_RESTIC_VERSION",
         "FAKE_RESTIC_PROGRESS_RATE",
         "FAKE_RESTIC_PROGRESS_COUNT",
+        "FAKE_RESTIC_SCENARIO",
         "FAKE_RESTIC_ARGV_FILE",
     ] {
         command.env_remove(name);

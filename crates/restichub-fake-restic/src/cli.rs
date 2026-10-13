@@ -37,6 +37,22 @@ impl Command {
     pub fn needs_repository(self) -> bool {
         !matches!(self, Self::Version)
     }
+
+    /// Key of this command in the scenario file.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Backup => "backup",
+            Self::Forget => "forget",
+            Self::Prune => "prune",
+            Self::Check => "check",
+            Self::Snapshots => "snapshots",
+            Self::Unlock => "unlock",
+            Self::Restore => "restore",
+            Self::Init => "init",
+            Self::Version => "version",
+            Self::CatConfig => "cat_config",
+        }
+    }
 }
 
 /// Options that change the output.

@@ -11,6 +11,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::cli::{Command, Invocation};
+use crate::scenario::Resolved;
 
 /// Target release of the emulated restic.
 pub const RESTIC_VERSION: &str = "0.19.1";
@@ -28,49 +29,74 @@ const REPOSITORY_ID: &str = "c5b1d2e4f6089a3b7c1d5e9f2a406b8b2f8a1c94e7d60351a8f
 const CHUNKER_POLYNOMIAL: &str = "25b468838dcb75";
 const TOTAL_BYTES: u64 = 4000;
 const TOTAL_FILES: u64 = 4;
-const DEFAULT_PROGRESS_COUNT: u64 = 3;
+
+/// How a command ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// The command wrote its full output, with the summary where the command has one.
+    Completed,
+    /// The command stopped before its summary: a fail-at step, a percentage or
+    /// a partial output (FR-SC-05).
+    Stopped,
+}
 
 /// Writes the output of the command to stdout.
-pub fn emit(invocation: &Invocation) -> io::Result<()> {
+pub fn emit(invocation: &Invocation, plan: &Resolved) -> io::Result<Outcome> {
     let stdout = io::stdout();
     let mut out = stdout.lock();
     match invocation.command {
-        Command::Backup => backup(&mut out, invocation),
-        Command::Forget => forget(&mut out, invocation),
-        Command::Check => check(&mut out, invocation),
-        Command::Snapshots => snapshots(&mut out, invocation),
-        Command::Restore => restore(&mut out, invocation),
-        Command::Init => init(&mut out, invocation),
-        Command::Version => version(&mut out, invocation),
-        Command::CatConfig => cat_config(&mut out),
-        Command::Prune | Command::Unlock => Ok(()),
+        Command::Backup => backup(&mut out, invocation, plan),
+        Command::Forget => forget(&mut out, invocation).map(|()| Outcome::Completed),
+        Command::Check => check(&mut out, invocation).map(|()| Outcome::Completed),
+        Command::Snapshots => snapshots(&mut out, invocation).map(|()| Outcome::Completed),
+        Command::Restore => restore(&mut out, invocation, plan),
+        Command::Init => init(&mut out, invocation).map(|()| Outcome::Completed),
+        Command::Version => version(&mut out, invocation).map(|()| Outcome::Completed),
+        Command::CatConfig => cat_config(&mut out).map(|()| Outcome::Completed),
+        Command::Prune | Command::Unlock => Ok(Outcome::Completed),
     }
 }
 
-fn backup<W: Write>(out: &mut W, invocation: &Invocation) -> io::Result<()> {
+fn backup<W: Write>(out: &mut W, invocation: &Invocation, plan: &Resolved) -> io::Result<Outcome> {
     if !invocation.global.json {
-        return Ok(());
+        return Ok(Outcome::Completed);
     }
-    let count = progress_count();
-    let rate = progress_rate();
+    let count = progress_steps(plan);
+    let rate = plan.progress_rate;
     for index in 0..count {
         write_line(out, &backup_status(index, count, rate))?;
+        if fails_after(plan, index + 1, count) {
+            return Ok(Outcome::Stopped);
+        }
         sleep_before_next(index, count, rate);
     }
-    write_line(out, &backup_summary())
+    if plan.partial_output {
+        return Ok(Outcome::Stopped);
+    }
+    silent_wait(plan);
+    write_line(out, &backup_summary())?;
+    Ok(Outcome::Completed)
 }
 
-fn restore<W: Write>(out: &mut W, invocation: &Invocation) -> io::Result<()> {
+fn restore<W: Write>(out: &mut W, invocation: &Invocation, plan: &Resolved) -> io::Result<Outcome> {
     if !invocation.global.json {
-        return Ok(());
+        return Ok(Outcome::Completed);
     }
-    let count = progress_count();
-    let rate = progress_rate();
+    let count = progress_steps(plan);
+    let rate = plan.progress_rate;
     for index in 0..count {
         write_line(out, &restore_status(index, count, rate))?;
+        if fails_after(plan, index + 1, count) {
+            return Ok(Outcome::Stopped);
+        }
         sleep_before_next(index, count, rate);
     }
-    write_line(out, &restore_summary())
+    if plan.partial_output {
+        return Ok(Outcome::Stopped);
+    }
+    silent_wait(plan);
+    write_line(out, &restore_summary())?;
+    Ok(Outcome::Completed)
 }
 
 fn snapshots<W: Write>(out: &mut W, invocation: &Invocation) -> io::Result<()> {
@@ -168,13 +194,30 @@ fn restic_version() -> String {
 }
 
 /// Number of `status` messages that a backup or a restore writes.
-fn progress_count() -> u64 {
-    env_u64("FAKE_RESTIC_PROGRESS_COUNT", DEFAULT_PROGRESS_COUNT).max(1)
+///
+/// A duration with a rate selects the count that covers the duration.
+fn progress_steps(plan: &Resolved) -> u64 {
+    if plan.progress_rate > 0.0 && plan.duration_ms > 0 {
+        ((plan.duration_ms as f64 / 1000.0 * plan.progress_rate).round() as u64).max(1)
+    } else {
+        plan.progress_count.max(1)
+    }
 }
 
-/// `status` messages for each second. Zero means no wait between the messages.
-fn progress_rate() -> f64 {
-    env_f64("FAKE_RESTIC_PROGRESS_RATE", 0.0).max(0.0)
+/// True when the run stops after the status message at index `step` (1-based).
+fn fails_after(plan: &Resolved, step: u64, count: u64) -> bool {
+    if plan.fail_at_step.is_some_and(|limit| step >= limit) {
+        return true;
+    }
+    plan.fail_at_percent
+        .is_some_and(|percent| percent_done(step - 1, count) * 100.0 >= percent)
+}
+
+/// A rate of zero turns the duration into a silent wait after the last message.
+fn silent_wait(plan: &Resolved) {
+    if plan.progress_rate == 0.0 && plan.duration_ms > 0 {
+        std::thread::sleep(Duration::from_millis(plan.duration_ms));
+    }
 }
 
 fn backup_status(index: u64, count: u64, rate: f64) -> BackupStatus {
@@ -339,20 +382,6 @@ fn nonzero(value: u64) -> Option<u64> {
     (value > 0).then_some(value)
 }
 
-fn env_u64(name: &str, default: u64) -> u64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(default)
-}
-
-fn env_f64(name: &str, default: f64) -> f64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(default)
-}
-
 fn go_os() -> &'static str {
     match std::env::consts::OS {
         "macos" => "darwin",
@@ -419,10 +448,16 @@ impl ResticExit {
 
     /// The `exit_error` JSON line that restic writes to stderr before it exits.
     pub fn error_message(self) -> String {
+        self.error_message_with(self.reason().to_string())
+    }
+
+    /// The `exit_error` JSON line with a message that the caller builds, for
+    /// example the lock conflict of FR-SC-05.
+    pub fn error_message_with(self, message: String) -> String {
         let error = ExitError {
             message_type: "exit_error",
             code: self.code(),
-            message: self.reason(),
+            message,
         };
         serde_json::to_string(&error).unwrap_or_else(|_| String::from("{}"))
     }
@@ -449,7 +484,7 @@ impl ResticExit {
 struct ExitError {
     message_type: &'static str,
     code: u8,
-    message: &'static str,
+    message: String,
 }
 
 #[derive(Serialize)]
