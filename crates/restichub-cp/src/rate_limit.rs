@@ -182,6 +182,14 @@ pub fn resolved_user_key(user: UserId) -> String {
     format!("u:{user}")
 }
 
+/// The enrollment bucket of one token prefix (FR-ID-05).
+///
+/// The prefix is short and public (the display prefix), so one token cannot bypass the limit by
+/// minting requests with different bodies.
+pub fn enrollment_token_key(prefix: &str) -> String {
+    format!("e:{prefix}")
+}
+
 /// The account create bucket, keyed by the tenant and the actor (threat T15).
 pub fn create_user_key(tenant: TenantId, actor: &str) -> String {
     format!("c:{tenant}:{actor}")

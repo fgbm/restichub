@@ -26,6 +26,8 @@ use crate::client_ip::TrustedProxies;
 use crate::clock::{Clock, SystemClock};
 use crate::config::{AuthConfig, TenancyConfig};
 use crate::error::{ApiError, InternalCause, PROBLEM_CONTENT_TYPE};
+use crate::job_signing::JobSigningService;
+use crate::pki::CaStore;
 use crate::rate_limit::RateLimiter;
 use crate::routes::ROUTES;
 
@@ -45,6 +47,14 @@ pub const CREATE_USER_RATE: u32 = 20;
 /// minting many API tokens, so a second bucket counts the tenant (threat T15).
 pub const CREATE_USER_TENANT_RATE: u32 = 60;
 
+/// The enrollment limit for each source IP address in one minute (FR-ID-05, AC-ID-05).
+///
+/// The 11th request from one address in one minute is refused with HTTP 429.
+pub const ENROLL_IP_RATE: u32 = 10;
+
+/// The enrollment limit for each enrollment token prefix in one minute (FR-ID-05).
+pub const ENROLL_TOKEN_RATE: u32 = 10;
+
 /// The type holds the configuration, the sign-in rate limiters, the account create limiters and the
 /// clock. A `Debug` shows the configuration only.
 #[derive(Clone)]
@@ -55,6 +65,8 @@ pub struct AuthState {
     pub resolved_limiter: Arc<RateLimiter>,
     pub create_user_limiter: Arc<RateLimiter>,
     pub create_user_tenant_limiter: Arc<RateLimiter>,
+    pub enroll_ip_limiter: Arc<RateLimiter>,
+    pub enroll_token_limiter: Arc<RateLimiter>,
     pub clock: Arc<dyn Clock>,
     pub hash_semaphore: Arc<Semaphore>,
 }
@@ -89,6 +101,10 @@ impl AuthState {
             window,
             crate::rate_limit::MAX_ENTRIES,
         );
+        let enroll_ip_limiter =
+            RateLimiter::new(ENROLL_IP_RATE, window, crate::rate_limit::MAX_ENTRIES);
+        let enroll_token_limiter =
+            RateLimiter::new(ENROLL_TOKEN_RATE, window, crate::rate_limit::MAX_ENTRIES);
         let hash_semaphore = Arc::new(Semaphore::new(config.max_concurrent_hashes as usize));
         Self {
             config,
@@ -97,6 +113,8 @@ impl AuthState {
             resolved_limiter: Arc::new(resolved_limiter),
             create_user_limiter: Arc::new(create_user_limiter),
             create_user_tenant_limiter: Arc::new(create_user_tenant_limiter),
+            enroll_ip_limiter: Arc::new(enroll_ip_limiter),
+            enroll_token_limiter: Arc::new(enroll_token_limiter),
             clock: Arc::new(SystemClock),
             hash_semaphore,
         }
@@ -134,6 +152,9 @@ pub struct AppState {
     auth: AuthState,
     kek: Option<Arc<dyn KekProvider>>,
     tenancy: TenancyConfig,
+    ca: Option<Arc<CaStore>>,
+    job_signing: Option<JobSigningService>,
+    agent_endpoint: Option<String>,
 }
 
 impl AppState {
@@ -150,6 +171,9 @@ impl AppState {
             auth: AuthState::new(AuthConfig::default()),
             kek: None,
             tenancy: TenancyConfig::default(),
+            ca: None,
+            job_signing: None,
+            agent_endpoint: None,
         }
     }
 
@@ -160,6 +184,9 @@ impl AppState {
             auth,
             kek: None,
             tenancy: TenancyConfig::default(),
+            ca: None,
+            job_signing: None,
+            agent_endpoint: None,
         }
     }
 
@@ -178,6 +205,21 @@ impl AppState {
     /// The server passes the tenancy configuration of the process here (ADR-0024).
     pub fn with_tenancy(mut self, tenancy: TenancyConfig) -> Self {
         self.tenancy = tenancy;
+        self
+    }
+
+    /// The server passes the loaded certificate authority, the job signing key set and the gRPC
+    /// endpoint here, so the enrollment endpoint can issue the agent certificate and return the
+    /// signed key set (ADR-0026, FR-ID-02).
+    pub fn with_pki(
+        mut self,
+        ca: Arc<CaStore>,
+        job_signing: JobSigningService,
+        agent_endpoint: Option<String>,
+    ) -> Self {
+        self.ca = Some(ca);
+        self.job_signing = Some(job_signing);
+        self.agent_endpoint = agent_endpoint;
         self
     }
 
@@ -200,6 +242,21 @@ impl AppState {
     /// The provider is absent only in a test that does not set it.
     pub fn kek(&self) -> Option<&dyn KekProvider> {
         self.kek.as_deref()
+    }
+
+    /// The certificate authority is absent only in a test that does not set it.
+    pub fn ca(&self) -> Option<&CaStore> {
+        self.ca.as_deref()
+    }
+
+    /// The job signing service is absent only in a test that does not set it.
+    pub fn job_signing(&self) -> Option<&JobSigningService> {
+        self.job_signing.as_ref()
+    }
+
+    /// The gRPC endpoint that the enrollment response reports to the agent.
+    pub fn agent_endpoint(&self) -> Option<&str> {
+        self.agent_endpoint.as_deref()
     }
 }
 

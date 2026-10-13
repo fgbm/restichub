@@ -12,6 +12,7 @@ pub mod clock;
 pub mod config;
 pub mod context;
 pub mod delivery;
+pub mod enrollment;
 pub mod enrollment_tokens;
 pub mod error;
 pub mod harden;
