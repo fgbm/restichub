@@ -43,6 +43,8 @@ enum Object {
     User,
     Secret,
     ApiToken,
+    Agent,
+    EnrollmentToken,
 }
 
 /// The isolation fixture of one route path pattern from the route table (AC-TN-01).
@@ -89,6 +91,14 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/users/{id}/password", Fixture::Object(Object::User)),
     ("/api/v1/api-tokens", Fixture::Collection),
     ("/api/v1/api-tokens/{id}", Fixture::Object(Object::ApiToken)),
+    ("/api/v1/agents", Fixture::Collection),
+    ("/api/v1/agents/{id}", Fixture::Object(Object::Agent)),
+    ("/api/v1/agents/{id}/revoke", Fixture::Object(Object::Agent)),
+    ("/api/v1/enrollment-tokens", Fixture::Collection),
+    (
+        "/api/v1/enrollment-tokens/{id}",
+        Fixture::Object(Object::EnrollmentToken),
+    ),
     ("/api/v1/secrets", Fixture::Collection),
     ("/api/v1/secrets/{id}", Fixture::Object(Object::Secret)),
     (
@@ -198,6 +208,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     // The tenant B objects. Their identifiers go into the path of a tenant A call.
     let user_b = create_user(db.database(), tenant_b, CANARY_USER, "phc", "viewer").await;
     let secret_b = seed_secret(db.database(), tenant_b, CANARY_SECRET).await;
+    let agent_b = common::seed_agent(db.database(), tenant_b, "canary-host").await;
+    let enrollment_token_b = common::seed_enrollment_token(db.database(), tenant_b, user_b).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
     let token_b = list_tokens(db.database(), tenant_b)
         .await
@@ -249,6 +261,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
         user_b.to_string(),
         secret_b.to_string(),
         token_b.to_string(),
+        agent_b.to_string(),
+        enrollment_token_b.to_string(),
     ];
     let before = snapshot_tenant(&db, tenant_b).await;
     let audit_before = count(db.database(), tenant_b, "audit_log").await;
@@ -293,6 +307,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     Object::User => user_b.to_string(),
                     Object::Secret => secret_b.to_string(),
                     Object::ApiToken => token_b.to_string(),
+                    Object::Agent => agent_b.to_string(),
+                    Object::EnrollmentToken => enrollment_token_b.to_string(),
                 };
                 let uri = path.replace("{id}", &id);
                 let Access::Protected(operation) = route.access else {
@@ -354,6 +370,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     user_b.to_string(),
                     secret_b.to_string(),
                     token_b.to_string(),
+                    agent_b.to_string(),
+                    enrollment_token_b.to_string(),
                     CANARY_USER.to_owned(),
                     CANARY_SECRET.to_owned(),
                 ] {

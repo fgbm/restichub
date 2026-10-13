@@ -80,6 +80,24 @@ export type CreateApiTokenRequest = components['schemas']['CreateTokenRequest'];
 
 export type ApiTokenListResponse = components['schemas']['ApiTokenListResponse'];
 
+/** One enrolled agent (ADR-0026). */
+export type Agent = components['schemas']['AgentView'];
+
+export type AgentStatus = components['schemas']['AgentStatus'];
+
+export type AgentListResponse = components['schemas']['AgentListResponse'];
+
+export type RenameAgentRequest = components['schemas']['RenameAgentRequest'];
+
+export type EnrollmentToken = components['schemas']['EnrollmentTokenView'];
+
+/** The value appears one time only. */
+export type EnrollmentTokenCreated = components['schemas']['CreateEnrollmentTokenResponse'];
+
+export type CreateEnrollmentTokenRequest = components['schemas']['CreateEnrollmentTokenRequest'];
+
+export type EnrollmentTokenListResponse = components['schemas']['EnrollmentTokenListResponse'];
+
 /**
  * One audit record. The generated `diff` type is an opaque object, so the UI
  * replaces it with the diff shape that the control plane writes.

@@ -8,6 +8,8 @@
 import { api } from './client';
 import { endpoints } from './endpoints';
 import type {
+	Agent,
+	AgentListResponse,
 	ApiToken,
 	ApiTokenCreated,
 	ApiTokenListResponse,
@@ -15,10 +17,15 @@ import type {
 	AuditQuery,
 	ChangePasswordRequest,
 	CreateApiTokenRequest,
+	CreateEnrollmentTokenRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
+	EnrollmentToken,
+	EnrollmentTokenCreated,
+	EnrollmentTokenListResponse,
 	Instance,
 	Me,
+	RenameAgentRequest,
 	ResetPasswordRequest,
 	SetupRequest,
 	SetupStatus,
@@ -58,6 +65,16 @@ export interface ApiService {
 	createToken(request: CreateApiTokenRequest): Promise<ApiTokenCreated>;
 	revokeToken(id: string): Promise<void>;
 
+	/** The enrolled agents of the tenant (ADR-0026). */
+	listAgents(): Promise<Agent[]>;
+	renameAgent(id: string, hostname: string): Promise<Agent>;
+	revokeAgent(id: string): Promise<void>;
+
+	/** One-time enrollment tokens (FR-ID-01). */
+	listEnrollmentTokens(): Promise<EnrollmentToken[]>;
+	createEnrollmentToken(request: CreateEnrollmentTokenRequest): Promise<EnrollmentTokenCreated>;
+	revokeEnrollmentToken(id: string): Promise<void>;
+
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
 	suspendTenant(id: string): Promise<void>;
@@ -94,6 +111,20 @@ const httpService: ApiService = {
 		api.get<ApiTokenListResponse>(endpoints.apiTokens.list).then((response) => response.items),
 	createToken: (request) => api.post<ApiTokenCreated>(endpoints.apiTokens.create, request),
 	revokeToken: (id) => api.delete<void>(endpoints.apiTokens.byId(id)),
+
+	listAgents: () =>
+		api.get<AgentListResponse>(endpoints.agents.list).then((response) => response.items),
+	renameAgent: (id, hostname) =>
+		api.patch<Agent>(endpoints.agents.byId(id), { hostname } satisfies RenameAgentRequest),
+	revokeAgent: (id) => api.post<void>(endpoints.agents.revoke(id)),
+
+	listEnrollmentTokens: () =>
+		api
+			.get<EnrollmentTokenListResponse>(endpoints.enrollmentTokens.list)
+			.then((response) => response.items),
+	createEnrollmentToken: (request) =>
+		api.post<EnrollmentTokenCreated>(endpoints.enrollmentTokens.create, request),
+	revokeEnrollmentToken: (id) => api.delete<void>(endpoints.enrollmentTokens.byId(id)),
 
 	listTenants: () =>
 		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),

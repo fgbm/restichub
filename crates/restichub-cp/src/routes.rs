@@ -258,6 +258,54 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/api/v1/agents",
+        access: Access::Protected(Operation::AgentsRead),
+        handler: || routes!(crate::agents::list_agents),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/agents/{id}",
+        access: Access::Protected(Operation::AgentsRead),
+        handler: || routes!(crate::agents::get_agent),
+    },
+    Route {
+        method: "patch",
+        path: "/api/v1/agents/{id}",
+        access: Access::Protected(Operation::AgentsWrite),
+        handler: || {
+            routes!(crate::agents::rename_agent)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/agents/{id}/revoke",
+        access: Access::Protected(Operation::AgentsWrite),
+        handler: || routes!(crate::agents::revoke_agent),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/enrollment-tokens",
+        access: Access::Protected(Operation::EnrollmentTokensRead),
+        handler: || routes!(crate::enrollment_tokens::list_enrollment_tokens),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/enrollment-tokens",
+        access: Access::Protected(Operation::EnrollmentTokensWrite),
+        handler: || {
+            routes!(crate::enrollment_tokens::create_enrollment_token)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "delete",
+        path: "/api/v1/enrollment-tokens/{id}",
+        access: Access::Protected(Operation::EnrollmentTokensWrite),
+        handler: || routes!(crate::enrollment_tokens::revoke_enrollment_token),
+    },
+    Route {
+        method: "get",
         path: "/api/v1/secrets",
         access: Access::Protected(Operation::SecretsRead),
         handler: || routes!(crate::secrets::list_secrets),

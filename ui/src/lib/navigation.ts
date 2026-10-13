@@ -10,6 +10,7 @@ const ALL_ROLES: Role[] = ['platform_admin', 'admin', 'operator', 'viewer'];
 export type NavHref =
 	| '/(app)'
 	| '/(app)/users'
+	| '/(app)/hosts'
 	| '/(app)/api-tokens'
 	| '/(app)/audit'
 	| '/(app)/platform/tenants'
@@ -35,6 +36,11 @@ export const navigation: NavSection[] = [
 		items: [
 			{ href: '/(app)', labelKey: 'nav.overview', roles: ALL_ROLES },
 			{ href: '/(app)/users', labelKey: 'nav.users', roles: ['platform_admin', 'admin'] },
+			{
+				href: '/(app)/hosts',
+				labelKey: 'nav.hosts',
+				roles: ['admin', 'operator', 'viewer']
+			},
 			{
 				href: '/(app)/api-tokens',
 				labelKey: 'nav.apiTokens',

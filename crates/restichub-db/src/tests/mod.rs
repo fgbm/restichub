@@ -8,6 +8,7 @@
 
 mod audit;
 mod auth;
+mod enrollment_tokens;
 mod migrations;
 mod rls;
 mod roles;
@@ -48,7 +49,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 19] = [
     "auth_add_membership",
 ];
 
-const TENANT_TABLES: [&str; 8] = [
+const TENANT_TABLES: [&str; 10] = [
     "users",
     "memberships",
     "sessions",
@@ -57,6 +58,8 @@ const TENANT_TABLES: [&str; 8] = [
     "secrets",
     "audit_log",
     "setup_tokens",
+    "agents",
+    "enrollment_tokens",
 ];
 
 struct Seed {
@@ -173,6 +176,35 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     .bind(SetupTokenId::new())
     .bind(tenant)
     .bind(&setup_hash)
+    .execute(tx.as_conn())
+    .await?;
+
+    let mut serial = tenant.as_uuid().as_bytes().to_vec();
+    serial[0] ^= 0x04;
+    sqlx::query(
+        "INSERT INTO agents \
+         (id, tenant_id, hostname, os, arch, agent_version, certificate_serial, \
+          certificate_expires_at, status) \
+         VALUES ($1, $2, 'host', 'linux', 'amd64', '0.1.0', $3, now() + interval '30 days', \
+                 'active')",
+    )
+    .bind(crate::AgentId::new())
+    .bind(tenant)
+    .bind(&serial)
+    .execute(tx.as_conn())
+    .await?;
+
+    let mut token_hash = tenant.as_uuid().as_bytes().to_vec();
+    token_hash[15] ^= 0x05;
+    sqlx::query(
+        "INSERT INTO enrollment_tokens \
+         (id, tenant_id, token_hash, display_prefix, labels, expires_at, created_by_user_id) \
+         VALUES ($1, $2, $3, 'ab12cd34', ARRAY['host'], now() + interval '15 minutes', $4)",
+    )
+    .bind(crate::EnrollmentTokenId::new())
+    .bind(tenant)
+    .bind(&token_hash)
+    .bind(user)
     .execute(tx.as_conn())
     .await?;
 
