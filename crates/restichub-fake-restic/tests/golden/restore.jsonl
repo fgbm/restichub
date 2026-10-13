@@ -1,0 +1,4 @@
+{"message_type":"status","percent_done":0.25,"total_files":4,"files_restored":1,"total_bytes":4000,"bytes_restored":1000}
+{"message_type":"status","percent_done":0.5,"total_files":4,"files_restored":2,"total_bytes":4000,"bytes_restored":2000}
+{"message_type":"status","percent_done":0.75,"total_files":4,"files_restored":3,"total_bytes":4000,"bytes_restored":3000}
+{"message_type":"summary","total_files":4,"files_restored":4,"total_bytes":4000,"bytes_restored":4000}

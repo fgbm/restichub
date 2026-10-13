@@ -1,0 +1,4 @@
+{"message_type":"status","seconds_remaining":2,"percent_done":0.25,"total_files":4,"files_done":1,"total_bytes":4000,"bytes_done":1000,"current_files":["/data/file1.txt"]}
+{"message_type":"status","seconds_elapsed":1,"seconds_remaining":1,"percent_done":0.5,"total_files":4,"files_done":2,"total_bytes":4000,"bytes_done":2000,"current_files":["/data/file2.txt"]}
+{"message_type":"status","seconds_elapsed":2,"percent_done":0.75,"total_files":4,"files_done":3,"total_bytes":4000,"bytes_done":3000,"current_files":["/data/file3.txt"]}
+{"message_type":"summary","files_new":1,"files_changed":0,"files_unmodified":3,"dirs_new":1,"dirs_changed":0,"dirs_unmodified":1,"data_blobs":1,"tree_blobs":1,"data_added":1024,"data_added_packed":1100,"total_files_processed":4,"total_bytes_processed":4000,"total_duration":5.0,"backup_start":"2026-01-01T00:00:00Z","backup_end":"2026-01-01T00:00:05Z","snapshot_id":"b2f8a1c94e7d60351a8f2b4c6d9e0f3a7c5b1d2e4f6089a3b7c1d5e9f2a406b8"}

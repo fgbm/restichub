@@ -1632,6 +1632,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "restichub-fake-restic"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "restichub-proto"
 version = "0.0.0"
 dependencies = [

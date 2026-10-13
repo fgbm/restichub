@@ -1,0 +1,17 @@
+[package]
+name = "restichub-fake-restic"
+description = "Recorded restic CLI emulator for agent tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The recorded restic messages use the restic field names and the omitted defaults.
+serde = { workspace = true }
+serde_json = { workspace = true }
