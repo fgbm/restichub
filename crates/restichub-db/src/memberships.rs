@@ -145,17 +145,16 @@ pub async fn remove_platform(
     WriteStatus::parse(&status)
 }
 
-/// Counts the active memberships with an administrator role in the tenant of the transaction.
+/// Counts the active memberships with the administrator role in the tenant of the transaction.
 ///
-/// The count covers the roles `admin` and `platform_admin`. A disabled membership and a disabled
-/// account both do not count, so an account that a Platform Admin disabled does not keep a tenant
-/// from removing its last active Admin. The read goes through the member function, so the count
-/// agrees with the list the tenant Admin sees. The caller holds the tenant lock
-/// ([`TenantTx::lock`]).
+/// The count covers the role `admin` only (ADR-0029). A disabled membership and a disabled account
+/// both do not count, so an account that a Platform Admin disabled does not keep a tenant from
+/// removing its last active Admin. The read goes through the member function, so the count agrees
+/// with the list the tenant Admin sees. The caller holds the tenant lock ([`TenantTx::lock`]).
 pub async fn count_admins(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
     let (count,): (i64,) = sqlx::query_as(
         "SELECT count(*) FROM auth_tenant_members() \
-         WHERE role IN ('admin', 'platform_admin') AND NOT disabled AND NOT account_disabled",
+         WHERE role = 'admin' AND NOT disabled AND NOT account_disabled",
     )
     .fetch_one(tx.as_conn())
     .await

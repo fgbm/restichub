@@ -401,14 +401,15 @@ async fn db_the_account_functions_are_scoped_to_the_current_tenant() -> TestResu
     };
     let platform = {
         let mut tx = db.database().begin_tenant(PLATFORM_TENANT_ID).await?;
-        let user = users::create_member(
+        let user = crate::UserId::new();
+        users::create_platform_admin(
             &mut tx,
+            user,
             &NewUser {
                 username: "root",
                 password_hash: "phc",
                 display_name: "Root",
             },
-            Role::PlatformAdmin,
         )
         .await?;
         tx.commit().await?;
