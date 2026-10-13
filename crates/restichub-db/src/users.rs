@@ -12,7 +12,7 @@ use crate::Database;
 use crate::DbError;
 use crate::enums::Role;
 use crate::ids::{SessionId, TenantId, UserId};
-use crate::tx::TenantTx;
+use crate::tx::{PlatformTx, TenantTx};
 
 /// Installation-wide identity that a person signs in with. It holds no password hash.
 #[derive(Debug, Clone)]
@@ -65,7 +65,7 @@ pub enum WriteStatus {
 }
 
 impl WriteStatus {
-    fn parse(value: &str) -> Result<Self, DbError> {
+    pub(crate) fn parse(value: &str) -> Result<Self, DbError> {
         match value {
             "ok" => Ok(Self::Ok),
             "not_found" => Ok(Self::NotFound),
@@ -270,6 +270,119 @@ pub async fn get_member(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<Memb
     .await
     .map_err(DbError::Query)?;
     Ok(row.map(Member::from))
+}
+
+/// An installation account for the platform administration (ADR-0028).
+#[derive(Debug, Clone)]
+pub struct PlatformAccount {
+    pub id: UserId,
+    pub username: String,
+    pub display_name: String,
+    /// Unique in the installation when it is set.
+    pub email: Option<String>,
+    /// False until an invitation verifies the address; the MVP leaves it false.
+    pub email_verified: bool,
+    /// A Platform Admin set it for the whole installation.
+    pub disabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewPlatformAccount<'a> {
+    /// Unique in the installation; ignores the letter case.
+    pub username: &'a str,
+    /// Argon2id PHC string.
+    pub password_hash: &'a str,
+    pub display_name: &'a str,
+    pub email: Option<&'a str>,
+}
+
+/// The result of the platform account create (migration 0020).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateAccountStatus {
+    Ok,
+    /// Duplicate username in the installation.
+    UsernameTaken,
+    /// Duplicate email in the installation.
+    EmailTaken,
+    /// The transaction is not in the platform scope.
+    Forbidden,
+}
+
+impl CreateAccountStatus {
+    fn parse(value: &str) -> Result<Self, DbError> {
+        match value {
+            "ok" => Ok(Self::Ok),
+            "username_taken" => Ok(Self::UsernameTaken),
+            "email_taken" => Ok(Self::EmailTaken),
+            "forbidden" => Ok(Self::Forbidden),
+            other => Err(DbError::UnknownWriteStatus(other.to_owned())),
+        }
+    }
+}
+
+/// Reads the accounts of the installation for the platform administration.
+pub async fn list_platform_accounts(
+    tx: &mut PlatformTx<'_>,
+) -> Result<Vec<PlatformAccount>, DbError> {
+    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, bool, bool)>(
+        "SELECT user_id, username, display_name, email, email_verified, disabled \
+         FROM auth_platform_accounts()",
+    )
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, username, display_name, email, email_verified, disabled)| PlatformAccount {
+                id: UserId::from_uuid(id),
+                username,
+                display_name,
+                email,
+                email_verified,
+                disabled,
+            },
+        )
+        .collect())
+}
+
+/// Creates an installation account (Platform Admin only).
+///
+/// The database function requires the platform scope, takes the account row lock and refuses a
+/// duplicate username or email.
+pub async fn platform_create_account(
+    tx: &mut PlatformTx<'_>,
+    id: UserId,
+    new: &NewPlatformAccount<'_>,
+) -> Result<CreateAccountStatus, DbError> {
+    let (status,): (String,) =
+        sqlx::query_as("SELECT auth_platform_create_account($1, $2, $3, $4, $5)")
+            .bind(id)
+            .bind(new.username)
+            .bind(new.password_hash)
+            .bind(new.display_name)
+            .bind(new.email)
+            .fetch_one(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    CreateAccountStatus::parse(&status)
+}
+
+/// Writes the email address of an account for the platform administration.
+///
+/// The unique index of the email makes a duplicate a database error with SQLSTATE 23505.
+pub async fn platform_set_email(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    email: &str,
+) -> Result<WriteStatus, DbError> {
+    let (status,): (String,) = sqlx::query_as("SELECT auth_platform_set_email($1, $2)")
+        .bind(id)
+        .bind(email)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    WriteStatus::parse(&status)
 }
 
 type MemberRow = (Uuid, String, String, Role, bool, bool, bool);

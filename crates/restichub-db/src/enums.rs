@@ -90,6 +90,44 @@ impl TenantStatus {
     }
 }
 
+/// The derived administrator state of a tenant (ADR-0028).
+///
+/// The control plane computes the state from the memberships: an active Admin count of zero gives
+/// [`AdminState::None`]. The state is not stored, so it cannot drift from the memberships.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminState {
+    None,
+    Present,
+}
+
+impl AdminState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Present => "present",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "present" => Some(Self::Present),
+            _ => None,
+        }
+    }
+
+    /// Zero active administrators give [`AdminState::None`].
+    pub fn from_active_admins(count: i64) -> Self {
+        if count == 0 {
+            Self::None
+        } else {
+            Self::Present
+        }
+    }
+}
+
 /// The role of a certificate authority (ADR-0026). The string value is part of the associated
 /// data of the wrapped key; do not change it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
@@ -183,7 +221,7 @@ impl ActorType {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActorType, CaRole, Role, SigningKeyRole, TenantStatus};
+    use super::{ActorType, AdminState, CaRole, Role, SigningKeyRole, TenantStatus};
 
     #[test]
     fn the_role_strings_are_stable() {
@@ -208,6 +246,16 @@ mod tests {
             assert_eq!(TenantStatus::parse(status.as_str()), Some(status));
         }
         assert_eq!(TenantStatus::parse("nope"), None);
+    }
+
+    #[test]
+    fn the_admin_state_strings_are_stable() {
+        for state in [AdminState::None, AdminState::Present] {
+            assert_eq!(AdminState::parse(state.as_str()), Some(state));
+        }
+        assert_eq!(AdminState::parse("nope"), None);
+        assert_eq!(AdminState::from_active_admins(0), AdminState::None);
+        assert_eq!(AdminState::from_active_admins(2), AdminState::Present);
     }
 
     #[test]
