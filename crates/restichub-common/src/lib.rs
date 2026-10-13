@@ -1,6 +1,5 @@
 //! Shared types for ResticHub.
 
-/// Final status of a step or a job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
     /// restic exit code 0.
@@ -37,7 +36,6 @@ impl JobStatus {
 mod tests {
     use super::JobStatus;
 
-    /// AC-AG-05: restic exit codes map to job statuses.
     #[test]
     fn ac_ag_05_exit_code_mapping() {
         let cases = [
