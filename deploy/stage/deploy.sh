@@ -21,7 +21,7 @@ scp -q "$repo_root/crates/restichub-db/sql/bootstrap-roles.sql" "$host:$dir/boot
 ssh "$host" "chmod 0700 '$dir/bootstrap.sh' && chmod 0644 '$dir/compose.yaml' '$dir/Caddyfile' '$dir/bootstrap-roles.sql'"
 
 echo "== create the environment file if it is missing =="
-ssh "$host" "cd '$dir' && ./bootstrap.sh"
+ssh "$host" "cd '$dir' && { [ -e .env ] || ./bootstrap.sh; }"
 
 echo "== pull the image and start the stack =="
 ssh "$host" "docker compose -f '$compose' pull"
