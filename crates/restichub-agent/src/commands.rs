@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::mpsc::Receiver;
 
 use anyhow::{Context, Result, bail};
+use time::OffsetDateTime;
 
 use crate::cli::RegisterOptions;
 use crate::enroll::{Client, Facts};
@@ -59,16 +60,18 @@ pub async fn register_async(
         restic_version: restic_version(restic)?,
     };
 
-    let (key_pem, csr_der) = generate_key_and_csr()?;
+    let (generated, csr_der) = generate_key_and_csr()?;
     let client = Client::new(options.ca_file.as_deref())?;
     let enrolled = client.enroll(&url, &token, &facts, &csr_der).await?;
+    // The response is checked before any file is written (ADR-0026, FR-AG-04).
+    crate::verify::check_enrollment(&generated.public_key, &enrolled, OffsetDateTime::now_utc())?;
 
     let identity = StoredIdentity {
         agent_id: enrolled.agent_id,
         tenant_id: enrolled.tenant_id,
         cp_url: url,
         grpc_endpoint: enrolled.grpc_endpoint,
-        key_pem,
+        key_pem: generated.key_pem,
         certificate_der: enrolled.certificate_der,
         ca_chain_der: enrolled.ca_chain_der,
         signing_key_update: enrolled.signing_key_update,

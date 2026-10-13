@@ -7,12 +7,13 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
-use http_body_util::{BodyExt as _, Full};
+use http_body_util::{BodyExt as _, Full, Limited};
 use hyper::header;
 use hyper_util::rt::TokioIo;
 use rustls::{ClientConfig, RootCertStore};
@@ -25,6 +26,14 @@ use crate::pem;
 
 /// The enrollment route of the agent listener (ADR-0026).
 pub const ENROLL_PATH: &str = "/agent/v1/enroll";
+
+/// Time budget for the TCP connect, the TLS handshake and the whole request.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Upper bound of the response body, so a hostile peer cannot exhaust the memory of the agent.
+const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 /// Host details that the agent reports at enrollment (FR-IN-07).
 #[derive(Debug, Clone)]
@@ -110,16 +119,26 @@ impl Client {
     }
 
     async fn post(&self, origin: &Origin, body: Vec<u8>) -> Result<HttpResponse> {
-        let tcp = TcpStream::connect((origin.host.as_str(), origin.port))
+        tokio::time::timeout(REQUEST_TIMEOUT, self.request(origin, body))
             .await
-            .with_context(|| format!("cannot connect to {}:{}", origin.host, origin.port))?;
+            .map_err(|_| anyhow::anyhow!("the enrollment request timed out"))?
+    }
+
+    async fn request(&self, origin: &Origin, body: Vec<u8>) -> Result<HttpResponse> {
+        let tcp = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            TcpStream::connect((origin.host.as_str(), origin.port)),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("the connection to the control plane timed out"))?
+        .with_context(|| format!("cannot connect to {}:{}", origin.host, origin.port))?;
         let connector = TlsConnector::from(self.tls.clone());
         let server_name = ServerName::try_from(origin.host.clone()).map_err(|error| {
             anyhow::anyhow!("`{}` is not a valid server name: {error}", origin.host)
         })?;
-        let stream = connector
-            .connect(server_name, tcp)
+        let stream = tokio::time::timeout(HANDSHAKE_TIMEOUT, connector.connect(server_name, tcp))
             .await
+            .map_err(|_| anyhow::anyhow!("the TLS handshake with the control plane timed out"))?
             .context("the TLS handshake with the control plane failed")?;
         let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
             .await
@@ -145,11 +164,12 @@ impl Client {
             .get(header::RETRY_AFTER)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<u64>().ok());
-        let body = response
-            .into_body()
+        let body = Limited::new(response.into_body(), MAX_RESPONSE_BYTES)
             .collect()
             .await
-            .context("cannot read the response")?
+            .map_err(|error| {
+                anyhow::anyhow!("the response body is too large or unreadable: {error}")
+            })?
             .to_bytes()
             .to_vec();
         // The connection stays open after the response, so the task ends only when the sender drops.

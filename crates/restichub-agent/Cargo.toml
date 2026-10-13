@@ -21,9 +21,11 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 bytes = "1.12"
 ctrlc = { workspace = true }
+ed25519-dalek = "3.0"
 http-body-util = { workspace = true }
 hyper = { version = "1.12", default-features = false, features = ["client", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+prost = "0.14"
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 restichub-proto = { path = "../restichub-proto" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
@@ -41,6 +43,12 @@ x509-parser = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+] }
 
 [dev-dependencies]
 anyhow = { workspace = true }
@@ -50,7 +58,6 @@ bytes = "1.12"
 http-body-util = { workspace = true }
 hyper = { version = "1.12", default-features = false, features = ["server", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
-prost = "0.14"
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 restichub-cp = { path = "../restichub-cp" }
 restichub-db = { workspace = true, features = ["test-util"] }
