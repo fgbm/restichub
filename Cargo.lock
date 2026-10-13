@@ -1800,6 +1800,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "ctrlc",
+ "ed25519-dalek",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -1822,6 +1823,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows-service",
+ "windows-sys 0.61.2",
  "x509-parser",
 ]
 

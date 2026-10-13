@@ -7,6 +7,8 @@ mod linux;
 #[cfg(windows)]
 mod windows;
 
+mod location;
+
 #[cfg(windows)]
 pub use windows::run_as_service;
 

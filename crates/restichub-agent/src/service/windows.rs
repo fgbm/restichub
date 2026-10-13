@@ -1,10 +1,12 @@
 //! The Windows service of the agent (FR-AG-01, FR-IN-08, AC-IN-03).
 
 use std::ffi::{OsStr, OsString};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use windows_service::service::{
-    ServiceAccess, ServiceControl, ServiceControlAccept, ServiceErrorControl, ServiceExitCode,
+    ServiceAccess, ServiceAction, ServiceActionType, ServiceControl, ServiceControlAccept,
+    ServiceErrorControl, ServiceExitCode, ServiceFailureActions, ServiceFailureResetPeriod,
     ServiceInfo, ServiceStartType, ServiceState, ServiceStatus, ServiceType,
 };
 use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
@@ -46,35 +48,55 @@ fn run_service() -> Result<()> {
         _ => ServiceControlHandlerResult::NotImplemented,
     };
     let status_handle = service_control_handler::register(SERVICE_NAME, handler)?;
-    status_handle.set_service_status(status(ServiceState::Running, ServiceControlAccept::STOP))?;
+    status_handle.set_service_status(status(
+        ServiceState::Running,
+        ServiceControlAccept::STOP,
+        ServiceExitCode::NO_ERROR,
+    ))?;
     let result = crate::commands::run(&crate::paths::config_dir(), Some(receiver));
-    status_handle
-        .set_service_status(status(ServiceState::Stopped, ServiceControlAccept::empty()))?;
+    // A failing run leaves a non-zero service exit code, so the SCM and an operator see it.
+    let exit_code = match result {
+        Ok(()) => ServiceExitCode::NO_ERROR,
+        Err(_) => ServiceExitCode::Win32(1),
+    };
+    status_handle.set_service_status(status(
+        ServiceState::Stopped,
+        ServiceControlAccept::empty(),
+        exit_code,
+    ))?;
     result
 }
 
-fn status(state: ServiceState, accept: ServiceControlAccept) -> ServiceStatus {
+fn status(
+    state: ServiceState,
+    accept: ServiceControlAccept,
+    exit_code: ServiceExitCode,
+) -> ServiceStatus {
     ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: state,
         controls_accepted: accept,
-        exit_code: ServiceExitCode::Win32(0),
+        exit_code,
         checkpoint: 0,
-        wait_hint: std::time::Duration::default(),
+        wait_hint: Duration::default(),
         process_id: None,
     }
 }
 
 /// Writes and starts the Windows service (FR-IN-08, AC-IN-03).
 ///
-/// An existing service is updated instead of created, so the command is idempotent.
+/// An existing service is updated instead of created, so the command is idempotent. The update
+/// points the service at the new executable path, sets the recovery actions and reports a start
+/// failure.
 ///
 /// # Errors
 ///
-/// Returns an error when the service cannot be created or started, usually without administrator
-/// rights.
+/// Returns an error when the service cannot be created, updated or started, usually without
+/// administrator rights.
 pub fn install() -> Result<()> {
     let exe = std::env::current_exe().context("cannot find the agent executable")?;
+    // A binary that another account can replace defeats the service hardening (T20).
+    super::location::check(&exe)?;
     let manager = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
@@ -97,15 +119,40 @@ pub fn install() -> Result<()> {
     let service = match manager.create_service(&info, access) {
         Ok(service) => service,
         Err(error) => {
-            tracing::debug!(%error, "the service already exists; updating it");
-            manager
+            tracing::debug!(%error, "the service already exists; updating its configuration");
+            let service = manager
                 .open_service(SERVICE_NAME, access)
-                .context("cannot create or open the service; run as an administrator")?
+                .context("cannot open the service; run as an administrator")?;
+            // A reinstall points the service at the new executable path.
+            service
+                .change_config(&info)
+                .context("cannot update the service configuration")?;
+            service
         }
     };
     service.set_description("The ResticHub backup agent")?;
+    // The service restarts after a failure; a repeated failure stays visible in the event log.
+    service.update_failure_actions(ServiceFailureActions {
+        reset_period: ServiceFailureResetPeriod::After(Duration::from_secs(86_400)),
+        reboot_msg: None,
+        command: None,
+        actions: Some(vec![
+            ServiceAction {
+                action_type: ServiceActionType::Restart,
+                delay: Duration::from_secs(5),
+            },
+            ServiceAction {
+                action_type: ServiceActionType::Restart,
+                delay: Duration::from_secs(30),
+            },
+        ]),
+    })?;
+    service.set_failure_actions_on_non_crash_failures(true)?;
     if service.query_status()?.current_state != ServiceState::Running {
-        let _ = service.start(&[] as &[&OsStr]);
+        // A start failure is reported, not hidden behind a success message.
+        service
+            .start(&[] as &[&OsStr])
+            .context("cannot start the service")?;
     }
     println!("the service {SERVICE_NAME} is installed and started");
     Ok(())

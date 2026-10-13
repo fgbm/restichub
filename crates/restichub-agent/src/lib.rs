@@ -12,3 +12,6 @@ pub mod paths;
 pub mod pem;
 pub mod restic;
 pub mod service;
+pub mod verify;
+#[cfg(windows)]
+pub mod winsec;
