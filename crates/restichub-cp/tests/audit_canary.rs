@@ -14,10 +14,10 @@ use time::OffsetDateTime;
 
 use common::{app, count, create_tenant, request, seed_session, send};
 
-/// The canary password. It must never appear in the audit log.
+/// The password must never appear in the audit log.
 const CANARY: &str = "CANARY-secret-0001";
 
-/// Signs in and returns the status and the cookie.
+/// Performs a sign-in and gives the status and the cookie.
 async fn sign_in(
     app: &axum::Router,
     tenant: &str,

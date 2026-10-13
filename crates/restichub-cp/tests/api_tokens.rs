@@ -13,7 +13,7 @@ async fn admin_cookie(db: &restichub_db::test_util::TestDatabase, tenant: Tenant
     seed_session(db.database(), tenant, "admin", "admin").await
 }
 
-/// Creates a token with an explicit expiry for a tenant.
+/// Creates a token for a tenant with an explicit expiry time.
 async fn token_with_expiry(
     db: &restichub_db::Database,
     tenant: TenantId,

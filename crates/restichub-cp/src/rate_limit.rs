@@ -1,16 +1,13 @@
 //! The sign-in rate limit (ADR-0023, section Local authentication).
 //!
-//! The limiter is an in-memory token bucket. The control plane creates the limiter at start.
-//!
 //! The limiter is per process. A second control plane instance has its own buckets. This is
-//! acceptable for the MVP, where one instance runs (ADR-0018). A shared limiter arrives with high
+//! acceptable for the MVP, where one instance runs (ADR-0018); a shared limiter arrives with high
 //! availability.
 //!
 //! A capped limiter holds the synthetic identities and the IP networks. It has a hard cap
-//! ([`MAX_ENTRIES`]). When the cap is reached, the limiter evicts the oldest buckets instead of
-//! growing. An uncapped limiter holds the resolved `(tenant_id, user_id)` identities; its size is
-//! bounded by the number of real users. An inline sweep runs at most once per second, and a
-//! periodic sweep in the control plane removes the full and the idle buckets of the idle keys.
+//! ([`MAX_ENTRIES`]) and evicts the oldest buckets when the cap is reached, instead of growing. An
+//! uncapped limiter holds the resolved `(tenant_id, user_id)` identities, so its size is bounded by
+//! the number of real users.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
@@ -61,10 +58,8 @@ impl RateLimiter {
         }
     }
 
-    /// Takes one token from the bucket of a key.
-    ///
-    /// The function returns the time to wait on a refusal. A capped limiter evicts the oldest
-    /// buckets when it is full.
+    /// The error is the time to wait on a refusal. A capped limiter evicts the oldest buckets when
+    /// it is full.
     pub fn check(&self, key: &str, now: Instant) -> Result<(), Duration> {
         let refill_per_second = self.capacity / self.window.as_secs_f64().max(f64::EPSILON);
         let mut state = match self.state.lock() {
@@ -128,8 +123,6 @@ impl RateLimiter {
     }
 }
 
-/// Removes the full and the idle buckets from a map.
-///
 /// A full bucket holds no useful state. An idle bucket is full again after the window, so it holds
 /// no useful state either.
 fn sweep(buckets: &mut HashMap<String, Bucket>, capacity: f64, window: Duration, now: Instant) {
@@ -157,8 +150,6 @@ fn evict_oldest(buckets: &mut HashMap<String, Bucket>, count: usize) {
     }
 }
 
-/// Bucket key of a source IP address.
-///
 /// An IPv6 address is keyed by the /64 network, so one host cannot rotate through the addresses of
 /// one network to avoid the limit.
 pub fn ip_key(ip: IpAddr) -> String {
@@ -181,10 +172,8 @@ pub fn ip_key(ip: IpAddr) -> String {
     }
 }
 
-/// Returns the bucket key of an attempt against an unresolved identity.
-///
-/// The function trims the tenant and lowercases both values, so the case of the input does not
-/// create a new bucket.
+/// The tenant is trimmed and both values are lowercased, so the case of the input does not create a
+/// new bucket.
 pub fn synthetic_user_key(tenant: &str, username: &str) -> String {
     format!(
         "s:{}:{}",

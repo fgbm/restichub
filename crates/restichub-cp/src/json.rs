@@ -39,8 +39,6 @@ where
     }
 }
 
-/// Maps a JSON rejection to a problem response.
-///
 /// A body that is larger than the limit gives HTTP 413. Every other rejection gives HTTP 400. The
 /// response holds no parser detail.
 fn map_rejection(rejection: JsonRejection) -> ApiError {

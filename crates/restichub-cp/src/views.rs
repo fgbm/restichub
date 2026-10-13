@@ -119,7 +119,6 @@ pub struct SecretDetailView {
     pub updated_at: String,
     /// Null for an API token actor.
     pub created_by: Option<String>,
-    /// The value itself never leaves the control plane.
     pub value: String,
 }
 

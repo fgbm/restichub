@@ -21,7 +21,7 @@ const ROLES: [Role; 4] = [
     Role::Viewer,
 ];
 
-/// Builds a unique username for a fresh session.
+/// Builds a username that is not in use for a fresh session.
 fn unique(role: Role, index: usize) -> String {
     format!("user-{}-{index}", role.as_str())
 }

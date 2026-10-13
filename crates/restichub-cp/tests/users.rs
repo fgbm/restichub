@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use common::{app, count, create_tenant, create_user, request, seed_session, send};
 
-/// Builds an Admin session and returns the cookie.
+/// Returns the session cookie of a user with the Admin role.
 async fn admin_cookie(
     db: &restichub_db::test_util::TestDatabase,
     tenant: restichub_db::TenantId,

@@ -119,11 +119,8 @@ pub async fn sign_in(
     }
 }
 
-/// Signs a user in against a known, active tenant.
-///
-/// The function reads the user in one transaction, then hashes without a transaction, then opens a
-/// second transaction for the session and the audit record. A hash never holds a database
-/// connection.
+/// The user is read in one transaction, then hashed without a transaction, then a second
+/// transaction opens for the session and the audit record. A hash never holds a database connection.
 async fn sign_in_tenant(
     state: &AppState,
     tenant_id: TenantId,

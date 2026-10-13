@@ -19,7 +19,7 @@ use common::{
     session_cookie, test_kek,
 };
 
-/// Returns a Platform Admin session cookie of the platform tenant.
+/// Returns a root session cookie of the platform tenant.
 async fn platform_admin(db: &restichub_db::Database) -> String {
     seed_session(db, PLATFORM_TENANT_ID, "root", "platform_admin").await
 }
@@ -55,7 +55,7 @@ async fn create_tenant_ok(app: &Router, cookie: &str, name: &str) -> String {
         .unwrap_or_else(|| panic!("the response holds no identifier: {body}"))
 }
 
-/// Returns the audit records of one action in a tenant.
+/// Reads the records of one action in a tenant.
 async fn tenant_audit(
     db: &restichub_db::Database,
     tenant: TenantId,
@@ -77,7 +77,7 @@ async fn tenant_audit(
     records
 }
 
-/// Returns the platform audit items of a query string.
+/// Reads the items of a platform query string.
 async fn platform_audit(app: &Router, cookie: &str, query: &str) -> Vec<Value> {
     let uri = format!("/api/v1/platform/audit?{query}");
     let (status, _, page) = send(app, request("GET", &uri, Some(cookie), None)).await;

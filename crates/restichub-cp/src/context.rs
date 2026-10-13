@@ -28,7 +28,8 @@ use crate::server::AppState;
 use crate::token;
 use crate::validation::Reason;
 
-/// The authorization table gives the minimum role of each operation.
+/// The authorization table gives the minimum role that each operation needs (ADR-0023, section
+/// Roles).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
     AuditRead,
@@ -64,7 +65,7 @@ impl Operation {
     }
 }
 
-/// Minimum role of an operation (ADR-0023, section Roles).
+/// The role that an operation needs (ADR-0023, section Roles).
 pub fn minimum_role(operation: Operation) -> Role {
     match operation {
         Operation::AuditRead => Role::Viewer,

@@ -26,9 +26,9 @@ pub enum StartupError {
 
 /// Verifies the `kek_check` row of the platform tenant, or creates it on the first start.
 ///
-/// The function takes an advisory lock before the read, so two starts cannot create two rows. The
-/// function refuses to start when the loaded KEK does not match the stored check: it returns
-/// [`KekError::Mismatch`] with the two key IDs. The error message names the cause (AC-RP-02).
+/// An advisory lock is taken before the read, so two starts cannot create two rows. The start is
+/// refused when the loaded KEK does not match the stored check; the error is [`KekError::Mismatch`]
+/// with the two key IDs (AC-RP-02).
 pub async fn ensure_kek_check(
     db: &Database,
     provider: &dyn KekProvider,

@@ -95,8 +95,8 @@ where
 trait BitAndMask: Copy + PartialEq {
     /// Returns the value with the low `shift` bits cleared.
     ///
-    /// The function returns zero when `shift` is not less than the width of the type. A zero mask
-    /// matches every address, also for the prefix `/0`.
+    /// A zero mask matches every address, also for the prefix `/0`. The result is zero when `shift`
+    /// is not less than the width of the type.
     fn masked(self, shift: u8) -> Self;
 }
 

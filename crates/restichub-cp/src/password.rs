@@ -73,9 +73,7 @@ pub fn hash_password(password: &str) -> Result<String, PasswordError> {
     Ok(hash.to_string())
 }
 
-/// Verifies a password against a PHC string. This function blocks the caller.
-///
-/// The function returns false for a value that is not a valid PHC string.
+/// Blocks the caller. `false` means the value is not a valid PHC string.
 pub fn verify_password(password: &str, hash: &str) -> bool {
     let Ok(hasher) = hasher() else {
         return false;
@@ -130,10 +128,8 @@ pub async fn verify_password_limited(
     with_permit(semaphore, move || verify_password(&password, &hash)).await
 }
 
-/// Verifies a password against the given hash, or against the dummy hash when the hash is absent.
-///
-/// The function returns false when the hash is absent. The dummy verification keeps the time
-/// similar. The dummy hash is built inside the blocking task.
+/// `false` when the hash is absent; the dummy verification keeps the time similar. The dummy hash is
+/// built inside the blocking task.
 pub async fn verify_or_dummy(
     semaphore: &Semaphore,
     password: String,

@@ -32,8 +32,8 @@ use crate::views::PlatformTenantView;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateTenantRequest {
-    /// The name of the tenant. It holds 1 to 63 characters from `a-z`, `0-9` and `-`, it starts
-    /// with a letter, and it is not `platform`.
+    /// Holds 1 to 63 characters from `a-z`, `0-9` and `-`, starts with a letter, and is not
+    /// `platform`.
     pub name: String,
     pub first_admin: CreateTenantAdmin,
 }

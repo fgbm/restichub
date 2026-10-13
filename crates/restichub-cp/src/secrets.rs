@@ -43,10 +43,10 @@ use crate::views::{SecretDetailView, SecretView};
 /// a [`SecretString`], so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 pub struct CreateSecretRequest {
-    /// The name of the secret. It holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`.
+    /// Holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`.
     pub name: String,
     pub purpose: SecretPurpose,
-    /// The value. It holds 1 to 64 KiB bytes.
+    /// Holds 1 to 64 KiB bytes.
     #[schema(value_type = String)]
     pub value: SecretString,
 }
@@ -55,7 +55,7 @@ pub struct CreateSecretRequest {
 /// a [`SecretString`], so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 pub struct ReplaceSecretRequest {
-    /// The new value. It holds 1 to 64 KiB bytes.
+    /// Holds 1 to 64 KiB bytes.
     #[schema(value_type = String)]
     pub value: SecretString,
 }
@@ -68,7 +68,6 @@ pub struct SecretListResponse {
 
 struct Encrypted {
     key_version: i32,
-    /// 96-bit nonce of the encryption.
     nonce: [u8; NONCE_LEN],
     ciphertext: Vec<u8>,
 }

@@ -233,8 +233,6 @@ impl ApiError {
         error
     }
 
-    /// Creates a `503 busy` error with a `Retry-After` header.
-    ///
     /// The control plane returns this error when the password hash semaphore is saturated.
     pub fn busy(retry_after: u64) -> Self {
         let mut error = Self::new(
@@ -303,8 +301,6 @@ impl From<PasswordError> for ApiError {
     }
 }
 
-/// Maps a database write error to the API error.
-///
 /// A duplicate value is a conflict. Every other error is internal, with the cause logged.
 pub fn map_write_error(error: DbError) -> ApiError {
     if error.is_unique_violation() {

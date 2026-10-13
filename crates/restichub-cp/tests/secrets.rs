@@ -29,7 +29,7 @@ use common::{
     seed_session, send, send_response, session_cookie, test_kek,
 };
 
-/// The canary value. It must never appear in a response, a log or a database dump.
+/// The value must never appear in a response, a log or a database dump.
 const CANARY: &str = "RESTICHUB-CANARY-7f3a91c2d4e5";
 const PURPOSE: &str = "repository_password";
 
@@ -84,7 +84,7 @@ async fn stored_value(
     Ok((row.nonce, row.ciphertext))
 }
 
-/// Decrypts a stored secret through `delivery::load_ciphertext` and the tenant key.
+/// Returns the plaintext of a stored secret through the tenant key.
 async fn decrypt_stored(
     db: &Database,
     tenant: TenantId,
@@ -114,7 +114,7 @@ async fn decrypt_stored(
     Ok(plaintext.expose_secret().to_owned())
 }
 
-/// Returns the audit records of one action in a tenant.
+/// Reads the records of one action in a tenant.
 async fn audit_records(
     db: &Database,
     tenant: TenantId,

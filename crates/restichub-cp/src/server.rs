@@ -158,10 +158,8 @@ impl AppState {
     }
 }
 
-/// Builds the HTTP router.
-///
-/// The router registers one route for each entry of [`ROUTES`], so the routes table, the router
-/// and the OpenAPI document cannot drift apart.
+/// The router registers one route for each entry of [`ROUTES`], so the routes table, the router and
+/// the OpenAPI document cannot drift apart.
 pub fn router(state: AppState) -> Router {
     let (router, _document) = openapi_router().split_for_parts();
     router

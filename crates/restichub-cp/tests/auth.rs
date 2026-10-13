@@ -24,7 +24,7 @@ use common::{
     send_response, session_cookie, set_tenant_status,
 };
 
-/// Builds a user with a real password hash.
+/// Builds a user whose password hash is real.
 async fn user_with_password(
     db: &restichub_db::Database,
     tenant: TenantId,
@@ -36,7 +36,7 @@ async fn user_with_password(
     create_user(db, tenant, username, &hash, role).await
 }
 
-/// Signs in through the HTTP API.
+/// Returns the result of a sign-in through the HTTP API.
 async fn sign_in(
     app: &Router,
     tenant: &str,

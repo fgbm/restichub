@@ -72,9 +72,7 @@ pub fn random_token() -> Result<String, TokenError> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-/// Generates a random API token value and its display prefix.
-///
-/// The function returns the value `rh_<base64url>` and the first eight characters after `rh_`.
+/// The value is `rh_<base64url>`; the prefix is the first eight characters after `rh_`.
 pub fn random_api_token() -> Result<(String, String), TokenError> {
     let value = random_token()?;
     let prefix: String = value.chars().take(DISPLAY_PREFIX_LEN).collect();

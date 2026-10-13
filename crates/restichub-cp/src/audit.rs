@@ -320,9 +320,7 @@ pub async fn list_platform_audit(
     Ok(Json(response(result)))
 }
 
-/// Builds the API page response.
-///
-/// The function returns `next_cursor` only when the table holds a later record.
+/// `next_cursor` is set only when the table holds a later record.
 fn response(result: repo::AuditPageResult) -> AuditPageResponse {
     let next_cursor = if result.has_more {
         result.records.last().map(|record| {

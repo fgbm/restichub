@@ -23,7 +23,7 @@ impl KekProvider for OneKek {
     }
 }
 
-/// Builds a provider with a key from a fill byte.
+/// A provider that holds one key, built from a fill byte.
 fn provider(fill: u8) -> OneKek {
     let mut bytes = [fill; 32];
     OneKek(Kek::from_bytes(&mut bytes))
