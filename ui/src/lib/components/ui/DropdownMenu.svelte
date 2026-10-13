@@ -12,23 +12,67 @@
 		align?: 'start' | 'center' | 'end';
 		children: Snippet;
 	} = $props();
+
+	interface Block {
+		group?: string;
+		items: MenuItem[];
+	}
+
+	// Items that share a `group` are exclusive, so they render as radio items.
+	const blocks = $derived.by(() => {
+		const result: Block[] = [];
+		for (const item of items) {
+			const last = result[result.length - 1];
+			if (item.group && last?.group === item.group) {
+				last.items.push(item);
+			} else {
+				result.push({ group: item.group, items: [item] });
+			}
+		}
+		return result;
+	});
+
+	function checkedValue(block: Block): string {
+		return block.items.find((item) => item.checked)?.label ?? '';
+	}
 </script>
 
 <Primitive.Root>
 	<Primitive.Trigger class="rh-menu__trigger">{@render children()}</Primitive.Trigger>
 	<Primitive.Portal>
 		<Primitive.Content class="rh-menu" {align} sideOffset={6}>
-			{#each items as item, index (index)}
-				{#if item.separatorBefore}
-					<Primitive.Separator class="rh-menu__separator" />
+			{#each blocks as block, blockIndex (blockIndex)}
+				{#if block.group}
+					{#if block.items[0].separatorBefore}
+						<Primitive.Separator class="rh-menu__separator" />
+					{/if}
+					<Primitive.RadioGroup value={checkedValue(block)} onValueChange={() => {}}>
+						{#each block.items as item (item.label)}
+							<Primitive.RadioItem
+								class="rh-menu__item"
+								value={item.label}
+								disabled={item.disabled}
+								onSelect={item.onSelect}
+							>
+								<span class="rh-menu__check" aria-hidden="true">{item.checked ? '✓' : ''}</span>
+								{item.label}
+							</Primitive.RadioItem>
+						{/each}
+					</Primitive.RadioGroup>
+				{:else}
+					{#each block.items as item (item.label)}
+						{#if item.separatorBefore}
+							<Primitive.Separator class="rh-menu__separator" />
+						{/if}
+						<Primitive.Item
+							class="rh-menu__item{item.tone === 'danger' ? ' rh-menu__item--danger' : ''}"
+							disabled={item.disabled}
+							onSelect={item.onSelect}
+						>
+							{item.label}
+						</Primitive.Item>
+					{/each}
 				{/if}
-				<Primitive.Item
-					class="rh-menu__item{item.tone === 'danger' ? ' rh-menu__item--danger' : ''}"
-					disabled={item.disabled}
-					onSelect={item.onSelect}
-				>
-					{item.label}
-				</Primitive.Item>
 			{/each}
 		</Primitive.Content>
 	</Primitive.Portal>
@@ -97,6 +141,11 @@
 
 	:global(.rh-menu__item[data-disabled]) {
 		opacity: 0.5;
+	}
+
+	:global(.rh-menu__check) {
+		width: 1ch;
+		color: var(--rh-color-accent);
 	}
 
 	:global(.rh-menu__separator) {

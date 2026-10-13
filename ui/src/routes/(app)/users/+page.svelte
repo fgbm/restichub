@@ -3,16 +3,15 @@
 	import { ApiError, assignableRoles, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Role, User } from '#lib/api/index.ts';
 	import {
+		Alert,
 		Button,
-		DataTable,
-		FormField,
-		InlineAlert,
 		PageHeader,
 		Select,
 		SidePanel,
+		Table,
 		TextField
-	} from '#lib/components/index.ts';
-	import type { Column, SelectOption } from '#lib/components/index.ts';
+	} from '#lib/components/ui/index.ts';
+	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -61,7 +60,7 @@
 
 	// A shared account belongs to another tenant; the label tells a tenant Admin that it cannot
 	// reset the password or change the display name (ADR-0025).
-	const columns = $derived<Column<User>[]>([
+	const columns = $derived<TableColumn<User>[]>([
 		{
 			key: 'username',
 			header: t('users.username'),
@@ -173,11 +172,15 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{t('users.title')} · {t('app.name')}</title>
+</svelte:head>
+
 <PageHeader title={t('users.title')} description={t('users.description')}>
 	<Button variant="primary" onclick={openCreate}>{t('users.create')}</Button>
 </PageHeader>
 
-<DataTable {columns} rows={users} {loading} {error} rowKey={(user) => user.id}>
+<Table {columns} rows={users} {loading} {error} rowKey={(user) => user.id}>
 	{#snippet rowActions(user)}
 		<Button
 			size="sm"
@@ -198,68 +201,48 @@
 			{user.disabled ? t('users.enable') : t('users.disable')}
 		</Button>
 	{/snippet}
-</DataTable>
+</Table>
 
 <SidePanel bind:open={createOpen} title={t('users.createTitle')}>
 	{#if createError}
-		<InlineAlert tone="danger" title={createError} />
+		<Alert tone="danger" title={createError} />
 	{/if}
-	<FormField
+	<TextField
+		id="user-username"
 		label={t('users.username')}
-		for="user-username"
 		error={usernameTaken ? tErrorCode('username_taken') : fieldError(createProblem, 'username')}
+		bind:value={newUsername}
+		mono
+		autocomplete="off"
 		required
-	>
-		<TextField
-			id="user-username"
-			bind:value={newUsername}
-			invalid={usernameTaken || Boolean(fieldError(createProblem, 'username'))}
-			mono
-			autocomplete="off"
-		/>
-	</FormField>
-	<FormField
+	/>
+	<TextField
+		id="user-display-name"
 		label={t('users.displayName')}
-		for="user-display-name"
 		error={fieldError(createProblem, 'display_name')}
+		bind:value={newDisplayName}
+		autocomplete="off"
 		required
-	>
-		<TextField
-			id="user-display-name"
-			bind:value={newDisplayName}
-			invalid={Boolean(fieldError(createProblem, 'display_name'))}
-			autocomplete="off"
-		/>
-	</FormField>
-	<FormField
+	/>
+	<Select
+		id="user-role"
 		label={t('users.role')}
-		for="user-role"
 		error={fieldError(createProblem, 'role')}
+		bind:value={newRole}
+		options={roleOptions}
 		required
-	>
-		<Select
-			id="user-role"
-			bind:value={newRole}
-			options={roleOptions}
-			invalid={Boolean(fieldError(createProblem, 'role'))}
-		/>
-	</FormField>
-	<FormField
+	/>
+	<TextField
+		id="user-password"
 		label={t('setup.password')}
-		for="user-password"
-		hint={t('setup.passwordHint')}
+		help={t('setup.passwordHint')}
 		error={fieldError(createProblem, 'password')}
+		bind:value={newPassword}
+		type="password"
+		autocomplete="new-password"
 		required
-	>
-		<TextField
-			id="user-password"
-			type="password"
-			bind:value={newPassword}
-			invalid={Boolean(fieldError(createProblem, 'password'))}
-			autocomplete="new-password"
-		/>
-	</FormField>
-	<div class="panel-actions">
+	/>
+	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
 		<Button
 			variant="primary"
@@ -269,27 +252,23 @@
 		>
 			{t('common.create')}
 		</Button>
-	</div>
+	{/snippet}
 </SidePanel>
 
 <SidePanel bind:open={resetOpen} title={t('users.resetTitle')}>
 	{#if resetError}
-		<InlineAlert tone="danger" title={resetError} />
+		<Alert tone="danger" title={resetError} />
 	{/if}
-	<FormField
+	<TextField
+		id="user-reset-password"
 		label={t('setup.password')}
-		for="user-reset-password"
-		hint={t('setup.passwordHint')}
+		help={t('setup.passwordHint')}
+		bind:value={newResetPassword}
+		type="password"
+		autocomplete="new-password"
 		required
-	>
-		<TextField
-			id="user-reset-password"
-			type="password"
-			bind:value={newResetPassword}
-			autocomplete="new-password"
-		/>
-	</FormField>
-	<div class="panel-actions">
+	/>
+	{#snippet footer()}
 		<Button onclick={() => (resetOpen = false)}>{t('common.cancel')}</Button>
 		<Button
 			variant="primary"
@@ -299,14 +278,5 @@
 		>
 			{t('users.resetPassword')}
 		</Button>
-	</div>
+	{/snippet}
 </SidePanel>
-
-<style>
-	.panel-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: var(--rh-space-2);
-		margin-top: var(--rh-space-2);
-	}
-</style>

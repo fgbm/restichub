@@ -21,13 +21,29 @@ export interface MenuItem {
 	tone?: 'default' | 'danger';
 	disabled?: boolean;
 	separatorBefore?: boolean;
+	/** Items with the same group are exclusive; `checked` marks the current one. */
+	group?: string;
+	checked?: boolean;
 }
 
 export interface TableColumn<T> {
 	key: string;
 	header: string;
 	mono?: boolean;
+	/** Sort the column. Default: `true`. */
+	sortable?: boolean;
+	/** Align the cell text. Default: `left`. */
 	align?: 'left' | 'right' | 'center';
-	/** Cell text. Default: `String(row[key])`. */
+	/** Value used for sorting and filtering. Default: `String(row[key])`. */
+	value?: (row: T) => string;
+	/** Cell text. Default: the value. */
 	cell?: (row: T) => string;
+	badge?: (row: T) => BadgeTone | null;
+}
+
+export interface KeyValueItem {
+	key: string;
+	label: string;
+	value: string;
+	mono?: boolean;
 }

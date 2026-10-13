@@ -20,7 +20,8 @@
 		"format": "prettier --write .",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"gen:api": "openapi-typescript ${OPENAPI_URL:-http://127.0.0.1:8080/api/v1/openapi.json} -o src/lib/api/schema.d.ts"
+		"gen:api": "openapi-typescript ${OPENAPI_URL:-http://127.0.0.1:8080/api/v1/openapi.json} -o src/lib/api/schema.d.ts",
+		"test:e2e": "playwright test"
 	},
 	"overrides": {
 		"openapi-typescript": {
@@ -29,6 +30,7 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "10.0.1",
+		"@playwright/test": "1.64.0",
 		"@sveltejs/adapter-static": "4.0.0",
 		"@sveltejs/kit": "3.0.1",
 		"@sveltejs/vite-plugin-svelte": "7.3.1",

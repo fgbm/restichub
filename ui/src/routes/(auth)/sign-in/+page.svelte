@@ -3,9 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import type { PathnameWithSearchOrHash } from '$app/types';
 	import { ApiError, NetworkError, service } from '#lib/api/index.ts';
-	import { Button, FormField, InlineAlert, TextField } from '#lib/components/index.ts';
+	import { Alert, Button, PasswordField, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSetupRequired, loadInstance } from '#lib/stores/instance.svelte.ts';
 	import { setSession } from '#lib/stores/session.svelte.ts';
@@ -43,7 +42,7 @@
 			// The account is installation-wide; the sign-in asks for no tenant (ADR-0025).
 			const me = await service.signIn({ username, password });
 			setSession(me);
-			await goto(resolve(next.replace(/^\//, '') as PathnameWithSearchOrHash));
+			await goto(next);
 		} catch (error) {
 			if (error instanceof NetworkError) {
 				errorCode = 'network';
@@ -60,30 +59,34 @@
 	}
 </script>
 
+<svelte:head>
+	<title>{t('signIn.title')} · {t('app.name')}</title>
+</svelte:head>
+
 <h1 class="title">{t('signIn.title')}</h1>
 <p class="description">{t('signIn.description')}</p>
 
 {#if errorTitle}
 	<div class="alert">
-		<InlineAlert tone="danger" title={errorTitle} code={errorCode} />
+		<Alert tone="danger" title={errorTitle} code={errorCode} />
 	</div>
 {/if}
 
 <form class="form" onsubmit={onSubmit}>
-	<FormField label={t('signIn.username')} for="signin-username" required>
-		<TextField id="signin-username" bind:value={username} autocomplete="username" required />
-	</FormField>
-
-	<FormField label={t('signIn.password')} for="signin-password" required>
-		<TextField
-			id="signin-password"
-			type="password"
-			bind:value={password}
-			autocomplete="current-password"
-			required
-		/>
-	</FormField>
-
+	<TextField
+		id="signin-username"
+		label={t('signIn.username')}
+		bind:value={username}
+		autocomplete="username"
+		required
+	/>
+	<PasswordField
+		id="signin-password"
+		label={t('signIn.password')}
+		bind:value={password}
+		autocomplete="current-password"
+		required
+	/>
 	<Button type="submit" variant="primary" loading={submitting}>
 		{submitting ? t('signIn.submitting') : t('signIn.submit')}
 	</Button>

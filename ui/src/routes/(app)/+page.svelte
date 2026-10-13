@@ -3,6 +3,10 @@
 	import { t } from '#lib/i18n/index.ts';
 </script>
 
+<svelte:head>
+	<title>{t('overview.title')} · {t('app.name')}</title>
+</svelte:head>
+
 <PageHeader title={t('overview.title')} description={t('overview.description')} />
 
 <Card>

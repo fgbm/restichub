@@ -38,7 +38,7 @@
 
 	.copy-field__label {
 		font-size: var(--rh-font-size-sm);
-		font-weight: var(--rh-font-weight-medium);
+		font-weight: var(--rh-font-weight-semibold);
 		color: var(--rh-color-text);
 	}
 
@@ -53,8 +53,8 @@
 		min-width: 0;
 		padding: var(--rh-space-2) var(--rh-space-3);
 		border: var(--rh-border-width) solid var(--rh-color-border-strong);
-		border-radius: var(--rh-radius-sm);
-		background-color: var(--rh-color-surface-muted);
+		border-radius: var(--rh-radius-md);
+		background-color: var(--rh-color-canvas-subtle);
 		color: var(--rh-color-text);
 		font-family: var(--rh-font-mono);
 		font-size: var(--rh-font-size-sm);

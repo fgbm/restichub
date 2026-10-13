@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { t } from '#lib/i18n/index.ts';
 
-	type Tone = 'info' | 'success' | 'danger';
+	type Tone = 'info' | 'success' | 'warning' | 'danger';
 
 	let {
 		tone = 'info',
@@ -45,21 +45,26 @@
 		max-width: 420px;
 		padding: var(--rh-space-3) var(--rh-space-4);
 		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-left-width: 3px;
 		border-radius: var(--rh-radius-md);
 		background-color: var(--rh-color-surface);
 		box-shadow: var(--rh-shadow-overlay);
 	}
 
+	.toast--info {
+		border-left-color: var(--rh-color-info);
+	}
+
 	.toast--success {
-		border-left: 3px solid var(--rh-color-success);
+		border-left-color: var(--rh-color-success);
+	}
+
+	.toast--warning {
+		border-left-color: var(--rh-color-warning);
 	}
 
 	.toast--danger {
-		border-left: 3px solid var(--rh-color-danger);
-	}
-
-	.toast--info {
-		border-left: 3px solid var(--rh-color-info);
+		border-left-color: var(--rh-color-danger);
 	}
 
 	.toast__body {

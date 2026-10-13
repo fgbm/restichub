@@ -1,22 +1,39 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { t } from '#lib/i18n/index.ts';
 
 	type Tone = 'info' | 'success' | 'attention' | 'danger';
 
 	let {
 		tone = 'info',
 		title,
+		code,
+		requestId,
 		children
-	}: { tone?: Tone; title?: string; children?: Snippet } = $props();
+	}: {
+		tone?: Tone;
+		title: string;
+		code?: string;
+		requestId?: string;
+		children?: Snippet;
+	} = $props();
 </script>
 
 <div class="alert alert--{tone}" role={tone === 'danger' ? 'alert' : 'status'}>
 	<div class="alert__body">
-		{#if title}
-			<p class="alert__title">{title}</p>
-		{/if}
+		<p class="alert__title">{title}</p>
 		{#if children}
 			<div class="alert__text">{@render children()}</div>
+		{/if}
+		{#if code || requestId}
+			<p class="alert__meta">
+				{#if code}
+					<span>{t('alert.code')}: <code>{code}</code></span>
+				{/if}
+				{#if requestId}
+					<span>{t('alert.requestId')}: <code>{requestId}</code></span>
+				{/if}
+			</p>
 		{/if}
 	</div>
 </div>
@@ -63,5 +80,19 @@
 		margin-top: var(--rh-space-1);
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	.alert__meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--rh-space-4);
+		margin: var(--rh-space-2) 0 0;
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.alert__meta code {
+		padding: 0 var(--rh-space-1);
+		border-radius: var(--rh-radius-sm);
+		background-color: var(--rh-color-code-bg);
 	}
 </style>

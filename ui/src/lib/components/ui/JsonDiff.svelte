@@ -1,7 +1,7 @@
 <script lang="ts">
-	import Badge from './Badge.svelte';
 	import { t } from '#lib/i18n/index.ts';
 	import type { AuditChange, AuditDiff } from '#lib/api/index.ts';
+	import Badge from './Badge.svelte';
 
 	const REDACTED = '<redacted>';
 
@@ -102,7 +102,7 @@
 	.diff th,
 	.diff td {
 		padding: var(--rh-space-1) var(--rh-space-2);
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
+		border-bottom: var(--rh-border-width) solid var(--rh-color-border-muted);
 		text-align: left;
 		vertical-align: top;
 		overflow-wrap: anywhere;

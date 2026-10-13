@@ -27,7 +27,7 @@ The status refers to the code, not to the plan. The check reads the routes in `c
 
 The stage address is given to the testers outside the repository. It runs in multi-tenant mode with the image of the `main` branch. A Windows host with Docker is available for the benches.
 
-The sign-in screen asks for the tenant name. The Platform Admin enters `platform` as the tenant name. Issue #44 removes the tenant field from the sign-in screen.
+The sign-in screen asks for the username and the password only. The account is installation-wide, so the person selects the organization in the top bar after the sign-in (ADR-0025).
 
 ## 5. First run and sign-in
 
@@ -52,18 +52,33 @@ The sign-in screen asks for the tenant name. The Platform Admin enters `platform
 ### UC-SETUP-02: Sign in
 
 - **Actor:** the Platform Admin, an Admin, an Operator or a Viewer.
-- **Preconditions:** the account exists. The tenant is active.
+- **Preconditions:** the account exists. The organization is active.
 - **Main flow:**
   1. Open the stage address.
-  2. Enter the tenant name, the username and the password.
+  2. Enter the username and the password.
   3. Click "Sign in".
-- **Expected result:** the dashboard appears. The top bar shows the tenant name and the role of the person. The audit log holds a `sign_in` record.
+- **Expected result:** the dashboard appears. The top bar shows the organization switcher and the role of the person. The audit log holds a `sign_in` record.
 - **Alternative flows:**
-  - A wrong tenant name, username or password gives `invalid_credentials`.
+  - A wrong username or password gives `invalid_credentials`.
   - Many attempts from one address give `rate_limited`.
 - **Requirements:** FR-AU-03, FR-AU-04.
 - **Acceptance criteria:** AC-AU-01.
-- **Note:** the sign-in screen asks for the tenant name. The Platform Admin enters `platform`. Issue #44 removes the tenant field (AC-AU-03).
+- **Status:** Ready on the stage.
+
+### UC-SETUP-03: Switch the organization
+
+- **Actor:** a person with more than one membership.
+- **Preconditions:** the account exists. The person is signed in.
+- **Main flow:**
+  1. Open the organization menu in the top bar.
+  2. The menu lists the memberships of the person with the role and a check mark on the current organization.
+  3. Click another organization. The menu shows a filter when the person holds more than seven memberships.
+- **Expected result:** the toast "Switched to name" appears. Every screen reloads its data for the new organization. The audit log holds a `session_switch` record.
+- **Alternative flows:**
+  - A failed switch shows a toast with the error.
+  - A lost session redirects to the sign-in screen.
+- **Requirements:** FR-AU-04, FR-TN-02.
+- **Acceptance criteria:** AC-AU-01.
 - **Status:** Ready on the stage.
 
 ## 6. Platform Admin manages organizations
@@ -71,7 +86,7 @@ The sign-in screen asks for the tenant name. The Platform Admin enters `platform
 ### UC-ORG-01: Create an organization
 
 - **Actor:** the Platform Admin.
-- **Preconditions:** the person signs in as the Platform Admin in the platform tenant.
+- **Preconditions:** the person signs in as the Platform Admin.
 - **Main flow:**
   1. Open the "Organizations" screen in the "Platform" section.
   2. Click "Create an organization".
@@ -101,6 +116,22 @@ The sign-in screen asks for the tenant name. The Platform Admin enters `platform
   - The delete of an active organization is refused. Suspend it first.
 - **Requirements:** FR-TN-02.
 - **Acceptance criteria:** AC-TN-03.
+- **Status:** Ready on the stage.
+
+### UC-ORG-03: Switch the organization
+
+- **Actor:** a person with a membership in more than one organization.
+- **Preconditions:** the person is signed in. The account holds memberships in two or more organizations.
+- **Main flow:**
+  1. Click the organization name in the top bar.
+  2. The menu lists the memberships with the role and a mark on the current organization.
+  3. Click another organization.
+- **Expected result:** a toast reports the switch. Every screen reloads its data for the new organization. The audit log holds a `session_switch` record.
+- **Alternative flows:**
+  - A Platform Admin membership appears under a Platform heading in the same menu.
+  - A filter field appears in the menu when the account holds more than seven memberships.
+- **Requirements:** FR-TN-02.
+- **Acceptance criteria:** AC-AU-01.
 - **Status:** Ready on the stage.
 
 ## 7. Tenant admin manages users and roles
@@ -428,8 +459,10 @@ The sign-in screen asks for the tenant name. The Platform Admin enters `platform
 |---|---|---|---|
 | UC-SETUP-01 | FR-AU-03, FR-TN-02 | AC-TN-06 | Ready on the stage |
 | UC-SETUP-02 | FR-AU-03, FR-AU-04 | AC-AU-01 | Ready on the stage |
+| UC-SETUP-03 | FR-AU-04, FR-TN-02 | AC-AU-01 | Ready on the stage |
 | UC-ORG-01 | FR-TN-01, FR-TN-02 | AC-AU-01 | Ready on the stage |
 | UC-ORG-02 | FR-TN-02 | AC-TN-03 | Ready on the stage |
+| UC-ORG-03 | FR-TN-02 | AC-AU-01 | Ready on the stage |
 | UC-USR-01 | FR-TN-02, FR-AU-03 | AC-AU-02 | Ready on the stage |
 | UC-USR-02 | FR-TN-02 | AC-AU-02 | Ready on the stage |
 | UC-AGT-01 | FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01 | AC-ID-01, AC-ID-05 | Blocked by #1 |
