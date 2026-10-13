@@ -41,6 +41,8 @@ The token never reaches a file and never reaches a log.
 
 ## Install the service
 
+Put the agent where only `root` or an administrator can change it. The recommended path is `/opt/restichub-agent` on Linux and `%ProgramFiles%\ResticHub\Agent` on Windows. The command refuses a binary that another account can write, and a directory that SYSTEM and Administrators do not own alone (threat T20).
+
 Run the command as `root` on Linux, or as an administrator on Windows:
 
 ```sh
@@ -51,9 +53,11 @@ On Linux the command writes `/etc/systemd/system/restichub-agent.service` and en
 
 ## The systemd hardening trade-off
 
-The systemd unit hardens the service: `NoNewPrivileges=true`, `ProtectSystem=strict`, `PrivateTmp=true` and an empty capability set.
+The unit keeps five capabilities: `CAP_DAC_READ_SEARCH`, `CAP_DAC_OVERRIDE`, `CAP_CHOWN`, `CAP_FOWNER` and `CAP_FSETID`. Restic runs as `root`, so these five are the only capabilities that the bounding set keeps. Without them restic cannot read a file of another account, or keep the owner and the mode of a restored file.
 
-`ProtectSystem=strict` makes the whole file system read-only. The unit keeps the identity directory writable through `ReadWritePaths`. Restic reads the backup sources, and a read-only view permits a read. Restic writes to a local repository. Add every local repository path to `ReadWritePaths`. Without this change a backup to a local repository fails.
+`ProtectSystem=strict` makes the whole file system read-only, except the identity directory through `ReadWritePaths` and the cache directory. A read of a backup source stays possible. Restic writes to a local repository, so add every local repository path to `ReadWritePaths`. `ProtectHome` stays off, because a backup source is often below `/home`.
+
+The unit sets `CacheDirectory=restichub-agent` and `RESTIC_CACHE_DIR=/var/cache/restichub-agent`, so the restic cache stays in a directory that the unit can write.
 
 ## The restic binary
 
