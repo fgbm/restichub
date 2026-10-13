@@ -31,7 +31,7 @@ $$;
 GRANT USAGE, CREATE ON SCHEMA public TO restichub_auth;
 GRANT SELECT, UPDATE ON enrollment_tokens TO restichub_auth;
 
-CREATE FUNCTION enroll_consume_token(token bytea, at_time timestamptz)
+CREATE FUNCTION enroll_consume_token(token bytea)
 RETURNS TABLE (outcome text, tenant_id uuid, token_id uuid, labels text[])
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -61,20 +61,20 @@ BEGIN
         RETURN QUERY SELECT 'revoked'::text, found_tenant, found_id, found_labels;
         RETURN;
     END IF;
-    IF found_expires <= at_time THEN
+    IF found_expires <= now() THEN
         RETURN QUERY SELECT 'expired'::text, found_tenant, found_id, found_labels;
         RETURN;
     END IF;
-    UPDATE public.enrollment_tokens AS entry SET used_at = at_time WHERE entry.id = found_id;
+    UPDATE public.enrollment_tokens AS entry SET used_at = now() WHERE entry.id = found_id;
     RETURN QUERY SELECT 'consumed'::text, found_tenant, found_id, found_labels;
 END
 $$;
 
-ALTER FUNCTION enroll_consume_token(bytea, timestamptz) OWNER TO restichub_auth;
+ALTER FUNCTION enroll_consume_token(bytea) OWNER TO restichub_auth;
 
-REVOKE ALL ON FUNCTION enroll_consume_token(bytea, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION enroll_consume_token(bytea) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION enroll_consume_token(bytea, timestamptz) TO restichub_app;
+GRANT EXECUTE ON FUNCTION enroll_consume_token(bytea) TO restichub_app;
 
 -- The definer role creates no object after the migration (N5). It keeps USAGE.
 REVOKE CREATE ON SCHEMA public FROM restichub_auth;

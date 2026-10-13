@@ -20,8 +20,8 @@ use time::{Duration, OffsetDateTime};
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
 use common::{
-    AGENT_ENDPOINT, app_with_pki, create_tenant, create_user, request, seed_enrollment_token_value,
-    seed_session, send,
+    AGENT_ENDPOINT, app_with_ca_without_signing_keys, app_with_pki, count, create_tenant,
+    create_user, request, seed_enrollment_token_value, seed_session, send,
 };
 
 /// Builds a certificate signing request with an ECDSA P-256 key (ADR-0026).
@@ -506,4 +506,222 @@ async fn ac_id_01_concurrent_requests_with_one_token_create_one_agent() {
     assert_eq!(agents_of(&app, &reader).await.len(), 1);
 
     db.cleanup().await;
+}
+
+/// The request policy reads the curve from the public key, not from the signature algorithm.
+///
+/// A P-384 key with an `ecdsa-with-SHA256` signature names the P-256 algorithm in the signature
+/// OID, so a check that reads the signature algorithm alone accepts it.
+#[tokio::test]
+async fn a_p384_key_with_a_sha256_signature_is_refused() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let Some(csr) = p384_sha256_csr() else {
+        println!("skipped: openssl is not on PATH, so the test cannot build the request");
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-p384-sha256").await;
+    let creator = create_user(db.database(), tenant, "enroll-admin", "phc", "admin").await;
+    let (token, id) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &[],
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    )
+    .await;
+    let app = app_with_pki(db.database()).await;
+
+    let (status, problem) = enroll(&app, &token, &csr).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem.get("field").and_then(Value::as_str), Some("csr"));
+
+    // The request check runs before the token lookup, so the token stays unused.
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let entry = enrollment_tokens::get(&mut tx, id)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"))
+        .expect("the token row is present");
+    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        entry.used_at.is_none(),
+        "a bad request must not spend the token"
+    );
+
+    db.cleanup().await;
+}
+
+/// A bad certificate signing request does not spend a live token: the same token still enrolls.
+#[tokio::test]
+async fn a_live_token_and_a_bad_csr_leave_the_token_unused() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let Some(rsa) = rsa_csr() else {
+        println!("skipped: openssl is not on PATH, so the test cannot build the request");
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-bad-csr").await;
+    let creator = create_user(db.database(), tenant, "enroll-admin", "phc", "admin").await;
+    let (token, id) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &[],
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    )
+    .await;
+    let app = app_with_pki(db.database()).await;
+
+    let (status, problem) = enroll(&app, &token, &rsa).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem.get("field").and_then(Value::as_str), Some("csr"));
+
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let entry = enrollment_tokens::get(&mut tx, id)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"))
+        .expect("the token row is present");
+    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        entry.used_at.is_none(),
+        "the bad request must not spend the token"
+    );
+
+    // The same token still enrols with a valid request.
+    let (status, response) = enroll(&app, &token, &p256_csr()).await;
+    assert_eq!(status, StatusCode::CREATED, "{response}");
+
+    db.cleanup().await;
+}
+
+/// A missing job signing key set refuses the enrollment with HTTP 500 and spends no token.
+#[tokio::test]
+async fn a_missing_signing_key_set_refuses_without_spending_the_token() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-no-keys").await;
+    let creator = create_user(db.database(), tenant, "enroll-admin", "phc", "admin").await;
+    let (token, id) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &[],
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    )
+    .await;
+    let app = app_with_ca_without_signing_keys(db.database()).await;
+
+    let (status, _) = enroll(&app, &token, &p256_csr()).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let entry = enrollment_tokens::get(&mut tx, id)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"))
+        .expect("the token row is present");
+    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        entry.used_at.is_none(),
+        "the missing key set must not spend the token"
+    );
+    assert_eq!(count(db.database(), tenant, "agents").await, 0);
+
+    db.cleanup().await;
+}
+
+fn openssl_available() -> bool {
+    std::process::Command::new("openssl")
+        .arg("version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn temp_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("restichub-enroll-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).expect("cannot create the temporary directory");
+    dir
+}
+
+/// Builds a P-384 key request signed with SHA-256, so the signature OID names P-256.
+fn p384_sha256_csr() -> Option<Vec<u8>> {
+    if !openssl_available() {
+        return None;
+    }
+    let dir = temp_dir();
+    let key = dir.join("key.pem");
+    let csr = dir.join("csr.der");
+    let generated = std::process::Command::new("openssl")
+        .args(["ecparam", "-name", "secp384r1", "-genkey", "-noout"])
+        .arg("-out")
+        .arg(&key)
+        .output()
+        .ok()?;
+    if !generated.status.success() {
+        std::fs::remove_dir_all(&dir).ok();
+        return None;
+    }
+    let requested = std::process::Command::new("openssl")
+        .args(["req", "-new", "-key"])
+        .arg(&key)
+        .args(["-sha256", "-subj", "/CN=agent", "-outform", "DER"])
+        .arg("-out")
+        .arg(&csr)
+        .output()
+        .ok()?;
+    let der = requested
+        .status
+        .success()
+        .then(|| std::fs::read(&csr).expect("cannot read the P-384 request"));
+    std::fs::remove_dir_all(&dir).ok();
+    der
+}
+
+/// Builds an RSA request with openssl.
+fn rsa_csr() -> Option<Vec<u8>> {
+    if !openssl_available() {
+        return None;
+    }
+    let dir = temp_dir();
+    let key = dir.join("key.pem");
+    let csr = dir.join("csr.der");
+    let requested = std::process::Command::new("openssl")
+        .args([
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=agent",
+        ])
+        .arg("-keyout")
+        .arg(&key)
+        .arg("-outform")
+        .arg("DER")
+        .arg("-out")
+        .arg(&csr)
+        .output()
+        .ok()?;
+    let der = requested
+        .status
+        .success()
+        .then(|| std::fs::read(&csr).expect("cannot read the RSA request"));
+    std::fs::remove_dir_all(&dir).ok();
+    der
 }

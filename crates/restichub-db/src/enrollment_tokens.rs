@@ -296,20 +296,18 @@ pub enum EnrollmentConsume {
 /// atomic consume under one row lock. On a hit the function returns the tenant, so the caller
 /// continues in a tenant transaction and creates the agent row in the same transaction; a consumed
 /// token therefore never stays without an agent. The caller records the refusal reason in the
-/// tenant of the refused token.
+/// tenant of the refused token. The function reads the time from the database server, so a clock of
+/// a control plane instance never moves the expiry boundary.
 pub async fn consume_for_enrollment(
     tx: &mut EnrollmentTx<'_>,
     token_hash: &[u8],
-    now: OffsetDateTime,
 ) -> Result<EnrollmentConsume, DbError> {
-    let row: Option<(String, Uuid, Uuid, Vec<String>)> = sqlx::query_as(
-        "SELECT outcome, tenant_id, token_id, labels FROM enroll_consume_token($1, $2)",
-    )
-    .bind(token_hash)
-    .bind(now)
-    .fetch_optional(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
+    let row: Option<(String, Uuid, Uuid, Vec<String>)> =
+        sqlx::query_as("SELECT outcome, tenant_id, token_id, labels FROM enroll_consume_token($1)")
+            .bind(token_hash)
+            .fetch_optional(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
     let Some((outcome, tenant_id, token_id, labels)) = row else {
         return Ok(EnrollmentConsume::Unknown);
     };

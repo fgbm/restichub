@@ -268,6 +268,31 @@ pub async fn app_with_pki(db: &Database) -> Router {
     )
 }
 
+/// Builds a router with a certificate authority but no job signing key set.
+///
+/// The enrollment endpoint builds the signed key set before it consumes the token, so this router
+/// refuses an enrollment without spending the token.
+pub async fn app_with_ca_without_signing_keys(db: &Database) -> Router {
+    let provider = test_kek();
+    let ca = restichub_cp::pki::CaService::new(provider.clone());
+    let store = ca
+        .ensure_initialized(db)
+        .await
+        .expect("cannot create the CA");
+    let job_signing = restichub_cp::job_signing::JobSigningService::new(provider.clone());
+    let auth = AuthState::new(AuthConfig::default());
+    router(
+        AppState::with_auth(db.clone(), auth)
+            .with_kek(provider)
+            .with_tenancy(TenancyConfig::multi())
+            .with_pki(
+                Arc::new(store),
+                job_signing,
+                Some(AGENT_ENDPOINT.to_owned()),
+            ),
+    )
+}
+
 /// Creates an enrollment token with a known value, so a test can send it to the endpoint.
 pub async fn seed_enrollment_token_value(
     db: &Database,

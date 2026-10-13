@@ -215,7 +215,7 @@ async fn ac_id_01_the_exchange_consumes_a_token_across_tenants_and_returns_its_t
     // The exchange starts without a tenant. The function consumes the token of tenant B and the
     // transaction continues as a tenant transaction of tenant B.
     let mut tx = db.database().begin_enrollment().await?;
-    match enrollment_tokens::consume_for_enrollment(&mut tx, &hash_b, now).await? {
+    match enrollment_tokens::consume_for_enrollment(&mut tx, &hash_b).await? {
         EnrollmentConsume::Consumed {
             tenant_id, labels, ..
         } => {
@@ -230,7 +230,7 @@ async fn ac_id_01_the_exchange_consumes_a_token_across_tenants_and_returns_its_t
 
     // A second exchange sees the used token and still names the tenant for the audit.
     let mut tx = db.database().begin_enrollment().await?;
-    match enrollment_tokens::consume_for_enrollment(&mut tx, &hash_b, now).await? {
+    match enrollment_tokens::consume_for_enrollment(&mut tx, &hash_b).await? {
         EnrollmentConsume::Refused {
             tenant_id, reason, ..
         } => {
@@ -244,7 +244,7 @@ async fn ac_id_01_the_exchange_consumes_a_token_across_tenants_and_returns_its_t
     // An unknown hash names no tenant, so the exchange writes no audit record.
     let mut tx = db.database().begin_enrollment().await?;
     assert!(matches!(
-        enrollment_tokens::consume_for_enrollment(&mut tx, &[9u8; 32], now).await?,
+        enrollment_tokens::consume_for_enrollment(&mut tx, &[9u8; 32]).await?,
         EnrollmentConsume::Unknown
     ));
     tx.commit().await?;

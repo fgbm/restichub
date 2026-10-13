@@ -14,6 +14,9 @@
 //! The consume of the token and the create of the agent row run in one transaction, so a consumed
 //! token never stays without an agent. The refusal record commits in the transaction of the
 //! refused token's tenant.
+//!
+//! The request is checked and the signed key set is built before the token is consumed, so a bad
+//! request or a missing key set never spends a token and never reveals the token state.
 
 use axum::Json;
 use axum::extract::State;
@@ -96,10 +99,28 @@ pub async fn enroll(
     let agent_version = validation::validate_token_name("agent_version", &body.agent_version)?;
     let restic_version = validation::validate_token_name("restic_version", &body.restic_version)?;
 
+    // The request checks run before the token lookup: a bad request never spends a token and never
+    // reveals the token state (AC-IN-02).
+    crate::pki::validate_enrollment_csr(&csr_der).map_err(map_ca_error)?;
+    let store = state
+        .ca()
+        .ok_or_else(|| ApiError::internal("the certificate authority is not loaded"))?;
+    let job_signing = state
+        .job_signing()
+        .ok_or_else(|| ApiError::internal("the job signing key set is not loaded"))?;
+
     let now = state.auth().clock.now();
+    // Build the signed key set before the consume, so a missing key set fails with the token
+    // untouched and no agent row.
+    let update = job_signing.key_update(state.db(), now).await?;
+    let mut key_update_bytes = Vec::new();
+    update
+        .encode(&mut key_update_bytes)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+
     let token_hash = crate::token::hash_token(&body.token);
     let mut tx = state.db().begin_enrollment().await?;
-    let consume = enrollment_tokens::consume_for_enrollment(&mut tx, &token_hash, now).await?;
+    let consume = enrollment_tokens::consume_for_enrollment(&mut tx, &token_hash).await?;
 
     match consume {
         EnrollmentConsume::Unknown => {
@@ -124,12 +145,6 @@ pub async fn enroll(
             token_id,
             labels,
         } => {
-            let store = state
-                .ca()
-                .ok_or_else(|| ApiError::internal("the certificate authority is not loaded"))?;
-            let job_signing = state
-                .job_signing()
-                .ok_or_else(|| ApiError::internal("the job signing key set is not loaded"))?;
             let agent_id = AgentId::new();
             let issued = store
                 .issue_agent_certificate(tenant_id.as_uuid(), agent_id.as_uuid(), &csr_der)
@@ -171,12 +186,6 @@ pub async fn enroll(
             .await?;
             tx.commit().await?;
 
-            let update = job_signing.key_update(state.db(), now).await?;
-            let mut bytes = Vec::new();
-            update
-                .encode(&mut bytes)
-                .map_err(|error| ApiError::internal(error.to_string()))?;
-
             tracing::info!(%source_ip, %tenant_id, %agent_id, "agent enrolled");
             Ok((
                 StatusCode::CREATED,
@@ -190,7 +199,7 @@ pub async fn enroll(
                         .map(|der| STANDARD.encode(der))
                         .collect(),
                     certificate_expires_at: format_time(issued.not_after),
-                    signing_key_update: STANDARD.encode(&bytes),
+                    signing_key_update: STANDARD.encode(&key_update_bytes),
                     grpc_endpoint: state.agent_endpoint().map(str::to_owned),
                 }),
             ))

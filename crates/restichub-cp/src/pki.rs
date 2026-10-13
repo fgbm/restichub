@@ -383,6 +383,7 @@ impl CaStore {
             CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(csr_der))
                 .map_err(CaError::BadCsr)?;
         validate_csr(&csr, &expected_uri)?;
+        validate_spki_p256(csr_der)?;
 
         let issuing = self.current_issuing().ok_or(CaError::NoIssuingCa)?;
         let issuer = self.current_issuer().ok_or(CaError::NoIssuingCa)?;
@@ -721,6 +722,62 @@ fn validate_csr(csr: &CertificateSigningRequestParams, expected_uri: &str) -> Re
         }
     }
     Ok(())
+}
+
+/// Checks the enrollment request before the token is consumed (FR-ID-02, ADR-0026).
+///
+/// The enrollment endpoint runs the function before the consume, so a malformed request never
+/// spends a token and a request error never reveals the token state. The function verifies the
+/// request signature, refuses a CA flag and a subject alternative name (the control plane sets the
+/// identity URI itself) and refuses a public key that is not an uncompressed ECDSA P-256 point. It
+/// needs no agent identity, so it runs before the token lookup.
+pub fn validate_enrollment_csr(csr_der: &[u8]) -> Result<(), CaError> {
+    let csr =
+        CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(csr_der))
+            .map_err(CaError::BadCsr)?;
+    if !matches!(csr.params.is_ca, IsCa::NoCa) {
+        return Err(CaError::CsrCaFlag);
+    }
+    if !csr.params.subject_alt_names.is_empty() {
+        return Err(CaError::CsrExtraSan);
+    }
+    validate_spki_p256(csr_der)
+}
+
+/// Refuses a public key that is not an uncompressed ECDSA P-256 point (ADR-0026).
+///
+/// The check reads the curve from the SubjectPublicKeyInfo. `rcgen` names the key algorithm after
+/// the signature algorithm of the request, so a P-384 key with an `ecdsa-with-SHA256` signature
+/// would pass a check that reads the signature algorithm alone.
+fn validate_spki_p256(csr_der: &[u8]) -> Result<(), CaError> {
+    use x509_parser::certification_request::X509CertificationRequest;
+    use x509_parser::oid_registry::{OID_EC_P256, OID_KEY_TYPE_EC_PUBLIC_KEY};
+    use x509_parser::prelude::FromDer;
+    use x509_parser::public_key::PublicKey;
+
+    let (_, csr) =
+        X509CertificationRequest::from_der(csr_der).map_err(|_| CaError::CsrKeyAlgorithm)?;
+    let spki = &csr.certification_request_info.subject_pki;
+    if spki.algorithm.algorithm != OID_KEY_TYPE_EC_PUBLIC_KEY {
+        return Err(CaError::CsrKeyAlgorithm);
+    }
+    let curve = spki
+        .algorithm
+        .parameters
+        .as_ref()
+        .and_then(|parameters| parameters.as_oid().ok())
+        .ok_or(CaError::CsrKeyAlgorithm)?;
+    if curve != OID_EC_P256 {
+        return Err(CaError::CsrKeyAlgorithm);
+    }
+    match spki.parsed() {
+        Ok(PublicKey::EC(point))
+            if point.data().first() == Some(&0x04) && point.data().len() == 65 =>
+        {
+            Ok(())
+        }
+        _ => Err(CaError::CsrKeyAlgorithm),
+    }
 }
 
 #[cfg(test)]
