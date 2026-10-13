@@ -8,6 +8,7 @@ Read this file before you change the repository.
 2. [design/acceptance-criteria.md](design/acceptance-criteria.md): acceptance criteria with IDs.
 3. [design/adr/](design/adr/): accepted decisions. Do not act against an accepted ADR. To change a decision, propose a new ADR.
 4. [design/threat-model.md](design/threat-model.md): security assumptions.
+5. [design/use-cases.md](design/use-cases.md): acceptance use cases for the manual acceptance.
 
 ## Rules
 
