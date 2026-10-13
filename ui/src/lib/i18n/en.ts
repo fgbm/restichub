@@ -34,7 +34,7 @@ export const en = {
 	'topbar.yourTenants': 'Your organizations',
 	'topbar.switchTenant': 'Switch organization',
 	'topbar.filterTenants': 'Filter organizations',
-	'topbar.platform': 'Platform',
+	'topbar.noOrganizations': 'No organizations',
 	'topbar.switched': 'You switched to {name}.',
 
 	// Common
@@ -117,6 +117,7 @@ export const en = {
 	'overview.title': 'Overview',
 	'overview.description': 'The state of the installation.',
 	'overview.placeholder': 'This section shows the state of the installation in a later version.',
+	'overview.noOrganizations': 'You hold no organization. Ask an administrator to add you to one.',
 
 	// Organizations
 	'tenants.title': 'Organizations',
@@ -185,6 +186,11 @@ export const en = {
 	'platformUsers.memberships': 'Memberships',
 	'platformUsers.emailTaken': 'This email is taken.',
 	'platformUsers.selectOrganization': 'Select an organization',
+	'platformUsers.platformAdmin': 'Platform Admin',
+	'platformUsers.grantAdmin': 'Grant the Platform Admin right',
+	'platformUsers.revokeAdmin': 'Remove the Platform Admin right',
+	'platformUsers.rightGranted': 'The Platform Admin right is granted.',
+	'platformUsers.rightRemoved': 'The Platform Admin right is removed.',
 
 	// API tokens
 	'tokens.title': 'API tokens',

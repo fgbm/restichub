@@ -16,10 +16,12 @@
 	let { children }: { children: Snippet } = $props();
 
 	const session = $derived(getSession());
-	// Single mode hides the platform section (ADR-0024).
+	// Single mode hides the platform section (ADR-0024). The platform section appears with the
+	// Platform Admin right; the administration section needs a current organization (ADR-0029).
 	const sections = $derived(
-		navSectionsForRole(session?.role ?? null).filter(
-			(section) => !(isSingleTenant() && section.platform)
+		navSectionsForRole(session?.role ?? null, session?.platform_admin ?? false).filter(
+			(section) =>
+				!(isSingleTenant() && section.platform) && (section.platform || !!session?.tenant)
 		)
 	);
 	const pathname = $derived(page.url.pathname);
@@ -37,6 +39,8 @@
 	);
 
 	const accountItems = $derived<MenuItem[]>([
+		// The Platform Admin right appears on the account menu, not as an organization (ADR-0029).
+		...(session?.platform_admin ? [{ label: t('users.role.platformAdmin') }] : []),
 		{
 			label: t('topbar.theme.light'),
 			group: 'theme',
@@ -134,10 +138,14 @@
 	</header>
 
 	<nav class="tabs" aria-label={t('nav.primary')}>
-		{#each sections as section (section.labelKey)}
+		{#each sections as section, index (section.labelKey)}
+			{#if section.platform && index > 0}
+				<span class="tabs__divider" aria-hidden="true"></span>
+			{/if}
 			{#each section.items as item (item.href)}
 				<a
 					class="tab"
+					class:tab--platform={section.platform}
 					href={resolve(item.href)}
 					aria-current={isActive(item.href) ? 'page' : undefined}
 				>
@@ -322,6 +330,23 @@
 		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
 		border-bottom-color: var(--rh-color-accent);
+	}
+
+	.tabs__divider {
+		align-self: center;
+		width: 1px;
+		height: 22px;
+		margin: 0 var(--rh-space-2);
+		background-color: var(--rh-color-border);
+	}
+
+	.tab--platform {
+		color: var(--rh-color-accent);
+	}
+
+	.tab--platform:hover,
+	.tab--platform[aria-current='page'] {
+		color: var(--rh-color-accent);
 	}
 
 	.page {

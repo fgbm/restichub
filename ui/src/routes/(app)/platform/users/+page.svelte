@@ -5,6 +5,7 @@
 	import {
 		Alert,
 		Button,
+		Checkbox,
 		PageHeader,
 		Select,
 		SidePanel,
@@ -33,6 +34,7 @@
 	let newPassword = $state('');
 	let newTenantId = $state('');
 	let newRole = $state<Role>('viewer');
+	let newPlatformAdmin = $state(false);
 
 	let manageOpen = $state(false);
 	let manageUser = $state<PlatformUser | null>(null);
@@ -70,6 +72,12 @@
 			key: 'email',
 			header: t('platformUsers.email'),
 			cell: (row) => row.email ?? ''
+		},
+		{
+			key: 'platform_admin',
+			header: t('platformUsers.platformAdmin'),
+			cell: (row) => (row.platform_admin ? t('platformUsers.platformAdmin') : t('common.none')),
+			badge: (row) => (row.platform_admin ? 'accent' : null)
 		},
 		{
 			key: 'disabled',
@@ -115,6 +123,7 @@
 		newPassword = '';
 		newTenantId = '';
 		newRole = 'viewer';
+		newPlatformAdmin = false;
 		createError = null;
 		createProblem = null;
 		createOpen = true;
@@ -130,6 +139,7 @@
 				display_name: newDisplayName,
 				email: newEmail.trim() === '' ? null : newEmail,
 				password: newPassword,
+				platform_admin: newPlatformAdmin,
 				memberships: newTenantId ? [{ tenant_id: newTenantId, role: newRole }] : []
 			});
 			pushToast('success', t('platformUsers.created'));
@@ -204,6 +214,22 @@
 		manageUser = accounts.find((account) => account.id === manageUser?.id) ?? null;
 	}
 
+	async function togglePlatformAdmin(user: PlatformUser): Promise<void> {
+		busyKey = `right:${user.id}`;
+		try {
+			await service.updatePlatformUser(user.id, { platform_admin: !user.platform_admin });
+			pushToast(
+				'success',
+				user.platform_admin ? t('platformUsers.rightRemoved') : t('platformUsers.rightGranted')
+			);
+			await load();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			busyKey = null;
+		}
+	}
+
 	async function toggleDisabled(user: PlatformUser): Promise<void> {
 		busyKey = `disable:${user.id}`;
 		try {
@@ -230,6 +256,15 @@
 	{#snippet rowActions(user)}
 		<Button size="sm" variant="ghost" onclick={() => openManage(user)}>
 			{t('platformUsers.memberships')}
+		</Button>
+		<Button
+			size="sm"
+			variant="ghost"
+			loading={busyKey === `right:${user.id}`}
+			title={user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin')}
+			onclick={() => togglePlatformAdmin(user)}
+		>
+			{user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin')}
 		</Button>
 		<Button
 			size="sm"
@@ -281,6 +316,11 @@
 		type="password"
 		autocomplete="new-password"
 		required
+	/>
+	<Checkbox
+		id="platform-user-admin"
+		label={t('platformUsers.platformAdmin')}
+		bind:checked={newPlatformAdmin}
 	/>
 	<Select
 		id="platform-user-tenant"
