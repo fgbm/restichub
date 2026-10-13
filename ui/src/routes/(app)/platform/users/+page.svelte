@@ -286,56 +286,53 @@
 	title={t('platformUsers.title')}
 	description={t('platformUsers.description')}
 	count={loading ? undefined : accounts.length}
-	bordered
 >
 	<Button variant="primary" icon="plus" onclick={openCreate}>{t('platformUsers.create')}</Button>
 </PageHeader>
 
-<div class="accounts">
-	<Table
-		{columns}
-		rows={accounts}
-		{loading}
-		{error}
-		rowKey={(user) => user.id}
-		filterPlaceholder={t('users.searchPlaceholder')}
-	>
-		{#snippet rowActions(user)}
-			<span class="row-actions">
-				<Button
-					size="sm"
-					icon="users"
-					title={t('platformUsers.memberships')}
-					aria-label={t('platformUsers.membershipsFor', { name: user.username })}
-					onclick={() => openManage(user)}
-				/>
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('users.moreActions', { name: user.username })}
-					items={[
-						{
-							label: user.platform_admin
-								? t('platformUsers.revokeAdmin')
-								: t('platformUsers.grantAdmin'),
-							icon: 'shield',
-							disabled: busyKey !== null,
-							onSelect: () => (user.platform_admin ? revokeRight(user) : openGrant(user))
-						},
-						{
-							label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
-							icon: 'octagon',
-							tone: 'danger',
-							separatorBefore: true,
-							disabled: busyKey !== null,
-							onSelect: () => toggleDisabled(user)
-						}
-					]}
-				/>
-			</span>
-		{/snippet}
-	</Table>
-</div>
+<Table
+	{columns}
+	rows={accounts}
+	{loading}
+	{error}
+	rowKey={(user) => user.id}
+	filterPlaceholder={t('users.searchPlaceholder')}
+>
+	{#snippet rowActions(user)}
+		<span class="row-actions">
+			<Button
+				size="sm"
+				icon="users"
+				title={t('platformUsers.memberships')}
+				aria-label={t('platformUsers.membershipsFor', { name: user.username })}
+				onclick={() => openManage(user)}
+			/>
+			<DropdownMenu
+				icon="more"
+				align="end"
+				label={t('users.moreActions', { name: user.username })}
+				items={[
+					{
+						label: user.platform_admin
+							? t('platformUsers.revokeAdmin')
+							: t('platformUsers.grantAdmin'),
+						icon: 'shield',
+						disabled: busyKey !== null,
+						onSelect: () => (user.platform_admin ? revokeRight(user) : openGrant(user))
+					},
+					{
+						label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
+						icon: 'octagon',
+						tone: 'danger',
+						separatorBefore: true,
+						disabled: busyKey !== null,
+						onSelect: () => toggleDisabled(user)
+					}
+				]}
+			/>
+		</span>
+	{/snippet}
+</Table>
 
 <Dialog bind:open={createOpen} title={t('platformUsers.createTitle')} onsubmit={createUser}>
 	{#if createError}
@@ -492,10 +489,6 @@
 </Dialog>
 
 <style>
-	.accounts {
-		margin-top: var(--rh-space-4);
-	}
-
 	.row-actions {
 		display: inline-flex;
 		gap: var(--rh-space-1);

@@ -153,46 +153,43 @@
 	title={t('tenants.title')}
 	description={t('tenants.description')}
 	count={loading ? undefined : tenants.length}
-	bordered
 >
 	<Button variant="primary" icon="plus" onclick={openCreate}>{t('tenants.create')}</Button>
 </PageHeader>
 
-<div class="tenants">
-	<Table
-		{columns}
-		rows={tenants}
-		{loading}
-		{error}
-		rowKey={(tenant) => tenant.id}
-		filterPlaceholder={t('tenants.searchPlaceholder')}
-	>
-		{#snippet rowActions(tenant)}
-			{#if tenant.status !== 'deleted'}
-				<Button
-					size="sm"
-					variant="ghost"
-					loading={busyId === tenant.id}
-					onclick={() => toggleStatus(tenant)}
-				>
-					{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
-				</Button>
-				<Button
-					size="sm"
-					variant="ghost"
-					disabled={tenant.status !== 'suspended'}
-					onclick={() => {
-						deleteTarget = tenant;
-						deleteTyped = '';
-						deleteOpen = true;
-					}}
-				>
-					{t('common.delete')}
-				</Button>
-			{/if}
-		{/snippet}
-	</Table>
-</div>
+<Table
+	{columns}
+	rows={tenants}
+	{loading}
+	{error}
+	rowKey={(tenant) => tenant.id}
+	filterPlaceholder={t('tenants.searchPlaceholder')}
+>
+	{#snippet rowActions(tenant)}
+		{#if tenant.status !== 'deleted'}
+			<Button
+				size="sm"
+				variant="ghost"
+				loading={busyId === tenant.id}
+				onclick={() => toggleStatus(tenant)}
+			>
+				{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
+			</Button>
+			<Button
+				size="sm"
+				variant="ghost"
+				disabled={tenant.status !== 'suspended'}
+				onclick={() => {
+					deleteTarget = tenant;
+					deleteTyped = '';
+					deleteOpen = true;
+				}}
+			>
+				{t('common.delete')}
+			</Button>
+		{/if}
+	{/snippet}
+</Table>
 
 <Dialog bind:open={createOpen} title={t('tenants.createTitle')} onsubmit={createTenant}>
 	{#if createError}
@@ -245,9 +242,3 @@
 		</Button>
 	{/snippet}
 </Dialog>
-
-<style>
-	.tenants {
-		margin-top: var(--rh-space-4);
-	}
-</style>

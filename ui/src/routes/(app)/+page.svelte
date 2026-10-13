@@ -82,7 +82,7 @@
 	<title>{t('overview.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<PageHeader title={t('overview.title')} description={t('overview.description')} bordered />
+<PageHeader title={t('overview.title')} description={t('overview.description')} />
 
 {#if hasTenant}
 	<div class="overview">

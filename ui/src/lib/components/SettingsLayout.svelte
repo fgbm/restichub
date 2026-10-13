@@ -25,7 +25,7 @@
 	const pathname = $derived(page.url.pathname);
 </script>
 
-<PageHeader {title} {description} {count} bordered children={actions} />
+<PageHeader {title} {description} {count} children={actions} />
 
 <div class="settings">
 	<nav class="subnav" aria-label={t('settings.sections')}>

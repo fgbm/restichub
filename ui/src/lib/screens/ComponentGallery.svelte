@@ -132,7 +132,6 @@
 	<PageHeader
 		title="Components"
 		description="Every element in its states, with the same tokens as the mockups."
-		bordered
 	/>
 
 	<section>

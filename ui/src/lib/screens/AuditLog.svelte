@@ -253,7 +253,7 @@
 	{/if}
 {/snippet}
 
-<PageHeader {title} description={t('audit.description')} bordered />
+<PageHeader {title} description={t('audit.description')} />
 
 <Panel title={t('audit.filters.title')}>
 	{#snippet actions()}

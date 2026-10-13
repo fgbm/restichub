@@ -5,19 +5,17 @@
 		title,
 		description,
 		count,
-		bordered = false,
 		children
 	}: {
 		title: string;
 		description?: string;
 		/** A counter next to the title, for example the number of rows. */
 		count?: number;
-		bordered?: boolean;
 		children?: Snippet;
 	} = $props();
 </script>
 
-<header class="page-header" class:page-header--bordered={bordered}>
+<header class="page-header">
 	<div class="page-header__text">
 		<div class="page-header__title-row">
 			<h1 class="page-header__title">{title}</h1>
@@ -37,11 +35,7 @@
 		display: flex;
 		align-items: flex-start;
 		gap: var(--rh-space-4);
-		padding-bottom: var(--rh-space-4);
-	}
-
-	.page-header--bordered {
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
+		padding-bottom: var(--rh-space-6);
 	}
 
 	.page-header__title-row {

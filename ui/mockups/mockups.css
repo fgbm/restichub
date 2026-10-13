@@ -674,7 +674,7 @@ button {
 	display: flex;
 	align-items: flex-start;
 	gap: var(--space-4);
-	padding-bottom: var(--space-4);
+	padding-bottom: var(--space-6);
 }
 .page-title {
 	font-size: var(--fs-xl);
@@ -695,9 +695,6 @@ button {
 	gap: var(--space-2);
 	flex-wrap: wrap;
 	justify-content: flex-end;
-}
-.page-header--bordered {
-	border-bottom: 1px solid var(--color-border);
 }
 
 .layout-split {

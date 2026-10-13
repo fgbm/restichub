@@ -191,57 +191,54 @@
 	title={t('hosts.title')}
 	description={t('hosts.description')}
 	count={loading ? undefined : agents.length}
-	bordered
 >
 	{#if canWrite}
 		<Button variant="primary" icon="plus" onclick={openAdd}>{t('hosts.add')}</Button>
 	{/if}
 </PageHeader>
 
-<div class="hosts">
-	{#if empty}
-		<EmptyState
-			icon="host"
-			title={t('hosts.emptyTitle')}
-			description={t('hosts.emptyDescription')}
-			bordered
-		>
-			{#if canWrite}
-				<Button variant="primary" onclick={openAdd}>{t('hosts.addFirst')}</Button>
-			{/if}
-		</EmptyState>
-	{:else}
-		<Table
-			{columns}
-			rows={agents}
-			{loading}
-			{error}
-			rowKey={(agent) => agent.id}
-			filterPlaceholder={t('hosts.searchPlaceholder')}
-		>
-			{#snippet rowActions(agent)}
-				{#if canWrite && agent.status === 'active'}
-					<DropdownMenu
-						icon="more"
-						align="end"
-						label={t('hosts.moreActions', { name: agent.hostname })}
-						items={[
-							{
-								label: t('hosts.revokeAgent'),
-								icon: 'octagon',
-								tone: 'danger',
-								onSelect: () => {
-									revokeTarget = agent;
-									revokeOpen = true;
-								}
+{#if empty}
+	<EmptyState
+		icon="host"
+		title={t('hosts.emptyTitle')}
+		description={t('hosts.emptyDescription')}
+		bordered
+	>
+		{#if canWrite}
+			<Button variant="primary" onclick={openAdd}>{t('hosts.addFirst')}</Button>
+		{/if}
+	</EmptyState>
+{:else}
+	<Table
+		{columns}
+		rows={agents}
+		{loading}
+		{error}
+		rowKey={(agent) => agent.id}
+		filterPlaceholder={t('hosts.searchPlaceholder')}
+	>
+		{#snippet rowActions(agent)}
+			{#if canWrite && agent.status === 'active'}
+				<DropdownMenu
+					icon="more"
+					align="end"
+					label={t('hosts.moreActions', { name: agent.hostname })}
+					items={[
+						{
+							label: t('hosts.revokeAgent'),
+							icon: 'octagon',
+							tone: 'danger',
+							onSelect: () => {
+								revokeTarget = agent;
+								revokeOpen = true;
 							}
-						]}
-					/>
-				{/if}
-			{/snippet}
-		</Table>
-	{/if}
-</div>
+						}
+					]}
+				/>
+			{/if}
+		{/snippet}
+	</Table>
+{/if}
 
 <Dialog
 	bind:open={addOpen}
@@ -293,10 +290,6 @@
 </Dialog>
 
 <style>
-	.hosts {
-		margin-top: var(--rh-space-4);
-	}
-
 	.host {
 		display: flex;
 		flex-direction: column;
