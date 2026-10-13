@@ -520,3 +520,54 @@ async fn db_an_account_function_without_the_settings_fails_closed() -> TestResul
     db.cleanup().await;
     Ok(())
 }
+
+/// A tenant-scope transaction cannot change the membership of a Platform Admin (ADR-0029). The
+/// trigger refuses the write at the database level, below the API check.
+#[tokio::test]
+async fn db_a_tenant_scope_cannot_change_a_platform_admin_membership() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+
+    // A Platform Admin account with one membership in tenant A.
+    let platform_admin = crate::UserId::new();
+    let mut tx = db.database().begin_platform().await?;
+    let status = crate::users::platform_create_account(
+        &mut tx,
+        platform_admin,
+        &crate::users::NewPlatformAccount {
+            username: "pa-member",
+            password_hash: "phc",
+            display_name: "PA",
+            email: None,
+            platform_admin: true,
+        },
+    )
+    .await?;
+    assert_eq!(status, crate::users::CreateAccountStatus::Ok);
+    assert!(
+        crate::auth::add_membership(&mut tx, platform_admin, tenant_a, crate::Role::Admin).await?,
+        "the membership is added in the platform scope"
+    );
+    tx.commit().await?;
+
+    // The tenant transaction cannot change or remove the membership.
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    assert!(
+        crate::memberships::set_role(&mut tx, platform_admin, crate::Role::Viewer)
+            .await
+            .is_err(),
+        "the tenant scope must not change the role"
+    );
+    assert!(
+        crate::memberships::set_disabled(&mut tx, platform_admin, true)
+            .await
+            .is_err(),
+        "the tenant scope must not disable the membership"
+    );
+    drop(tx);
+
+    db.cleanup().await;
+    Ok(())
+}

@@ -6,9 +6,13 @@
 -- keys and the platform audit records reference it, so the row stays, but no membership points to
 -- it and no user-facing list shows it.
 --
--- The platform API token keeps the role `platform_admin` in the platform tenant only. The creator
--- of a platform token holds no membership in the platform tenant, so the creator-membership
--- trigger skips the platform tenant.
+-- The MVP holds no platform-scope API token. Every API token of the platform tenant with the role
+-- `platform_admin` is revoked (the rows stay); the code refuses to create or to authenticate one.
+-- A later record may add a platform token bound to its creator.
+--
+-- A tenant-scope write on a Platform Admin account is refused: the tenant Admin of an organization
+-- must not change an account that holds the installation-wide right. The guard lives in the
+-- administrator functions and in a trigger on `memberships`.
 
 DO $$
 BEGIN
@@ -28,10 +32,13 @@ ALTER TABLE memberships NO FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE users ADD COLUMN platform_admin boolean NOT NULL DEFAULT false;
 
--- Each `platform_admin` membership becomes the right of its account.
+-- Each enabled `platform_admin` membership becomes the right of its account. A disabled membership
+-- is a revoked Platform Admin and gives no right.
 UPDATE users
 SET platform_admin = true
-WHERE id IN (SELECT user_id FROM memberships WHERE role = 'platform_admin');
+WHERE id IN (
+    SELECT user_id FROM memberships WHERE role = 'platform_admin' AND NOT disabled
+);
 
 DELETE FROM memberships WHERE role = 'platform_admin';
 
@@ -89,6 +96,226 @@ BEGIN
     END IF;
     RETURN NEW;
 END
+$$;
+
+-- The MVP holds no platform-scope API token. Every platform token is revoked; the rows stay for the
+-- audit trail (ADR-0029). The revoke runs after the creator-membership trigger skips the platform
+-- tenant, so the update passes.
+ALTER TABLE api_tokens NO FORCE ROW LEVEL SECURITY;
+
+UPDATE api_tokens
+SET revoked_at = now()
+WHERE tenant_id = '00000000-0000-7000-8000-000000000000'::uuid
+  AND role = 'platform_admin'
+  AND revoked_at IS NULL;
+
+ALTER TABLE api_tokens FORCE ROW LEVEL SECURITY;
+
+-- A tenant-scope write to the membership of a Platform Admin is refused: the Admin of an
+-- organization must not change the role, disable or remove the membership of an account that holds
+-- the installation-wide right (ADR-0029). The platform scope and the platform tenant manage it.
+-- The function runs as its owner, so it reads the right of the account.
+CREATE FUNCTION check_platform_admin_membership() RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    target uuid;
+BEGIN
+    IF current_setting('restichub.scope', true) IS NOT DISTINCT FROM 'platform'
+       OR NULLIF(current_setting('restichub.tenant_id', true), '')::uuid
+          = '00000000-0000-7000-8000-000000000000'::uuid
+    THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RETURN NEW;
+    END IF;
+    target := CASE WHEN TG_OP = 'DELETE' THEN OLD.user_id ELSE NEW.user_id END;
+    IF EXISTS (SELECT 1 FROM public.users WHERE id = target AND platform_admin) THEN
+        RAISE EXCEPTION
+            'the organization scope may not change the membership of the Platform Admin %',
+            target
+            USING ERRCODE = '42501';
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+CREATE TRIGGER memberships_platform_admin_guard
+    BEFORE INSERT OR UPDATE OR DELETE ON memberships
+    FOR EACH ROW EXECUTE FUNCTION check_platform_admin_membership();
+
+-- An administrator write of the account password. It also refuses a Platform Admin from a tenant
+-- scope (ADR-0029). The status is `ok`, `not_found`, `shared` or `forbidden`.
+CREATE OR REPLACE FUNCTION auth_admin_set_password(account_id uuid, new_password_hash text)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    current_tenant uuid := NULLIF(current_setting('restichub.tenant_id', true), '')::uuid;
+BEGIN
+    PERFORM 1 FROM public.users WHERE id = account_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN 'not_found';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.memberships
+        WHERE user_id = account_id AND tenant_id = current_tenant
+    ) THEN
+        RETURN 'not_found';
+    END IF;
+    IF current_tenant <> '00000000-0000-7000-8000-000000000000'::uuid
+       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
+       AND EXISTS (
+           SELECT 1 FROM public.users WHERE id = account_id AND platform_admin
+       ) THEN
+        RETURN 'forbidden';
+    END IF;
+    IF current_tenant <> '00000000-0000-7000-8000-000000000000'::uuid
+       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
+       AND EXISTS (
+           SELECT 1
+           FROM public.memberships AS member
+           JOIN public.tenants AS tenant ON tenant.id = member.tenant_id
+           WHERE member.user_id = account_id
+             AND member.tenant_id <> current_tenant
+             AND tenant.status <> 'deleted'
+       ) THEN
+        RETURN 'shared';
+    END IF;
+    UPDATE public.users
+    SET password_hash = new_password_hash, updated_at = now()
+    WHERE id = account_id;
+    RETURN 'ok';
+END
+$$;
+
+-- An administrator write of the account display name. The same rule as `auth_admin_set_password`.
+CREATE OR REPLACE FUNCTION auth_admin_set_display_name(account_id uuid, new_display_name text)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    current_tenant uuid := NULLIF(current_setting('restichub.tenant_id', true), '')::uuid;
+BEGIN
+    PERFORM 1 FROM public.users WHERE id = account_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN 'not_found';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.memberships
+        WHERE user_id = account_id AND tenant_id = current_tenant
+    ) THEN
+        RETURN 'not_found';
+    END IF;
+    IF current_tenant <> '00000000-0000-7000-8000-000000000000'::uuid
+       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
+       AND EXISTS (
+           SELECT 1 FROM public.users WHERE id = account_id AND platform_admin
+       ) THEN
+        RETURN 'forbidden';
+    END IF;
+    IF current_tenant <> '00000000-0000-7000-8000-000000000000'::uuid
+       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
+       AND EXISTS (
+           SELECT 1
+           FROM public.memberships AS member
+           JOIN public.tenants AS tenant ON tenant.id = member.tenant_id
+           WHERE member.user_id = account_id
+             AND member.tenant_id <> current_tenant
+             AND tenant.status <> 'deleted'
+       ) THEN
+        RETURN 'shared';
+    END IF;
+    UPDATE public.users
+    SET display_name = new_display_name, updated_at = now()
+    WHERE id = account_id;
+    RETURN 'ok';
+END
+$$;
+
+-- The member reads also return the Platform Admin right, so a tenant Admin refuses the write before
+-- the database guard (ADR-0029).
+DROP FUNCTION auth_tenant_members();
+
+CREATE FUNCTION auth_tenant_members()
+RETURNS TABLE (
+    user_id uuid,
+    username text,
+    display_name text,
+    role text,
+    disabled boolean,
+    account_disabled boolean,
+    shared boolean,
+    last_used_tenant_id uuid,
+    platform_admin boolean
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT account.id, account.username, account.display_name, member.role, member.disabled,
+           account.disabled,
+           EXISTS (
+               SELECT 1
+               FROM public.memberships AS other
+               JOIN public.tenants AS other_tenant ON other_tenant.id = other.tenant_id
+               WHERE other.user_id = account.id
+                 AND other.tenant_id <> member.tenant_id
+                 AND other_tenant.status <> 'deleted'
+           ),
+           account.last_used_tenant_id,
+           account.platform_admin
+    FROM public.memberships AS member
+    JOIN public.users AS account ON account.id = member.user_id
+    WHERE member.tenant_id = NULLIF(current_setting('restichub.tenant_id', true), '')::uuid
+    ORDER BY account.username
+$$;
+
+DROP FUNCTION auth_tenant_member(uuid);
+
+CREATE FUNCTION auth_tenant_member(account_id uuid)
+RETURNS TABLE (
+    user_id uuid,
+    username text,
+    display_name text,
+    role text,
+    disabled boolean,
+    account_disabled boolean,
+    shared boolean,
+    last_used_tenant_id uuid,
+    platform_admin boolean
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT account.id, account.username, account.display_name, member.role, member.disabled,
+           account.disabled,
+           EXISTS (
+               SELECT 1
+               FROM public.memberships AS other
+               JOIN public.tenants AS other_tenant ON other_tenant.id = other.tenant_id
+               WHERE other.user_id = account.id
+                 AND other.tenant_id <> member.tenant_id
+                 AND other_tenant.status <> 'deleted'
+           ),
+           account.last_used_tenant_id,
+           account.platform_admin
+    FROM public.memberships AS member
+    JOIN public.users AS account ON account.id = member.user_id
+    WHERE member.tenant_id = NULLIF(current_setting('restichub.tenant_id', true), '')::uuid
+      AND member.user_id = account_id
+    LIMIT 1
 $$;
 
 -- The account lookups also return the Platform Admin right.
@@ -308,6 +535,11 @@ BEGIN
 END
 $$;
 
+ALTER FUNCTION check_platform_admin_membership() OWNER TO restichub_auth;
+ALTER FUNCTION auth_admin_set_password(uuid, text) OWNER TO restichub_auth;
+ALTER FUNCTION auth_admin_set_display_name(uuid, text) OWNER TO restichub_auth;
+ALTER FUNCTION auth_tenant_members() OWNER TO restichub_auth;
+ALTER FUNCTION auth_tenant_member(uuid) OWNER TO restichub_auth;
 ALTER FUNCTION tenant_admin_counts() OWNER TO restichub_auth;
 ALTER FUNCTION auth_find_account(text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_find_account_by_id(uuid) OWNER TO restichub_auth;
@@ -318,6 +550,11 @@ ALTER FUNCTION auth_platform_admin_count() OWNER TO restichub_auth;
 ALTER FUNCTION auth_is_platform_admin(uuid) OWNER TO restichub_auth;
 ALTER FUNCTION auth_set_platform_admin(uuid, boolean) OWNER TO restichub_auth;
 
+REVOKE ALL ON FUNCTION check_platform_admin_membership() FROM PUBLIC;
+REVOKE ALL ON FUNCTION auth_admin_set_password(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION auth_admin_set_display_name(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION auth_tenant_members() FROM PUBLIC;
+REVOKE ALL ON FUNCTION auth_tenant_member(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION tenant_admin_counts() FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_find_account(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_find_account_by_id(uuid) FROM PUBLIC;
@@ -328,6 +565,10 @@ REVOKE ALL ON FUNCTION auth_platform_admin_count() FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_is_platform_admin(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_set_platform_admin(uuid, boolean) FROM PUBLIC;
 
+GRANT EXECUTE ON FUNCTION auth_admin_set_password(uuid, text) TO restichub_app;
+GRANT EXECUTE ON FUNCTION auth_admin_set_display_name(uuid, text) TO restichub_app;
+GRANT EXECUTE ON FUNCTION auth_tenant_members() TO restichub_app;
+GRANT EXECUTE ON FUNCTION auth_tenant_member(uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION tenant_admin_counts() TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_find_account(text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_find_account_by_id(uuid) TO restichub_app;

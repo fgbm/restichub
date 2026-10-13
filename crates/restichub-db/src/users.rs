@@ -54,6 +54,8 @@ pub struct Member {
     pub account_disabled: bool,
     /// The account holds a membership in another tenant that is not deleted.
     pub shared: bool,
+    /// True when the account holds the installation-wide right (ADR-0029).
+    pub platform_admin: bool,
 }
 
 /// The result of an account write of the database functions (migration 0017).
@@ -257,7 +259,8 @@ pub async fn set_last_tenant(
 /// Lists the members of the tenant of the transaction: the accounts with a membership in it.
 pub async fn list_members(tx: &mut TenantTx<'_>) -> Result<Vec<Member>, DbError> {
     let rows = sqlx::query_as::<_, MemberRow>(
-        "SELECT user_id, username, display_name, role, disabled, account_disabled, shared \
+        "SELECT user_id, username, display_name, role, disabled, account_disabled, shared, \
+                platform_admin \
          FROM auth_tenant_members()",
     )
     .fetch_all(tx.as_conn())
@@ -269,7 +272,8 @@ pub async fn list_members(tx: &mut TenantTx<'_>) -> Result<Vec<Member>, DbError>
 /// Reads one member of the tenant of the transaction. `None` when the account is not a member.
 pub async fn get_member(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<Member>, DbError> {
     let row = sqlx::query_as::<_, MemberRow>(
-        "SELECT user_id, username, display_name, role, disabled, account_disabled, shared \
+        "SELECT user_id, username, display_name, role, disabled, account_disabled, shared, \
+                platform_admin \
          FROM auth_tenant_member($1)",
     )
     .bind(id)
@@ -454,11 +458,12 @@ pub async fn platform_set_email(
     WriteStatus::parse(&status)
 }
 
-type MemberRow = (Uuid, String, String, Role, bool, bool, bool);
+type MemberRow = (Uuid, String, String, Role, bool, bool, bool, bool);
 
 impl From<MemberRow> for Member {
     fn from(row: MemberRow) -> Self {
-        let (id, username, display_name, role, disabled, account_disabled, shared) = row;
+        let (id, username, display_name, role, disabled, account_disabled, shared, platform_admin) =
+            row;
         Self {
             id: UserId::from_uuid(id),
             username,
@@ -467,6 +472,7 @@ impl From<MemberRow> for Member {
             disabled,
             account_disabled,
             shared,
+            platform_admin,
         }
     }
 }
