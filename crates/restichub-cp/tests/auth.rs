@@ -114,10 +114,16 @@ async fn sign_in_failures_are_identical() {
     common::seed_memberless_account(&db, "orphan", &orphan_hash).await;
     let app = app(db.database());
 
-    // An unknown account, a wrong password and an account with no active membership.
+    // Wrong credentials: an unknown account and a wrong password.
     let (s1, _, b1) = sign_in(&app, "failures", "nobody", "correct horse battery").await;
     let (s2, _, b2) = sign_in(&app, "failures", "alice", "wrong password value").await;
+    // An account with no active membership signs in with no organization (ADR-0029).
     let (s3, _, b3) = sign_in(&app, "failures", "orphan", "correct horse battery").await;
+    assert_eq!(s3, StatusCode::OK, "{b3}");
+    assert!(
+        b3.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{b3}"
+    );
 
     // Disabled account.
     // Only the platform tenant disables the account itself (ADR-0025).
@@ -137,7 +143,7 @@ async fn sign_in_failures_are_identical() {
     set_tenant_status(db.database(), tenant, "suspended").await;
     let (s5, _, b5) = sign_in(&app, "failures", "alice", "correct horse battery").await;
 
-    for (status, body) in [(s1, &b1), (s2, &b2), (s3, &b3), (s4, &b4), (s5, &b5)] {
+    for (status, body) in [(s1, &b1), (s2, &b2), (s4, &b4), (s5, &b5)] {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(
             body.get("code").and_then(Value::as_str),

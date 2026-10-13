@@ -70,6 +70,23 @@ impl Operation {
     pub fn is_tenant_only(self) -> bool {
         matches!(self, Self::SecretsRead | Self::SecretsWrite)
     }
+
+    /// Returns true if the operation reads or writes tenant data.
+    ///
+    /// The platform tenant is internal and holds no tenant data (ADR-0029). A session with no
+    /// organization runs in the platform tenant, so these operations are refused there (HTTP 403).
+    pub fn is_tenant_data(self) -> bool {
+        matches!(
+            self,
+            Self::AuditRead
+                | Self::UsersRead
+                | Self::UsersWrite
+                | Self::ApiTokensRead
+                | Self::ApiTokensWrite
+                | Self::SecretsRead
+                | Self::SecretsWrite
+        )
+    }
 }
 
 /// The role that an operation needs (ADR-0023, section Roles).
@@ -152,6 +169,9 @@ pub struct RequestContext {
     pub tenant_id: TenantId,
     pub actor: Actor,
     pub role: Role,
+    /// True when the account holds the installation-wide right (ADR-0029). It is the authority for
+    /// a platform operation, independent of the session tenant.
+    pub platform_admin: bool,
     /// Absent for an API token.
     pub session_id: Option<SessionId>,
     pub source_ip: Option<IpAddr>,
@@ -167,6 +187,7 @@ impl RequestContext {
             tenant_id,
             actor,
             role,
+            platform_admin: false,
             session_id: None,
             source_ip: None,
             session_expires_at: None,
@@ -174,15 +195,19 @@ impl RequestContext {
         }
     }
 
-    /// Checks the role of the context against the minimum role of the operation.
+    /// Checks the right of the context against the operation.
     ///
-    /// A platform operation needs the platform tenant too. A tenant-only operation is refused in
-    /// the platform tenant.
+    /// A platform operation needs the Platform Admin right (ADR-0029). A tenant-only operation is
+    /// refused in the platform tenant.
     pub fn authorize(&self, operation: Operation) -> Result<(), ApiError> {
-        if operation.is_platform() && self.tenant_id != restichub_db::PLATFORM_TENANT_ID {
-            return Err(ApiError::forbidden());
+        if operation.is_platform() {
+            return if self.platform_admin {
+                Ok(())
+            } else {
+                Err(ApiError::forbidden())
+            };
         }
-        if operation.is_tenant_only() && self.tenant_id == restichub_db::PLATFORM_TENANT_ID {
+        if operation.is_tenant_data() && self.tenant_id == restichub_db::PLATFORM_TENANT_ID {
             return Err(ApiError::forbidden());
         }
         if self.role.allows(minimum_role(operation)) {
@@ -287,21 +312,39 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
     if tenant.is_none_or(|tenant| tenant.status != restichub_db::TenantStatus::Active) {
         return Err(ApiError::unauthenticated());
     }
-    // The account lives in the platform tenant, so the member read goes through the definer
-    // function of migration 0017 (ADR-0025).
-    let member = users::get_member(&mut tx, lookup.user_id).await?;
-    let Some(member) = member else {
+    // The account holds the Platform Admin right (ADR-0029). A session with no organization has the
+    // internal platform tenant as its session tenant and no membership.
+    let account = users::find_account_by_id(state.db(), lookup.user_id).await?;
+    let Some(account) = account else {
         return Err(ApiError::unauthenticated());
     };
-    if member.account_disabled || member.disabled {
+    if account.disabled {
         return Err(ApiError::unauthenticated());
     }
+    let role = if lookup.tenant_id == restichub_db::PLATFORM_TENANT_ID {
+        if !account.platform_admin {
+            return Err(ApiError::unauthenticated());
+        }
+        Role::PlatformAdmin
+    } else {
+        // The account lives in the platform tenant, so the member read goes through the definer
+        // function of migration 0017 (ADR-0025).
+        let member = users::get_member(&mut tx, lookup.user_id).await?;
+        let Some(member) = member else {
+            return Err(ApiError::unauthenticated());
+        };
+        if member.disabled {
+            return Err(ApiError::unauthenticated());
+        }
+        member.role
+    };
     sessions::touch(&mut tx, lookup.session_id, now).await?;
     tx.commit().await?;
     Ok(RequestContext {
         tenant_id: lookup.tenant_id,
         actor: Actor::User(lookup.user_id),
-        role: member.role,
+        role,
+        platform_admin: account.platform_admin,
         session_id: Some(lookup.session_id),
         source_ip: None,
         session_expires_at: Some(lookup.expires_at),
@@ -328,12 +371,15 @@ async fn authenticate_bearer(state: &AppState, value: &str) -> Result<RequestCon
         return Err(ApiError::unauthenticated());
     }
     let role = lookup.role;
+    // A platform API token carries the Platform Admin right (ADR-0029).
+    let platform_admin = role == Role::PlatformAdmin;
     api_tokens::touch(&mut tx, lookup.token_id, now).await?;
     tx.commit().await?;
     Ok(RequestContext {
         tenant_id: lookup.tenant_id,
         actor: Actor::ApiToken(lookup.token_id),
         role,
+        platform_admin,
         session_id: None,
         source_ip: None,
         session_expires_at: None,

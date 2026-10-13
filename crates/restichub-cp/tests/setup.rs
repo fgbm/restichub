@@ -147,6 +147,36 @@ async fn the_setup_creates_the_first_platform_admin_once() {
         Some("platform_admin")
     );
 
+    // AC-AU-11: the first account holds the right and no membership. It signs in and reaches the
+    // platform screens (ADR-0029).
+    assert_eq!(common::platform_admin_count(db.database()).await, 1);
+    assert_eq!(
+        common::count(db.database(), PLATFORM_TENANT_ID, "memberships").await,
+        0
+    );
+    let sign_in = json!({"username": "root", "password": "a long enough password"});
+    let (status, cookie, me) = send(
+        &app,
+        request("POST", "/api/v1/auth/sign-in", None, Some(sign_in)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(
+        me.get("platform_admin").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        me.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{me}"
+    );
+    let cookie = cookie.expect("a session cookie");
+    let (status, _, _) = send(
+        &app,
+        request("GET", "/api/v1/platform/tenants", Some(&cookie), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     let (_, _, body) = send(&app, request("GET", "/api/v1/setup/status", None, None)).await;
     assert_eq!(
         body.get("setup_required").and_then(Value::as_bool),
@@ -201,12 +231,8 @@ async fn two_parallel_setup_calls_leave_exactly_one_admin() {
         1,
         "exactly one setup call must succeed: {statuses:?}"
     );
-    assert_eq!(
-        common::list_users(db.database(), PLATFORM_TENANT_ID)
-            .await
-            .len(),
-        1
-    );
+    // The setup creates one account with the Platform Admin right and no membership (ADR-0029).
+    assert_eq!(common::platform_admin_count(db.database()).await, 1);
 
     db.cleanup().await;
 }

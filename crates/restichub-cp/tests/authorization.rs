@@ -6,7 +6,7 @@ mod common;
 use axum::http::StatusCode;
 use restichub_cp::context::{Access, Operation, minimum_role};
 use restichub_cp::routes::ROUTES;
-use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens, memberships};
+use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens};
 use serde_json::Value;
 
 use common::{app, app_with_kek, create_tenant_with_key, create_user, request, seed_session, send};
@@ -160,11 +160,11 @@ async fn ac_au_02_role_operation_matrix() {
             let (status, _, _) = send(&app, request(&method, &path, Some(&cookie), body)).await;
 
             let allowed_by_role = role.rank() >= minimum.rank();
-            // A platform operation needs the platform tenant. A tenant-only operation is refused
-            // in the platform tenant.
+            // A platform operation needs the Platform Admin right (ADR-0029). A tenant data
+            // operation is refused in the platform tenant, which holds no organization.
             let tenant_ok = if operation.is_platform() {
                 role == Role::PlatformAdmin
-            } else if operation.is_tenant_only() {
+            } else if operation.is_tenant_data() {
                 session_tenant != PLATFORM_TENANT_ID
             } else {
                 true
@@ -222,7 +222,7 @@ async fn ac_au_02_platform_tenant_refuses_a_lower_role() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    // The platform tenant holds the platform_admin role only.
+    // The platform Admin holds the account right and no membership (ADR-0029).
     let user = create_user(
         db.database(),
         PLATFORM_TENANT_ID,
@@ -232,22 +232,7 @@ async fn ac_au_02_platform_tenant_refuses_a_lower_role() {
     )
     .await;
 
-    // A membership with a lower role in the platform tenant is refused by the database.
-    let mut tx = db
-        .database()
-        .begin_tenant(PLATFORM_TENANT_ID)
-        .await
-        .unwrap_or_else(|e| panic!("{e}"));
-    let membership = memberships::set_role(&mut tx, user, Role::Admin).await;
-    assert!(
-        membership
-            .as_ref()
-            .is_err_and(|error| error.is_check_violation()),
-        "{membership:?}"
-    );
-    drop(tx);
-
-    // An API token with a lower role in the platform tenant is refused too.
+    // An API token with a lower role in the platform tenant is refused.
     let mut tx = db
         .database()
         .begin_tenant(PLATFORM_TENANT_ID)

@@ -20,7 +20,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
 use restichub_db::tenants::{self as tenant_repo, BootstrapAdmin, BootstrapTenant};
-use restichub_db::{PLATFORM_TENANT_ID, Role, SetupTokenId, TenantId, setup, users};
+use restichub_db::{PLATFORM_TENANT_ID, Role, SetupTokenId, TenantId, UserId, setup, users};
 use restichub_secrets::{generate_dek, wrap_dek};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -111,8 +111,15 @@ async fn setup_required_db(
     db: &restichub_db::Database,
     tenancy: &TenancyConfig,
 ) -> Result<bool, restichub_db::DbError> {
-    let tenant_id = match tenancy.mode {
-        TenancyMode::Multi => PLATFORM_TENANT_ID,
+    match tenancy.mode {
+        // In multi mode the setup is required while no account holds the Platform Admin right
+        // (ADR-0029).
+        TenancyMode::Multi => {
+            let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
+            let count = users::platform_admin_count(&mut tx).await?;
+            tx.commit().await?;
+            Ok(count == 0)
+        }
         TenancyMode::Single => {
             let tenant = {
                 let mut tx = db.begin_platform().await?;
@@ -120,16 +127,15 @@ async fn setup_required_db(
                 tx.commit().await?;
                 tenant
             };
-            match tenant {
-                Some(tenant) => tenant.id,
-                None => return Ok(true),
-            }
+            let Some(tenant) = tenant else {
+                return Ok(true);
+            };
+            let mut tx = db.begin_tenant(tenant.id).await?;
+            let count = setup::user_count(&mut tx).await?;
+            tx.commit().await?;
+            Ok(count == 0)
         }
-    };
-    let mut tx = db.begin_tenant(tenant_id).await?;
-    let count = setup::user_count(&mut tx).await?;
-    tx.commit().await?;
-    Ok(count == 0)
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -287,7 +293,7 @@ async fn setup_multi(
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(PLATFORM_TENANT_ID).await?;
     tx.lock(SETUP_LOCK).await?;
-    if setup::user_count(&mut tx).await? > 0 {
+    if users::platform_admin_count(&mut tx).await? > 0 {
         return Err(ApiError::conflict());
     }
     let hash = token::hash_token(setup_token);
@@ -297,16 +303,21 @@ async fn setup_multi(
     };
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, password.to_owned()).await?;
-    let user_id = users::create_member(
+    // The first account holds the Platform Admin right and no membership (ADR-0029).
+    let user_id = UserId::new();
+    let created = users::create_platform_admin(
         &mut tx,
+        user_id,
         &users::NewUser {
             username,
             password_hash: &password_hash,
             display_name,
         },
-        PLATFORM_ADMIN_ROLE,
     )
     .await?;
+    if !created {
+        return Err(ApiError::conflict());
+    }
     let marked = setup::mark_used(&mut tx, token_id, now).await?;
     if !marked {
         return Err(ApiError::conflict());
@@ -321,20 +332,22 @@ async fn setup_multi(
         Some(&serde_json::json!({
             "username": username,
             "display_name": display_name,
-            "role": PLATFORM_ADMIN_ROLE.as_str(),
+            "platform_admin": true,
         })),
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
-    let member = users::get_member(&mut tx, user_id).await?;
     tx.commit().await?;
-    let Some(member) = member else {
-        return Err(ApiError::internal(
-            "the created Platform Admin is not found after the read",
-        ));
+    let user = UserView {
+        id: user_id.to_string(),
+        username: username.to_owned(),
+        display_name: display_name.to_owned(),
+        disabled: false,
+        role: PLATFORM_ADMIN_ROLE,
+        shared: false,
     };
     tracing::info!("the first Platform Admin is created");
-    Ok((StatusCode::CREATED, Json(UserView::from_member(&member))))
+    Ok((StatusCode::CREATED, Json(user)))
 }
 
 /// Finds the unused, unexpired setup token in the platform tenant.
