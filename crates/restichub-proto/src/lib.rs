@@ -12,9 +12,7 @@ pub const PROTOCOL_VERSION_MAJOR: u32 = 1;
 /// only. See `AgentHello` and `ServerHello`.
 pub const PROTOCOL_VERSION_MINOR: u32 = 0;
 
-/// Messages and services of the `restichub.agent.v1` package.
 pub mod agent {
-    /// Version 1 of the agent protocol.
     pub mod v1 {
         tonic::include_proto!("restichub.agent.v1");
     }
@@ -25,5 +23,4 @@ pub mod signing;
 /// Argument validation of a job before signing and before execution (FR-PR-10).
 pub mod validate;
 
-/// Manual `Debug` implementations that keep secrets out of log output.
 mod debug;

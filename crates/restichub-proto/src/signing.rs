@@ -42,24 +42,16 @@ pub struct KeyRing {
 /// A reason why a signing key update did not apply (FR-PR-11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyUpdateError {
-    /// The signer_key_id is not in the key ring.
     UnknownSigner,
-    /// The signer_key_id is revoked.
     RevokedSigner,
-    /// The signature does not match the key update bytes.
     BadSignature,
-    /// The key_update field is not a valid KeyUpdate message.
     Malformed,
-    /// The signer_key_id of the envelope and of the decoded KeyUpdate differ.
     SignerMismatch,
-    /// The key_id already exists in the key ring with a different key.
     KeyIdConflict,
-    /// The key_id is revoked and cannot be inserted again.
     RevokedKeyId,
 }
 
 impl KeyRing {
-    /// Creates an empty key ring.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -95,7 +87,7 @@ impl KeyRing {
         }
     }
 
-    /// Returns the public key for `key_id`. A revoked key returns `None`.
+    /// Revoked keys are not returned.
     #[must_use]
     pub fn get(&self, key_id: &str) -> Option<&VerifyingKey> {
         if self.revoked.contains(key_id) {
@@ -105,7 +97,6 @@ impl KeyRing {
         }
     }
 
-    /// Returns true when `key_id` is revoked.
     #[must_use]
     pub fn is_revoked(&self, key_id: &str) -> bool {
         self.revoked.contains(key_id)
@@ -164,8 +155,6 @@ impl KeyRing {
         Ok(())
     }
 
-    /// Moves `key_id` to the revoked set. The key can no longer verify a job or
-    /// a key update.
     fn revoke(&mut self, key_id: &str) {
         self.keys.remove(key_id);
         self.revoked.insert(key_id.to_owned());
@@ -175,21 +164,16 @@ impl KeyRing {
 /// The values that the agent expects in an incoming job (FR-PR-03).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expected {
-    /// Identifier of the agent that receives the job.
     pub agent_id: String,
-    /// Identifier of the tenant of the agent.
     pub tenant_id: String,
-    /// Current time of the agent.
     pub now: Timestamp,
 }
 
-/// A rejected job and the reason (FR-PR-03).
+/// Explains why a job was rejected (FR-PR-03).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rejection {
-    /// Reason for the rejection.
     pub reason: RejectReason,
-    /// Identifier of the job. It is `Some` when the signature was valid and
-    /// the bytes decoded, so the agent can fill `JobRejected.job_id`.
+    /// `Some` when the signature was valid and the bytes decoded.
     pub job_id: Option<String>,
 }
 
@@ -299,42 +283,30 @@ pub fn verify_job(
 /// State of one job in a [`JobJournal`] (ADR-0020).
 #[derive(Debug, Clone, PartialEq)]
 pub enum JournalState {
-    /// The agent has no record of the job.
     Unknown,
-    /// The agent accepted the job and has not completed it.
     InProgress,
-    /// The agent completed the job and kept the result.
     Completed(JobResult),
 }
 
 /// Result of [`admit`] for one job (ADR-0020).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Admission {
-    /// The job is new. The agent records it and runs it.
     New,
-    /// The agent accepted the job earlier and it is not complete. The agent
-    /// does not run a second copy.
     InProgress,
-    /// The agent completed the job earlier. The agent sends the stored result
-    /// again instead of a second run.
     AlreadyCompleted(JobResult),
 }
 
 /// Storage of accepted and completed jobs (ADR-0020). The agent crate adds a
 /// persistent implementation; [`InMemoryJournal`] serves tests.
 pub trait JobJournal {
-    /// Returns the state of `job_id`.
     fn lookup(&self, job_id: &str) -> JournalState;
-    /// Records that the agent accepted `job_id` until `expires_at`.
     fn record_accepted(&mut self, job_id: &str, expires_at: Timestamp);
-    /// Records that the agent completed `job_id` with `result`.
     fn record_completed(&mut self, job_id: &str, result: JobResult);
     /// Removes the accepted jobs whose expiry time plus the clock skew is
     /// before `now` (ADR-0020).
     fn purge_expired(&mut self, now: Timestamp);
 }
 
-/// A [`JobJournal`] in memory. It serves tests and single-run tools.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryJournal {
     entries: HashMap<String, JournalEntry>,
@@ -379,8 +351,7 @@ impl JobJournal for InMemoryJournal {
 
 /// Admits a job into the journal (ADR-0020).
 ///
-/// A new job is recorded as accepted. An accepted job is not run a second time.
-/// A completed job returns its stored result.
+/// A new job is recorded as accepted; an accepted job is not run a second time; a completed job returns its stored result.
 #[must_use]
 pub fn admit(job: &Job, journal: &mut impl JobJournal, now: Timestamp) -> Admission {
     match journal.lookup(&job.job_id) {
@@ -393,7 +364,6 @@ pub fn admit(job: &Job, journal: &mut impl JobJournal, now: Timestamp) -> Admiss
     }
 }
 
-/// Builds the signed input: the context prefix followed by the payload.
 fn signing_input(context: &[u8], payload: &[u8]) -> Vec<u8> {
     let mut input = Vec::with_capacity(context.len() + payload.len());
     input.extend_from_slice(context);
@@ -401,25 +371,22 @@ fn signing_input(context: &[u8], payload: &[u8]) -> Vec<u8> {
     input
 }
 
-/// Converts raw bytes into a signature. Returns `None` for a wrong length.
+/// `None` for a wrong length.
 fn signature_from_bytes(bytes: &[u8]) -> Option<Signature> {
     let bytes: [u8; Signature::BYTE_SIZE] = bytes.try_into().ok()?;
     Some(Signature::from_bytes(&bytes))
 }
 
-/// Converts raw bytes into a public key. Returns `None` for a wrong length or
-/// an invalid point.
+/// Returns `None` for a wrong length or an invalid point.
 fn public_key_from_bytes(bytes: &[u8]) -> Option<VerifyingKey> {
     let bytes: [u8; 32] = bytes.try_into().ok()?;
     VerifyingKey::from_bytes(&bytes).ok()
 }
 
-/// Returns the time of a timestamp in nanoseconds since the Unix epoch.
 fn timestamp_nanos(timestamp: &Timestamp) -> i128 {
     i128::from(timestamp.seconds) * 1_000_000_000 + i128::from(timestamp.nanos)
 }
 
-/// Builds a [`Rejection`] for a job whose identifier is known.
 fn rejection(reason: RejectReason, job_id: &str) -> Rejection {
     Rejection {
         reason,
@@ -427,8 +394,7 @@ fn rejection(reason: RejectReason, job_id: &str) -> Rejection {
     }
 }
 
-/// Returns a closure that builds a [`Rejection`] without a job identifier. The
-/// closure fits `Result::map_err` and `Option::ok_or_else`.
+/// The closure fits `Result::map_err` and `Option::ok_or_else`.
 fn no_job_id(reason: RejectReason) -> impl Fn() -> Rejection {
     move || Rejection {
         reason,
@@ -499,7 +465,6 @@ mod tests {
         }
     }
 
-    /// AC-PR-01: the agent rejects a job with a changed payload.
     #[test]
     fn ac_pr_01_rejects_tampered_payload() {
         let mut signed = sign_job(&job(), KEY_ID, &signing_key());
@@ -511,7 +476,6 @@ mod tests {
         );
     }
 
-    /// AC-PR-01: the agent rejects a job with a different agent_id.
     #[test]
     fn ac_pr_01_rejects_other_agent() {
         let mut other = job();
@@ -524,7 +488,6 @@ mod tests {
         );
     }
 
-    /// AC-PR-01: the agent rejects a job with a different tenant_id.
     #[test]
     fn ac_pr_01_rejects_other_tenant() {
         let mut other = job();
@@ -537,7 +500,6 @@ mod tests {
         );
     }
 
-    /// AC-PR-01: the agent rejects a job with an expired time.
     #[test]
     fn ac_pr_01_rejects_expired() {
         let mut other = job();
@@ -553,7 +515,6 @@ mod tests {
         );
     }
 
-    /// AC-PR-01: the agent rejects a job with an unknown signing key.
     #[test]
     fn ac_pr_01_rejects_unknown_key() {
         let signed = sign_job(&job(), "job-key-2", &signing_key());
@@ -564,7 +525,6 @@ mod tests {
         );
     }
 
-    /// A valid job passes each check and decodes to the original message.
     #[test]
     fn accepts_valid_job() {
         let original = job();
@@ -573,7 +533,6 @@ mod tests {
         assert_eq!(verify_job(&signed, &key_ring(), &expected()), Ok(original));
     }
 
-    /// AC-PR-01, ADR-0020: a job without issued_at is malformed.
     #[test]
     fn rejects_missing_issued_at() {
         let mut other = job();
@@ -586,7 +545,6 @@ mod tests {
         );
     }
 
-    /// AC-PR-01, ADR-0020: a job without expires_at is malformed.
     #[test]
     fn rejects_missing_expires_at() {
         let mut other = job();
@@ -599,7 +557,6 @@ mod tests {
         );
     }
 
-    /// ADR-0020: a job with a lifetime above the maximum is rejected.
     #[test]
     fn rejects_lifetime_too_long() {
         let mut other = job();
@@ -615,7 +572,6 @@ mod tests {
         );
     }
 
-    /// ADR-0020: a job from the future beyond the clock skew is rejected.
     #[test]
     fn rejects_not_yet_valid() {
         let mut other = job();
@@ -635,7 +591,6 @@ mod tests {
         );
     }
 
-    /// ADR-0020: an empty expected agent_id is malformed.
     #[test]
     fn rejects_empty_expected_identity() {
         let signed = sign_job(&job(), KEY_ID, &signing_key());
@@ -648,7 +603,6 @@ mod tests {
         );
     }
 
-    /// ADR-0020: an empty job agent_id is malformed.
     #[test]
     fn rejects_empty_job_identity() {
         let mut other = job();
@@ -668,7 +622,6 @@ mod tests {
         }
     }
 
-    /// ADR-0020: a new job is recorded and admitted.
     #[test]
     fn admit_new_job() {
         let mut journal = InMemoryJournal::default();
@@ -681,7 +634,6 @@ mod tests {
         assert_eq!(journal.lookup(JOB_ID), JournalState::InProgress);
     }
 
-    /// ADR-0020: an accepted job is not run a second time.
     #[test]
     fn admit_in_progress_job() {
         let mut journal = InMemoryJournal::default();
@@ -694,7 +646,6 @@ mod tests {
         assert_eq!(admit(&job(), &mut journal, now), Admission::InProgress);
     }
 
-    /// ADR-0020: a completed job returns its stored result.
     #[test]
     fn admit_completed_job() {
         let mut journal = InMemoryJournal::default();
@@ -712,8 +663,6 @@ mod tests {
         );
     }
 
-    /// ADR-0020: purge_expired removes the accepted jobs after their expiry
-    /// plus the clock skew, and keeps them before that.
     #[test]
     fn purge_expired_jobs() {
         let mut journal = InMemoryJournal::default();
@@ -756,7 +705,6 @@ mod tests {
         }
     }
 
-    /// AC-PR-09: a signed rotation adds the new key.
     #[test]
     fn ac_pr_09_accepts_key_rotation() {
         let mut ring = key_ring();
@@ -769,7 +717,6 @@ mod tests {
         assert_eq!(ring.get(KEY_ID), Some(&signing_key().verifying_key()));
     }
 
-    /// AC-PR-09: a key_id cannot overwrite a different key.
     #[test]
     fn ac_pr_09_rejects_key_id_overwrite() {
         let mut ring = key_ring();
@@ -784,8 +731,6 @@ mod tests {
         assert_eq!(ring.get(KEY_ID), Some(&signing_key().verifying_key()));
     }
 
-    /// AC-PR-09: a second update with the same key_id and the same key is a
-    /// no-op, and a different key is a conflict.
     #[test]
     fn ac_pr_09_same_key_is_a_no_op() {
         let mut ring = key_ring();
@@ -796,7 +741,6 @@ mod tests {
         assert_eq!(ring.get(KEY_ID), Some(&signing_key().verifying_key()));
     }
 
-    /// AC-PR-09: an update signed by a revoked key is rejected.
     #[test]
     fn ac_pr_09_rejects_update_signed_by_revoked_key() {
         let mut ring = key_ring();
@@ -806,7 +750,6 @@ mod tests {
         assert_eq!(ring.apply_key_update(&signed_rotation), Ok(()));
         assert!(ring.is_revoked(KEY_ID));
 
-        // The revoked key may not sign another update.
         let later = rotation_update("job-key-3", &next, KEY_ID, &[]);
         let signed_later = sign_key_update(&later, &signing_key());
         assert_eq!(
@@ -815,7 +758,6 @@ mod tests {
         );
         assert_eq!(ring.get("job-key-3"), None);
 
-        // The revoked key may not verify a job either.
         let signed_job = sign_job(&job(), KEY_ID, &signing_key());
         assert_eq!(
             verify_job(&signed_job, &ring, &expected()),
@@ -823,7 +765,6 @@ mod tests {
         );
     }
 
-    /// AC-PR-09: a replayed update of a revoked key is rejected.
     #[test]
     fn ac_pr_09_rejects_replayed_update_of_revoked_key() {
         let mut ring = key_ring();
@@ -832,7 +773,6 @@ mod tests {
         let signed_rotation = sign_key_update(&rotation, &signing_key());
         assert_eq!(ring.apply_key_update(&signed_rotation), Ok(()));
 
-        // A replay of the same update has a revoked signer.
         assert_eq!(
             ring.apply_key_update(&signed_rotation),
             Err(KeyUpdateError::RevokedSigner)
@@ -840,7 +780,6 @@ mod tests {
         assert_eq!(ring.get("job-key-2"), Some(&next.verifying_key()));
     }
 
-    /// AC-PR-09: a revoked key cannot be inserted again.
     #[test]
     fn ac_pr_09_rejects_reinsert_of_revoked_key() {
         let mut ring = key_ring();
@@ -855,7 +794,6 @@ mod tests {
         );
     }
 
-    /// AC-PR-09: a bad signature leaves the ring unchanged.
     #[test]
     fn ac_pr_09_rejects_bad_signature() {
         let mut ring = key_ring();
@@ -872,9 +810,6 @@ mod tests {
         assert_eq!(ring.get(KEY_ID), Some(&signing_key().verifying_key()));
     }
 
-    /// AC-PR-09: a corrupted key_update with a well-formed envelope is a bad
-    /// signature, not a malformed update. The agent verifies the signature over
-    /// the raw bytes before it decodes them (ADR-0005).
     #[test]
     fn ac_pr_09_rejects_tampered_update() {
         let mut ring = key_ring();
@@ -893,13 +828,10 @@ mod tests {
         assert_eq!(ring.get("job-key-2"), None);
     }
 
-    /// AC-PR-09: the signer_key_id of the envelope and of the decoded
-    /// KeyUpdate must match. A difference is rejected.
     #[test]
     fn ac_pr_09_rejects_signer_id_mismatch() {
         let mut ring = key_ring();
         let next = other_signing_key();
-        // The signed bytes name a different signer than the envelope.
         let update = rotation_update("job-key-2", &next, "job-key-9", &[]);
         let mut signed = sign_key_update(&update, &signing_key());
         // The envelope names the known signer KEY_ID, so the lookup and the
@@ -913,7 +845,6 @@ mod tests {
         assert_eq!(ring.get("job-key-2"), None);
     }
 
-    /// AC-PR-09: an update from an unknown signer is rejected.
     #[test]
     fn ac_pr_09_rejects_unknown_signer() {
         let mut ring = key_ring();

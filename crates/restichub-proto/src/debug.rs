@@ -12,7 +12,6 @@ use crate::agent::v1::{
     repository_access::BackendCredentials,
 };
 
-/// The text that replaces every secret value.
 const MASK: &str = "***";
 
 impl fmt::Debug for SignedJob {
@@ -119,8 +118,6 @@ mod tests {
         }
     }
 
-    /// AC-AG-03: the `Debug` output of a job, of a control message with a
-    /// signed job and of an enrollment request has no secret.
     #[test]
     fn ac_ag_03_debug_output_has_no_secrets() {
         let job = Job {

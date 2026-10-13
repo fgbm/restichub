@@ -3,7 +3,6 @@
 //! The build uses the pure-Rust `protox` compiler. It does not need a system
 //! `protoc`. The generated code goes to `OUT_DIR` and is not committed.
 
-/// Protocol Buffers files of the contract, relative to the module root.
 const PROTO_FILES: &[&str] = &[
     "restichub/agent/v1/control.proto",
     "restichub/agent/v1/enrollment.proto",
