@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { DropdownMenu as Primitive } from 'bits-ui';
+	import Icon from './Icon.svelte';
 	import type { MenuItem } from './types';
 
 	let {
@@ -54,8 +55,11 @@
 								disabled={item.disabled}
 								onSelect={item.onSelect}
 							>
-								<span class="rh-menu__check" aria-hidden="true">{item.checked ? '✓' : ''}</span>
-								{item.label}
+								{#if item.icon}<Icon name={item.icon} />{/if}
+								<span class="rh-menu__label">{item.label}</span>
+								<span class="rh-menu__check" aria-hidden="true">
+									{#if item.checked}<Icon name="i-check" size="xs" />{/if}
+								</span>
 							</Primitive.RadioItem>
 						{/each}
 					</Primitive.RadioGroup>
@@ -69,7 +73,8 @@
 							disabled={item.disabled}
 							onSelect={item.onSelect}
 						>
-							{item.label}
+							{#if item.icon}<Icon name={item.icon} />{/if}
+							<span class="rh-menu__label">{item.label}</span>
 						</Primitive.Item>
 					{/each}
 				{/if}
@@ -126,6 +131,14 @@
 		cursor: pointer;
 	}
 
+	:global(.rh-menu__label) {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	:global(.rh-menu__item[data-highlighted]) {
 		outline: none;
 		background-color: var(--rh-color-hover);
@@ -144,7 +157,9 @@
 	}
 
 	:global(.rh-menu__check) {
-		width: 1ch;
+		display: inline-flex;
+		justify-content: center;
+		width: 1em;
 		color: var(--rh-color-accent);
 	}
 

@@ -1,18 +1,29 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { t } from '#lib/i18n/index.ts';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
 	type Tone = 'info' | 'success' | 'attention' | 'danger';
+
+	const toneIcon: Record<Tone, IconName> = {
+		info: 'i-info',
+		success: 'i-check-circle',
+		attention: 'i-alert',
+		danger: 'i-octagon'
+	};
 
 	let {
 		tone = 'info',
 		title,
+		icon,
 		code,
 		requestId,
 		children
 	}: {
 		tone?: Tone;
 		title: string;
+		icon?: IconName;
 		code?: string;
 		requestId?: string;
 		children?: Snippet;
@@ -20,6 +31,7 @@
 </script>
 
 <div class="alert alert--{tone}" role={tone === 'danger' ? 'alert' : 'status'}>
+	<Icon name={icon ?? toneIcon[tone]} size="lg" />
 	<div class="alert__body">
 		<p class="alert__title">{title}</p>
 		{#if children}
@@ -54,21 +66,34 @@
 	.alert--info {
 		--alert-bg: var(--rh-color-info-subtle);
 		--alert-border: var(--rh-color-info-subtle-border);
+		--alert-accent: var(--rh-color-info);
 	}
 
 	.alert--success {
 		--alert-bg: var(--rh-color-success-subtle);
 		--alert-border: var(--rh-color-success-subtle-border);
+		--alert-accent: var(--rh-color-success);
 	}
 
 	.alert--attention {
 		--alert-bg: var(--rh-color-warning-subtle);
 		--alert-border: var(--rh-color-warning-subtle-border);
+		--alert-accent: var(--rh-color-warning);
 	}
 
 	.alert--danger {
 		--alert-bg: var(--rh-color-danger-subtle);
 		--alert-border: var(--rh-color-danger-subtle-border);
+		--alert-accent: var(--rh-color-danger);
+	}
+
+	.alert > :global(.icon) {
+		color: var(--alert-accent, var(--rh-color-text-muted));
+	}
+
+	.alert__body {
+		flex: 1;
+		min-width: 0;
 	}
 
 	.alert__title {

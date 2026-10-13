@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { Dialog as Primitive } from 'bits-ui';
 	import { t } from '#lib/i18n/index.ts';
+	import Icon from './Icon.svelte';
 
 	let {
 		open = $bindable(false),
@@ -29,7 +30,9 @@
 						<Primitive.Description class="rh-panel__subtitle">{subtitle}</Primitive.Description>
 					{/if}
 				</div>
-				<Primitive.Close class="rh-panel__close" aria-label={t('common.close')}>✕</Primitive.Close>
+				<Primitive.Close class="rh-panel__close" aria-label={t('common.close')}>
+					<Icon name="i-x" size="xs" />
+				</Primitive.Close>
 			</header>
 			<div class="rh-panel__body">{@render children()}</div>
 			{#if footer}

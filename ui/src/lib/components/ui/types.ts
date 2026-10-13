@@ -1,3 +1,5 @@
+import type { IconName } from './icons';
+
 export interface SelectOption {
 	value: string;
 	label: string;
@@ -21,6 +23,8 @@ export interface MenuItem {
 	tone?: 'default' | 'danger';
 	disabled?: boolean;
 	separatorBefore?: boolean;
+	/** A leading icon from the sprite. */
+	icon?: IconName;
 	/** Items with the same group are exclusive; `checked` marks the current one. */
 	group?: string;
 	checked?: boolean;

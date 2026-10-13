@@ -4,6 +4,7 @@
 	import Badge from './Badge.svelte';
 	import Button from './Button.svelte';
 	import EmptyState from './EmptyState.svelte';
+	import Icon from './Icon.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import TextField from './TextField.svelte';
 	import type { TableColumn } from './types';
@@ -140,7 +141,14 @@
 								<button type="button" class="th-btn" onclick={() => toggleSort(column)}>
 									{column.header}
 									<span class="th-btn__icon" aria-hidden="true">
-										{sortKey === column.key ? (sortDirection === 'asc' ? '▲' : '▼') : ''}
+										{#if sortKey === column.key}
+											<Icon
+												name={sortDirection === 'asc' ? 'i-chevron-up' : 'i-chevron-down'}
+												size="xs"
+											/>
+										{:else}
+											<Icon name="i-sort" size="xs" />
+										{/if}
 									</span>
 								</button>
 							{/if}

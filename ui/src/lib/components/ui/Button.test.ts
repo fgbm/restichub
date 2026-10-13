@@ -30,4 +30,17 @@ describe('Button', () => {
 		expect(button).toBeDisabled();
 		expect(button).toHaveAttribute('aria-busy', 'true');
 	});
+
+	it('renders a leading icon with the label', () => {
+		render(Button, { props: { icon: 'i-plus', children: label('Add host') } });
+		const button = screen.getByRole('button', { name: 'Add host' });
+		expect(button).not.toHaveClass('btn--icon');
+		expect(button.querySelector('svg.icon use')).toHaveAttribute('href', '/icons.svg#i-plus');
+	});
+
+	it('holds the icon only and takes the name from aria-label', () => {
+		render(Button, { props: { icon: 'i-refresh', 'aria-label': 'Refresh' } });
+		const button = screen.getByRole('button', { name: 'Refresh' });
+		expect(button).toHaveClass('btn--icon');
+	});
 });

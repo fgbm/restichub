@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { HTMLButtonAttributes } from 'svelte/elements';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
 	type Variant = 'primary' | 'secondary' | 'danger' | 'ghost';
 	type Size = 'sm' | 'md';
@@ -10,7 +12,9 @@
 		size = 'md',
 		loading = false,
 		disabled = false,
+		full = false,
 		type = 'button',
+		icon,
 		onclick,
 		children,
 		...rest
@@ -19,15 +23,23 @@
 		size?: Size;
 		loading?: boolean;
 		disabled?: boolean;
+		/** Stretch the button to the width of its container. */
+		full?: boolean;
 		type?: HTMLButtonAttributes['type'];
+		/** A leading icon. Without `children` the button holds the icon only; give it an `aria-label`. */
+		icon?: IconName;
 		onclick?: (event: MouseEvent) => void;
-		children: Snippet;
+		children?: Snippet;
 	} & HTMLButtonAttributes = $props();
+
+	const iconOnly = $derived(icon !== undefined && children === undefined);
 </script>
 
 <button
 	{type}
 	class="btn btn--{variant} btn--{size}"
+	class:btn--icon={iconOnly}
+	class:btn--full={full}
 	disabled={disabled || loading}
 	aria-busy={loading ? 'true' : undefined}
 	{onclick}
@@ -35,8 +47,12 @@
 >
 	{#if loading}
 		<span class="btn__spinner" aria-hidden="true"></span>
+	{:else if icon}
+		<Icon name={icon} />
 	{/if}
-	<span class="btn__label">{@render children()}</span>
+	{#if children}
+		<span class="btn__label">{@render children()}</span>
+	{/if}
 </button>
 
 <style>
@@ -76,6 +92,19 @@
 		height: 28px;
 		padding: 0 var(--rh-space-2);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	.btn--icon {
+		width: var(--rh-control-height);
+		padding: 0;
+	}
+
+	.btn--icon.btn--sm {
+		width: 28px;
+	}
+
+	.btn--full {
+		width: 100%;
 	}
 
 	.btn--primary {

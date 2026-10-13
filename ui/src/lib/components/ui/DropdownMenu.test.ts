@@ -23,9 +23,9 @@ describe('DropdownMenu', () => {
 		expect(button).toHaveAttribute('aria-expanded', 'false');
 
 		await user.click(button);
-		const item = await screen.findByText('Edit');
-		expect(item).toHaveAttribute('role', 'menuitem');
-		await user.click(item);
+		const item = (await screen.findByText('Edit')).closest('[role="menuitem"]');
+		expect(item).not.toBeNull();
+		await user.click(item as HTMLElement);
 		expect(onSelect).toHaveBeenCalledOnce();
 	});
 });

@@ -1,11 +1,20 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 	import type { StatusTone } from './types';
 
-	let { tone = 'neutral', children }: { tone?: StatusTone; children: Snippet } = $props();
+	let {
+		tone = 'neutral',
+		icon,
+		children
+	}: { tone?: StatusTone; icon?: IconName; children: Snippet } = $props();
 </script>
 
-<span class="status status--{tone}">{@render children()}</span>
+<span class="status status--{tone}">
+	{#if icon}<Icon name={icon} size="xs" />{/if}
+	{@render children()}
+</span>
 
 <style>
 	.status {

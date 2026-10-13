@@ -1,8 +1,17 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { t } from '#lib/i18n/index.ts';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
 	type Tone = 'info' | 'success' | 'warning' | 'danger';
+
+	const toneIcon: Record<Tone, IconName> = {
+		info: 'i-info',
+		success: 'i-check-circle',
+		warning: 'i-alert',
+		danger: 'i-octagon'
+	};
 
 	let {
 		tone = 'info',
@@ -18,6 +27,7 @@
 </script>
 
 <div class="toast toast--{tone}" role="status">
+	<span class="toast__icon"><Icon name={toneIcon[tone]} size="lg" /></span>
 	<div class="toast__body">
 		{#if title}
 			<p class="toast__title">{title}</p>
@@ -32,7 +42,7 @@
 		aria-label={t('common.dismiss')}
 		onclick={() => onDismiss?.()}
 	>
-		✕
+		<Icon name="i-x" size="xs" />
 	</button>
 </div>
 
@@ -65,6 +75,27 @@
 
 	.toast--danger {
 		border-left-color: var(--rh-color-danger);
+	}
+
+	.toast__icon {
+		display: inline-flex;
+		color: var(--rh-color-text-muted);
+	}
+
+	.toast--info .toast__icon {
+		color: var(--rh-color-info);
+	}
+
+	.toast--success .toast__icon {
+		color: var(--rh-color-success);
+	}
+
+	.toast--warning .toast__icon {
+		color: var(--rh-color-warning);
+	}
+
+	.toast--danger .toast__icon {
+		color: var(--rh-color-danger);
 	}
 
 	.toast__body {

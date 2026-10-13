@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
 	let {
 		title,
@@ -9,14 +11,16 @@
 	}: {
 		title: string;
 		description?: string;
-		icon?: Snippet;
+		icon?: IconName;
 		children?: Snippet;
 	} = $props();
 </script>
 
 <div class="empty">
 	{#if icon}
-		<span class="empty__icon" aria-hidden="true">{@render icon()}</span>
+		<span class="empty__icon">
+			<Icon name={icon} size="xl" />
+		</span>
 	{/if}
 	<p class="empty__title">{title}</p>
 	{#if description}
