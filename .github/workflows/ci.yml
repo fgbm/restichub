@@ -41,7 +41,7 @@ jobs:
       - name: Test
         run: cargo test --workspace
       # The database tests are inside the crate behind the test-util feature. A build without the
-      # feature must still compile them (N8).
+      # feature must still compile them.
       - name: Check that the database tests are compiled
         if: runner.os == 'Linux'
         shell: bash
@@ -50,8 +50,7 @@ jobs:
           count=$(cargo test -p restichub-db -- --list | grep -c '^tests::' || true)
           echo "database tests: $count"
           test "$count" -gt 0
-      # The test helper is a dev-only feature. No binary crate may enable it in the normal graph
-      # (D8, N11).
+      # The test helper is a dev-only feature. No binary crate may enable it in the normal graph.
       - name: Check that the test helper is not a normal dependency
         if: runner.os == 'Linux'
         shell: bash
