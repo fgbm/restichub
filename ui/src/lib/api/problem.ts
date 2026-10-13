@@ -65,6 +65,20 @@ export function fieldError(
 	return tErrorReason(problem.reason) ?? t('error.field');
 }
 
+/**
+ * True when the problem names one of the given fields.
+ *
+ * A form uses the function to decide whether to show the message next to an
+ * input or the general alert. A problem of a field outside the form (for example
+ * `body`) gives the general alert.
+ */
+export function namesField(
+	problem: ApiProblem | null | undefined,
+	fields: readonly string[]
+): boolean {
+	return Boolean(problem?.field && fields.includes(problem.field));
+}
+
 function defaultTitle(status: number): string {
 	if (status === 401) return 'Unauthorized';
 	if (status === 403) return 'Forbidden';

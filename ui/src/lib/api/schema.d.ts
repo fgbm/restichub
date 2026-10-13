@@ -468,8 +468,34 @@ export interface components {
             /** @description The role of the token. */
             role: components["schemas"]["Role"];
         };
-        /** @enum {string} */
-        AuditAction: "sign_in" | "sign_in_failed" | "sign_out" | "config_create" | "config_update" | "config_delete" | "job_run" | "job_cancel" | "restore_start" | "secret_delivered" | "agent_enrolled" | "agent_revoked" | "remote_install" | "tenant_create" | "tenant_suspend" | "tenant_resume" | "tenant_delete" | "user_create" | "user_update" | "user_delete" | "api_token_create" | "api_token_revoke" | "secret_create" | "secret_replace" | "secret_delete";
+        /**
+         * @example sign_in
+         * @example sign_in_failed
+         * @example sign_out
+         * @example config_create
+         * @example config_update
+         * @example config_delete
+         * @example job_run
+         * @example job_cancel
+         * @example restore_start
+         * @example secret_delivered
+         * @example agent_enrolled
+         * @example agent_revoked
+         * @example remote_install
+         * @example tenant_create
+         * @example tenant_suspend
+         * @example tenant_resume
+         * @example tenant_delete
+         * @example user_create
+         * @example user_update
+         * @example user_delete
+         * @example api_token_create
+         * @example api_token_revoke
+         * @example secret_create
+         * @example secret_replace
+         * @example secret_delete
+         */
+        AuditAction: string;
         /** @description One audit record in the API. */
         AuditItem: {
             /** @description The action. */
@@ -589,7 +615,7 @@ export interface components {
             user?: components["schemas"]["UserView"] | null;
         };
         /**
-         * @description A tenant in a platform administration response (issue #20, FR-TN-02).
+         * @description A tenant in a platform administration response (FR-TN-02).
          *
          *     The view holds the user count only. It never holds a user list or a secret of the tenant.
          */
@@ -649,7 +675,7 @@ export interface components {
          */
         Role: "platform_admin" | "admin" | "operator" | "viewer";
         /**
-         * @description The metadata of one secret with the marker that the value is set (issue #17, FR-RP-05).
+         * @description The metadata of one secret with the marker that the value is set (FR-RP-05).
          *
          *     The field `value` holds the marker `set` only. The API never returns the value (AC-RP-02).
          */
@@ -683,7 +709,7 @@ export interface components {
          */
         SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password";
         /**
-         * @description The metadata of a secret in a response (issue #17, FR-RP-05).
+         * @description The metadata of a secret in a response (FR-RP-05).
          *
          *     The view never holds the value. The API cannot return a secret value after a user saves it
          *     (AC-RP-02).
@@ -744,7 +770,7 @@ export interface components {
             next_cursor?: string | null;
         };
         /**
-         * @description The status of a tenant (FR-TN-02, issue #20).
+         * @description The status of a tenant (FR-TN-02).
          * @enum {string}
          */
         TenantStatus: "active" | "suspended" | "deleted";

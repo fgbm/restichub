@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError, assignableRoles, fieldError, service } from '#lib/api/index.ts';
+	import { ApiError, assignableRoles, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, ApiToken, ApiTokenCreated, Role } from '#lib/api/index.ts';
 	import {
 		Button,
@@ -27,6 +27,10 @@
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
 	let newName = $state('');
+
+	// The fields of the create form. A problem of another field (for example `body`) shows the
+	// general alert instead of the message next to an input.
+	const createFields = ['name', 'role', 'expires_at'];
 	let newRole = $state<Role>('viewer');
 	let newExpiry = $state('');
 	let createdToken = $state<ApiTokenCreated | null>(null);
@@ -115,7 +119,7 @@
 			await load();
 		} catch (problem) {
 			createProblem = problem instanceof ApiError ? problem.problem : null;
-			createError = createProblem?.field ? null : messageOf(problem);
+			createError = namesField(createProblem, createFields) ? null : messageOf(problem);
 		} finally {
 			creating = false;
 		}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { ApiError, NetworkError, fieldError, service } from '#lib/api/index.ts';
+	import { ApiError, NetworkError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem } from '#lib/api/index.ts';
 	import { Button, FormField, InlineAlert, TextField } from '#lib/components/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -16,6 +16,10 @@
 	let errorCode = $state<string | undefined>();
 	let errorTitle = $state<string | undefined>();
 	let problem = $state<ApiProblem | null>(null);
+
+	// The fields of the form. A problem of another field (for example `body`) shows the general
+	// alert instead of the message next to an input.
+	const formFields = ['setup_token', 'username', 'display_name', 'password'];
 
 	const passwordTooShort = $derived(password.length > 0 && password.length < 12);
 	const passwordMismatch = $derived(confirmPassword.length > 0 && password !== confirmPassword);
@@ -47,7 +51,7 @@
 				errorTitle = t('error.network');
 			} else if (error instanceof ApiError) {
 				problem = error.problem;
-				if (!problem.field) {
+				if (!namesField(problem, formFields)) {
 					errorCode = error.code;
 					errorTitle = tErrorCode(error.code) ?? t('alert.problemTitle');
 				}
