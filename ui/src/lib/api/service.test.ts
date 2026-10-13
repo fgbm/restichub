@@ -67,6 +67,7 @@ describe('the HTTP service (issue #20 tenants)', () => {
 			email: null,
 			email_verified: false,
 			disabled: false,
+			platform_admin: false,
 			memberships: [{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false }]
 		};
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ items: [account] }));

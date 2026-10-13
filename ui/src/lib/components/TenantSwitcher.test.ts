@@ -51,7 +51,8 @@ function session(id: string, name: string) {
 			shared: false
 		},
 		tenant: { id, name },
-		role: 'admin' as const
+		role: 'admin' as const,
+		platform_admin: false
 	};
 }
 
@@ -80,6 +81,15 @@ describe('the tenant switcher', () => {
 		expect(current).toHaveAttribute('aria-checked', 'true');
 		const other = screen.getByRole('menuitemradio', { name: /globex/ });
 		expect(other).toHaveAttribute('aria-checked', 'false');
+	});
+
+	it('ac_au_12_shows_the_empty_state_when_the_account_holds_no_membership', async () => {
+		mocks.listMemberships.mockResolvedValue([]);
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await waitFor(() => expect(screen.getByText('No organizations')).toBeInTheDocument());
 	});
 
 	it('reloads the membership list on every open', async () => {
@@ -177,17 +187,15 @@ describe('the tenant switcher', () => {
 		expect(screen.getByRole('menuitemradio', { name: /globex/ })).toBeInTheDocument();
 	});
 
-	it('shows a separate Platform entry for a Platform Admin', async () => {
-		mocks.listMemberships.mockResolvedValue([
-			...tenants,
-			{ id: 't_platform', name: 'platform', role: 'platform_admin' as const }
-		]);
+	it('ac_au_13_lists_real_organizations_only', async () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
 		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
 		await waitFor(() =>
-			expect(screen.getByRole('menuitemradio', { name: /Platform/ })).toBeInTheDocument()
+			expect(screen.getByRole('menuitemradio', { name: /acme/ })).toBeInTheDocument()
 		);
+		// The internal platform tenant is no entry (ADR-0029).
+		expect(screen.queryByRole('menuitemradio', { name: /Platform/ })).toBeNull();
 	});
 });

@@ -119,9 +119,8 @@ function makePlatformUsers(): PlatformUser[] {
 			email: null,
 			email_verified: false,
 			disabled: false,
-			memberships: [
-				{ tenant_id: 't_01', tenant_name: 'acme', role: 'platform_admin', disabled: false }
-			]
+			platform_admin: true,
+			memberships: [{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false }]
 		},
 		{
 			id: 'pu_02',
@@ -130,6 +129,7 @@ function makePlatformUsers(): PlatformUser[] {
 			email: 'anna@example.com',
 			email_verified: false,
 			disabled: false,
+			platform_admin: false,
 			memberships: [
 				{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false },
 				{ tenant_id: 't_02', tenant_name: 'globex', role: 'viewer', disabled: false }
@@ -142,6 +142,7 @@ function makePlatformUsers(): PlatformUser[] {
 			email: null,
 			email_verified: false,
 			disabled: true,
+			platform_admin: false,
 			memberships: []
 		}
 	];
@@ -272,11 +273,12 @@ export class MockApiService {
 		const tenant = this.memberships.find((item) => item.id === this.currentTenant);
 		return {
 			user: this.users[0],
-			tenant: {
-				id: tenant?.id ?? this.tenants[0].id,
-				name: tenant?.name ?? this.tenants[0].name
-			},
-			role: tenant?.role ?? this.users[0].role
+			tenant: tenant
+				? { id: tenant.id, name: tenant.name }
+				: { id: this.tenants[0].id, name: this.tenants[0].name },
+			role: tenant?.role ?? this.users[0].role,
+			// The mock stands for a Platform Admin, so the platform screens appear (ADR-0029).
+			platform_admin: true
 		};
 	}
 
@@ -450,6 +452,7 @@ export class MockApiService {
 			email: request.email?.toLowerCase() ?? null,
 			email_verified: false,
 			disabled: false,
+			platform_admin: request.platform_admin ?? false,
 			memberships
 		};
 		this.platformUsers = [...this.platformUsers, user];
@@ -462,7 +465,8 @@ export class MockApiService {
 				? {
 						...user,
 						disabled: patch.disabled ?? user.disabled,
-						email: patch.email ? patch.email.toLowerCase() : user.email
+						email: patch.email ? patch.email.toLowerCase() : user.email,
+						platform_admin: patch.platform_admin ?? user.platform_admin
 					}
 				: user
 		);

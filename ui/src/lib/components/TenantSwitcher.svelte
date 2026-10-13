@@ -4,7 +4,8 @@
 	 *
 	 * The menu lists the memberships of the caller with the role and a check mark on the current
 	 * tenant. It reloads the list on every open. A filter appears when the caller holds more than
-	 * seven memberships. A Platform Admin gets a separate Platform entry.
+	 * seven memberships. The list holds real organizations only; an account with no membership sees
+	 * the empty state (ADR-0029).
 	 *
 	 * The keyboard moves with the arrows (`aria-activedescendant` names the active item), selects
 	 * with Enter and closes with Escape; the focus returns to the button. A click outside closes
@@ -43,13 +44,9 @@
 		return tenant.name.toLowerCase().includes(query);
 	}
 
-	const regular = $derived(
-		tenants.filter((tenant) => tenant.role !== 'platform_admin' && matches(tenant))
-	);
-	const platform = $derived(
-		tenants.filter((tenant) => tenant.role === 'platform_admin' && matches(tenant))
-	);
-	const options = $derived([...regular, ...platform]);
+	// The list holds real organizations only (ADR-0029).
+	const regular = $derived(tenants.filter((tenant) => matches(tenant)));
+	const options = $derived(regular);
 	const showFilter = $derived(tenants.length > 7);
 	const activeId = $derived(options[activeIndex] ? itemId(options[activeIndex]) : undefined);
 
@@ -192,6 +189,9 @@
 					bind:value={filter}
 				/>
 			{/if}
+			{#if regular.length === 0}
+				<p class="switcher__empty">{t('topbar.noOrganizations')}</p>
+			{/if}
 			{#each regular as tenant, index (tenant.id)}
 				<button
 					type="button"
@@ -210,28 +210,6 @@
 					</span>
 				</button>
 			{/each}
-			{#if platform.length > 0}
-				<p class="switcher__group-title">{t('topbar.platform')}</p>
-				{#each platform as tenant, index (tenant.id)}
-					{@const position = regular.length + index}
-					<button
-						type="button"
-						id={itemId(tenant)}
-						class="switcher__item"
-						class:switcher__item--active={position === activeIndex}
-						role="menuitemradio"
-						aria-checked={tenant.id === currentId}
-						onmouseenter={() => (activeIndex = position)}
-						onclick={() => select(tenant)}
-					>
-						<span class="switcher__item-name">{t('topbar.platform')}</span>
-						<span class="switcher__item-role">{t(roleKeys[tenant.role])}</span>
-						<span class="switcher__item-check" aria-hidden="true">
-							{tenant.id === currentId ? '✓' : ''}
-						</span>
-					</button>
-				{/each}
-			{/if}
 		</div>
 	{/if}
 </div>
@@ -275,6 +253,12 @@
 		background-color: var(--rh-color-surface);
 		box-shadow: var(--rh-shadow-overlay);
 		z-index: var(--rh-z-topbar);
+	}
+
+	.switcher__empty {
+		margin: var(--rh-space-2);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.switcher__group-title {
