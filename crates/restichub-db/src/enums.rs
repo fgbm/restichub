@@ -38,7 +38,7 @@ impl Role {
         }
     }
 
-    /// Higher ranks include the lower roles.
+    /// Higher roles include the lower roles.
     pub fn rank(self) -> u8 {
         match self {
             Self::PlatformAdmin => 4,

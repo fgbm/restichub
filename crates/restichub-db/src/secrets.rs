@@ -33,10 +33,9 @@ pub struct SecretMetadata {
     pub created_by: Option<UserId>,
 }
 
-/// The caller encrypts the value and passes the ciphertext. The caller passes the key version of
-/// the data encryption key (DEK) that encrypted the value. The caller generates the identifier
-/// before the encryption, because the identifier is part of the associated data (ADR-0023, section
-/// Secrets).
+/// The caller encrypts the value and passes the ciphertext with the key version of the data
+/// encryption key (DEK) that encrypted it. The identifier is generated before the encryption,
+/// because it is part of the associated data (ADR-0023, section Secrets).
 #[derive(Debug, Clone)]
 pub struct NewSecret<'a> {
     pub id: SecretId,
@@ -44,7 +43,6 @@ pub struct NewSecret<'a> {
     pub name: &'a str,
     pub purpose: &'a str,
     pub key_version: i32,
-    /// 96-bit nonce of the encryption.
     pub nonce: &'a [u8],
     pub ciphertext: &'a [u8],
     /// Absent for an API token actor.

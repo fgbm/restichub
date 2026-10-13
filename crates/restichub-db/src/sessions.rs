@@ -80,7 +80,7 @@ pub async fn delete_for_user_except(
 
 /// Updates `last_seen_at` when the stored value is older than [`TOUCH_INTERVAL_SECONDS`].
 ///
-/// The function takes the current time, so a test uses the same clock as the idle check.
+/// The current time is a parameter, so a test uses the same clock as the idle check.
 pub async fn touch(
     tx: &mut TenantTx<'_>,
     id: SessionId,

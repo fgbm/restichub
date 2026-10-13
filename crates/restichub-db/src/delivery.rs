@@ -1,17 +1,14 @@
 //! The delivery of a secret value to an agent (FR-RP-05, AC-RP-03).
 //!
-//! This module holds [`load_ciphertext_for_delivery`]. The function reads the encrypted value of one
-//! secret of the tenant of the transaction and inserts the `secret_delivered` audit record in the
-//! same transaction, before it returns the ciphertext. A delivery without its record cannot commit
-//! (AC-RP-03).
+//! A delivery without its `secret_delivered` audit record cannot commit (AC-RP-03).
 //!
 //! Only the job dispatcher may call [`load_ciphertext_for_delivery`], and only through the
 //! `SecretReader` of the control plane. The caller MUST commit the transaction before it sends the
 //! value to the agent. A rollback removes the record and the delivery does not happen; the agent
 //! then does not receive the value.
 //!
-//! The function does not decrypt. The control plane unwraps the data encryption key (DEK) and
-//! decrypts the value outside this crate (ADR-0017, ADR-0023).
+//! This crate does not decrypt. The control plane unwraps the data encryption key (DEK) and
+//! decrypts the value outside it (ADR-0017, ADR-0023).
 
 use uuid::Uuid;
 
@@ -26,17 +23,16 @@ pub struct CiphertextRow {
     /// Part of the associated data.
     pub purpose: String,
     pub key_version: i32,
-    /// 96-bit nonce of the encryption.
     pub nonce: Vec<u8>,
     pub ciphertext: Vec<u8>,
 }
 
 /// Reads the encrypted value of one secret and records the delivery (AC-RP-03).
 ///
-/// The function returns `None` for a missing secret or a secret of another tenant, and it writes no
-/// record then (AC-TN-01). For an existing secret it inserts the `secret_delivered` audit record in
-/// the transaction of the caller before it returns the ciphertext. The caller MUST commit before it
-/// sends the value to the agent: a rollback removes the record and the delivery does not happen.
+/// `None` for a missing secret or a secret of another tenant; no record is written then (AC-TN-01).
+/// For an existing secret the `secret_delivered` audit record is inserted in the transaction of the
+/// caller before the ciphertext is returned. The caller MUST commit before it sends the value to the
+/// agent: a rollback removes the record and the delivery does not happen.
 pub async fn load_ciphertext_for_delivery(
     tx: &mut TenantTx<'_>,
     id: SecretId,

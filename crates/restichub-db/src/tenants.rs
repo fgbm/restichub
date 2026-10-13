@@ -79,7 +79,6 @@ pub fn is_dispatch_allowed(status: TenantStatus) -> bool {
     status == TenantStatus::Active
 }
 
-/// Optional first administrator of a new tenant.
 #[derive(Debug, Clone)]
 pub struct BootstrapAdmin<'a> {
     /// Unique for the tenant.
@@ -89,14 +88,7 @@ pub struct BootstrapAdmin<'a> {
     pub display_name: &'a str,
 }
 
-/// Input of [`create_with_bootstrap`].
-///
-/// The caller wraps the data encryption key (DEK). The caller passes the wrapped bytes. The caller
-/// also passes the identifier of the tenant, because the associated data of the wrapped DEK holds
-/// the tenant id: the caller must know the id before it wraps the DEK.
-///
-/// The caller passes the actor and the source IP of the operation. The function writes them on the
-/// audit records of the creation.
+/// `tenant_id` is chosen by the caller because it is part of the wrapped DEK's associated data.
 #[derive(Debug, Clone)]
 pub struct BootstrapTenant<'a> {
     pub id: TenantId,
@@ -133,8 +125,7 @@ async fn create_with_id(
     Ok(id)
 }
 
-/// The function writes every row in the transaction of the caller. The rows commit together or not
-/// at all.
+/// Every row is written in the transaction of the caller; the rows commit together or not at all.
 pub async fn create_with_bootstrap(
     tx: &mut PlatformTx<'_>,
     input: &BootstrapTenant<'_>,
@@ -227,7 +218,6 @@ pub async fn set_status(
     Ok(result.rows_affected() == 1)
 }
 
-/// The result of a status transition of a tenant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transition {
     Changed,
@@ -305,12 +295,10 @@ pub async fn get_platform(
     Ok(row.map(TenantSummary::from))
 }
 
-/// Lists the tenants in a platform transaction (FR-TN-02).
-///
-/// The list orders the tenants by creation time and identifier, from the newest to the oldest. The
-/// default list (no status filter) excludes a deleted tenant. The filter `status = deleted` shows
-/// the deleted tenants. The list reads one row more than the page holds, to report `has_more`
-/// correctly. The keyset cursor of `page.after` continues the list.
+/// Ordered by creation time and identifier, newest first (FR-TN-02). The default list (no status
+/// filter) excludes a deleted tenant; the filter `status = deleted` shows them. One row more than
+/// the page holds is read, to report `has_more` correctly. The keyset cursor of `page.after`
+/// continues the list.
 pub async fn list_platform(
     tx: &mut PlatformTx<'_>,
     filter: &TenantFilter,

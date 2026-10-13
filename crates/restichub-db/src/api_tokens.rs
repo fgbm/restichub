@@ -91,8 +91,8 @@ pub async fn get(tx: &mut TenantTx<'_>, id: ApiTokenId) -> Result<Option<ApiToke
 
 /// Revokes an API token of the tenant of the transaction.
 ///
-/// The function returns true if it changed the token. A second call on the same token returns
-/// false and changes nothing (idempotent).
+/// `true` when the token changed. A second call on the same token returns `false` and changes
+/// nothing (idempotent).
 pub async fn revoke(
     tx: &mut TenantTx<'_>,
     id: ApiTokenId,

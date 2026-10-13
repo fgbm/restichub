@@ -102,10 +102,8 @@ pub struct Database {
 }
 
 impl Database {
-    /// Connects to the database and returns the pool.
-    ///
-    /// The function uses `password` if it is set. The pool runs `RESET ALL` when a connection goes
-    /// back to the pool, so a session-level setting never survives.
+    /// The pool runs `RESET ALL` when a connection goes back to the pool, so a session-level
+    /// setting never survives.
     pub async fn connect(config: &DatabaseConfig, password: Option<&str>) -> Result<Self, DbError> {
         let options = connect_options(config, password)?;
         let pool = with_session_reset(PgPoolOptions::new())
@@ -137,16 +135,12 @@ impl Database {
         &self.pool
     }
 
-    /// Begins a transaction for one tenant.
-    ///
     /// The transaction sets the runtime role and the tenant scope. Row-Level Security shows only
     /// the rows of this tenant.
     pub async fn begin_tenant(&self, tenant: TenantId) -> Result<TenantTx<'_>, DbError> {
         TenantTx::begin(&self.pool, tenant).await
     }
 
-    /// Begins a transaction for a platform operation.
-    ///
     /// The transaction sets the runtime role and the platform scope.
     pub async fn begin_platform(&self) -> Result<PlatformTx<'_>, DbError> {
         PlatformTx::begin(&self.pool).await
@@ -333,8 +327,6 @@ impl Database {
         }
     }
 
-    /// Closes the pool.
-    ///
     /// The control plane uses a short-lived migration database. It closes that pool after the
     /// migrations.
     pub async fn close(self) {

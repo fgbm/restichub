@@ -193,9 +193,8 @@ impl AuditAction {
         Self::parse(&value).unwrap_or(Self::Unknown(value))
     }
 
-    /// Known actions, in the stored order.
-    ///
-    /// The list excludes [`AuditAction::Unknown`]. The OpenAPI schema and the audit query use it.
+    /// The list is in the stored order and excludes [`AuditAction::Unknown`]. The OpenAPI schema and
+    /// the audit query use it.
     pub fn known() -> &'static [Self] {
         &[
             Self::SignIn,
@@ -282,19 +281,16 @@ impl RedactedDiff {
     }
 }
 
-/// Builds the diff of two values.
+/// The top-level and the nested fields are compared. A changed field becomes `{"old": .., "new": ..}`;
+/// a missing side is `null`.
 ///
-/// The function compares the top-level and the nested fields. A changed field becomes
-/// `{"old": .., "new": ..}`. A missing side is `null`.
+/// A field is redacted when its name is in `redact` (without the letter case) or holds one of
+/// `password`, `secret`, `token`, `key`, `private_key`. A field named `value` is also redacted when
+/// the parent object holds a field named `secret`.
 ///
-/// The function redacts a field when its name is in `redact` (without the letter case) or when
-/// its name holds one of `password`, `secret`, `token`, `key`, `private_key`. It also redacts a
-/// field named `value` when the parent object holds a field named `secret`.
-///
-/// Every emitted value goes through [`redact_value`]. The function therefore redacts a sensitive
-/// field at any depth, also when one side is not an object, when a key is on one side only, and
-/// inside an array. A redacted field becomes `"<redacted>"`. The function never writes a secret
-/// value.
+/// Every emitted value goes through [`redact_value`], so a sensitive field is redacted at any depth:
+/// also when one side is not an object, when a key is on one side only, and inside an array. A
+/// redacted field becomes `"<redacted>"`. A secret value is never written.
 pub fn diff(before: Option<&Value>, after: Option<&Value>, redact: &[&str]) -> RedactedDiff {
     match diff_value(before, after, redact, false) {
         Some(value) => RedactedDiff(value),
@@ -528,12 +524,10 @@ pub async fn insert_secret_delivered(
     insert(tx, &event).await
 }
 
-/// Inserts a record in a platform transaction.
-///
 /// The policy `audit_log_platform_insert` of migration 0014 accepts the entered tenant, the
-/// platform tenant and the tenant of the GUC `restichub.audit_tenant_id`. The caller passes the
-/// tenant. The caller enters a created tenant first with `PlatformTx::enter_tenant`, and it uses
-/// [`insert_platform_for`] for an existing tenant.
+/// platform tenant and the tenant of the GUC `restichub.audit_tenant_id`. A created tenant is
+/// entered first with `PlatformTx::enter_tenant`; [`insert_platform_for`] is used for an existing
+/// tenant.
 pub async fn insert_platform(
     tx: &mut PlatformTx<'_>,
     tenant: TenantId,

@@ -12,14 +12,13 @@ use crate::tx::TenantTx;
 #[derive(Debug, Clone)]
 pub struct KekCheckRow {
     pub kek_id: String,
-    /// 96-bit nonce of the encryption.
     pub nonce: Vec<u8>,
     pub ciphertext: Vec<u8>,
 }
 
 /// Reads the `kek_check` row of the tenant of the transaction.
 ///
-/// The function returns `None` on the first start, when the platform tenant holds no check row.
+/// `None` on the first start, when the platform tenant holds no check row.
 pub async fn read_check(tx: &mut TenantTx<'_>) -> Result<Option<KekCheckRow>, DbError> {
     let row = sqlx::query_as::<_, (String, Vec<u8>, Vec<u8>)>(
         "SELECT kek_id, nonce, ciphertext FROM kek_check ORDER BY created_at, kek_id LIMIT 1",
@@ -58,7 +57,6 @@ pub struct TenantKey {
     pub key_version: i32,
     pub kek_id: String,
     pub wrapped_dek: Vec<u8>,
-    /// 96-bit nonce of the wrapping.
     pub nonce: Vec<u8>,
 }
 
@@ -86,18 +84,18 @@ pub async fn read_tenant_key(
 
 /// Reads the active key row of the tenant of the transaction.
 ///
-/// The function returns the wrapped data encryption key (DEK). The control plane unwraps it with
-/// the key encryption key (KEK) before it encrypts or decrypts a secret value (ADR-0017). A tenant
-/// has one active key version, so the function returns at most one row.
+/// The wrapped data encryption key (DEK) is unwrapped by the control plane with the key encryption
+/// key (KEK) before it encrypts or decrypts a secret value (ADR-0017). A tenant has one active key
+/// version, so at most one row is returned.
 pub async fn active_key(tx: &mut TenantTx<'_>) -> Result<Option<TenantKey>, DbError> {
     read_tenant_key(tx, tx.tenant()).await
 }
 
 /// Reads the key row of the tenant of the transaction with a given version.
 ///
-/// The function returns the row also when the version is not active. The delivery path uses it: a
-/// secret holds the key version that encrypted it, so a rotated tenant must still deliver a secret
-/// that an older version encrypted (ADR-0017).
+/// The row is returned also when the version is not active. The delivery path uses it: a secret
+/// holds the key version that encrypted it, so a rotated tenant must still deliver a secret that an
+/// older version encrypted (ADR-0017).
 pub async fn key_by_version(
     tx: &mut TenantTx<'_>,
     version: i32,

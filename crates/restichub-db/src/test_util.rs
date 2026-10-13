@@ -123,10 +123,7 @@ impl Drop for TestDatabase {
     }
 }
 
-/// Creates a new test database and applies the migrations.
-///
-/// The function returns `None` if `RESTICHUB_TEST_DATABASE_URL` is not set. Any setup error panics
-/// with the cause.
+/// `None` if `RESTICHUB_TEST_DATABASE_URL` is not set. Any setup error panics with the cause.
 pub async fn test_database() -> Option<TestDatabase> {
     let Ok(url) = std::env::var("RESTICHUB_TEST_DATABASE_URL") else {
         println!("skipped: RESTICHUB_TEST_DATABASE_URL is not set");
@@ -412,9 +409,7 @@ async fn cleanup_cluster(admin: &PgConnectOptions, name: &str, runtime_role: &st
     pool.close().await;
 }
 
-/// Counts the rows of one table in a tenant transaction.
-///
-/// The function is a test helper. The table name comes from a fixed list in the test only.
+/// A test helper. The table name comes from a fixed list in the test only.
 pub async fn count_rows(
     database: &Database,
     tenant: super::TenantId,
