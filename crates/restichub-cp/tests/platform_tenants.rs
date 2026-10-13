@@ -24,17 +24,9 @@ async fn platform_admin(db: &restichub_db::Database) -> String {
     seed_session(db, PLATFORM_TENANT_ID, "root", "platform_admin").await
 }
 
-/// Builds a create-tenant body. The first admin username is unique in the installation (ADR-0025).
+/// Builds a create-tenant body. The create holds the name only (ADR-0028).
 fn create_body(name: &str) -> Value {
-    let username: String = format!("admin-{}", name.chars().take(20).collect::<String>());
-    json!({
-        "name": name,
-        "first_admin": {
-            "username": username,
-            "display_name": "Admin",
-            "password": "a long enough password",
-        },
-    })
+    json!({ "name": name })
 }
 
 /// Creates a tenant through the API and returns its identifier.
@@ -110,7 +102,12 @@ async fn create_list_and_get_a_tenant() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body.get("name").and_then(Value::as_str), Some("acme"));
     assert_eq!(body.get("status").and_then(Value::as_str), Some("active"));
-    assert_eq!(body.get("user_count").and_then(Value::as_u64), Some(1));
+    assert_eq!(body.get("user_count").and_then(Value::as_u64), Some(0));
+    // An organization without an active Admin has the derived state `none` (ADR-0028).
+    assert_eq!(
+        body.get("admin_state").and_then(Value::as_str),
+        Some("none")
+    );
     assert!(body.get("created_at").and_then(Value::as_str).is_some());
     let id = body
         .get("id")
@@ -133,7 +130,11 @@ async fn create_list_and_get_a_tenant() {
         .iter()
         .find(|item| item.get("id").and_then(Value::as_str) == Some(id.as_str()))
         .unwrap_or_else(|| panic!("the list holds no created tenant: {list}"));
-    assert_eq!(found.get("user_count").and_then(Value::as_u64), Some(1));
+    assert_eq!(found.get("user_count").and_then(Value::as_u64), Some(0));
+    assert_eq!(
+        found.get("admin_state").and_then(Value::as_str),
+        Some("none")
+    );
 
     let (status, _, one) = send(
         &app,
@@ -148,13 +149,14 @@ async fn create_list_and_get_a_tenant() {
     assert_eq!(status, StatusCode::OK, "{one}");
     assert_eq!(one.get("name").and_then(Value::as_str), Some("acme"));
 
+    // The create writes no account, so no user can sign in to the new organization (ADR-0028).
     let body = json!({"username": "admin-acme", "password": "a long enough password"});
     let (status, _, _) = send(
         &app,
         request("POST", "/api/v1/auth/sign-in", None, Some(body)),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     db.cleanup().await;
 }
@@ -464,7 +466,7 @@ async fn the_audit_records_are_in_both_tenants() {
         .parse::<TenantId>()
         .unwrap_or_else(|error| panic!("{error}"));
 
-    // The creation: `tenant_create` in the platform tenant and `user_create` in the new tenant.
+    // The creation writes `tenant_create` alone, in the platform tenant (ADR-0028).
     let platform_events = platform_audit(
         &app,
         &cookie,
@@ -495,18 +497,11 @@ async fn the_audit_records_are_in_both_tenants() {
         platform_events[0].get("source_ip").and_then(Value::as_str),
         Some("203.0.113.7")
     );
+    // The create writes no user and no `user_create` record.
     let created_events = tenant_audit(db.database(), tenant, AuditAction::UserCreate).await;
-    assert_eq!(
-        created_events.len(),
-        1,
-        "the user_create of the tenant is missing"
-    );
-    // The `user_create` record holds the actor and the source IP too.
-    assert_eq!(created_events[0].actor.actor_type(), "user");
-    assert!(created_events[0].actor.actor_id().is_some());
-    assert_eq!(
-        created_events[0].source_ip.map(|ip| ip.to_string()),
-        Some("203.0.113.7".to_owned())
+    assert!(
+        created_events.is_empty(),
+        "the tenant create must write no user_create record"
     );
 
     // The suspend: the event is in the platform tenant and in the affected tenant.
@@ -734,41 +729,57 @@ async fn a_deleted_tenant_is_refused_for_sign_in_session_and_token() {
 }
 
 #[tokio::test]
-async fn a_taken_first_admin_username_is_a_username_taken_conflict() {
+async fn an_organization_without_an_admin_has_the_derived_state() {
     let Some(db) = common::test_db().await else {
         return;
     };
     let cookie = platform_admin(db.database()).await;
     let app = app_with_kek(db.database());
-    // The first tenant holds the account `admin-first` (ADR-0025).
-    let _ = create_tenant_ok(&app, &cookie, "first").await;
+    let id = create_tenant_ok(&app, &cookie, "lonely").await;
 
-    let body = json!({
-        "name": "second",
-        "first_admin": {
-            "username": "admin-first",
-            "display_name": "Admin",
-            "password": "a long enough password",
-        },
-    });
-    let (status, _, problem) = send(
+    // The create holds the name only, so the state is `none` (ADR-0028).
+    let (status, _, one) = send(
         &app,
         request(
-            "POST",
-            "/api/v1/platform/tenants",
+            "GET",
+            &format!("/api/v1/platform/tenants/{id}"),
             Some(&cookie),
-            Some(body),
+            None,
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(status, StatusCode::OK, "{one}");
+    assert_eq!(one.get("admin_state").and_then(Value::as_str), Some("none"));
+    assert_eq!(one.get("user_count").and_then(Value::as_u64), Some(0));
+
+    // An active Admin membership makes the state `present`.
+    let body = json!({
+        "username": "admin-lonely",
+        "display_name": "Admin",
+        "password": "a long enough password",
+        "memberships": [{"tenant_id": id, "role": "admin"}],
+    });
+    let (status, _, account) = send(
+        &app,
+        request("POST", "/api/v1/platform/users", Some(&cookie), Some(body)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{account}");
+
+    let (status, _, one) = send(
+        &app,
+        request(
+            "GET",
+            &format!("/api/v1/platform/tenants/{id}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{one}");
     assert_eq!(
-        problem.get("code").and_then(Value::as_str),
-        Some("username_taken")
-    );
-    assert_eq!(
-        problem.get("field").and_then(Value::as_str),
-        Some("first_admin.username")
+        one.get("admin_state").and_then(Value::as_str),
+        Some("present")
     );
 
     db.cleanup().await;

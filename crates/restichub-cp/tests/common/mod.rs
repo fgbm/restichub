@@ -132,14 +132,17 @@ pub fn write_body(
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
-            "first_admin": {
-                "username": format!("admin-{index}"),
-                "display_name": "Matrix",
-                "password": "a long enough password",
-            },
+        })),
+        ("POST", "/api/v1/platform/users") => Some(json!({
+            "username": format!("matrix-{index}"),
+            "display_name": "Matrix",
+            "password": "a long enough password",
         })),
         ("POST", "/api/v1/platform/users/{id}/memberships") => {
             Some(json!({"tenant_id": tenant_id, "role": "viewer"}))
+        }
+        ("PATCH", "/api/v1/platform/users/{id}/memberships/{tenant_id}") => {
+            Some(json!({"role": "viewer"}))
         }
         ("PATCH", "/api/v1/platform/users/{id}") => Some(json!({"disabled": true})),
         ("POST", "/api/v1/auth/password") => Some(json!({
