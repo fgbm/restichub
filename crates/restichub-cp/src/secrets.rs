@@ -333,7 +333,7 @@ fn wrapped_dek(key: &kek::TenantKey) -> Result<WrappedDek, ApiError> {
         .nonce
         .as_slice()
         .try_into()
-        .map_err(|_| ApiError::internal("the stored nonce has a wrong length"))?;
+        .map_err(|error: std::array::TryFromSliceError| ApiError::internal(error.to_string()))?;
     Ok(WrappedDek {
         kek_id,
         nonce,
