@@ -3,7 +3,9 @@ use std::path::PathBuf;
 
 use restichub_secrets::EnvReader;
 
-use super::{Cli, Command, Config, ConfigError, LogFormat, MigrationConfig, parse_args};
+use super::{
+    Cli, Command, Config, ConfigError, LogFormat, MigrationConfig, TenancyMode, parse_args,
+};
 
 struct MapEnv(HashMap<String, String>);
 
@@ -378,4 +380,73 @@ fn the_kek_file_comes_from_the_file() {
         config.ok().and_then(|config| config.secrets.kek_file),
         Some(PathBuf::from("/etc/restichub/kek"))
     );
+}
+
+#[test]
+fn the_tenancy_mode_defaults_to_single() {
+    let env = MapEnv::new(&[("RESTICHUB_DATABASE_URL", "postgres://host/db")]);
+    let config = Config::load_with(&Cli::default(), &env);
+    let tenancy = config.ok().map(|config| config.tenancy);
+    assert_eq!(
+        tenancy.as_ref().map(|tenancy| tenancy.mode),
+        Some(TenancyMode::Single)
+    );
+    assert_eq!(
+        tenancy.map(|tenancy| tenancy.default_tenant),
+        Some("default".to_owned())
+    );
+}
+
+#[test]
+fn a_bad_tenancy_mode_names_the_parameter() {
+    let env = MapEnv::new(&[
+        ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+        ("RESTICHUB_TENANCY_MODE", "both"),
+    ]);
+    let error = Config::load_with(&Cli::default(), &env);
+    assert!(matches!(
+        error,
+        Err(ConfigError::Invalid {
+            name: "tenancy.mode",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn the_tenancy_settings_come_from_the_file() {
+    let path = temp_path("tenancy");
+    std::fs::write(
+        &path,
+        "database_url = \"postgres://host/db\"\n[tenancy]\nmode = \"multi\"\ndefault_tenant = \"acme\"\n",
+    )
+    .ok();
+    let env = MapEnv::new(&[("RESTICHUB_CONFIG", path.to_str().unwrap_or_default())]);
+    let config = Config::load_with(&Cli::default(), &env);
+    std::fs::remove_file(&path).ok();
+    let tenancy = config.ok().map(|config| config.tenancy);
+    assert_eq!(
+        tenancy.as_ref().map(|tenancy| tenancy.mode),
+        Some(TenancyMode::Multi)
+    );
+    assert_eq!(
+        tenancy.map(|tenancy| tenancy.default_tenant),
+        Some("acme".to_owned())
+    );
+}
+
+#[test]
+fn a_reserved_default_tenant_name_is_refused() {
+    let env = MapEnv::new(&[
+        ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+        ("RESTICHUB_TENANCY_DEFAULT_TENANT", "platform"),
+    ]);
+    let error = Config::load_with(&Cli::default(), &env);
+    assert!(matches!(
+        error,
+        Err(ConfigError::Invalid {
+            name: "tenancy.default_tenant",
+            ..
+        })
+    ));
 }

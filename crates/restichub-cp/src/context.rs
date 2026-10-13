@@ -125,6 +125,16 @@ pub enum Access {
     Protected(Operation),
 }
 
+impl Access {
+    /// True for a route under `/api/v1/platform/*` (ADR-0024).
+    ///
+    /// The router hides these routes in single mode. The rule reads the operation of the route
+    /// table, so the two agree.
+    pub fn is_platform(self) -> bool {
+        matches!(self, Self::Protected(operation) if operation.is_platform())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RequestContext {
     pub tenant_id: TenantId,
@@ -206,6 +216,9 @@ impl FromRequestParts<AppState> for RequestContext {
             (Some(_), Some(_)) => Err(ApiError::ambiguous_credentials()),
             (Some(value), None) => {
                 let mut context = authenticate_session(state, &value).await?;
+                if platform_hidden_in_single(state, context.tenant_id) {
+                    return Err(ApiError::unauthenticated());
+                }
                 // A cookie-authenticated unsafe method needs the CSRF header.
                 if token::is_unsafe_method(&parts.method) && !token::csrf_ok(&parts.headers) {
                     return Err(ApiError::csrf_required());
@@ -217,12 +230,24 @@ impl FromRequestParts<AppState> for RequestContext {
             }
             (None, Some(value)) => {
                 let mut context = authenticate_bearer(state, &value).await?;
+                if platform_hidden_in_single(state, context.tenant_id) {
+                    return Err(ApiError::unauthenticated());
+                }
                 context.source_ip = Some(ClientIp::from_request_parts(parts, state).await?.0);
                 Ok(context)
             }
             (None, None) => Err(ApiError::unauthenticated()),
         }
     }
+}
+
+/// True for a platform-tenant credential in single mode (ADR-0024).
+///
+/// Single mode has no platform tenant in the user interface and in the API, so a session or an
+/// API token of the platform tenant cannot authenticate. The check is the same 401 as a request
+/// with no valid credential, so the mode reveals no platform account.
+fn platform_hidden_in_single(state: &AppState, tenant_id: TenantId) -> bool {
+    state.tenancy().mode.is_single() && tenant_id == restichub_db::PLATFORM_TENANT_ID
 }
 
 async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestContext, ApiError> {

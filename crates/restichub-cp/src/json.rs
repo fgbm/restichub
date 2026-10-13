@@ -61,11 +61,19 @@ fn map_rejection(rejection: JsonRejection) -> ApiError {
 
 /// Reads the schema path from the message of a data error.
 ///
-/// The path comes from the request type, not from user input. The function accepts only a path of
-/// letters, digits, `_` and `.`, so an unexpected value falls back to `body`.
+/// The path names a field of the request type. The function refuses any value that can hold user
+/// input, so the problem body never echoes a part of the request:
+///
+/// - An `unknown field` error names the key that the client sent, so the function falls back to
+///   `body`.
+/// - The path must hold only letters, digits, `_` and `.`.
 fn body_error_field(message: &str) -> Option<String> {
     let rest = message.strip_prefix(JSON_DATA_ERROR_PREFIX)?;
-    let path = rest.split_once(": ").map_or(rest, |(path, _)| path).trim();
+    let (path, detail) = rest.split_once(": ").unwrap_or((rest, ""));
+    if detail.starts_with("unknown field") {
+        return None;
+    }
+    let path = path.trim();
     if path.is_empty() || path == "." {
         return None;
     }
@@ -73,4 +81,58 @@ fn body_error_field(message: &str) -> Option<String> {
         .chars()
         .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.'));
     valid.then(|| path.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::Json;
+    use axum::response::IntoResponse;
+    use http_body_util::BodyExt;
+    use serde::Deserialize;
+
+    use super::map_rejection;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
+    struct Known {
+        role: String,
+    }
+
+    /// Returns the `field` of the problem body for a body that does not match the schema.
+    async fn field_of(body: &str) -> Option<String> {
+        let rejection =
+            Json::<Known>::from_bytes(body.as_bytes()).expect_err("the body must be refused");
+        let response = map_rejection(rejection).into_response();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .map(|body| body.to_bytes())
+            .ok()?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        value
+            .get("field")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    }
+
+    #[tokio::test]
+    async fn a_known_field_error_names_the_field() {
+        // The value of a known field is wrong; the path is the field of the schema.
+        assert_eq!(field_of(r#"{"role": 5}"#).await.as_deref(), Some("role"));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_field_never_echoes_the_client_key() {
+        // A key that the client sent, including a markup name, never reaches the problem body.
+        assert_eq!(
+            field_of(r#"{"<script>": 1}"#).await.as_deref(),
+            Some("body")
+        );
+        assert_eq!(
+            field_of(r#"{"canary_field_name": 1}"#).await.as_deref(),
+            Some("body")
+        );
+    }
 }

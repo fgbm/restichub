@@ -5,10 +5,12 @@
 //! the row, so the control plane refuses to start with an incorrect KEK and shows the cause
 //! (AC-RP-02).
 
-use restichub_db::{Database, PLATFORM_TENANT_ID, kek};
+use restichub_db::{Database, PLATFORM_TENANT_ID, TenantStatus, kek, tenants};
 use restichub_secrets::{
     CryptoError, KekCheck, KekError, KekId, KekProvider, make_kek_check, verify_kek_check,
 };
+
+use crate::config::{TenancyConfig, TenancyMode};
 
 const KEK_CHECK_LOCK: &str = "restichub.kek_check:";
 
@@ -22,6 +24,73 @@ pub enum StartupError {
     Crypto(#[from] CryptoError),
     #[error("the stored kek_check row is not valid")]
     BadCheck,
+    #[error("the single-tenant mode cannot start: {reason}")]
+    Tenancy { reason: String },
+}
+
+/// Checks that the database matches the tenancy mode (ADR-0024).
+///
+/// Single mode needs exactly one active tenant, named `tenancy.default_tenant`. The function
+/// refuses the start otherwise and names the problem. An installation with no non-platform tenant
+/// is a fresh install, so the setup creates the tenant `default` later. A suspended or a deleted
+/// tenant does not block the switch, because only an active tenant serves requests.
+pub async fn ensure_tenancy_mode(
+    db: &Database,
+    tenancy: &TenancyConfig,
+) -> Result<(), StartupError> {
+    if tenancy.mode == TenancyMode::Multi {
+        return Ok(());
+    }
+    let mut tx = db.begin_platform().await?;
+    let all = tenants::list(&mut tx).await?;
+    tx.commit().await?;
+    let non_platform: Vec<&tenants::Tenant> = all
+        .iter()
+        .filter(|tenant| tenant.id != PLATFORM_TENANT_ID)
+        .collect();
+    if non_platform.is_empty() {
+        return Ok(());
+    }
+    let active: Vec<&&tenants::Tenant> = non_platform
+        .iter()
+        .filter(|tenant| tenant.status == TenantStatus::Active)
+        .collect();
+    if active.is_empty() {
+        let named = non_platform
+            .iter()
+            .find(|tenant| tenant.name.eq_ignore_ascii_case(&tenancy.default_tenant));
+        let reason = match named {
+            Some(tenant) => format!(
+                "the tenant `{}` is `{}`, not active; single mode needs it active",
+                tenant.name,
+                tenant.status.as_str()
+            ),
+            None => format!(
+                "the database holds no active tenant named `{}`; create it or set the setting `tenancy.default_tenant`",
+                tenancy.default_tenant
+            ),
+        };
+        return Err(StartupError::Tenancy { reason });
+    }
+    if active.len() > 1 {
+        return Err(StartupError::Tenancy {
+            reason: format!(
+                "it needs exactly one active tenant, but the database holds {} active tenants of {} non-platform tenants; delete or suspend the other tenants first",
+                active.len(),
+                non_platform.len()
+            ),
+        });
+    }
+    let only = active[0];
+    if !only.name.eq_ignore_ascii_case(&tenancy.default_tenant) {
+        return Err(StartupError::Tenancy {
+            reason: format!(
+                "the only active tenant is named `{}`, but the setting `tenancy.default_tenant` is `{}`; rename the tenant or set the setting",
+                only.name, tenancy.default_tenant
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// Verifies the `kek_check` row of the platform tenant, or creates it on the first start.

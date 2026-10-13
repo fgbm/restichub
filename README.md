@@ -76,7 +76,7 @@ The Compose file at the repository root starts a development stack: PostgreSQL, 
    docker compose logs cp
    ```
 
-   The token is on the line with `setup_token`. Use it on the setup page to create the first Platform Admin.
+   The token is on the line with `setup_token`. Use it on the setup page to create the first administrator. The administrator is the Admin of the tenant `default` in the default single mode, or the Platform Admin in multi mode. Set `RESTICHUB_TENANCY_MODE=multi` to run the multi-tenant mode.
 
 5. Stop the stack and remove the data volume:
 

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::client_ip::ClientIp;
+use crate::config::TenancyMode;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
@@ -31,8 +32,9 @@ const MAX_SIGN_IN_FIELD: usize = 128;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SignInRequest {
+    /// Required in multi mode; ignored in single mode, which uses the tenant `default` (ADR-0024).
     /// Ignores the letter case.
-    pub tenant: String,
+    pub tenant: Option<String>,
     pub username: String,
     pub password: String,
 }
@@ -88,24 +90,44 @@ pub async fn sign_in(
     }
     // The IP bucket is checked first, before the user map is touched.
     check_ip(&state, client.0)?;
+    // In multi mode the request names the tenant. In single mode the tenant is the default one.
+    let tenancy = state.tenancy();
+    let tenant_name = match tenancy.mode {
+        TenancyMode::Multi => match body.tenant.as_deref() {
+            Some(value) => value.to_owned(),
+            None => return Err(ApiError::invalid_field("tenant", Reason::Empty)),
+        },
+        TenancyMode::Single => tenancy.default_tenant.clone(),
+    };
     // The length checks follow the IP bucket and give the generic error.
-    if body.tenant.len() > MAX_SIGN_IN_FIELD || body.username.len() > MAX_SIGN_IN_FIELD {
+    if tenant_name.len() > MAX_SIGN_IN_FIELD || body.username.len() > MAX_SIGN_IN_FIELD {
         return Err(ApiError::invalid_credentials());
     }
 
     let now = state.auth().clock.now();
-    let lookup = auth::find_tenant(state.db(), &body.tenant).await?;
+    let lookup = auth::find_tenant(state.db(), &tenant_name).await?;
     let active_id = lookup
         .as_ref()
         .filter(|tenant| tenant.status == TenantStatus::Active)
         .map(|tenant| tenant.id);
 
     match active_id {
-        Some(tenant_id) => sign_in_tenant(&state, tenant_id, &body, client.0, now, &headers).await,
+        Some(tenant_id) => {
+            sign_in_tenant(
+                &state,
+                tenant_id,
+                &tenant_name,
+                &body,
+                client.0,
+                now,
+                &headers,
+            )
+            .await
+        }
         None => {
             // An unknown tenant and a suspended tenant are the same failure. The dummy
             // verification keeps the time similar.
-            check_synthetic(&state, &body.tenant, &body.username)?;
+            check_synthetic(&state, &tenant_name, &body.username)?;
             let _ = password::verify_or_dummy(
                 &state.auth().hash_semaphore,
                 body.password.clone(),
@@ -124,6 +146,7 @@ pub async fn sign_in(
 async fn sign_in_tenant(
     state: &AppState,
     tenant_id: TenantId,
+    tenant_name: &str,
     body: &SignInRequest,
     client: std::net::IpAddr,
     now: time::OffsetDateTime,
@@ -144,7 +167,7 @@ async fn sign_in_tenant(
     // otherwise.
     match &user {
         Some(user) => check_resolved(state, tenant_id, user.id)?,
-        None => check_synthetic(state, &body.tenant, &body.username)?,
+        None => check_synthetic(state, tenant_name, &body.username)?,
     }
 
     let hash = user.as_ref().map(|user| user.password_hash.clone());

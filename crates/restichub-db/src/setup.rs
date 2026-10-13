@@ -67,6 +67,19 @@ pub async fn mark_used(
     Ok(result.rows_affected() == 1)
 }
 
+/// Marks every unused setup token of the tenant of the transaction as used.
+///
+/// The caller runs this in the transaction of a successful setup, so a token that the control
+/// plane issued earlier cannot be used after the setup is done (ADR-0023).
+pub async fn mark_all_used(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<u64, DbError> {
+    let result = sqlx::query("UPDATE setup_tokens SET used_at = $1 WHERE used_at IS NULL")
+        .bind(now)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
+}
+
 pub async fn user_count(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
     let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM users")
         .fetch_one(tx.as_conn())

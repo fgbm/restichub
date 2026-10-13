@@ -81,6 +81,8 @@ services:
       RESTICHUB_SERVER_INSECURE_COOKIES: 'true'
       # The key encryption key. The control plane verifies it against the stored check at start.
       RESTICHUB_KEK: ${RESTICHUB_KEK}
+      # The tenancy mode. The default is single. See design/adr/0024-single-tenant-mode.md.
+      RESTICHUB_TENANCY_MODE: ${RESTICHUB_TENANCY_MODE:-single}
     ports:
       - '127.0.0.1:8080:8080'
 

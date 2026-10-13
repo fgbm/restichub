@@ -1,15 +1,18 @@
 //! Initial setup tests (FR-AU-03).
 
+#![allow(clippy::expect_used)]
+
 mod common;
 
 use axum::http::StatusCode;
 use restichub_cp::clock::SystemClock;
+use restichub_cp::config::TenancyConfig;
 use restichub_cp::setup::ensure_setup_token;
 use restichub_db::{PLATFORM_TENANT_ID, setup};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
-use common::{app, count, create_user, request, send};
+use common::{app, count, create_tenant_with_key, create_user, request, send};
 
 /// Inserts a setup token for the platform tenant and returns its value.
 async fn insert_setup_token(db: &restichub_db::Database, value: &str, expires_at: OffsetDateTime) {
@@ -17,11 +20,11 @@ async fn insert_setup_token(db: &restichub_db::Database, value: &str, expires_at
     let mut tx = db
         .begin_tenant(PLATFORM_TENANT_ID)
         .await
-        .unwrap_or_else(|e| panic!("{e}"));
+        .expect("the database call failed");
     setup::create(&mut tx, &hash, expires_at)
         .await
-        .unwrap_or_else(|e| panic!("{e}"));
-    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
+        .expect("the database call failed");
+    tx.commit().await.expect("the database call failed");
 }
 
 #[tokio::test]
@@ -29,18 +32,18 @@ async fn ensure_setup_token_creates_one_when_there_is_no_user() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    ensure_setup_token(db.database(), &SystemClock)
+    ensure_setup_token(db.database(), &SystemClock, &TenancyConfig::multi())
         .await
-        .unwrap_or_else(|e| panic!("{e}"));
+        .expect("the database call failed");
     assert_eq!(
         count(db.database(), PLATFORM_TENANT_ID, "setup_tokens").await,
         1
     );
 
     // A second start with no user creates another token (the old one may be expired).
-    ensure_setup_token(db.database(), &SystemClock)
+    ensure_setup_token(db.database(), &SystemClock, &TenancyConfig::multi())
         .await
-        .unwrap_or_else(|e| panic!("{e}"));
+        .expect("the database call failed");
     assert_eq!(
         count(db.database(), PLATFORM_TENANT_ID, "setup_tokens").await,
         2
@@ -62,12 +65,48 @@ async fn ensure_setup_token_does_not_create_when_a_user_exists() {
         "platform_admin",
     )
     .await;
-    ensure_setup_token(db.database(), &SystemClock)
+    ensure_setup_token(db.database(), &SystemClock, &TenancyConfig::multi())
         .await
-        .unwrap_or_else(|e| panic!("{e}"));
+        .expect("the database call failed");
     assert_eq!(
         count(db.database(), PLATFORM_TENANT_ID, "setup_tokens").await,
         0
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ensure_setup_token_uses_the_default_tenant_in_single_mode() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    // The tenant `default` is absent, so the setup is required and the token is issued.
+    ensure_setup_token(
+        db.database(),
+        &SystemClock,
+        &TenancyConfig::single("default"),
+    )
+    .await
+    .expect("the database call failed");
+    assert_eq!(
+        count(db.database(), PLATFORM_TENANT_ID, "setup_tokens").await,
+        1
+    );
+
+    // With the tenant and a user, the setup is not required and no token is issued.
+    let tenant = create_tenant_with_key(db.database(), "default").await;
+    create_user(db.database(), tenant, "admin", "phc", "admin").await;
+    ensure_setup_token(
+        db.database(),
+        &SystemClock,
+        &TenancyConfig::single("default"),
+    )
+    .await
+    .expect("the database call failed");
+    assert_eq!(
+        count(db.database(), PLATFORM_TENANT_ID, "setup_tokens").await,
+        1
     );
 
     db.cleanup().await;
@@ -78,7 +117,7 @@ async fn the_setup_creates_the_first_platform_admin_once() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    let value = restichub_cp::token::random_token().unwrap_or_default();
+    let value = restichub_cp::token::random_token().expect("cannot build the token");
     insert_setup_token(
         db.database(),
         &value,
@@ -131,7 +170,7 @@ async fn two_parallel_setup_calls_leave_exactly_one_admin() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    let value = restichub_cp::token::random_token().unwrap_or_default();
+    let value = restichub_cp::token::random_token().expect("cannot build the token");
     insert_setup_token(
         db.database(),
         &value,
@@ -172,7 +211,7 @@ async fn an_expired_setup_token_is_refused() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    let value = restichub_cp::token::random_token().unwrap_or_default();
+    let value = restichub_cp::token::random_token().expect("cannot build the token");
     insert_setup_token(
         db.database(),
         &value,

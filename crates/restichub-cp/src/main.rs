@@ -56,9 +56,19 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .await
         .context("cannot verify the key encryption key")?;
 
-    restichub_cp::setup::ensure_setup_token(&database, &restichub_cp::clock::SystemClock)
+    // Single mode refuses the start unless the database matches the mode (ADR-0024).
+    restichub_cp::startup::ensure_tenancy_mode(&database, &config.tenancy)
         .await
-        .context("cannot prepare the initial setup")?;
+        .context("cannot check the tenancy mode")?;
+
+    // The setup token protects the first administrator of both modes (ADR-0024).
+    restichub_cp::setup::ensure_setup_token(
+        &database,
+        &restichub_cp::clock::SystemClock,
+        &config.tenancy,
+    )
+    .await
+    .context("cannot prepare the initial setup")?;
 
     // The periodic maintenance removes the expired sessions and setup tokens.
     restichub_cp::maintenance::spawn(
@@ -75,7 +85,8 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     let app = server::router(
         AppState::with_auth(database, auth)
             .with_trusted_proxies(config.trusted_proxies.clone())
-            .with_kek(kek),
+            .with_kek(kek)
+            .with_tenancy(config.tenancy.clone()),
     );
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await

@@ -203,6 +203,24 @@ pub async fn list(tx: &mut PlatformTx<'_>) -> Result<Vec<Tenant>, DbError> {
         .collect())
 }
 
+/// Reads one tenant by name through the platform scope (ADR-0024).
+///
+/// The comparison ignores the letter case, as the unique index `tenants_name_lower_unique` does.
+pub async fn find_by_name(tx: &mut PlatformTx<'_>, name: &str) -> Result<Option<Tenant>, DbError> {
+    let row = sqlx::query_as::<_, (Uuid, String, TenantStatus)>(
+        "SELECT id, name, status FROM tenants WHERE lower(name) = lower($1)",
+    )
+    .bind(name)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(|(id, name, status)| Tenant {
+        id: TenantId::from_uuid(id),
+        name,
+        status,
+    }))
+}
+
 /// Platform operation (FR-TN-02).
 pub async fn set_status(
     tx: &mut PlatformTx<'_>,

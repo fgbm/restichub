@@ -9,7 +9,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use restichub_cp::clock::ManualClock;
-use restichub_cp::config::AuthConfig;
+use restichub_cp::config::{AuthConfig, TenancyConfig};
 use restichub_cp::password;
 use restichub_cp::rate_limit::RateLimiter;
 use restichub_cp::server::AppState;
@@ -512,7 +512,7 @@ async fn the_platform_setup_session_works() {
     };
     // A Platform Admin of the platform tenant can sign in and read the platform audit.
     let cookie = seed_session(db.database(), PLATFORM_TENANT_ID, "root", "platform_admin").await;
-    let app = router(AppState::new(db.database().clone()));
+    let app = router(AppState::new(db.database().clone()).with_tenancy(TenancyConfig::multi()));
     let (status, _, _) = send(
         &app,
         request("GET", "/api/v1/platform/audit", Some(&cookie), None),
@@ -548,7 +548,9 @@ async fn the_sign_in_rate_limit_ignores_the_case() {
         window,
         restichub_cp::rate_limit::MAX_ENTRIES,
     ));
-    let app = router(AppState::with_auth(db.database().clone(), auth));
+    let app = router(
+        AppState::with_auth(db.database().clone(), auth).with_tenancy(TenancyConfig::multi()),
+    );
 
     // The same unknown user with alternating case uses one bucket.
     for index in 0..10 {
@@ -607,7 +609,9 @@ async fn a_full_synthetic_map_does_not_block_a_known_user() {
         ..AuthConfig::default()
     };
     let auth = AuthState::new(config).with_bucket_cap(4);
-    let app = router(AppState::with_auth(db.database().clone(), auth));
+    let app = router(
+        AppState::with_auth(db.database().clone(), auth).with_tenancy(TenancyConfig::multi()),
+    );
 
     // Fill the synthetic map with distinct unknown users. The map evicts instead of growing, and
     // each attempt gives the generic error.
@@ -654,7 +658,7 @@ async fn a_saturated_semaphore_does_not_block_other_requests() {
         .database_with_max(3)
         .await
         .unwrap_or_else(|e| panic!("{e}"));
-    let app = router(AppState::with_auth(database, auth));
+    let app = router(AppState::with_auth(database, auth).with_tenancy(TenancyConfig::multi()));
     let cookie = sign_in_ok(&app, "pool", "alice", "correct horse battery").await;
 
     // Hold the only hash permit. A sign-in then waits for it without a database transaction.

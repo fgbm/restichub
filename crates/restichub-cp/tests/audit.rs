@@ -11,6 +11,7 @@ use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use restichub_cp::audit::AuditService;
+use restichub_cp::config::TenancyConfig;
 use restichub_cp::server::{AppState, router};
 use restichub_db::audit::{self, Actor, AuditAction, AuditEvent, AuditFilter, AuditPage};
 use restichub_db::test_util::{TestDatabase, test_database};
@@ -45,7 +46,10 @@ fn lazy_app() -> Result<Router, Box<dyn std::error::Error>> {
         acquire_timeout: Duration::from_millis(100),
     };
     let database = Database::connect_lazy(&config, None)?;
-    Ok(router(AppState::new(database)))
+    // The platform audit path is under test, so the router runs in multi mode.
+    Ok(router(
+        AppState::new(database).with_tenancy(TenancyConfig::multi()),
+    ))
 }
 
 async fn body_json(
@@ -211,7 +215,7 @@ async fn the_platform_audit_endpoint_refuses_a_tenant_role()
     tx.commit().await?;
     let cookie = sign_in(&db, tenant, "admin").await?;
 
-    let app = router(AppState::new(db.database().clone()));
+    let app = router(AppState::new(db.database().clone()).with_tenancy(TenancyConfig::multi()));
     let response = app
         .oneshot(request("GET", AUDIT_PLATFORM_PATH, Some(&cookie))?)
         .await?;
@@ -236,7 +240,7 @@ async fn the_audit_endpoint_refuses_a_bad_query() -> Result<(), Box<dyn std::err
     tx.commit().await?;
     let cookie = sign_in(&db, tenant, "viewer").await?;
 
-    let app = router(AppState::new(db.database().clone()));
+    let app = router(AppState::new(db.database().clone()).with_tenancy(TenancyConfig::multi()));
     let response = app
         .oneshot(request(
             "GET",
@@ -320,7 +324,7 @@ async fn a_viewer_reads_the_tenant_audit_records() -> Result<(), Box<dyn std::er
     tx.commit().await?;
     let cookie = sign_in(&db, tenant, "viewer").await?;
 
-    let app = router(AppState::new(db.database().clone()));
+    let app = router(AppState::new(db.database().clone()).with_tenancy(TenancyConfig::multi()));
     let response = app
         .oneshot(request("GET", AUDIT_TENANT_PATH, Some(&cookie))?)
         .await?;
@@ -363,7 +367,7 @@ async fn the_platform_audit_endpoint_returns_every_tenant() -> Result<(), Box<dy
     tx.commit().await?;
     let cookie = sign_in(&db, PLATFORM_TENANT_ID, "platform_admin").await?;
 
-    let app = router(AppState::new(db.database().clone()));
+    let app = router(AppState::new(db.database().clone()).with_tenancy(TenancyConfig::multi()));
     let response = app
         .oneshot(request("GET", AUDIT_PLATFORM_PATH, Some(&cookie))?)
         .await?;

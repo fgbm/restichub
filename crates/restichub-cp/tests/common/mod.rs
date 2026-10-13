@@ -15,11 +15,12 @@ use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use restichub_cp::clock::Clock;
-use restichub_cp::config::AuthConfig;
+use restichub_cp::config::{AuthConfig, TenancyConfig};
 use restichub_cp::server::{AppState, AuthState, router};
 use restichub_db::test_util::{TestDatabase, test_database};
 use restichub_db::{
-    Database, Role, TenantId, TenantStatus, api_tokens, memberships, sessions, tenants, users,
+    Database, PLATFORM_TENANT_ID, Role, TenantId, TenantStatus, api_tokens, memberships, sessions,
+    tenants, users,
 };
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -124,13 +125,19 @@ fn cookie_pair(header: &str) -> Option<String> {
     header.split(';').next().map(str::to_owned)
 }
 
+/// The existing tests cover the multi-tenant behaviour, so the helper sets multi mode.
 pub fn app(db: &Database) -> Router {
-    router(AppState::new(db.clone()))
+    router(AppState::new(db.clone()).with_tenancy(TenancyConfig::multi()))
 }
 
 pub fn app_with_auth(db: &Database, config: AuthConfig, clock: Arc<dyn Clock>) -> Router {
     let auth = AuthState::new(config).with_clock(clock);
-    router(AppState::with_auth(db.clone(), auth))
+    router(AppState::with_auth(db.clone(), auth).with_tenancy(TenancyConfig::multi()))
+}
+
+/// The same as [`app`], in single mode with the default tenant name.
+pub fn app_single(db: &Database) -> Router {
+    router(AppState::new(db.clone()).with_tenancy(TenancyConfig::default()))
 }
 
 #[derive(Debug)]
@@ -152,7 +159,21 @@ pub fn test_kek() -> Arc<dyn restichub_secrets::KekProvider> {
 }
 
 pub fn app_with_kek(db: &Database) -> Router {
-    router(AppState::new(db.clone()).with_kek(test_kek()))
+    router(
+        AppState::new(db.clone())
+            .with_kek(test_kek())
+            .with_tenancy(TenancyConfig::multi()),
+    )
+}
+
+/// The single mode with a key encryption key provider. A test that runs the single-mode setup
+/// needs the provider to wrap the data encryption key of the tenant `default`.
+pub fn app_single_with_kek(db: &Database) -> Router {
+    router(
+        AppState::new(db.clone())
+            .with_kek(test_kek())
+            .with_tenancy(TenancyConfig::default()),
+    )
 }
 
 pub async fn create_tenant(db: &Database, name: &str) -> TenantId {
@@ -301,6 +322,22 @@ pub async fn seed_api_token(db: &Database, tenant: TenantId, role: &str) -> Stri
     let creator_name = format!("creator-{role}");
     let creator = create_user(db, tenant, &creator_name, "phc", "admin").await;
     seed_token(db, tenant, role, creator).await
+}
+
+/// Creates a Platform Admin API token and returns its value.
+///
+/// The platform tenant holds the role `platform_admin` only (FR-TN-02), so the creator holds that
+/// role.
+pub async fn seed_platform_api_token(db: &Database) -> String {
+    let creator = create_user(
+        db,
+        PLATFORM_TENANT_ID,
+        "platform-token-owner",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    seed_token(db, PLATFORM_TENANT_ID, "platform_admin", creator).await
 }
 
 /// Creates an Admin API token whose creator is not an Admin and returns its value.

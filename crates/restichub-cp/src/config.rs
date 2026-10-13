@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use restichub_secrets::{EnvReader, SecretString, SystemEnv, read_secret};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::client_ip::TrustedProxies;
 
@@ -38,6 +39,10 @@ pub const SIGN_IN_USER_RATE_ENV: &str = "RESTICHUB_AUTH_SIGN_IN_USER_RATE";
 pub const SIGN_IN_IP_RATE_ENV: &str = "RESTICHUB_AUTH_SIGN_IN_IP_RATE";
 pub const INSECURE_COOKIES_ENV: &str = "RESTICHUB_SERVER_INSECURE_COOKIES";
 pub const MAX_CONCURRENT_HASHES_ENV: &str = "RESTICHUB_AUTH_MAX_CONCURRENT_HASHES";
+/// The tenancy mode: `single` or `multi` (ADR-0024).
+pub const TENANCY_MODE_ENV: &str = "RESTICHUB_TENANCY_MODE";
+/// The tenant that single mode uses and that the switch from multi mode expects.
+pub const TENANCY_DEFAULT_TENANT_ENV: &str = "RESTICHUB_TENANCY_DEFAULT_TENANT";
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:8080";
 const DEFAULT_LOG_LEVEL: &str = "info";
@@ -47,6 +52,70 @@ const DEFAULT_SESSION_IDLE: Duration = Duration::from_secs(30 * 60);
 const DEFAULT_SESSION_ABSOLUTE: Duration = Duration::from_secs(12 * 60 * 60);
 const DEFAULT_SIGN_IN_USER_RATE: u32 = 10;
 const DEFAULT_SIGN_IN_IP_RATE: u32 = 30;
+const DEFAULT_TENANT_NAME: &str = "default";
+
+/// The tenancy mode of the installation (ADR-0024).
+///
+/// The mode changes the API surface and the user interface. It never changes the storage model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TenancyMode {
+    #[default]
+    Single,
+    Multi,
+}
+
+impl TenancyMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Multi => "multi",
+        }
+    }
+
+    pub fn is_single(self) -> bool {
+        matches!(self, Self::Single)
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "single" => Some(Self::Single),
+            "multi" => Some(Self::Multi),
+            _ => None,
+        }
+    }
+}
+
+/// The tenancy mode of the process and the name of the tenant that single mode uses (ADR-0024).
+#[derive(Debug, Clone)]
+pub struct TenancyConfig {
+    pub mode: TenancyMode,
+    /// The tenant that single mode uses and that the switch from multi mode expects.
+    pub default_tenant: String,
+}
+
+impl TenancyConfig {
+    pub fn single(default_tenant: impl Into<String>) -> Self {
+        Self {
+            mode: TenancyMode::Single,
+            default_tenant: default_tenant.into(),
+        }
+    }
+
+    pub fn multi() -> Self {
+        Self {
+            mode: TenancyMode::Multi,
+            default_tenant: DEFAULT_TENANT_NAME.to_owned(),
+        }
+    }
+}
+
+impl Default for TenancyConfig {
+    fn default() -> Self {
+        Self::single(DEFAULT_TENANT_NAME)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -156,6 +225,7 @@ pub struct Config {
     pub trusted_proxies: TrustedProxies,
     pub auth: AuthConfig,
     pub secrets: SecretsConfig,
+    pub tenancy: TenancyConfig,
 }
 
 /// Secret handling configuration (ADR-0023, section Secrets).
@@ -202,6 +272,7 @@ impl Config {
         let trusted_proxies = trusted_proxies(env, file.server.as_ref())?;
         let auth = auth_config(env, file.auth.as_ref(), file.server.as_ref())?;
         let secrets = secrets_config(env, file.secrets.as_ref());
+        let tenancy = tenancy_config(env, file.tenancy.as_ref())?;
 
         let database_url = env
             .get(DATABASE_URL_ENV)
@@ -259,6 +330,7 @@ impl Config {
             trusted_proxies,
             auth,
             secrets,
+            tenancy,
         })
     }
 }
@@ -316,6 +388,7 @@ struct FileConfig {
     server: Option<ServerConfig>,
     auth: Option<AuthSection>,
     secrets: Option<SecretsSection>,
+    tenancy: Option<TenancySection>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -339,6 +412,13 @@ struct AuthSection {
 #[serde(deny_unknown_fields)]
 struct SecretsSection {
     kek_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TenancySection {
+    mode: Option<TenancyMode>,
+    default_tenant: Option<String>,
 }
 
 impl FileConfig {
@@ -469,6 +549,37 @@ fn secrets_config(env: &dyn EnvReader, secrets: Option<&SecretsSection>) -> Secr
         .map(PathBuf::from)
         .or_else(|| secrets.and_then(|section| section.kek_file.clone()));
     SecretsConfig { kek_file }
+}
+
+/// Reads the tenancy settings (ADR-0024).
+///
+/// Environment values override the file. The mode default is `single`. The name of the default
+/// tenant obeys the tenant name rule, so the reserved name `platform` is refused.
+fn tenancy_config(
+    env: &dyn EnvReader,
+    tenancy: Option<&TenancySection>,
+) -> Result<TenancyConfig, ConfigError> {
+    let mode = match env.get(TENANCY_MODE_ENV) {
+        Some(value) => TenancyMode::parse(&value).ok_or_else(|| ConfigError::Invalid {
+            name: "tenancy.mode",
+            reason: format!("`{value}` is not `single` or `multi`"),
+        })?,
+        None => tenancy.and_then(|section| section.mode).unwrap_or_default(),
+    };
+    let default_tenant = env
+        .get(TENANCY_DEFAULT_TENANT_ENV)
+        .or_else(|| tenancy.and_then(|section| section.default_tenant.clone()))
+        .unwrap_or_else(|| DEFAULT_TENANT_NAME.to_owned());
+    let default_tenant =
+        crate::validation::validate_tenant_name("tenancy.default_tenant", &default_tenant)
+            .map_err(|error| ConfigError::Invalid {
+                name: "tenancy.default_tenant",
+                reason: error.reason.as_str().to_owned(),
+            })?;
+    Ok(TenancyConfig {
+        mode,
+        default_tenant,
+    })
 }
 
 fn number<T: std::str::FromStr>(

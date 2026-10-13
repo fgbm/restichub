@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::client_ip::TrustedProxies;
 use crate::clock::{Clock, SystemClock};
-use crate::config::AuthConfig;
+use crate::config::{AuthConfig, TenancyConfig};
 use crate::error::{ApiError, InternalCause, PROBLEM_CONTENT_TYPE};
 use crate::rate_limit::RateLimiter;
 use crate::routes::ROUTES;
@@ -103,19 +103,23 @@ pub struct AppState {
     trusted_proxies: TrustedProxies,
     auth: AuthState,
     kek: Option<Arc<dyn KekProvider>>,
+    tenancy: TenancyConfig,
 }
 
 impl AppState {
     /// Creates the application state with the default authentication settings.
     ///
     /// The state holds no key encryption key provider. A test that creates a tenant calls
-    /// [`AppState::with_kek`]. The production server always sets the provider.
+    /// [`AppState::with_kek`]. The production server always sets the provider. The tenancy mode is
+    /// single, the default of the configuration; the production server sets it from the
+    /// configuration with [`AppState::with_tenancy`].
     pub fn new(db: Database) -> Self {
         Self {
             db,
             trusted_proxies: TrustedProxies::default(),
             auth: AuthState::new(AuthConfig::default()),
             kek: None,
+            tenancy: TenancyConfig::default(),
         }
     }
 
@@ -125,6 +129,7 @@ impl AppState {
             trusted_proxies: TrustedProxies::default(),
             auth,
             kek: None,
+            tenancy: TenancyConfig::default(),
         }
     }
 
@@ -140,6 +145,12 @@ impl AppState {
         self
     }
 
+    /// The server passes the tenancy configuration of the process here (ADR-0024).
+    pub fn with_tenancy(mut self, tenancy: TenancyConfig) -> Self {
+        self.tenancy = tenancy;
+        self
+    }
+
     pub fn db(&self) -> &Database {
         &self.db
     }
@@ -150,6 +161,10 @@ impl AppState {
 
     pub fn auth(&self) -> &AuthState {
         &self.auth
+    }
+
+    pub fn tenancy(&self) -> &TenancyConfig {
+        &self.tenancy
     }
 
     /// The provider is absent only in a test that does not set it.
@@ -165,7 +180,8 @@ pub fn router(state: AppState) -> Router {
     router
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
-        .with_state(state)
+        .with_state(state.clone())
+        .layer(middleware::from_fn_with_state(state, hide_platform_routes))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
@@ -182,6 +198,23 @@ fn openapi_router() -> OpenApiRouter<AppState> {
         router = router.routes((route.handler)());
     }
     router
+}
+
+/// Hides the platform routes in single mode (ADR-0024).
+///
+/// The function is one guard for every platform route: the access rule of the route table decides
+/// which path is a platform path. The response is the same 404 `not_found` as an unknown path, so
+/// the mode reveals no platform route. The guard runs before the handler, so it also covers an
+/// unauthenticated request.
+async fn hide_platform_routes(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if state.tenancy().mode.is_single() && crate::routes::is_platform_path(request.uri().path()) {
+        return ApiError::not_found().into_response();
+    }
+    next.run(request).await
 }
 
 pub fn openapi_document() -> OpenApiDocument {

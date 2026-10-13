@@ -23,6 +23,21 @@ pub struct Route {
     pub handler: fn() -> UtoipaMethodRouter<AppState>,
 }
 
+/// True if the path is under a platform route of the table (ADR-0024).
+///
+/// The guard of the router uses the function to hide the platform routes in single mode. The path
+/// prefix of each platform route comes from the table, so the two agree. A path parameter cuts the
+/// prefix at the first `{`.
+pub fn is_platform_path(path: &str) -> bool {
+    ROUTES
+        .iter()
+        .filter(|route| route.access.is_platform())
+        .any(|route| {
+            let prefix = route.path.split('{').next().unwrap_or(route.path);
+            path.starts_with(prefix)
+        })
+}
+
 pub const ROUTES: &[Route] = &[
     Route {
         method: "get",
@@ -84,6 +99,12 @@ pub const ROUTES: &[Route] = &[
         path: "/api/v1/setup/status",
         access: Access::Public,
         handler: || routes!(crate::setup::status),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/instance",
+        access: Access::Public,
+        handler: || routes!(crate::instance::instance),
     },
     Route {
         method: "get",

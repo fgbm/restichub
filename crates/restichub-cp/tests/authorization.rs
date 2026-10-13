@@ -172,6 +172,8 @@ async fn ac_au_02_role_operation_matrix() {
         return;
     };
     let tenant = create_tenant_with_key(db.database(), "matrix").await;
+    // The matrix runs in multi mode: the helper sets it. Single mode covers the platform routes
+    // in ac_tn_06 (ADR-0024).
     let app = app_with_kek(db.database());
     let id = uuid::Uuid::now_v7().to_string();
 
