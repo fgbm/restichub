@@ -306,7 +306,7 @@ pub async fn get_platform(
          FROM tenants AS tenant \
          LEFT JOIN public.tenant_user_counts() AS counts ON counts.tenant_id = tenant.id \
          LEFT JOIN public.tenant_admin_counts() AS admins ON admins.tenant_id = tenant.id \
-         WHERE tenant.id = $1",
+         WHERE tenant.id = $1 AND tenant.id <> '00000000-0000-7000-8000-000000000000'::uuid",
     )
     .bind(id)
     .fetch_optional(tx.as_conn())
@@ -335,7 +335,8 @@ pub async fn list_platform(
          FROM tenants AS tenant \
          LEFT JOIN public.tenant_user_counts() AS counts ON counts.tenant_id = tenant.id \
          LEFT JOIN public.tenant_admin_counts() AS admins ON admins.tenant_id = tenant.id \
-         WHERE (($1::text IS NULL AND tenant.status <> 'deleted') OR tenant.status = $1) \
+         WHERE tenant.id <> '00000000-0000-7000-8000-000000000000'::uuid \
+           AND (($1::text IS NULL AND tenant.status <> 'deleted') OR tenant.status = $1) \
            AND ($2::timestamptz IS NULL \
                 OR (tenant.created_at, tenant.id) < ($2::timestamptz, $3::uuid)) \
          ORDER BY tenant.created_at DESC, tenant.id DESC \

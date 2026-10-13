@@ -106,16 +106,17 @@ async fn db_platform_audit_writes_an_existing_tenant() -> TestResult {
     let (tenant_a, _) = two_tenants(db.database()).await?;
     seed_tenant(db.database(), tenant_a).await?;
 
-    // Seed the platform tenant, so the visibility check below is meaningful.
+    // Seed the platform tenant, so the visibility check below is meaningful. The Platform Admin is
+    // an account right with no membership (ADR-0029).
     let mut tx = db.database().begin_tenant(PLATFORM_TENANT_ID).await?;
-    users::create_member(
+    users::create_platform_admin(
         &mut tx,
+        crate::UserId::new(),
         &NewUser {
             username: "root",
             password_hash: "phc",
             display_name: "Root",
         },
-        crate::Role::PlatformAdmin,
     )
     .await?;
     sqlx::query(

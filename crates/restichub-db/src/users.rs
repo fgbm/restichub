@@ -24,6 +24,8 @@ pub struct Account {
     pub disabled: bool,
     /// The tenant that was last used through this account.
     pub last_used_tenant_id: Option<TenantId>,
+    /// True when the account holds the installation-wide right (ADR-0029).
+    pub platform_admin: bool,
 }
 
 /// An account row with the password hash. The control plane never sends it.
@@ -35,6 +37,8 @@ pub struct AccountAuth {
     pub disabled: bool,
     /// The tenant that was last used through this account.
     pub last_used_tenant_id: Option<TenantId>,
+    /// True when the account holds the installation-wide right (ADR-0029).
+    pub platform_admin: bool,
 }
 
 /// A member of a tenant: an account with its membership (ADR-0025).
@@ -87,27 +91,29 @@ pub struct NewUser<'a> {
 
 /// Resolves a username for the sign-in, ignoring the letter case.
 pub async fn find_account(db: &Database, username: &str) -> Result<Option<AccountAuth>, DbError> {
-    let row = sqlx::query_as::<_, (Uuid, String, bool, Option<Uuid>)>(
-        "SELECT id, password_hash, disabled, last_used_tenant_id FROM auth_find_account($1)",
+    let row = sqlx::query_as::<_, (Uuid, String, bool, Option<Uuid>, bool)>(
+        "SELECT id, password_hash, disabled, last_used_tenant_id, platform_admin \
+         FROM auth_find_account($1)",
     )
     .bind(username)
     .fetch_optional(db.pool())
     .await
     .map_err(DbError::Query)?;
     Ok(row.map(
-        |(id, password_hash, disabled, last_used_tenant_id)| AccountAuth {
+        |(id, password_hash, disabled, last_used_tenant_id, platform_admin)| AccountAuth {
             id: UserId::from_uuid(id),
             password_hash,
             disabled,
             last_used_tenant_id: last_used_tenant_id.map(TenantId::from_uuid),
+            platform_admin,
         },
     ))
 }
 
 /// Finds the account by the identifier. It returns no password hash.
 pub async fn find_account_by_id(db: &Database, id: UserId) -> Result<Option<Account>, DbError> {
-    let row = sqlx::query_as::<_, (Uuid, String, String, bool, Option<Uuid>)>(
-        "SELECT id, username, display_name, disabled, last_used_tenant_id \
+    let row = sqlx::query_as::<_, (Uuid, String, String, bool, Option<Uuid>, bool)>(
+        "SELECT id, username, display_name, disabled, last_used_tenant_id, platform_admin \
          FROM auth_find_account_by_id($1)",
     )
     .bind(id)
@@ -115,12 +121,13 @@ pub async fn find_account_by_id(db: &Database, id: UserId) -> Result<Option<Acco
     .await
     .map_err(DbError::Query)?;
     Ok(row.map(
-        |(id, username, display_name, disabled, last_used_tenant_id)| Account {
+        |(id, username, display_name, disabled, last_used_tenant_id, platform_admin)| Account {
             id: UserId::from_uuid(id),
             username,
             display_name,
             disabled,
             last_used_tenant_id: last_used_tenant_id.map(TenantId::from_uuid),
+            platform_admin,
         },
     ))
 }
@@ -284,6 +291,8 @@ pub struct PlatformAccount {
     pub email_verified: bool,
     /// A Platform Admin set it for the whole installation.
     pub disabled: bool,
+    /// True when the account holds the installation-wide right (ADR-0029).
+    pub platform_admin: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +303,8 @@ pub struct NewPlatformAccount<'a> {
     pub password_hash: &'a str,
     pub display_name: &'a str,
     pub email: Option<&'a str>,
+    /// Grants the installation-wide right at the create (ADR-0029).
+    pub platform_admin: bool,
 }
 
 /// The result of the platform account create (migration 0020).
@@ -324,8 +335,8 @@ impl CreateAccountStatus {
 pub async fn list_platform_accounts(
     tx: &mut PlatformTx<'_>,
 ) -> Result<Vec<PlatformAccount>, DbError> {
-    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, bool, bool)>(
-        "SELECT user_id, username, display_name, email, email_verified, disabled \
+    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, bool, bool, bool)>(
+        "SELECT user_id, username, display_name, email, email_verified, disabled, platform_admin \
          FROM auth_platform_accounts()",
     )
     .fetch_all(tx.as_conn())
@@ -334,13 +345,16 @@ pub async fn list_platform_accounts(
     Ok(rows
         .into_iter()
         .map(
-            |(id, username, display_name, email, email_verified, disabled)| PlatformAccount {
-                id: UserId::from_uuid(id),
-                username,
-                display_name,
-                email,
-                email_verified,
-                disabled,
+            |(id, username, display_name, email, email_verified, disabled, platform_admin)| {
+                PlatformAccount {
+                    id: UserId::from_uuid(id),
+                    username,
+                    display_name,
+                    email,
+                    email_verified,
+                    disabled,
+                    platform_admin,
+                }
             },
         )
         .collect())
@@ -356,16 +370,71 @@ pub async fn platform_create_account(
     new: &NewPlatformAccount<'_>,
 ) -> Result<CreateAccountStatus, DbError> {
     let (status,): (String,) =
-        sqlx::query_as("SELECT auth_platform_create_account($1, $2, $3, $4, $5)")
+        sqlx::query_as("SELECT auth_platform_create_account($1, $2, $3, $4, $5, $6)")
             .bind(id)
             .bind(new.username)
             .bind(new.password_hash)
             .bind(new.display_name)
             .bind(new.email)
+            .bind(new.platform_admin)
             .fetch_one(tx.as_conn())
             .await
             .map_err(DbError::Query)?;
     CreateAccountStatus::parse(&status)
+}
+
+/// Creates the first Platform Admin account with the right and no membership (ADR-0029). The setup
+/// calls it in the platform tenant.
+pub async fn create_platform_admin(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    new: &NewUser<'_>,
+) -> Result<bool, DbError> {
+    let (created,): (bool,) = sqlx::query_as("SELECT auth_create_platform_admin($1, $2, $3, $4)")
+        .bind(id)
+        .bind(new.username)
+        .bind(new.password_hash)
+        .bind(new.display_name)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(created)
+}
+
+/// Reads the number of the active installation administrators (ADR-0029). It needs the platform
+/// tenant or the platform scope.
+pub async fn platform_admin_count(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
+    let (count,): (i64,) = sqlx::query_as("SELECT auth_platform_admin_count()")
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(count)
+}
+
+/// True when the account holds the active Platform Admin right (ADR-0029).
+pub async fn is_platform_admin(tx: &mut TenantTx<'_>, id: UserId) -> Result<bool, DbError> {
+    let (value,): (bool,) = sqlx::query_as("SELECT auth_is_platform_admin($1)")
+        .bind(id)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(value)
+}
+
+/// Writes the Platform Admin right of an account (ADR-0029). It needs the platform tenant or the
+/// platform scope and takes the account row lock.
+pub async fn set_platform_admin(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    value: bool,
+) -> Result<WriteStatus, DbError> {
+    let (status,): (String,) = sqlx::query_as("SELECT auth_set_platform_admin($1, $2)")
+        .bind(id)
+        .bind(value)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    WriteStatus::parse(&status)
 }
 
 /// Writes the email address of an account for the platform administration.

@@ -19,6 +19,23 @@ async fn db_the_platform_scope_manages_tenants() -> TestResult {
     assert!(list.iter().any(|tenant| tenant.id == PLATFORM_TENANT_ID));
     tx.commit().await?;
 
+    // The user-facing platform list excludes the internal platform tenant (ADR-0029).
+    let mut tx = db.database().begin_platform().await?;
+    let page = tenants::list_platform(
+        &mut tx,
+        &tenants::TenantFilter::default(),
+        &tenants::TenantPage::default(),
+    )
+    .await?;
+    assert!(
+        !page
+            .tenants
+            .iter()
+            .any(|tenant| tenant.id == PLATFORM_TENANT_ID),
+        "the platform tenant must not appear in the platform list"
+    );
+    tx.commit().await?;
+
     // A tenant scope sees its own row only and cannot write `tenants`.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let rows: Vec<(Uuid,)> = sqlx::query_as("SELECT id FROM tenants")
