@@ -18,6 +18,7 @@ export const en = {
 	'nav.audit': 'Audit log',
 	'nav.platformAudit': 'Platform audit',
 	'nav.tenants': 'Organizations',
+	'nav.platformUsers': 'Users',
 	'nav.primary': 'Primary navigation',
 
 	// Top bar
@@ -164,9 +165,7 @@ export const en = {
 	'tenants.name': 'Name',
 	'tenants.namePlaceholder': 'organization name',
 	'tenants.users': 'Users',
-	'tenants.adminUsername': 'First admin user name',
-	'tenants.adminDisplayName': 'First admin display name',
-	'tenants.adminPassword': 'First admin password',
+	'tenants.noAdministrator': 'No administrator',
 	'tenants.created': 'The organization is created.',
 	'tenants.suspend': 'Suspend',
 	'tenants.resume': 'Resume',
@@ -200,6 +199,31 @@ export const en = {
 	'users.resetDone': 'The password is reset.',
 	'users.sharedResetHint':
 		'This account belongs to other organizations. The user or a Platform Admin can reset the password.',
+
+	// Platform users (installation-wide accounts)
+	'platformUsers.title': 'Users',
+	'platformUsers.description': 'Create installation accounts and manage their memberships.',
+	'platformUsers.create': 'Create user',
+	'platformUsers.createTitle': 'Create an installation account',
+	'platformUsers.username': 'User name',
+	'platformUsers.displayName': 'Display name',
+	'platformUsers.email': 'Email',
+	'platformUsers.emailHint': 'Optional. The invitations of 1.0 use it.',
+	'platformUsers.password': 'Password',
+	'platformUsers.organizations': 'Organizations',
+	'platformUsers.noOrganizations': 'No organization',
+	'platformUsers.addOrganization': 'Add an organization',
+	'platformUsers.organization': 'Organization',
+	'platformUsers.role': 'Role',
+	'platformUsers.created': 'The account is created.',
+	'platformUsers.changeRole': 'Change the role',
+	'platformUsers.removeMembership': 'Remove',
+	'platformUsers.removed': 'The membership is removed.',
+	'platformUsers.roleChanged': 'The role is changed.',
+	'platformUsers.added': 'The membership is added.',
+	'platformUsers.memberships': 'Memberships',
+	'platformUsers.emailTaken': 'This email is taken.',
+	'platformUsers.selectOrganization': 'Select an organization',
 
 	// API tokens
 	'tokens.title': 'API tokens',
@@ -353,6 +377,7 @@ export const en = {
 	'error.shared_account':
 		'This account belongs to other organizations. The user or a Platform Admin can reset the password.',
 	'error.username_taken': 'This user name is taken.',
+	'error.email_taken': 'This email is taken.',
 	'error.internal_error': 'The control plane has an internal problem.',
 	'error.network': 'The control plane did not answer.',
 	'error.field': 'Correct this field.',

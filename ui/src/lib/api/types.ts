@@ -129,3 +129,23 @@ export type Tenant = components['schemas']['PlatformTenantView'];
 export type TenantListResponse = components['schemas']['TenantListResponse'];
 
 export type CreateTenantRequest = components['schemas']['CreateTenantRequest'];
+
+/** The derived administrator state of an organization (ADR-0028). */
+export type AdminState = components['schemas']['AdminState'];
+
+/** An installation account with its memberships (ADR-0028). */
+export type PlatformUser = components['schemas']['PlatformUserView'];
+
+export type PlatformMembership = components['schemas']['PlatformMembershipView'];
+
+export type PlatformUserListResponse = components['schemas']['PlatformUserListResponse'];
+
+export type CreatePlatformUserRequest = components['schemas']['CreateAccountRequest'];
+
+/** One membership of the account create request. */
+export type MembershipInput = components['schemas']['MembershipInput'];
+
+export type SetRoleRequest = components['schemas']['SetRoleRequest'];
+
+/** An absent field leaves the value unchanged. */
+export type UpdateAccountRequest = components['schemas']['UpdateAccountRequest'];

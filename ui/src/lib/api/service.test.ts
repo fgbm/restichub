@@ -29,7 +29,8 @@ describe('the HTTP service (issue #20 tenants)', () => {
 			name: 'acme',
 			status: 'active',
 			created_at: '2026-10-12T10:00:00Z',
-			user_count: 3
+			user_count: 3,
+			admin_state: 'present'
 		};
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ items: [tenant], next_cursor: null }));
 		const service = await loadService(fetchFn);
@@ -45,22 +46,34 @@ describe('the HTTP service (issue #20 tenants)', () => {
 			name: 'globex',
 			status: 'active',
 			created_at: '2026-10-12T10:00:00Z',
-			user_count: 1
+			user_count: 0,
+			admin_state: 'none'
 		};
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(tenant, 201));
 		const service = await loadService(fetchFn);
 
-		const created = await service.createTenant({
-			name: 'globex',
-			first_admin: { username: 'admin', display_name: 'Admin', password: 'a-long-password' }
-		});
+		const created = await service.createTenant({ name: 'globex' });
 		expect(created).toEqual(tenant);
 		const init = fetchFn.mock.calls[0][1] as RequestInit;
 		expect(init.method).toBe('POST');
-		expect(JSON.parse(init.body as string)).toEqual({
-			name: 'globex',
-			first_admin: { username: 'admin', display_name: 'Admin', password: 'a-long-password' }
-		});
+		expect(JSON.parse(init.body as string)).toEqual({ name: 'globex' });
+	});
+
+	it('unwraps the platform account list items', async () => {
+		const account = {
+			id: 'pu_01',
+			username: 'anna',
+			display_name: 'Anna',
+			email: null,
+			email_verified: false,
+			disabled: false,
+			memberships: [{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false }]
+		};
+		const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ items: [account] }));
+		const service = await loadService(fetchFn);
+
+		expect(await service.listPlatformUsers()).toEqual([account]);
+		expect(fetchFn.mock.calls[0][0]).toContain('/api/v1/platform/users');
 	});
 
 	it('suspend, resume and delete return no body', async () => {

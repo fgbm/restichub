@@ -1,0 +1,379 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
+	import type { ApiProblem, PlatformUser, Role, Tenant } from '#lib/api/index.ts';
+	import {
+		Alert,
+		Button,
+		PageHeader,
+		Select,
+		SidePanel,
+		Table,
+		TextField
+	} from '#lib/components/ui/index.ts';
+	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+
+	// The platform tenant holds the role `platform_admin` only, so a membership here is below it.
+	const ASSIGNABLE: Role[] = ['admin', 'operator', 'viewer'];
+
+	let accounts = $state<PlatformUser[]>([]);
+	let tenants = $state<Tenant[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+
+	let createOpen = $state(false);
+	let creating = $state(false);
+	let createError = $state<string | null>(null);
+	let createProblem = $state<ApiProblem | null>(null);
+	let newUsername = $state('');
+	let newDisplayName = $state('');
+	let newEmail = $state('');
+	let newPassword = $state('');
+	let newTenantId = $state('');
+	let newRole = $state<Role>('viewer');
+
+	let manageOpen = $state(false);
+	let manageUser = $state<PlatformUser | null>(null);
+	let manageTenantId = $state('');
+	let manageRole = $state<Role>('viewer');
+	let busyKey = $state<string | null>(null);
+
+	const createFields = ['username', 'display_name', 'email', 'password'];
+	const emailTaken = $derived(
+		createProblem?.code === 'email_taken' || createProblem?.code === 'username_taken'
+	);
+
+	const roleKeys = $derived<Record<Role, string>>({
+		platform_admin: t('users.role.platformAdmin'),
+		admin: t('users.role.admin'),
+		operator: t('users.role.operator'),
+		viewer: t('users.role.viewer')
+	});
+
+	const roleOptions = $derived<SelectOption[]>(
+		ASSIGNABLE.map((role) => ({ value: role, label: roleKeys[role] }))
+	);
+
+	const tenantOptions = $derived<SelectOption[]>([
+		{ value: '', label: t('platformUsers.noOrganizations') },
+		...tenants
+			.filter((tenant) => tenant.status === 'active')
+			.map((tenant) => ({ value: tenant.id, label: tenant.name }))
+	]);
+
+	const columns = $derived<TableColumn<PlatformUser>[]>([
+		{ key: 'username', header: t('platformUsers.username'), mono: true },
+		{ key: 'display_name', header: t('platformUsers.displayName') },
+		{
+			key: 'email',
+			header: t('platformUsers.email'),
+			cell: (row) => row.email ?? ''
+		},
+		{
+			key: 'disabled',
+			header: t('common.status'),
+			cell: (row) => (row.disabled ? t('common.disabled') : t('common.enabled')),
+			badge: (row) => (row.disabled ? 'warning' : 'success')
+		},
+		{
+			key: 'memberships',
+			header: t('platformUsers.memberships'),
+			cell: (row) =>
+				row.memberships.length === 0
+					? t('platformUsers.noOrganizations')
+					: row.memberships
+							.map((member) => `${member.tenant_name} · ${roleKeys[member.role]}`)
+							.join(', ')
+		}
+	]);
+
+	function messageOf(problem: unknown): string {
+		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		return t('table.error');
+	}
+
+	async function load(): Promise<void> {
+		loading = true;
+		error = null;
+		try {
+			[accounts, tenants] = await Promise.all([service.listPlatformUsers(), service.listTenants()]);
+		} catch (problem) {
+			error = messageOf(problem);
+		} finally {
+			loading = false;
+		}
+	}
+
+	onMount(load);
+
+	function openCreate(): void {
+		newUsername = '';
+		newDisplayName = '';
+		newEmail = '';
+		newPassword = '';
+		newTenantId = '';
+		newRole = 'viewer';
+		createError = null;
+		createProblem = null;
+		createOpen = true;
+	}
+
+	async function createUser(): Promise<void> {
+		creating = true;
+		createError = null;
+		createProblem = null;
+		try {
+			await service.createPlatformUser({
+				username: newUsername,
+				display_name: newDisplayName,
+				email: newEmail.trim() === '' ? null : newEmail,
+				password: newPassword,
+				memberships: newTenantId ? [{ tenant_id: newTenantId, role: newRole }] : []
+			});
+			pushToast('success', t('platformUsers.created'));
+			createOpen = false;
+			await load();
+		} catch (problem) {
+			createProblem = problem instanceof ApiError ? problem.problem : null;
+			createError =
+				emailTaken || namesField(createProblem, createFields) ? null : messageOf(problem);
+		} finally {
+			creating = false;
+		}
+	}
+
+	function openManage(user: PlatformUser): void {
+		manageUser = user;
+		manageTenantId = '';
+		manageRole = 'viewer';
+		manageOpen = true;
+	}
+
+	async function addMembership(): Promise<void> {
+		if (!manageUser || !manageTenantId) return;
+		busyKey = 'add';
+		try {
+			await service.addPlatformMembership(manageUser.id, {
+				tenant_id: manageTenantId,
+				role: manageRole
+			});
+			pushToast('success', t('platformUsers.added'));
+			await load();
+			refreshManage();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			busyKey = null;
+		}
+	}
+
+	async function changeRole(tenantId: string, role: Role): Promise<void> {
+		if (!manageUser) return;
+		busyKey = `role:${tenantId}`;
+		try {
+			await service.setPlatformMembershipRole(manageUser.id, tenantId, { role });
+			pushToast('success', t('platformUsers.roleChanged'));
+			await load();
+			refreshManage();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			busyKey = null;
+		}
+	}
+
+	async function removeMembership(tenantId: string): Promise<void> {
+		if (!manageUser) return;
+		busyKey = `remove:${tenantId}`;
+		try {
+			await service.removePlatformMembership(manageUser.id, tenantId);
+			pushToast('success', t('platformUsers.removed'));
+			await load();
+			refreshManage();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			busyKey = null;
+		}
+	}
+
+	function refreshManage(): void {
+		if (!manageUser) return;
+		manageUser = accounts.find((account) => account.id === manageUser?.id) ?? null;
+	}
+
+	async function toggleDisabled(user: PlatformUser): Promise<void> {
+		busyKey = `disable:${user.id}`;
+		try {
+			await service.updatePlatformUser(user.id, { disabled: !user.disabled });
+			pushToast('success', user.disabled ? t('users.enabledToast') : t('users.disabledToast'));
+			await load();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			busyKey = null;
+		}
+	}
+</script>
+
+<svelte:head>
+	<title>{t('platformUsers.title')} · {t('app.name')}</title>
+</svelte:head>
+
+<PageHeader title={t('platformUsers.title')} description={t('platformUsers.description')}>
+	<Button variant="primary" onclick={openCreate}>{t('platformUsers.create')}</Button>
+</PageHeader>
+
+<Table {columns} rows={accounts} {loading} {error} rowKey={(user) => user.id}>
+	{#snippet rowActions(user)}
+		<Button size="sm" variant="ghost" onclick={() => openManage(user)}>
+			{t('platformUsers.memberships')}
+		</Button>
+		<Button
+			size="sm"
+			variant="ghost"
+			loading={busyKey === `disable:${user.id}`}
+			onclick={() => toggleDisabled(user)}
+		>
+			{user.disabled ? t('users.enable') : t('users.disable')}
+		</Button>
+	{/snippet}
+</Table>
+
+<SidePanel bind:open={createOpen} title={t('platformUsers.createTitle')}>
+	{#if createError}
+		<Alert tone="danger" title={createError} />
+	{/if}
+	<TextField
+		id="platform-user-username"
+		label={t('platformUsers.username')}
+		error={emailTaken ? tErrorCode('username_taken') : fieldError(createProblem, 'username')}
+		bind:value={newUsername}
+		mono
+		autocomplete="off"
+		required
+	/>
+	<TextField
+		id="platform-user-display-name"
+		label={t('platformUsers.displayName')}
+		error={fieldError(createProblem, 'display_name')}
+		bind:value={newDisplayName}
+		autocomplete="off"
+		required
+	/>
+	<TextField
+		id="platform-user-email"
+		label={t('platformUsers.email')}
+		help={t('platformUsers.emailHint')}
+		error={emailTaken ? tErrorCode('email_taken') : fieldError(createProblem, 'email')}
+		bind:value={newEmail}
+		type="email"
+		autocomplete="off"
+	/>
+	<TextField
+		id="platform-user-password"
+		label={t('setup.password')}
+		help={t('setup.passwordHint')}
+		error={fieldError(createProblem, 'password')}
+		bind:value={newPassword}
+		type="password"
+		autocomplete="new-password"
+		required
+	/>
+	<Select
+		id="platform-user-tenant"
+		label={t('platformUsers.organization')}
+		bind:value={newTenantId}
+		options={tenantOptions}
+	/>
+	{#if newTenantId}
+		<Select
+			id="platform-user-role"
+			label={t('platformUsers.role')}
+			bind:value={newRole}
+			options={roleOptions}
+		/>
+	{/if}
+	{#snippet footer()}
+		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
+		<Button
+			variant="primary"
+			loading={creating}
+			disabled={!newUsername || !newDisplayName || newPassword.length < 12}
+			onclick={createUser}
+		>
+			{t('common.create')}
+		</Button>
+	{/snippet}
+</SidePanel>
+
+<SidePanel bind:open={manageOpen} title={manageUser?.username ?? ''}>
+	{#if manageUser}
+		<h3>{t('platformUsers.memberships')}</h3>
+		{#if manageUser.memberships.length === 0}
+			<p>{t('platformUsers.noOrganizations')}</p>
+		{:else}
+			{#each manageUser.memberships as member (member.tenant_id)}
+				<div class="membership">
+					<span class="membership__name">{member.tenant_name}</span>
+					<Select
+						id={`membership-role-${member.tenant_id}`}
+						label={t('platformUsers.role')}
+						value={member.role}
+						options={roleOptions}
+						onchange={(event) =>
+							changeRole(
+								member.tenant_id,
+								(event.currentTarget as HTMLSelectElement).value as Role
+							)}
+					/>
+					<Button
+						size="sm"
+						variant="ghost"
+						loading={busyKey === `remove:${member.tenant_id}`}
+						onclick={() => removeMembership(member.tenant_id)}
+					>
+						{t('platformUsers.removeMembership')}
+					</Button>
+				</div>
+			{/each}
+		{/if}
+		<h3>{t('platformUsers.addOrganization')}</h3>
+		<Select
+			id="manage-tenant"
+			label={t('platformUsers.organization')}
+			bind:value={manageTenantId}
+			options={tenantOptions}
+		/>
+		{#if manageTenantId}
+			<Select
+				id="manage-role"
+				label={t('platformUsers.role')}
+				bind:value={manageRole}
+				options={roleOptions}
+			/>
+			<Button
+				variant="primary"
+				loading={busyKey === 'add'}
+				disabled={!manageTenantId}
+				onclick={addMembership}
+			>
+				{t('platformUsers.addOrganization')}
+			</Button>
+		{/if}
+	{/if}
+</SidePanel>
+
+<style>
+	.membership {
+		display: flex;
+		align-items: flex-end;
+		gap: var(--space-2);
+	}
+
+	.membership__name {
+		flex: 1;
+	}
+</style>
