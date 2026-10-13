@@ -18,6 +18,7 @@ export const ru: Record<MessageKey, string> = {
 	'nav.audit': 'Журнал аудита',
 	'nav.platformAudit': 'Аудит платформы',
 	'nav.tenants': 'Организации',
+	'nav.platformUsers': 'Пользователи',
 	'nav.primary': 'Основная навигация',
 
 	// Top bar
@@ -128,9 +129,7 @@ export const ru: Record<MessageKey, string> = {
 	'tenants.name': 'Имя',
 	'tenants.namePlaceholder': 'имя организации',
 	'tenants.users': 'Пользователи',
-	'tenants.adminUsername': 'Имя первого администратора',
-	'tenants.adminDisplayName': 'Отображаемое имя первого администратора',
-	'tenants.adminPassword': 'Пароль первого администратора',
+	'tenants.noAdministrator': 'Нет администратора',
 	'tenants.created': 'Организация создана.',
 	'tenants.suspend': 'Приостановить',
 	'tenants.resume': 'Возобновить',
@@ -164,6 +163,32 @@ export const ru: Record<MessageKey, string> = {
 	'users.resetDone': 'Пароль сброшен.',
 	'users.sharedResetHint':
 		'Учётная запись принадлежит другим организациям. Пароль может сбросить пользователь или администратор платформы.',
+
+	// Platform users (installation-wide accounts)
+	'platformUsers.title': 'Пользователи',
+	'platformUsers.description':
+		'Создавайте учётные записи установки и управляйте их членством в организациях.',
+	'platformUsers.create': 'Создать пользователя',
+	'platformUsers.createTitle': 'Создание учётной записи установки',
+	'platformUsers.username': 'Имя пользователя',
+	'platformUsers.displayName': 'Отображаемое имя',
+	'platformUsers.email': 'Электронная почта',
+	'platformUsers.emailHint': 'Необязательно. Используется приглашениями в версии 1.0.',
+	'platformUsers.password': 'Пароль',
+	'platformUsers.organizations': 'Организации',
+	'platformUsers.noOrganizations': 'Нет организации',
+	'platformUsers.addOrganization': 'Добавить организацию',
+	'platformUsers.organization': 'Организация',
+	'platformUsers.role': 'Роль',
+	'platformUsers.created': 'Учётная запись создана.',
+	'platformUsers.changeRole': 'Изменить роль',
+	'platformUsers.removeMembership': 'Убрать',
+	'platformUsers.removed': 'Членство убрано.',
+	'platformUsers.roleChanged': 'Роль изменена.',
+	'platformUsers.added': 'Членство добавлено.',
+	'platformUsers.memberships': 'Членство',
+	'platformUsers.emailTaken': 'Этот адрес электронной почты занят.',
+	'platformUsers.selectOrganization': 'Выберите организацию',
 
 	// API tokens
 	'tokens.title': 'Токены API',
@@ -274,6 +299,7 @@ export const ru: Record<MessageKey, string> = {
 	'error.shared_account':
 		'Учётная запись принадлежит другим организациям. Пароль может сбросить пользователь или администратор платформы.',
 	'error.username_taken': 'Это имя пользователя занято.',
+	'error.email_taken': 'Этот адрес электронной почты занят.',
 	'error.internal_error': 'В сервере управления внутренняя проблема.',
 	'error.network': 'Сервер управления не ответил.',
 	'error.field': 'Исправьте это поле.',

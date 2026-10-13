@@ -12,16 +12,21 @@ import type {
 	AuditRecord,
 	ChangePasswordRequest,
 	CreateApiTokenRequest,
+	CreatePlatformUserRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
 	Instance,
 	Me,
+	MembershipInput,
+	PlatformUser,
 	ResetPasswordRequest,
+	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
 	SignInRequest,
 	Tenant,
 	TenantAccess,
+	UpdateAccountRequest,
 	UpdateUserRequest,
 	User
 } from './types';
@@ -77,14 +82,67 @@ function makeMemberships(): TenantAccess[] {
 
 function makeTenants(): Tenant[] {
 	return [
-		{ id: 't_01', name: 'acme', status: 'active', created_at: iso(60 * 24 * 90), user_count: 4 },
-		{ id: 't_02', name: 'globex', status: 'active', created_at: iso(60 * 24 * 60), user_count: 2 },
+		{
+			id: 't_01',
+			name: 'acme',
+			status: 'active',
+			created_at: iso(60 * 24 * 90),
+			user_count: 4,
+			admin_state: 'present'
+		},
+		{
+			id: 't_02',
+			name: 'globex',
+			status: 'active',
+			created_at: iso(60 * 24 * 60),
+			user_count: 2,
+			admin_state: 'present'
+		},
 		{
 			id: 't_03',
 			name: 'initech',
 			status: 'suspended',
 			created_at: iso(60 * 24 * 30),
-			user_count: 1
+			user_count: 0,
+			admin_state: 'none'
+		}
+	];
+}
+
+/** The installation accounts with their memberships (ADR-0028). */
+function makePlatformUsers(): PlatformUser[] {
+	return [
+		{
+			id: 'pu_01',
+			username: 'root',
+			display_name: 'Platform Admin',
+			email: null,
+			email_verified: false,
+			disabled: false,
+			memberships: [
+				{ tenant_id: 't_01', tenant_name: 'acme', role: 'platform_admin', disabled: false }
+			]
+		},
+		{
+			id: 'pu_02',
+			username: 'anna',
+			display_name: 'Anna Petrova',
+			email: 'anna@example.com',
+			email_verified: false,
+			disabled: false,
+			memberships: [
+				{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false },
+				{ tenant_id: 't_02', tenant_name: 'globex', role: 'viewer', disabled: false }
+			]
+		},
+		{
+			id: 'pu_03',
+			username: 'boris',
+			display_name: 'Boris Ivanov',
+			email: null,
+			email_verified: false,
+			disabled: true,
+			memberships: []
 		}
 	];
 }
@@ -200,6 +258,7 @@ function makeAudit(): AuditRecord[] {
 export class MockApiService {
 	private users: User[] = makeUsers();
 	private tenants: Tenant[] = makeTenants();
+	private platformUsers: PlatformUser[] = makePlatformUsers();
 	private tokens: ApiToken[] = makeTokens();
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
@@ -353,10 +412,109 @@ export class MockApiService {
 			name: request.name,
 			status: 'active',
 			created_at: new Date().toISOString(),
-			user_count: 1
+			user_count: 0,
+			admin_state: 'none'
 		};
 		this.tenants = [...this.tenants, tenant];
 		return tenant;
+	}
+
+	async listPlatformUsers(): Promise<PlatformUser[]> {
+		return [...this.platformUsers];
+	}
+
+	async createPlatformUser(request: CreatePlatformUserRequest): Promise<PlatformUser> {
+		if (
+			this.platformUsers.some(
+				(user) => user.username.toLowerCase() === request.username.toLowerCase()
+			)
+		) {
+			throw new Error('username_taken');
+		}
+		if (
+			request.email &&
+			this.platformUsers.some((user) => user.email?.toLowerCase() === request.email?.toLowerCase())
+		) {
+			throw new Error('email_taken');
+		}
+		const memberships = (request.memberships ?? []).map((membership) => ({
+			tenant_id: membership.tenant_id,
+			tenant_name: this.tenantName(membership.tenant_id),
+			role: membership.role,
+			disabled: false
+		}));
+		const user: PlatformUser = {
+			id: `pu_${this.platformUsers.length + 1}`,
+			username: request.username,
+			display_name: request.display_name,
+			email: request.email?.toLowerCase() ?? null,
+			email_verified: false,
+			disabled: false,
+			memberships
+		};
+		this.platformUsers = [...this.platformUsers, user];
+		return user;
+	}
+
+	async updatePlatformUser(id: string, patch: UpdateAccountRequest): Promise<void> {
+		this.platformUsers = this.platformUsers.map((user) =>
+			user.id === id
+				? {
+						...user,
+						disabled: patch.disabled ?? user.disabled,
+						email: patch.email ? patch.email.toLowerCase() : user.email
+					}
+				: user
+		);
+	}
+
+	async addPlatformMembership(id: string, request: MembershipInput): Promise<void> {
+		this.platformUsers = this.platformUsers.map((user) => {
+			if (user.id !== id || user.memberships.some((item) => item.tenant_id === request.tenant_id)) {
+				return user;
+			}
+			return {
+				...user,
+				memberships: [
+					...user.memberships,
+					{
+						tenant_id: request.tenant_id,
+						tenant_name: this.tenantName(request.tenant_id),
+						role: request.role,
+						disabled: false
+					}
+				]
+			};
+		});
+	}
+
+	async setPlatformMembershipRole(
+		id: string,
+		tenantId: string,
+		request: SetRoleRequest
+	): Promise<void> {
+		this.platformUsers = this.platformUsers.map((user) =>
+			user.id === id
+				? {
+						...user,
+						memberships: user.memberships.map((item) =>
+							item.tenant_id === tenantId ? { ...item, role: request.role } : item
+						)
+					}
+				: user
+		);
+	}
+
+	async removePlatformMembership(id: string, tenantId: string): Promise<void> {
+		this.platformUsers = this.platformUsers.map((user) =>
+			user.id === id
+				? { ...user, memberships: user.memberships.filter((item) => item.tenant_id !== tenantId) }
+				: user
+		);
+	}
+
+	private tenantName(id: string): string {
+		return this.tenants.find((tenant) => tenant.id === id)?.name ?? id;
 	}
 
 	async suspendTenant(id: string): Promise<void> {

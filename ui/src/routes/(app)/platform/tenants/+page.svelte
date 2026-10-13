@@ -13,21 +13,13 @@
 
 	let createOpen = $state(false);
 	let newName = $state('');
-	let newAdminUsername = $state('');
-	let newAdminDisplayName = $state('');
-	let newAdminPassword = $state('');
 	let creating = $state(false);
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
 
 	// The fields of the create form. A problem of another field (for example `body`) shows the
 	// general alert instead of the message next to an input.
-	const createFields = [
-		'name',
-		'first_admin.username',
-		'first_admin.display_name',
-		'first_admin.password'
-	];
+	const createFields = ['name'];
 
 	let deleteTarget = $state<Tenant | null>(null);
 	let deleteOpen = $state(false);
@@ -63,6 +55,12 @@
 			header: t('tenants.users'),
 			cell: (row) => String(row.user_count)
 		},
+		{
+			key: 'admin_state',
+			header: t('users.role.admin'),
+			cell: (row) => (row.admin_state === 'none' ? t('tenants.noAdministrator') : ''),
+			badge: (row) => (row.admin_state === 'none' ? 'warning' : null)
+		},
 		{ key: 'created_at', header: t('common.createdAt'), cell: (row) => formatDate(row.created_at) }
 	]);
 
@@ -90,20 +88,10 @@
 		createError = null;
 		createProblem = null;
 		try {
-			await service.createTenant({
-				name: newName,
-				first_admin: {
-					username: newAdminUsername,
-					display_name: newAdminDisplayName,
-					password: newAdminPassword
-				}
-			});
+			await service.createTenant({ name: newName });
 			pushToast('success', t('tenants.created'));
 			createOpen = false;
 			newName = '';
-			newAdminUsername = '';
-			newAdminDisplayName = '';
-			newAdminPassword = '';
 			await load();
 		} catch (problem) {
 			createProblem = problem instanceof ApiError ? problem.problem : null;
@@ -195,44 +183,9 @@
 		mono
 		required
 	/>
-	<TextField
-		id="tenant-admin-username"
-		label={t('tenants.adminUsername')}
-		error={fieldError(createProblem, 'first_admin.username')}
-		bind:value={newAdminUsername}
-		mono
-		autocomplete="off"
-		required
-	/>
-	<TextField
-		id="tenant-admin-display-name"
-		label={t('tenants.adminDisplayName')}
-		error={fieldError(createProblem, 'first_admin.display_name')}
-		bind:value={newAdminDisplayName}
-		autocomplete="off"
-		required
-	/>
-	<TextField
-		id="tenant-admin-password"
-		label={t('tenants.adminPassword')}
-		help={t('setup.passwordHint')}
-		error={fieldError(createProblem, 'first_admin.password')}
-		bind:value={newAdminPassword}
-		type="password"
-		autocomplete="new-password"
-		required
-	/>
 	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
-		<Button
-			variant="primary"
-			loading={creating}
-			disabled={!newName ||
-				!newAdminUsername ||
-				!newAdminDisplayName ||
-				newAdminPassword.length < 12}
-			onclick={createTenant}
-		>
+		<Button variant="primary" loading={creating} disabled={!newName} onclick={createTenant}>
 			{t('common.create')}
 		</Button>
 	{/snippet}
