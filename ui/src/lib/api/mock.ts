@@ -21,6 +21,7 @@ import type {
 	SetupStatus,
 	SignInRequest,
 	Tenant,
+	TenantAccess,
 	UpdateUserRequest,
 	User
 } from './types';
@@ -33,21 +34,44 @@ function iso(minutesAgo: number): string {
 
 function makeUsers(): User[] {
 	return [
-		{ id: 'u_01', username: 'admin', display_name: 'Anna Petrova', role: 'admin', disabled: false },
+		{
+			id: 'u_01',
+			username: 'admin',
+			display_name: 'Anna Petrova',
+			role: 'admin',
+			disabled: false,
+			shared: false
+		},
 		{
 			id: 'u_02',
 			username: 'operator',
 			display_name: 'Boris Ivanov',
 			role: 'operator',
-			disabled: false
+			disabled: false,
+			shared: false
 		},
 		{
 			id: 'u_03',
 			username: 'viewer',
 			display_name: 'Vera Sokolova',
 			role: 'viewer',
-			disabled: true
+			disabled: true,
+			shared: true
 		}
+	];
+}
+
+/** The memberships of the caller (ADR-0025). */
+function makeMemberships(): TenantAccess[] {
+	return [
+		{ id: 't_01', name: 'acme', role: 'admin' },
+		{ id: 't_02', name: 'globex', role: 'operator' },
+		{ id: 't_03', name: 'initech', role: 'viewer' },
+		{ id: 't_04', name: 'northwind', role: 'admin' },
+		{ id: 't_05', name: 'umbrella', role: 'viewer' },
+		{ id: 't_06', name: 'brightline', role: 'operator' },
+		{ id: 't_07', name: 'redwood', role: 'admin' },
+		{ id: 't_08', name: 'summit', role: 'viewer' }
 	];
 }
 
@@ -178,14 +202,31 @@ export class MockApiService {
 	private tenants: Tenant[] = makeTenants();
 	private tokens: ApiToken[] = makeTokens();
 	private audit: AuditRecord[] = makeAudit();
+	private memberships: TenantAccess[] = makeMemberships();
+	private currentTenant = 't_01';
 	private setupDone = false;
 
 	private me(): Me {
+		const tenant = this.memberships.find((item) => item.id === this.currentTenant);
 		return {
 			user: this.users[0],
-			tenant: { id: this.tenants[0].id, name: this.tenants[0].name },
-			role: this.users[0].role
+			tenant: {
+				id: tenant?.id ?? this.tenants[0].id,
+				name: tenant?.name ?? this.tenants[0].name
+			},
+			role: tenant?.role ?? this.users[0].role
 		};
+	}
+
+	async listMemberships(): Promise<TenantAccess[]> {
+		return [...this.memberships];
+	}
+
+	async switchTenant(tenantId: string): Promise<Me> {
+		const tenant = this.memberships.find((item) => item.id === tenantId);
+		if (!tenant) throw new Error('not found');
+		this.currentTenant = tenantId;
+		return this.me();
 	}
 
 	async signIn(_request: SignInRequest): Promise<Me> {
@@ -230,7 +271,8 @@ export class MockApiService {
 			username: request.username,
 			display_name: request.display_name,
 			role: request.role as User['role'],
-			disabled: false
+			disabled: false,
+			shared: false
 		};
 		this.users = [...this.users, user];
 		return user;

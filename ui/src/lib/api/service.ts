@@ -24,6 +24,8 @@ import type {
 	SetupStatus,
 	SignInRequest,
 	Tenant,
+	TenantAccess,
+	TenantAccessListResponse,
 	TenantListResponse,
 	UpdateUserRequest,
 	User,
@@ -35,6 +37,11 @@ export interface ApiService {
 	signOut(): Promise<void>;
 	currentUser(): Promise<Me>;
 	changePassword(request: ChangePasswordRequest): Promise<void>;
+
+	/** The memberships of the caller (ADR-0025). */
+	listMemberships(): Promise<TenantAccess[]>;
+	/** Moves the session to another tenant and returns the new session. */
+	switchTenant(tenantId: string): Promise<Me>;
 
 	setupStatus(): Promise<SetupStatus>;
 	setup(request: SetupRequest): Promise<Me>;
@@ -66,6 +73,10 @@ const httpService: ApiService = {
 	signOut: () => api.post<void>(endpoints.auth.signOut),
 	currentUser: () => api.get<Me>(endpoints.auth.me),
 	changePassword: (request) => api.post<void>(endpoints.auth.password, request),
+
+	listMemberships: () =>
+		api.get<TenantAccessListResponse>(endpoints.auth.tenants).then((response) => response.items),
+	switchTenant: (tenantId) => api.post<Me>(endpoints.auth.switchTenant, { tenant_id: tenantId }),
 
 	setupStatus: () => api.get<SetupStatus>(endpoints.setup.status),
 	setup: (request) => api.post<Me>(endpoints.setup.create, request),

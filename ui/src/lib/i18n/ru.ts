@@ -31,6 +31,11 @@ export const ru: Record<MessageKey, string> = {
 	'topbar.theme.system': 'Как в системе',
 	'topbar.signOut': 'Выйти',
 	'topbar.role': 'Роль',
+	'topbar.yourTenants': 'Ваши организации',
+	'topbar.switchTenant': 'Сменить организацию',
+	'topbar.filterTenants': 'Фильтр организаций',
+	'topbar.platform': 'Платформа',
+	'topbar.switched': 'Вы перешли в «{name}».',
 
 	// Common
 	'common.actions': 'Действия',
@@ -83,15 +88,12 @@ export const ru: Record<MessageKey, string> = {
 
 	// Sign-in
 	'signIn.title': 'Вход',
-	'signIn.description': 'Укажите организацию, имя пользователя и пароль.',
-	'signIn.descriptionSingle': 'Укажите имя пользователя и пароль.',
-	'signIn.tenant': 'Организация',
-	'signIn.tenantPlaceholder': 'имя организации',
+	'signIn.description': 'Укажите имя пользователя и пароль.',
 	'signIn.username': 'Имя пользователя',
 	'signIn.password': 'Пароль',
 	'signIn.submit': 'Войти',
 	'signIn.submitting': 'Вход',
-	'signIn.invalid': 'Организация, имя пользователя или пароль указаны неверно.',
+	'signIn.invalid': 'Имя пользователя или пароль указаны неверно.',
 
 	// Setup
 	'setup.title': 'Первоначальная настройка',
@@ -156,6 +158,12 @@ export const ru: Record<MessageKey, string> = {
 	'users.role.operator': 'Оператор',
 	'users.role.viewer': 'Наблюдатель',
 	'users.role.platformAdmin': 'Администратор платформы',
+	'users.shared': 'Общая учётная запись',
+	'users.resetPassword': 'Сбросить пароль',
+	'users.resetTitle': 'Сброс пароля',
+	'users.resetDone': 'Пароль сброшен.',
+	'users.sharedResetHint':
+		'Учётная запись принадлежит другим организациям. Пароль может сбросить пользователь или администратор платформы.',
 
 	// API tokens
 	'tokens.title': 'Токены API',
@@ -208,6 +216,7 @@ export const ru: Record<MessageKey, string> = {
 	'audit.action.sign_in': 'Вход',
 	'audit.action.sign_in_failed': 'Неудачный вход',
 	'audit.action.sign_out': 'Выход',
+	'audit.action.session_switch': 'Смена организации',
 	'audit.action.config_create': 'Создание конфигурации',
 	'audit.action.config_update': 'Изменение конфигурации',
 	'audit.action.config_delete': 'Удаление конфигурации',
@@ -253,7 +262,7 @@ export const ru: Record<MessageKey, string> = {
 	'alert.requestId': 'Идентификатор запроса',
 
 	// Errors from the API (problem codes)
-	'error.invalid_credentials': 'Организация, имя пользователя или пароль указаны неверно.',
+	'error.invalid_credentials': 'Имя пользователя или пароль указаны неверно.',
 	'error.unauthorized': 'Сеанс завершён. Войдите снова.',
 	'error.forbidden': 'У вас нет прав на эту операцию.',
 	'error.not_found': 'Запись не существует.',
@@ -262,6 +271,9 @@ export const ru: Record<MessageKey, string> = {
 	'error.invalid_setup_token': 'Токен настройки указан неверно.',
 	'error.rate_limited': 'Слишком много попыток. Подождите и повторите.',
 	'error.conflict': 'Запись уже существует.',
+	'error.shared_account':
+		'Учётная запись принадлежит другим организациям. Пароль может сбросить пользователь или администратор платформы.',
+	'error.username_taken': 'Это имя пользователя занято.',
 	'error.internal_error': 'В сервере управления внутренняя проблема.',
 	'error.network': 'Сервер управления не ответил.',
 	'error.field': 'Исправьте это поле.',

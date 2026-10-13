@@ -10,7 +10,9 @@ export const endpoints = {
 		signIn: '/auth/sign-in',
 		signOut: '/auth/sign-out',
 		me: '/auth/me',
-		password: '/auth/password'
+		password: '/auth/password',
+		tenants: '/auth/tenants',
+		switchTenant: '/auth/switch'
 	},
 	setup: {
 		status: '/setup/status',

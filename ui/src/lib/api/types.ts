@@ -51,6 +51,13 @@ export type SetupStatus = components['schemas']['SetupStatusResponse'];
 
 export type SignInRequest = components['schemas']['SignInRequest'];
 
+/** One membership of the caller (ADR-0025). */
+export type TenantAccess = components['schemas']['TenantAccessView'];
+
+export type TenantAccessListResponse = components['schemas']['TenantAccessListResponse'];
+
+export type SwitchTenantRequest = components['schemas']['SwitchTenantRequest'];
+
 export type SetupRequest = components['schemas']['SetupRequest'];
 
 export type ChangePasswordRequest = components['schemas']['ChangePasswordRequest'];

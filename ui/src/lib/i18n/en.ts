@@ -30,6 +30,11 @@ export const en = {
 	'topbar.theme.system': 'System',
 	'topbar.signOut': 'Sign out',
 	'topbar.role': 'Role',
+	'topbar.yourTenants': 'Your tenants',
+	'topbar.switchTenant': 'Switch tenant',
+	'topbar.filterTenants': 'Filter tenants',
+	'topbar.platform': 'Platform',
+	'topbar.switched': 'You switched to {name}.',
 
 	// Common
 	'common.actions': 'Actions',
@@ -82,15 +87,12 @@ export const en = {
 
 	// Sign-in
 	'signIn.title': 'Sign in',
-	'signIn.description': 'Enter your tenant, user name and password.',
-	'signIn.descriptionSingle': 'Enter your user name and password.',
-	'signIn.tenant': 'Tenant',
-	'signIn.tenantPlaceholder': 'tenant name',
+	'signIn.description': 'Enter your user name and password.',
 	'signIn.username': 'User name',
 	'signIn.password': 'Password',
 	'signIn.submit': 'Sign in',
 	'signIn.submitting': 'Signing in',
-	'signIn.invalid': 'The tenant, the user name or the password is not correct.',
+	'signIn.invalid': 'The user name or the password is not correct.',
 
 	// Setup
 	'setup.title': 'Initial setup',
@@ -153,6 +155,12 @@ export const en = {
 	'users.role.operator': 'Operator',
 	'users.role.viewer': 'Viewer',
 	'users.role.platformAdmin': 'Platform Admin',
+	'users.shared': 'Shared account',
+	'users.resetPassword': 'Reset password',
+	'users.resetTitle': 'Reset the password',
+	'users.resetDone': 'The password is reset.',
+	'users.sharedResetHint':
+		'This account belongs to other tenants. The user or a Platform Admin can reset the password.',
 
 	// API tokens
 	'tokens.title': 'API tokens',
@@ -205,6 +213,7 @@ export const en = {
 	'audit.action.sign_in': 'Sign in',
 	'audit.action.sign_in_failed': 'Failed sign-in',
 	'audit.action.sign_out': 'Sign out',
+	'audit.action.session_switch': 'Switch tenant',
 	'audit.action.config_create': 'Create configuration',
 	'audit.action.config_update': 'Change configuration',
 	'audit.action.config_delete': 'Delete configuration',
@@ -250,7 +259,7 @@ export const en = {
 	'alert.requestId': 'Request ID',
 
 	// Errors from the API (problem codes)
-	'error.invalid_credentials': 'The tenant, the user name or the password is not correct.',
+	'error.invalid_credentials': 'The user name or the password is not correct.',
 	'error.unauthorized': 'Your session ended. Sign in again.',
 	'error.forbidden': 'You do not have permission for this operation.',
 	'error.not_found': 'The record does not exist.',
@@ -259,6 +268,9 @@ export const en = {
 	'error.invalid_setup_token': 'The setup token is not correct.',
 	'error.rate_limited': 'Too many attempts. Wait and try again.',
 	'error.conflict': 'The record already exists.',
+	'error.shared_account':
+		'This account belongs to other tenants. The user or a Platform Admin can reset the password.',
+	'error.username_taken': 'This user name is taken.',
 	'error.internal_error': 'The control plane has an internal problem.',
 	'error.network': 'The control plane did not answer.',
 	'error.field': 'Correct this field.',

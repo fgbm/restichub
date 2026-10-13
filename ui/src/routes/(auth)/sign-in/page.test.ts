@@ -1,8 +1,8 @@
 /*
- * The sign-in screen hides the tenant field in single mode (ADR-0024).
+ * The sign-in screen asks for the username and the password only (ADR-0025).
  *
  * The test replaces the SvelteKit modules and the service, so it renders the
- * screen alone. It sets the mode through the `/api/v1/instance` response.
+ * screen alone.
  */
 import { render, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,15 +37,18 @@ describe('the sign-in screen', () => {
 		mocks.setupStatus.mockResolvedValue({ setup_required: false });
 	});
 
-	it('hides the tenant field in single mode', async () => {
-		mocks.instance.mockResolvedValue({ tenancy_mode: 'single', setup_required: false });
-		const { container } = render(SignIn);
-		await waitFor(() => expect(container.querySelector('#signin-tenant')).toBeNull());
-	});
-
-	it('shows the tenant field in multi mode', async () => {
+	it('asks for the username and the password only', async () => {
 		mocks.instance.mockResolvedValue({ tenancy_mode: 'multi', setup_required: false });
 		const { container } = render(SignIn);
-		await waitFor(() => expect(container.querySelector('#signin-tenant')).not.toBeNull());
+		await waitFor(() => expect(container.querySelector('#signin-username')).not.toBeNull());
+		expect(container.querySelector('#signin-password')).not.toBeNull();
+		expect(container.querySelector('#signin-tenant')).toBeNull();
+	});
+
+	it('has no tenant field in single mode either', async () => {
+		mocks.instance.mockResolvedValue({ tenancy_mode: 'single', setup_required: false });
+		const { container } = render(SignIn);
+		await waitFor(() => expect(container.querySelector('#signin-username')).not.toBeNull());
+		expect(container.querySelector('#signin-tenant')).toBeNull();
 	});
 });

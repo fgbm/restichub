@@ -27,9 +27,18 @@
 	let createProblem = $state<ApiProblem | null>(null);
 	let busyId = $state<string | null>(null);
 
+	let resetOpen = $state(false);
+	let resetUser = $state<User | null>(null);
+	let resetting = $state(false);
+	let resetError = $state<string | null>(null);
+	let newResetPassword = $state('');
+
 	// The fields of the create form. A problem of another field (for example `body`) shows the
 	// general alert instead of the message next to an input.
 	const createFields = ['username', 'display_name', 'role', 'password'];
+
+	// The create endpoint answers HTTP 409 `username_taken` without a field name.
+	const usernameTaken = $derived(createProblem?.code === 'username_taken');
 
 	let newUsername = $state('');
 	let newDisplayName = $state('');
@@ -50,8 +59,15 @@
 		}))
 	);
 
+	// A shared account belongs to another tenant; the label tells a tenant Admin that it cannot
+	// reset the password or change the display name (ADR-0025).
 	const columns = $derived<Column<User>[]>([
-		{ key: 'username', header: t('users.username'), mono: true },
+		{
+			key: 'username',
+			header: t('users.username'),
+			mono: true,
+			cell: (row) => (row.shared ? `${row.username} \u00b7 ${t('users.shared')}` : row.username)
+		},
 		{ key: 'display_name', header: t('users.displayName') },
 		{
 			key: 'role',
@@ -112,9 +128,34 @@
 			await load();
 		} catch (problem) {
 			createProblem = problem instanceof ApiError ? problem.problem : null;
-			createError = namesField(createProblem, createFields) ? null : messageOf(problem);
+			// A taken username is a problem of the username field (ADR-0025).
+			createError =
+				usernameTaken || namesField(createProblem, createFields) ? null : messageOf(problem);
 		} finally {
 			creating = false;
+		}
+	}
+
+	function openReset(user: User): void {
+		resetUser = user;
+		newResetPassword = '';
+		resetError = null;
+		resetOpen = true;
+	}
+
+	async function resetPassword(): Promise<void> {
+		if (!resetUser) return;
+		resetting = true;
+		resetError = null;
+		try {
+			await service.resetUserPassword(resetUser.id, { new_password: newResetPassword });
+			pushToast('success', t('users.resetDone'));
+			resetOpen = false;
+			await load();
+		} catch (problem) {
+			resetError = messageOf(problem);
+		} finally {
+			resetting = false;
 		}
 	}
 
@@ -141,6 +182,16 @@
 		<Button
 			size="sm"
 			variant="ghost"
+			disabled={user.shared}
+			title={user.shared ? t('users.sharedResetHint') : t('users.resetPassword')}
+			aria-label={t('users.resetPassword')}
+			onclick={() => openReset(user)}
+		>
+			{t('users.resetPassword')}
+		</Button>
+		<Button
+			size="sm"
+			variant="ghost"
 			loading={busyId === user.id}
 			onclick={() => toggleDisabled(user)}
 		>
@@ -156,13 +207,13 @@
 	<FormField
 		label={t('users.username')}
 		for="user-username"
-		error={fieldError(createProblem, 'username')}
+		error={usernameTaken ? tErrorCode('username_taken') : fieldError(createProblem, 'username')}
 		required
 	>
 		<TextField
 			id="user-username"
 			bind:value={newUsername}
-			invalid={Boolean(fieldError(createProblem, 'username'))}
+			invalid={usernameTaken || Boolean(fieldError(createProblem, 'username'))}
 			mono
 			autocomplete="off"
 		/>
@@ -217,6 +268,36 @@
 			onclick={createUser}
 		>
 			{t('common.create')}
+		</Button>
+	</div>
+</SidePanel>
+
+<SidePanel bind:open={resetOpen} title={t('users.resetTitle')}>
+	{#if resetError}
+		<InlineAlert tone="danger" title={resetError} />
+	{/if}
+	<FormField
+		label={t('setup.password')}
+		for="user-reset-password"
+		hint={t('setup.passwordHint')}
+		required
+	>
+		<TextField
+			id="user-reset-password"
+			type="password"
+			bind:value={newResetPassword}
+			autocomplete="new-password"
+		/>
+	</FormField>
+	<div class="panel-actions">
+		<Button onclick={() => (resetOpen = false)}>{t('common.cancel')}</Button>
+		<Button
+			variant="primary"
+			loading={resetting}
+			disabled={newResetPassword.length < 12}
+			onclick={resetPassword}
+		>
+			{t('users.resetPassword')}
 		</Button>
 	</div>
 </SidePanel>

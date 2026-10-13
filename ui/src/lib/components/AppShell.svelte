@@ -18,6 +18,7 @@
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
 	import { getTheme, setTheme, themes, type Theme } from '#lib/stores/theme.svelte.ts';
 	import Toast from './Toast.svelte';
+	import TenantSwitcher from './TenantSwitcher.svelte';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -61,8 +62,10 @@
 	<header class="topbar">
 		<div class="topbar__brand">
 			<span class="topbar__product">{t('app.name')}</span>
-			{#if !isSingleTenant()}
+			{#if isSingleTenant()}
 				<span class="topbar__tenant">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
+			{:else}
+				<TenantSwitcher />
 			{/if}
 		</div>
 

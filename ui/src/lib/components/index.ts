@@ -13,6 +13,7 @@ export { default as KeyValue } from './KeyValue.svelte';
 export { default as PageHeader } from './PageHeader.svelte';
 export { default as Select } from './Select.svelte';
 export { default as SidePanel } from './SidePanel.svelte';
+export { default as TenantSwitcher } from './TenantSwitcher.svelte';
 export { default as TextField } from './TextField.svelte';
 export { default as Toast } from './Toast.svelte';
 export type { Column, KeyValueItem, SelectOption } from './types';

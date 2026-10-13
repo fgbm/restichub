@@ -88,12 +88,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Changes the password of the current user.
-         * @description Changes the password of the current user.
-         *
-         *     The endpoint removes every other session of the user and keeps the current session. A wrong
-         *     current password counts against the user rate limit. The hash runs without a database
-         *     transaction.
+         * Changes the password of the current user (installation-wide).
+         * @description The endpoint sets the account password and removes every other session of the account in every
+         *     tenant, and it keeps the current session. A wrong current password counts against the user rate
+         *     limit. The hash runs without a database transaction.
          */
         post: operations["change_password"];
         delete?: never;
@@ -112,9 +110,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Signs a user in.
-         * @description The endpoint returns the same error for an unknown tenant, an unknown user, a wrong password, a
-         *     disabled user and a suspended tenant. The control plane logs the real reason.
+         * Signs a user in with the username and the password only.
+         * @description The endpoint returns the same error for an unknown account, a wrong password, a disabled
+         *     account and an account with no active membership. An absent account is verified against a dummy
+         *     hash, so the answer and the time are the same.
          */
         post: operations["sign_in"];
         delete?: never;
@@ -134,6 +133,49 @@ export interface paths {
         put?: never;
         /** Signs the current session out. */
         post: operations["sign_out"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switches the session to another tenant (ADR-0025).
+         * @description The endpoint checks the membership of the caller in the target tenant, creates a new session in
+         *     the target tenant, deletes the old session and rotates the cookie. It writes the audit record
+         *     `session_switch` in the source tenant and in the target tenant.
+         */
+        post: operations["switch_tenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lists the memberships of the caller only (ADR-0025).
+         * @description The platform tenant is included for a Platform Admin in multi mode. In single mode the platform
+         *     tenant is hidden (ADR-0024).
+         */
+        get: operations["list_tenants"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -276,6 +318,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Disables or enables an account itself (Platform Admin only). */
+        patch: operations["set_account_disabled"];
+        trace?: never;
+    };
+    "/api/v1/platform/users/{id}/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adds a membership for an existing account (Platform Admin only). */
+        post: operations["add_membership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/secrets": {
         parameters: {
             query?: never;
@@ -381,10 +457,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lists the users of the tenant. */
+        /** Lists the members of the tenant. */
         get: operations["list_users"];
         put?: never;
-        /** Creates a user in the tenant. */
+        /** Creates an account with a membership in the tenant. */
         post: operations["create_user"];
         delete?: never;
         options?: never;
@@ -399,15 +475,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Reads one user of the tenant. */
+        /** Reads one member of the tenant. */
         get: operations["get_user"];
         put?: never;
         post?: never;
-        /** Disables a user of the tenant and removes its sessions. */
+        /** Disables the membership of the account in the tenant and removes its sessions in the tenant. */
         delete: operations["delete_user"];
         options?: never;
         head?: never;
-        /** Changes a user of the tenant. */
+        /**
+         * Changes a member of the tenant.
+         * @description A tenant Admin changes the role or disables the membership in its tenant. It cannot change the
+         *     display name of a shared account (HTTP 403 `shared_account`).
+         */
         patch: operations["update_user"];
         trace?: never;
     };
@@ -420,7 +500,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resets the password of a user of the tenant (Admin action). */
+        /**
+         * Resets the password of a member (Admin action).
+         * @description A tenant Admin cannot reset the password of a shared account (HTTP 403 `shared_account`).
+         */
         post: operations["reset_password"];
         delete?: never;
         options?: never;
@@ -466,6 +549,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AddMembershipRequest: {
+            role: components["schemas"]["Role"];
+            /** @description The identifier of the target tenant. */
+            tenant_id: string;
+        };
         ApiTokenListResponse: {
             items: components["schemas"]["ApiTokenView"][];
         };
@@ -483,6 +571,7 @@ export interface components {
          * @example sign_in
          * @example sign_in_failed
          * @example sign_out
+         * @example session_switch
          * @example config_create
          * @example config_update
          * @example config_delete
@@ -576,11 +665,14 @@ export interface components {
             /** @description At least 12 characters. */
             password: string;
             role: components["schemas"]["Role"];
-            /** @description Unique for the tenant; ignores the letter case. */
+            /** @description Unique in the installation; ignores the letter case. */
             username: string;
         };
+        DisableAccountRequest: {
+            disabled: boolean;
+        };
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken";
         /** @description The mode and the setup state of the installation. */
         InstanceResponse: {
             /** @description True while the installation has no administrator. */
@@ -591,6 +683,10 @@ export interface components {
             role: components["schemas"]["Role"];
             tenant: components["schemas"]["TenantView"];
             user?: components["schemas"]["UserView"] | null;
+        };
+        MembershipView: {
+            role: components["schemas"]["Role"];
+            tenant_id: string;
         };
         /**
          * @description A tenant in a platform administration response (FR-TN-02).
@@ -693,19 +789,23 @@ export interface components {
             setup_required: boolean;
             tenancy_mode: components["schemas"]["TenancyMode"];
         };
+        /**
+         * @description The sign-in body. It holds the username and the password only. An unknown field, for example
+         *     `tenant`, is ignored (ADR-0025).
+         */
         SignInRequest: {
             password: string;
-            /**
-             * @description Required in multi mode; ignored in single mode, which uses the tenant `default` (ADR-0024).
-             *     Ignores the letter case.
-             */
-            tenant?: string | null;
+            /** @description Unique in the installation; ignores the letter case. */
             username: string;
         };
         SignInResponse: {
             role: components["schemas"]["Role"];
             tenant: components["schemas"]["TenantView"];
             user: components["schemas"]["UserView"];
+        };
+        SwitchTenantRequest: {
+            /** @description The identifier of the tenant to switch to. */
+            tenant_id: string;
         };
         /**
          * @description The tenancy mode of the installation (ADR-0024).
@@ -714,6 +814,15 @@ export interface components {
          * @enum {string}
          */
         TenancyMode: "single" | "multi";
+        TenantAccessListResponse: {
+            items: components["schemas"]["TenantAccessView"][];
+        };
+        /** @description The memberships of the caller. Each item holds the tenant id, the tenant name and the role. */
+        TenantAccessView: {
+            id: string;
+            name: string;
+            role: components["schemas"]["Role"];
+        };
         TenantListResponse: {
             items: components["schemas"]["PlatformTenantView"][];
             /** @description Null when the table holds no later tenant. */
@@ -738,10 +847,13 @@ export interface components {
             items: components["schemas"]["UserView"][];
         };
         UserView: {
+            /** @description The membership is disabled in the current tenant, or the account is disabled. */
             disabled: boolean;
             display_name: string;
             id: string;
             role: components["schemas"]["Role"];
+            /** @description The account holds an active membership in another active tenant. */
+            shared: boolean;
             username: string;
         };
     };
@@ -1140,6 +1252,86 @@ export interface operations {
             };
             /** @description The CSRF header is missing. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    switch_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description The session moved to the target tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInResponse"];
+                };
+            };
+            /** @description The request body is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The caller is not a member of the target tenant. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_tenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The memberships of the caller. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantAccessListResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1589,6 +1781,139 @@ export interface operations {
             };
         };
     };
+    set_account_disabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the account. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisableAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description The account is changed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The account is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    add_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the account. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddMembershipRequest"];
+            };
+        };
+        responses: {
+            /** @description The membership is added. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The account or the tenant is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The account is already a member. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     list_secrets: {
         parameters: {
             query?: never;
@@ -1953,7 +2278,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The users of the tenant. */
+            /** @description The members of the tenant. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1995,7 +2320,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The user is created. */
+            /** @description The account is created. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -2031,7 +2356,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The username exists. */
+            /** @description The username exists in the installation. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2056,14 +2381,14 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The identifier of the user. */
+                /** @description The identifier of the account. */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The user. */
+            /** @description The member. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2090,7 +2415,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The user is not found. */
+            /** @description The account is not a member of the tenant. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -2106,14 +2431,14 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The identifier of the user. */
+                /** @description The identifier of the account. */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The user is disabled. */
+            /** @description The membership is disabled. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -2138,7 +2463,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The user is not found. */
+            /** @description The account is not a member of the tenant. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -2147,7 +2472,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The user is the last Admin. */
+            /** @description The account is the last Admin. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2163,7 +2488,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The identifier of the user. */
+                /** @description The identifier of the account. */
                 id: string;
             };
             cookie?: never;
@@ -2174,7 +2499,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The changed user. */
+            /** @description The changed member. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2201,7 +2526,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The role is not sufficient. */
+            /** @description The account is shared. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2210,7 +2535,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The user is not found. */
+            /** @description The account is not a member of the tenant. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -2235,7 +2560,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The identifier of the user. */
+                /** @description The identifier of the account. */
                 id: string;
             };
             cookie?: never;
@@ -2271,7 +2596,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The role is not sufficient. */
+            /** @description The account is shared. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2280,7 +2605,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The user is not found. */
+            /** @description The account is not a member of the tenant. */
             404: {
                 headers: {
                     [name: string]: unknown;
