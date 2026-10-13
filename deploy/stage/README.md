@@ -30,10 +30,10 @@ The control plane trusts the `X-Forwarded-For` header from the Caddy network alo
 
 1. Install Docker Engine and the Compose plugin. The server uses the official Docker repository.
 2. Allow port 80 and port 443 in `ufw`. Keep port 22 open.
-3. Add a DNS record for the domain. Use the type `A` and the address `201.34.151.146`:
+3. Add a DNS record for the domain. Use the type `A` and the address `200.169.190.217`:
 
    ```text
-   rh-stage.app.galen-is.ru.  A  201.34.151.146
+   rh-stage.app.galen-is.ru.  A  200.169.190.217
    ```
 
 ## Deploy
