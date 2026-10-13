@@ -6,12 +6,12 @@
 //! the manner of a CA key (ADR-0026, section Job signing keys).
 //!
 //! A rotation promotes the next key to current, generates a new next key and schedules the
-//! retirement of the old current key. The old key retires when the agent that held it acknowledges
-//! the new set, or at most [`ROTATION_OVERLAP`] after the rotation starts; a periodic control plane
-//! task calls [`JobSigningService::retire_due`], so the bound holds without a manual call. An agent
-//! that was offline longer re-syncs the key set at its reconnect; the delivery is
-//! [`KeySet::key_update`]. A signature checks the table version first and reloads a key set that
-//! another control plane rotated.
+//! retirement of the old current key. The old key retires when all known online agents
+//! acknowledged the new set, or at most [`ROTATION_OVERLAP`] after the rotation starts; a periodic
+//! control plane task calls [`JobSigningService::retire_due`], so the bound holds without a manual
+//! call. An agent that was offline longer re-syncs the key set at its reconnect (ADR-0030); the
+//! delivery is [`KeySet::key_update`]. A signature checks the table version first and reloads a key
+//! set that another control plane rotated or retired.
 //!
 //! The plaintext key never leaves this module. The types hold no `Debug` that shows a key, and the
 //! key set is never written to a log or to a process argument.
@@ -232,6 +232,18 @@ impl JobSigningService {
         Ok(self.current_set(db).await?.sign_job(job))
     }
 
+    /// Builds the signed set update for an agent (FR-PR-11).
+    ///
+    /// The version check reloads a set that another control plane rotated or retired, so the update
+    /// names the current key and the latest revoked key identifiers.
+    pub async fn key_update(
+        &self,
+        db: &Database,
+        now: OffsetDateTime,
+    ) -> Result<SigningKeyUpdate, JobSigningError> {
+        Ok(self.current_set(db).await?.key_update(now))
+    }
+
     async fn current_set(&self, db: &Database) -> Result<Arc<KeySet>, JobSigningError> {
         let version = {
             let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
@@ -282,9 +294,11 @@ impl JobSigningService {
         let current = active_row(&rows, SigningKeyRole::Current)?.id;
         let next_row = active_row(&rows, SigningKeyRole::Next)?;
         let next = next_row.id;
-        // The associated data of the wrapped key binds the role and the key ID, so the promoted key
-        // is re-wrapped under the current role (ADR-0026, section CA key format).
-        let material = self.unwrap_bytes(next_row)?;
+        // The promoted key is unwrapped and checked against its row before any write, so a corrupt
+        // row cannot be promoted. The associated data of the wrapped key binds the role and the key
+        // ID, so the promoted key is re-wrapped under the current role (ADR-0026, section CA key
+        // format).
+        let material = self.unwrap_row(next_row)?;
 
         signing::schedule_retire(&mut tx, current, now + ROTATION_OVERLAP).await?;
         let wrapped = wrap_signing_key(
@@ -292,7 +306,7 @@ impl JobSigningService {
             PLATFORM_TENANT_ID.as_uuid(),
             next,
             SigningKeyRole::Current.as_str(),
-            &material,
+            material.key.as_bytes(),
         )?;
         signing::set_role_and_wrapped(
             &mut tx,
@@ -313,6 +327,9 @@ impl JobSigningService {
     }
 
     /// Retires the old keys whose overlap ended. Returns the number of retired keys (ADR-0026).
+    ///
+    /// The control plane writes a [`AuditAction::SigningKeyRetire`] record for each retired key in
+    /// the same transaction.
     pub async fn retire_due(
         &self,
         db: &Database,
@@ -320,14 +337,19 @@ impl JobSigningService {
     ) -> Result<u64, JobSigningError> {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
         let retired = signing::retire_due(&mut tx, now).await?;
+        for id in &retired {
+            audit_retire(&mut tx, *id).await?;
+        }
         tx.commit().await?;
-        Ok(retired)
+        Ok(retired.len() as u64)
     }
 
-    /// Retires one old key, because the agent that held it acknowledged the new set (ADR-0026).
+    /// Retires the named old key after all known online agents acknowledged the new set
+    /// (ADR-0026).
     ///
     /// The advisory lock is the same as the rotation lock, so an acknowledgement and a rotation do
-    /// not interleave. Only the named key retires; a newer rotation's overlap key stays.
+    /// not interleave. Only the named key retires; a newer rotation's overlap key stays. The
+    /// control plane writes a [`AuditAction::SigningKeyRetire`] record in the same transaction.
     pub async fn retire_acknowledged(
         &self,
         db: &Database,
@@ -337,8 +359,11 @@ impl JobSigningService {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
         tx.lock(SIGNING_KEY_LOCK).await?;
         let retired = signing::retire_pending(&mut tx, key_id, now).await?;
+        for id in &retired {
+            audit_retire(&mut tx, *id).await?;
+        }
         tx.commit().await?;
-        Ok(retired)
+        Ok(retired.len() as u64)
     }
 
     fn build(&self, rows: &[SigningKeyRow]) -> Result<KeySet, JobSigningError> {
@@ -473,6 +498,16 @@ async fn audit_rotation(
         "next": new_next.to_string(),
     });
     event.diff = Some(audit::diff(None, Some(&after), &[]));
+    audit::insert(tx, &event).await?;
+    Ok(())
+}
+
+async fn audit_retire(
+    tx: &mut restichub_db::TenantTx<'_>,
+    id: Uuid,
+) -> Result<(), JobSigningError> {
+    let mut event = AuditEvent::new(AuditAction::SigningKeyRetire, "signing_key");
+    event.object_id = Some(id);
     audit::insert(tx, &event).await?;
     Ok(())
 }

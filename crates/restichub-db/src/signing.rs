@@ -46,13 +46,15 @@ pub struct NewSigningKey<'a> {
     pub public_key: &'a [u8],
 }
 
-/// A cheap change token of the table: the row count and the newest row time.
+/// A cheap change token of the table: the row count, the retired row count and the newest row time.
 ///
-/// A rotation inserts a next key, so the token changes. A caller that holds a loaded key set
-/// compares the token before it signs and reloads on a change (ADR-0026).
+/// A rotation inserts a next key and a retirement sets `retired_at`, so the token changes. A caller
+/// that holds a loaded key set compares the token before it signs and reloads on a change
+/// (ADR-0026).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Version {
     pub rows: i64,
+    pub retired: i64,
     pub newest: Option<OffsetDateTime>,
 }
 
@@ -110,12 +112,18 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<SigningKeyRow>, DbError> 
 
 /// The change token of the table, for a cheap freshness check before a signature (ADR-0026).
 pub async fn version(tx: &mut TenantTx<'_>) -> Result<Version, DbError> {
-    let (rows, newest): (i64, Option<OffsetDateTime>) =
-        sqlx::query_as("SELECT count(*), max(created_at) FROM signing_keys")
-            .fetch_one(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
-    Ok(Version { rows, newest })
+    let (rows, retired, newest): (i64, i64, Option<OffsetDateTime>) = sqlx::query_as(
+        "SELECT count(*), count(*) FILTER (WHERE retired_at IS NOT NULL), max(created_at) \
+         FROM signing_keys",
+    )
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(Version {
+        rows,
+        retired,
+        newest,
+    })
 }
 
 pub async fn insert(tx: &mut TenantTx<'_>, new: &NewSigningKey<'_>) -> Result<(), DbError> {
@@ -178,33 +186,36 @@ pub async fn schedule_retire(
     Ok(())
 }
 
-/// Retires the pending keys whose `retire_after` is not after `now`. Returns the number of rows.
-pub async fn retire_due(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<u64, DbError> {
-    let result = sqlx::query(
+/// Retires the pending keys whose `retire_after` is not after `now`. Returns the retired rows.
+pub async fn retire_due(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<Vec<Uuid>, DbError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
         "UPDATE signing_keys SET retired_at = $1 \
-         WHERE retired_at IS NULL AND retire_after IS NOT NULL AND retire_after <= $1",
+         WHERE retired_at IS NULL AND retire_after IS NOT NULL AND retire_after <= $1 \
+         RETURNING id",
     )
     .bind(now)
-    .execute(tx.as_conn())
+    .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(result.rows_affected())
+    Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
-/// Retires one pending key, because the agent that held it acknowledged the new set (ADR-0026).
+/// Retires the named pending key after all known online agents acknowledged the new set (ADR-0026).
+/// Returns the retired row, or none when the key is not pending.
 pub async fn retire_pending(
     tx: &mut TenantTx<'_>,
     id: Uuid,
     now: OffsetDateTime,
-) -> Result<u64, DbError> {
-    let result = sqlx::query(
+) -> Result<Vec<Uuid>, DbError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
         "UPDATE signing_keys SET retired_at = $1 \
-         WHERE id = $2 AND retired_at IS NULL AND retire_after IS NOT NULL",
+         WHERE id = $2 AND retired_at IS NULL AND retire_after IS NOT NULL \
+         RETURNING id",
     )
     .bind(now)
     .bind(id)
-    .execute(tx.as_conn())
+    .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(result.rows_affected())
+    Ok(rows.into_iter().map(|(id,)| id).collect())
 }

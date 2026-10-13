@@ -15,6 +15,7 @@ use restichub_canary_scan::{Canary, Scanner};
 use restichub_cp::clock::ManualClock;
 use restichub_cp::job_signing::{JobSigningError, JobSigningService, ROTATION_OVERLAP};
 use restichub_cp::maintenance;
+use restichub_db::audit::{self, AuditAction, AuditFilter, AuditPage};
 use restichub_db::signing::{self, SigningKeyRow};
 use restichub_db::{Database, PLATFORM_TENANT_ID, SigningKeyRole};
 use restichub_proto::agent::v1::{Job, KeyUpdate, RejectReason};
@@ -234,6 +235,27 @@ async fn pending_key(db: &Database) -> Uuid {
         .find(|row| row.retire_after.is_some() && row.retired_at.is_none())
         .map(|row| row.id)
         .expect("a pending key is present")
+}
+
+/// Overwrites `public_key` of one row in the owner connection, to break the row binding.
+async fn overwrite_public_key(db: &restichub_db::test_util::TestDatabase, id: Uuid, bytes: &[u8]) {
+    let mut tx = db
+        .owner_pool()
+        .begin()
+        .await
+        .expect("cannot begin the owner transaction");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(PLATFORM_TENANT_ID.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query("UPDATE signing_keys SET public_key = $1 WHERE id = $2")
+        .bind(bytes)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot overwrite the public key");
+    tx.commit().await.expect("cannot commit the overwrite");
 }
 
 #[tokio::test]
@@ -745,6 +767,118 @@ async fn a_rotation_is_visible_to_another_signing_service() {
         .await
         .expect("cannot sign the job");
     assert_eq!(after.signer_key_id, rotated.current_key_id());
+
+    db.cleanup().await;
+}
+
+/// Item 1 of the second review: the version token notices a retirement, so the service rebuilds
+/// the key update and lists the newly revoked key.
+#[tokio::test]
+async fn a_retirement_is_visible_to_the_signing_service() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let service = create_set(db.database()).await;
+    let before = service
+        .load(db.database())
+        .await
+        .expect("cannot load the key set")
+        .expect("the key set is present");
+    let old_current = before.current_key_id().to_owned();
+    let now = OffsetDateTime::now_utc();
+    service
+        .rotate(db.database(), now)
+        .await
+        .expect("cannot rotate the key set");
+
+    // The first update fills the cache; the old key is not revoked yet.
+    let cached = service
+        .key_update(db.database(), now)
+        .await
+        .expect("cannot build the key update");
+    let cached = KeyUpdate::decode(cached.key_update.as_slice()).expect("the update must decode");
+    assert!(!cached.revoked_key_ids.contains(&old_current));
+
+    service
+        .retire_acknowledged(
+            db.database(),
+            old_current.parse().expect("the key ID is a UUID"),
+            now,
+        )
+        .await
+        .expect("cannot retire the old key");
+
+    let update = service
+        .key_update(db.database(), now)
+        .await
+        .expect("cannot build the key update");
+    let decoded = KeyUpdate::decode(update.key_update.as_slice()).expect("the update must decode");
+    assert!(decoded.revoked_key_ids.contains(&old_current));
+
+    db.cleanup().await;
+}
+
+/// Item 3 of the second review: a row whose `public_key` does not match the unwrapped key is
+/// refused with `KeyMismatch`.
+#[tokio::test]
+async fn a_wrong_public_key_refuses_the_key() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let service = create_set(db.database()).await;
+    let (current, _) =
+        active_key(db.database(), provider().as_ref(), SigningKeyRole::Current).await;
+    overwrite_public_key(
+        &db,
+        current.parse().expect("the key ID is a UUID"),
+        &[9_u8; 32],
+    )
+    .await;
+
+    let error = service.ensure_initialized(db.database()).await;
+    assert!(
+        matches!(error, Err(JobSigningError::KeyMismatch { .. })),
+        "{error:?}"
+    );
+
+    db.cleanup().await;
+}
+
+/// Item 5 of the second review: a retirement writes a `signing_key_retire` audit record in the
+/// same transaction.
+#[tokio::test]
+async fn a_retirement_writes_an_audit_record() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let service = create_set(db.database()).await;
+    let now = OffsetDateTime::now_utc();
+    service
+        .rotate(db.database(), now)
+        .await
+        .expect("cannot rotate the key set");
+    let pending = pending_key(db.database()).await;
+    let retired = service
+        .retire_acknowledged(db.database(), pending, now)
+        .await
+        .expect("cannot retire the old key");
+    assert_eq!(retired, 1);
+
+    let mut tx = db
+        .database()
+        .begin_tenant(PLATFORM_TENANT_ID)
+        .await
+        .expect("cannot begin the transaction");
+    let filter = AuditFilter {
+        action: Some(AuditAction::SigningKeyRetire),
+        ..AuditFilter::default()
+    };
+    let result = audit::list(&mut tx, &filter, &AuditPage::default())
+        .await
+        .expect("cannot list the audit log");
+    tx.commit().await.expect("cannot commit the read");
+    assert_eq!(result.records.len(), 1, "one retirement record");
+    assert_eq!(result.records[0].object_id, Some(pending));
 
     db.cleanup().await;
 }
