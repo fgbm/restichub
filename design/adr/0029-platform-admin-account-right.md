@@ -40,6 +40,7 @@ The platform tenant row stays internal. The `ca_keys` table (ADR-0026) and the s
 
 - The last active Platform Admin cannot lose the right. The operation gives HTTP 409.
 - A Platform Admin cannot remove the right from itself. The operation gives HTTP 403.
+- A tenant-scope write on an account that holds the right is refused (HTTP 403). The Admin of an organization must not reset the password or the display name of such an account. It must not disable the account, and it must not change, disable or remove its membership. Only the platform scope manages such an account. The guard lives in the administrator database functions and in a trigger on `memberships`. The API repeats it.
 - Only a `SECURITY DEFINER` function owned by `restichub_auth` writes the right. The function sets the search path and a fail-closed scope check, and it takes the account row lock. The runtime role gets `EXECUTE` only. The rules of migrations 0016 to 0019 apply.
 
 ### The platform tenant row
@@ -71,6 +72,9 @@ The platform tenant row stays internal. The `ca_keys` table (ADR-0026) and the s
 | Remove the platform tenant row | The `ca_keys` table, the signing keys and the platform audit records reference it by a foreign key. |
 | A nullable `sessions.tenant_id` | The foreign key and the Row-Level Security of the session table need a tenant. |
 
-## Open points
+## Platform API tokens
 
-- A platform API token keeps the role `platform_admin` in the platform tenant for now. The token carries the right to a machine actor. A later record decides whether the right belongs to a token. This record changes the session path only.
+- The MVP holds no platform-scope API token. A token cannot carry the Platform Admin right.
+- The migration revokes every API token of the platform tenant with the role `platform_admin`. It keeps the rows for the audit trail.
+- The control plane refuses to create a token with the role `platform_admin` and refuses to authenticate a token of the platform tenant. No token path gives `platform_admin = true`.
+- A later record may add a platform token that is bound to its creator. It must state how the right of the creator binds to the token.
