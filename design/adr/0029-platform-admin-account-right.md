@@ -70,3 +70,7 @@ The platform tenant row stays internal. The `ca_keys` table (ADR-0026) and the s
 | A second platform tenant for the right | The right belongs to the account, not to a tenant. |
 | Remove the platform tenant row | The `ca_keys` table, the signing keys and the platform audit records reference it by a foreign key. |
 | A nullable `sessions.tenant_id` | The foreign key and the Row-Level Security of the session table need a tenant. |
+
+## Open points
+
+- A platform API token keeps the role `platform_admin` in the platform tenant for now. The token carries the right to a machine actor. A later record decides whether the right belongs to a token. This record changes the session path only.
