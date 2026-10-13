@@ -10,6 +10,8 @@ ADR-0012 fixes the web UI as a Svelte 5 single-page application in the control p
 
 The control plane serves the UI with a strict Content Security Policy ([ui.rs](../../crates/restichub-cp/src/ui.rs)). A primitive must work under that policy. A primitive that writes an inline style attribute or injects a style element needs `style-src 'unsafe-inline'`.
 
+Note, 2026-10-13: The policy allows one style attribute value by hash. The directive `style-src-attr 'unsafe-hashes' 'sha256-...'` allows the style attribute of the SvelteKit `#svelte-announcer` element. The policy holds no `unsafe-inline`. The hash is in `ui/vite.config.ts` and in [ui.rs](../../crates/restichub-cp/src/ui.rs). Recompute the hash at a `@sveltejs/kit` upgrade, because the upgrade changes the hash. The `ui-csp` CI job catches a stale hash.
+
 The project has one main maintainer. Each added dependency is a maintenance cost.
 
 ## Decision
@@ -25,7 +27,7 @@ The project has one main maintainer. Each added dependency is a maintenance cost
   - DatePicker and TimeField, loaded lazily at a later step.
 - We do not use Tailwind and we do not copy a component kit. The UI keeps its own CSS on the design tokens of `ui/mockups/mockups.css`. The work moves `ui/src/lib/styles/tokens.css` to those tokens. The CSS styles a state through the `data-state` and `data-highlighted` attributes.
 - We keep the native `<select>` for a simple choice, because the bits-ui Select has open accessibility issues. We keep the own DataTable (a headless table library arrives only when column hiding, filters or virtualization are needed). We keep the own Toast, Button, fields and badges.
-- The policy uses `style-src 'self'` without `unsafe-inline`. bits-ui and Svelte set styles through the CSS Object Model. A verification in Chromium 153 found no violation. No template holds a static `style="..."` attribute (a lint rule). We do not use PinInput, because it injects a style element.
+- The policy uses `style-src 'self'` without `unsafe-inline`. bits-ui and Svelte set styles through the CSS Object Model. A verification in Chromium 153 found no violation. No application template holds a static `style="..."` attribute (a lint rule). The SvelteKit announcer is not an application template, so the policy allows its one style attribute by hash. We do not use PinInput, because it injects a style element.
 - A CI test opens Dialog, DropdownMenu, Combobox and Tooltip on the production build under the production policy. The test fails on any `securitypolicyviolation` event. It runs in Chromium and Firefox, and in WebKit when the runner has it.
 - An upgrade of bits-ui passes that test before the merge. The version stays pinned and the maintainer reviews the changelogs.
 - Later, the file tree for restore uses an ARIA tree pattern. That epic decides between an own tree and a headless tree of another library.
