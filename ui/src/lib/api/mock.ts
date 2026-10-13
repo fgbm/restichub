@@ -204,9 +204,10 @@ export class MockApiService {
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
-	// The mock stands for a ready instance, so the screens behind the sign-in are reachable without
-	// the setup step. The setup screen stays reachable at its own route.
+	// The mock stands for a ready instance, so the setup screen stays reachable at its own route.
+	// A fresh page starts without a session, the way the real installation does.
 	private setupDone = true;
+	private signedIn = false;
 
 	private me(): Me {
 		const tenant = this.memberships.find((item) => item.id === this.currentTenant);
@@ -233,14 +234,19 @@ export class MockApiService {
 
 	async signIn(_request: SignInRequest): Promise<Me> {
 		void _request;
+		this.signedIn = true;
 		return this.me();
 	}
 
 	async signOut(): Promise<void> {
+		this.signedIn = false;
 		return undefined;
 	}
 
 	async currentUser(): Promise<Me> {
+		// An anonymous caller gets a 401 from the control plane, and the session store
+		// reads that as no session.
+		if (!this.signedIn) throw new Error('no session');
 		return this.me();
 	}
 

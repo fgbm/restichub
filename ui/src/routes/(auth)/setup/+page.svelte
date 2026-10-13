@@ -6,7 +6,7 @@
 	import type { ApiProblem } from '#lib/api/index.ts';
 	import { Alert, Button, PasswordField, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
+	import { getSetupRequired, isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let setupToken = $state('');
@@ -35,8 +35,13 @@
 			password === confirmPassword
 	);
 
-	onMount(() => {
-		void loadInstance();
+	// A configured installation offers no setup. The screen would disclose the state
+	// of the installation and ask for a privileged action that is no longer possible
+	// (FR-TN-02). The screen stays while the answer is unknown, so an unreachable
+	// control plane does not loop the redirect.
+	onMount(async () => {
+		await loadInstance();
+		if (getSetupRequired() === false) await goto(resolve('/(auth)/sign-in'));
 	});
 
 	async function onSubmit(event: SubmitEvent): Promise<void> {

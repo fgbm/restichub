@@ -7,7 +7,7 @@
 	import { Alert, Button, PasswordField, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSetupRequired, loadInstance } from '#lib/stores/instance.svelte.ts';
-	import { setSession } from '#lib/stores/session.svelte.ts';
+	import { getSession, isLoaded, loadSession, setSession } from '#lib/stores/session.svelte.ts';
 
 	let username = $state('');
 	let password = $state('');
@@ -26,11 +26,23 @@
 
 	const next = $derived(safeNext(page.url.searchParams.get('next')));
 
-	// An installation without a user needs the setup first. The sign-in form stays
-	// in place when the check fails.
+	// An installation without a user needs the setup first. A signed-in person has no
+	// reason to see the sign-in form, so the screen moves them to the dashboard. The
+	// probe is safe here: the API client never redirects on a 401 while the sign-in
+	// path is open (NO_REDIRECT_PATHS and shouldRedirectToSignIn in client.ts). The
+	// form stays when the session is unknown, or a lost session would loop.
 	onMount(async () => {
 		await loadInstance();
-		if (getSetupRequired() === true) await goto(resolve('/(auth)/setup'));
+		if (getSetupRequired() === true) {
+			await goto(resolve('/(auth)/setup'));
+			return;
+		}
+		if (!isLoaded()) await loadSession();
+		if (getSession()) {
+			// The `next` value is a validated in-app path and the base path is empty.
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			await goto(next);
+		}
 	});
 
 	async function onSubmit(event: SubmitEvent): Promise<void> {
