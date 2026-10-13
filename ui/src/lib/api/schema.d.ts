@@ -320,6 +320,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists every account of the installation with its memberships (Platform Admin only). */
+        get: operations["list_accounts"];
+        put?: never;
+        /** Creates an installation account with optional memberships (Platform Admin only). */
+        post: operations["create_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/users/{id}": {
         parameters: {
             query?: never;
@@ -334,10 +352,11 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Disables or enables an account itself (Platform Admin only).
-         * @description The endpoint refuses the caller's own account and the last active Platform Admin.
+         * Changes an account itself (Platform Admin only).
+         * @description The endpoint refuses the caller's own account and the last active Platform Admin. At least one
+         *     field must be present.
          */
-        patch: operations["set_account_disabled"];
+        patch: operations["update_account"];
         trace?: never;
     };
     "/api/v1/platform/users/{id}/memberships": {
@@ -351,14 +370,38 @@ export interface paths {
         put?: never;
         /**
          * Adds a membership for an existing account (Platform Admin only).
-         * @description The platform tenant is refused: a Platform Admin membership is created by the setup or by the
-         *     platform user create only.
+         * @description The platform tenant is refused: a Platform Admin membership is created by the setup only.
          */
         post: operations["add_membership"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/users/{id}/memberships/{tenant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Removes a membership of an account (Platform Admin only).
+         * @description The platform tenant is refused. The endpoint keeps the last active Platform Admin and the
+         *     caller's own membership.
+         */
+        delete: operations["remove_membership"];
+        options?: never;
+        head?: never;
+        /**
+         * Changes the role of an existing membership (Platform Admin only).
+         * @description The platform tenant is refused.
+         */
+        patch: operations["set_membership_role"];
         trace?: never;
     };
     "/api/v1/secrets": {
@@ -638,15 +681,18 @@ export interface components {
             /** @description Holds 1 to 64 KiB bytes. */
             value: string;
         };
-        CreateTenantAdmin: {
+        CreateAccountRequest: {
             display_name: string;
+            /** @description Unique in the installation when it is set (ADR-0028). */
+            email?: string | null;
+            /** @description The organizations of the account with the role in each one. */
+            memberships?: components["schemas"]["MembershipInput"][];
             /** @description At least 12 characters. */
             password: string;
-            /** @description Unique for the tenant; ignores the letter case. */
+            /** @description Unique in the installation; ignores the letter case. */
             username: string;
         };
         CreateTenantRequest: {
-            first_admin: components["schemas"]["CreateTenantAdmin"];
             /**
              * @description Holds 1 to 63 characters from `a-z`, `0-9` and `-`, starts with a letter, and is not
              *     `platform`.
@@ -676,11 +722,16 @@ export interface components {
             /** @description Unique in the installation; ignores the letter case. */
             username: string;
         };
-        DisableAccountRequest: {
-            disabled: boolean;
-        };
+        /**
+         * @description The derived administrator state of a tenant (ADR-0028).
+         *
+         *     The control plane computes the state from the memberships: an active Admin count of zero gives
+         *     [`AdminState::None`]. The state is not stored, so it cannot drift from the memberships.
+         * @enum {string}
+         */
+        AdminState: "none" | "present";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken";
         /** @description The mode and the setup state of the installation. */
         InstanceResponse: {
             /** @description True while the installation has no administrator. */
@@ -692,9 +743,22 @@ export interface components {
             tenant: components["schemas"]["TenantView"];
             user?: components["schemas"]["UserView"] | null;
         };
+        /** @description One membership of the account create request. */
+        MembershipInput: {
+            role: components["schemas"]["Role"];
+            tenant_id: string;
+        };
         MembershipView: {
             role: components["schemas"]["Role"];
             tenant_id: string;
+        };
+        /** @description One membership of an account in the platform account list (ADR-0028). */
+        PlatformMembershipView: {
+            /** @description Off in this organization only. */
+            disabled: boolean;
+            role: components["schemas"]["Role"];
+            tenant_id: string;
+            tenant_name: string;
         };
         /**
          * @description A tenant in a platform administration response (FR-TN-02).
@@ -702,6 +766,8 @@ export interface components {
          *     The view holds the user count only. It never holds a user list or a secret of the tenant.
          */
         PlatformTenantView: {
+            /** @description Derived from the memberships: `none` when the tenant has no active Admin (ADR-0028). */
+            admin_state: components["schemas"]["AdminState"];
             /** @description In RFC 3339. */
             created_at: string;
             id: string;
@@ -709,6 +775,31 @@ export interface components {
             status: components["schemas"]["TenantStatus"];
             /** Format: int64 */
             user_count: number;
+        };
+        /** @description An installation account with its memberships (ADR-0028). */
+        PlatformUserListResponse: {
+            items: components["schemas"]["PlatformUserView"][];
+        };
+        /** @description An installation account with its memberships (ADR-0028). */
+        PlatformUserView: {
+            /** @description A Platform Admin set it for the whole installation. */
+            disabled: boolean;
+            display_name: string;
+            /** @description Unique in the installation when it is set. */
+            email?: string | null;
+            /** @description The MVP never sets it true. */
+            email_verified: boolean;
+            id: string;
+            memberships: components["schemas"]["PlatformMembershipView"][];
+            username: string;
+        };
+        SetRoleRequest: {
+            role: components["schemas"]["Role"];
+        };
+        UpdateAccountRequest: {
+            disabled?: boolean | null;
+            /** @description The MVP treats the email as unverified. */
+            email?: string | null;
         };
         ProblemBody: {
             /** @description In snake_case. */
@@ -1788,7 +1879,7 @@ export interface operations {
             };
         };
     };
-    set_account_disabled: {
+    update_account: {
         parameters: {
             query?: never;
             header?: never;
@@ -1800,7 +1891,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DisableAccountRequest"];
+                "application/json": components["schemas"]["UpdateAccountRequest"];
             };
         };
         responses: {
@@ -1912,6 +2003,244 @@ export interface operations {
             };
             /** @description The account or the tenant is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    set_membership_role: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the account. */
+                id: string;
+                /** @description The identifier of the organization. */
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description The role is changed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The membership is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    remove_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the account. */
+                id: string;
+                /** @description The identifier of the organization. */
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The membership is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The membership is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The membership is the caller's own membership. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_accounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every account of the installation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformUserListResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description The account is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformUserView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description A membership names an unknown organization. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The username or the email exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The password work is busy. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

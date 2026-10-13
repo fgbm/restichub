@@ -17,9 +17,14 @@ import type {
 	CreateApiTokenRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
+	CreatePlatformUserRequest,
 	Instance,
 	Me,
+	MembershipInput,
+	PlatformUser,
+	PlatformUserListResponse,
 	ResetPasswordRequest,
+	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
 	SignInRequest,
@@ -27,6 +32,7 @@ import type {
 	TenantAccess,
 	TenantAccessListResponse,
 	TenantListResponse,
+	UpdateAccountRequest,
 	UpdateUserRequest,
 	User,
 	UserListResponse
@@ -63,6 +69,14 @@ export interface ApiService {
 	suspendTenant(id: string): Promise<void>;
 	resumeTenant(id: string): Promise<void>;
 	deleteTenant(id: string): Promise<void>;
+
+	/** Every account of the installation with its memberships (ADR-0028). */
+	listPlatformUsers(): Promise<PlatformUser[]>;
+	createPlatformUser(request: CreatePlatformUserRequest): Promise<PlatformUser>;
+	updatePlatformUser(id: string, patch: UpdateAccountRequest): Promise<void>;
+	addPlatformMembership(id: string, request: MembershipInput): Promise<void>;
+	setPlatformMembershipRole(id: string, tenantId: string, request: SetRoleRequest): Promise<void>;
+	removePlatformMembership(id: string, tenantId: string): Promise<void>;
 
 	listAudit(query: AuditQuery): Promise<AuditPage>;
 	listPlatformAudit(query: AuditQuery): Promise<AuditPage>;
@@ -101,6 +115,17 @@ const httpService: ApiService = {
 	suspendTenant: (id) => api.post<void>(endpoints.platform.suspendTenant(id)),
 	resumeTenant: (id) => api.post<void>(endpoints.platform.resumeTenant(id)),
 	deleteTenant: (id) => api.delete<void>(endpoints.platform.deleteTenant(id)),
+
+	listPlatformUsers: () =>
+		api.get<PlatformUserListResponse>(endpoints.platform.users).then((response) => response.items),
+	createPlatformUser: (request) => api.post<PlatformUser>(endpoints.platform.createUser, request),
+	updatePlatformUser: (id, patch) => api.patch<void>(endpoints.platform.userById(id), patch),
+	addPlatformMembership: (id, request) =>
+		api.post<void>(endpoints.platform.userMemberships(id), request),
+	setPlatformMembershipRole: (id, tenantId, request) =>
+		api.patch<void>(endpoints.platform.userMembership(id, tenantId), request),
+	removePlatformMembership: (id, tenantId) =>
+		api.delete<void>(endpoints.platform.userMembership(id, tenantId)),
 
 	listAudit: (query) =>
 		api.get<AuditPage>(endpoints.audit.list, {

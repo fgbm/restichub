@@ -40,6 +40,12 @@ export const endpoints = {
 		suspendTenant: (id: string) => `/platform/tenants/${encodeURIComponent(id)}/suspend`,
 		resumeTenant: (id: string) => `/platform/tenants/${encodeURIComponent(id)}/resume`,
 		deleteTenant: (id: string) => `/platform/tenants/${encodeURIComponent(id)}`,
+		users: '/platform/users',
+		createUser: '/platform/users',
+		userById: (id: string) => `/platform/users/${encodeURIComponent(id)}`,
+		userMemberships: (id: string) => `/platform/users/${encodeURIComponent(id)}/memberships`,
+		userMembership: (id: string, tenantId: string) =>
+			`/platform/users/${encodeURIComponent(id)}/memberships/${encodeURIComponent(tenantId)}`,
 		audit: '/platform/audit'
 	}
 } as const;

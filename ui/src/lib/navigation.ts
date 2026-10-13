@@ -13,6 +13,7 @@ export type NavHref =
 	| '/(app)/api-tokens'
 	| '/(app)/audit'
 	| '/(app)/platform/tenants'
+	| '/(app)/platform/users'
 	| '/(app)/platform/audit';
 
 export interface NavItem {
@@ -50,6 +51,11 @@ export const navigation: NavSection[] = [
 			{
 				href: '/(app)/platform/tenants',
 				labelKey: 'nav.tenants',
+				roles: ['platform_admin']
+			},
+			{
+				href: '/(app)/platform/users',
+				labelKey: 'nav.platformUsers',
 				roles: ['platform_admin']
 			},
 			{
