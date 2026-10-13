@@ -17,6 +17,7 @@ pub const INSECURE_SESSION_COOKIE: &str = "restichub_session";
 pub const CSRF_HEADER: &str = "x-restichub-csrf";
 pub const CSRF_VALUE: &str = "1";
 pub const API_TOKEN_PREFIX: &str = "rh_";
+pub const ENROLLMENT_TOKEN_PREFIX: &str = "re_";
 pub const DISPLAY_PREFIX_LEN: usize = 8;
 const TOKEN_BYTES: usize = 32;
 
@@ -79,6 +80,13 @@ pub fn random_api_token() -> Result<(String, String), TokenError> {
     Ok((format!("{API_TOKEN_PREFIX}{value}"), prefix))
 }
 
+/// The value is `re_<base64url>`; the prefix is the first eight characters after `re_`.
+pub fn random_enrollment_token() -> Result<(String, String), TokenError> {
+    let value = random_token()?;
+    let prefix: String = value.chars().take(DISPLAY_PREFIX_LEN).collect();
+    Ok((format!("{ENROLLMENT_TOKEN_PREFIX}{value}"), prefix))
+}
+
 pub fn hash_token(value: &str) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
@@ -118,8 +126,9 @@ mod tests {
 
     use super::{
         API_TOKEN_PREFIX, CSRF_HEADER, CSRF_VALUE, INSECURE_SESSION_COOKIE, SESSION_COOKIE,
-        clear_cookie_header, csrf_ok, hash_token, is_unsafe_method, random_api_token, random_token,
-        session_cookie, session_cookie_name, set_cookie_header,
+        clear_cookie_header, csrf_ok, hash_token, is_unsafe_method, random_api_token,
+        random_enrollment_token, random_token, session_cookie, session_cookie_name,
+        set_cookie_header,
     };
 
     #[test]
@@ -147,6 +156,18 @@ mod tests {
             &value[API_TOKEN_PREFIX.len()..API_TOKEN_PREFIX.len() + 8]
         );
         assert_eq!(prefix.len(), 8);
+    }
+
+    #[test]
+    fn an_enrollment_token_has_the_prefix_and_the_display_prefix() {
+        let (value, prefix) = match random_enrollment_token() {
+            Ok(pair) => pair,
+            Err(error) => panic!("cannot build the token: {error}"),
+        };
+        assert!(value.starts_with("re_"));
+        assert_eq!(prefix, &value[3..11]);
+        assert_eq!(prefix.len(), 8);
+        assert!(!value.starts_with(API_TOKEN_PREFIX));
     }
 
     #[test]

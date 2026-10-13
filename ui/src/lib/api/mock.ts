@@ -5,6 +5,7 @@
  * know which one it uses. The tenant functions are the planned API of issue #20.
  */
 import type {
+	Agent,
 	ApiToken,
 	ApiTokenCreated,
 	AuditPage,
@@ -12,8 +13,11 @@ import type {
 	AuditRecord,
 	ChangePasswordRequest,
 	CreateApiTokenRequest,
+	CreateEnrollmentTokenRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
+	EnrollmentToken,
+	EnrollmentTokenCreated,
 	Instance,
 	Me,
 	ResetPasswordRequest,
@@ -201,6 +205,8 @@ export class MockApiService {
 	private users: User[] = makeUsers();
 	private tenants: Tenant[] = makeTenants();
 	private tokens: ApiToken[] = makeTokens();
+	private agents: Agent[] = [];
+	private enrollmentTokens: EnrollmentToken[] = [];
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
@@ -341,6 +347,61 @@ export class MockApiService {
 		this.tokens = this.tokens.map((token) =>
 			token.id === id ? { ...token, revoked_at: new Date().toISOString() } : token
 		);
+	}
+
+	async listAgents(): Promise<Agent[]> {
+		return [...this.agents];
+	}
+
+	async renameAgent(id: string, hostname: string): Promise<Agent> {
+		const agent = this.agents.find((item) => item.id === id);
+		if (!agent) throw new Error('not found');
+		agent.hostname = hostname;
+		return agent;
+	}
+
+	async revokeAgent(id: string): Promise<void> {
+		this.agents = this.agents.map((agent) =>
+			agent.id === id
+				? { ...agent, status: 'revoked', revoked_at: new Date().toISOString() }
+				: agent
+		);
+	}
+
+	async listEnrollmentTokens(): Promise<EnrollmentToken[]> {
+		return [...this.enrollmentTokens];
+	}
+
+	async createEnrollmentToken(
+		request: CreateEnrollmentTokenRequest
+	): Promise<EnrollmentTokenCreated> {
+		const now = new Date();
+		const ttl = request.ttl_seconds ?? 900;
+		const value = 're_EXAMPLEONLYVALUE00000000000000000000000000';
+		const prefix = value.slice(3, 11);
+		const created: EnrollmentTokenCreated = {
+			id: `e_${this.enrollmentTokens.length + 1}`,
+			token: value,
+			display_prefix: prefix,
+			labels: request.labels ?? [],
+			expires_at: new Date(now.getTime() + ttl * 1000).toISOString(),
+			created_at: now.toISOString()
+		};
+		const token: EnrollmentToken = {
+			id: created.id,
+			display_prefix: prefix,
+			labels: created.labels,
+			expires_at: created.expires_at,
+			used_at: null,
+			created_at: created.created_at,
+			created_by: this.users[0].id
+		};
+		this.enrollmentTokens = [...this.enrollmentTokens, token];
+		return created;
+	}
+
+	async revokeEnrollmentToken(id: string): Promise<void> {
+		this.enrollmentTokens = this.enrollmentTokens.filter((token) => token.id !== id);
 	}
 
 	async listTenants(): Promise<Tenant[]> {

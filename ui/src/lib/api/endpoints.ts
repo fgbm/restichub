@@ -30,6 +30,16 @@ export const endpoints = {
 		create: '/api-tokens',
 		byId: (id: string) => `/api-tokens/${encodeURIComponent(id)}`
 	},
+	agents: {
+		list: '/agents',
+		byId: (id: string) => `/agents/${encodeURIComponent(id)}`,
+		revoke: (id: string) => `/agents/${encodeURIComponent(id)}/revoke`
+	},
+	enrollmentTokens: {
+		list: '/enrollment-tokens',
+		create: '/enrollment-tokens',
+		byId: (id: string) => `/enrollment-tokens/${encodeURIComponent(id)}`
+	},
 	audit: {
 		list: '/audit'
 	},

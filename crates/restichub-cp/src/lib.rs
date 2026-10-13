@@ -3,6 +3,7 @@
 //! The crate holds the configuration, the HTTP server, the local authentication and the error type
 //! of the control plane (ADR-0023).
 
+pub mod agents;
 pub mod api_tokens;
 pub mod audit;
 pub mod auth;
@@ -11,6 +12,7 @@ pub mod clock;
 pub mod config;
 pub mod context;
 pub mod delivery;
+pub mod enrollment_tokens;
 pub mod error;
 pub mod harden;
 pub mod instance;

@@ -90,6 +90,35 @@ impl TenantStatus {
     }
 }
 
+/// The status of an enrolled agent (ADR-0026, FR-ID-04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum AgentStatus {
+    /// Accepted at each handshake and each stream open.
+    Active,
+    /// The stream layer refuses the agent and closes an open stream (FR-ID-04).
+    Revoked,
+}
+
+impl AgentStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Revoked => "revoked",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "active" => Some(Self::Active),
+            "revoked" => Some(Self::Revoked),
+            _ => None,
+        }
+    }
+}
+
 /// The role of a certificate authority (ADR-0026). The string value is part of the associated
 /// data of the wrapped key; do not change it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
@@ -183,7 +212,7 @@ impl ActorType {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActorType, CaRole, Role, SigningKeyRole, TenantStatus};
+    use super::{ActorType, AgentStatus, CaRole, Role, SigningKeyRole, TenantStatus};
 
     #[test]
     fn the_role_strings_are_stable() {
@@ -208,6 +237,14 @@ mod tests {
             assert_eq!(TenantStatus::parse(status.as_str()), Some(status));
         }
         assert_eq!(TenantStatus::parse("nope"), None);
+    }
+
+    #[test]
+    fn the_agent_status_strings_are_stable() {
+        for status in [AgentStatus::Active, AgentStatus::Revoked] {
+            assert_eq!(AgentStatus::parse(status.as_str()), Some(status));
+        }
+        assert_eq!(AgentStatus::parse("nope"), None);
     }
 
     #[test]

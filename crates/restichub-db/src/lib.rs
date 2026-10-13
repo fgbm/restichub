@@ -13,11 +13,13 @@ use std::time::Duration;
 use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 
+pub mod agents;
 pub mod api_tokens;
 pub mod audit;
 pub mod auth;
 pub mod ca;
 pub mod delivery;
+pub mod enrollment_tokens;
 pub mod enums;
 pub mod ids;
 pub mod kek;
@@ -33,9 +35,10 @@ pub mod users;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 
-pub use enums::{ActorType, CaRole, Role, SigningKeyRole, TenantStatus};
+pub use enums::{ActorType, AgentStatus, CaRole, Role, SigningKeyRole, TenantStatus};
 pub use ids::{
-    ApiTokenId, AuditLogId, PLATFORM_TENANT_ID, SecretId, SessionId, SetupTokenId, TenantId, UserId,
+    AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, PLATFORM_TENANT_ID, SecretId, SessionId,
+    SetupTokenId, TenantId, UserId,
 };
 pub use tx::{PlatformTx, TenantTx};
 

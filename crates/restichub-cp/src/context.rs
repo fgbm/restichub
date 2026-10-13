@@ -45,6 +45,10 @@ pub enum Operation {
     UsersWrite,
     ApiTokensRead,
     ApiTokensWrite,
+    AgentsRead,
+    AgentsWrite,
+    EnrollmentTokensRead,
+    EnrollmentTokensWrite,
     SecretsRead,
     SecretsWrite,
 }
@@ -66,7 +70,15 @@ impl Operation {
     /// secrets belong to a real tenant; the platform tenant holds the Platform Admin users and the
     /// platform audit records (FR-TN-02).
     pub fn is_tenant_only(self) -> bool {
-        matches!(self, Self::SecretsRead | Self::SecretsWrite)
+        matches!(
+            self,
+            Self::SecretsRead
+                | Self::SecretsWrite
+                | Self::AgentsRead
+                | Self::AgentsWrite
+                | Self::EnrollmentTokensRead
+                | Self::EnrollmentTokensWrite
+        )
     }
 }
 
@@ -87,6 +99,10 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::UsersWrite => Role::Admin,
         Operation::ApiTokensRead => Role::Admin,
         Operation::ApiTokensWrite => Role::Admin,
+        Operation::AgentsRead => Role::Viewer,
+        Operation::AgentsWrite => Role::Admin,
+        Operation::EnrollmentTokensRead => Role::Viewer,
+        Operation::EnrollmentTokensWrite => Role::Admin,
         Operation::SecretsRead => Role::Viewer,
         Operation::SecretsWrite => Role::Admin,
     }
@@ -200,6 +216,25 @@ impl RequestContext {
         event.source_ip = self.source_ip;
         event.object_id = Some(object_id);
         event
+    }
+
+    /// Resolves the account behind the actor.
+    ///
+    /// A user actor is its own account. An API token actor stands for the account of its creator
+    /// (ADR-0023).
+    pub async fn actor_user(&self, state: &AppState) -> Result<restichub_db::UserId, ApiError> {
+        match self.actor {
+            Actor::User(user_id) => Ok(user_id),
+            Actor::ApiToken(token_id) => {
+                let mut tx = state.db().begin_tenant(self.tenant_id).await?;
+                let token = api_tokens::get(&mut tx, token_id).await?;
+                tx.commit().await?;
+                token.map(|token| token.created_by).ok_or_else(|| {
+                    ApiError::internal(format!("the token {token_id} is not found after the read"))
+                })
+            }
+            _ => Err(ApiError::forbidden()),
+        }
     }
 
     /// Opens a tenant transaction for the context, runs the closure and commits.

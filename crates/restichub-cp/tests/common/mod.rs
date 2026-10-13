@@ -124,6 +124,10 @@ pub fn write_body(
             Some(json!({"new_password": "a long enough password"}))
         }
         ("POST", "/api/v1/api-tokens") => Some(json!({"name": "matrix", "role": role})),
+        ("POST", "/api/v1/enrollment-tokens") => {
+            Some(json!({"labels": ["matrix"], "ttl_seconds": 900}))
+        }
+        ("PATCH", "/api/v1/agents/{id}") => Some(json!({"hostname": "matrix-host"})),
         ("POST", "/api/v1/secrets") => Some(json!({
             "name": format!("matrix-secret-{index}"),
             "purpose": "repository_password",
@@ -311,6 +315,62 @@ pub async fn seed_secret(db: &Database, tenant: TenantId, name: &str) -> restich
     .await
     .expect("cannot create the secret");
     tx.commit().await.expect("cannot commit the secret");
+    id
+}
+
+/// Inserts an active agent row of a tenant and returns its identifier.
+///
+/// The enrollment exchange (#48) creates the row in production; a test seeds it directly.
+pub async fn seed_agent(db: &Database, tenant: TenantId, hostname: &str) -> restichub_db::AgentId {
+    let mut serial = vec![0_u8; 16];
+    getrandom::fill(&mut serial).expect("cannot read random bytes");
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::agents::create(
+        &mut tx,
+        &restichub_db::agents::NewAgent {
+            hostname,
+            os: "linux",
+            arch: "amd64",
+            agent_version: "0.1.0",
+            certificate_serial: &serial,
+            certificate_expires_at: OffsetDateTime::now_utc() + time::Duration::days(30),
+            last_seen_at: None,
+        },
+    )
+    .await
+    .expect("cannot create the agent");
+    tx.commit().await.expect("cannot commit the agent");
+    id
+}
+
+/// Inserts an unused enrollment token row of a tenant and returns its identifier.
+pub async fn seed_enrollment_token(
+    db: &Database,
+    tenant: TenantId,
+    created_by: restichub_db::UserId,
+) -> restichub_db::EnrollmentTokenId {
+    let mut hash = vec![0_u8; 32];
+    getrandom::fill(&mut hash).expect("cannot read random bytes");
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::enrollment_tokens::create(
+        &mut tx,
+        &restichub_db::enrollment_tokens::NewEnrollmentToken {
+            token_hash: &hash,
+            display_prefix: "ab12cd34",
+            labels: &["host".to_owned()],
+            expires_at: OffsetDateTime::now_utc() + time::Duration::minutes(15),
+            created_by,
+        },
+    )
+    .await
+    .expect("cannot create the enrollment token");
+    tx.commit().await.expect("cannot commit the token");
     id
 }
 

@@ -33,6 +33,14 @@ pub struct AuditLogId(Uuid);
 #[sqlx(transparent)]
 pub struct SetupTokenId(Uuid);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct AgentId(Uuid);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct EnrollmentTokenId(Uuid);
+
 /// The reserved platform tenant (ADR-0023, section Tenant isolation).
 ///
 /// The value is the constant `id` of the reserved row in the `tenants` table. The Platform Admin
@@ -98,3 +106,5 @@ id_type!(ApiTokenId);
 id_type!(SecretId);
 id_type!(AuditLogId);
 id_type!(SetupTokenId);
+id_type!(AgentId);
+id_type!(EnrollmentTokenId);
