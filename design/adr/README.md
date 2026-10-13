@@ -31,3 +31,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0023](0023-control-plane-core.md) | Control plane core: storage, authentication and secret format | partly superseded by ADR-0025 (installation-wide user accounts) |
 | [0024](0024-single-tenant-mode.md) | Single-tenant mode | partly superseded by ADR-0025 (installation-wide user accounts) |
 | [0025](0025-installation-wide-user-accounts.md) | Installation-wide user accounts | accepted |
+| [0026](0026-agent-pki-identity-and-key-rotation.md) | Agent PKI, identity and key rotation | accepted |
