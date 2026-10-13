@@ -3,10 +3,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use restichub_emulator::agent::{AgentConfig, Backoff, run_agent};
+use restichub_emulator::agent::{AgentConfig, AgentLoad, Backoff, run_agent};
 use restichub_emulator::control::{AgentEvent, TestControlPlane};
 use restichub_emulator::executor::{Executor, Simulated, SimulatedProfile};
 use restichub_emulator::identity::{SERVER_NAME, TENANT_ID, TestPki, key_ring};
+use restichub_emulator::metrics::Metrics;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 
@@ -55,6 +56,7 @@ pub fn spawn_agents(
             key_ring: key_ring(),
             executor: Arc::clone(&executor),
             backoff,
+            load: AgentLoad::new(Arc::new(Metrics::default())),
         });
         tasks.push(tokio::spawn(run_agent(config, receiver.clone())));
     }

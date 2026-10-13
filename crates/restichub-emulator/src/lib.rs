@@ -14,6 +14,9 @@ pub mod cli;
 pub mod executor;
 pub mod identity;
 pub mod job;
+pub mod metrics;
+pub mod profile;
+pub mod runner;
 
 #[cfg(feature = "test-util")]
 pub mod control;
@@ -25,6 +28,14 @@ use std::sync::{Mutex, MutexGuard};
 /// keeps the data usable, so this recovers it instead of panicking.
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+/// Draws a value in `[0, 1)` from the system entropy source.
+pub(crate) fn random_fraction() -> f64 {
+    let mut bytes = [0u8; 8];
+    // getrandom does not fail on a supported host. Zero is a safe fallback.
+    let _ = getrandom::fill(&mut bytes);
+    (u64::from_le_bytes(bytes) as f64) / (u64::MAX as f64)
 }
 
 /// Returns the current time as a Protocol Buffers timestamp.

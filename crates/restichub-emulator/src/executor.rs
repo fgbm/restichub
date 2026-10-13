@@ -1,8 +1,8 @@
 //! Step execution for the emulated agent.
 //!
-//! The default executor waits for the step time of a profile. The optional
-//! executor spawns `restichub-fake-restic`. Epic #34 adds the load profile and
-//! the metrics.
+//! The default executor waits for the step time of a profile. The profile
+//! executor of a load run samples the step time and the exit code. The optional
+//! executor spawns `restichub-fake-restic`.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -11,6 +11,8 @@ use async_trait::async_trait;
 use restichub_proto::agent::v1::{Step, StepStatus, step};
 
 use crate::agent::ProgressSink;
+use crate::profile::LoadProfile;
+use crate::random_fraction;
 
 /// Status and exit code of one step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +182,104 @@ pub fn status_for_exit(code: i32) -> StepStatus {
         10 | 12 => StepStatus::ConfigError,
         130 => StepStatus::Cancelled,
         _ => StepStatus::Failed,
+    }
+}
+
+/// One exit code with the chance that a step ends with it.
+#[derive(Debug, Clone, Copy)]
+pub struct FailureRate {
+    pub exit_code: i32,
+    pub probability: f64,
+}
+
+/// The step time, the progress and the failures of a load profile.
+#[derive(Debug, Clone, Default)]
+pub struct ProfiledProfile {
+    pub min_seconds: f64,
+    pub max_seconds: f64,
+    pub progress_rate: f64,
+    pub failures: Vec<FailureRate>,
+}
+
+impl ProfiledProfile {
+    /// Builds the step behaviour of a load profile.
+    #[must_use]
+    pub fn from_profile(profile: &LoadProfile) -> Self {
+        let failures = profile
+            .failure_rate
+            .iter()
+            .filter_map(|(code, probability)| {
+                code.parse::<i32>().ok().map(|exit_code| FailureRate {
+                    exit_code,
+                    probability: *probability,
+                })
+            })
+            .collect();
+        Self {
+            min_seconds: profile.job_duration.min_seconds,
+            max_seconds: profile.job_duration.max_seconds,
+            progress_rate: profile.progress_rate,
+            failures,
+        }
+    }
+}
+
+/// The executor of a load run. It samples the step time, reports the progress
+/// and picks a failure exit code (FR-AG-09).
+#[derive(Debug, Clone, Default)]
+pub struct Profiled {
+    pub profile: ProfiledProfile,
+}
+
+#[async_trait]
+impl Executor for Profiled {
+    async fn run_step(&self, _step: &Step, progress: &ProgressSink) -> StepOutcome {
+        let seconds = sample_seconds(
+            self.profile.min_seconds,
+            self.profile.max_seconds,
+            random_fraction(),
+        );
+        report_progress(seconds, self.profile.progress_rate, progress).await;
+        match sample_failure(&self.profile.failures, random_fraction()) {
+            Some(exit_code) => StepOutcome {
+                status: status_for_exit(exit_code),
+                exit_code,
+            },
+            None => StepOutcome::success(),
+        }
+    }
+}
+
+fn sample_seconds(min: f64, max: f64, fraction: f64) -> f64 {
+    let min = min.max(0.0);
+    let max = max.max(min);
+    min + (max - min) * fraction
+}
+
+fn sample_failure(failures: &[FailureRate], fraction: f64) -> Option<i32> {
+    let mut accumulated = 0.0;
+    for failure in failures {
+        accumulated += failure.probability;
+        if fraction < accumulated {
+            return Some(failure.exit_code);
+        }
+    }
+    None
+}
+
+async fn report_progress(seconds: f64, rate: f64, progress: &ProgressSink) {
+    let seconds = seconds.max(0.0);
+    if rate <= 0.0 {
+        tokio::time::sleep(Duration::from_secs_f64(seconds)).await;
+        return;
+    }
+    let ticks = ((seconds * rate).round() as u64).max(1);
+    let slice = seconds / ticks as f64;
+    for tick in 1..=ticks {
+        tokio::time::sleep(Duration::from_secs_f64(slice)).await;
+        progress
+            .report(tick as f64 / ticks as f64, slice * tick as f64)
+            .await;
     }
 }
 

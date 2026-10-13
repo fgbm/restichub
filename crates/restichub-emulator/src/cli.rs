@@ -4,6 +4,7 @@
 //! itself and prints the usage on `--help`. The option names are stable for the
 //! bench scripts.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,11 +12,12 @@ use std::time::Duration;
 use anyhow::{Context as _, anyhow, bail};
 use ed25519_dalek::VerifyingKey;
 use restichub_proto::signing::KeyRing;
-use tokio::sync::watch;
 
-use crate::agent::{AgentConfig, Backoff, run_agent};
-use crate::executor::{Executor, FakeRestic, Simulated, SimulatedProfile};
+use crate::agent::Backoff;
+use crate::executor::{Executor, FakeRestic, Profiled, ProfiledProfile, SimulatedProfile};
 use crate::identity::{self, AgentIdentity, TestPki};
+use crate::profile::{JobDuration, LoadProfile};
+use crate::runner::{LoadRun, RunConfig};
 
 const USAGE: &str = "\
 restichub-emulator - ResticHub agent emulator for load tests
@@ -37,7 +39,11 @@ OPTIONS:
   --key HEX           job signing public key, 32 bytes in hex
   --step-seconds SEC  wall time of one simulated step (default 0.1)
   --progress-ticks N  progress messages for each simulated step (default 0)
-  --duration SEC      stop after SEC seconds (default: run until Ctrl+C)
+  --duration SEC      stop after SEC seconds (default: the profile length, or run until Ctrl+C)
+  --profile FILE      load profile file (JSON); overrides --agents, --duration,
+                      --step-seconds and --progress-ticks
+  --metrics-addr ADDR Prometheus endpoint address, or none (default 127.0.0.1:9100)
+  --summary FILE      write the final JSON summary to FILE
   --help              print this help";
 
 /// Which executor the agents use.
@@ -63,6 +69,9 @@ pub struct Options {
     pub key: Option<String>,
     pub profile: SimulatedProfile,
     pub duration: Option<u64>,
+    pub profile_file: Option<PathBuf>,
+    pub metrics_addr: String,
+    pub summary: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -81,6 +90,9 @@ impl Default for Options {
             key: None,
             profile: SimulatedProfile::default(),
             duration: None,
+            profile_file: None,
+            metrics_addr: "127.0.0.1:9100".to_owned(),
+            summary: None,
         }
     }
 }
@@ -129,6 +141,13 @@ fn parse(args: &[String]) -> anyhow::Result<Options> {
                 options.profile.progress_ticks = take_value(args, &mut index, &name)?.parse()?;
             }
             "--duration" => options.duration = Some(take_value(args, &mut index, &name)?.parse()?),
+            "--profile" => {
+                options.profile_file = Some(PathBuf::from(take_value(args, &mut index, &name)?));
+            }
+            "--metrics-addr" => options.metrics_addr = take_value(args, &mut index, &name)?,
+            "--summary" => {
+                options.summary = Some(PathBuf::from(take_value(args, &mut index, &name)?));
+            }
             "--help" | "-h" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -163,11 +182,18 @@ async fn run(options: &Options) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let (ca_pem, identities) = resolve_identity(options)?;
+    let profile = resolve_profile(options)?;
+    let agents = profile.agents;
+    let run_seconds = match options.duration {
+        Some(seconds) => Some(Duration::from_secs(seconds)),
+        None if options.profile_file.is_some() => Some(profile.duration()),
+        None => None,
+    };
+    let (ca_pem, identities) = resolve_identity(options, agents)?;
     let key_ring = resolve_key_ring(options)?;
     let executor: Arc<dyn Executor> = match options.executor {
-        ExecutorKind::Simulated => Arc::new(Simulated {
-            profile: options.profile,
+        ExecutorKind::Simulated => Arc::new(Profiled {
+            profile: ProfiledProfile::from_profile(&profile),
         }),
         ExecutorKind::FakeRestic => {
             let program = options
@@ -177,28 +203,30 @@ async fn run(options: &Options) -> anyhow::Result<()> {
             Arc::new(FakeRestic { program })
         }
     };
+    let metrics_addr = resolve_metrics_addr(options)?;
 
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let mut tasks = Vec::with_capacity(identities.len());
-    for identity in identities {
-        let config = Arc::new(AgentConfig {
-            tenant_id: options.tenant.clone(),
-            server_url: options.server.clone(),
-            server_name: options.server_name.clone(),
-            ca_pem: ca_pem.clone(),
-            identity,
-            key_ring: key_ring.clone(),
-            executor: Arc::clone(&executor),
-            backoff: Backoff::default(),
-        });
-        tasks.push(tokio::spawn(run_agent(config, shutdown_rx.clone())));
+    let config = RunConfig {
+        profile,
+        server_url: options.server.clone(),
+        server_name: options.server_name.clone(),
+        ca_pem,
+        tenant_id: options.tenant.clone(),
+        key_ring,
+        identities,
+        executor,
+        backoff: Backoff::default(),
+        metrics_addr,
+    };
+    let run = LoadRun::start(config).await?;
+    if let Some(addr) = run.metrics_addr() {
+        println!("metrics on http://{addr}/metrics");
     }
-    println!("started {} agents against {}", tasks.len(), options.server);
+    println!("started {agents} agents against {}", options.server);
 
-    match options.duration {
+    match run_seconds {
         Some(seconds) => {
             tokio::select! {
-                () = tokio::time::sleep(Duration::from_secs(seconds)) => {}
+                () = tokio::time::sleep(seconds) => {}
                 result = tokio::signal::ctrl_c() => result.context("cannot listen for Ctrl+C")?,
             }
         }
@@ -207,14 +235,60 @@ async fn run(options: &Options) -> anyhow::Result<()> {
             .context("cannot listen for Ctrl+C")?,
     }
 
-    let _ = shutdown_tx.send(true);
-    for task in tasks {
-        let _ = task.await;
+    let summary = run.stop().await;
+    if let Some(path) = &options.summary {
+        let text =
+            serde_json::to_string_pretty(&summary).context("cannot serialize the summary")?;
+        std::fs::write(path, text)
+            .with_context(|| format!("cannot write the summary {}", path.display()))?;
+        println!("wrote the summary to {}", path.display());
     }
+    println!(
+        "{}",
+        serde_json::to_string(&summary).context("cannot serialize the summary")?
+    );
     Ok(())
 }
 
-fn resolve_identity(options: &Options) -> anyhow::Result<(String, Vec<AgentIdentity>)> {
+fn resolve_profile(options: &Options) -> anyhow::Result<LoadProfile> {
+    if let Some(path) = &options.profile_file {
+        return LoadProfile::load(path);
+    }
+    let step_seconds = options.profile.step_seconds;
+    let progress_rate = if step_seconds > 0.0 {
+        f64::from(options.profile.progress_ticks) / step_seconds
+    } else {
+        0.0
+    };
+    let profile = LoadProfile {
+        agents: options.agents,
+        duration_seconds: options.duration.map_or(60.0, |seconds| seconds as f64),
+        job_duration: JobDuration {
+            min_seconds: step_seconds,
+            max_seconds: step_seconds,
+        },
+        progress_rate,
+        ..LoadProfile::default()
+    };
+    profile.validate()?;
+    Ok(profile)
+}
+
+fn resolve_metrics_addr(options: &Options) -> anyhow::Result<Option<SocketAddr>> {
+    if options.metrics_addr == "none" {
+        return Ok(None);
+    }
+    let addr = options
+        .metrics_addr
+        .parse::<SocketAddr>()
+        .with_context(|| format!("invalid metrics address: {}", options.metrics_addr))?;
+    Ok(Some(addr))
+}
+
+fn resolve_identity(
+    options: &Options,
+    agents: usize,
+) -> anyhow::Result<(String, Vec<AgentIdentity>)> {
     if let Some(dir) = &options.certs {
         let ca = match &options.ca {
             Some(path) => std::fs::read_to_string(path)?,
@@ -222,7 +296,7 @@ fn resolve_identity(options: &Options) -> anyhow::Result<(String, Vec<AgentIdent
         };
         return Ok((ca, identity::read_client_identities(dir)?));
     }
-    let pki = TestPki::generate(options.agents)?;
+    let pki = TestPki::generate(agents)?;
     let ca = match &options.ca {
         Some(path) => std::fs::read_to_string(path)?,
         None => pki.ca_pem().to_owned(),

@@ -7,8 +7,9 @@
 //! starts no action on its own (ADR-0002).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use restichub_proto::agent::v1::{
@@ -26,6 +27,7 @@ use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 
 use crate::executor::{Executor, StepOutcome};
 use crate::identity::AgentIdentity;
+use crate::metrics::Metrics;
 use crate::now_timestamp;
 
 /// Number of outbound messages buffered for one agent.
@@ -62,10 +64,7 @@ impl Backoff {
 }
 
 fn random_fraction() -> f64 {
-    let mut bytes = [0u8; 8];
-    // getrandom does not fail on a supported host. Zero is a safe fallback.
-    let _ = getrandom::fill(&mut bytes);
-    (u64::from_le_bytes(bytes) as f64) / (u64::MAX as f64)
+    crate::random_fraction()
 }
 
 /// Configuration of one emulated agent.
@@ -78,6 +77,38 @@ pub struct AgentConfig {
     pub key_ring: KeyRing,
     pub executor: Arc<dyn Executor>,
     pub backoff: Backoff,
+    pub load: AgentLoad,
+}
+
+/// Load-profile behaviour of one agent. The default holds no profile: the host
+/// OS, no clock offset, no acknowledgement delay and no reconnect storm.
+pub struct AgentLoad {
+    pub metrics: Arc<Metrics>,
+    pub run_start: Instant,
+    pub drop_at: Option<Duration>,
+    /// Set when the storm fired, so a later reconnect does not drop again.
+    pub storm_dropped: AtomicBool,
+    /// Offset of the agent clock in microseconds, for job validation.
+    pub clock_skew_micros: i64,
+    pub ack_delay: Duration,
+    /// Label that the agent reports in `AgentHello.os`. `None` uses the host OS.
+    pub os_label: Option<String>,
+}
+
+impl AgentLoad {
+    /// Behaviour with no load profile.
+    #[must_use]
+    pub fn new(metrics: Arc<Metrics>) -> Self {
+        Self {
+            metrics,
+            run_start: Instant::now(),
+            drop_at: None,
+            storm_dropped: AtomicBool::new(false),
+            clock_skew_micros: 0,
+            ack_delay: Duration::ZERO,
+            os_label: None,
+        }
+    }
 }
 
 /// Signals that a running job must stop (FR-AG-10).
@@ -159,9 +190,16 @@ pub async fn run_agent(config: Arc<AgentConfig>, mut shutdown: watch::Receiver<b
     // task starts no job.
     let purge = tokio::spawn(purge_journal(Arc::clone(&journal), shutdown.clone()));
     let mut attempt = 0u32;
+    let mut connected = false;
     while !*shutdown.borrow() {
+        if connected {
+            config.load.metrics.inc_reconnect();
+        }
         match connect_once(&config, &journal, &mut shutdown).await {
-            Ok(()) => attempt = 0,
+            Ok(()) => {
+                attempt = 0;
+                connected = true;
+            }
             Err(error) => {
                 // A load generator does not stop on a connection error.
                 eprintln!("{}: {error:#}", config.identity.agent_id);
@@ -213,6 +251,7 @@ async fn connect_once(
     let endpoint = Endpoint::from_shared(config.server_url.clone())
         .context("invalid server URL")?
         .tls_config(tls)?;
+    let started = Instant::now();
     let channel = endpoint.connect().await?;
     let mut client = AgentServiceClient::new(channel);
 
@@ -220,7 +259,10 @@ async fn connect_once(
     let response = client.connect(ReceiverStream::new(rx)).await?;
     let mut inbound = response.into_inner();
 
-    send_hello(&tx).await?;
+    send_hello(&tx, config.load.os_label.as_deref()).await?;
+
+    let metrics = Arc::clone(&config.load.metrics);
+    metrics.record_connect(started.elapsed().as_micros() as u64);
 
     let session = Session {
         tx: tx.clone(),
@@ -231,8 +273,10 @@ async fn connect_once(
     };
 
     while !*shutdown.borrow() {
+        let storm = storm_drop(config);
         let message = tokio::select! {
             message = inbound.message() => message?,
+            () = storm => break,
             result = shutdown.changed() => {
                 if result.is_err() || *shutdown.borrow() {
                     break;
@@ -278,17 +322,36 @@ async fn connect_once(
     }
 
     cancel_running(&session);
+    metrics.stream_closed();
     Ok(())
 }
 
-async fn send_hello(tx: &mpsc::Sender<AgentMessage>) -> anyhow::Result<()> {
+/// Waits for the reconnect storm of the profile, then drops the stream once
+/// (FR-ID-08). Without a storm, or after the drop, it never completes.
+///
+/// The deadline is absolute, so a control message between the connect and the
+/// storm does not cancel it.
+async fn storm_drop(config: &AgentConfig) {
+    let Some(deadline) = config.load.drop_at.map(|at| config.load.run_start + at) else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    if config.load.storm_dropped.load(Ordering::Relaxed) {
+        std::future::pending::<()>().await;
+        return;
+    }
+    tokio::time::sleep(deadline.saturating_duration_since(Instant::now())).await;
+    config.load.storm_dropped.store(true, Ordering::Relaxed);
+}
+
+async fn send_hello(tx: &mpsc::Sender<AgentMessage>, os_label: Option<&str>) -> anyhow::Result<()> {
     let hello = AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
             protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
             restic_version: "0.19.1".to_owned(),
-            os: std::env::consts::OS.to_owned(),
+            os: os_label.unwrap_or(std::env::consts::OS).to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
             supported_step_types: supported_step_types(),
             ..AgentHello::default()
@@ -331,20 +394,23 @@ async fn run_job(
     handle: CancelHandle,
     mut token: CancelToken,
 ) {
+    let received = Instant::now();
     let expected = Expected {
         agent_id: session.config.identity.agent_id.clone(),
         tenant_id: session.config.tenant_id.clone(),
-        now: now_timestamp(),
+        now: skewed_timestamp(now_timestamp(), session.config.load.clock_skew_micros),
     };
     let ring = crate::lock(&session.ring).clone();
     let job = match verify_job(&signed, &ring, &expected) {
         Ok(job) => job,
         Err(rejection) => {
+            session.config.load.metrics.inc_rejected();
             send_rejected(&session.tx, rejection.job_id, rejection.reason).await;
             return;
         }
     };
     if let Err(rejection) = validate_job(&job) {
+        session.config.load.metrics.inc_rejected();
         send_rejected(&session.tx, rejection.job_id, rejection.reason).await;
         return;
     }
@@ -364,6 +430,10 @@ async fn run_job(
     let job_id = job.job_id.clone();
     crate::lock(&session.jobs).insert(job_id.clone(), handle);
 
+    // A slow agent holds the acknowledgement for the profile delay.
+    if !session.config.load.ack_delay.is_zero() {
+        tokio::time::sleep(session.config.load.ack_delay).await;
+    }
     let ack = AgentMessage {
         payload: Some(agent_message::Payload::JobAck(JobAck {
             job_id: job_id.clone(),
@@ -373,6 +443,12 @@ async fn run_job(
         crate::lock(&session.jobs).remove(&job_id);
         return;
     }
+    session
+        .config
+        .load
+        .metrics
+        .record_ack(received.elapsed().as_micros() as u64);
+    let acked = Instant::now();
 
     let steps_total = u32::try_from(job.steps.len()).unwrap_or(u32::MAX);
     let mut succeeded = 0u32;
@@ -432,7 +508,24 @@ async fn run_job(
     };
     crate::lock(&session.journal).record_completed(&job_id, result.clone());
     let _ = session.tx.send(job_result_message(result)).await;
+    session
+        .config
+        .load
+        .metrics
+        .record_result(acked.elapsed().as_micros() as u64);
     crate::lock(&session.jobs).remove(&job_id);
+}
+
+/// Adds a clock offset in microseconds to a timestamp.
+fn skewed_timestamp(base: prost_types::Timestamp, skew_micros: i64) -> prost_types::Timestamp {
+    if skew_micros == 0 {
+        return base;
+    }
+    let total = base.seconds as i128 * 1_000_000 + base.nanos as i128 / 1_000 + skew_micros as i128;
+    prost_types::Timestamp {
+        seconds: total.div_euclid(1_000_000) as i64,
+        nanos: (total.rem_euclid(1_000_000) * 1_000) as i32,
+    }
 }
 
 async fn send_rejected(
