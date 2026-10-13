@@ -389,9 +389,10 @@ mod tests {
         create_protected_dir(&base).expect("cannot create the protected base");
         let dir = base.join("agent");
         create_protected_dir(&dir).expect("cannot create the protected directory");
-        // An administrator of a Windows host owns a new directory through Administrators, so the
-        // test sets a different owner by hand.
-        set_owner(&dir, "BU").expect("cannot set the owner");
+        // An administrator owns a new directory through Administrators, so the test sets the owner
+        // to the account of the current process, which is not SYSTEM or Administrators.
+        let sid = current_user_sid().expect("cannot read the user SID");
+        set_owner(&dir, &sid).expect("cannot set the owner");
         assert!(ensure_config_dir(&dir).is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -421,6 +422,28 @@ mod tests {
         create_protected_file(&file, b"key").expect("cannot write the protected file");
         check_admin_only(&file).expect("the key file must be SYSTEM and Administrators only");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reads the security identifier of the account that runs the process.
+    fn current_user_sid() -> Result<String> {
+        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
+        let whoami = Path::new(&system_root).join("System32").join("whoami.exe");
+        let output = std::process::Command::new(whoami)
+            .args(["/user", "/fo", "csv", "/nh"])
+            .output()
+            .context("cannot run whoami")?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        // The line is `"domain\account","S-1-5-21-..."`.
+        let sid = text
+            .rsplit("\",\"")
+            .next()
+            .unwrap_or_default()
+            .trim_matches(|character| character == '"' || character == '\r' || character == '\n')
+            .to_owned();
+        if !sid.starts_with("S-1-") {
+            bail!("cannot read the user SID from `{text}`");
+        }
+        Ok(sid)
     }
 
     /// Sets the owner of `path` to the SDDL identity, for a negative test.
