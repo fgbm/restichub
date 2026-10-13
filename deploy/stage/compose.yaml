@@ -1,0 +1,183 @@
+# The staging environment of ResticHub.
+#
+# Create `.env` first with `bootstrap.sh`. It holds random passwords and the key
+# encryption key. This file is for the staging server only.
+#
+# Only Caddy publishes ports. The control plane and PostgreSQL listen on the
+# private network below. The control plane trusts the forwarded client address
+# from Caddy only, because the trusted proxy list holds the network alone.
+
+name: restichub-stage
+
+services:
+  postgres:
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # The server has 2 GB of memory, so the buffer cache stays small.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=40
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Creates the cluster roles once and sets the installation passwords. The
+  # script reads each password from the environment with `\getenv`, so a
+  # password never appears in the process arguments.
+  db-bootstrap:
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE: ${POSTGRES_DB}
+      OWNER_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+      RUNTIME_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+    volumes:
+      - ./bootstrap-roles.sql:/bootstrap-roles.sql:ro
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=1 -d postgres \
+          -v app_role=restichub_app -v auth_role=restichub_auth \
+          -v owner_role=restichub_owner -v runtime_role=restichub_runtime \
+          -f /bootstrap-roles.sql
+        psql -v ON_ERROR_STOP=1 -d postgres <<'SQL'
+        \getenv owner_password OWNER_PASSWORD
+        \getenv runtime_password RUNTIME_PASSWORD
+        \getenv database DATABASE
+        ALTER ROLE restichub_owner PASSWORD :'owner_password';
+        ALTER ROLE restichub_runtime PASSWORD :'runtime_password';
+        ALTER DATABASE :"database" OWNER TO restichub_owner;
+        SQL
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Applies the migrations as the owner login and stops.
+  migrate:
+    image: ghcr.io/fgbm/restichub-cp:${RESTICHUB_IMAGE_TAG:-edge}
+    restart: 'no'
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_DATABASE_MIGRATION_URL: postgres://restichub_owner@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_MIGRATION_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+    command: ['migrate']
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Serves the control plane and the embedded web UI.
+  cp:
+    image: ghcr.io/fgbm/restichub-cp:${RESTICHUB_IMAGE_TAG:-edge}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_LISTEN_ADDR: 0.0.0.0:8080
+      RESTICHUB_DATABASE_URL: postgres://restichub_runtime@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+      # The key encryption key. The control plane verifies it against the stored check at start.
+      RESTICHUB_KEK: ${RESTICHUB_KEK}
+      # The multi mode exercises the tenant path of the product. See ADR-0024.
+      RESTICHUB_TENANCY_MODE: ${RESTICHUB_TENANCY_MODE:-multi}
+      # The control plane reads the client address from `X-Forwarded-For` only
+      # when the socket peer is in this list. The list holds the Caddy network.
+      RESTICHUB_TRUSTED_PROXIES: ${RESTICHUB_TRUSTED_PROXIES:-172.28.0.0/24}
+    # The control plane is not published. Caddy reaches it on this network.
+    expose:
+      - '8080'
+    healthcheck:
+      # The runtime image holds no HTTP client. Bash opens a socket and reads the
+      # status line of `/healthz`.
+      test:
+        - CMD-SHELL
+        - bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /healthz HTTP/1.0\r\n\r\n" >&3 && head -n1 <&3 | grep -q 200'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    # The agent listener (gRPC with mTLS) is not part of this deployment yet.
+    # Its port stays closed until epic #1 lands.
+    # ports:
+    #   - '8443:8443'
+
+  # The reverse proxy. It gets the certificate for the domain automatically.
+  caddy:
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    restart: unless-stopped
+    depends_on:
+      cp:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      RESTICHUB_DOMAIN: ${RESTICHUB_DOMAIN:-rh-stage.app.galen-is.ru}
+      RESTICHUB_ACME_EMAIL: ${RESTICHUB_ACME_EMAIL:-admin@galen-is.ru}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

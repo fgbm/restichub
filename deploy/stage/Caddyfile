@@ -1,0 +1,23 @@
+# The reverse proxy of the staging environment.
+#
+# Caddy gets the TLS certificate for the domain automatically. The control plane
+# listens on the private network only, so Caddy is the only service that
+# publishes a port. Caddy adds the `X-Forwarded-For` header, and the control
+# plane trusts that header from the Caddy network alone.
+
+{
+	email {$RESTICHUB_ACME_EMAIL:admin@galen-is.ru}
+}
+
+{$RESTICHUB_DOMAIN:rh-stage.app.galen-is.ru} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy cp:8080
+}
