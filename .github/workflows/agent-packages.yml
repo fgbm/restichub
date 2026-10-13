@@ -1,0 +1,188 @@
+name: Agent packages
+
+# Build the agent package for each MVP platform. The package holds the agent,
+# the pinned restic binary, the license texts and the package hashes (ADR-0031).
+# The workflow builds artifacts only. The operator approves a release, so no job
+# publishes one.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The restic verification runs on Linux for every target. The signing key and
+  # gpg stay off the Windows runner.
+  restic:
+    name: Restic (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Fetch and verify restic
+        run: >-
+          packaging/fetch-restic.sh
+          --os "${{ matrix.os }}" --arch "${{ matrix.arch }}"
+          --output "$RUNNER_TEMP/restic"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: restic-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/restic/restic
+            ${{ runner.temp }}/restic/restic.exe
+            ${{ runner.temp }}/restic/restic.sha256
+            ${{ runner.temp }}/restic/restic-LICENSE
+          if-no-files-found: error
+
+  build:
+    name: Build (${{ matrix.os }}-${{ matrix.arch }})
+    needs: restic
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            binary: target/release/restichub-agent
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            binary: target/release/restichub-agent
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            binary: target/release/restichub-agent.exe
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The action reads rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: restic-${{ matrix.os }}-${{ matrix.arch }}
+          path: restic
+      - name: Read the restic hash
+        id: restic
+        shell: bash
+        run: echo "sha256=$(cat restic/restic.sha256)" >> "$GITHUB_OUTPUT"
+      # The build embeds the expected restic hash for its target (FR-AG-11).
+      - name: Build the agent
+        env:
+          RESTICHUB_RESTIC_SHA256: ${{ steps.restic.outputs.sha256 }}
+        run: cargo build --release -p restichub-agent
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  package:
+    name: Package (${{ matrix.os }}-${{ matrix.arch }})
+    needs: [restic, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: restic-${{ matrix.os }}-${{ matrix.arch }}
+          path: restic
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-${{ matrix.os }}-${{ matrix.arch }}
+          path: agent
+      - name: Assemble the package
+        id: assemble
+        env:
+          OS: ${{ matrix.os }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          # The pinned restic version and its license text come from the
+          # verified release.
+          . packaging/restic.env
+          # Cargo.lock holds the resolved version of the agent crate.
+          version="$(awk -F'"' '/^name = "restichub-agent"$/{getline; print $2; exit}' Cargo.lock)"
+
+          stage="$RUNNER_TEMP/stage"
+          rm -rf "$stage"
+          mkdir -p "$stage"
+          if [ "$OS" = windows ]; then
+            names=(restichub-agent.exe restic.exe)
+            cp agent/restichub-agent.exe "$stage/"
+            cp restic/restic.exe "$stage/"
+          else
+            names=(restichub-agent restic)
+            cp agent/restichub-agent "$stage/"
+            cp restic/restic "$stage/"
+          fi
+          cp LICENSE "$stage/LICENSE"
+          {
+            echo "ResticHub agent package"
+            echo
+            echo "This package contains third-party software:"
+            echo
+            echo "restic ${RESTIC_VERSION}"
+            echo "License: BSD 2-Clause"
+            echo "Source: https://github.com/restic/restic/releases/tag/v${RESTIC_VERSION}"
+            echo
+            echo "The BSD 2-Clause license text follows."
+            echo
+            cat restic/restic-LICENSE
+          } > "$stage/THIRD_PARTY_NOTICES"
+          ( cd "$stage" && sha256sum "${names[@]}" LICENSE THIRD_PARTY_NOTICES > SHA256SUMS )
+
+          archive="$RUNNER_TEMP/restichub-agent-${version}-${OS}-${ARCH}"
+          if [ "$OS" = windows ]; then
+            archive="$archive.zip"
+            ( cd "$stage" && zip -q -X "$archive" "${names[@]}" LICENSE THIRD_PARTY_NOTICES SHA256SUMS )
+          else
+            archive="$archive.tar.gz"
+            tar -czf "$archive" -C "$stage" "${names[@]}" LICENSE THIRD_PARTY_NOTICES SHA256SUMS
+          fi
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+      # AC-IN-01: the package holds the agent, restic, the license texts and the
+      # package hashes, and the restic hash equals the pinned value.
+      - name: Verify the package (AC-IN-01)
+        env:
+          ARCHIVE: ${{ steps.assemble.outputs.archive }}
+        run: |
+          set -euo pipefail
+          packaging/verify-agent-package.sh \
+            --package "$ARCHIVE" \
+            --expected-restic-sha256 "$(cat restic/restic.sha256)"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: restichub-agent-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ steps.assemble.outputs.archive }}
+          if-no-files-found: error
