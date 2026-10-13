@@ -306,3 +306,128 @@ async fn db_every_relation_has_forced_rls_and_a_policy() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+/// Each account function carries its own scope at the database level (ADR-0025). A tenant A
+/// transaction cannot reach an account that is a member only of tenant B, nor a Platform Admin
+/// account.
+#[tokio::test]
+async fn db_the_account_functions_are_scoped_to_the_current_tenant() -> TestResult {
+    use crate::enums::Role;
+    use crate::{auth, memberships, users};
+
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
+
+    let local = {
+        let mut tx = db.database().begin_tenant(tenant_a).await?;
+        let user = users::create(
+            &mut tx,
+            &NewUser {
+                username: "local",
+                password_hash: "phc",
+                display_name: "Local",
+            },
+        )
+        .await?;
+        memberships::set_role(&mut tx, user, Role::Admin).await?;
+        tx.commit().await?;
+        user
+    };
+    let foreign = {
+        let mut tx = db.database().begin_tenant(tenant_b).await?;
+        let user = users::create(
+            &mut tx,
+            &NewUser {
+                username: "foreign",
+                password_hash: "phc",
+                display_name: "Foreign",
+            },
+        )
+        .await?;
+        memberships::set_role(&mut tx, user, Role::Viewer).await?;
+        tx.commit().await?;
+        user
+    };
+    let platform = {
+        let mut tx = db.database().begin_tenant(PLATFORM_TENANT_ID).await?;
+        let user = users::create(
+            &mut tx,
+            &NewUser {
+                username: "root",
+                password_hash: "phc",
+                display_name: "Root",
+            },
+        )
+        .await?;
+        memberships::set_role(&mut tx, user, Role::PlatformAdmin).await?;
+        tx.commit().await?;
+        user
+    };
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+
+    // A tenant transaction reads no account row directly.
+    let (direct,): (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(direct, 0);
+
+    // The member reads return only the members of tenant A.
+    assert!(users::get_member(&mut tx, foreign).await?.is_none());
+    let members = users::list_members(&mut tx).await?;
+    assert!(members.iter().any(|entry| entry.id == local));
+    assert!(members.iter().all(|entry| entry.id != foreign));
+
+    // The administrator writes need a membership in the current tenant.
+    assert_eq!(
+        users::admin_set_password(&mut tx, foreign, "phc").await?,
+        users::WriteStatus::NotFound
+    );
+    assert_eq!(
+        users::admin_set_display_name(&mut tx, foreign, "F").await?,
+        users::WriteStatus::NotFound
+    );
+    assert_eq!(
+        users::admin_set_password(&mut tx, platform, "phc").await?,
+        users::WriteStatus::NotFound
+    );
+
+    // The own password change is bound to the caller's own session.
+    assert!(!users::self_set_password(&mut tx, foreign, SessionId::new(), "phc").await?);
+    assert!(
+        users::self_password_hash(&mut tx, foreign, SessionId::new())
+            .await?
+            .is_none()
+    );
+
+    // Only the platform tenant disables the account itself.
+    assert_eq!(
+        users::set_disabled(&mut tx, foreign, true).await?,
+        users::WriteStatus::Forbidden
+    );
+
+    // The last used tenant is written for the caller's own session only.
+    assert!(!users::set_last_tenant(&mut tx, foreign, SessionId::new(), tenant_a).await?);
+
+    // The session removal reaches the current tenant only.
+    assert_eq!(
+        auth::delete_account_sessions(&mut tx, foreign, None).await?,
+        0
+    );
+
+    // The membership insert needs the platform scope: the same call from a tenant transaction is
+    // refused by the database function.
+    let (added,): (bool,) = sqlx::query_as("SELECT auth_add_membership($1, $2, $3)")
+        .bind(foreign)
+        .bind(tenant_a)
+        .bind("viewer")
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert!(!added);
+
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}

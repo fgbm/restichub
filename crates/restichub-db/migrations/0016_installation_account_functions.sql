@@ -275,6 +275,7 @@ BEGIN
         RETURN 'not_found';
     END IF;
     IF current_tenant <> '00000000-0000-7000-8000-000000000000'::uuid
+       AND current_setting('restichub.scope', true) <> 'platform'
        AND EXISTS (
            SELECT 1
            FROM public.memberships AS member
@@ -314,6 +315,7 @@ BEGIN
         RETURN 'not_found';
     END IF;
     IF current_tenant <> '00000000-0000-7000-8000-000000000000'::uuid
+       AND current_setting('restichub.scope', true) <> 'platform'
        AND EXISTS (
            SELECT 1
            FROM public.memberships AS member
