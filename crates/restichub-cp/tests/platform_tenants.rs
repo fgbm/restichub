@@ -732,3 +732,44 @@ async fn a_deleted_tenant_is_refused_for_sign_in_session_and_token() {
 
     db.cleanup().await;
 }
+
+#[tokio::test]
+async fn a_taken_first_admin_username_is_a_username_taken_conflict() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let cookie = platform_admin(db.database()).await;
+    let app = app_with_kek(db.database());
+    // The first tenant holds the account `admin-first` (ADR-0025).
+    let _ = create_tenant_ok(&app, &cookie, "first").await;
+
+    let body = json!({
+        "name": "second",
+        "first_admin": {
+            "username": "admin-first",
+            "display_name": "Admin",
+            "password": "a long enough password",
+        },
+    });
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/platform/tenants",
+            Some(&cookie),
+            Some(body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(
+        problem.get("code").and_then(Value::as_str),
+        Some("username_taken")
+    );
+    assert_eq!(
+        problem.get("field").and_then(Value::as_str),
+        Some("first_admin.username")
+    );
+
+    db.cleanup().await;
+}

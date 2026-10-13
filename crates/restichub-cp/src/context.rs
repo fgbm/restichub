@@ -152,6 +152,10 @@ pub struct RequestContext {
     /// Absent for an API token.
     pub session_id: Option<SessionId>,
     pub source_ip: Option<IpAddr>,
+    /// The absolute expiry of the cookie session. Absent for an API token.
+    pub session_expires_at: Option<time::OffsetDateTime>,
+    /// Present for a cookie only, absent for a token.
+    pub session_user_agent: Option<String>,
 }
 
 impl RequestContext {
@@ -162,6 +166,8 @@ impl RequestContext {
             role,
             session_id: None,
             source_ip: None,
+            session_expires_at: None,
+            session_user_agent: None,
         }
     }
 
@@ -295,6 +301,8 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
         role: member.role,
         session_id: Some(lookup.session_id),
         source_ip: None,
+        session_expires_at: Some(lookup.expires_at),
+        session_user_agent: lookup.user_agent,
     })
 }
 
@@ -325,6 +333,8 @@ async fn authenticate_bearer(state: &AppState, value: &str) -> Result<RequestCon
         role,
         session_id: None,
         source_ip: None,
+        session_expires_at: None,
+        session_user_agent: None,
     })
 }
 

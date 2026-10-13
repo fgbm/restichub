@@ -3,11 +3,15 @@
 mod common;
 
 use axum::http::StatusCode;
+use restichub_cp::config::{AuthConfig, TenancyConfig};
 use restichub_cp::password;
+use restichub_cp::rate_limit::RateLimiter;
+use restichub_cp::server::{AppState, AuthState, router};
 use serde_json::{Value, json};
+use std::sync::Arc;
+use std::time::Duration;
 
 use common::{app, count, create_tenant, create_user, request, seed_session, send};
-
 /// Returns the session cookie of a user with the Admin role.
 async fn admin_cookie(
     db: &restichub_db::test_util::TestDatabase,
@@ -566,6 +570,61 @@ async fn an_account_without_a_membership_is_not_found() {
     assert_eq!(
         page.get("items").and_then(Value::as_array).map(Vec::len),
         Some(1)
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_create_user_endpoint_is_rate_limited() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "create-limit").await;
+    let cookie = admin_cookie(&db, tenant).await;
+    // A long refill window keeps the bucket at its capacity during the test.
+    let mut auth = AuthState::new(AuthConfig::default());
+    auth.create_user_limiter = Arc::new(RateLimiter::new(
+        20,
+        Duration::from_secs(3600),
+        restichub_cp::rate_limit::MAX_ENTRIES,
+    ));
+    let app = router(
+        AppState::with_auth(db.database().clone(), auth).with_tenancy(TenancyConfig::multi()),
+    );
+
+    // The limit is 20 per minute for each actor and tenant.
+    for index in 0..20 {
+        let body = json!({
+            "username": format!("user{index}"),
+            "password": "a long enough password",
+            "display_name": "User",
+            "role": "viewer",
+        });
+        let (status, _, _) = send(
+            &app,
+            request("POST", "/api/v1/users", Some(&cookie), Some(body)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "the create {index}");
+    }
+    let body = json!({
+        "username": "user20",
+        "password": "a long enough password",
+        "display_name": "User",
+        "role": "viewer",
+    });
+    let response = common::send_response(
+        &app,
+        request("POST", "/api/v1/users", Some(&cookie), Some(body)),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(common::retry_after(&response).is_some());
+    let problem = common::body_json(response).await;
+    assert_eq!(
+        problem.get("code").and_then(Value::as_str),
+        Some("rate_limited")
     );
 
     db.cleanup().await;

@@ -259,6 +259,13 @@ impl ApiError {
     pub fn username_taken() -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::UsernameTaken, "Conflict")
     }
+
+    /// The same, with the request field that holds the taken name.
+    pub fn username_taken_field(field: impl Into<String>) -> Self {
+        let mut error = Self::username_taken();
+        error.field = Some(field.into());
+        error
+    }
 }
 
 /// In seconds.

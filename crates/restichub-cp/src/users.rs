@@ -12,6 +12,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, AuditEvent, diff};
+use restichub_db::users::WriteStatus;
 use restichub_db::{
     DbError, PLATFORM_TENANT_ID, Role, TenantTx, UserId, auth, memberships, sessions, users,
 };
@@ -101,6 +102,8 @@ pub async fn create_user(
     ApiJson(body): ApiJson<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserView>), ApiError> {
     context.authorize(Operation::UsersWrite)?;
+    // The create endpoint is rate limited for each actor and tenant (threat T15).
+    check_create_user_limit(&state, &context)?;
     allowed_role(&context, body.role)?;
     let role = body.role;
     let username = validation::validate_username("username", &body.username)?;
@@ -230,14 +233,6 @@ pub async fn update_user(
     };
     ensure_target_not_above_actor(&context, member.role)?;
 
-    // A tenant Admin cannot change the display name of a shared account (ADR-0025).
-    if display_name.is_some()
-        && context.tenant_id != PLATFORM_TENANT_ID
-        && auth::account_is_shared(state.db(), user_id, context.tenant_id).await?
-    {
-        return Err(ApiError::shared_account());
-    }
-
     // The guard applies to an active Admin only. A disabled membership is not the last Admin.
     let active_admin = member.role.is_admin() && !member.disabled && !member.account_disabled;
     let role_lost_admin = new_role.is_some_and(|role| !role.is_admin());
@@ -247,7 +242,14 @@ pub async fn update_user(
     }
 
     if let Some(display_name) = &display_name {
-        users::set_display_name(&mut tx, user_id, display_name).await?;
+        // The database function takes the account row lock, then checks the membership and the
+        // sharing, then writes (ADR-0025).
+        match users::admin_set_display_name(&mut tx, user_id, display_name).await? {
+            WriteStatus::Ok => {}
+            WriteStatus::NotFound => return Err(ApiError::not_found()),
+            WriteStatus::Shared => return Err(ApiError::shared_account()),
+            WriteStatus::Forbidden => return Err(ApiError::forbidden()),
+        }
     }
     if let Some(disabled) = body.disabled {
         if context.tenant_id == PLATFORM_TENANT_ID {
@@ -367,20 +369,21 @@ pub async fn reset_password(
         return Err(ApiError::not_found());
     };
     ensure_target_not_above_actor(&context, member.role)?;
-    // A tenant Admin cannot reset the password of a shared account (ADR-0025).
-    if context.tenant_id != PLATFORM_TENANT_ID
-        && auth::account_is_shared(state.db(), user_id, context.tenant_id).await?
-    {
-        return Err(ApiError::shared_account());
-    }
 
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, body.new_password.clone())
             .await?;
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    users::set_password(&mut tx, user_id, &password_hash).await?;
-    // The account is not shared here, so its sessions live in this tenant only.
+    // The database function takes the account row lock, then checks the membership and the sharing,
+    // then writes (ADR-0025).
+    match users::admin_set_password(&mut tx, user_id, &password_hash).await? {
+        WriteStatus::Ok => {}
+        WriteStatus::NotFound => return Err(ApiError::not_found()),
+        WriteStatus::Shared => return Err(ApiError::shared_account()),
+        WriteStatus::Forbidden => return Err(ApiError::forbidden()),
+    }
+    // A tenant Admin reset removes the sessions of this tenant only.
     auth::delete_account_sessions(&mut tx, user_id, None).await?;
     let mut event = context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
     event.diff = Some(diff(
@@ -416,6 +419,24 @@ async fn audit_platform(
     restichub_db::audit::insert_platform(&mut tx, PLATFORM_TENANT_ID, &event).await?;
     tx.commit().await?;
     Ok(())
+}
+
+/// The create endpoint limit for each actor and tenant.
+fn check_create_user_limit(state: &AppState, context: &RequestContext) -> Result<(), ApiError> {
+    let actor = match &context.actor {
+        restichub_db::audit::Actor::User(id) => format!("user:{id}"),
+        restichub_db::audit::Actor::ApiToken(id) => format!("api_token:{id}"),
+        other => other.actor_type().to_owned(),
+    };
+    let key = crate::rate_limit::create_user_key(context.tenant_id, &actor);
+    match state
+        .auth()
+        .create_user_limiter
+        .check(&key, std::time::Instant::now())
+    {
+        Ok(()) => Ok(()),
+        Err(wait) => Err(ApiError::rate_limited(wait.as_secs().max(1))),
+    }
 }
 
 /// A duplicate username in the installation is HTTP 409 `username_taken`.

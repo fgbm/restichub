@@ -38,14 +38,18 @@ pub const BODY_LIMIT: usize = 16 * 1024;
 /// so the limit is six values plus 4 KiB.
 pub const SECRET_BODY_LIMIT: usize = 6 * 64 * 1024 + 4 * 1024;
 
-/// The type holds the configuration, the two sign-in rate limiters and the clock. A `Debug` shows
-/// the configuration only.
+/// The account create limit for each actor and tenant in one minute (threat T15).
+pub const CREATE_USER_RATE: u32 = 20;
+
+/// The type holds the configuration, the sign-in rate limiters, the account create limiter and the
+/// clock. A `Debug` shows the configuration only.
 #[derive(Clone)]
 pub struct AuthState {
     pub config: AuthConfig,
     pub user_limiter: Arc<RateLimiter>,
     pub ip_limiter: Arc<RateLimiter>,
     pub resolved_limiter: Arc<RateLimiter>,
+    pub create_user_limiter: Arc<RateLimiter>,
     pub clock: Arc<dyn Clock>,
     pub hash_semaphore: Arc<Semaphore>,
 }
@@ -73,12 +77,15 @@ impl AuthState {
             crate::rate_limit::MAX_ENTRIES,
         );
         let resolved_limiter = RateLimiter::new(config.sign_in_user_rate, window, 0);
+        let create_user_limiter =
+            RateLimiter::new(CREATE_USER_RATE, window, crate::rate_limit::MAX_ENTRIES);
         let hash_semaphore = Arc::new(Semaphore::new(config.max_concurrent_hashes as usize));
         Self {
             config,
             user_limiter: Arc::new(user_limiter),
             ip_limiter: Arc::new(ip_limiter),
             resolved_limiter: Arc::new(resolved_limiter),
+            create_user_limiter: Arc::new(create_user_limiter),
             clock: Arc::new(SystemClock),
             hash_semaphore,
         }
@@ -88,6 +95,7 @@ impl AuthState {
         let window = Duration::from_secs(60);
         self.user_limiter = Arc::new(RateLimiter::new(self.config.sign_in_user_rate, window, cap));
         self.ip_limiter = Arc::new(RateLimiter::new(self.config.sign_in_ip_rate, window, cap));
+        self.create_user_limiter = Arc::new(RateLimiter::new(CREATE_USER_RATE, window, cap));
         self
     }
 

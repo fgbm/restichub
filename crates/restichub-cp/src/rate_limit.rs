@@ -14,7 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use restichub_db::UserId;
+use restichub_db::{TenantId, UserId};
 
 pub const MAX_ENTRIES: usize = 100_000;
 
@@ -180,6 +180,11 @@ pub fn synthetic_user_key(username: &str) -> String {
 
 pub fn resolved_user_key(user: UserId) -> String {
     format!("u:{user}")
+}
+
+/// The account create bucket, keyed by the tenant and the actor (threat T15).
+pub fn create_user_key(tenant: TenantId, actor: &str) -> String {
+    format!("c:{tenant}:{actor}")
 }
 
 #[cfg(test)]

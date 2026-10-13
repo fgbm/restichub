@@ -15,7 +15,7 @@ use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, AuditEvent};
 use restichub_db::tenants as repo;
 use restichub_db::tenants::{TenantFilter, TenantPage, TenantSummary};
-use restichub_db::{PLATFORM_TENANT_ID, TenantId, TenantStatus};
+use restichub_db::{PLATFORM_TENANT_ID, TenantId, TenantStatus, users};
 use restichub_secrets::{generate_dek, wrap_dek};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -119,6 +119,12 @@ pub async fn create_tenant(
         &body.first_admin.display_name,
     )?;
     validation::validate_password("first_admin.password", &body.first_admin.password)?;
+
+    // The username is unique in the installation (ADR-0025). A taken name gives HTTP 409
+    // `username_taken` with the request field.
+    if users::find_account(state.db(), &username).await?.is_some() {
+        return Err(ApiError::username_taken_field("first_admin.username"));
+    }
 
     let kek = state
         .kek()

@@ -480,21 +480,28 @@ async fn ac_au_05_a_concurrent_switch_keeps_one_session() {
             request("POST", "/api/v1/auth/switch", Some(&cookie), Some(body))
         ),
     );
-    // Both requests create a session in beta and delete the source session. A race may refuse one
-    // of them with HTTP 401 after the other deleted the source session; neither fails internally.
-    for status in [first.0, second.0] {
-        assert!(
-            status == StatusCode::OK || status == StatusCode::UNAUTHORIZED,
-            "the switch gave {status}"
-        );
-    }
-    assert!(
-        first.0 == StatusCode::OK || second.0 == StatusCode::OK,
-        "at least one switch must succeed"
+    // Exactly one switch wins; the other finds the source session already removed.
+    let statuses = [first.0, second.0];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::OK)
+            .count(),
+        1,
+        "exactly one switch must succeed: {statuses:?}"
     );
-    // Old cookie rejected after the rotation.
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::UNAUTHORIZED)
+            .count(),
+        1,
+        "the other switch must find the source session gone: {statuses:?}"
+    );
+    // The old cookie is dead and exactly one session of the account remains.
     let (status, _, _) = send(&app, request("GET", "/api/v1/auth/me", Some(&cookie), None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(count_sessions(&db, beta, user).await, 1);
 
     db.cleanup().await;
 }
@@ -680,6 +687,396 @@ async fn a_platform_admin_disables_an_account() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _, _) = sign_in(&app, "alice", "correct horse battery").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    db.cleanup().await;
+}
+
+/// The absolute expiry of the session that the cookie names, read through the owner connection.
+async fn session_expiry(
+    db: &restichub_db::test_util::TestDatabase,
+    tenant: TenantId,
+    cookie: &str,
+) -> time::OffsetDateTime {
+    let value = cookie.split('=').nth(1).expect("the cookie holds a value");
+    let hash = restichub_cp::token::hash_token(value);
+    let mut tx = db
+        .owner_pool()
+        .begin()
+        .await
+        .expect("cannot begin the transaction");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    let (expires,): (time::OffsetDateTime,) =
+        sqlx::query_as("SELECT expires_at FROM sessions WHERE token_hash = $1")
+            .bind(&hash)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("cannot read the session");
+    tx.commit().await.expect("cannot commit the read");
+    expires
+}
+
+/// The number of sessions of an account in a tenant, read through the owner connection.
+async fn count_sessions(
+    db: &restichub_db::test_util::TestDatabase,
+    tenant: TenantId,
+    user: restichub_db::UserId,
+) -> i64 {
+    let mut tx = db
+        .owner_pool()
+        .begin()
+        .await
+        .expect("cannot begin the transaction");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM sessions WHERE user_id = $1")
+        .bind(user)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("cannot count the sessions");
+    tx.commit().await.expect("cannot commit the count");
+    count
+}
+
+#[tokio::test]
+async fn ac_au_07_a_suspended_tenant_still_shares_the_account() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let alpha = create_tenant(db.database(), "ac-au-share-a").await;
+    let beta = create_tenant(db.database(), "ac-au-share-b").await;
+    let shared = account(
+        db.database(),
+        alpha,
+        "shared",
+        "correct horse battery",
+        "viewer",
+    )
+    .await;
+    add_membership(db.database(), beta, shared, "viewer").await;
+    common::set_tenant_status(db.database(), beta, "suspended").await;
+    let admin = seed_session(db.database(), alpha, "admin", "admin").await;
+    let app = app(db.database());
+
+    let (status, _, body) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/users/{shared}/password"),
+            Some(&admin),
+            Some(json!({"new_password": "another long password"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        body.get("code").and_then(Value::as_str),
+        Some("shared_account")
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_au_07_a_disabled_membership_still_shares_the_account() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let alpha = create_tenant(db.database(), "ac-au-share2-a").await;
+    let beta = create_tenant(db.database(), "ac-au-share2-b").await;
+    let shared = account(
+        db.database(),
+        alpha,
+        "shared",
+        "correct horse battery",
+        "viewer",
+    )
+    .await;
+    add_membership(db.database(), beta, shared, "viewer").await;
+    // A disabled membership of tenant beta still shares the account.
+    {
+        use restichub_db::memberships;
+        let mut tx = db
+            .database()
+            .begin_tenant(beta)
+            .await
+            .expect("cannot begin the transaction");
+        memberships::set_disabled(&mut tx, shared, true)
+            .await
+            .expect("cannot disable the membership");
+        tx.commit().await.expect("cannot commit the membership");
+    }
+    let admin = seed_session(db.database(), alpha, "admin", "admin").await;
+    let app = app(db.database());
+
+    // Refuse the password reset.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/users/{shared}/password"),
+            Some(&admin),
+            Some(json!({"new_password": "another long password"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        body.get("code").and_then(Value::as_str),
+        Some("shared_account")
+    );
+
+    // Refuse the display name change too.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/users/{shared}"),
+            Some(&admin),
+            Some(json!({"display_name": "Renamed"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        body.get("code").and_then(Value::as_str),
+        Some("shared_account")
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_au_05_the_switch_keeps_the_absolute_expiry() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let alpha = create_tenant(db.database(), "ac-au-exp-a").await;
+    let beta = create_tenant(db.database(), "ac-au-exp-b").await;
+    let user = account(
+        db.database(),
+        alpha,
+        "alice",
+        "correct horse battery",
+        "admin",
+    )
+    .await;
+    add_membership(db.database(), beta, user, "viewer").await;
+    let app = app(db.database());
+
+    let (status, cookie, _) = sign_in(&app, "alice", "correct horse battery").await;
+    assert_eq!(status, StatusCode::OK);
+    let cookie = cookie.expect("a session cookie");
+    let before = session_expiry(&db, alpha, &cookie).await;
+
+    let (status, new_cookie, _) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/auth/switch",
+            Some(&cookie),
+            Some(json!({"tenant_id": beta.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let new_cookie = new_cookie.expect("a rotated session cookie");
+    let after = session_expiry(&db, beta, &new_cookie).await;
+    assert_eq!(after, before, "the switch must keep the absolute expiry");
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_au_05_a_switch_to_the_current_tenant_is_refused() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let alpha = create_tenant(db.database(), "ac-au-same").await;
+    account(
+        db.database(),
+        alpha,
+        "alice",
+        "correct horse battery",
+        "admin",
+    )
+    .await;
+    let app = app(db.database());
+
+    let (status, cookie, _) = sign_in(&app, "alice", "correct horse battery").await;
+    assert_eq!(status, StatusCode::OK);
+    let cookie = cookie.expect("a session cookie");
+    let (status, _, body) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/auth/switch",
+            Some(&cookie),
+            Some(json!({"tenant_id": alpha.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body.get("field").and_then(Value::as_str), Some("tenant_id"));
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_au_07_a_role_change_keeps_a_disabled_membership_disabled() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "ac-au-role").await;
+    let admin = seed_session(db.database(), tenant, "admin", "admin").await;
+    let bob = account(
+        db.database(),
+        tenant,
+        "bob",
+        "correct horse battery",
+        "viewer",
+    )
+    .await;
+    let app = app(db.database());
+
+    // Disable the membership and change the role in one request.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/users/{bob}"),
+            Some(&admin),
+            Some(json!({"disabled": true, "role": "operator"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body.get("disabled").and_then(Value::as_bool), Some(true));
+    assert_eq!(body.get("role").and_then(Value::as_str), Some("operator"));
+
+    // The membership stays disabled, so bob cannot sign in.
+    let (status, _, _) = sign_in(&app, "bob", "correct horse battery").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_last_platform_admin_and_the_caller_are_protected() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    // The caller is a platform API token whose creator is a Platform Admin.
+    let token = common::seed_platform_api_token(db.database()).await;
+    let second = common::create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "second-admin",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let app = app(db.database());
+
+    // Disabling the second Platform Admin leaves one active one and succeeds.
+    let (status, _, body) = send(
+        &app,
+        common::bearer_request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{second}"),
+            &token,
+            Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // Disabling the last active Platform Admin is refused.
+    let creator = common::list_users(db.database(), PLATFORM_TENANT_ID)
+        .await
+        .into_iter()
+        .find(|member| member.username == "platform-token-owner")
+        .map(|member| member.id)
+        .expect("the token creator is a member");
+    let (status, _, _) = send(
+        &app,
+        common::bearer_request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{creator}"),
+            &token,
+            Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_platform_admin_cannot_disable_its_own_account() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let root = common::create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "root",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let cookie = common::session_cookie(db.database(), PLATFORM_TENANT_ID, root).await;
+    let app = app(db.database());
+
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{root}"),
+            Some(&cookie),
+            Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn add_membership_refuses_the_platform_tenant() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let root = common::create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "root",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let cookie = common::session_cookie(db.database(), PLATFORM_TENANT_ID, root).await;
+    let app = app(db.database());
+
+    let (status, _, body) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/platform/users/{root}/memberships"),
+            Some(&cookie),
+            Some(json!({"tenant_id": PLATFORM_TENANT_ID.to_string(), "role": "admin"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 
     db.cleanup().await;
 }

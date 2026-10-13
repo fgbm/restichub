@@ -137,14 +137,16 @@ async fn sign_in_failures_are_identical() {
     let (s3, _, b3) = sign_in(&app, "failures", "orphan", "correct horse battery").await;
 
     // Disabled account.
+    // Only the platform tenant disables the account itself (ADR-0025).
     let mut tx = db
         .database()
-        .begin_tenant(tenant)
+        .begin_tenant(PLATFORM_TENANT_ID)
         .await
         .unwrap_or_else(|e| panic!("{e}"));
-    restichub_db::users::set_disabled(&mut tx, user, true)
+    let status = restichub_db::users::set_disabled(&mut tx, user, true)
         .await
         .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(status, restichub_db::users::WriteStatus::Ok);
     tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
     let (s4, _, b4) = sign_in(&app, "failures", "alice", "correct horse battery").await;
 
@@ -401,14 +403,16 @@ async fn a_disabled_user_is_refused() {
     let app = app(db.database());
     let cookie = sign_in_ok(&app, "disabled", "alice", "correct horse battery").await;
 
+    // Only the platform tenant disables the account itself (ADR-0025).
     let mut tx = db
         .database()
-        .begin_tenant(tenant)
+        .begin_tenant(PLATFORM_TENANT_ID)
         .await
         .unwrap_or_else(|e| panic!("{e}"));
-    restichub_db::users::set_disabled(&mut tx, user, true)
+    let status = restichub_db::users::set_disabled(&mut tx, user, true)
         .await
         .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(status, restichub_db::users::WriteStatus::Ok);
     tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
 
     let (status, _, _) = send(&app, request("GET", "/api/v1/auth/me", Some(&cookie), None)).await;

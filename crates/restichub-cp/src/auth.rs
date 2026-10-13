@@ -165,7 +165,7 @@ pub async fn sign_in(
     let user_agent = user_agent(&headers);
 
     let mut tx = state.db().begin_tenant(tenant_id).await?;
-    sessions::create(
+    let session_id = sessions::create(
         &mut tx,
         account.id,
         &token_hash,
@@ -175,7 +175,7 @@ pub async fn sign_in(
         user_agent.as_deref(),
     )
     .await?;
-    users::set_last_tenant(&mut tx, account.id, tenant_id).await?;
+    users::set_last_tenant(&mut tx, account.id, session_id, tenant_id).await?;
 
     let mut event = AuditEvent::new(AuditAction::SignIn, "user");
     event.actor = Actor::User(account.id);
@@ -183,13 +183,15 @@ pub async fn sign_in(
     event.object_id = Some(account.id.as_uuid());
     restichub_db::audit::insert(&mut tx, &event).await?;
 
+    // The membership and the tenant are read before the commit, so a lost membership leaves no
+    // session behind.
     let member = users::get_member(&mut tx, account.id).await?;
     let tenant = tenants::get(&mut tx, tenant_id).await?;
-    tx.commit().await?;
-
     let (Some(member), Some(tenant)) = (member, tenant) else {
         return Err(ApiError::invalid_credentials());
     };
+    tx.commit().await?;
+
     let insecure = state.auth().config.insecure_cookies;
     let name = token::session_cookie_name(insecure);
     let cookie = token::set_cookie_header(name, &value, !insecure);
@@ -262,9 +264,10 @@ async fn tenant_name(state: &AppState, tenant_id: TenantId) -> String {
 
 /// Switches the session to another tenant (ADR-0025).
 ///
-/// The endpoint checks the membership of the caller in the target tenant, creates a new session in
-/// the target tenant, deletes the old session and rotates the cookie. It writes the audit record
-/// `session_switch` in the source tenant and in the target tenant.
+/// The endpoint checks the membership of the caller in the target tenant, deletes the source
+/// session, creates a new session in the target tenant with the source expiry and the source user
+/// agent, and rotates the cookie. A source session that another request already removed gives HTTP
+/// 401. Switching to the current tenant gives HTTP 400.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/switch",
@@ -272,7 +275,7 @@ async fn tenant_name(state: &AppState, tenant_id: TenantId) -> String {
     request_body = SwitchTenantRequest,
     responses(
         (status = 200, description = "The session moved to the target tenant.", body = SignInResponse),
-        (status = 400, description = "The request body is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "The target tenant is the current tenant.", body = crate::error::ProblemBody),
         (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
         (status = 403, description = "The caller is not a member of the target tenant.", body = crate::error::ProblemBody)
     )
@@ -290,6 +293,9 @@ pub async fn switch_tenant(
         return Err(ApiError::forbidden());
     };
     let tenant_id = parse_tenant_id(&body.tenant_id)?;
+    if tenant_id == context.tenant_id {
+        return Err(ApiError::invalid_argument("tenant_id"));
+    }
 
     // The membership check. A suspended or deleted tenant and a disabled membership are refused.
     let memberships = auth::list_memberships(state.db(), user_id).await?;
@@ -305,41 +311,46 @@ pub async fn switch_tenant(
     let now = state.auth().clock.now();
     let value = token::random_token()?;
     let token_hash = token::hash_token(&value);
-    let expires_at = now + state.auth().config.session_absolute;
+    // The new session keeps the absolute expiry and the user agent of the source session.
+    let expires_at = context
+        .session_expires_at
+        .unwrap_or_else(|| now + state.auth().config.session_absolute);
+    let user_agent = context.session_user_agent.clone();
     let source_tenant = context.tenant_id;
 
-    // The new session in the target tenant defeats session fixation.
     let mut tx = state.db().begin_tenant(tenant_id).await?;
-    sessions::create(
+    // The source session is deleted in the same transaction, so two parallel switches leave one
+    // session. A missing row means another request already moved the session.
+    let deleted = auth::delete_session(&mut tx, session_id, user_id).await?;
+    if deleted == 0 {
+        return Err(ApiError::unauthenticated());
+    }
+    let new_session_id = sessions::create(
         &mut tx,
         user_id,
         &token_hash,
         expires_at,
         now,
         context.source_ip,
-        None,
+        user_agent.as_deref(),
     )
     .await?;
-    users::set_last_tenant(&mut tx, user_id, tenant_id).await?;
+    users::set_last_tenant(&mut tx, user_id, new_session_id, tenant_id).await?;
     let event = context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
     restichub_db::audit::insert(&mut tx, &event).await?;
     let member = users::get_member(&mut tx, user_id).await?;
     let tenant = tenants::get(&mut tx, tenant_id).await?;
-    tx.commit().await?;
-
-    // The old session and its audit record belong to the source tenant.
-    let mut tx = state.db().begin_tenant(source_tenant).await?;
-    sessions::delete(&mut tx, session_id).await?;
-    if source_tenant != tenant_id {
-        let event =
-            context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
-        restichub_db::audit::insert(&mut tx, &event).await?;
-    }
-    tx.commit().await?;
-
     let (Some(member), Some(tenant)) = (member, tenant) else {
         return Err(ApiError::forbidden());
     };
+    tx.commit().await?;
+
+    // Record the switch in the source tenant too.
+    let mut tx = state.db().begin_tenant(source_tenant).await?;
+    let event = context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
+
     let insecure = state.auth().config.insecure_cookies;
     let name = token::session_cookie_name(insecure);
     let cookie = token::set_cookie_header(name, &value, !insecure);
@@ -420,8 +431,9 @@ pub async fn me(
 /// Changes the password of the current user (installation-wide).
 ///
 /// The endpoint sets the account password and removes every other session of the account in every
-/// tenant, and it keeps the current session. A wrong current password counts against the user rate
-/// limit. The hash runs without a database transaction.
+/// tenant, and it keeps the current session. The database function binds the write to the caller's
+/// own session. A wrong current password counts against the user rate limit. The hash runs without
+/// a database transaction.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/password",
@@ -445,19 +457,28 @@ pub async fn change_password(
     let Actor::User(user_id) = context.actor else {
         return Err(ApiError::forbidden());
     };
+    let Some(session_id) = context.session_id else {
+        return Err(ApiError::forbidden());
+    };
     validation::validate_password("new_password", &body.new_password)?;
     // A wrong current password counts against the user bucket.
     check_resolved(&state, user_id)?;
 
-    let auth_row = users::find_account_auth_by_id(state.db(), user_id).await?;
-    let Some(auth_row) = auth_row else {
-        return Err(ApiError::not_found());
+    // The hash comes from the caller's own account, bound to the caller's own session.
+    let current_hash = {
+        let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+        let hash = users::self_password_hash(&mut tx, user_id, session_id).await?;
+        tx.commit().await?;
+        hash
+    };
+    let Some(current_hash) = current_hash else {
+        return Err(ApiError::unauthenticated());
     };
 
     let current_ok = password::verify_password_limited(
         &state.auth().hash_semaphore,
         body.current_password.clone(),
-        auth_row.password_hash,
+        current_hash,
     )
     .await?;
     if !current_ok {
@@ -471,10 +492,13 @@ pub async fn change_password(
             .await?;
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    users::set_password(&mut tx, user_id, &hash).await?;
+    let written = users::self_set_password(&mut tx, user_id, session_id, &hash).await?;
+    if !written {
+        return Err(ApiError::unauthenticated());
+    }
     // The password change is installation-wide: it ends the sessions in every tenant and keeps the
     // current one (ADR-0025).
-    auth::delete_account_sessions(&mut tx, user_id, context.session_id).await?;
+    auth::delete_account_sessions(&mut tx, user_id, Some(session_id)).await?;
     let mut event = context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
     event.diff = Some(diff(
         None,
