@@ -73,12 +73,19 @@ export const navigation: NavSection[] = [
 	}
 ];
 
-export function navSectionsForRole(role: Role | null): NavSection[] {
-	if (!role) return [];
+/**
+ * The sections for the current actor.
+ *
+ * The platform section appears with the Platform Admin right, independently of the current
+ * organization (ADR-0029). The administration items follow the role of the current membership.
+ */
+export function navSectionsForRole(role: Role | null, platformAdmin: boolean): NavSection[] {
 	return navigation
 		.map((section) => ({
 			...section,
-			items: section.items.filter((item) => item.roles.includes(role))
+			items: section.items.filter((item) =>
+				section.platform ? platformAdmin : role ? item.roles.includes(role) : false
+			)
 		}))
 		.filter((section) => section.items.length > 0);
 }

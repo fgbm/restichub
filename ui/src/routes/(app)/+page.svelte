@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Alert, Button, EmptyState, Icon, PageHeader, Panel } from '#lib/components/ui/index.ts';
+	import { Alert, Button, Card, EmptyState, Icon, PageHeader, Panel } from '#lib/components/ui/index.ts';
 	import type { IconName } from '#lib/components/ui/index.ts';
 	import { t } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -14,6 +14,8 @@
 	}
 
 	const session = $derived(getSession());
+	// An account with no current organization sees the empty state (ADR-0029).
+	const hasTenant = $derived(!!getSession()?.tenant);
 
 	// Only the first step can be done here: the hosts, repositories and profiles
 	// screens arrive later, so their actions stay disabled.
@@ -70,6 +72,7 @@
 
 <PageHeader title={t('overview.title')} description={t('overview.description')} bordered />
 
+{#if hasTenant}
 <div class="overview">
 	<Alert tone="info" title={t('overview.welcomeTitle')}>{t('overview.welcomeBody')}</Alert>
 
@@ -113,6 +116,16 @@
 		</ul>
 	</Panel>
 </div>
+
+{:else}
+	<Card>
+		<EmptyState
+			title={t('overview.title')}
+			description={t('overview.noOrganizations')}
+			bordered
+		/>
+	</Card>
+{/if}
 
 <style>
 	.overview {

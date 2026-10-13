@@ -38,7 +38,7 @@ export const ru: Record<MessageKey, string> = {
 	'topbar.yourTenants': 'Ваши организации',
 	'topbar.switchTenant': 'Сменить организацию',
 	'topbar.filterTenants': 'Фильтр организаций',
-	'topbar.platform': 'Платформа',
+	'topbar.noOrganizations': 'Нет организаций',
 	'topbar.switched': 'Вы перешли в «{name}».',
 
 	// Common
@@ -158,6 +158,8 @@ export const ru: Record<MessageKey, string> = {
 		'Агент обращается к репозиторию напрямую. Сервер управления никогда не хранит данные резервных копий.',
 	'overview.how.maintenance':
 		'Один агент обслуживания выполняет forget, prune и check для каждого репозитория.',
+	'overview.noOrganizations':
+		'У вас нет организации. Попросите администратора добавить вас в организацию.',
 
 	// Tenants
 	'tenants.title': 'Организации',
@@ -227,6 +229,11 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.memberships': 'Членство',
 	'platformUsers.emailTaken': 'Этот адрес электронной почты занят.',
 	'platformUsers.selectOrganization': 'Выберите организацию',
+	'platformUsers.platformAdmin': 'Администратор платформы',
+	'platformUsers.grantAdmin': 'Выдать право администратора платформы',
+	'platformUsers.revokeAdmin': 'Забрать право администратора платформы',
+	'platformUsers.rightGranted': 'Право администратора платформы выдано.',
+	'platformUsers.rightRemoved': 'Право администратора платформы забрано.',
 
 	// API tokens
 	'tokens.title': 'Токены API',
