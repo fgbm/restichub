@@ -44,8 +44,8 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | T15 | Username enumeration through the account create endpoint. | The create endpoint needs the Admin role and has a rate limit. Invitations by email arrive in 1.0 (ADR-0025). | **Accepted.** The answer HTTP 409 `username_taken` reveals an existing name. A tenant Admin can probe names. |
 | T16 | Session fixation on the tenant switch. | The switch deletes the old session and rotates the cookie. The new session token is 256 random bits (ADR-0023, ADR-0025). | None. |
 | T17 | A revoked agent stays connected or reconnects. | The control plane checks the registry status and the certificate serial at each handshake and stream open (ADR-0026, FR-ID-04). A revoke invalidates the cache and closes the stream at once. | A stale cache entry delays the close by the cache lifetime. |
-| T18 | A CA private key or a job signing key in a database dump. | The KEK wraps each key outside the database (ADR-0017, ADR-0023, ADR-0026). | An attacker with the KEK and the dump gets the keys. |
-| T19 | An attacker swaps a stored key blob. | The AAD binds the ciphertext to the tenant and the key role (ADR-0026). | None. |
+| T18 | A CA private key or a job signing key in a database dump. | The KEK wraps each key outside the database (ADR-0017, ADR-0023, ADR-0026). | An attacker with the KEK and the dump gets the keys. `rcgen` and `ring` keep some private key bytes in the heap in a buffer that they do not zeroize. The control plane holds the plaintext only for the current issuing CA. It drops every other copy at load. It refuses a core dump on Linux (ADR-0026). |
+| T19 | An attacker swaps a stored key blob. | The AAD binds the ciphertext to the tenant and the key role. The start check binds the key to the certificate of its row (ADR-0026). | None. |
 
 ## 4. Recommendations for operators
 

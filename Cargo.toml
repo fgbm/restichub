@@ -28,6 +28,7 @@ restichub-proto = { path = "crates/restichub-proto" }
 restichub-secrets = { path = "crates/restichub-secrets" }
 rust-embed = { version = "8", features = ["debug-embed"] }
 rustls-pki-types = "1"
+rustls-webpki = { version = "0.103", features = ["ring"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"

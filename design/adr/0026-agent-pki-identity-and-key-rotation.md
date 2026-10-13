@@ -65,7 +65,7 @@ The P4 spike ([p4-stream-load.md](../spikes/p4-stream-load.md)) gives the reconn
 - A CA private key uses AES-256-GCM with a random 96-bit nonce.
 - The associated data is the bytes `restichub-ca-key-v1\0`, then the 16 tenant ID bytes. Then come the 4 length bytes of the CA role in big-endian order and the CA role bytes. The CA role is `root` or `issuing`.
 - A wrapped job signing key uses the same form. The associated data is the bytes `restichub-signing-key-v1\0`, then the 16 tenant ID bytes. Then come the 4 length bytes of the key role in big-endian order and the key role bytes. The key role is `current` or `next`.
-- The tenant ID and the role in the associated data bind the ciphertext to one key. A swapped blob fails the check.
+- The tenant ID and the role in the associated data bind the ciphertext to one key. The start check refuses a swapped blob. The role binds the associated data, and the unwrapped key must match the certificate of the row (T19).
 
 ## Consequences
 
@@ -98,3 +98,19 @@ This record answers the threats below. [threat-model.md](../threat-model.md) hol
 | gRPC enrollment | AC-ID-05 asks for HTTP 429 on the enrollment endpoint. An HTTPS endpoint gives the answer directly and needs a simpler install script. |
 | The tenant in a message field | A message field is not trusted. The certificate identity is the only source (FR-PR-08). |
 | A one-level CA without an issuing CA | The root key would sign each agent certificate. The root key can stay offline with a separate issuing CA. |
+
+## Implementation notes
+
+These notes refine the decision. Issue #45 puts them into the code. The decision itself does not change.
+
+- A CA key and the control plane server key use ECDSA P-256 (`PKCS_ECDSA_P256_SHA256`). The rustls and tonic stack, `rcgen` with `ring` and the X.509 parser support it for a client and a server certificate. Ed25519 is not used: a TLS 1.2 stack and some verifiers reject it.
+- Every certificate carries a random 16-byte serial number with the top bit clear. The same key pair therefore signs certificates with different serials.
+- The root certificate has a path length of 1 and each issuing certificate a path length of 0. The agents trust the root certificate.
+- The control plane accepts a certificate signing request with an ECDSA P-256 public key only. It refuses a request with an RSA or a P-384 key. It refuses a request with a CA flag or with a subject alternative name that it does not set.
+- At load the control plane checks each row. It parses the certificate and unwraps the key. The public key of the key must equal the key of the certificate. The basic constraints must match the role. Each issuing CA must chain to the root. The validity comes from the certificate, not from the `not_before` and `not_after` columns.
+- At start the control plane rotates the issuing CA when less than 60 days remain. A leaf certificate never outlives its issuing CA. The control plane cuts the `not_after` to the issuer.
+- Under the advisory lock a rotation re-reads the rows. It returns the newer issuing CA of a concurrent rotation. Two starts therefore add one issuing CA only.
+- A start with a root and no issuing CA creates the issuing CA. A start with an expired root refuses with a message and points to the manual root rotation procedure.
+- The control plane holds the plaintext key of the current issuing CA in memory, so each issue reuses it. It drops every other plaintext copy at load. `rcgen` and `ring` keep some private key bytes in the heap in a buffer that they do not zeroize. The control plane refuses a core dump on Linux with `PR_SET_DUMPABLE`, and a service unit sets `LimitCORE=0`. This is the accepted residual risk next to T18.
+- The manual root CA rotation procedure is in `docs/src/content/docs/operations/root-ca-rotation.md`. It is planned for 1.0.
+

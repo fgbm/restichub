@@ -12,6 +12,7 @@ pub mod config;
 pub mod context;
 pub mod delivery;
 pub mod error;
+pub mod harden;
 pub mod instance;
 pub mod json;
 pub mod maintenance;

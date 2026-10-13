@@ -12,20 +12,22 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::enums::CaRole;
 use crate::tx::TenantTx;
 
 /// The type holds the wrapped private key, never the plaintext key.
 #[derive(Debug, Clone)]
 pub struct CaKeyRow {
     pub id: Uuid,
-    /// Allowed values are owned by the `restichub-secrets` crate (`root` or `issuing`).
-    pub role: String,
+    pub role: CaRole,
     pub kek_id: String,
     pub nonce: Vec<u8>,
     pub wrapped_key: Vec<u8>,
     /// Public certificate, DER encoded.
     pub cert_der: Vec<u8>,
+    /// Informative only: the control plane takes the validity from the certificate.
     pub not_before: OffsetDateTime,
+    /// Informative only: the control plane takes the validity from the certificate.
     pub not_after: OffsetDateTime,
 }
 
@@ -34,7 +36,7 @@ pub struct CaKeyRow {
 #[derive(Debug, Clone)]
 pub struct NewCaKey<'a> {
     pub id: Uuid,
-    pub role: &'a str,
+    pub role: CaRole,
     pub kek_id: &'a str,
     pub nonce: &'a [u8],
     pub wrapped_key: &'a [u8],
@@ -50,7 +52,7 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<CaKeyRow>, DbError> {
         _,
         (
             Uuid,
-            String,
+            CaRole,
             String,
             Vec<u8>,
             Vec<u8>,

@@ -1,20 +1,37 @@
 //! The private certificate authority of the installation (ADR-0026).
 //!
-//! The installation has a two-level certificate authority. One root CA (10 years) signs one issuing
-//! CA (2 years); the issuing CA signs the agent certificates and the control plane server
-//! certificate. The agents trust the root CA.
+//! The installation has a two-level certificate authority. One root CA (10 years, path length 1)
+//! signs one issuing CA (2 years, path length 0); the issuing CA signs the agent certificates and
+//! the control plane server certificate. The agents trust the root CA.
 //!
 //! The control plane wraps each CA private key with the key encryption key (KEK) and stores both
 //! rows in the platform tenant ([`restichub_db::ca`]). The certificates are stored in clear. The
 //! control plane stores no agent private key.
 //!
-//! The service loads the wrapped keys only. It unwraps a key on demand when it signs, so no
-//! plaintext key lives for the lifetime of the process. [`CaService::ensure_initialized`] unwraps
-//! each key once at start to prove that the KEK and the stored bytes are correct, then drops the
-//! plaintext.
+//! Every certificate carries a random 16-byte serial number. The binding of a stored row is checked
+//! at load: the public key of the unwrapped private key must equal the key of the certificate, the
+//! basic constraints must match the role, and each issuing CA must chain to the root. The validity
+//! comes from the certificate, never from the stored columns. A swapped or replaced blob refuses
+//! the start (T19).
+//!
+//! The service keeps one [`Issuer`] for the current issuing CA in memory, so each issue reuses it
+//! instead of rebuilding the key. The root key is unwrapped on demand, only for a rotation.
 //!
 //! The issuing CA rotates with an overlap: [`CaService::rotate_issuing_ca`] signs a new issuing CA
-//! with the root and keeps the older one until its certificate expires (ADR-0026).
+//! with the root and keeps the older one until its certificate expires. [`CaService::ensure_initialized`]
+//! rotates at start when the current issuing CA has less than [`ISSUING_CA_RENEWAL_WINDOW`] left,
+//! and a leaf never outlives its issuing CA.
+//!
+//! An issued certificate carries the chain of the issuing CA and then the root CA.
+//!
+//! # Residual risk
+//!
+//! `rcgen` and `ring` keep the private key bytes of a [`KeyPair`] in the heap in a buffer that they
+//! do not zeroize (`rcgen` zeroizes the serialized PKCS#8 copy on drop, not every working copy).
+//! The control plane reduces the exposure: it holds the plaintext only for the current issuing CA,
+//! it drops every other copy at load, and [`crate::harden::disable_core_dumps`] refuses a core
+//! dump on Linux. A service unit sets `LimitCORE=0` as the second barrier. An attacker who can read
+//! the process memory already holds the KEK path. This is the accepted residual risk next to T18.
 
 use std::sync::Arc;
 
@@ -22,16 +39,19 @@ use rcgen::string::Ia5String;
 use rcgen::{
     BasicConstraints, CertificateParams, CertificateSigningRequestParams, DistinguishedName,
     DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose,
-    PKCS_ECDSA_P256_SHA256, SanType,
+    PKCS_ECDSA_P256_SHA256, PublicKeyData, SanType, SerialNumber,
 };
 use restichub_db::ca::{self, CaKeyRow, NewCaKey};
-use restichub_db::{Database, PLATFORM_TENANT_ID, TenantTx};
+use restichub_db::{CaRole, Database, PLATFORM_TENANT_ID, TenantTx};
 use restichub_secrets::{
-    CaRole, CryptoError, KekError, KekId, KekProvider, WrappedCaKey, unwrap_ca_key, wrap_ca_key,
+    CryptoError, KekError, KekId, KekProvider, WrappedCaKey, unwrap_ca_key, wrap_ca_key,
 };
 use rustls_pki_types::{CertificateDer, CertificateSigningRequestDer, PrivatePkcs8KeyDer};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
+use x509_parser::certificate::X509Certificate;
+use x509_parser::error::X509Error;
+use x509_parser::nom::Err as NomErr;
 use zeroize::Zeroizing;
 
 /// How long the installation root CA stays valid (ADR-0026).
@@ -42,8 +62,15 @@ pub const ISSUING_CA_LIFETIME: Duration = Duration::days(730);
 pub const AGENT_CERT_LIFETIME: Duration = Duration::days(30);
 /// The lifetime of the control plane server certificate.
 pub const SERVER_CERT_LIFETIME: Duration = Duration::days(365);
+/// The remaining life below which a start rotates the issuing CA (ADR-0026).
+pub const ISSUING_CA_RENEWAL_WINDOW: Duration = Duration::days(60);
 
-/// The advisory lock scope that serializes the creation of the installation CA.
+/// The path length of the root CA: it signs one issuing CA only (ADR-0026).
+const ROOT_PATH_LEN: u8 = 1;
+/// The path length of an issuing CA: it signs end-entity certificates only (ADR-0026).
+const ISSUING_PATH_LEN: u8 = 0;
+
+/// The advisory lock scope that serializes the creation and the rotation of the installation CA.
 const CA_LOCK: &str = "restichub.ca_init:";
 
 /// Builds the identity URI of an agent (ADR-0026, section Identity).
@@ -59,6 +86,8 @@ pub enum CaError {
     Kek(#[from] KekError),
     #[error(transparent)]
     Crypto(#[from] CryptoError),
+    #[error("the operating system random number generator failed")]
+    Random(#[source] getrandom::Error),
     #[error("the certificate generation failed")]
     Certificate(#[source] rcgen::Error),
     #[error("the certificate signing request is not valid")]
@@ -69,28 +98,74 @@ pub enum CaError {
         "the certificate signing request asks for a subject alternative name that the control plane does not set"
     )]
     CsrExtraSan,
+    #[error(
+        "the certificate signing request uses a key algorithm that the control plane does not accept"
+    )]
+    CsrKeyAlgorithm,
     #[error("the installation has no certificate authority yet")]
     Missing,
+    #[error("the installation holds more than one root certificate authority")]
+    MultipleRoot,
     #[error("the installation has no valid issuing certificate authority")]
     NoIssuingCa,
-    #[error("the stored certificate authority row is not valid: {cause}")]
-    BadStoredCa { cause: String },
+    #[error(
+        "the installation root certificate authority expired at {not_after}; rotate the root CA by the documented procedure"
+    )]
+    RootExpired { not_after: OffsetDateTime },
+    #[error("the stored certificate authority {id} does not hold a valid certificate")]
+    BadStoredCa {
+        id: Uuid,
+        #[source]
+        source: NomErr<X509Error>,
+    },
+    #[error("the stored certificate authority {id} holds an invalid extension")]
+    BadStoredCaExtension {
+        id: Uuid,
+        #[source]
+        source: X509Error,
+    },
+    #[error("the stored key of the certificate authority {id} does not match its certificate")]
+    KeyMismatch { id: Uuid },
+    #[error("the stored certificate authority {id} does not match its role")]
+    BadCaRole { id: Uuid },
+    #[error("the stored nonce of the certificate authority {id} is not 96 bits")]
+    BadNonce {
+        id: Uuid,
+        #[source]
+        source: std::array::TryFromSliceError,
+    },
+    #[error("the root certificate authority {id} is not self-signed")]
+    UntrustedRoot {
+        id: Uuid,
+        #[source]
+        source: X509Error,
+    },
+    #[error("the issuing certificate authority {id} does not chain to the root")]
+    UntrustedIssuingCa {
+        id: Uuid,
+        #[source]
+        source: X509Error,
+    },
+    #[error("the issuing certificate authority {id} is not valid inside the validity of the root")]
+    IssuingOutsideRoot { id: Uuid },
     #[error("the subject alternative name `{value}` is not valid")]
-    BadSan { value: String },
+    BadSan {
+        value: String,
+        #[source]
+        source: rcgen::Error,
+    },
 }
 
 /// An issued certificate and its chain. The type holds no private key, so a `Debug` is safe.
 #[derive(Debug, Clone)]
 pub struct IssuedCertificate {
     pub cert_der: Vec<u8>,
-    /// The chain holds the issuing CA then the root CA (ADR-0026).
     pub chain_der: Vec<Vec<u8>>,
 }
 
 /// The control plane server certificate with its private key.
 pub struct IssuedServerCertificate {
     pub cert_der: Vec<u8>,
-    /// The chain holds the issuing CA then the root CA (ADR-0026).
     pub chain_der: Vec<Vec<u8>>,
     /// The server's PKCS#8 material, zeroized on drop.
     pub key_der: Zeroizing<Vec<u8>>,
@@ -107,60 +182,95 @@ impl std::fmt::Debug for IssuedServerCertificate {
     }
 }
 
-/// One loaded certificate authority. The type holds the wrapped private key and the certificate,
-/// never a plaintext key.
+/// One loaded certificate authority. The type holds the wrapped private key and the certificate.
 #[derive(Debug)]
 pub struct LoadedCa {
     pub id: Uuid,
     pub role: CaRole,
     pub cert_der: Vec<u8>,
+    /// Taken from the certificate, not from the stored columns.
     pub not_before: OffsetDateTime,
+    /// Taken from the certificate, not from the stored columns.
     pub not_after: OffsetDateTime,
     wrapped: WrappedCaKey,
 }
 
 impl LoadedCa {
-    fn from_row(row: CaKeyRow) -> Result<Self, CaError> {
-        let role = CaRole::parse(&row.role).ok_or_else(|| CaError::BadStoredCa {
-            cause: format!("the role `{}` is not known", row.role),
-        })?;
-        let kek_id = KekId::parse(&row.kek_id)?;
-        let nonce = row
-            .nonce
-            .as_slice()
-            .try_into()
-            .map_err(|_| CaError::BadStoredCa {
-                cause: "the nonce is not 96 bits".to_owned(),
-            })?;
-        Ok(Self {
-            id: row.id,
-            role,
-            cert_der: row.cert_der,
-            not_before: row.not_before,
-            not_after: row.not_after,
-            wrapped: WrappedCaKey {
-                kek_id,
-                nonce,
-                ciphertext: row.wrapped_key,
-            },
-        })
-    }
+    /// Parses the certificate, unwraps the key and checks that the two agree.
+    ///
+    /// The returned [`KeyPair`] is the unwrapped key; the caller keeps it only for the current
+    /// issuing CA.
+    fn from_row(row: CaKeyRow, provider: &dyn KekProvider) -> Result<(Self, KeyPair), CaError> {
+        let cert = parse_certificate(&row.cert_der, row.id)?;
+        let not_before = cert.validity().not_before.to_datetime();
+        let not_after = cert.validity().not_after.to_datetime();
 
-    /// Opens the stored key on demand; the plaintext lives in a zeroizing buffer only.
-    fn unwrap_key(&self, provider: &dyn KekProvider) -> Result<Zeroizing<Vec<u8>>, CaError> {
-        Ok(unwrap_ca_key(
+        let wrapped = WrappedCaKey {
+            kek_id: KekId::parse(&row.kek_id)?,
+            nonce: row
+                .nonce
+                .as_slice()
+                .try_into()
+                .map_err(|source| CaError::BadNonce { id: row.id, source })?,
+            ciphertext: row.wrapped_key,
+        };
+        let key = key_pair_from_der(&unwrap_ca_key(
             provider,
             PLATFORM_TENANT_ID.as_uuid(),
-            self.role,
-            &self.wrapped,
-        )?)
+            row.role.as_str(),
+            &wrapped,
+        )?)?;
+        if key.der_bytes() != cert.public_key().subject_public_key.as_ref() {
+            return Err(CaError::KeyMismatch { id: row.id });
+        }
+
+        let basic = cert
+            .basic_constraints()
+            .map_err(|source| CaError::BadStoredCaExtension { id: row.id, source })?;
+        let (is_ca, path_len) = match basic {
+            Some(extension) => (extension.value.ca, extension.value.path_len_constraint),
+            None => (false, None),
+        };
+        let role_ok = match row.role {
+            CaRole::Root => is_ca && path_len.unwrap_or(0) >= u32::from(ROOT_PATH_LEN),
+            CaRole::Issuing => is_ca && path_len == Some(u32::from(ISSUING_PATH_LEN)),
+        };
+        if !role_ok {
+            return Err(CaError::BadCaRole { id: row.id });
+        }
+
+        Ok((
+            Self {
+                id: row.id,
+                role: row.role,
+                cert_der: row.cert_der,
+                not_before,
+                not_after,
+                wrapped,
+            },
+            key,
+        ))
     }
 
+    /// Builds the signing authority from the stored key. The rotation uses it for the root CA.
     fn issuer(&self, provider: &dyn KekProvider) -> Result<Issuer<'static, KeyPair>, CaError> {
-        let key = key_pair_from_der(&self.unwrap_key(provider)?)?;
+        let der = unwrap_ca_key(
+            provider,
+            PLATFORM_TENANT_ID.as_uuid(),
+            self.role.as_str(),
+            &self.wrapped,
+        )?;
+        let key = key_pair_from_der(&der)?;
         let cert = CertificateDer::from(self.cert_der.clone());
         Issuer::from_ca_cert_der(&cert, key).map_err(CaError::Certificate)
     }
+}
+
+/// The current issuing CA and the issuer built from it, kept for the process lifetime.
+#[derive(Debug)]
+struct CurrentCa {
+    index: usize,
+    issuer: Issuer<'static, KeyPair>,
 }
 
 /// The loaded certificate authorities of the installation.
@@ -169,32 +279,63 @@ pub struct CaStore {
     root: LoadedCa,
     /// Sorted by start time. A rotation leaves more than one row.
     issuing: Vec<LoadedCa>,
+    current: Option<CurrentCa>,
 }
 
 impl CaStore {
-    fn from_rows(rows: Vec<CaKeyRow>) -> Result<Self, CaError> {
-        let mut root = None;
-        let mut issuing = Vec::new();
+    fn from_rows(rows: Vec<CaKeyRow>, provider: &dyn KekProvider) -> Result<Self, CaError> {
+        let mut root: Option<LoadedCa> = None;
+        let mut issuing: Vec<(LoadedCa, KeyPair)> = Vec::new();
         for row in rows {
-            let loaded = LoadedCa::from_row(row)?;
-            match loaded.role {
+            let (ca, key) = LoadedCa::from_row(row, provider)?;
+            match ca.role {
                 CaRole::Root => {
                     if root.is_some() {
-                        return Err(CaError::BadStoredCa {
-                            cause: "more than one root certificate authority".to_owned(),
-                        });
+                        return Err(CaError::MultipleRoot);
                     }
-                    root = Some(loaded);
+                    // The root key is unwrapped on demand for a rotation, not kept here.
+                    drop(key);
+                    root = Some(ca);
                 }
-                CaRole::Issuing => issuing.push(loaded),
+                CaRole::Issuing => issuing.push((ca, key)),
             }
         }
         let root = root.ok_or(CaError::Missing)?;
-        if issuing.is_empty() {
-            return Err(CaError::Missing);
+
+        let root_cert = parse_certificate(&root.cert_der, root.id)?;
+        root_cert
+            .verify_signature(None)
+            .map_err(|source| CaError::UntrustedRoot {
+                id: root.id,
+                source,
+            })?;
+        for (ca, _) in &issuing {
+            let cert = parse_certificate(&ca.cert_der, ca.id)?;
+            cert.verify_signature(Some(root_cert.public_key()))
+                .map_err(|source| CaError::UntrustedIssuingCa { id: ca.id, source })?;
+            if ca.not_before < root.not_before || ca.not_after > root.not_after {
+                return Err(CaError::IssuingOutsideRoot { id: ca.id });
+            }
         }
-        issuing.sort_by_key(|ca| ca.not_before);
-        Ok(Self { root, issuing })
+
+        issuing.sort_by_key(|(ca, _)| ca.not_before);
+        let now = OffsetDateTime::now_utc();
+        let current_index = issuing.iter().rposition(|(ca, _)| ca.not_after > now);
+        let mut current = None;
+        let mut loaded = Vec::with_capacity(issuing.len());
+        for (index, (ca, key)) in issuing.into_iter().enumerate() {
+            if Some(index) == current_index {
+                let cert = CertificateDer::from(ca.cert_der.clone());
+                let issuer = Issuer::from_ca_cert_der(&cert, key).map_err(CaError::Certificate)?;
+                current = Some(CurrentCa { index, issuer });
+            }
+            loaded.push(ca);
+        }
+        Ok(Self {
+            root,
+            issuing: loaded,
+            current,
+        })
     }
 
     pub fn root(&self) -> &LoadedCa {
@@ -210,19 +351,13 @@ impl CaStore {
     /// A rotation adds a newer issuing CA; the older one stays valid until its certificate expires
     /// (ADR-0026).
     pub fn current_issuing(&self) -> Option<&LoadedCa> {
-        let now = OffsetDateTime::now_utc();
-        self.issuing.iter().rev().find(|ca| ca.not_after > now)
+        self.current
+            .as_ref()
+            .map(|current| &self.issuing[current.index])
     }
 
-    /// Unwraps each private key once and drops the plaintext.
-    ///
-    /// The function proves that the key encryption key and the stored bytes are correct, so an
-    /// incorrect KEK or an unreadable key refuses the start (ADR-0026).
-    pub fn verify(&self, provider: &dyn KekProvider) -> Result<(), CaError> {
-        for ca in std::iter::once(&self.root).chain(self.issuing.iter()) {
-            ca.unwrap_key(provider)?;
-        }
-        Ok(())
+    fn current_issuer(&self) -> Option<&Issuer<'static, KeyPair>> {
+        self.current.as_ref().map(|current| &current.issuer)
     }
 }
 
@@ -239,7 +374,8 @@ impl CaService {
 
     /// Reads the certificate authorities of the platform tenant.
     ///
-    /// The function reads the wrapped keys only. `None` when the installation has no CA yet.
+    /// Each row is checked (key, role, chain) and the validity comes from the certificates.
+    /// `None` when the installation has no CA yet.
     pub async fn load(&self, db: &Database) -> Result<Option<CaStore>, CaError> {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
         let rows = ca::list(&mut tx).await?;
@@ -247,37 +383,51 @@ impl CaService {
         if rows.is_empty() {
             return Ok(None);
         }
-        Ok(Some(CaStore::from_rows(rows)?))
+        Ok(Some(CaStore::from_rows(rows, self.provider.as_ref())?))
     }
 
-    /// Creates the root CA and the first issuing CA when the platform tenant holds none.
+    /// Creates the CA on the first start and keeps it healthy on every later start.
     ///
-    /// An advisory lock serializes two starts, so exactly one start creates the CA. The function
-    /// then reads the rows and unwraps each key once to prove that the KEK and the stored bytes are
-    /// correct; the plaintext is dropped at once.
+    /// An advisory lock serializes two starts, so exactly one start creates the CA. Under the lock
+    /// the function refuses an expired root, creates an issuing CA when none exists, and rotates
+    /// the issuing CA when less than [`ISSUING_CA_RENEWAL_WINDOW`] remains.
     pub async fn ensure_initialized(&self, db: &Database) -> Result<CaStore, CaError> {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
-        // The lock serializes two starts. The read below happens after the lock, so the second
-        // start sees the rows that the first start created.
         tx.lock(CA_LOCK).await?;
-        let existing = ca::list(&mut tx).await?;
-        if existing.is_empty() {
+        let rows = ca::list(&mut tx).await?;
+        if rows.is_empty() {
             let (root, issuing) = self.generate_installation()?;
             self.insert(&mut tx, &root).await?;
             self.insert(&mut tx, &issuing).await?;
+            tx.commit().await?;
+        } else {
+            let store = CaStore::from_rows(rows, self.provider.as_ref())?;
+            let now = OffsetDateTime::now_utc();
+            if store.root().not_after <= now {
+                return Err(CaError::RootExpired {
+                    not_after: store.root().not_after,
+                });
+            }
+            let renew = match store.current_issuing() {
+                None => true,
+                Some(ca) => ca.not_after - now < ISSUING_CA_RENEWAL_WINDOW,
+            };
+            if renew {
+                let pending = self.new_issuing_ca(&store, now)?;
+                self.insert(&mut tx, &pending).await?;
+            }
+            tx.commit().await?;
         }
-        tx.commit().await?;
-        let store = self.load(db).await?.ok_or(CaError::Missing)?;
-        store.verify(self.provider.as_ref())?;
-        Ok(store)
+        self.load(db).await?.ok_or(CaError::Missing)
     }
 
     /// Signs a certificate signing request into an agent certificate with the current issuing CA.
     ///
     /// The certificate carries the SAN URI `restichub://tenant/<tenant>/agent/<agent>` and the agent
-    /// UUID as the common name. The lifetime is [`AGENT_CERT_LIFETIME`] and the key usage is
-    /// `clientAuth` (FR-ID-02, FR-ID-03). A request that asks for a CA certificate or for another
-    /// subject alternative name is refused.
+    /// UUID as the common name. The lifetime is [`AGENT_CERT_LIFETIME`], cut to the issuer when the
+    /// issuing CA expires sooner, and the key usage is `clientAuth` (FR-ID-02, FR-ID-03). A request
+    /// that asks for a CA certificate, for another subject alternative name or for a key algorithm
+    /// that the control plane does not accept is refused.
     pub fn issue_agent_certificate(
         &self,
         store: &CaStore,
@@ -292,9 +442,10 @@ impl CaService {
         validate_csr(&csr, &expected_uri)?;
 
         let issuing = store.current_issuing().ok_or(CaError::NoIssuingCa)?;
-        let issuer = issuing.issuer(self.provider.as_ref())?;
-        let san = Ia5String::try_from(expected_uri.clone()).map_err(|_| CaError::BadSan {
+        let issuer = store.current_issuer().ok_or(CaError::NoIssuingCa)?;
+        let san = Ia5String::try_from(expected_uri.clone()).map_err(|source| CaError::BadSan {
             value: expected_uri.clone(),
+            source,
         })?;
 
         let now = OffsetDateTime::now_utc();
@@ -305,11 +456,12 @@ impl CaService {
         params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
         params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
         params.use_authority_key_identifier_extension = true;
+        params.serial_number = Some(random_serial()?);
         params.not_before = now;
-        params.not_after = now + AGENT_CERT_LIFETIME;
+        params.not_after = leaf_not_after(now, AGENT_CERT_LIFETIME, issuing.not_after);
 
         let cert = params
-            .signed_by(&csr.public_key, &issuer)
+            .signed_by(&csr.public_key, issuer)
             .map_err(CaError::Certificate)?;
         Ok(IssuedCertificate {
             cert_der: cert.der().to_vec(),
@@ -320,14 +472,14 @@ impl CaService {
     /// Issues the control plane server certificate for the agent listener (ADR-0026).
     ///
     /// The subject alternative names come from the configuration; a name is a DNS name or an IP
-    /// address. The key usage is `serverAuth`.
+    /// address. The key usage is `serverAuth`, and the certificate never outlives its issuer.
     pub fn issue_server_certificate(
         &self,
         store: &CaStore,
         sans: &[String],
     ) -> Result<IssuedServerCertificate, CaError> {
         let issuing = store.current_issuing().ok_or(CaError::NoIssuingCa)?;
-        let issuer = issuing.issuer(self.provider.as_ref())?;
+        let issuer = store.current_issuer().ok_or(CaError::NoIssuingCa)?;
 
         let now = OffsetDateTime::now_utc();
         let mut params = CertificateParams::new(sans.to_vec()).map_err(CaError::Certificate)?;
@@ -336,12 +488,13 @@ impl CaService {
         params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
         params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
         params.use_authority_key_identifier_extension = true;
+        params.serial_number = Some(random_serial()?);
         params.not_before = now;
-        params.not_after = now + SERVER_CERT_LIFETIME;
+        params.not_after = leaf_not_after(now, SERVER_CERT_LIFETIME, issuing.not_after);
 
         let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).map_err(CaError::Certificate)?;
         let cert = params
-            .signed_by(&key, &issuer)
+            .signed_by(&key, issuer)
             .map_err(CaError::Certificate)?;
         Ok(IssuedServerCertificate {
             cert_der: cert.der().to_vec(),
@@ -353,25 +506,26 @@ impl CaService {
     /// Signs a new issuing CA with the root and stores it.
     ///
     /// The older issuing CA stays in the store and stays valid until its certificate expires; the
-    /// control plane accepts both during the overlap (ADR-0026). The trigger of a rotation is out
-    /// of scope.
+    /// control plane accepts both during the overlap (ADR-0026). Under the lock the function
+    /// re-reads the rows: when another start already rotated, it returns that newer CA instead of
+    /// creating a second one. The trigger of a rotation is out of scope.
     pub async fn rotate_issuing_ca(
         &self,
         db: &Database,
         store: &CaStore,
     ) -> Result<CaStore, CaError> {
-        let now = OffsetDateTime::now_utc();
-        let root_issuer = store.root().issuer(self.provider.as_ref())?;
-        let pending = new_ca(
-            CaRole::Issuing,
-            ISSUING_CA_COMMON_NAME,
-            ISSUING_CA_LIFETIME,
-            Some(&root_issuer),
-            now,
-        )?;
-
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
         tx.lock(CA_LOCK).await?;
+        let fresh = CaStore::from_rows(ca::list(&mut tx).await?, self.provider.as_ref())?;
+        let already_rotated = match (fresh.current_issuing(), store.current_issuing()) {
+            (Some(fresh_ca), Some(store_ca)) => fresh_ca.id != store_ca.id,
+            _ => true,
+        };
+        if already_rotated {
+            tx.commit().await?;
+            return Ok(fresh);
+        }
+        let pending = self.new_issuing_ca(&fresh, OffsetDateTime::now_utc())?;
         self.insert(&mut tx, &pending).await?;
         tx.commit().await?;
         self.load(db).await?.ok_or(CaError::Missing)
@@ -397,16 +551,27 @@ impl CaService {
         Ok((root, issuing))
     }
 
+    fn new_issuing_ca(&self, store: &CaStore, now: OffsetDateTime) -> Result<PendingCa, CaError> {
+        let root_issuer = store.root().issuer(self.provider.as_ref())?;
+        new_ca(
+            CaRole::Issuing,
+            ISSUING_CA_COMMON_NAME,
+            ISSUING_CA_LIFETIME,
+            Some(&root_issuer),
+            now,
+        )
+    }
+
     async fn insert(&self, tx: &mut TenantTx<'_>, pending: &PendingCa) -> Result<(), CaError> {
         let wrapped = wrap_ca_key(
             self.provider.current(),
             PLATFORM_TENANT_ID.as_uuid(),
-            pending.role,
+            pending.role.as_str(),
             &pending.key_der,
         )?;
         let new = NewCaKey {
             id: pending.id,
-            role: pending.role.as_str(),
+            role: pending.role,
             kek_id: wrapped.kek_id.as_str(),
             nonce: &wrapped.nonce,
             wrapped_key: &wrapped.ciphertext,
@@ -452,11 +617,16 @@ fn new_ca(
     now: OffsetDateTime,
 ) -> Result<PendingCa, CaError> {
     let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).map_err(CaError::Certificate)?;
+    let path_len = match role {
+        CaRole::Root => ROOT_PATH_LEN,
+        CaRole::Issuing => ISSUING_PATH_LEN,
+    };
     let mut params = CertificateParams::default();
     params.distinguished_name = distinguished_name(common_name);
-    params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+    params.is_ca = IsCa::Ca(BasicConstraints::Constrained(path_len));
     params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
     params.use_authority_key_identifier_extension = true;
+    params.serial_number = Some(random_serial()?);
     params.not_before = now;
     params.not_after = now + lifetime;
 
@@ -476,9 +646,36 @@ fn new_ca(
     })
 }
 
+/// A random 16-byte serial number with the top bit cleared, so the DER integer needs no leading
+/// zero and two certificates from the same key get different serials (RFC 5280, section 4.1.2.2).
+fn random_serial() -> Result<SerialNumber, CaError> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).map_err(CaError::Random)?;
+    bytes[0] &= 0x7f;
+    if bytes.iter().all(|byte| *byte == 0) {
+        bytes[15] = 1;
+    }
+    Ok(SerialNumber::from_slice(&bytes))
+}
+
+/// The earlier of the requested lifetime and the expiry of the issuer, so a leaf never outlives it.
+fn leaf_not_after(
+    now: OffsetDateTime,
+    lifetime: Duration,
+    issuer_not_after: OffsetDateTime,
+) -> OffsetDateTime {
+    (now + lifetime).min(issuer_not_after)
+}
+
 fn key_pair_from_der(der: &[u8]) -> Result<KeyPair, CaError> {
     KeyPair::from_pkcs8_der_and_sign_algo(&PrivatePkcs8KeyDer::from(der), &PKCS_ECDSA_P256_SHA256)
         .map_err(CaError::Certificate)
+}
+
+fn parse_certificate(der: &[u8], id: Uuid) -> Result<X509Certificate<'_>, CaError> {
+    x509_parser::parse_x509_certificate(der)
+        .map(|(_, cert)| cert)
+        .map_err(|source| CaError::BadStoredCa { id, source })
 }
 
 fn distinguished_name(common_name: &str) -> DistinguishedName {
@@ -488,9 +685,12 @@ fn distinguished_name(common_name: &str) -> DistinguishedName {
     name
 }
 
-/// Refuses a request that asks for a CA certificate or for a subject alternative name that the
-/// control plane does not set (ADR-0026, section Identity).
+/// Refuses a request that asks for a CA certificate, for another subject alternative name, or that
+/// uses a key algorithm other than ECDSA P-256 (ADR-0026, section Identity).
 fn validate_csr(csr: &CertificateSigningRequestParams, expected_uri: &str) -> Result<(), CaError> {
+    if csr.public_key.algorithm() != &PKCS_ECDSA_P256_SHA256 {
+        return Err(CaError::CsrKeyAlgorithm);
+    }
     if !matches!(csr.params.is_ca, IsCa::NoCa) {
         return Err(CaError::CsrCaFlag);
     }
@@ -507,7 +707,9 @@ fn validate_csr(csr: &CertificateSigningRequestParams, expected_uri: &str) -> Re
 mod tests {
     use uuid::Uuid;
 
-    use super::{AGENT_CERT_LIFETIME, ISSUING_CA_LIFETIME, ROOT_CA_LIFETIME, agent_san_uri};
+    use super::{
+        AGENT_CERT_LIFETIME, ISSUING_CA_LIFETIME, ROOT_CA_LIFETIME, agent_san_uri, random_serial,
+    };
 
     #[test]
     fn the_agent_san_uri_binds_the_tenant_and_the_agent() {
@@ -522,5 +724,18 @@ mod tests {
         assert_eq!(ROOT_CA_LIFETIME.whole_days(), 3650);
         assert_eq!(ISSUING_CA_LIFETIME.whole_days(), 730);
         assert_eq!(AGENT_CERT_LIFETIME.whole_days(), 30);
+    }
+
+    #[test]
+    fn a_random_serial_is_16_bytes_with_the_top_bit_clear() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            let serial = random_serial().expect("the generator must work");
+            let bytes = serial.to_bytes();
+            assert_eq!(bytes.len(), 16);
+            assert_eq!(bytes[0] & 0x80, 0, "the top bit must be clear");
+            assert!(bytes.iter().any(|byte| *byte != 0), "the serial is zero");
+            assert!(seen.insert(bytes), "a serial repeated");
+        }
     }
 }

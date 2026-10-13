@@ -40,7 +40,7 @@ pub mod secret;
 
 mod crypto;
 
-pub use ca::{CaRole, WrappedCaKey, unwrap_ca_key, wrap_ca_key};
+pub use ca::{WrappedCaKey, unwrap_ca_key, wrap_ca_key};
 pub use check::{KekCheck, make_kek_check, verify_kek_check};
 pub use crypto::NONCE_LEN;
 pub use envelope::{DEK_LEN, Dek, WrappedDek, generate_dek, unwrap_dek, wrap_dek};

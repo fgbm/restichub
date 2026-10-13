@@ -18,6 +18,7 @@ axum = { workspace = true }
 base64 = { workspace = true }
 getrandom = { workspace = true }
 http-body-util = { workspace = true }
+libc = { workspace = true }
 rcgen = { workspace = true }
 restichub-db = { workspace = true }
 restichub-proto = { workspace = true }
@@ -37,12 +38,13 @@ tracing-subscriber = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { workspace = true }
 uuid = { workspace = true }
+x509-parser = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
 http-body-util = "0.1"
 restichub-canary-scan = { path = "../restichub-canary-scan" }
 restichub-db = { workspace = true, features = ["test-util"] }
+rustls-webpki = { workspace = true }
 sqlx = { workspace = true }
 tower = { workspace = true, features = ["util"] }
-x509-parser = { workspace = true }

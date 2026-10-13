@@ -30,6 +30,8 @@ async fn main() -> anyhow::Result<()> {
 async fn serve(cli: Cli) -> anyhow::Result<()> {
     let config = Config::load(&cli)?;
     telemetry::init(&config)?;
+    // Refuse a core dump before the key encryption key is in memory (T18).
+    restichub_cp::harden::disable_core_dumps();
     tracing::info!(listen_addr = %config.listen_addr, "starting the control plane");
     if config.auth.insecure_cookies {
         tracing::warn!(

@@ -97,6 +97,11 @@ jobs:
           components: rustfmt, clippy
       - name: Test
         run: cargo test --workspace
+      # The openssl chain check prints its result line; --nocapture puts the line in this log.
+      - name: Show the openssl chain check
+        run: >-
+          cargo test -p restichub-cp --test pki_certs --
+          --nocapture openssl_verifies_the_issued_chain
 
   cargo-deny:
     name: Dependencies

@@ -5,10 +5,11 @@
 //! associated data `restichub-ca-key-v1\0 || tenant_id || role`. The associated data binds the
 //! ciphertext to one tenant and one role, so a swapped blob fails the check (T19).
 //!
+//! The role is the stored value of `restichub_db::CaRole` (`root` or `issuing`). This crate holds
+//! the bytes only; the closed set lives with the storage type.
+//!
 //! The unwrapping asks the [`KekProvider`] for the KEK with the key ID of the wrapped key, so a
 //! key that an older KEK wrapped stays readable. The plaintext key returns in a zeroizing buffer.
-
-use std::fmt;
 
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -19,39 +20,6 @@ use crate::error::CryptoError;
 use crate::kek::{Kek, KekId, KekProvider};
 
 const CA_KEY_DOMAIN: &[u8] = b"restichub-ca-key-v1\0";
-
-/// The role of a certificate authority (ADR-0026).
-///
-/// The string value is part of the associated data. A change makes every wrapped key unreadable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CaRole {
-    Root,
-    Issuing,
-}
-
-impl CaRole {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Root => "root",
-            Self::Issuing => "issuing",
-        }
-    }
-
-    /// `None` on an unknown string.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "root" => Some(Self::Root),
-            "issuing" => Some(Self::Issuing),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for CaRole {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
 
 /// The wrapped private key. The type holds no plaintext key, so a `Debug` is safe.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,11 +32,12 @@ pub struct WrappedCaKey {
 /// Wraps the private key `key_der` with the key encryption key `kek`.
 ///
 /// The associated data is `restichub-ca-key-v1\0 || tenant_id || role`, with the 4 length bytes of
-/// the role in big-endian order before the role bytes (ADR-0026, section CA key format).
+/// the role in big-endian order before the role bytes (ADR-0026, section CA key format). `role` is
+/// the value of a `restichub_db::CaRole`.
 pub fn wrap_ca_key(
     kek: &Kek,
     tenant_id: Uuid,
-    role: CaRole,
+    role: &str,
     key_der: &[u8],
 ) -> Result<WrappedCaKey, CryptoError> {
     let nonce = random_nonce()?;
@@ -89,7 +58,7 @@ pub fn wrap_ca_key(
 pub fn unwrap_ca_key(
     provider: &dyn KekProvider,
     tenant_id: Uuid,
-    role: CaRole,
+    role: &str,
     wrapped: &WrappedCaKey,
 ) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     let kek = provider
@@ -101,8 +70,8 @@ pub fn unwrap_ca_key(
     Ok(Zeroizing::new(plaintext))
 }
 
-fn ca_aad(tenant_id: Uuid, role: CaRole) -> Vec<u8> {
-    let role = role.as_str().as_bytes();
+fn ca_aad(tenant_id: Uuid, role: &str) -> Vec<u8> {
+    let role = role.as_bytes();
     let mut aad = Vec::with_capacity(CA_KEY_DOMAIN.len() + 16 + 4 + role.len());
     aad.extend_from_slice(CA_KEY_DOMAIN);
     aad.extend_from_slice(tenant_id.as_bytes());
@@ -115,7 +84,7 @@ fn ca_aad(tenant_id: Uuid, role: CaRole) -> Vec<u8> {
 mod tests {
     use uuid::Uuid;
 
-    use super::{CaRole, ca_aad, unwrap_ca_key, wrap_ca_key};
+    use super::{ca_aad, unwrap_ca_key, wrap_ca_key};
     use crate::error::CryptoError;
     use crate::kek::{Kek, KekId, KekProvider};
 
@@ -147,7 +116,7 @@ mod tests {
 
     #[test]
     fn ca_aad_known_answer() {
-        let aad = ca_aad(tenant(), CaRole::Root);
+        let aad = ca_aad(tenant(), "root");
         let expected: Vec<u8> = [
             b"restichub-ca-key-v1\0".as_slice(),
             &[
@@ -163,73 +132,62 @@ mod tests {
 
     #[test]
     fn ca_aad_distinguishes_the_role() {
-        assert_ne!(
-            ca_aad(tenant(), CaRole::Root),
-            ca_aad(tenant(), CaRole::Issuing)
-        );
+        assert_ne!(ca_aad(tenant(), "root"), ca_aad(tenant(), "issuing"));
     }
 
     #[test]
     fn ca_key_round_trip() {
         let key = kek(1);
         let der = b"pkcs8-der-placeholder".to_vec();
-        let result = wrap_ca_key(&key, tenant(), CaRole::Root, &der)
+        let result = wrap_ca_key(&key, tenant(), "root", &der)
             .ok()
-            .and_then(|wrapped| unwrap_ca_key(&provider(1), tenant(), CaRole::Root, &wrapped).ok())
+            .and_then(|wrapped| unwrap_ca_key(&provider(1), tenant(), "root", &wrapped).ok())
             .map(|plain| plain.to_vec());
         assert_eq!(result, Some(der));
     }
 
     #[test]
     fn unknown_kek_fails() {
-        let wrapped = wrap_ca_key(&kek(1), tenant(), CaRole::Issuing, b"key");
+        let wrapped = wrap_ca_key(&kek(1), tenant(), "issuing", b"key");
         let result = wrapped
             .ok()
             .as_ref()
-            .map(|wrapped| unwrap_ca_key(&provider(2), tenant(), CaRole::Issuing, wrapped));
+            .map(|wrapped| unwrap_ca_key(&provider(2), tenant(), "issuing", wrapped));
         assert!(matches!(result, Some(Err(CryptoError::UnknownKek(_)))));
     }
 
     #[test]
     fn aad_swap_role_fails() {
         // A blob wrapped for the root CA must not unwrap as an issuing CA key (T19).
-        let wrapped = wrap_ca_key(&kek(1), tenant(), CaRole::Root, b"key");
+        let wrapped = wrap_ca_key(&kek(1), tenant(), "root", b"key");
         let result = wrapped
             .ok()
             .as_ref()
-            .map(|wrapped| unwrap_ca_key(&provider(1), tenant(), CaRole::Issuing, wrapped));
+            .map(|wrapped| unwrap_ca_key(&provider(1), tenant(), "issuing", wrapped));
         assert!(matches!(result, Some(Err(CryptoError::Decrypt(_)))));
     }
 
     #[test]
     fn aad_swap_tenant_id_fails() {
-        let wrapped = wrap_ca_key(&kek(1), tenant(), CaRole::Root, b"key");
+        let wrapped = wrap_ca_key(&kek(1), tenant(), "root", b"key");
         let other = Uuid::from_u128(1);
         let result = wrapped
             .ok()
             .as_ref()
-            .map(|wrapped| unwrap_ca_key(&provider(1), other, CaRole::Root, wrapped));
+            .map(|wrapped| unwrap_ca_key(&provider(1), other, "root", wrapped));
         assert!(matches!(result, Some(Err(CryptoError::Decrypt(_)))));
     }
 
     #[test]
     fn tampered_ciphertext_fails() {
-        let result = wrap_ca_key(&kek(1), tenant(), CaRole::Root, b"key")
+        let result = wrap_ca_key(&kek(1), tenant(), "root", b"key")
             .ok()
             .map(|mut wrapped| {
                 if let Some(byte) = wrapped.ciphertext.first_mut() {
                     *byte ^= 0xff;
                 }
-                unwrap_ca_key(&provider(1), tenant(), CaRole::Root, &wrapped)
+                unwrap_ca_key(&provider(1), tenant(), "root", &wrapped)
             });
         assert!(matches!(result, Some(Err(CryptoError::Decrypt(_)))));
-    }
-
-    #[test]
-    fn role_strings_are_stable() {
-        for role in [CaRole::Root, CaRole::Issuing] {
-            assert_eq!(CaRole::parse(role.as_str()), Some(role));
-        }
-        assert_eq!(CaRole::parse("nope"), None);
     }
 }

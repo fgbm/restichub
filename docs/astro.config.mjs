@@ -23,6 +23,11 @@ export default defineConfig({
 					translations: { ru: 'Основные понятия' },
 					items: [{ autogenerate: { directory: 'concepts' } }],
 				},
+				{
+					label: 'Operations',
+					translations: { ru: 'Операции' },
+					items: [{ autogenerate: { directory: 'operations' } }],
+				},
 			],
 		}),
 	],

@@ -90,6 +90,34 @@ impl TenantStatus {
     }
 }
 
+/// The role of a certificate authority (ADR-0026). The string value is part of the associated
+/// data of the wrapped key; do not change it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum CaRole {
+    Root,
+    Issuing,
+}
+
+impl CaRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Root => "root",
+            Self::Issuing => "issuing",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "root" => Some(Self::Root),
+            "issuing" => Some(Self::Issuing),
+            _ => None,
+        }
+    }
+}
+
 /// Audit actor type (ADR-0023, section Audit log).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -125,7 +153,7 @@ impl ActorType {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActorType, Role, TenantStatus};
+    use super::{ActorType, CaRole, Role, TenantStatus};
 
     #[test]
     fn the_role_strings_are_stable() {
@@ -150,6 +178,14 @@ mod tests {
             assert_eq!(TenantStatus::parse(status.as_str()), Some(status));
         }
         assert_eq!(TenantStatus::parse("nope"), None);
+    }
+
+    #[test]
+    fn the_ca_role_strings_are_stable() {
+        for role in [CaRole::Root, CaRole::Issuing] {
+            assert_eq!(CaRole::parse(role.as_str()), Some(role));
+        }
+        assert_eq!(CaRole::parse("nope"), None);
     }
 
     #[test]
