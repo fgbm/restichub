@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::server::AppState;
+use crate::validation::Reason;
 
 /// The highest number of records of the audit API.
 const MAX_PAGE_LIMIT: i64 = repo::MAX_PAGE_LIMIT;
@@ -143,58 +144,99 @@ pub struct AuditQuery {
 
 impl AuditQuery {
     /// Builds the filter. The function returns an error on a bad value.
-    fn filter(&self) -> Result<AuditFilter, ()> {
+    fn filter(&self) -> Result<AuditFilter, ApiError> {
         if self.actor_id.is_some() && self.actor_type.is_none() {
-            return Err(());
+            return Err(invalid_query("`actor_id` needs `actor_type`"));
         }
         let action = match self.action.as_deref() {
-            Some(value) => Some(AuditAction::parse(value).ok_or(())?),
+            Some(value) => Some(
+                AuditAction::parse(value)
+                    .ok_or_else(|| invalid_query("the action is not known"))?,
+            ),
             None => None,
         };
         let actor = self.actor()?;
         Ok(AuditFilter {
-            from: self.from.as_deref().map(parse_time).transpose()?,
-            to: self.to.as_deref().map(parse_time).transpose()?,
+            from: self
+                .from
+                .as_deref()
+                .map(parse_time)
+                .transpose()
+                .map_err(invalid_query)?,
+            to: self
+                .to
+                .as_deref()
+                .map(parse_time)
+                .transpose()
+                .map_err(invalid_query)?,
             action,
             actor,
             object_type: self.object_type.clone(),
-            object_id: self.object_id.as_deref().map(parse_uuid).transpose()?,
+            object_id: self
+                .object_id
+                .as_deref()
+                .map(parse_uuid)
+                .transpose()
+                .map_err(invalid_query)?,
             tenant_id: self
                 .tenant_id
                 .as_deref()
                 .map(parse_uuid)
-                .transpose()?
+                .transpose()
+                .map_err(invalid_query)?
                 .map(restichub_db::TenantId::from_uuid),
         })
     }
 
     /// Builds the actor of the filter.
-    fn actor(&self) -> Result<Option<Actor>, ()> {
+    fn actor(&self) -> Result<Option<Actor>, ApiError> {
         let Some(actor_type) = self.actor_type.as_deref() else {
             return Ok(None);
         };
-        let actor = match ActorType::parse(actor_type).ok_or(())? {
+        let actor = match ActorType::parse(actor_type)
+            .ok_or_else(|| invalid_query("the actor type is not known"))?
+        {
             ActorType::System => Actor::System,
-            ActorType::User => Actor::User(restichub_db::UserId::from_uuid(parse_uuid(
-                self.actor_id.as_deref().ok_or(())?,
-            )?)),
-            ActorType::ApiToken => Actor::ApiToken(restichub_db::ApiTokenId::from_uuid(
-                parse_uuid(self.actor_id.as_deref().ok_or(())?)?,
+            ActorType::User => Actor::User(restichub_db::UserId::from_uuid(
+                self.actor_id().map_err(invalid_query)?,
             )),
-            ActorType::Agent => Actor::Agent(parse_uuid(self.actor_id.as_deref().ok_or(())?)?),
+            ActorType::ApiToken => Actor::ApiToken(restichub_db::ApiTokenId::from_uuid(
+                self.actor_id().map_err(invalid_query)?,
+            )),
+            ActorType::Agent => Actor::Agent(self.actor_id().map_err(invalid_query)?),
         };
         Ok(Some(actor))
     }
 
+    /// Parses the `actor_id` of the filter. It needs `actor_type`.
+    fn actor_id(&self) -> Result<Uuid, String> {
+        parse_uuid(self.actor_id.as_deref().ok_or("`actor_id` is missing")?)
+    }
+
     /// Builds the page.
-    fn page(&self) -> Result<AuditPage, ()> {
+    fn page(&self) -> Result<AuditPage, ApiError> {
         let limit = self
             .limit
             .unwrap_or(repo::DEFAULT_PAGE_LIMIT)
             .clamp(1, MAX_PAGE_LIMIT);
-        let after = self.cursor.as_deref().map(decode_cursor).transpose()?;
+        let after = self
+            .cursor
+            .as_deref()
+            .map(decode_cursor)
+            .transpose()
+            .map_err(invalid_cursor)?;
         Ok(AuditPage { limit, after })
     }
+}
+
+/// Builds an `invalid_argument` error of the audit query, with the cause of the failure.
+fn invalid_query(cause: impl Into<String>) -> ApiError {
+    ApiError::invalid_field_cause("query", Reason::InvalidFormat, cause)
+}
+
+/// Builds an `invalid_argument` error of the audit cursor, with the cause of the failure.
+fn invalid_cursor(cause: impl Into<String>) -> ApiError {
+    ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
 }
 
 /// The query extractor of the audit API.
@@ -213,7 +255,7 @@ impl FromRequestParts<AppState> for AuditParams {
             Ok(Query(query)) => Ok(Self(query)),
             Err(error) => {
                 tracing::debug!(%error, "the audit query is not valid");
-                Err(ApiError::invalid_field("query", "invalid_format"))
+                Err(invalid_query(error.to_string()))
             }
         }
     }
@@ -224,14 +266,14 @@ fn format_time(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
-/// Parses an RFC 3339 time.
-fn parse_time(value: &str) -> Result<OffsetDateTime, ()> {
-    OffsetDateTime::parse(value, &Rfc3339).map_err(|_| ())
+/// Parses an RFC 3339 time. The error holds the cause of the failure.
+fn parse_time(value: &str) -> Result<OffsetDateTime, String> {
+    OffsetDateTime::parse(value, &Rfc3339).map_err(|error| error.to_string())
 }
 
-/// Parses a UUID.
-fn parse_uuid(value: &str) -> Result<Uuid, ()> {
-    Uuid::parse_str(value).map_err(|_| ())
+/// Parses a UUID. The error holds the cause of the failure.
+fn parse_uuid(value: &str) -> Result<Uuid, String> {
+    Uuid::parse_str(value).map_err(|error| error.to_string())
 }
 
 /// Encodes the cursor of a page.
@@ -243,15 +285,20 @@ fn encode_cursor(cursor: repo::AuditCursor) -> String {
     )
 }
 
-/// Decodes the cursor of a page.
-fn decode_cursor(value: &str) -> Result<repo::AuditCursor, ()> {
-    let (time, id) = value.split_once(';').ok_or(())?;
-    let nanos: i128 = time.parse().map_err(|_| ())?;
-    let occurred_at = OffsetDateTime::from_unix_timestamp_nanos(nanos).map_err(|_| ())?;
+/// Decodes the cursor of a page. The error holds the cause of the failure.
+fn decode_cursor(value: &str) -> Result<repo::AuditCursor, String> {
+    let (time, id) = value
+        .split_once(';')
+        .ok_or_else(|| "the cursor holds no `;`".to_owned())?;
+    let nanos: i128 = time
+        .parse()
+        .map_err(|error: std::num::ParseIntError| error.to_string())?;
+    let occurred_at =
+        OffsetDateTime::from_unix_timestamp_nanos(nanos).map_err(|error| error.to_string())?;
     if !repo::is_supported_time(occurred_at) {
-        return Err(());
+        return Err("the time of the cursor is outside the supported range".to_owned());
     }
-    let id = id.parse().map_err(|_| ())?;
+    let id = id.parse().map_err(|error: uuid::Error| error.to_string())?;
     Ok(repo::AuditCursor { occurred_at, id })
 }
 
@@ -259,6 +306,7 @@ fn decode_cursor(value: &str) -> Result<repo::AuditCursor, ()> {
 #[utoipa::path(
     get,
     path = "/api/v1/audit",
+    security(("cookie" = []), ("bearer" = [])),
     params(AuditQuery),
     responses(
         (status = 200, description = "The audit records of the tenant.", body = AuditPageResponse),
@@ -273,12 +321,8 @@ pub async fn list_tenant_audit(
 ) -> Result<Json<AuditPageResponse>, ApiError> {
     context.authorize(Operation::AuditRead)?;
     let query = params.0;
-    let filter = query
-        .filter()
-        .map_err(|_| ApiError::invalid_field("query", "invalid_format"))?;
-    let page = query
-        .page()
-        .map_err(|_| ApiError::invalid_field("cursor", "invalid_format"))?;
+    let filter = query.filter()?;
+    let page = query.page()?;
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let result = repo::list(&mut tx, &filter, &page).await?;
     tx.commit().await?;
@@ -289,6 +333,7 @@ pub async fn list_tenant_audit(
 #[utoipa::path(
     get,
     path = "/api/v1/platform/audit",
+    security(("cookie" = []), ("bearer" = [])),
     params(AuditQuery),
     responses(
         (status = 200, description = "The audit records of the platform.", body = AuditPageResponse),
@@ -303,12 +348,8 @@ pub async fn list_platform_audit(
 ) -> Result<Json<AuditPageResponse>, ApiError> {
     context.authorize(Operation::PlatformAuditRead)?;
     let query = params.0;
-    let filter = query
-        .filter()
-        .map_err(|_| ApiError::invalid_field("query", "invalid_format"))?;
-    let page = query
-        .page()
-        .map_err(|_| ApiError::invalid_field("cursor", "invalid_format"))?;
+    let filter = query.filter()?;
+    let page = query.page()?;
     let mut tx = state.db().begin_platform().await?;
     let result = repo::list_platform(&mut tx, &filter, &page).await?;
     tx.commit().await?;

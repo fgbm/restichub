@@ -16,10 +16,11 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext, allowed_role};
-use crate::error::ApiError;
+use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::token;
+use crate::validation::Reason;
 
 /// The body of the create-token request.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -138,8 +139,13 @@ pub async fn create_token(
     let now = state.auth().clock.now();
     let expires_at = match &body.expires_at {
         Some(value) => {
-            let parsed = OffsetDateTime::parse(value, &Rfc3339)
-                .map_err(|_| ApiError::invalid_field("expires_at", "invalid_format"))?;
+            let parsed = OffsetDateTime::parse(value, &Rfc3339).map_err(|error| {
+                ApiError::invalid_field_cause(
+                    "expires_at",
+                    Reason::InvalidFormat,
+                    error.to_string(),
+                )
+            })?;
             crate::validation::validate_expiry("expires_at", parsed, now)?;
             Some(parsed)
         }
@@ -213,7 +219,9 @@ pub async fn revoke_token(
     context.authorize(Operation::ApiTokensWrite)?;
     let token_id = Uuid::parse_str(&id)
         .map(ApiTokenId::from_uuid)
-        .map_err(|_| ApiError::invalid_argument("id"))?;
+        .map_err(|error| {
+            ApiError::invalid_field_cause("id", Reason::InvalidFormat, error.to_string())
+        })?;
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let token = api_tokens::get(&mut tx, token_id).await?;
@@ -241,18 +249,9 @@ async fn creator_of(
     tx.commit().await?;
     // An API token is owned by the tenant. A token that creates a token records the same creator
     // as the current token.
-    token
-        .map(|token| token.created_by)
-        .ok_or_else(ApiError::internal_error)
-}
-
-/// Maps a write error to the API error. A duplicate name is a conflict.
-fn map_write_error(error: restichub_db::DbError) -> ApiError {
-    if error.is_unique_violation() {
-        ApiError::conflict()
-    } else {
-        ApiError::from(error)
-    }
+    token.map(|token| token.created_by).ok_or_else(|| {
+        ApiError::internal(format!("the token {token_id} is not found after the read"))
+    })
 }
 
 /// Formats a time as RFC 3339.

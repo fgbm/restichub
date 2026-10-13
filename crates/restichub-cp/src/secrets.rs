@@ -32,10 +32,11 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
-use crate::error::ApiError;
+use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::validation;
+use crate::validation::Reason;
 use crate::views::{SecretDetailView, SecretView};
 
 /// The body of the create-secret request.
@@ -127,7 +128,9 @@ pub async fn create_secret(
     let name = validation::validate_secret_name("name", &body.name)?;
     let purpose = body.purpose;
     validation::validate_secret_value("value", body.value.expose_secret())?;
-    let provider = state.kek().ok_or_else(ApiError::internal_error)?;
+    let provider = state
+        .kek()
+        .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
 
     // The value lives in a `SecretString` only.
     let plaintext = body.value;
@@ -164,7 +167,9 @@ pub async fn create_secret(
     let metadata = repo::get(&mut tx, secret_id).await?;
     tx.commit().await?;
     let Some(metadata) = metadata else {
-        return Err(ApiError::internal_error());
+        return Err(ApiError::internal(
+            "the created secret is not found after the read",
+        ));
     };
     Ok((StatusCode::CREATED, Json(SecretView::from(&metadata))))
 }
@@ -232,8 +237,12 @@ pub async fn replace_secret_value(
     let Some(metadata) = metadata else {
         return Err(ApiError::not_found());
     };
-    let provider = state.kek().ok_or_else(ApiError::internal_error)?;
-    let purpose = SecretPurpose::parse(&metadata.purpose).ok_or_else(ApiError::internal_error)?;
+    let provider = state
+        .kek()
+        .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
+    let purpose = SecretPurpose::parse(&metadata.purpose).ok_or_else(|| {
+        ApiError::internal(format!("the secret {} holds an unknown purpose", secret_id))
+    })?;
     let encrypted = encrypt_for_tenant(&mut tx, provider, secret_id, purpose, &plaintext).await?;
     repo::replace(
         &mut tx,
@@ -329,11 +338,13 @@ async fn encrypt_for_tenant(
 /// Builds the wrapped data encryption key (DEK) from the stored key row.
 fn wrapped_dek(key: &kek::TenantKey) -> Result<WrappedDek, ApiError> {
     let kek_id = KekId::parse(&key.kek_id)?;
-    let nonce = key
-        .nonce
-        .as_slice()
-        .try_into()
-        .map_err(|error: std::array::TryFromSliceError| ApiError::internal(error.to_string()))?;
+    let nonce =
+        key.nonce
+            .as_slice()
+            .try_into()
+            .map_err(|error: std::array::TryFromSliceError| {
+                ApiError::internal(format!("the stored DEK nonce has a wrong length: {error}"))
+            })?;
     Ok(WrappedDek {
         kek_id,
         nonce,
@@ -353,14 +364,7 @@ fn actor_user(actor: &Actor) -> Option<UserId> {
 fn parse_secret_id(value: &str) -> Result<SecretId, ApiError> {
     Uuid::parse_str(value)
         .map(SecretId::from_uuid)
-        .map_err(|_| ApiError::invalid_argument("id"))
-}
-
-/// Maps a write error to the API error. A duplicate name is a conflict.
-fn map_write_error(error: restichub_db::DbError) -> ApiError {
-    if error.is_unique_violation() {
-        ApiError::conflict()
-    } else {
-        ApiError::from(error)
-    }
+        .map_err(|error| {
+            ApiError::invalid_field_cause("id", Reason::InvalidFormat, error.to_string())
+        })
 }

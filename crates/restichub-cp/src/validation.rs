@@ -36,6 +36,14 @@ pub enum Reason {
     InvalidCharacter,
     /// The value is reserved.
     Reserved,
+    /// The value is not known.
+    Unknown,
+    /// The value does not have the expected format.
+    InvalidFormat,
+    /// The request body is not valid.
+    InvalidBody,
+    /// The credentials are not correct.
+    InvalidCredentials,
     /// The time is not in the future.
     NotInFuture,
     /// The time is later than the allowed lifetime.
@@ -51,6 +59,10 @@ impl Reason {
             Self::TooLong => "too_long",
             Self::InvalidCharacter => "invalid_character",
             Self::Reserved => "reserved",
+            Self::Unknown => "unknown",
+            Self::InvalidFormat => "invalid_format",
+            Self::InvalidBody => "invalid_body",
+            Self::InvalidCredentials => "invalid_credentials",
             Self::NotInFuture => "not_in_future",
             Self::TooFarInFuture => "too_far_in_future",
         }

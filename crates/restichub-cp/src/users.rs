@@ -17,7 +17,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext, allowed_role, ensure_target_not_above_actor};
-use crate::error::ApiError;
+use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
 use crate::password;
 use crate::server::AppState;
@@ -93,7 +93,9 @@ pub async fn list_users(
             .iter()
             .find(|membership| membership.user_id == user.id)
             .map(|membership| membership.role)
-            .ok_or_else(ApiError::internal_error)?;
+            .ok_or_else(|| {
+                ApiError::internal(format!("the user {} holds no membership", user.id))
+            })?;
         items.push(UserView::new(user, role));
     }
     Ok(Json(UserListResponse { items }))
@@ -167,7 +169,9 @@ pub async fn create_user(
     let user = users::get(&mut tx, user_id).await?;
     tx.commit().await?;
     let Some(user) = user else {
-        return Err(ApiError::internal_error());
+        return Err(ApiError::internal(format!(
+            "the user {user_id} is not found after the create"
+        )));
     };
     Ok((StatusCode::CREATED, Json(UserView::new(&user, role))))
 }
@@ -201,7 +205,9 @@ pub async fn get_user(
     match user {
         Some(user) => Ok(Json(UserView::new(
             &user,
-            role.ok_or_else(ApiError::internal_error)?,
+            role.ok_or_else(|| {
+                ApiError::internal(format!("the user {user_id} holds no membership"))
+            })?,
         ))),
         None => Err(ApiError::not_found()),
     }
@@ -287,9 +293,13 @@ pub async fn update_user(
     match updated {
         Some(user) => Ok(Json(UserView::new(
             &user,
-            final_role.ok_or_else(ApiError::internal_error)?,
+            final_role.ok_or_else(|| {
+                ApiError::internal(format!("the user {user_id} holds no membership"))
+            })?,
         ))),
-        None => Err(ApiError::internal_error()),
+        None => Err(ApiError::internal(format!(
+            "the user {user_id} is not found after the update"
+        ))),
     }
 }
 
@@ -409,18 +419,15 @@ async fn guard_last_admin(tx: &mut TenantTx<'_>) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Maps a write error to the API error. A duplicate username is a conflict.
-fn map_write_error(error: restichub_db::DbError) -> ApiError {
-    if error.is_unique_violation() {
-        ApiError::conflict()
-    } else {
-        ApiError::from(error)
-    }
-}
-
 /// Parses a UUID from a path parameter.
 fn parse_uuid(value: &str) -> Result<UserId, ApiError> {
     Uuid::parse_str(value)
         .map(UserId::from_uuid)
-        .map_err(|_| ApiError::invalid_argument("id"))
+        .map_err(|error| {
+            ApiError::invalid_field_cause(
+                "id",
+                validation::Reason::InvalidFormat,
+                error.to_string(),
+            )
+        })
 }

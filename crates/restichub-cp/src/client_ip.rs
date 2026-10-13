@@ -138,7 +138,7 @@ impl FromRequestParts<AppState> for ClientIp {
             .extensions
             .get::<ConnectInfo<SocketAddr>>()
             .map(|ConnectInfo(address)| address.ip())
-            .ok_or_else(ApiError::internal_error)?;
+            .ok_or_else(|| ApiError::internal("the request holds no socket peer address"))?;
         let forwarded = forwarded_for(parts);
         Ok(Self(resolve_client_ip(
             peer,

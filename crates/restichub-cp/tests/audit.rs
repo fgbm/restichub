@@ -181,11 +181,13 @@ async fn ac_au_01_audit_routes_refuse_a_mutation() -> Result<(), Box<dyn std::er
 #[tokio::test]
 async fn the_audit_endpoint_rejects_an_unauthenticated_request()
 -> Result<(), Box<dyn std::error::Error>> {
-    let mut request = Request::builder()
-        .uri(AUDIT_TENANT_PATH)
-        .body(Body::empty())?;
-    request.extensions_mut().insert(peer());
-    let response = lazy_app()?.oneshot(request).await?;
+    let response = lazy_app()?
+        .oneshot(
+            Request::builder()
+                .uri(AUDIT_TENANT_PATH)
+                .body(Body::empty())?,
+        )
+        .await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let content_type = response
         .headers()

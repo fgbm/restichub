@@ -197,7 +197,9 @@ pub async fn setup(
     let user = users::get(&mut tx, user_id).await?;
     tx.commit().await?;
     let Some(user) = user else {
-        return Err(ApiError::internal_error());
+        return Err(ApiError::internal(
+            "the created Platform Admin is not found after the read",
+        ));
     };
     tracing::info!("the first Platform Admin is created");
     Ok((

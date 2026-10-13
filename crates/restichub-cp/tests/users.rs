@@ -521,3 +521,57 @@ async fn an_admin_password_reset_kills_the_sessions_of_the_user() {
 
     db.cleanup().await;
 }
+
+#[tokio::test]
+async fn a_user_without_a_membership_is_an_internal_error() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "memberless").await;
+    let cookie = admin_cookie(&db, tenant).await;
+    let app = app(db.database());
+
+    // A user row with no membership row. The control plane never creates this state.
+    let orphan = {
+        let mut tx = db
+            .database()
+            .begin_tenant(tenant)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let user = restichub_db::users::create(
+            &mut tx,
+            &restichub_db::users::NewUser {
+                username: "orphan",
+                password_hash: "phc",
+                display_name: "Orphan",
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+        tx.commit().await.unwrap_or_else(|error| panic!("{error}"));
+        user
+    };
+
+    // The read of the memberless user gives HTTP 500 `internal_error`.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "GET",
+            &format!("/api/v1/users/{}", orphan.as_uuid()),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(
+        body.get("code").and_then(Value::as_str),
+        Some("internal_error")
+    );
+
+    // The list holds the same user and gives the same error.
+    let (status, _, _) = send(&app, request("GET", "/api/v1/users", Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    db.cleanup().await;
+}

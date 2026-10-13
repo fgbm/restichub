@@ -23,7 +23,7 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
-use crate::error::ApiError;
+use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
 use crate::password;
 use crate::server::AppState;
@@ -129,7 +129,9 @@ pub async fn create_tenant(
     )?;
     validation::validate_password("first_admin.password", &body.first_admin.password)?;
 
-    let kek = state.kek().ok_or_else(ApiError::internal_error)?;
+    let kek = state
+        .kek()
+        .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
 
     // Hash the password before the transaction (ADR-0023: a hash never holds a transaction).
     let password_hash = password::hash_password_limited(
@@ -167,7 +169,9 @@ pub async fn create_tenant(
     let summary = repo::get_platform(&mut tx, created).await?;
     tx.commit().await?;
     let Some(summary) = summary else {
-        return Err(ApiError::internal_error());
+        return Err(ApiError::internal(format!(
+            "the tenant {created} is not found after the create"
+        )));
     };
     Ok((
         StatusCode::CREATED,
@@ -340,7 +344,7 @@ fn filter(query: &TenantListQuery) -> Result<TenantFilter, ApiError> {
         None => None,
         Some(value) => Some(
             TenantStatus::parse(value)
-                .ok_or_else(|| ApiError::invalid_field("status", "unknown"))?,
+                .ok_or_else(|| ApiError::invalid_field("status", validation::Reason::Unknown))?,
         ),
     };
     Ok(TenantFilter { status })
@@ -357,7 +361,9 @@ fn page(query: &TenantListQuery) -> Result<TenantPage, ApiError> {
         .as_deref()
         .map(decode_cursor)
         .transpose()
-        .map_err(|_| ApiError::invalid_field("cursor", "invalid_format"))?;
+        .map_err(|cause| {
+            ApiError::invalid_field_cause("cursor", validation::Reason::InvalidFormat, cause)
+        })?;
     Ok(TenantPage { limit, after })
 }
 
@@ -383,12 +389,17 @@ fn encode_cursor(tenant: &TenantSummary) -> String {
     format!("{};{}", tenant.created_at.unix_timestamp_nanos(), tenant.id)
 }
 
-/// Decodes the cursor of a page.
-fn decode_cursor(value: &str) -> Result<repo::TenantCursor, ()> {
-    let (time, id) = value.split_once(';').ok_or(())?;
-    let nanos: i128 = time.parse().map_err(|_| ())?;
-    let created_at = OffsetDateTime::from_unix_timestamp_nanos(nanos).map_err(|_| ())?;
-    let id: Uuid = id.parse().map_err(|_| ())?;
+/// Decodes the cursor of a page. The error holds the cause of the failure.
+fn decode_cursor(value: &str) -> Result<repo::TenantCursor, String> {
+    let (time, id) = value
+        .split_once(';')
+        .ok_or_else(|| "the cursor holds no `;`".to_owned())?;
+    let nanos: i128 = time
+        .parse()
+        .map_err(|error: std::num::ParseIntError| error.to_string())?;
+    let created_at =
+        OffsetDateTime::from_unix_timestamp_nanos(nanos).map_err(|error| error.to_string())?;
+    let id: Uuid = id.parse().map_err(|error: uuid::Error| error.to_string())?;
     Ok(repo::TenantCursor {
         created_at,
         id: TenantId::from_uuid(id),
@@ -399,16 +410,13 @@ fn decode_cursor(value: &str) -> Result<repo::TenantCursor, ()> {
 fn parse_tenant_id(value: &str) -> Result<TenantId, ApiError> {
     Uuid::parse_str(value)
         .map(TenantId::from_uuid)
-        .map_err(|_| ApiError::invalid_argument("id"))
-}
-
-/// Maps a write error to the API error. A duplicate name is a conflict.
-fn map_write_error(error: restichub_db::DbError) -> ApiError {
-    if error.is_unique_violation() {
-        ApiError::conflict()
-    } else {
-        ApiError::from(error)
-    }
+        .map_err(|error| {
+            ApiError::invalid_field_cause(
+                "id",
+                validation::Reason::InvalidFormat,
+                error.to_string(),
+            )
+        })
 }
 
 #[cfg(test)]

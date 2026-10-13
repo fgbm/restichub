@@ -23,6 +23,7 @@ use crate::rate_limit;
 use crate::server::AppState;
 use crate::token;
 use crate::validation;
+use crate::validation::Reason;
 use crate::views::{TenantView, UserView};
 
 /// The largest length of the tenant name and the username of a sign-in request.
@@ -343,7 +344,7 @@ pub async fn change_password(
     if !current_ok {
         return Err(ApiError::invalid_field(
             "current_password",
-            "invalid_credentials",
+            Reason::InvalidCredentials,
         ));
     }
     let hash =

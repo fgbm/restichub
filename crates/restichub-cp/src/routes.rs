@@ -3,6 +3,10 @@
 //! One table holds every route: the method, the path, the access rule and the handler. The router
 //! and the OpenAPI document of [`crate::server`] derive from the table, and the AC-AU-02 and
 //! AC-TN-01 tests read it. Each handler declares its operation in the table row.
+//!
+//! The table is a declaration for the tests, not the access check. Each handler calls
+//! [`crate::context::RequestContext::authorize`] with its operation; that call is the real check.
+//! The AC-AU-02 test reads the table to prove that the two agree.
 
 use utoipa_axum::router::{UtoipaMethodRouter, UtoipaMethodRouterExt};
 use utoipa_axum::routes;

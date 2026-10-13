@@ -196,8 +196,8 @@ pub fn router(state: AppState) -> Router {
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
         ))
-        .layer(TraceLayer::new_for_http().make_span_with(RequestSpan))
         .layer(middleware::from_fn(finalize_problem))
+        .layer(TraceLayer::new_for_http().make_span_with(RequestSpan))
         .layer(PropagateRequestIdLayer::new(request_id_header()))
         .layer(SetRequestIdLayer::new(request_id_header(), MakeRequestIdV7))
 }
@@ -226,6 +226,13 @@ fn base_openapi() -> OpenApiDocument {
             utoipa::openapi::InfoBuilder::new()
                 .title("ResticHub API")
                 .version(env!("CARGO_PKG_VERSION"))
+                .description(Some(env!("CARGO_PKG_DESCRIPTION")))
+                .license(Some(
+                    utoipa::openapi::LicenseBuilder::new()
+                        .name("Apache-2.0")
+                        .identifier(Some("Apache-2.0"))
+                        .build(),
+                ))
                 .build(),
         )
         .build();

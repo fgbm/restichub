@@ -12,8 +12,9 @@ publish.workspace = true
 workspace = true
 
 [features]
-# Enables `serde::Deserialize` for `SecretString`, so a request body can hold a secret value.
-serde = ["dep:serde"]
+# Enables `serde::Deserialize` for `SecretString` and the OpenAPI schema of `SecretPurpose`, so a
+# request body can hold a secret value and the document can describe the purpose.
+serde = ["dep:serde", "dep:utoipa"]
 
 [dependencies]
 aes-gcm = { workspace = true }
@@ -22,7 +23,7 @@ getrandom = { workspace = true }
 serde = { workspace = true, optional = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-utoipa = { workspace = true }
+utoipa = { workspace = true, optional = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
 

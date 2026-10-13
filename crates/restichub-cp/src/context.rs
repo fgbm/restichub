@@ -26,6 +26,7 @@ use crate::client_ip::ClientIp;
 use crate::error::ApiError;
 use crate::server::AppState;
 use crate::token;
+use crate::validation::Reason;
 
 /// An operation of the API.
 ///
@@ -108,7 +109,8 @@ pub fn minimum_role(operation: Operation) -> Role {
 /// - An actor cannot grant a role above its own. A token cannot create a token with a higher role
 ///   than its own, and a user cannot either.
 pub fn allowed_role(context: &RequestContext, value: &str) -> Result<Role, ApiError> {
-    let role = Role::parse(value).ok_or_else(|| ApiError::invalid_argument("role"))?;
+    let role =
+        Role::parse(value).ok_or_else(|| ApiError::invalid_field("role", Reason::Unknown))?;
     let platform = context.tenant_id == restichub_db::PLATFORM_TENANT_ID;
     if platform && role != Role::PlatformAdmin {
         return Err(ApiError::forbidden());
@@ -225,7 +227,6 @@ impl FromRequestParts<AppState> for RequestContext {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let client = ClientIp::from_request_parts(parts, state).await?;
         let name = token::session_cookie_name(state.auth().config.insecure_cookies);
         let cookie = token::session_cookie(&parts.headers, name);
         let bearer = token::bearer_token(&parts.headers);
@@ -237,12 +238,14 @@ impl FromRequestParts<AppState> for RequestContext {
                 if token::is_unsafe_method(&parts.method) && !token::csrf_ok(&parts.headers) {
                     return Err(ApiError::csrf_required());
                 }
-                context.source_ip = Some(client.0);
+                // The source IP is read after the authentication, so a request with no credential
+                // is refused with HTTP 401 even when the socket peer is absent.
+                context.source_ip = Some(ClientIp::from_request_parts(parts, state).await?.0);
                 Ok(context)
             }
             (None, Some(value)) => {
                 let mut context = authenticate_bearer(state, &value).await?;
-                context.source_ip = Some(client.0);
+                context.source_ip = Some(ClientIp::from_request_parts(parts, state).await?.0);
                 Ok(context)
             }
             (None, None) => Err(ApiError::unauthenticated()),

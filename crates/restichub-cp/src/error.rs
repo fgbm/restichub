@@ -20,7 +20,7 @@ use utoipa::ToSchema;
 
 use crate::password::PasswordError;
 use crate::token::TokenError;
-use crate::validation::ValidationError;
+use crate::validation::{Reason, ValidationError};
 
 /// The content type of an RFC 9457 problem response.
 pub const PROBLEM_CONTENT_TYPE: &str = "application/problem+json";
@@ -94,7 +94,7 @@ pub struct ApiError {
     code: ErrorCode,
     title: &'static str,
     field: Option<&'static str>,
-    reason: Option<&'static str>,
+    reason: Option<Reason>,
     /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
     retry_after: Option<u64>,
     /// The internal detail. The response body never holds it; the mapper logs it with the request
@@ -141,15 +141,6 @@ impl ApiError {
         );
         error.cause = Some(cause.into());
         error
-    }
-
-    /// Creates a `500 internal_error` error with no cause.
-    pub fn internal_error() -> Self {
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorCode::InternalError,
-            "Internal Server Error",
-        )
     }
 
     /// Creates a `401 unauthenticated` error.
@@ -205,9 +196,23 @@ impl ApiError {
     }
 
     /// Creates a `400 invalid_argument` error for a field with a reason code.
-    pub fn invalid_field(field: &'static str, reason: &'static str) -> Self {
+    pub fn invalid_field(field: &'static str, reason: Reason) -> Self {
         let mut error = Self::invalid_argument(field);
         error.reason = Some(reason);
+        error
+    }
+
+    /// Creates a `400 invalid_argument` error for a field, with the cause of the failure.
+    ///
+    /// The cause is the message of a parse failure. The response mapper logs it with the request
+    /// ID; the body never holds it.
+    pub fn invalid_field_cause(
+        field: &'static str,
+        reason: Reason,
+        cause: impl Into<String>,
+    ) -> Self {
+        let mut error = Self::invalid_field(field, reason);
+        error.cause = Some(cause.into());
         error
     }
 
@@ -324,7 +329,7 @@ impl From<TokenError> for ApiError {
 
 impl From<ValidationError> for ApiError {
     fn from(error: ValidationError) -> Self {
-        Self::invalid_field(error.field, error.reason.as_str())
+        Self::invalid_field(error.field, error.reason)
     }
 }
 
@@ -334,6 +339,17 @@ impl From<PasswordError> for ApiError {
             PasswordError::Busy => Self::busy(crate::password::HASH_WAIT.as_secs()),
             other => Self::internal(cause_chain(&other)),
         }
+    }
+}
+
+/// Maps a database write error to the API error.
+///
+/// A duplicate value is a conflict. Every other error is internal, with the cause logged.
+pub fn map_write_error(error: DbError) -> ApiError {
+    if error.is_unique_violation() {
+        ApiError::conflict()
+    } else {
+        ApiError::from(error)
     }
 }
 
@@ -354,7 +370,7 @@ impl IntoResponse for ApiError {
             // The response mapper fills the request ID from the request extension.
             request_id: String::new(),
             field: self.field.map(str::to_owned),
-            reason: self.reason.map(str::to_owned),
+            reason: self.reason.map(|reason| reason.as_str().to_owned()),
         };
         let mut response = (
             self.status,
@@ -417,10 +433,11 @@ mod tests {
     use http_body_util::BodyExt;
 
     use super::{ApiError, ErrorCode};
+    use crate::validation::Reason;
 
     #[tokio::test]
     async fn the_problem_body_holds_the_code_and_the_field() {
-        let response = ApiError::invalid_field("username", "too_long").into_response();
+        let response = ApiError::invalid_field("username", Reason::TooLong).into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let content_type = response
             .headers()

@@ -136,6 +136,38 @@ async fn ac_au_02_the_router_route_list_matches_the_openapi_paths() {
 }
 
 #[tokio::test]
+async fn ac_au_02_every_protected_route_documents_security() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let app = app(db.database());
+    let (status, _, document) =
+        send(&app, request("GET", "/api/v1/openapi.json", None, None)).await;
+    assert_eq!(status, StatusCode::OK);
+    let paths = document
+        .get("paths")
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("the document holds no paths"));
+
+    // The OpenAPI `security` of an operation is present exactly when the route is not public.
+    for route in ROUTES {
+        let operation = paths
+            .get(route.path)
+            .and_then(|item| item.get(route.method))
+            .unwrap_or_else(|| panic!("the document holds no {} {}", route.method, route.path));
+        let has_security = operation.get("security").is_some();
+        let protected = !matches!(route.access, Access::Public);
+        assert_eq!(
+            has_security, protected,
+            "{} {}: the security document does not match the access rule",
+            route.method, route.path
+        );
+    }
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
 async fn ac_au_02_role_operation_matrix() {
     let Some(db) = common::test_db().await else {
         return;

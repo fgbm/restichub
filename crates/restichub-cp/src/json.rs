@@ -15,6 +15,7 @@ use axum::extract::{FromRequest, Request};
 use axum::http::StatusCode;
 
 use crate::error::ApiError;
+use crate::validation::Reason;
 
 /// A JSON request body with the problem-response mapping of the control plane.
 ///
@@ -46,6 +47,6 @@ fn map_rejection(rejection: JsonRejection) -> ApiError {
     if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
         ApiError::payload_too_large()
     } else {
-        ApiError::invalid_field("body", "invalid_body")
+        ApiError::invalid_field("body", Reason::InvalidBody)
     }
 }

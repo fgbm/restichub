@@ -288,14 +288,15 @@ impl utoipa::PartialSchema for AuditAction {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
         use utoipa::openapi::ObjectBuilder;
         use utoipa::openapi::schema::Type;
+        // The action is an open string: the database keeps an action that a newer version writes.
+        // The known values are examples, not a closed enum, so a strict client does not fail.
         ObjectBuilder::new()
             .schema_type(Type::String)
-            .enum_values(Some(
+            .examples(
                 Self::known()
                     .iter()
-                    .map(|action| serde_json::Value::String(action.as_str().to_owned()))
-                    .collect::<Vec<_>>(),
-            ))
+                    .map(|action| serde_json::Value::String(action.as_str().to_owned())),
+            )
             .build()
             .into()
     }
