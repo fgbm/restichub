@@ -1801,11 +1801,13 @@ dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",
  "http-body-util",
+ "rcgen",
  "restichub-canary-scan",
  "restichub-db",
  "restichub-proto",
  "restichub-secrets",
  "rust-embed",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1821,6 +1823,8 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "uuid",
+ "x509-parser",
+ "zeroize",
 ]
 
 [[package]]

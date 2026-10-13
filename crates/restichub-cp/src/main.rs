@@ -56,6 +56,13 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .await
         .context("cannot verify the key encryption key")?;
 
+    // Create the installation CA on the first start, or load it and prove that the KEK opens the
+    // stored keys. The server refuses to start without a CA (ADR-0026).
+    let ca = restichub_cp::pki::CaService::new(kek.clone());
+    ca.ensure_initialized(&database)
+        .await
+        .context("cannot prepare the certificate authority")?;
+
     // Single mode refuses the start unless the database matches the mode (ADR-0024).
     restichub_cp::startup::ensure_tenancy_mode(&database, &config.tenancy)
         .await

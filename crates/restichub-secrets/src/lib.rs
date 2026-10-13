@@ -8,6 +8,7 @@
 //!
 //! - [`kek`]: the KEK, the KEK providers and the key ID derivation;
 //! - [`envelope`]: the data encryption key (DEK), its generation and its wrapping;
+//! - [`ca`]: the wrapping of the certificate authority private keys;
 //! - [`secret`]: the encryption of a secret value with the DEK of a tenant;
 //! - [`check`]: the `kek_check` value and the verification that refuses a wrong KEK;
 //! - [`error`]: the error types.
@@ -30,6 +31,7 @@ use std::path::{Path, PathBuf};
 
 use zeroize::{Zeroize, Zeroizing};
 
+pub mod ca;
 pub mod check;
 pub mod envelope;
 pub mod error;
@@ -38,6 +40,7 @@ pub mod secret;
 
 mod crypto;
 
+pub use ca::{CaRole, WrappedCaKey, unwrap_ca_key, wrap_ca_key};
 pub use check::{KekCheck, make_kek_check, verify_kek_check};
 pub use crypto::NONCE_LEN;
 pub use envelope::{DEK_LEN, Dek, WrappedDek, generate_dek, unwrap_dek, wrap_dek};

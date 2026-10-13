@@ -16,6 +16,7 @@ use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 pub mod api_tokens;
 pub mod audit;
 pub mod auth;
+pub mod ca;
 pub mod delivery;
 pub mod enums;
 pub mod ids;

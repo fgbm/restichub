@@ -16,6 +16,7 @@ pub mod instance;
 pub mod json;
 pub mod maintenance;
 pub mod password;
+pub mod pki;
 pub mod rate_limit;
 pub mod routes;
 pub mod secrets;
