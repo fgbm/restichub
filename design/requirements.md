@@ -36,7 +36,7 @@ Each requirement has an ID. Acceptance criteria refer to these IDs. See [accepta
 
 | Term | Meaning |
 |---|---|
-| Tenant | An isolated organization in one ResticHub installation. |
+| Tenant | An organization: the isolation unit that owns hosts, repositories, plans, profiles, secrets and memberships (ADR-0006, ADR-0024, ADR-0025). |
 | Repository | A restic repository: backend address, password, backend credentials. |
 | Profile | A declarative backup definition, similar to a resticprofile profile. |
 | Plan | A profile assigned to agents, with a schedule. |

@@ -56,7 +56,7 @@ Write a warning or a caution as a short command, then the reason: "Do not run `u
 | agent | The ResticHub program on a host | client, node, daemon |
 | control plane | The ResticHub server | server (alone), backend, master |
 | host | A computer with an agent | machine, box |
-| tenant | An isolated organization in one installation | customer, organization (for this concept) |
+| tenant | An organization: the isolation unit that owns hosts, repositories, plans, profiles, secrets and memberships (ADR-0006, ADR-0024, ADR-0025) | customer, organization (for this concept) |
 | repository | A restic repository | repo, storage |
 | profile | A backup definition | config, preset |
 | plan | A profile assigned to agents, with a schedule | task, schedule (for this concept) |
