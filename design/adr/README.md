@@ -34,3 +34,5 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0026](0026-agent-pki-identity-and-key-rotation.md) | Agent PKI, identity and key rotation | accepted |
 | [0027](0027-web-ui-component-primitives.md) | Web UI component primitives | accepted |
 | [0030](0030-job-signing-key-resync.md) | Re-sync of the job signing key set | accepted |
+| [0031](0031-bundled-restic-in-agent-package.md) | Agent package with a bundled restic | accepted |
+| [0032](0032-manual-agent-registration-and-service-install.md) | Manual agent registration and service install | accepted |

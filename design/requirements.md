@@ -79,7 +79,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-AG-08 | The agent parses the restic JSON output and streams progress and logs to the CP in real time. | M |
 | FR-AG-09 | The agent maps restic exit codes to job statuses. 0: success. 3: warning. 11: retry (lock). 10 and 12: configuration error. 130: cancelled. All other codes: failed. | M |
 | FR-AG-10 | The agent cancels a step in two stages. First it sends SIGINT on Unix or Ctrl+Break on Windows. After a grace period it kills the process tree. After a hard kill it reports "possible stale lock". | M |
-| FR-AG-11 | The agent package contains a tested restic version. The agent reports the agent, restic and operating system versions. ResticHub supports restic 0.18.1 and later. | M |
+| FR-AG-11 | The agent package contains a tested restic version next to the agent. The agent build embeds the expected SHA-256 of that restic binary. At start the agent checks the hash and refuses a different binary. The control plane cannot set the restic path. The agent reports the agent, restic and operating system versions. ResticHub supports restic 0.18.1 and later. | M |
 | FR-AG-12 | If the agent receives a `job_id` that it completed before, it does not execute the job again. It returns the stored result. | M |
 | FR-AG-13 | Self-update accepts only a binary signed with the project release key, not with a CP key. After the update the agent does a health check. If it cannot connect in N minutes, it goes back to the previous binary. | 1.0 |
 | FR-AG-14 | Resource limits: idle agent 30 MB RAM or less and 1 % CPU or less. During a job 100 MB RAM or less, without restic. | 1.0 |
@@ -224,6 +224,10 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-IN-04 | Remote installation over WinRM: NTLM, Kerberos, HTTPS. Behind an abstraction with a fallback. | 1.0 (after spike P3) |
 | FR-IN-05 | The CP does not store credentials for remote installation. It uses them once and records the operation in the audit log. | 1.0 |
 | FR-IN-06 | Agent removal: stop the service, remove the files, revoke the certificate. | 1.0 |
+| FR-IN-07 | The agent registers by hand. A person on the host unpacks the agent package and runs `restichub-agent register --url <control-plane-url>`. The command reads the one-time enrollment token from the standard input by default, or from a file with `--token-file <path>`. The command has no token flag. The agent generates its key pair, enrolls and stores its identity in the protected configuration directory. | M |
+| FR-IN-08 | The agent installs itself as an operating system service. A person on the host runs `restichub-agent install-service`. The command writes and enables a Windows service or a systemd unit (launchd on macOS in 1.0). | M (Windows, Linux), 1.0 (macOS) |
+
+FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by hand (ADR-0032) and the enrollment token never goes into a command-line argument.
 
 ### 3.13. User interface, API, audit
 

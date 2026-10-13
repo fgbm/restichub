@@ -175,16 +175,19 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Preconditions:** the person signs in as the Admin. A Windows or Linux host is ready.
 - **Main flow:**
   1. Open the "Agents" screen and create an enrollment token with labels.
-  2. Copy the token value. The screen shows the value one time.
-  3. On the host, run the installation script with the token.
-  4. The agent generates its key pair and sends a certificate signing request to the control plane.
-  5. The control plane signs the certificate and returns it.
+  2. Copy the token value. The screen shows the value one time, with the ready registration command.
+  3. On the host, unpack the agent package.
+  4. Run `restichub-agent register --url <control-plane-url>`. Supply the token on the standard input, or name a file with `--token-file`.
+  5. The agent generates its key pair and sends the certificate signing request and the token to the control plane.
+  6. The control plane signs the certificate and returns it. The agent stores its identity in the protected configuration directory.
+  7. Run `restichub-agent install-service` to register the operating system service.
 - **Expected result:** the host appears in the "Agents" list with the status "Active". The certificate holds the agent ID and the tenant ID. The audit log holds `agent_enrolled`.
 - **Alternative flows:**
   - A used or an expired token is refused with a clear error.
   - The 11th enrollment request from one address in one minute gives HTTP 429.
-- **Requirements:** FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01.
-- **Acceptance criteria:** AC-ID-01, AC-ID-05.
+  - The token never appears in a command-line argument (ADR-0032).
+- **Requirements:** FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01, FR-IN-07, FR-IN-08.
+- **Acceptance criteria:** AC-ID-01, AC-ID-05, AC-IN-02, AC-IN-03.
 - **Status:** Blocked by #1. The child issues are #46 (enrollment tokens), #47 (agent registry) and #48 (enrollment exchange).
 
 ### UC-AGT-02: Revoke an agent
@@ -465,7 +468,7 @@ The sign-in screen asks for the username and the password only. The account is i
 | UC-ORG-03 | FR-TN-02 | AC-AU-01 | Ready on the stage |
 | UC-USR-01 | FR-TN-02, FR-AU-03 | AC-AU-02 | Ready on the stage |
 | UC-USR-02 | FR-TN-02 | AC-AU-02 | Ready on the stage |
-| UC-AGT-01 | FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01 | AC-ID-01, AC-ID-05 | Blocked by #1 |
+| UC-AGT-01 | FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01, FR-IN-07, FR-IN-08 | AC-ID-01, AC-ID-05, AC-IN-02, AC-IN-03 | Blocked by #1 |
 | UC-AGT-02 | FR-ID-04 | AC-ID-04 | Blocked by #1 |
 | UC-RP-01 | FR-RP-03, FR-RP-05 | AC-RP-02 | Ready on the stage |
 | UC-RP-02 | FR-RP-01, FR-RP-02 | AC-RP-01 | Blocked by #5 |
