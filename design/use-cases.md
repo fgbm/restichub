@@ -89,7 +89,7 @@ The sign-in screen asks for the username and the password only. The account is i
   1. Open the stage address.
   2. Enter the username and the password.
   3. Click "Sign in".
-- **Expected result:** the sign-in succeeds. A Platform Admin reaches the platform screens (Organizations, Platform users, Platform audit). Another account sees the empty state "no organizations, ask an administrator". The switcher shows no organization and no Platform entry.
+- **Expected result:** the sign-in succeeds. A Platform Admin lands in the platform mode (Organizations, Users, Audit). Another account sees the empty state "no organizations, ask an administrator". The switcher shows no organization and no Platform entry for that account, and the Platform administration entry for the Platform Admin.
 - **Alternative flows:**
   - The platform screens appear for a Platform Admin in any current organization.
 - **Requirements:** FR-AU-04, FR-TN-02.
@@ -412,7 +412,7 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Platform Admin.
 - **Preconditions:** the person signs in as the Platform Admin.
 - **Main flow:**
-  1. Open the "Platform audit" screen.
+  1. Open the "Audit" tab in the platform mode.
   2. Read the records of the organization operations.
 - **Expected result:** the records show `tenant_create`, `tenant_suspend`, `tenant_resume` and `tenant_delete` with the actor and the time.
 - **Requirements:** FR-AU-01, FR-TN-02.

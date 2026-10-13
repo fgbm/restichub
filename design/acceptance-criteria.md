@@ -181,9 +181,9 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-AU-09 | FR-TN-02 | The Platform Admin calls `GET /api/v1/platform/users`. **Expected:** the list holds every account of every organization with its memberships and roles. A tenant Admin gets HTTP 403. | A |
 | AC-AU-10 | FR-AU-04 | Create an account with an email that another account holds. **Expected:** HTTP 409 `email_taken`. The control plane treats the email of a new account as unverified. | A |
 | AC-AU-11 | FR-TN-02 | Complete the setup of a new installation. **Expected:** the setup creates one account with the Platform Admin right and no membership. The account signs in and reaches the platform screens. | A |
-| AC-AU-12 | FR-AU-04 | Open the organization switcher as a Platform Admin with no membership. **Expected:** the switcher shows the empty state and no Platform entry. | A |
+| AC-AU-12 | FR-AU-04 | Open the organization switcher as a Platform Admin with no membership. **Expected:** the switcher shows the empty state and the Platform administration entry. | A |
 | AC-AU-13 | FR-AU-04 | A Platform Admin is a member of organization A and organization B. **Expected:** the switcher lists A and B only, and the switch works (AC-AU-04). | A |
-| AC-AU-14 | FR-TN-02 | Open the platform screens (Organizations, Platform users, Platform audit) as a Platform Admin in any current organization. **Expected:** the screens open with no organization switch. | A |
+| AC-AU-14 | FR-TN-02 | Open the platform screens (Organizations, Users, Audit) as a Platform Admin in any current organization. **Expected:** the screens open with no organization switch. | A |
 | AC-AU-15 | FR-TN-02 | A tenant Admin calls a platform endpoint. **Expected:** HTTP 403. The Platform Admin right is necessary. | A |
 | AC-AU-16 | FR-TN-02 | Remove the Platform Admin right from the last active Platform Admin, or from itself. **Expected:** HTTP 409 for the last one and HTTP 403 for the own account. | A |
 | AC-AU-17 | FR-AU-04 | A Platform Admin holds the Viewer role in organization A and reads the tenant data of A. **Expected:** the answer agrees with the Viewer role. The right adds no access (ADR-0006). | A |

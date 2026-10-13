@@ -58,11 +58,12 @@ The platform tenant row stays internal. The `ca_keys` table (ADR-0026) and the s
 ## Consequences
 
 - An account has the Platform Admin right independently of its organizations.
-- The switcher lists real organizations only. An account with no membership sees an empty state.
-- The platform screens (Organizations, Platform users, Platform audit) open for a Platform Admin in any current organization. No organization switch is necessary.
+- The switcher lists real organizations only. An account with no membership sees an empty state; a Platform Admin sees the Platform administration entry.
+- The platform screens (Organizations, Users, Audit) open for a Platform Admin in any current organization. No organization switch is necessary.
+- A Platform Admin without a current organization lands in the platform mode. An organization route in the address bar opens the platform mode.
 - The platform right gives no tenant data access. The operator adds a membership to work in an organization.
 - The platform tenant row is internal. A user-facing list never shows it.
-- The sign-in of an account with zero memberships succeeds and shows the empty state. The answer no longer hides the absence of a membership.
+- The sign-in of an account with zero memberships succeeds. A Platform Admin reaches the platform mode; another account sees the empty state. The answer no longer hides the absence of a membership.
 
 ## Alternatives
 
