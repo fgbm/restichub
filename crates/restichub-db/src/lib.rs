@@ -25,6 +25,7 @@ pub mod memberships;
 pub mod secrets;
 pub mod sessions;
 pub mod setup;
+pub mod signing;
 pub mod tenants;
 pub mod tx;
 pub mod users;
@@ -32,7 +33,7 @@ pub mod users;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 
-pub use enums::{ActorType, CaRole, Role, TenantStatus};
+pub use enums::{ActorType, CaRole, Role, SigningKeyRole, TenantStatus};
 pub use ids::{
     ApiTokenId, AuditLogId, PLATFORM_TENANT_ID, SecretId, SessionId, SetupTokenId, TenantId, UserId,
 };

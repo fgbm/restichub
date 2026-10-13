@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use restichub_proto::agent::v1::{
-    AgentMessage, CancelJob, ControlMessage, Job, Ping, ServerHello, SignedJob, agent_message,
+    AgentMessage, CancelJob, ControlMessage, Job, Ping, ServerHello, SignedJob, SigningKeyUpdate,
+    agent_message,
     agent_service_server::{AgentService, AgentServiceServer},
     control_message,
 };
@@ -204,6 +205,20 @@ impl TestControlPlane {
     pub fn dispatch(&self, agent_id: &str, job: &Job) -> bool {
         let signed = sign_job(job, KEY_ID, &signing_key());
         self.send_raw(agent_id, signed)
+    }
+
+    /// Sends a signed key set update to one agent (FR-PR-11).
+    pub fn deliver_key_update(&self, agent_id: &str, update: SigningKeyUpdate) -> bool {
+        let sender = crate::lock(&self.state.agents)
+            .get(agent_id)
+            .map(|connection| connection.tx.clone());
+        let Some(sender) = sender else {
+            return false;
+        };
+        let message = ControlMessage {
+            payload: Some(control_message::Payload::SigningKeyUpdate(update)),
+        };
+        sender.try_send(message).is_ok()
     }
 
     /// Sends a signed job without a check, for a forged or tampered job

@@ -120,6 +120,7 @@ pub enum AuditAction {
     SecretCreate,
     SecretReplace,
     SecretDelete,
+    SigningKeyRotate,
     /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),
 }
@@ -153,6 +154,7 @@ impl AuditAction {
             Self::SecretCreate => "secret_create",
             Self::SecretReplace => "secret_replace",
             Self::SecretDelete => "secret_delete",
+            Self::SigningKeyRotate => "signing_key_rotate",
             Self::Unknown(value) => value,
         }
     }
@@ -186,6 +188,7 @@ impl AuditAction {
             "secret_create" => Self::SecretCreate,
             "secret_replace" => Self::SecretReplace,
             "secret_delete" => Self::SecretDelete,
+            "signing_key_rotate" => Self::SigningKeyRotate,
             _ => return None,
         };
         Some(action)
@@ -226,6 +229,7 @@ impl AuditAction {
             Self::SecretCreate,
             Self::SecretReplace,
             Self::SecretDelete,
+            Self::SigningKeyRotate,
         ]
     }
 }
