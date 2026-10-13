@@ -197,6 +197,14 @@ pub async fn rename_agent(
             };
             if current.hostname != hostname {
                 repo::rename(tx, agent_id, &hostname).await?;
+                let mut event =
+                    context.audit_event(AuditAction::AgentUpdate, "agent", agent_id.as_uuid());
+                event.diff = Some(diff(
+                    Some(&serde_json::json!({"hostname": current.hostname})),
+                    Some(&serde_json::json!({"hostname": hostname})),
+                    &[],
+                ));
+                restichub_db::audit::insert(tx, &event).await?;
             }
             Ok(repo::get(tx, agent_id).await?)
         })
@@ -238,7 +246,7 @@ pub async fn revoke_agent(
     }
     let changed = repo::revoke(&mut tx, agent_id, actor, now).await?;
     if changed {
-        let mut event = context.audit_event(AuditAction::AgentRevoked, "agent", agent_id.as_uuid());
+        let mut event = context.audit_event(AuditAction::AgentRevoke, "agent", agent_id.as_uuid());
         event.diff = Some(diff(
             Some(&serde_json::json!({"status": AgentStatus::Active.as_str()})),
             Some(&serde_json::json!({"status": AgentStatus::Revoked.as_str()})),

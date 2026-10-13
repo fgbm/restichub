@@ -353,11 +353,7 @@ async fn the_platform_audit_endpoint_returns_every_tenant() -> Result<(), Box<dy
     tx.commit().await?;
 
     let mut tx = db.database().begin_tenant(tenant).await?;
-    audit::insert(
-        &mut tx,
-        &AuditEvent::new(AuditAction::AgentEnrolled, "agent"),
-    )
-    .await?;
+    audit::insert(&mut tx, &AuditEvent::new(AuditAction::AgentEnroll, "agent")).await?;
     tx.commit().await?;
     let cookie = sign_in(&db, PLATFORM_TENANT_ID, "platform_admin").await?;
 

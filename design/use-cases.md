@@ -179,7 +179,7 @@ The sign-in screen asks for the username and the password only. The account is i
   3. On the host, run the installation script with the token.
   4. The agent generates its key pair and sends a certificate signing request to the control plane.
   5. The control plane signs the certificate and returns it.
-- **Expected result:** the host appears in the "Agents" list with the status "Active". The certificate holds the agent ID and the tenant ID. The audit log holds `agent_enrolled`.
+- **Expected result:** the host appears in the "Agents" list with the status "Active". The certificate holds the agent ID and the tenant ID. The audit log holds `agent_enroll`.
 - **Alternative flows:**
   - A used or an expired token is refused with a clear error.
   - The 11th enrollment request from one address in one minute gives HTTP 429.

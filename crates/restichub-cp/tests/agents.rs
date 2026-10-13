@@ -49,7 +49,7 @@ async fn ac_id_04_an_admin_revokes_an_agent_and_writes_the_audit() {
         &app,
         request(
             "GET",
-            "/api/v1/audit?action=agent_revoked",
+            "/api/v1/audit?action=agent_revoke",
             Some(&cookie),
             None,
         ),
@@ -171,6 +171,87 @@ async fn a_viewer_lists_and_reads_the_agents_and_the_status_filter_works() {
     assert_eq!(
         body.get("hostname").and_then(Value::as_str),
         Some("renamed")
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_agent_rename_writes_an_audit_record_only_on_a_change() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "agents-rename").await;
+    let agent = seed_agent(db.database(), tenant, "host-1").await;
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let app = app(db.database());
+
+    // A real change writes one record in the same transaction.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/agents/{agent}"),
+            Some(&cookie),
+            Some(json!({"hostname": "host-2"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.get("hostname").and_then(Value::as_str), Some("host-2"));
+
+    let (status, _, page) = send(
+        &app,
+        request(
+            "GET",
+            "/api/v1/audit?action=agent_update",
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = page
+        .get("items")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("no items"));
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].get("object_id").and_then(Value::as_str),
+        Some(agent.to_string().as_str())
+    );
+    assert_eq!(
+        items[0]
+            .pointer("/diff/hostname/new")
+            .and_then(Value::as_str),
+        Some("host-2")
+    );
+
+    // The same name changes nothing and writes no record.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/agents/{agent}"),
+            Some(&cookie),
+            Some(json!({"hostname": "host-2"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, _, page) = send(
+        &app,
+        request(
+            "GET",
+            "/api/v1/audit?action=agent_update",
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        page.get("items").and_then(Value::as_array).map(Vec::len),
+        Some(1)
     );
 
     db.cleanup().await;
