@@ -42,7 +42,7 @@ pub struct KekId(String);
 impl KekId {
     /// Parses a key ID from 16 lowercase hexadecimal characters.
     ///
-    /// The function returns [`KekError::BadKekId`] for another value.
+    /// [`KekError::BadKekId`] means the value is not 16 lowercase hexadecimal characters.
     pub fn parse(value: &str) -> Result<Self, KekError> {
         let valid = value.len() == 16
             && value
@@ -77,7 +77,7 @@ pub struct Kek {
 impl Kek {
     /// Creates a KEK from 32 bytes and derives the key ID.
     ///
-    /// The function copies the bytes into the KEK and zeroizes the source array.
+    /// The bytes are copied into the KEK and the source array is zeroized.
     pub fn from_bytes(bytes: &mut [u8; KEK_LEN]) -> Self {
         let id = derive_kek_id(bytes);
         let stored = *bytes;
@@ -107,8 +107,6 @@ impl Drop for Kek {
     }
 }
 
-/// Derives the key ID of a KEK.
-///
 /// The key ID is the first 16 hexadecimal characters of the SHA-256 digest of [`KEK_ID_DOMAIN`]
 /// followed by the KEK bytes.
 fn derive_kek_id(key: &[u8; KEK_LEN]) -> KekId {
@@ -144,20 +142,14 @@ pub struct KekConfig {
     pub file_path: Option<PathBuf>,
 }
 
-/// Loads the KEK provider from the configuration.
+/// # Errors
 ///
-/// The function selects the file provider if the configuration sets a path. The function selects
-/// the environment provider if the configuration sets no path.
+/// - [`KekError::BothSourcesSet`] when the configuration sets a path and [`KEK_ENV`] is also set;
+/// - [`KekError::MissingSource`] when the configuration sets no path and [`KEK_ENV`] is not set;
+/// - [`KekError::BadEncoding`] when the value is not valid base64;
+/// - [`KekError::BadLength`] when the decoded value is not 32 bytes.
 ///
-/// The function returns an error in these cases:
-///
-/// - the configuration sets a path and the environment variable [`KEK_ENV`] is also set, with
-///   [`KekError::BothSourcesSet`];
-/// - the configuration sets no path and the environment variable [`KEK_ENV`] is not set, with
-///   [`KekError::MissingSource`];
-/// - the value is not valid base64 or it is not 32 bytes.
-///
-/// The error names the parameter. The error never holds the value.
+/// The error names the parameter and never holds the value.
 pub fn load_kek_provider(
     config: &KekConfig,
     env: &dyn EnvReader,
@@ -241,10 +233,8 @@ impl fmt::Debug for EnvKekProvider {
     }
 }
 
-/// Decodes a base64 KEK value and checks the length.
-///
-/// The function names the parameter `name` in the error. The function never puts the value in the
-/// error. The decoded bytes are zeroized after the copy into the KEK.
+/// The parameter `name` appears in the error; the value never does. The decoded bytes are zeroized
+/// after the copy into the KEK.
 fn parse_kek(encoded: &str, name: &'static str) -> Result<Kek, KekError> {
     let decoded = STANDARD
         .decode(encoded)

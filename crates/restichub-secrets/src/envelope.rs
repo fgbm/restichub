@@ -60,7 +60,6 @@ pub fn generate_dek() -> Result<Dek, CryptoError> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrappedDek {
     pub kek_id: KekId,
-    /// 96-bit nonce of the wrapping.
     pub nonce: [u8; NONCE_LEN],
     pub ciphertext: Vec<u8>,
 }
@@ -86,12 +85,9 @@ pub fn wrap_dek(
     })
 }
 
-/// Unwraps the data encryption key of the value `wrapped`.
-///
-/// The function asks the provider for the KEK with the key ID `wrapped.kek_id`. The function
-/// returns [`CryptoError::UnknownKek`] if the provider does not hold this KEK. The function uses
-/// the same associated data as [`wrap_dek`]. The function returns [`CryptoError::Decrypt`] if the
-/// associated data changed.
+/// The KEK comes from the provider by the key ID `wrapped.kek_id`; [`CryptoError::UnknownKek`]
+/// means the provider does not hold it. The associated data is the same as [`wrap_dek`], so a
+/// change to it gives [`CryptoError::Decrypt`].
 pub fn unwrap_dek(
     provider: &dyn KekProvider,
     tenant_id: Uuid,

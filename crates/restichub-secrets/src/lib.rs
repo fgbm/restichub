@@ -135,14 +135,10 @@ pub enum SecretError {
     NotUtf8 { path: PathBuf },
 }
 
-/// Reads a secret value from one source.
+/// The source is the file when `file_path` is set, otherwise the environment variable `env_var`.
+/// When both are set, the function returns [`SecretError::BothSourcesSet`].
 ///
-/// The function reads the file if `file_path` is set. The function reads the environment variable
-/// `env_var` if `file_path` is not set. If `file_path` is set and the environment variable is also
-/// set, the function returns [`SecretError::BothSourcesSet`].
-///
-/// The function removes one trailing carriage return and one trailing line feed from the file
-/// value.
+/// One trailing carriage return and one trailing line feed are removed from a file value.
 pub fn read_secret(
     file_path: Option<&Path>,
     env_var: &str,
@@ -162,13 +158,11 @@ pub fn read_secret(
     }
 }
 
-/// Reads a secret value from a file.
+/// The file is opened one time and read from the same handle. A symbolic link, a path that is not a
+/// regular file and a file whose permissions are wider than the owner (`mode & 0o077 != 0`) on Unix
+/// are rejected.
 ///
-/// The function opens the file one time and reads from the same handle. The function rejects a
-/// symbolic link, a path that is not a regular file and a file whose permissions are wider than
-/// the owner (`mode & 0o077 != 0`) on Unix.
-///
-/// The function is crate-internal. The KEK provider uses it.
+/// Crate-internal; the KEK provider uses it.
 pub(crate) fn read_secret_file(path: &Path) -> Result<SecretString, SecretError> {
     check_not_symlink(path)?;
     let file = open_readonly(path)?;

@@ -44,11 +44,8 @@ impl SecretPurpose {
         }
     }
 
-    /// Parses the stable string of a purpose.
-    ///
-    /// The function returns `None` for a string that this version does not know. The strings are
-    /// stable and MUST NOT change: a change makes every stored ciphertext of that purpose
-    /// undecryptable.
+    /// The stable strings MUST NOT change: a change makes every stored ciphertext of that purpose
+    /// undecryptable. `None` means this version does not know the string.
     pub fn parse(value: &str) -> Option<Self> {
         let purpose = match value {
             "repository_password" => Self::RepositoryPassword,
@@ -63,14 +60,11 @@ impl SecretPurpose {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncryptedSecret {
-    /// 96-bit nonce of the encryption.
     pub nonce: [u8; NONCE_LEN],
     pub ciphertext: Vec<u8>,
 }
 
-/// Encrypts the secret value `plaintext` with the DEK of the tenant.
-///
-/// The function uses a random nonce from the operating system random number generator.
+/// A random nonce comes from the operating system random number generator.
 pub fn encrypt_secret(
     dek: &Dek,
     tenant_id: Uuid,
@@ -85,9 +79,8 @@ pub fn encrypt_secret(
     Ok(EncryptedSecret { nonce, ciphertext })
 }
 
-/// Decrypts the secret value `encrypted` with the DEK of the tenant.
-///
-/// The function returns [`CryptoError::Decrypt`] if the DEK or the associated data changed.
+/// The error [`CryptoError::Decrypt`] means the DEK or the associated data changed, and
+/// [`CryptoError::Utf8`] means the plaintext is not UTF-8.
 pub fn decrypt_secret(
     dek: &Dek,
     tenant_id: Uuid,
@@ -103,10 +96,8 @@ pub fn decrypt_secret(
     Ok(SecretString::new(text.to_owned()))
 }
 
-/// Builds the associated data of a secret value.
-///
-/// The function writes the length of the purpose as a big-endian `u32` before the purpose bytes,
-/// so that the fields do not run together. The function checks the conversion of the length.
+/// The length of the purpose is written as a big-endian `u32` before the purpose bytes, so the
+/// fields do not run together. The conversion of the length is checked.
 fn secret_aad(
     tenant_id: Uuid,
     secret_id: Uuid,

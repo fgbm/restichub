@@ -16,11 +16,8 @@ pub const NONCE_LEN: usize = 12;
 /// AES-256 key length in bytes.
 pub(crate) const KEY_LEN: usize = 32;
 
-/// Builds the AES-256-GCM cipher for a 32-byte key.
-///
-/// The function copies the key into a zeroizing buffer, so the working copy is zeroized when it
-/// leaves the scope. The `aes-gcm` crate with the `zeroize` feature zeroizes the state of the
-/// cipher on drop.
+/// The key is copied into a zeroizing buffer, so the working copy is zeroized when it leaves the
+/// scope. The `aes-gcm` crate with the `zeroize` feature zeroizes the cipher state on drop.
 pub(crate) fn cipher(key: &[u8; KEY_LEN]) -> Aes256Gcm {
     let key = Zeroizing::new(*key);
     Aes256Gcm::new(&Key::<Aes256Gcm>::from(*key))

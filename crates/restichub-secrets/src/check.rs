@@ -20,15 +20,12 @@ const KEK_CHECK_PLAINTEXT: &[u8] = b"restichub-kek-check-plaintext-v1";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KekCheck {
     pub kek_id: KekId,
-    /// 96-bit nonce of the encryption.
     pub nonce: [u8; NONCE_LEN],
     pub ciphertext: Vec<u8>,
 }
 
-/// Creates a `kek_check` value with the current KEK.
-///
-/// The function uses a random nonce from the operating system random number generator, so it
-/// returns the error [`CryptoError::Random`] if the generator fails.
+/// A random nonce comes from the operating system random number generator, so the error
+/// [`CryptoError::Random`] means the generator failed.
 pub fn make_kek_check(kek: &Kek) -> Result<KekCheck, CryptoError> {
     let nonce = random_nonce()?;
     let cipher = cipher(kek.bytes());
@@ -40,14 +37,13 @@ pub fn make_kek_check(kek: &Kek) -> Result<KekCheck, CryptoError> {
     })
 }
 
-/// Verifies the `kek_check` value `check` with the loaded KEK `kek`.
-///
-/// The function returns [`KekError::Mismatch`] with the expected and the actual key ID if the key
-/// ID of the loaded KEK is not the key ID of the check. The function returns
-/// [`KekError::CheckCorrupt`] if the key IDs match but the check does not decrypt or the decrypted
-/// plaintext is not the fixed plaintext.
-///
 /// The error message is suitable for the start refusal of the control plane (AC-RP-02).
+///
+/// # Errors
+///
+/// - [`KekError::Mismatch`] when the key ID of the loaded KEK is not the key ID of the check;
+/// - [`KekError::CheckCorrupt`] when the key IDs match but the check does not decrypt or the
+///   decrypted plaintext is not the fixed plaintext.
 pub fn verify_kek_check(kek: &Kek, check: &KekCheck) -> Result<(), KekError> {
     let actual_kek_id = kek.id().clone();
     if actual_kek_id != check.kek_id {
