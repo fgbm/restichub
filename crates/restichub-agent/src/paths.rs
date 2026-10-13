@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+#[cfg(not(windows))]
+use anyhow::Context as _;
+use anyhow::Result;
 
 /// Path of the directory that holds the agent identity (FR-AG-04).
 ///
@@ -31,6 +33,22 @@ pub fn ensure_config_dir(dir: &Path) -> Result<()> {
     #[cfg(windows)]
     {
         crate::winsec::ensure_config_dir(dir)
+    }
+    #[cfg(not(windows))]
+    {
+        create_protected_dir(dir)
+    }
+}
+
+/// Makes one directory that only the service account can use (FR-AG-04).
+///
+/// # Errors
+///
+/// Returns an error when the directory cannot be created or its access cannot be restricted.
+pub fn create_protected_dir(dir: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::winsec::create_protected_dir(dir)
     }
     #[cfg(not(windows))]
     {

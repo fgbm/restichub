@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use restichub_agent::cli::RegisterOptions;
 use restichub_agent::commands;
-use restichub_agent::identity::{KEY_FILE, StoredIdentity};
+use restichub_agent::identity::StoredIdentity;
 use restichub_agent::restic::Restic;
 use x509_parser::prelude::{FromDer as _, GeneralName, X509Certificate};
 
@@ -126,21 +126,19 @@ async fn ac_in_02_a_second_registration_is_refused_without_force() {
     fixture.db.cleanup().await;
 }
 
+#[cfg(unix)]
 #[test]
 fn the_key_file_is_owner_only() {
     let dir = common::temp_config_dir("register-key-mode");
     let identity = sample_identity();
     identity.save(&dir).expect("cannot save the identity");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        let mode = std::fs::metadata(dir.join(KEY_FILE))
-            .expect("the key file")
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(mode, 0o600);
-    }
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = std::fs::metadata(dir.join(restichub_agent::identity::KEY_FILE))
+        .expect("the key file")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
