@@ -3,17 +3,18 @@
 //! An account is installation-wide and its row lives in the platform tenant (ADR-0025). The
 //! username is unique in the installation and the comparison ignores the letter case. A tenant
 //! transaction reads no account row directly: it calls the `SECURITY DEFINER` functions of
-//! migration 0016 through this module.
+//! migration 0016 through this module. Each function carries its own scope rule at the database
+//! level, so this module cannot widen the reach of a caller.
 
 use uuid::Uuid;
 
 use crate::Database;
 use crate::DbError;
 use crate::enums::Role;
-use crate::ids::{TenantId, UserId};
+use crate::ids::{SessionId, TenantId, UserId};
 use crate::tx::TenantTx;
 
-/// Installation-wide identity that a person signs in with.
+/// Installation-wide identity that a person signs in with. It holds no password hash.
 #[derive(Debug, Clone)]
 pub struct Account {
     pub id: UserId,
@@ -25,7 +26,7 @@ pub struct Account {
     pub last_used_tenant_id: Option<TenantId>,
 }
 
-/// Carries the password hash. The control plane never sends it.
+/// An account row with the password hash. The control plane never sends it.
 #[derive(Debug, Clone)]
 pub struct AccountAuth {
     pub id: UserId,
@@ -47,8 +48,32 @@ pub struct Member {
     pub disabled: bool,
     /// A Platform Admin set it for the whole installation.
     pub account_disabled: bool,
-    /// The account holds an active membership in another active tenant.
+    /// The account holds a membership in another tenant that is not deleted.
     pub shared: bool,
+}
+
+/// The result of an account write of the database functions (migration 0016).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteStatus {
+    Ok,
+    /// The account holds no membership in the current tenant, or the account is absent.
+    NotFound,
+    /// The account holds a membership in another tenant that is not deleted.
+    Shared,
+    /// The current tenant or scope may not do this write.
+    Forbidden,
+}
+
+impl WriteStatus {
+    fn parse(value: &str) -> Result<Self, DbError> {
+        match value {
+            "ok" => Ok(Self::Ok),
+            "not_found" => Ok(Self::NotFound),
+            "shared" => Ok(Self::Shared),
+            "forbidden" => Ok(Self::Forbidden),
+            other => Err(DbError::UnknownWriteStatus(other.to_owned())),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +104,7 @@ pub async fn find_account(db: &Database, username: &str) -> Result<Option<Accoun
     ))
 }
 
-/// Finds the account by the identifier.
+/// Finds the account by the identifier. It returns no password hash.
 pub async fn find_account_by_id(db: &Database, id: UserId) -> Result<Option<Account>, DbError> {
     let row = sqlx::query_as::<_, (Uuid, String, String, bool, Option<Uuid>)>(
         "SELECT id, username, display_name, disabled, last_used_tenant_id \
@@ -100,26 +125,20 @@ pub async fn find_account_by_id(db: &Database, id: UserId) -> Result<Option<Acco
     ))
 }
 
-/// Finds the account with its password hash by the identifier.
-pub async fn find_account_auth_by_id(
-    db: &Database,
-    id: UserId,
-) -> Result<Option<AccountAuth>, DbError> {
-    let row = sqlx::query_as::<_, (Uuid, String, bool, Option<Uuid>)>(
-        "SELECT id, password_hash, disabled, last_used_tenant_id FROM auth_find_account_by_id($1)",
-    )
-    .bind(id)
-    .fetch_optional(db.pool())
-    .await
-    .map_err(DbError::Query)?;
-    Ok(row.map(
-        |(id, password_hash, disabled, last_used_tenant_id)| AccountAuth {
-            id: UserId::from_uuid(id),
-            password_hash,
-            disabled,
-            last_used_tenant_id: last_used_tenant_id.map(TenantId::from_uuid),
-        },
-    ))
+/// The password hash of the caller's own account, bound to the caller's own session.
+pub async fn self_password_hash(
+    tx: &mut TenantTx<'_>,
+    account_id: UserId,
+    session_id: SessionId,
+) -> Result<Option<String>, DbError> {
+    let row =
+        sqlx::query_as::<_, (String,)>("SELECT password_hash FROM auth_self_password_hash($1, $2)")
+            .bind(account_id)
+            .bind(session_id)
+            .fetch_optional(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    Ok(row.map(|(hash,)| hash))
 }
 
 /// Creates an account in the platform tenant. The row commits with the caller's transaction.
@@ -136,63 +155,96 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewUser<'_>) -> Result<UserId, 
     Ok(id)
 }
 
-/// The new password applies to the whole installation.
-pub async fn set_password(
+/// A membership insert calls it, so it serializes with the write of the same row.
+/// administrator write of the same account.
+pub async fn lock_account(tx: &mut TenantTx<'_>, id: UserId) -> Result<bool, DbError> {
+    let (locked,): (bool,) = sqlx::query_as("SELECT auth_lock_account($1)")
+        .bind(id)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(locked)
+}
+
+/// The password write of an administrator (ADR-0025). It needs a membership in the current tenant
+/// and refuses a shared account unless the current tenant is the platform tenant.
+pub async fn admin_set_password(
     tx: &mut TenantTx<'_>,
     id: UserId,
     password_hash: &str,
-) -> Result<bool, DbError> {
-    let (updated,): (bool,) = sqlx::query_as("SELECT auth_set_account_password($1, $2)")
+) -> Result<WriteStatus, DbError> {
+    let (status,): (String,) = sqlx::query_as("SELECT auth_admin_set_password($1, $2)")
         .bind(id)
         .bind(password_hash)
         .fetch_one(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
-    Ok(updated)
+    WriteStatus::parse(&status)
 }
 
-pub async fn set_display_name(
+/// The display name write of an administrator. The same scope rule as [`admin_set_password`].
+pub async fn admin_set_display_name(
     tx: &mut TenantTx<'_>,
     id: UserId,
     display_name: &str,
-) -> Result<bool, DbError> {
-    let (updated,): (bool,) = sqlx::query_as("SELECT auth_set_account_display_name($1, $2)")
+) -> Result<WriteStatus, DbError> {
+    let (status,): (String,) = sqlx::query_as("SELECT auth_admin_set_display_name($1, $2)")
         .bind(id)
         .bind(display_name)
         .fetch_one(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
-    Ok(updated)
+    WriteStatus::parse(&status)
 }
 
-/// Disables or enables the account itself. Only a Platform Admin calls this.
+/// The password change of the user itself, bound to the caller's own session.
+pub async fn self_set_password(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    session_id: SessionId,
+    password_hash: &str,
+) -> Result<bool, DbError> {
+    let (written,): (bool,) = sqlx::query_as("SELECT auth_self_set_password($1, $2, $3)")
+        .bind(id)
+        .bind(session_id)
+        .bind(password_hash)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(written)
+}
+
+/// Disables or enables the account itself. Only the platform tenant or the platform scope may do
+/// it.
 pub async fn set_disabled(
     tx: &mut TenantTx<'_>,
     id: UserId,
     disabled: bool,
-) -> Result<bool, DbError> {
-    let (updated,): (bool,) = sqlx::query_as("SELECT auth_set_account_disabled($1, $2)")
+) -> Result<WriteStatus, DbError> {
+    let (status,): (String,) = sqlx::query_as("SELECT auth_set_account_disabled($1, $2)")
         .bind(id)
         .bind(disabled)
         .fetch_one(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
-    Ok(updated)
+    WriteStatus::parse(&status)
 }
 
-/// Stores the tenant that was last used through the account.
+/// Stores the last used tenant, for the account of the caller's own session only.
 pub async fn set_last_tenant(
     tx: &mut TenantTx<'_>,
     id: UserId,
+    session_id: SessionId,
     tenant_id: TenantId,
-) -> Result<(), DbError> {
-    sqlx::query("SELECT auth_set_last_tenant($1, $2)")
+) -> Result<bool, DbError> {
+    let (written,): (bool,) = sqlx::query_as("SELECT auth_set_last_tenant($1, $2, $3)")
         .bind(id)
+        .bind(session_id)
         .bind(tenant_id)
-        .execute(tx.as_conn())
+        .fetch_one(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
-    Ok(())
+    Ok(written)
 }
 
 /// Lists the members of the tenant of the transaction: the accounts with a membership in it.

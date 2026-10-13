@@ -29,11 +29,12 @@ pub async fn role_of(tx: &mut TenantTx<'_>, user_id: UserId) -> Result<Option<Ro
     Ok(row.map(|(role,)| role))
 }
 
-/// Adds a membership or changes its role. A disabled membership is re-enabled.
+/// Adds a membership or changes its role. It leaves the `disabled` flag unchanged: only the
+/// platform `add_membership` re-enables a membership (ADR-0025).
 pub async fn set_role(tx: &mut TenantTx<'_>, user_id: UserId, role: Role) -> Result<(), DbError> {
     sqlx::query(
         "INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, $3) \
-         ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role, disabled = false",
+         ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role",
     )
     .bind(tx.tenant())
     .bind(user_id)

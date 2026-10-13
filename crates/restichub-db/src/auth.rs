@@ -36,6 +36,7 @@ pub struct SessionLookup {
     pub user_id: UserId,
     pub expires_at: OffsetDateTime,
     pub last_seen_at: OffsetDateTime,
+    pub user_agent: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,20 +67,32 @@ pub async fn find_session(
     db: &Database,
     token_hash: &[u8],
 ) -> Result<Option<SessionLookup>, DbError> {
-    let row = sqlx::query_as::<_, (Uuid, Uuid, Uuid, OffsetDateTime, OffsetDateTime)>(
-        "SELECT tenant_id, session_id, user_id, expires_at, last_seen_at FROM auth_find_session($1)",
+    let row = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            Uuid,
+            Uuid,
+            OffsetDateTime,
+            OffsetDateTime,
+            Option<String>,
+        ),
+    >(
+        "SELECT tenant_id, session_id, user_id, expires_at, last_seen_at, user_agent \
+         FROM auth_find_session($1)",
     )
     .bind(token_hash)
     .fetch_optional(db.pool())
     .await
     .map_err(DbError::Query)?;
     Ok(row.map(
-        |(tenant_id, session_id, user_id, expires_at, last_seen_at)| SessionLookup {
+        |(tenant_id, session_id, user_id, expires_at, last_seen_at, user_agent)| SessionLookup {
             tenant_id: TenantId::from_uuid(tenant_id),
             session_id: SessionId::from_uuid(session_id),
             user_id: UserId::from_uuid(user_id),
             expires_at,
             last_seen_at,
+            user_agent,
         },
     ))
 }
@@ -153,6 +166,10 @@ pub async fn account_is_shared(
 }
 
 /// Deletes the sessions of an account. A password change keeps the current session.
+///
+/// The database function reaches the whole installation only from the platform tenant, from the
+/// platform scope, or for the own password change. Otherwise it removes the sessions of the current
+/// tenant only.
 pub async fn delete_account_sessions(
     tx: &mut crate::TenantTx<'_>,
     account_id: UserId,
@@ -165,4 +182,39 @@ pub async fn delete_account_sessions(
         .await
         .map_err(DbError::Query)?;
     Ok(deleted as u64)
+}
+
+/// Deletes one session of the account. The tenant switch removes the source session through it.
+pub async fn delete_session(
+    tx: &mut crate::TenantTx<'_>,
+    session_id: SessionId,
+    account_id: UserId,
+) -> Result<u64, DbError> {
+    let (deleted,): (i64,) = sqlx::query_as("SELECT auth_delete_session($1, $2)")
+        .bind(session_id)
+        .bind(account_id)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(deleted as u64)
+}
+
+/// Gives an existing identity a role in a tenant (Platform Admin only).
+///
+/// The database function requires the platform scope, takes the account row lock, refuses the
+/// platform tenant and re-enables a disabled membership.
+pub async fn add_membership(
+    tx: &mut crate::PlatformTx<'_>,
+    account_id: UserId,
+    tenant_id: TenantId,
+    role: Role,
+) -> Result<bool, DbError> {
+    let (added,): (bool,) = sqlx::query_as("SELECT auth_add_membership($1, $2, $3)")
+        .bind(account_id)
+        .bind(tenant_id)
+        .bind(role.as_str())
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(added)
 }

@@ -65,6 +65,8 @@ pub enum DbError {
     InsecureRuntimeRole { cause: String },
     #[error("the platform transaction did not create the tenant {0}")]
     TenantNotCreated(TenantId),
+    #[error("the database function returned an unknown write status: {0}")]
+    UnknownWriteStatus(String),
     #[error(
         "the database schema is behind (applied version {applied}, expected {expected}); run `restichub-cp migrate`"
     )]
