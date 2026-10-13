@@ -235,6 +235,67 @@ pub fn app_with_kek(db: &Database) -> Router {
     )
 }
 
+/// The gRPC endpoint that the enrollment tests report to an agent.
+pub const AGENT_ENDPOINT: &str = "https://agents.example:8443";
+
+/// Builds a router with a real certificate authority and job signing key set, so the enrollment
+/// endpoint can issue a certificate and return the signed key set.
+pub async fn app_with_pki(db: &Database) -> Router {
+    let provider = test_kek();
+    let ca = restichub_cp::pki::CaService::new(provider.clone());
+    let store = ca
+        .ensure_initialized(db)
+        .await
+        .expect("cannot create the CA");
+    let job_signing = restichub_cp::job_signing::JobSigningService::new(provider.clone());
+    job_signing
+        .ensure_initialized(db)
+        .await
+        .expect("cannot create the job signing key set");
+    let auth = AuthState::new(AuthConfig::default());
+    router(
+        AppState::with_auth(db.clone(), auth)
+            .with_kek(provider)
+            .with_tenancy(TenancyConfig::multi())
+            .with_pki(
+                Arc::new(store),
+                job_signing,
+                Some(AGENT_ENDPOINT.to_owned()),
+            ),
+    )
+}
+
+/// Creates an enrollment token with a known value, so a test can send it to the endpoint.
+pub async fn seed_enrollment_token_value(
+    db: &Database,
+    tenant: TenantId,
+    created_by: restichub_db::UserId,
+    labels: &[String],
+    expires_at: OffsetDateTime,
+) -> (String, restichub_db::EnrollmentTokenId) {
+    let (value, prefix) =
+        restichub_cp::token::random_enrollment_token().expect("cannot build the token");
+    let hash = restichub_cp::token::hash_token(&value);
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::enrollment_tokens::create(
+        &mut tx,
+        &restichub_db::enrollment_tokens::NewEnrollmentToken {
+            token_hash: &hash,
+            display_prefix: &prefix,
+            labels,
+            expires_at,
+            created_by,
+        },
+    )
+    .await
+    .expect("cannot create the enrollment token");
+    tx.commit().await.expect("cannot commit the token");
+    (value, id)
+}
+
 /// The single mode with a key encryption key provider. A test that runs the single-mode setup
 /// needs the provider to wrap the data encryption key of the tenant `default`.
 pub fn app_single_with_kek(db: &Database) -> Router {
@@ -331,10 +392,13 @@ pub async fn seed_agent(db: &Database, tenant: TenantId, hostname: &str) -> rest
     let id = restichub_db::agents::create(
         &mut tx,
         &restichub_db::agents::NewAgent {
+            id: restichub_db::AgentId::new(),
             hostname,
             os: "linux",
             arch: "amd64",
             agent_version: "0.1.0",
+            restic_version: "0.19.0",
+            labels: &[],
             certificate_serial: &serial,
             certificate_expires_at: OffsetDateTime::now_utc() + time::Duration::days(30),
             last_seen_at: None,

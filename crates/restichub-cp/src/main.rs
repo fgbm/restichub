@@ -59,11 +59,14 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .context("cannot verify the key encryption key")?;
 
     // Create the installation CA on the first start, or load it and prove that the KEK opens the
-    // stored keys. The server refuses to start without a CA (ADR-0026).
+    // stored keys. The server refuses to start without a CA (ADR-0026). The loaded store serves the
+    // enrollment endpoint, so an issue reuses the in-memory issuing key.
     let ca = restichub_cp::pki::CaService::new(kek.clone());
-    ca.ensure_initialized(&database)
-        .await
-        .context("cannot prepare the certificate authority")?;
+    let ca_store = Arc::new(
+        ca.ensure_initialized(&database)
+            .await
+            .context("cannot prepare the certificate authority")?,
+    );
 
     // Create the job signing key set on the first start, or load it and prove that the KEK opens
     // the stored keys. The key identifiers are public; a key never reaches the log (AC-PR-02).
@@ -119,7 +122,8 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         AppState::with_auth(database, auth)
             .with_trusted_proxies(config.trusted_proxies.clone())
             .with_kek(kek)
-            .with_tenancy(config.tenancy.clone()),
+            .with_tenancy(config.tenancy.clone())
+            .with_pki(ca_store, job_signing.clone(), config.agent_endpoint.clone()),
     );
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await

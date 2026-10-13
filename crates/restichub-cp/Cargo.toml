@@ -20,6 +20,7 @@ ed25519-dalek = "3.0"
 getrandom = { workspace = true }
 http-body-util = { workspace = true }
 libc = { workspace = true }
+prost = "0.14"
 prost-types = "0.14"
 rcgen = { workspace = true }
 restichub-db = { workspace = true }
@@ -45,9 +46,9 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 http-body-util = "0.1"
-prost = "0.14"
 restichub-canary-scan = { path = "../restichub-canary-scan" }
 restichub-db = { workspace = true, features = ["test-util"] }
+restichub-emulator = { path = "../restichub-emulator" }
 rustls-webpki = { workspace = true }
 sqlx = { workspace = true }
 tower = { workspace = true, features = ["util"] }

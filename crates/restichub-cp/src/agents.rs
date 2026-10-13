@@ -32,6 +32,8 @@ pub struct AgentView {
     pub os: String,
     pub arch: String,
     pub agent_version: String,
+    pub restic_version: String,
+    pub labels: Vec<String>,
     /// Lower-case hexadecimal.
     pub certificate_serial: String,
     /// In RFC 3339.
@@ -51,6 +53,8 @@ impl From<&repo::Agent> for AgentView {
             os: agent.os.clone(),
             arch: agent.arch.clone(),
             agent_version: agent.agent_version.clone(),
+            restic_version: agent.restic_version.clone(),
+            labels: agent.labels.clone(),
             certificate_serial: to_hex(&agent.certificate_serial),
             certificate_expires_at: format_time(agent.certificate_expires_at),
             status: agent.status,

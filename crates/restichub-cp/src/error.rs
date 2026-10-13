@@ -297,6 +297,12 @@ impl From<CryptoError> for ApiError {
     }
 }
 
+impl From<crate::job_signing::JobSigningError> for ApiError {
+    fn from(error: crate::job_signing::JobSigningError) -> Self {
+        Self::internal(cause_chain(&error))
+    }
+}
+
 impl From<KekError> for ApiError {
     fn from(error: KekError) -> Self {
         Self::internal(cause_chain(&error))

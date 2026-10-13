@@ -161,6 +161,10 @@ pub enum CaError {
 pub struct IssuedCertificate {
     pub cert_der: Vec<u8>,
     pub chain_der: Vec<Vec<u8>>,
+    /// Random; the registry row stores the same bytes.
+    pub serial: Vec<u8>,
+    /// Taken from the issued certificate.
+    pub not_after: OffsetDateTime,
 }
 
 /// The control plane server certificate with its private key.
@@ -359,6 +363,59 @@ impl CaStore {
     fn current_issuer(&self) -> Option<&Issuer<'static, KeyPair>> {
         self.current.as_ref().map(|current| &current.issuer)
     }
+
+    /// Signs a certificate signing request into an agent certificate with the current issuing CA.
+    ///
+    /// The certificate carries the SAN URI `restichub://tenant/<tenant>/agent/<agent>` and the agent
+    /// UUID as the common name. The lifetime is [`AGENT_CERT_LIFETIME`], cut to the issuer when the
+    /// issuing CA expires sooner, and the key usage is `clientAuth` (FR-ID-02, FR-ID-03). A request
+    /// that asks for a CA certificate, for another subject alternative name or for a key algorithm
+    /// that the control plane does not accept is refused. The issuer is in memory, so the call needs
+    /// no key material from the database.
+    pub fn issue_agent_certificate(
+        &self,
+        tenant: Uuid,
+        agent: Uuid,
+        csr_der: &[u8],
+    ) -> Result<IssuedCertificate, CaError> {
+        let expected_uri = agent_san_uri(tenant, agent);
+        let csr =
+            CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(csr_der))
+                .map_err(CaError::BadCsr)?;
+        validate_csr(&csr, &expected_uri)?;
+
+        let issuing = self.current_issuing().ok_or(CaError::NoIssuingCa)?;
+        let issuer = self.current_issuer().ok_or(CaError::NoIssuingCa)?;
+        let san = Ia5String::try_from(expected_uri.clone()).map_err(|source| CaError::BadSan {
+            value: expected_uri.clone(),
+            source,
+        })?;
+
+        let now = OffsetDateTime::now_utc();
+        let mut params = CertificateParams::default();
+        params.distinguished_name = distinguished_name(&agent.to_string());
+        params.subject_alt_names = vec![SanType::URI(san)];
+        params.is_ca = IsCa::NoCa;
+        params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        params.use_authority_key_identifier_extension = true;
+        let serial = random_serial()?;
+        let serial_bytes = serial.to_bytes();
+        params.serial_number = Some(serial);
+        params.not_before = now;
+        let not_after = leaf_not_after(now, AGENT_CERT_LIFETIME, issuing.not_after);
+        params.not_after = not_after;
+
+        let cert = params
+            .signed_by(&csr.public_key, issuer)
+            .map_err(CaError::Certificate)?;
+        Ok(IssuedCertificate {
+            cert_der: cert.der().to_vec(),
+            chain_der: vec![issuing.cert_der.clone(), self.root.cert_der.clone()],
+            serial: serial_bytes,
+            not_after,
+        })
+    }
 }
 
 /// The certificate authority of the installation.
@@ -422,12 +479,6 @@ impl CaService {
     }
 
     /// Signs a certificate signing request into an agent certificate with the current issuing CA.
-    ///
-    /// The certificate carries the SAN URI `restichub://tenant/<tenant>/agent/<agent>` and the agent
-    /// UUID as the common name. The lifetime is [`AGENT_CERT_LIFETIME`], cut to the issuer when the
-    /// issuing CA expires sooner, and the key usage is `clientAuth` (FR-ID-02, FR-ID-03). A request
-    /// that asks for a CA certificate, for another subject alternative name or for a key algorithm
-    /// that the control plane does not accept is refused.
     pub fn issue_agent_certificate(
         &self,
         store: &CaStore,
@@ -435,38 +486,7 @@ impl CaService {
         agent: Uuid,
         csr_der: &[u8],
     ) -> Result<IssuedCertificate, CaError> {
-        let expected_uri = agent_san_uri(tenant, agent);
-        let csr =
-            CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(csr_der))
-                .map_err(CaError::BadCsr)?;
-        validate_csr(&csr, &expected_uri)?;
-
-        let issuing = store.current_issuing().ok_or(CaError::NoIssuingCa)?;
-        let issuer = store.current_issuer().ok_or(CaError::NoIssuingCa)?;
-        let san = Ia5String::try_from(expected_uri.clone()).map_err(|source| CaError::BadSan {
-            value: expected_uri.clone(),
-            source,
-        })?;
-
-        let now = OffsetDateTime::now_utc();
-        let mut params = CertificateParams::default();
-        params.distinguished_name = distinguished_name(&agent.to_string());
-        params.subject_alt_names = vec![SanType::URI(san)];
-        params.is_ca = IsCa::NoCa;
-        params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
-        params.use_authority_key_identifier_extension = true;
-        params.serial_number = Some(random_serial()?);
-        params.not_before = now;
-        params.not_after = leaf_not_after(now, AGENT_CERT_LIFETIME, issuing.not_after);
-
-        let cert = params
-            .signed_by(&csr.public_key, issuer)
-            .map_err(CaError::Certificate)?;
-        Ok(IssuedCertificate {
-            cert_der: cert.der().to_vec(),
-            chain_der: vec![issuing.cert_der.clone(), store.root.cert_der.clone()],
-        })
+        store.issue_agent_certificate(tenant, agent, csr_der)
     }
 
     /// Issues the control plane server certificate for the agent listener (ADR-0026).

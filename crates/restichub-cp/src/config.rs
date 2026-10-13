@@ -39,6 +39,8 @@ pub const SIGN_IN_USER_RATE_ENV: &str = "RESTICHUB_AUTH_SIGN_IN_USER_RATE";
 pub const SIGN_IN_IP_RATE_ENV: &str = "RESTICHUB_AUTH_SIGN_IN_IP_RATE";
 pub const INSECURE_COOKIES_ENV: &str = "RESTICHUB_SERVER_INSECURE_COOKIES";
 pub const MAX_CONCURRENT_HASHES_ENV: &str = "RESTICHUB_AUTH_MAX_CONCURRENT_HASHES";
+/// The gRPC endpoint of the agent listener, reported to an agent at enrollment (ADR-0026).
+pub const AGENT_ENDPOINT_ENV: &str = "RESTICHUB_AGENT_ENDPOINT";
 /// The tenancy mode: `single` or `multi` (ADR-0024).
 pub const TENANCY_MODE_ENV: &str = "RESTICHUB_TENANCY_MODE";
 /// The tenant that single mode uses and that the switch from multi mode expects.
@@ -226,6 +228,8 @@ pub struct Config {
     pub auth: AuthConfig,
     pub secrets: SecretsConfig,
     pub tenancy: TenancyConfig,
+    /// Reported to an agent at enrollment; the address of the agent listener (ADR-0026).
+    pub agent_endpoint: Option<String>,
 }
 
 /// Secret handling configuration (ADR-0023, section Secrets).
@@ -273,6 +277,7 @@ impl Config {
         let auth = auth_config(env, file.auth.as_ref(), file.server.as_ref())?;
         let secrets = secrets_config(env, file.secrets.as_ref());
         let tenancy = tenancy_config(env, file.tenancy.as_ref())?;
+        let agent_endpoint = env.get(AGENT_ENDPOINT_ENV).or(file.agent_endpoint);
 
         let database_url = env
             .get(DATABASE_URL_ENV)
@@ -331,6 +336,7 @@ impl Config {
             auth,
             secrets,
             tenancy,
+            agent_endpoint,
         })
     }
 }
@@ -389,6 +395,7 @@ struct FileConfig {
     auth: Option<AuthSection>,
     secrets: Option<SecretsSection>,
     tenancy: Option<TenancySection>,
+    agent_endpoint: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
