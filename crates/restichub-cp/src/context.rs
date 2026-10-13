@@ -83,26 +83,85 @@ impl Operation {
         )
     }
 
-    /// Returns true if the operation reads or writes tenant data.
+    /// Returns true for the account operations of an authenticated session.
     ///
-    /// The platform tenant is internal and holds no tenant data (ADR-0029). A session with no
-    /// organization runs in the platform tenant, so these operations are refused there (HTTP 403).
-    pub fn is_tenant_data(self) -> bool {
+    /// A session with no organization runs in the internal platform tenant. Only these operations
+    /// pass there (ADR-0029).
+    pub fn is_auth(self) -> bool {
         matches!(
             self,
-            Self::AuditRead
-                | Self::UsersRead
-                | Self::UsersWrite
-                | Self::ApiTokensRead
-                | Self::ApiTokensWrite
-                | Self::AgentsRead
-                | Self::AgentsWrite
-                | Self::EnrollmentTokensRead
-                | Self::EnrollmentTokensWrite
-                | Self::SecretsRead
-                | Self::SecretsWrite
+            Self::AuthMe
+                | Self::AuthSignOut
+                | Self::AuthPasswordChange
+                | Self::AuthTenants
+                | Self::AuthSwitch
         )
     }
+
+    /// Every operation. A new variant stops the build in [`the_platform_tenant_allow_list`] and in
+    /// [`crate::context::Operation::classify`].
+    pub const ALL: [Operation; 21] = [
+        Operation::AuditRead,
+        Operation::PlatformAuditRead,
+        Operation::PlatformTenantsRead,
+        Operation::PlatformTenantsWrite,
+        Operation::PlatformUsersRead,
+        Operation::PlatformUsersWrite,
+        Operation::AuthMe,
+        Operation::AuthSignOut,
+        Operation::AuthPasswordChange,
+        Operation::AuthTenants,
+        Operation::AuthSwitch,
+        Operation::UsersRead,
+        Operation::UsersWrite,
+        Operation::ApiTokensRead,
+        Operation::ApiTokensWrite,
+        Operation::AgentsRead,
+        Operation::AgentsWrite,
+        Operation::EnrollmentTokensRead,
+        Operation::EnrollmentTokensWrite,
+        Operation::SecretsRead,
+        Operation::SecretsWrite,
+    ];
+
+    /// The class of an operation, for the platform-tenant allow-list. The `match` lists every
+    /// variant, so a new variant stops the build.
+    pub fn classify(self) -> OperationClass {
+        match self {
+            Operation::AuthMe
+            | Operation::AuthSignOut
+            | Operation::AuthPasswordChange
+            | Operation::AuthTenants
+            | Operation::AuthSwitch => OperationClass::Auth,
+            Operation::PlatformAuditRead
+            | Operation::PlatformTenantsRead
+            | Operation::PlatformTenantsWrite
+            | Operation::PlatformUsersRead
+            | Operation::PlatformUsersWrite => OperationClass::Platform,
+            Operation::AuditRead
+            | Operation::UsersRead
+            | Operation::UsersWrite
+            | Operation::ApiTokensRead
+            | Operation::ApiTokensWrite
+            | Operation::AgentsRead
+            | Operation::AgentsWrite
+            | Operation::EnrollmentTokensRead
+            | Operation::EnrollmentTokensWrite
+            | Operation::SecretsRead
+            | Operation::SecretsWrite => OperationClass::Tenant,
+        }
+    }
+}
+
+/// The class of an operation for the platform-tenant allow-list (ADR-0029).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationClass {
+    /// An account operation of an authenticated session.
+    Auth,
+    /// A platform administration operation; it needs the Platform Admin right.
+    Platform,
+    /// A tenant data operation; it needs a real organization.
+    Tenant,
 }
 
 /// The role that an operation needs (ADR-0023, section Roles).
@@ -223,7 +282,8 @@ impl RequestContext {
                 Err(ApiError::forbidden())
             };
         }
-        if operation.is_tenant_data() && self.tenant_id == restichub_db::PLATFORM_TENANT_ID {
+        // The platform tenant is internal: only the account operations pass there (ADR-0029).
+        if self.tenant_id == restichub_db::PLATFORM_TENANT_ID && !operation.is_auth() {
             return Err(ApiError::forbidden());
         }
         if self.role.allows(minimum_role(operation)) {
@@ -435,10 +495,17 @@ mod tests {
     use restichub_db::audit::Actor;
     use uuid::Uuid;
 
-    use super::{RequestContext, ensure_target_not_above_actor};
+    use super::{Operation, OperationClass, RequestContext, ensure_target_not_above_actor};
 
     fn context(role: Role) -> RequestContext {
         RequestContext::new(TenantId::from_uuid(Uuid::now_v7()), Actor::System, role)
+    }
+
+    fn platform_context(role: Role, platform_admin: bool) -> RequestContext {
+        let mut context =
+            RequestContext::new(restichub_db::PLATFORM_TENANT_ID, Actor::System, role);
+        context.platform_admin = platform_admin;
+        context
     }
 
     #[test]
@@ -447,5 +514,33 @@ mod tests {
         assert!(ensure_target_not_above_actor(&context(Role::Admin), Role::Viewer).is_ok());
         assert!(ensure_target_not_above_actor(&context(Role::Admin), Role::PlatformAdmin).is_err());
         assert!(ensure_target_not_above_actor(&context(Role::Viewer), Role::Operator).is_err());
+    }
+
+    /// The platform tenant is an allow-list: only the account operations and the platform
+    /// operations pass. `Operation::classify` lists every variant, so a new variant stops the build.
+    #[test]
+    fn the_platform_tenant_allow_list() {
+        for operation in Operation::ALL {
+            let class = operation.classify();
+            assert_eq!(operation.is_auth(), class == OperationClass::Auth);
+
+            // A Platform Admin reaches the platform operations and the account operations.
+            let allowed = class != OperationClass::Tenant;
+            assert_eq!(
+                platform_context(Role::PlatformAdmin, true)
+                    .authorize(operation)
+                    .is_ok(),
+                allowed,
+                "{operation:?}"
+            );
+            // Without the right only the account operations pass.
+            assert_eq!(
+                platform_context(Role::Viewer, false)
+                    .authorize(operation)
+                    .is_ok(),
+                class == OperationClass::Auth,
+                "{operation:?}"
+            );
+        }
     }
 }

@@ -536,19 +536,29 @@ async fn ac_au_16_the_self_right_and_the_last_admin_stay() {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
-    for value in [true, false] {
-        let (status, _, problem) = send(
-            &app,
-            request(
-                "PATCH",
-                &format!("/api/v1/platform/users/{second}"),
-                Some(&cookie),
-                Some(json!({"platform_admin": value})),
-            ),
-        )
-        .await;
-        assert_eq!(status, StatusCode::NO_CONTENT, "{problem}");
-    }
+    // The grant needs a new password; the removal does not.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{second}"),
+            Some(&cookie),
+            Some(json!({"platform_admin": true, "password": "a brand new password"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{problem}");
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{second}"),
+            Some(&cookie),
+            Some(json!({"platform_admin": false})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{problem}");
 
     db.cleanup().await;
 }
@@ -936,6 +946,107 @@ async fn a_concurrent_account_create_is_a_conflict() {
             .any(|problem| { problem.get("code").and_then(Value::as_str) == Some("email_taken") }),
         "the loser must answer email_taken: {email_problems:?}"
     );
+
+    db.cleanup().await;
+}
+
+/// AC-AU-19: a grant of the Platform Admin right requires a new password and ends every session of
+/// the account, so a password that a tenant Admin knows gives no access (ADR-0029).
+#[tokio::test]
+async fn ac_au_19_a_grant_requires_a_new_password_and_ends_the_sessions() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let cookie = platform_admin(db.database()).await;
+    let app = app_with_kek(db.database());
+    let tenant_a = create_tenant(db.database(), "grant-pw").await.to_string();
+
+    // An account with a membership and a password that the tenant Admin may know.
+    let body = json!({
+        "username": "grantee-pw",
+        "display_name": "Grantee",
+        "password": "correct horse battery",
+        "memberships": [{"tenant_id": tenant_a, "role": "viewer"}],
+    });
+    let (status, account) = create_account(&app, &cookie, body).await;
+    assert_eq!(status, StatusCode::CREATED, "{account}");
+    let user_id = account
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+
+    // One session of the account exists before the grant.
+    let sign_in = json!({"username": "grantee-pw", "password": "correct horse battery"});
+    let (status, session, me) = send(
+        &app,
+        request("POST", "/api/v1/auth/sign-in", None, Some(sign_in)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let session = session.expect("a session cookie");
+
+    // Grant with no password: HTTP 400.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{user_id}"),
+            Some(&cookie),
+            Some(json!({"platform_admin": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+
+    // Grant with a new password.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{user_id}"),
+            Some(&cookie),
+            Some(json!({"platform_admin": true, "password": "a brand new password"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{problem}");
+
+    // Platform list: the right is set.
+    let (_, _, list) = send(
+        &app,
+        request("GET", "/api/v1/platform/users", Some(&cookie), None),
+    )
+    .await;
+    let found = find_account(&list, "grantee-pw").unwrap_or_else(|| panic!("no account: {list}"));
+    assert_eq!(
+        found.get("platform_admin").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    // The old password fails and the old session is gone.
+    let old = json!({"username": "grantee-pw", "password": "correct horse battery"});
+    let (status, _, _) = send(
+        &app,
+        request("POST", "/api/v1/auth/sign-in", None, Some(old)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, _) = send(
+        &app,
+        request("GET", "/api/v1/auth/me", Some(&session), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // New password: a session.
+    let new = json!({"username": "grantee-pw", "password": "a brand new password"});
+    let (status, _, me) = send(
+        &app,
+        request("POST", "/api/v1/auth/sign-in", None, Some(new)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
 
     db.cleanup().await;
 }

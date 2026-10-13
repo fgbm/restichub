@@ -74,6 +74,9 @@ pub struct UpdateAccountRequest {
     pub email: Option<String>,
     /// True when the account holds the installation-wide right (ADR-0029).
     pub platform_admin: Option<bool>,
+    /// The new secret of a grant. It is required when `platform_admin` is true and it is not used
+    /// otherwise.
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -480,8 +483,8 @@ pub async fn remove_membership(
 
 /// Changes an account itself (Platform Admin only).
 ///
-/// The endpoint refuses the caller's own account and the last active Platform Admin. At least one
-/// field must be present.
+/// The endpoint refuses the caller's own account and the last active Platform Admin. A grant of the
+/// right requires a new password and ends every session of the account (ADR-0029).
 #[utoipa::path(
     patch,
     path = "/api/v1/platform/users/{id}",
@@ -490,7 +493,7 @@ pub async fn remove_membership(
     request_body = UpdateAccountRequest,
     responses(
         (status = 204, description = "The account is changed."),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid, or a grant holds no password.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
         (status = 404, description = "The account is not found.", body = crate::error::ProblemBody),
         (status = 409, description = "The account is the last active Platform Admin or the email exists.", body = crate::error::ProblemBody)
@@ -504,15 +507,39 @@ pub async fn update_account(
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformUsersWrite)?;
     let user_id = parse_uuid(&id)?;
-    if body.disabled.is_none() && body.email.is_none() && body.platform_admin.is_none() {
+    if body.disabled.is_none()
+        && body.email.is_none()
+        && body.platform_admin.is_none()
+        && body.password.is_none()
+    {
         return Err(ApiError::invalid_field(
             "body",
             validation::Reason::InvalidBody,
         ));
     }
-    // The caller cannot disable its own account and cannot remove its own right (ADR-0029).
+    // A grant of the right needs a new password that only the Platform Admin chooses. The old
+    // password may be known to a tenant Admin, so it must not survive the grant (ADR-0029, T25).
+    let grant = body.platform_admin == Some(true);
+    let grant_hash = match (&body.password, grant) {
+        (Some(password), true) => {
+            validation::validate_password("password", password)?;
+            Some(
+                password::hash_password_limited(&state.auth().hash_semaphore, password.to_owned())
+                    .await?,
+            )
+        }
+        (None, true) => {
+            return Err(ApiError::invalid_field(
+                "password",
+                validation::Reason::Empty,
+            ));
+        }
+        _ => None,
+    };
+    // The caller cannot disable its own account, cannot remove its own right and cannot grant the
+    // right to itself (it already holds it).
     if context.actor == Actor::User(user_id)
-        && (body.disabled == Some(true) || body.platform_admin == Some(false))
+        && (body.disabled == Some(true) || body.platform_admin == Some(false) || grant)
     {
         return Err(ApiError::forbidden());
     }
@@ -532,7 +559,17 @@ pub async fn update_account(
     if target_active && active_count <= 1 && (removes_right || disables) {
         return Err(ApiError::conflict());
     }
-    if let Some(value) = body.platform_admin {
+    if grant {
+        // The grant sets the new password, sets the right and ends every session of the account in
+        // one transaction.
+        match users::grant_platform_admin(&mut tx, user_id, grant_hash.as_deref().unwrap_or(""))
+            .await?
+        {
+            WriteStatus::Ok => {}
+            WriteStatus::NotFound => return Err(ApiError::not_found()),
+            WriteStatus::Forbidden | WriteStatus::Shared => return Err(ApiError::forbidden()),
+        }
+    } else if let Some(value) = body.platform_admin {
         match users::set_platform_admin(&mut tx, user_id, value).await? {
             WriteStatus::Ok => {}
             WriteStatus::NotFound => return Err(ApiError::not_found()),
@@ -567,6 +604,7 @@ pub async fn update_account(
             "disabled": body.disabled,
             "email": email,
             "platform_admin": body.platform_admin,
+            "password": if grant { Some("<grant>") } else { None },
         })),
         &[],
     ));

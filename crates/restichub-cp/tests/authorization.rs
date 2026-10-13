@@ -162,10 +162,12 @@ async fn ac_au_02_role_operation_matrix() {
             let allowed_by_role = role.rank() >= minimum.rank();
             // A platform operation needs the Platform Admin right (ADR-0029). A tenant data
             // operation is refused in the platform tenant, which holds no organization.
+            // The platform tenant is an allow-list: only the account operations pass there, next to
+            // the platform operations that need the right (ADR-0029).
             let tenant_ok = if operation.is_platform() {
                 role == Role::PlatformAdmin
-            } else if operation.is_tenant_data() {
-                session_tenant != PLATFORM_TENANT_ID
+            } else if session_tenant == PLATFORM_TENANT_ID {
+                operation.is_auth()
             } else {
                 true
             };
@@ -203,6 +205,11 @@ async fn ac_au_02_role_operation_matrix() {
     assert!(Operation::SecretsRead.is_tenant_only());
     assert!(Operation::SecretsWrite.is_tenant_only());
     assert!(!Operation::UsersRead.is_tenant_only());
+    // The account operations are the allow-list of the platform tenant.
+    assert!(Operation::AuthMe.is_auth());
+    assert!(Operation::AuthPasswordChange.is_auth());
+    assert!(!Operation::UsersRead.is_auth());
+    assert!(!Operation::AgentsRead.is_auth());
 
     // Only the Platform Admin manages the tenants, and only in the platform tenant.
     for operation in [
