@@ -174,11 +174,20 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-AU-03 | FR-AU-04 | Sign in with the username and the password only. The account has one active membership. **Expected:** a session in that tenant. The sign-in screen has no tenant field. | A |
 | AC-AU-04 | FR-AU-04 | Sign in with the username and the password only. The account has two active memberships. **Expected:** a session in the last used tenant, or in the first by name when the account has no last used tenant. `GET /api/v1/auth/tenants` lists the two memberships only. | A |
 | AC-AU-05 | FR-AU-04 | Switch tenants with `POST /api/v1/auth/switch`. **Expected:** a new session in the target tenant, the old session is gone, the cookie rotates. The audit log holds `session_switch` in both tenants. A tenant without membership gives HTTP 403. | A |
-| AC-AU-06 | FR-AU-04 | Sign in when the account has no active membership (the memberships are absent, or their tenants are suspended or deleted). **Expected:** HTTP 401 `invalid_credentials`, with the same answer and a similar time as a wrong password. | S |
+| AC-AU-06 | FR-AU-04 | Sign in when the account has no active membership (the memberships are absent, or their tenants are suspended or deleted). **Expected:** the sign-in succeeds with no current organization. A Platform Admin reaches the platform screens. Another account sees the empty state "no organizations, ask an administrator". | S |
 | AC-AU-07 | FR-AU-04 | A tenant Admin resets the password or the display name of a shared account. It creates an account with a username that exists in another tenant. **Expected:** HTTP 403 `shared_account` for the first two calls, HTTP 409 `username_taken` for the create. | A |
 | AC-AU-08 | FR-AU-04 | The Platform Admin creates an account and adds a membership in the first organization, then a membership in the second. **Expected:** the account signs in and reaches the first, and the switch to the second works (AC-AU-04). | A |
 | AC-AU-09 | FR-TN-02 | The Platform Admin calls `GET /api/v1/platform/users`. **Expected:** the list holds every account of every organization with its memberships and roles. A tenant Admin gets HTTP 403. | A |
 | AC-AU-10 | FR-AU-04 | Create an account with an email that another account holds. **Expected:** HTTP 409 `email_taken`. The control plane treats the email of a new account as unverified. | A |
+| AC-AU-11 | FR-TN-02 | Complete the setup of a new installation. **Expected:** the setup creates one account with the Platform Admin right and no membership. The account signs in and reaches the platform screens. | A |
+| AC-AU-12 | FR-AU-04 | Open the organization switcher as a Platform Admin with no membership. **Expected:** the switcher shows the empty state and no Platform entry. | A |
+| AC-AU-13 | FR-AU-04 | A Platform Admin is a member of organization A and organization B. **Expected:** the switcher lists A and B only, and the switch works (AC-AU-04). | A |
+| AC-AU-14 | FR-TN-02 | Open the platform screens (Organizations, Platform users, Platform audit) as a Platform Admin in any current organization. **Expected:** the screens open with no organization switch. | A |
+| AC-AU-15 | FR-TN-02 | A tenant Admin calls a platform endpoint. **Expected:** HTTP 403. The Platform Admin right is necessary. | A |
+| AC-AU-16 | FR-TN-02 | Remove the Platform Admin right from the last active Platform Admin, or from itself. **Expected:** HTTP 409 for the last one and HTTP 403 for the own account. | A |
+| AC-AU-17 | FR-AU-04 | A Platform Admin holds the Viewer role in organization A and reads the tenant data of A. **Expected:** the answer agrees with the Viewer role. The right adds no access (ADR-0006). | A |
+| AC-AU-18 | FR-TN-02 | Apply the migration to an installation with `platform_admin` memberships. **Expected:** every such account holds the right and the memberships are gone. | A |
+| AC-TN-08 | FR-TN-01 | List the organizations and open the switcher. **Expected:** the internal platform tenant appears in no user-facing list and is no membership target. | A |
 
 ## 13. Non-functional requirements
 

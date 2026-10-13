@@ -41,7 +41,7 @@ The sign-in screen asks for the username and the password only. The account is i
   3. Read the one-time setup token in the control plane log with `docker compose logs cp`.
   4. Enter the setup token, the username, the display name and a password of 12 characters or more.
   5. Click "Create the Platform Admin".
-- **Expected result:** the screen reports the success and shows the sign-in screen. The Platform Admin account exists in the platform tenant.
+- **Expected result:** the screen reports the success and shows the sign-in screen. The Platform Admin account holds the Platform Admin right and no membership.
 - **Alternative flows:**
   - A wrong setup token gives the error `invalid_setup_token`.
   - A repeated setup gives the error `setup_already_done`.
@@ -79,6 +79,21 @@ The sign-in screen asks for the username and the password only. The account is i
   - A lost session redirects to the sign-in screen.
 - **Requirements:** FR-AU-04, FR-TN-02.
 - **Acceptance criteria:** AC-AU-01.
+- **Status:** Ready on the stage.
+
+### UC-SETUP-04: Sign in with no organization
+
+- **Actor:** a Platform Admin with no membership, or another account with no membership.
+- **Preconditions:** the account exists. The account holds no membership in an active organization.
+- **Main flow:**
+  1. Open the stage address.
+  2. Enter the username and the password.
+  3. Click "Sign in".
+- **Expected result:** the sign-in succeeds. A Platform Admin reaches the platform screens (Organizations, Platform users, Platform audit). Another account sees the empty state "no organizations, ask an administrator". The switcher shows no organization and no Platform entry.
+- **Alternative flows:**
+  - The platform screens appear for a Platform Admin in any current organization.
+- **Requirements:** FR-AU-04, FR-TN-02.
+- **Acceptance criteria:** AC-AU-06, AC-AU-11, AC-AU-12.
 - **Status:** Ready on the stage.
 
 ## 6. Platform Admin manages organizations
@@ -125,9 +140,9 @@ The sign-in screen asks for the username and the password only. The account is i
   1. Click the organization name in the top bar.
   2. The menu lists the memberships with the role and a mark on the current organization.
   3. Click another organization.
-- **Expected result:** a toast reports the switch. Every screen reloads its data for the new organization. The audit log holds a `session_switch` record.
+- **Expected result:** a toast reports the switch. Every screen reloads its data for the new organization. The audit log holds a `session_switch` record. The menu lists real organizations only; the internal platform tenant appears in no entry.
 - **Alternative flows:**
-  - A Platform Admin membership appears under a Platform heading in the same menu.
+  - A Platform Admin with no membership sees the empty state in the menu.
   - A filter field appears in the menu when the account holds more than seven memberships.
 - **Requirements:** FR-TN-02.
 - **Acceptance criteria:** AC-AU-01.
@@ -477,6 +492,7 @@ The sign-in screen asks for the username and the password only. The account is i
 | UC-SETUP-01 | FR-AU-03, FR-TN-02 | AC-TN-06 | Ready on the stage |
 | UC-SETUP-02 | FR-AU-03, FR-AU-04 | AC-AU-01 | Ready on the stage |
 | UC-SETUP-03 | FR-AU-04, FR-TN-02 | AC-AU-01 | Ready on the stage |
+| UC-SETUP-04 | FR-AU-04, FR-TN-02 | AC-AU-06, AC-AU-11, AC-AU-12 | Ready on the stage |
 | UC-ORG-01 | FR-TN-01, FR-TN-02 | AC-TN-07 | Ready on the stage |
 | UC-ORG-02 | FR-TN-02 | AC-TN-03 | Ready on the stage |
 | UC-ORG-03 | FR-TN-02 | AC-AU-01 | Ready on the stage |

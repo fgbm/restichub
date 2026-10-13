@@ -46,6 +46,9 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | T17 | A revoked agent stays connected or reconnects. | The control plane checks the registry status and the certificate serial at each handshake and stream open (ADR-0026, FR-ID-04). A revoke invalidates the cache and closes the stream at once. | A stale cache entry delays the close by the cache lifetime. |
 | T18 | A CA private key or a job signing key in a database dump. | The KEK wraps each key outside the database (ADR-0017, ADR-0023, ADR-0026). | An attacker with the KEK and the dump gets the keys. `rcgen` and `ring` keep some private key bytes in the heap in a buffer that they do not zeroize. The control plane holds the plaintext only for the current issuing CA. It drops every other copy at load. It refuses a core dump on Linux (ADR-0026). |
 | T19 | An attacker swaps a stored key blob. | The AAD binds the ciphertext to the tenant and the key role. The start check binds the key to the certificate of its row (ADR-0026). | None. |
+| T20 | A Platform Admin reads the tenant data of an organization through the platform right. | The right is an account attribute and gives no tenant data access (ADR-0029). A platform operation runs in the platform scope; the tenant data needs a membership and its role (ADR-0006, ADR-0025). AC-AU-17 checks it. | None for the right alone. The operator grants a membership on purpose. |
+| T21 | A Platform Admin adds a membership for itself and hides the change. | The write needs the Platform Admin right, and it is an audit record in the platform audit and in the target organization's audit (ADR-0029). | A Platform Admin can add itself to any active organization. The operator reads the platform audit. |
+| T22 | A user-facing list shows the internal platform tenant. | The organization list, the switcher and the tenant API exclude the platform tenant (ADR-0029). AC-TN-08 checks it. | None. |
 
 ## 4. Recommendations for operators
 

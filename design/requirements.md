@@ -208,7 +208,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-TN-01 | Each object belongs to a tenant: agents, repositories, secrets, profiles, plans, jobs, logs, audit records, tokens. | M |
-| FR-TN-02 | The Platform Admin manages tenants, creates an organization by name only, and manages the installation-wide accounts and their memberships. An organization without an active Admin has the derived state "no administrator". Admin, Operator and Viewer roles apply in one tenant. | M |
+| FR-TN-02 | The Platform Admin right is a right of the installation account, independent of the organizations. A Platform Admin manages tenants, creates an organization by name only, and manages the installation-wide accounts and their memberships. An organization without an active Admin has the derived state "no administrator". Admin, Operator and Viewer roles apply in one tenant. | M |
 | FR-TN-03 | The enrollment token belongs to one tenant. Each agent belongs to exactly one tenant, and the certificate contains the tenant ID. | M |
 | FR-TN-04 | Quotas for each tenant: agents, plans, concurrent jobs, log volume. | 1.0 |
 | FR-TN-05 | Metrics and audit records have a tenant label. Each API token belongs to one tenant. | M |
@@ -238,7 +238,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-AU-01 | Audit log: sign-in, configuration changes, run, cancellation, restore, delivery of secrets to agents, agent enrollment and revocation, remote installation. Each record has user, time, IP address and diff. | M |
 | FR-AU-02 | The audit log is append-only and protected by a hash chain. Export to syslog. | 1.0 |
 | FR-AU-03 | Authentication: local users with password, TOTP, OIDC, LDAP or Active Directory. | M (local), 1.0 (TOTP, OIDC), L (LDAP) |
-| FR-AU-04 | A user account is installation-wide. A user signs in with the username and the password only, without a tenant name, and switches between the tenants after the sign-in. | M |
+| FR-AU-04 | A user account is installation-wide. A user signs in with the username and the password only, without a tenant name, and switches between the tenants after the sign-in. An account with no membership signs in too and sees the platform screens or the empty state. | M |
 
 ## 4. Non-functional requirements
 
