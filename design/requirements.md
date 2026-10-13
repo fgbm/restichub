@@ -208,7 +208,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-TN-01 | Each object belongs to a tenant: agents, repositories, secrets, profiles, plans, jobs, logs, audit records, tokens. | M |
-| FR-TN-02 | The Platform Admin manages tenants. Admin, Operator and Viewer roles apply in one tenant. | M |
+| FR-TN-02 | The Platform Admin manages tenants, creates an organization by name only, and manages the installation-wide accounts and their memberships. An organization without an active Admin has the derived state "no administrator". Admin, Operator and Viewer roles apply in one tenant. | M |
 | FR-TN-03 | The enrollment token belongs to one tenant. Each agent belongs to exactly one tenant, and the certificate contains the tenant ID. | M |
 | FR-TN-04 | Quotas for each tenant: agents, plans, concurrent jobs, log volume. | 1.0 |
 | FR-TN-05 | Metrics and audit records have a tenant label. Each API token belongs to one tenant. | M |
