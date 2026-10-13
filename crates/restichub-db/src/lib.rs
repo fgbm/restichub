@@ -89,6 +89,20 @@ impl DbError {
         self.sqlstate().as_deref() == Some("23505")
     }
 
+    /// The name of the violated constraint, when the driver reports it.
+    ///
+    /// A caller uses it to tell two unique indexes apart, for example the username and the email of
+    /// the account row.
+    pub fn unique_constraint(&self) -> Option<String> {
+        match self {
+            Self::Query(error) => error
+                .as_database_error()
+                .and_then(|error| error.constraint())
+                .map(str::to_owned),
+            _ => None,
+        }
+    }
+
     /// True for a check constraint violation (SQLSTATE 23514).
     pub fn is_check_violation(&self) -> bool {
         self.sqlstate().as_deref() == Some("23514")

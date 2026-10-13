@@ -199,3 +199,117 @@ async fn db_the_platform_admin_migration_moves_the_membership_to_a_right() -> Te
     db.cleanup().await;
     Ok(())
 }
+
+/// A disabled `platform_admin` membership gives no right, and every platform API token is revoked
+/// (ADR-0029).
+#[tokio::test]
+async fn db_the_right_migration_skips_a_revoked_membership_and_revokes_the_tokens() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let admin = admin_pool(&db).await?;
+    let name = format!("restichub_mig_{}", uuid::Uuid::now_v7().simple());
+    admin_query(&admin, &format!("CREATE DATABASE \"{name}\"")).await?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(db.admin_options().database(name.as_str()))
+        .await?;
+
+    // Apply the migrations that precede the right.
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 21)
+        .cloned()
+        .collect();
+    let up_to_21 = Migrator {
+        migrations: Cow::Owned(before),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+        table_name: Cow::Borrowed("_sqlx_migrations"),
+        create_schemas: Cow::Owned(Vec::new()),
+    };
+    up_to_21.run(&pool).await?;
+
+    // One account with an enabled membership and one with a disabled (revoked) membership.
+    let enabled = uuid::Uuid::now_v7();
+    let revoked = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
+         VALUES ($1, '00000000-0000-7000-8000-000000000000', 'enabled', 'phc', 'Enabled'), \
+                ($2, '00000000-0000-7000-8000-000000000000', 'revoked', 'phc', 'Revoked')",
+    )
+    .bind(enabled)
+    .bind(revoked)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO memberships (tenant_id, user_id, role, disabled) \
+         VALUES ('00000000-0000-7000-8000-000000000000', $1, 'platform_admin', false), \
+                ('00000000-0000-7000-8000-000000000000', $2, 'platform_admin', true)",
+    )
+    .bind(enabled)
+    .bind(revoked)
+    .execute(&pool)
+    .await?;
+
+    // A live platform-tenant platform_admin token.
+    sqlx::query(
+        "INSERT INTO api_tokens \
+         (id, tenant_id, name, token_hash, display_prefix, role, created_by, revoked_at) \
+         VALUES ($1, '00000000-0000-7000-8000-000000000000', 'old', $2, 'rh_deadbeef', \
+                 'platform_admin', $3, NULL)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(vec![9u8; 32])
+    .bind(enabled)
+    .execute(&pool)
+    .await?;
+
+    // Apply the right migration.
+    let sql = MIGRATOR
+        .iter()
+        .find(|migration| migration.version == 22)
+        .expect("the platform admin right migration is present")
+        .sql
+        .as_str()
+        .to_owned();
+    sqlx::raw_sql(AssertSqlSafe(sql)).execute(&pool).await?;
+
+    let (enabled_flag,): (bool,) = sqlx::query_as("SELECT platform_admin FROM users WHERE id = $1")
+        .bind(enabled)
+        .fetch_one(&pool)
+        .await?;
+    assert!(enabled_flag, "the enabled membership gives the right");
+    let (revoked_flag,): (bool,) = sqlx::query_as("SELECT platform_admin FROM users WHERE id = $1")
+        .bind(revoked)
+        .fetch_one(&pool)
+        .await?;
+    assert!(!revoked_flag, "the disabled membership gives no right");
+
+    let (memberships,): (i64,) = sqlx::query_as("SELECT count(*) FROM memberships")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(memberships, 0, "the platform_admin memberships are gone");
+
+    let (live,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM api_tokens WHERE revoked_at IS NULL")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(live, 0, "the platform token is revoked");
+    let (kept,): (i64,) = sqlx::query_as("SELECT count(*) FROM api_tokens")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(kept, 1, "the token row stays");
+
+    pool.close().await;
+    admin_query(
+        &admin,
+        &format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"),
+    )
+    .await?;
+    admin.close().await;
+    db.cleanup().await;
+    Ok(())
+}
