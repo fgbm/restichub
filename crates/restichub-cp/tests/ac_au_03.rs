@@ -1501,6 +1501,9 @@ async fn a_signin_with_no_membership_and_no_right_reaches_only_the_account_opera
         body.get("platform_admin").and_then(Value::as_bool),
         Some(false)
     );
+    // A non-admin with no membership carries the lowest role, never the synthetic Platform Admin
+    // role (ADR-0029).
+    assert_eq!(body.get("role").and_then(Value::as_str), Some("viewer"));
     let cookie = cookie.expect("a session cookie");
 
     // Account operations work.
@@ -1509,6 +1512,11 @@ async fn a_signin_with_no_membership_and_no_right_reaches_only_the_account_opera
     assert!(
         me.get("tenant").map(Value::is_null).unwrap_or(false),
         "{me}"
+    );
+    assert_eq!(me.get("role").and_then(Value::as_str), Some("viewer"));
+    assert_eq!(
+        me.get("platform_admin").and_then(Value::as_bool),
+        Some(false)
     );
 
     // Every tenant data route and every platform route is refused.

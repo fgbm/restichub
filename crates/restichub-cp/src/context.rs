@@ -95,6 +95,10 @@ impl Operation {
                 | Self::UsersWrite
                 | Self::ApiTokensRead
                 | Self::ApiTokensWrite
+                | Self::AgentsRead
+                | Self::AgentsWrite
+                | Self::EnrollmentTokensRead
+                | Self::EnrollmentTokensWrite
                 | Self::SecretsRead
                 | Self::SecretsWrite
         )

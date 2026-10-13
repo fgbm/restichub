@@ -165,6 +165,11 @@ async fn the_setup_creates_the_first_platform_admin_once() {
         me.get("platform_admin").and_then(Value::as_bool),
         Some(true)
     );
+    // A Platform Admin with no membership carries the synthetic Platform Admin role (ADR-0029).
+    assert_eq!(
+        me.get("role").and_then(Value::as_str),
+        Some("platform_admin")
+    );
     assert!(
         me.get("tenant").map(Value::is_null).unwrap_or(false),
         "{me}"
