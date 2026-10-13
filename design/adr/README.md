@@ -28,8 +28,9 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0020](0020-replay-protection-job-journal.md) | Replay protection with a job journal | accepted |
 | [0021](0021-restic-argument-construction.md) | restic argument construction and validation | accepted |
 | [0022](0022-sftp-deferred-to-1-0.md) | SFTP is deferred to 1.0 | accepted |
-| [0023](0023-control-plane-core.md) | Control plane core: storage, authentication and secret format | partly superseded by ADR-0025 (installation-wide user accounts) |
+| [0023](0023-control-plane-core.md) | Control plane core: storage, authentication and secret format | partly superseded by ADR-0025 (installation-wide user accounts) and ADR-0028 (organization create without an administrator) |
 | [0024](0024-single-tenant-mode.md) | Single-tenant mode | partly superseded by ADR-0025 (installation-wide user accounts) |
 | [0025](0025-installation-wide-user-accounts.md) | Installation-wide user accounts | accepted |
 | [0026](0026-agent-pki-identity-and-key-rotation.md) | Agent PKI, identity and key rotation | accepted |
 | [0027](0027-web-ui-component-primitives.md) | Web UI component primitives | accepted |
+| [0028](0028-platform-user-management.md) | Organization creation without an administrator, and platform user management | accepted |

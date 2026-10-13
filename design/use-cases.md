@@ -91,14 +91,13 @@ The sign-in screen asks for the username and the password only. The account is i
   1. Open the "Organizations" screen in the "Platform" section.
   2. Click "Create an organization".
   3. Enter the name. The name holds 1 to 63 characters from `a-z`, `0-9` and `-`, starts with a letter and is not `platform`.
-  4. Enter the username, the display name and a password of the first Admin. The password has 12 characters or more.
-  5. Click "Create".
-- **Expected result:** the list shows the new organization with the status "Active" and the user count 1. The first Admin signs in to the new organization.
+  4. Click "Create".
+- **Expected result:** the list shows the new organization with the status "Active", the user count 0 and the mark "No administrator". The platform audit log holds `tenant_create`.
 - **Alternative flows:**
   - An existing name gives `conflict`.
-  - An invalid name or password gives `validation_failed` on the field.
+  - An invalid name gives `validation_failed` on the field.
 - **Requirements:** FR-TN-01, FR-TN-02.
-- **Acceptance criteria:** AC-AU-01.
+- **Acceptance criteria:** AC-TN-07.
 - **Status:** Ready on the stage.
 
 ### UC-ORG-02: Suspend, resume and delete an organization
@@ -165,6 +164,24 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Expected result:** the status changes between "Disabled" and "Enabled". A disabled user cannot sign in. The audit log holds `user_update`.
 - **Requirements:** FR-TN-02.
 - **Acceptance criteria:** AC-AU-02.
+- **Status:** Ready on the stage.
+
+### UC-USR-03: Create an installation account and add it to an organization
+
+- **Actor:** the Platform Admin.
+- **Preconditions:** the person signs in as the Platform Admin. An organization exists.
+- **Main flow:**
+  1. Open the "Users" screen in the "Platform" section.
+  2. Click "Create a user".
+  3. Enter the username, the display name and a password of 12 characters or more. Enter an optional email.
+  4. Add a membership: select an organization and a role.
+  5. Click "Create".
+- **Expected result:** the list shows the account with its memberships and roles. The person signs in and reaches the organization. The platform audit log holds `user_create`.
+- **Alternative flows:**
+  - An existing username gives `username_taken`. An existing email gives `email_taken`.
+  - An organization without an active Admin shows the mark "No administrator".
+- **Requirements:** FR-TN-02, FR-AU-04.
+- **Acceptance criteria:** AC-AU-08, AC-AU-09.
 - **Status:** Ready on the stage.
 
 ## 8. Agent enrollment and host registration
@@ -460,11 +477,12 @@ The sign-in screen asks for the username and the password only. The account is i
 | UC-SETUP-01 | FR-AU-03, FR-TN-02 | AC-TN-06 | Ready on the stage |
 | UC-SETUP-02 | FR-AU-03, FR-AU-04 | AC-AU-01 | Ready on the stage |
 | UC-SETUP-03 | FR-AU-04, FR-TN-02 | AC-AU-01 | Ready on the stage |
-| UC-ORG-01 | FR-TN-01, FR-TN-02 | AC-AU-01 | Ready on the stage |
+| UC-ORG-01 | FR-TN-01, FR-TN-02 | AC-TN-07 | Ready on the stage |
 | UC-ORG-02 | FR-TN-02 | AC-TN-03 | Ready on the stage |
 | UC-ORG-03 | FR-TN-02 | AC-AU-01 | Ready on the stage |
 | UC-USR-01 | FR-TN-02, FR-AU-03 | AC-AU-02 | Ready on the stage |
 | UC-USR-02 | FR-TN-02 | AC-AU-02 | Ready on the stage |
+| UC-USR-03 | FR-TN-02, FR-AU-04 | AC-AU-08, AC-AU-09 | Ready on the stage |
 | UC-AGT-01 | FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01 | AC-ID-01, AC-ID-05 | Blocked by #1 |
 | UC-AGT-02 | FR-ID-04 | AC-ID-04 | Blocked by #1 |
 | UC-RP-01 | FR-RP-03, FR-RP-05 | AC-RP-02 | Ready on the stage |
