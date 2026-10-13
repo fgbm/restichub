@@ -33,7 +33,6 @@
 		emptyTitle?: string;
 		emptyDescription?: string;
 		onRowClick?: (row: T) => void;
-		/** Optional actions for each row. Renders an extra column. */
 		rowActions?: Snippet<[T]>;
 	} = $props();
 

@@ -52,12 +52,11 @@ export function setLocale(next: Locale): void {
 	if (typeof document !== 'undefined') document.documentElement.lang = next;
 }
 
-/** Apply the current language to the document element. Call this after mount. */
+/** Call this after mount. */
 export function applyLocale(): void {
 	if (typeof document !== 'undefined') document.documentElement.lang = locale;
 }
 
-/** Translate a message key. */
 export function t(key: MessageKey, params?: Record<string, string | number>): string {
 	return interpolate(catalogs[locale][key], params);
 }

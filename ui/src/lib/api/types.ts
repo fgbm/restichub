@@ -9,7 +9,6 @@
  */
 import type { components } from './schema';
 
-/** The roles of the control plane (requirements section 2). */
 export type Role = components['schemas']['Role'];
 
 /**
@@ -24,10 +23,8 @@ export function assignableRoles(role: Role | null | undefined): Role[] {
 	return ['admin', 'operator', 'viewer'];
 }
 
-/** The actor types of an audit record (the values that the server stores). */
 export type AuditActorType = 'user' | 'api_token' | 'agent' | 'system';
 
-/** The change of one field. */
 export interface AuditChange {
 	old: unknown;
 	new: unknown;
@@ -42,46 +39,34 @@ export interface AuditChange {
  */
 export type AuditDiff = Record<string, unknown>;
 
-/** A user. */
 export type User = components['schemas']['UserView'];
 
-/** The current actor and its tenant. */
 export type Me = components['schemas']['MeResponse'];
 
-/** The setup status. */
 export type SetupStatus = components['schemas']['SetupStatusResponse'];
 
-/** The body of the sign-in request. */
 export type SignInRequest = components['schemas']['SignInRequest'];
 
-/** The body of the setup request. */
 export type SetupRequest = components['schemas']['SetupRequest'];
 
-/** The body of the self password change request. */
 export type ChangePasswordRequest = components['schemas']['ChangePasswordRequest'];
 
-/** The body of the create-user request. */
 export type CreateUserRequest = components['schemas']['CreateUserRequest'];
 
-/** The body of the update-user request. An absent field does not change. */
+/** An absent field does not change the value. */
 export type UpdateUserRequest = components['schemas']['UpdateUserRequest'];
 
-/** The body of the admin password reset request. */
 export type ResetPasswordRequest = components['schemas']['ResetPasswordRequest'];
 
-/** A list of users. */
 export type UserListResponse = components['schemas']['UserListResponse'];
 
-/** An API token in a list response. */
 export type ApiToken = components['schemas']['ApiTokenView'];
 
-/** The API token of a create response. The value appears one time only. */
+/** The value appears one time only. */
 export type ApiTokenCreated = components['schemas']['CreateTokenResponse'];
 
-/** The body of the create-token request. */
 export type CreateApiTokenRequest = components['schemas']['CreateTokenRequest'];
 
-/** A list of API tokens. */
 export type ApiTokenListResponse = components['schemas']['ApiTokenListResponse'];
 
 /**
@@ -92,12 +77,10 @@ export type AuditRecord = Omit<components['schemas']['AuditItem'], 'diff'> & {
 	diff?: AuditDiff | null;
 };
 
-/** One page of audit records with the cursor of the next page. */
 export type AuditPage = Omit<components['schemas']['AuditPageResponse'], 'items'> & {
 	items: AuditRecord[];
 };
 
-/** The query of the audit endpoints. */
 export interface AuditQuery {
 	from?: string;
 	to?: string;
@@ -110,14 +93,10 @@ export interface AuditQuery {
 	limit?: number;
 }
 
-/** The status of a tenant. */
 export type TenantStatus = components['schemas']['TenantStatus'];
 
-/** A tenant in the platform administration. */
 export type Tenant = components['schemas']['PlatformTenantView'];
 
-/** A list of tenants. */
 export type TenantListResponse = components['schemas']['TenantListResponse'];
 
-/** The body of the create-tenant request. */
 export type CreateTenantRequest = components['schemas']['CreateTenantRequest'];

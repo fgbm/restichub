@@ -34,7 +34,7 @@
 			const status = await service.setupStatus();
 			if (status.setup_required) await goto(resolve('/(auth)/setup'));
 		} catch {
-			// The sign-in form stays.
+			// The form stays.
 		}
 	});
 

@@ -32,7 +32,7 @@ export function setTheme(next: Theme): void {
 	applyTheme();
 }
 
-/** Apply the current theme to the document element. Call this after mount. */
+/** Call this after mount. */
 export function applyTheme(): void {
 	if (typeof document !== 'undefined') {
 		document.documentElement.dataset.theme = theme;

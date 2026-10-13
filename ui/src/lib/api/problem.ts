@@ -9,7 +9,6 @@
 import { t, tErrorReason } from '#lib/i18n/index.ts';
 import type { components } from './schema';
 
-/** A problem document as the UI uses it. */
 export interface ApiProblem {
 	status: number;
 	code: string;

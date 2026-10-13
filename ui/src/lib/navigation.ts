@@ -7,7 +7,6 @@ import type { MessageKey } from '#lib/i18n/index.ts';
 
 const ALL_ROLES: Role[] = ['platform_admin', 'admin', 'operator', 'viewer'];
 
-/** The route ids that the navigation uses. */
 export type NavHref =
 	| '/(app)'
 	| '/(app)/users'
@@ -58,7 +57,6 @@ export const navigation: NavSection[] = [
 	}
 ];
 
-/** The sections and items that the role may use. */
 export function navSectionsForRole(role: Role | null): NavSection[] {
 	if (!role) return [];
 	return navigation

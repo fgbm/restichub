@@ -32,7 +32,7 @@ export class ApiError extends Error {
 	}
 }
 
-/** The session is not valid. The client redirects to the sign-in page. */
+/** The client redirects to the sign-in page. */
 export class UnauthorizedError extends ApiError {
 	constructor(problem: ApiProblem) {
 		super(problem);
@@ -40,7 +40,7 @@ export class UnauthorizedError extends ApiError {
 	}
 }
 
-/** The user has no permission. The UI shows a clear message. */
+/** The UI shows a clear message. */
 export class ForbiddenError extends ApiError {
 	constructor(problem: ApiProblem) {
 		super(problem);
@@ -48,7 +48,6 @@ export class ForbiddenError extends ApiError {
 	}
 }
 
-/** The control plane did not answer. */
 export class NetworkError extends Error {
 	constructor(cause?: unknown) {
 		super('Network request failed');

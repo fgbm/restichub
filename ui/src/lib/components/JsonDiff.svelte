@@ -3,7 +3,6 @@
 	import { t } from '#lib/i18n/index.ts';
 	import type { AuditChange, AuditDiff } from '#lib/api/index.ts';
 
-	/** The control plane replaces a secret value with this marker. */
 	const REDACTED = '<redacted>';
 
 	let { diff }: { diff: AuditDiff | null } = $props();
@@ -27,7 +26,6 @@
 		return { text: JSON.stringify(value), redacted: false, empty: false };
 	}
 
-	/** True for a value of the shape `{ old, new }`. */
 	function isChange(value: unknown): value is AuditChange {
 		return typeof value === 'object' && value !== null && ('old' in value || 'new' in value);
 	}

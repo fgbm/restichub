@@ -12,7 +12,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 	});
 }
 
-/** Loads the service with a replaced `fetch`. */
 async function loadService(fetchFn: ReturnType<typeof vi.fn>): Promise<ApiService> {
 	vi.resetModules();
 	vi.stubGlobal('fetch', fetchFn);
