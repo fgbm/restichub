@@ -22,7 +22,6 @@ use super::{Database, MIGRATOR};
 /// The advisory lock key that serializes the cluster-wide setup across test processes.
 const ROLE_SETUP_LOCK: i64 = 0x7265_7374_6963_6875;
 
-/// The template database and the owner login that the migrations use.
 struct Template {
     name: String,
     owner_role: String,
@@ -30,11 +29,9 @@ struct Template {
     admin: PgConnectOptions,
 }
 
-/// The template of the embedded migrations. The first test creates it; every test reuses it.
+/// Created by the first test and reused by every test.
 static TEMPLATE: tokio::sync::OnceCell<Template> = tokio::sync::OnceCell::const_new();
 
-/// A fresh test database.
-///
 /// The value removes the clone database and the runtime login on drop (best effort). Call
 /// [`TestDatabase::cleanup`] at the end of the test for a correct removal. The template database
 /// and the template owner login stay for the next test.
@@ -50,50 +47,38 @@ pub struct TestDatabase {
 }
 
 impl TestDatabase {
-    /// Returns the runtime database handle.
-    ///
-    /// The pool connects as the runtime login.
+    /// Connects as the runtime login.
     pub fn database(&self) -> &Database {
         &self.database
     }
 
-    /// Returns the runtime connection pool.
     pub fn pool(&self) -> &PgPool {
         self.database.pool()
     }
 
-    /// Returns the owner connection pool.
-    ///
     /// The tests use it for the owner-level checks, for example the audit trigger.
     pub fn owner_pool(&self) -> &PgPool {
         &self.owner
     }
 
-    /// Returns the runtime connection options.
     pub fn connect_options(&self) -> PgConnectOptions {
         self.runtime_options.clone()
     }
 
-    /// Returns the name of the template owner login.
     pub fn owner_role(&self) -> &str {
         &self.owner_role
     }
 
-    /// Returns the name of the per-test runtime login.
     pub fn runtime_role(&self) -> &str {
         &self.runtime_role
     }
 
-    /// Returns the administrator (superuser) connection options.
-    ///
-    /// A test uses the options to create a scratch role or a scratch database (N1).
+    /// A test uses the options to create a scratch role or a scratch database.
     pub fn admin_options(&self) -> PgConnectOptions {
         self.admin.clone()
     }
 
-    /// Returns the runtime connection options.
-    ///
-    /// A test uses the options to open a pool that points to another database (N1).
+    /// A test uses the options to open a pool that points to another database.
     pub fn runtime_options(&self) -> PgConnectOptions {
         self.runtime_options.clone()
     }
@@ -118,7 +103,6 @@ impl TestDatabase {
         Ok(Database { pool })
     }
 
-    /// Removes the clone database and the runtime login.
     pub async fn cleanup(&self) {
         self.database.pool().close().await;
         self.owner.close().await;
@@ -204,7 +188,6 @@ pub async fn test_database() -> Option<TestDatabase> {
     })
 }
 
-/// Returns the template of the embedded migrations. The first test creates it.
 async fn template(url: &str) -> &'static Template {
     TEMPLATE
         .get_or_init(|| async {
@@ -235,7 +218,6 @@ async fn template(url: &str) -> &'static Template {
         .await
 }
 
-/// Sets up the cluster roles and the template database.
 async fn setup_template(admin_pool: &PgPool, admin: &PgConnectOptions) -> Template {
     ensure_role(
         admin_pool,

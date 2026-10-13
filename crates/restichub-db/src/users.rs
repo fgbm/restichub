@@ -10,31 +10,24 @@ use crate::DbError;
 use crate::ids::UserId;
 use crate::tx::TenantTx;
 
-/// A user row.
 #[derive(Debug, Clone)]
 pub struct User {
-    /// The identifier of the user.
     pub id: UserId,
-    /// The username. The name is unique for the tenant.
+    /// Unique for the tenant.
     pub username: String,
-    /// The name for the user interface.
     pub display_name: String,
-    /// The flag that disables the user.
     pub disabled: bool,
 }
 
-/// The data of a new user.
 #[derive(Debug, Clone)]
 pub struct NewUser<'a> {
-    /// The username. The name is unique for the tenant.
+    /// Unique for the tenant.
     pub username: &'a str,
-    /// The password hash (Argon2id PHC string).
+    /// Argon2id PHC string.
     pub password_hash: &'a str,
-    /// The name for the user interface.
     pub display_name: &'a str,
 }
 
-/// Creates a user in the tenant of the transaction and returns its identifier.
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewUser<'_>) -> Result<UserId, DbError> {
     let id = UserId::new();
     sqlx::query(
@@ -52,7 +45,6 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewUser<'_>) -> Result<UserId, 
     Ok(id)
 }
 
-/// Lists the users of the tenant of the transaction.
 pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<User>, DbError> {
     let rows = sqlx::query_as::<_, (Uuid, String, String, bool)>(
         "SELECT id, username, display_name, disabled FROM users ORDER BY username",
@@ -71,24 +63,20 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<User>, DbError> {
         .collect())
 }
 
-/// The row of a user for sign-in.
-///
 /// The type holds the password hash. The control plane never sends it and never writes it to the
 /// audit log.
 #[derive(Debug, Clone)]
 pub struct AuthUser {
-    /// The identifier of the user.
     pub id: UserId,
-    /// The password hash (Argon2id PHC string).
+    /// Argon2id PHC string.
     pub password_hash: String,
-    /// The flag that disables the user.
     pub disabled: bool,
 }
 
 /// Finds a user by the username of the tenant of the transaction.
 ///
 /// The comparison ignores the letter case, as the unique index `users_tenant_username_lower_unique`
-/// does (D6).
+/// does.
 pub async fn find_for_auth(
     tx: &mut TenantTx<'_>,
     username: &str,
@@ -107,7 +95,6 @@ pub async fn find_for_auth(
     }))
 }
 
-/// Reads a user of the tenant of the transaction.
 pub async fn get(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<User>, DbError> {
     let row = sqlx::query_as::<_, (Uuid, String, String, bool)>(
         "SELECT id, username, display_name, disabled FROM users WHERE id = $1",
@@ -124,7 +111,6 @@ pub async fn get(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<User>, DbEr
     }))
 }
 
-/// Reads the password hash and the flag of a user of the tenant of the transaction.
 pub async fn get_auth(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<AuthUser>, DbError> {
     let row = sqlx::query_as::<_, (Uuid, String, bool)>(
         "SELECT id, password_hash, disabled FROM users WHERE id = $1",
@@ -140,7 +126,6 @@ pub async fn get_auth(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<AuthUs
     }))
 }
 
-/// Replaces the password hash of a user.
 pub async fn set_password(
     tx: &mut TenantTx<'_>,
     id: UserId,
@@ -156,7 +141,6 @@ pub async fn set_password(
     Ok(result.rows_affected() == 1)
 }
 
-/// Replaces the display name of a user.
 pub async fn set_display_name(
     tx: &mut TenantTx<'_>,
     id: UserId,
@@ -172,7 +156,6 @@ pub async fn set_display_name(
     Ok(result.rows_affected() == 1)
 }
 
-/// Sets the flag that disables a user.
 pub async fn set_disabled(
     tx: &mut TenantTx<'_>,
     id: UserId,

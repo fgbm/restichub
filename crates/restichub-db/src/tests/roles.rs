@@ -1,5 +1,3 @@
-//! Runtime role tests: the safety check, the pooled connection reset and escalation.
-
 use super::*;
 use crate::DatabaseConfig;
 use crate::test_util::test_database;
@@ -69,7 +67,6 @@ async fn db_the_runtime_role_is_safe_and_the_owner_is_refused() -> TestResult {
         return Ok(());
     };
 
-    // The runtime login passes the check.
     db.database().verify_runtime_role().await?;
 
     // The owner login owns a relation, so the check refuses it.
@@ -78,7 +75,6 @@ async fn db_the_runtime_role_is_safe_and_the_owner_is_refused() -> TestResult {
     };
     assert!(owner_database.verify_runtime_role().await.is_err());
 
-    // A superuser is refused.
     let config = DatabaseConfig {
         url: std::env::var("RESTICHUB_TEST_DATABASE_URL")?,
         max_connections: 1,
@@ -118,8 +114,7 @@ async fn db_the_session_setting_does_not_leak_on_a_pooled_connection() -> TestRe
     drop(connection);
     assert_eq!(role_before.0, "restichub_app");
 
-    // The pool holds one connection. The `RESET ROLE` and `RESET ALL` hook must clear the state
-    // (M2, N7).
+    // The pool holds one connection. The `RESET ROLE` and `RESET ALL` hook must clear the state.
     let mut connection = pool.acquire().await?;
     let (scope, tenant, current): (Option<String>, Option<String>, String) = sqlx::query_as(
         "SELECT current_setting('restichub.scope', true), \
@@ -162,7 +157,6 @@ async fn db_the_runtime_login_cannot_escalate() -> TestResult {
     assert_code(no_force, "42501");
     drop(tx);
 
-    // The runtime login cannot become another role.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let set_role = sqlx::query("SET ROLE restichub_auth")
         .execute(tx.as_conn())
@@ -170,7 +164,6 @@ async fn db_the_runtime_login_cannot_escalate() -> TestResult {
     assert_code(set_role, "42501");
     drop(tx);
 
-    // The runtime login cannot become the owner login either.
     let owner_role = db.owner_role().to_owned();
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let set_owner = sqlx::query(sqlx::AssertSqlSafe(format!("SET ROLE \"{owner_role}\"")))
@@ -191,7 +184,6 @@ async fn db_the_runtime_role_check_refuses_unsafe_setups() -> TestResult {
     let admin = admin_pool(&db).await?;
     let suffix = Uuid::now_v7().simple().to_string();
 
-    // The runtime login owns the current database.
     let scratch = format!("restichub_scratch_{suffix}");
     admin_query(
         &admin,
@@ -215,7 +207,7 @@ async fn db_the_runtime_role_check_refuses_unsafe_setups() -> TestResult {
     .await?;
 
     // A substitute group role owns BYPASSRLS. The group role is cluster-wide, so a test does not
-    // change `restichub_app` itself (N1).
+    // change `restichub_app` itself.
     let probe_app = format!("restichub_app_probe_{suffix}");
     let probe_login = format!("restichub_probe_login_{suffix}");
     let probe_password = Uuid::now_v7().simple().to_string();

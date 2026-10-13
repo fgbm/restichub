@@ -1,9 +1,9 @@
-//! Database tests for tenant isolation and the schema (issue #16, AC-TN-01 at the database layer).
+//! Database tests for tenant isolation and the schema (AC-TN-01 at the database layer).
 //!
 //! The tests read `RESTICHUB_TEST_DATABASE_URL`. If the variable is not set, the helper prints a
 //! message and the tests do nothing.
 //!
-//! The tests are inside the crate, because the connection methods are crate-internal (H1). The
+//! The tests are inside the crate, because the connection methods are crate-internal. The
 //! isolation checks read through the runtime login. The owner-level checks use the owner pool.
 
 mod audit;
@@ -23,10 +23,9 @@ use crate::test_util::TestDatabase;
 use crate::users::NewUser;
 use crate::{Database, TenantId, TenantTx, users};
 
-/// The error type of the tests.
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-/// The SECURITY DEFINER functions that the schema allows (N9).
+/// The SECURITY DEFINER functions that the schema allows.
 const SECURITY_DEFINER_ALLOWED: [&str; 4] = [
     "auth_find_tenant",
     "auth_find_session",
@@ -34,7 +33,6 @@ const SECURITY_DEFINER_ALLOWED: [&str; 4] = [
     "tenant_user_counts",
 ];
 
-/// The tenant tables with the general tenant policy.
 const TENANT_TABLES: [&str; 8] = [
     "users",
     "memberships",
@@ -46,7 +44,6 @@ const TENANT_TABLES: [&str; 8] = [
     "setup_tokens",
 ];
 
-/// The identifiers of one seeded tenant.
 struct Seed {
     user: UserId,
     session_id: SessionId,
@@ -55,7 +52,6 @@ struct Seed {
     api_hash: Vec<u8>,
 }
 
-/// Returns the SQLSTATE of a database error.
 fn code(error: &sqlx::Error) -> Option<String> {
     error
         .as_database_error()
@@ -63,7 +59,6 @@ fn code(error: &sqlx::Error) -> Option<String> {
         .map(|code| code.to_string())
 }
 
-/// Asserts that a statement fails with the given SQLSTATE.
 fn assert_code(result: Result<sqlx::postgres::PgQueryResult, sqlx::Error>, expected: &str) {
     match result {
         Ok(_) => panic!("the statement must fail"),
@@ -71,7 +66,6 @@ fn assert_code(result: Result<sqlx::postgres::PgQueryResult, sqlx::Error>, expec
     }
 }
 
-/// Creates two tenants through a platform transaction.
 async fn two_tenants(db: &Database) -> Result<(TenantId, TenantId), Box<dyn std::error::Error>> {
     let mut tx = db.begin_platform().await?;
     let tenant_a = crate::tenants::create(&mut tx, "tenant-a").await?;
@@ -80,7 +74,6 @@ async fn two_tenants(db: &Database) -> Result<(TenantId, TenantId), Box<dyn std:
     Ok((tenant_a, tenant_b))
 }
 
-/// Inserts one row of each tenant table for the tenant `tenant`.
 async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn std::error::Error>> {
     let mut session_hash = tenant.as_uuid().as_bytes().to_vec();
     session_hash[15] ^= 0x01;
@@ -182,7 +175,6 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     })
 }
 
-/// Counts the rows of one tenant table.
 async fn count_rows(
     tx: &mut TenantTx<'_>,
     table: &'static str,
@@ -194,7 +186,6 @@ async fn count_rows(
     Ok(count.0)
 }
 
-/// Returns a bootstrap input for a test tenant (N2).
 fn bootstrap(name: &str) -> crate::tenants::BootstrapTenant<'_> {
     crate::tenants::BootstrapTenant {
         id: TenantId::new(),
@@ -217,7 +208,6 @@ fn bootstrap(name: &str) -> crate::tenants::BootstrapTenant<'_> {
     }
 }
 
-/// Counts the rows of one tenant table in a tenant transaction.
 async fn count_in_tenant(
     db: &Database,
     tenant: TenantId,
@@ -229,7 +219,6 @@ async fn count_in_tenant(
     Ok(count)
 }
 
-/// Returns an administrator (superuser) pool for a test.
 async fn admin_pool(db: &TestDatabase) -> Result<PgPool, Box<dyn std::error::Error>> {
     Ok(PgPoolOptions::new()
         .max_connections(1)
@@ -237,7 +226,6 @@ async fn admin_pool(db: &TestDatabase) -> Result<PgPool, Box<dyn std::error::Err
         .await?)
 }
 
-/// Runs one statement as the administrator.
 async fn admin_query(admin: &PgPool, statement: &str) -> Result<(), Box<dyn std::error::Error>> {
     sqlx::query(AssertSqlSafe(statement.to_owned()))
         .execute(admin)
@@ -245,7 +233,6 @@ async fn admin_query(admin: &PgPool, statement: &str) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-/// Checks the tenant row through a platform transaction.
 async fn tenant_exists(
     db: &Database,
     tenant: TenantId,
@@ -259,7 +246,6 @@ async fn tenant_exists(
     Ok(count.0 == 1)
 }
 
-/// Inserts one audit record in a tenant transaction.
 async fn insert_audit(
     tx: &mut TenantTx<'_>,
     action: AuditAction,

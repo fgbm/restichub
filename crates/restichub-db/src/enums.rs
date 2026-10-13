@@ -11,18 +11,13 @@ use utoipa::ToSchema;
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum Role {
-    /// The Platform Admin manages tenants.
     PlatformAdmin,
-    /// The Admin manages one tenant.
     Admin,
-    /// The Operator runs jobs.
     Operator,
-    /// The Viewer reads data.
     Viewer,
 }
 
 impl Role {
-    /// Returns the stored string of the role.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::PlatformAdmin => "platform_admin",
@@ -32,7 +27,7 @@ impl Role {
         }
     }
 
-    /// Parses the stored string of a role. The function returns `None` on an unknown string.
+    /// `None` on an unknown string.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "platform_admin" => Some(Self::PlatformAdmin),
@@ -43,7 +38,7 @@ impl Role {
         }
     }
 
-    /// Returns the rank of the role. A higher rank includes the lower roles.
+    /// Higher ranks include the lower roles.
     pub fn rank(self) -> u8 {
         match self {
             Self::PlatformAdmin => 4,
@@ -53,32 +48,29 @@ impl Role {
         }
     }
 
-    /// Returns true if the role includes the minimum role.
     pub fn allows(self, minimum: Self) -> bool {
         self.rank() >= minimum.rank()
     }
 
-    /// Returns true for the administrator roles. The count of the last Admin uses it.
+    /// Used by the count of the last Admin.
     pub fn is_admin(self) -> bool {
         matches!(self, Self::Admin | Self::PlatformAdmin)
     }
 }
 
-/// The status of a tenant (FR-TN-02).
+/// Tenant status (FR-TN-02).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum TenantStatus {
-    /// The tenant signs in and its API tokens work.
     Active,
-    /// A suspended tenant cannot sign in and its API tokens fail (AC-TN-03).
+    /// Cannot sign in; its API tokens fail (AC-TN-03).
     Suspended,
-    /// A deleted tenant keeps its rows; the retention task removes them later.
+    /// Keeps its rows; the retention task removes them later.
     Deleted,
 }
 
 impl TenantStatus {
-    /// Returns the stored string of the status.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
@@ -87,7 +79,7 @@ impl TenantStatus {
         }
     }
 
-    /// Parses the stored string of a status. The function returns `None` on an unknown string.
+    /// `None` on an unknown string.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "active" => Some(Self::Active),
@@ -98,23 +90,18 @@ impl TenantStatus {
     }
 }
 
-/// The type of an audit actor (ADR-0023, section Audit log).
+/// Audit actor type (ADR-0023, section Audit log).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum ActorType {
-    /// A local user.
     User,
-    /// An API token.
     ApiToken,
-    /// An agent.
     Agent,
-    /// The control plane.
     System,
 }
 
 impl ActorType {
-    /// Returns the stored string of the actor type.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
@@ -124,7 +111,7 @@ impl ActorType {
         }
     }
 
-    /// Parses the stored string of an actor type. The function returns `None` on an unknown string.
+    /// `None` on an unknown string.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "user" => Some(Self::User),

@@ -1,5 +1,3 @@
-//! Tenant lifecycle tests: creation, status transitions and unique indexes.
-
 use super::*;
 use crate::PLATFORM_TENANT_ID;
 use crate::enums::TenantStatus;
@@ -60,7 +58,7 @@ async fn db_a_tenant_creation_commits_atomically() -> TestResult {
     };
     let (_, _) = two_tenants(db.database()).await?;
 
-    // A created tenant, its key row, its first admin and its audit record commit together (N2/D3).
+    // A created tenant, its key row, its first admin and its audit record commit together.
     let mut tx = db.database().begin_platform().await?;
     let committed = tenants::create_with_bootstrap(&mut tx, &bootstrap("committed")).await?;
     tx.commit().await?;
@@ -79,7 +77,7 @@ async fn db_a_tenant_creation_commits_atomically() -> TestResult {
         1
     );
 
-    // A dropped transaction leaves nothing (D3).
+    // Dropping the transaction leaves nothing.
     let mut tx = db.database().begin_platform().await?;
     let crashed = tenants::create_with_bootstrap(&mut tx, &bootstrap("crashed")).await?;
     drop(tx);
@@ -97,8 +95,7 @@ async fn db_a_tenant_creation_rolls_back_on_a_bad_audit_actor() -> TestResult {
     let (_, _) = two_tenants(db.database()).await?;
 
     // A failure inside `create_with_bootstrap`: the audit insert rejects an unknown actor type
-    // (23514). The tenant row, the key row, the first admin and the audit records must not persist
-    // (N2/D3).
+    // (23514). The tenant row, the key row, the first admin and the audit records must not persist.
     let mut input = bootstrap("bad-audit");
     input.actor = Actor::Unknown {
         actor_type: "bogus".to_owned(),
@@ -137,7 +134,6 @@ async fn db_a_concurrent_delete_and_resume_never_end_active() -> TestResult {
     };
     let (tenant_a, _) = two_tenants(db.database()).await?;
 
-    // The tenant starts suspended.
     let mut tx = db.database().begin_platform().await?;
     let suspend = AuditEvent::new(AuditAction::TenantSuspend, "tenant");
     assert_eq!(
@@ -155,7 +151,7 @@ async fn db_a_concurrent_delete_and_resume_never_end_active() -> TestResult {
     tx.commit().await?;
 
     // A delete (suspended -> deleted) races a resume (suspended -> active). The update of the
-    // loser touches no row (issue #20).
+    // loser touches no row.
     let database = db.database();
     let delete = async {
         let mut tx = database.begin_platform().await?;
@@ -224,7 +220,7 @@ async fn db_enter_tenant_refuses_a_foreign_tenant() -> TestResult {
     };
     let (_, tenant_b) = two_tenants(db.database()).await?;
 
-    // The tenant exists, but this transaction did not create it (N2).
+    // The tenant exists, but this transaction did not create it.
     let mut tx = db.database().begin_platform().await?;
     assert!(tx.enter_tenant(tenant_b).await.is_err());
     drop(tx);
@@ -240,13 +236,13 @@ async fn db_the_lower_case_unique_indexes_hold() -> TestResult {
     };
     let (tenant_a, _) = two_tenants(db.database()).await?;
 
-    // The tenant name is unique and ignores the letter case (D6).
+    // The tenant name is unique and ignores the letter case.
     let mut tx = db.database().begin_platform().await?;
     let duplicate_tenant = tenants::create(&mut tx, "TENANT-A").await;
     assert!(duplicate_tenant.is_err(), "the name must be unique");
     drop(tx);
 
-    // The username is unique for the tenant and ignores the letter case (D6).
+    // The username is unique for the tenant and ignores the letter case.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     users::create(
         &mut tx,

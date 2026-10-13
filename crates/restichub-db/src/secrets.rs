@@ -18,51 +18,39 @@ use crate::DbError;
 use crate::ids::{SecretId, UserId};
 use crate::tx::TenantTx;
 
-/// The metadata of a secret value.
-///
 /// The type never holds the ciphertext, so a response built from it cannot disclose the value
 /// (AC-RP-02).
 #[derive(Debug, Clone)]
 pub struct SecretMetadata {
-    /// The identifier of the secret.
     pub id: SecretId,
-    /// The name of the secret. The name is unique for the tenant.
+    /// Unique for the tenant.
     pub name: String,
-    /// The stable purpose of the value. The `restichub-secrets` crate owns the allowed values.
+    /// Allowed values are owned by the `restichub-secrets` crate.
     pub purpose: String,
-    /// The time the secret was created.
     pub created_at: OffsetDateTime,
-    /// The time the value was last replaced.
     pub updated_at: OffsetDateTime,
-    /// The user that created the secret. It is absent for an API token actor.
+    /// Absent for an API token actor.
     pub created_by: Option<UserId>,
 }
 
-/// The data of a new secret value.
-///
 /// The caller encrypts the value and passes the ciphertext. The caller passes the key version of
 /// the data encryption key (DEK) that encrypted the value. The caller generates the identifier
 /// before the encryption, because the identifier is part of the associated data (ADR-0023, section
 /// Secrets).
 #[derive(Debug, Clone)]
 pub struct NewSecret<'a> {
-    /// The identifier of the secret.
     pub id: SecretId,
-    /// The name of the secret. The name is unique for the tenant.
+    /// Unique for the tenant.
     pub name: &'a str,
-    /// The stable purpose of the value.
     pub purpose: &'a str,
-    /// The version of the tenant key that encrypted the value.
     pub key_version: i32,
-    /// The 96-bit nonce of the encryption.
+    /// 96-bit nonce of the encryption.
     pub nonce: &'a [u8],
-    /// The authenticated ciphertext of the value.
     pub ciphertext: &'a [u8],
-    /// The user that created the secret. It is absent for an API token actor.
+    /// Absent for an API token actor.
     pub created_by: Option<UserId>,
 }
 
-/// Creates a secret in the tenant of the transaction and returns its identifier.
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewSecret<'_>) -> Result<SecretId, DbError> {
     sqlx::query(
         "INSERT INTO secrets \
@@ -155,10 +143,7 @@ pub async fn get_for_update(
     Ok(row.map(SecretMetadata::from))
 }
 
-/// Removes a secret of the tenant of the transaction.
-///
-/// The function returns true if it removed the secret. A missing secret returns false. Epic #5 adds
-/// the reference check: the endpoint will return HTTP 409 when a repository references the secret.
+/// True if it removed the secret, false for a missing secret.
 pub async fn delete(tx: &mut TenantTx<'_>, id: SecretId) -> Result<bool, DbError> {
     let result = sqlx::query("DELETE FROM secrets WHERE id = $1")
         .bind(id)
@@ -168,7 +153,6 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: SecretId) -> Result<bool, DbError
     Ok(result.rows_affected() == 1)
 }
 
-/// The column tuple of one secret metadata row.
 type MetadataRow = (
     Uuid,
     String,

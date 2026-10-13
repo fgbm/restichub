@@ -6,7 +6,7 @@
 //!
 //! This crate is the only crate that runs SQL. An API crate calls the typed repository functions
 //! ([`tenants`], [`users`]). The scoped transactions ([`TenantTx`], [`PlatformTx`]) are the only
-//! way to get a connection. `TenantTx::as_conn` and `PlatformTx::as_conn` are crate-internal (H1).
+//! way to get a connection. `TenantTx::as_conn` and `PlatformTx::as_conn` are crate-internal.
 
 use std::time::Duration;
 
@@ -37,7 +37,6 @@ pub use ids::{
 };
 pub use tx::{PlatformTx, TenantTx};
 
-/// The embedded migrations of the control plane database.
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 /// The configuration of the database connection.
@@ -46,72 +45,46 @@ static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 /// [`Database::connect_lazy`] separately, so a `Debug` of this type shows no secret.
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
-    /// The connection URL.
     pub url: String,
-    /// The maximum number of connections in the pool.
     pub max_connections: u32,
-    /// The time to wait for a connection from the pool.
     pub acquire_timeout: Duration,
 }
 
-/// The error of a database operation.
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
-    /// The connection to the database failed.
     #[error("cannot connect to the database")]
     Connect(#[source] sqlx::Error),
-    /// The URL is not valid.
     #[error("the database URL is not valid")]
     InvalidUrl(#[source] sqlx::Error),
-    /// The migrations failed.
     #[error("cannot apply the database migrations")]
     Migrate(#[source] sqlx::migrate::MigrateError),
-    /// A database query failed.
     #[error("the database query failed")]
     Query(#[source] sqlx::Error),
-    /// The runtime role of the database is not safe.
     #[error("the runtime database role is not safe: {cause}")]
-    InsecureRuntimeRole {
-        /// The cause of the refusal.
-        cause: String,
-    },
-    /// The platform transaction did not create this tenant.
+    InsecureRuntimeRole { cause: String },
     #[error("the platform transaction did not create the tenant {0}")]
     TenantNotCreated(TenantId),
-    /// The database schema is behind the embedded migrations.
     #[error(
         "the database schema is behind (applied version {applied}, expected {expected}); run `restichub-cp migrate`"
     )]
-    MigrationsBehind {
-        /// The applied version.
-        applied: i64,
-        /// The expected version.
-        expected: i64,
-    },
-    /// The database schema is ahead of the embedded migrations.
+    MigrationsBehind { applied: i64, expected: i64 },
     #[error(
         "the database schema is ahead (applied version {applied}, expected {expected}); the binary is older than the schema"
     )]
-    MigrationsAhead {
-        /// The applied version.
-        applied: i64,
-        /// The expected version.
-        expected: i64,
-    },
+    MigrationsAhead { applied: i64, expected: i64 },
 }
 
 impl DbError {
-    /// Returns true if the error is a unique constraint violation (SQLSTATE 23505).
+    /// True for a unique constraint violation (SQLSTATE 23505).
     pub fn is_unique_violation(&self) -> bool {
         self.sqlstate().as_deref() == Some("23505")
     }
 
-    /// Returns true if the error is a check constraint violation (SQLSTATE 23514).
+    /// True for a check constraint violation (SQLSTATE 23514).
     pub fn is_check_violation(&self) -> bool {
         self.sqlstate().as_deref() == Some("23514")
     }
 
-    /// Returns the SQLSTATE of a query error.
     fn sqlstate(&self) -> Option<String> {
         match self {
             Self::Query(error) => error
@@ -123,7 +96,6 @@ impl DbError {
     }
 }
 
-/// The database of the control plane: a connection pool and the migrations.
 #[derive(Debug, Clone)]
 pub struct Database {
     pool: PgPool,
@@ -133,7 +105,7 @@ impl Database {
     /// Connects to the database and returns the pool.
     ///
     /// The function uses `password` if it is set. The pool runs `RESET ALL` when a connection goes
-    /// back to the pool, so a session-level setting never survives (M2).
+    /// back to the pool, so a session-level setting never survives.
     pub async fn connect(config: &DatabaseConfig, password: Option<&str>) -> Result<Self, DbError> {
         let options = connect_options(config, password)?;
         let pool = with_session_reset(PgPoolOptions::new())
@@ -158,8 +130,6 @@ impl Database {
         Ok(Self { pool })
     }
 
-    /// Returns the connection pool.
-    ///
     /// The method is not public. A caller uses [`Database::begin_tenant`] or
     /// [`Database::begin_platform`]. Only the migrations, the readiness check and the role check
     /// use the pool directly.
@@ -185,7 +155,7 @@ impl Database {
     /// Applies the embedded migrations and logs the applied version.
     ///
     /// The migration login is the owner of the installation database. The control plane uses a
-    /// short-lived owner connection for this call and closes it (D1).
+    /// short-lived owner connection for this call and closes it.
     pub async fn migrate(&self) -> Result<(), DbError> {
         MIGRATOR.run(&self.pool).await.map_err(DbError::Migrate)?;
         let version = MIGRATOR.iter().map(|migration| migration.version).max();
@@ -193,7 +163,6 @@ impl Database {
         Ok(())
     }
 
-    /// Checks that the database answers a query.
     pub async fn is_ready(&self) -> bool {
         match sqlx::query("SELECT 1").execute(self.pool()).await {
             Ok(_) => true,
@@ -204,7 +173,7 @@ impl Database {
         }
     }
 
-    /// Checks that the runtime login is safe (D1, N1).
+    /// Refuses a runtime setup that is not safe.
     ///
     /// The check refuses a runtime setup where any of these conditions is true:
     ///
@@ -223,7 +192,7 @@ impl Database {
     /// Checks the runtime login against a named group role.
     ///
     /// The public API uses `restichub_app`. A test uses a per-test substitute role, because the
-    /// group role is cluster-wide (N1).
+    /// group role is cluster-wide.
     pub(crate) async fn verify_runtime_role_for(&self, app_role: &str) -> Result<(), DbError> {
         let app: Option<(bool, bool, bool, bool)> = sqlx::query_as(
             "SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb \
@@ -321,7 +290,7 @@ impl Database {
         Ok(())
     }
 
-    /// Checks that the applied migrations match the embedded migrations (N4).
+    /// Checks that the applied migrations match the embedded migrations.
     ///
     /// The server calls this method at start. The runtime role needs `SELECT` on
     /// `_sqlx_migrations` (migration 0007). The method refuses a schema that is behind (run
@@ -367,7 +336,7 @@ impl Database {
     /// Closes the pool.
     ///
     /// The control plane uses a short-lived migration database. It closes that pool after the
-    /// migrations (D1).
+    /// migrations.
     pub async fn close(self) {
         self.pool.close().await;
     }
@@ -389,8 +358,7 @@ fn connect_options(
 
 /// Adds a hook that runs `RESET ROLE` and `RESET ALL` when a connection goes back to the pool.
 ///
-/// A session-level `SET ROLE` and a session-level `SET` then never survive on a pooled connection
-/// (M2, N7).
+/// A session-level `SET ROLE` and a session-level `SET` then never survive on a pooled connection.
 fn with_session_reset(options: PgPoolOptions) -> PgPoolOptions {
     options.after_release(|connection, _metadata| {
         Box::pin(async move {
@@ -401,7 +369,6 @@ fn with_session_reset(options: PgPoolOptions) -> PgPoolOptions {
     })
 }
 
-/// Returns true if the error says that the relation does not exist.
 fn is_undefined_table(error: &sqlx::Error) -> bool {
     error
         .as_database_error()

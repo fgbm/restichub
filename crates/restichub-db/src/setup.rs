@@ -1,4 +1,4 @@
-//! One-time setup token operations (issue #18, FR-AU-03).
+//! One-time setup token operations (FR-AU-03).
 //!
 //! The server generates a setup token at start when the platform tenant has no user. The database
 //! keeps only the SHA-256 hash. The token belongs to the platform tenant and uses a tenant
@@ -11,7 +11,6 @@ use crate::DbError;
 use crate::ids::SetupTokenId;
 use crate::tx::TenantTx;
 
-/// Creates a setup token in the tenant of the transaction.
 pub async fn create(
     tx: &mut TenantTx<'_>,
     token_hash: &[u8],
@@ -53,7 +52,6 @@ pub async fn find_valid(
     Ok(row.map(|(id,)| SetupTokenId::from_uuid(id)))
 }
 
-/// Marks a setup token as used.
 pub async fn mark_used(
     tx: &mut TenantTx<'_>,
     id: SetupTokenId,
@@ -69,7 +67,6 @@ pub async fn mark_used(
     Ok(result.rows_affected() == 1)
 }
 
-/// Counts the users of the tenant of the transaction.
 pub async fn user_count(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
     let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM users")
         .fetch_one(tx.as_conn())

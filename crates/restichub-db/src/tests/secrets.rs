@@ -1,5 +1,3 @@
-//! Secret storage tests: the tenant key and the active key rule.
-
 use super::*;
 use crate::test_util::test_database;
 

@@ -1,5 +1,3 @@
-//! Migration version tests.
-
 use super::TestResult;
 use crate::test_util::test_database;
 
@@ -9,10 +7,9 @@ async fn db_verify_migrations_detects_a_newer_schema() -> TestResult {
         return Ok(());
     };
 
-    // The database matches the embedded migrations.
     db.database().verify_migrations().await?;
 
-    // A newer applied version is reported as ahead (N4).
+    // Ahead: a newer applied version.
     let fake = 9_999_999_i64;
     sqlx::query(
         "INSERT INTO _sqlx_migrations \

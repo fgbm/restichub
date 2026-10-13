@@ -8,15 +8,13 @@
 //!
 //! The connection is crate-internal (`TenantTx::as_conn` and `PlatformTx::as_conn` are
 //! `pub(crate)`). Only the repository functions of this crate run SQL with bind parameters. An API
-//! crate calls typed repository functions, never raw SQL (H1).
+//! crate calls typed repository functions, never raw SQL.
 
 use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 
 use crate::DbError;
 use crate::ids::TenantId;
 
-/// A transaction for one tenant.
-///
 /// The transaction holds the tenant id in `restichub.tenant_id`. Row-Level Security shows only the
 /// rows of this tenant.
 pub struct TenantTx<'a> {
@@ -25,17 +23,15 @@ pub struct TenantTx<'a> {
 }
 
 impl<'a> TenantTx<'a> {
-    /// Begins a transaction for one tenant.
     pub async fn begin(pool: &'a PgPool, tenant: TenantId) -> Result<Self, DbError> {
         let mut tx = pool.begin().await.map_err(DbError::Query)?;
         set_role(&mut tx).await?;
         set_config(&mut tx, "restichub.tenant_id", &tenant.to_string()).await?;
-        // Clear the platform scope. A session-level value never survives (M2).
+        // A session-level value does not survive a pooled connection.
         set_config(&mut tx, "restichub.scope", "").await?;
         Ok(Self { tx, tenant })
     }
 
-    /// Returns the tenant of the transaction.
     pub fn tenant(&self) -> TenantId {
         self.tenant
     }
@@ -55,8 +51,6 @@ impl<'a> TenantTx<'a> {
         Ok(())
     }
 
-    /// Returns the connection for a query.
-    ///
     /// The method is crate-internal. Only the repository functions of this crate use it. The
     /// transaction is the only way to get a connection, so a query always runs with the tenant
     /// scope.
@@ -64,14 +58,11 @@ impl<'a> TenantTx<'a> {
         &mut self.tx
     }
 
-    /// Commits the transaction.
     pub async fn commit(self) -> Result<(), DbError> {
         self.tx.commit().await.map_err(DbError::Query)
     }
 }
 
-/// A transaction for a platform operation.
-///
 /// The transaction sets `restichub.scope` to `platform`. Only the `tenants` table and the platform
 /// audit path accept this scope (ADR-0023, section Tenant isolation).
 pub struct PlatformTx<'a> {
@@ -80,12 +71,11 @@ pub struct PlatformTx<'a> {
 }
 
 impl<'a> PlatformTx<'a> {
-    /// Begins a platform transaction.
     pub async fn begin(pool: &'a PgPool) -> Result<Self, DbError> {
         let mut tx = pool.begin().await.map_err(DbError::Query)?;
         set_role(&mut tx).await?;
         set_config(&mut tx, "restichub.scope", "platform").await?;
-        // Clear the tenant id. A session-level value never survives (M2).
+        // A session-level value does not survive a pooled connection.
         set_config(&mut tx, "restichub.tenant_id", "").await?;
         Ok(Self {
             tx,
@@ -93,20 +83,18 @@ impl<'a> PlatformTx<'a> {
         })
     }
 
-    /// Records the tenant that this transaction created (N2).
-    ///
     /// Only [`crate::tenants::create`] and [`crate::tenants::create_with_bootstrap`] call this
     /// method.
     pub(crate) fn mark_created(&mut self, tenant: TenantId) {
         self.created_tenant = Some(tenant);
     }
 
-    /// Selects the tenant of the next writes in this transaction (N2).
+    /// Selects the tenant of the next writes in this transaction.
     ///
     /// The function keeps the platform scope and sets `restichub.tenant_id`. The tenant must be the
     /// one that this transaction created. Otherwise the function returns an error. A tenant
     /// creation and its key row, its first user and its audit record then commit in one
-    /// transaction (D3).
+    /// transaction.
     pub(crate) async fn enter_tenant(&mut self, tenant: TenantId) -> Result<(), DbError> {
         if self.created_tenant != Some(tenant) {
             return Err(DbError::TenantNotCreated(tenant));
@@ -114,14 +102,11 @@ impl<'a> PlatformTx<'a> {
         set_config(&mut self.tx, "restichub.tenant_id", &tenant.to_string()).await
     }
 
-    /// Returns the connection for a query.
-    ///
-    /// The method is crate-internal (H1).
+    /// Crate-internal.
     pub(crate) fn as_conn(&mut self) -> &mut PgConnection {
         &mut self.tx
     }
 
-    /// Commits the transaction.
     pub async fn commit(self) -> Result<(), DbError> {
         self.tx.commit().await.map_err(DbError::Query)
     }

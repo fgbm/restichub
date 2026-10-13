@@ -1,5 +1,3 @@
-//! Audit log tests: the append-only rule, the platform scope and the filters.
-
 use super::*;
 use crate::PLATFORM_TENANT_ID;
 use crate::audit;
@@ -67,7 +65,6 @@ async fn db_insert_platform_for_clears_the_tenant_guc() -> TestResult {
     let event = AuditEvent::new(AuditAction::TenantSuspend, "tenant");
     audit::insert_platform_for(&mut tx, tenant_a, &event).await?;
 
-    // The record is in tenant A.
     let page = audit::list_platform(
         &mut tx,
         &AuditFilter {
@@ -79,7 +76,7 @@ async fn db_insert_platform_for_clears_the_tenant_guc() -> TestResult {
     .await?;
     assert_eq!(page.records.len(), 1);
 
-    // The function cleared the GUC: the transaction reads no row of tenant A (issue #20).
+    // The function cleared the GUC: the transaction reads no row of tenant A.
     let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
         .fetch_one(tx.as_conn())
         .await?;
@@ -145,7 +142,7 @@ async fn db_platform_audit_writes_an_existing_tenant_and_counts_users() -> TestR
     tx.commit().await?;
     assert_eq!(summary.map(|tenant| tenant.user_count), Some(1));
 
-    // The count function returns no row in a tenant transaction (issue #20).
+    // The count function returns no row in a tenant transaction.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let rows: Vec<(Uuid, i64)> =
         sqlx::query_as("SELECT tenant_id, user_count FROM tenant_user_counts()")
@@ -172,7 +169,7 @@ async fn db_platform_audit_writes_an_existing_tenant_and_counts_users() -> TestR
     assert_eq!(transition, tenants::Transition::Changed);
 
     // After the audit write, the transaction reads and writes no row of tenant A, and it sees no
-    // row of the platform tenant (issue #20).
+    // row of the platform tenant.
     let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
         .fetch_one(tx.as_conn())
         .await?;
@@ -191,7 +188,7 @@ async fn db_platform_audit_writes_an_existing_tenant_and_counts_users() -> TestR
     assert_eq!(platform_setup.0, 0);
     tx.commit().await?;
 
-    // The audit record is in the affected tenant.
+    // The audit record is in the affected tenant only.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let records = audit::list(
         &mut tx,
@@ -245,7 +242,7 @@ async fn db_a_platform_audit_insert_is_limited_to_the_entered_tenant() -> TestRe
     let created = tenants::create(&mut tx, "audit-target").await?;
     tx.enter_tenant(created).await?;
 
-    // The entered tenant is accepted.
+    // Accepts the entered tenant.
     let entered = sqlx::query(
         "INSERT INTO audit_log (id, tenant_id, actor_type, action, object_type) \
          VALUES ($1, $2, 'system', 'x', 'tenant')",
@@ -256,7 +253,7 @@ async fn db_a_platform_audit_insert_is_limited_to_the_entered_tenant() -> TestRe
     .await;
     assert!(entered.is_ok());
 
-    // The platform tenant is accepted.
+    // Accepts the platform tenant.
     let platform = sqlx::query(
         "INSERT INTO audit_log (id, tenant_id, actor_type, action, object_type) \
          VALUES ($1, $2, 'system', 'x', 'tenant')",
@@ -374,13 +371,13 @@ async fn db_audit_platform_insert_follows_the_policy() -> TestResult {
     tx.enter_tenant(created).await?;
     let event = AuditEvent::new(AuditAction::TenantCreate, "tenant");
 
-    // The entered tenant is accepted.
+    // Accepts the entered tenant.
     assert!(
         audit::insert_platform(&mut tx, created, &event)
             .await
             .is_ok()
     );
-    // The platform tenant is accepted.
+    // Accepts the platform tenant.
     assert!(
         audit::insert_platform(&mut tx, PLATFORM_TENANT_ID, &event)
             .await
@@ -470,7 +467,6 @@ async fn db_audit_pagination_is_stable() -> TestResult {
     unique.dedup();
     assert_eq!(unique.len(), 5, "the pages repeat a record");
 
-    // The first page is stable.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let first = audit::list(
         &mut tx,
@@ -497,7 +493,7 @@ async fn db_audit_list_keeps_an_unknown_action_and_actor() -> TestResult {
     };
     let (tenant_a, _) = two_tenants(db.database()).await?;
 
-    // A row of a newer schema. The list must not fail and must keep the row (M5). The actor type
+    // A row of a newer schema. The list must not fail and must keep the row. The actor type
     // is a known type with no id, and the action string is not known.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     sqlx::query(

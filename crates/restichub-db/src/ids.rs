@@ -5,37 +5,30 @@
 
 use uuid::Uuid;
 
-/// The identifier of a tenant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct TenantId(Uuid);
 
-/// The identifier of a user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct UserId(Uuid);
 
-/// The identifier of a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct SessionId(Uuid);
 
-/// The identifier of an API token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct ApiTokenId(Uuid);
 
-/// The identifier of a secret.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct SecretId(Uuid);
 
-/// The identifier of an audit record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct AuditLogId(Uuid);
 
-/// The identifier of a one-time setup token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
 #[sqlx(transparent)]
 pub struct SetupTokenId(Uuid);
@@ -51,17 +44,14 @@ pub const PLATFORM_TENANT_ID: TenantId = TenantId(Uuid::from_bytes([
 macro_rules! id_type {
     ($type:ident) => {
         impl $type {
-            /// Creates the identifier from a UUID.
             pub fn from_uuid(uuid: Uuid) -> Self {
                 Self(uuid)
             }
 
-            /// Generates a new identifier (UUIDv7).
             pub fn new() -> Self {
                 Self(Uuid::now_v7())
             }
 
-            /// Returns the UUID.
             pub fn as_uuid(self) -> Uuid {
                 self.0
             }

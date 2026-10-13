@@ -1,5 +1,3 @@
-//! Authentication lookup tests: the SECURITY DEFINER functions and the token role.
-
 use super::*;
 use crate::test_util::test_database;
 use uuid::Uuid;

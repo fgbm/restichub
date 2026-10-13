@@ -26,45 +26,32 @@ use crate::enums::ActorType;
 use crate::ids::{ApiTokenId, AuditLogId, SecretId, TenantId, UserId};
 use crate::tx::{PlatformTx, TenantTx};
 
-/// The default number of records in one page.
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
 
-/// The largest number of records in one page.
 pub const MAX_PAGE_LIMIT: i64 = 200;
 
-/// The marker of a redacted field.
 pub const REDACTED: &str = "<redacted>";
 
-/// The last year of a valid RFC 3339 time.
+/// Last year of a valid RFC 3339 time.
 const MAX_YEAR: i32 = 9999;
 
-/// The key names that are always sensitive.
-///
 /// A field whose name holds one of these words is sensitive.
 const SENSITIVE_KEYS: [&str; 5] = ["password", "secret", "token", "key", "private_key"];
 
-/// The actor of an audit record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Actor {
-    /// A local user.
     User(UserId),
-    /// An API token.
     ApiToken(ApiTokenId),
-    /// An agent.
     Agent(Uuid),
-    /// The control plane.
     System,
-    /// An actor type that this version does not know. The list keeps the row.
+    /// A type from a newer version; the list keeps the row instead of failing.
     Unknown {
-        /// The stored actor type.
         actor_type: String,
-        /// The stored actor id.
         actor_id: Option<Uuid>,
     },
 }
 
 impl Actor {
-    /// Returns the stored value of the actor type.
     pub fn actor_type(&self) -> &str {
         match self {
             Self::User(_) => ActorType::User.as_str(),
@@ -75,7 +62,6 @@ impl Actor {
         }
     }
 
-    /// Returns the stored value of the actor id.
     pub fn actor_id(&self) -> Option<Uuid> {
         match self {
             Self::User(id) => Some(id.as_uuid()),
@@ -86,8 +72,6 @@ impl Actor {
         }
     }
 
-    /// Builds the actor from the two stored columns.
-    ///
     /// The function keeps an unknown type or a missing id as [`Actor::Unknown`]. A list therefore
     /// never fails on a row of a newer schema.
     fn from_parts(actor_type: String, actor_id: Option<Uuid>) -> Self {
@@ -107,67 +91,39 @@ impl Actor {
     }
 }
 
-/// The action of an audit record.
-///
 /// The string of each action is stable. Do not change a string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuditAction {
-    /// A user signs in.
     SignIn,
-    /// A sign-in attempt fails.
     SignInFailed,
-    /// A user signs out.
     SignOut,
-    /// The control plane creates a configuration.
     ConfigCreate,
-    /// The control plane changes a configuration.
     ConfigUpdate,
-    /// The control plane removes a configuration.
     ConfigDelete,
-    /// A job starts.
     JobRun,
-    /// A job is cancelled.
     JobCancel,
-    /// A restore starts.
     RestoreStart,
-    /// The control plane delivers a secret to an agent.
     SecretDelivered,
-    /// An agent enrolls.
     AgentEnrolled,
-    /// The control plane revokes an agent.
     AgentRevoked,
-    /// The control plane installs an agent remotely.
     RemoteInstall,
-    /// The control plane creates a tenant.
     TenantCreate,
-    /// The control plane suspends a tenant.
     TenantSuspend,
-    /// The control plane resumes a tenant.
     TenantResume,
-    /// The control plane removes a tenant.
     TenantDelete,
-    /// The control plane creates a user.
     UserCreate,
-    /// The control plane changes a user.
     UserUpdate,
-    /// The control plane removes a user.
     UserDelete,
-    /// The control plane creates an API token.
     ApiTokenCreate,
-    /// The control plane revokes an API token.
     ApiTokenRevoke,
-    /// The control plane creates a secret.
     SecretCreate,
-    /// The control plane replaces a secret.
     SecretReplace,
-    /// The control plane removes a secret.
     SecretDelete,
-    /// An action that this version does not know. The list keeps the row.
+    /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),
 }
 
 impl AuditAction {
-    /// Returns the stable stored string of the action.
     pub fn as_str(&self) -> &str {
         match self {
             Self::SignIn => "sign_in",
@@ -199,7 +155,7 @@ impl AuditAction {
         }
     }
 
-    /// Builds the action from the stored string. The function returns `None` on an unknown string.
+    /// `None` on an unknown string.
     pub fn parse(value: &str) -> Option<Self> {
         let action = match value {
             "sign_in" => Self::SignIn,
@@ -232,12 +188,12 @@ impl AuditAction {
         Some(action)
     }
 
-    /// Builds the action from a stored string. The function keeps an unknown string.
+    /// Keeps an unknown string.
     fn from_db(value: String) -> Self {
         Self::parse(&value).unwrap_or(Self::Unknown(value))
     }
 
-    /// Returns the known actions, in the stored order.
+    /// Known actions, in the stored order.
     ///
     /// The list excludes [`AuditAction::Unknown`]. The OpenAPI schema and the audit query use it.
     pub fn known() -> &'static [Self] {
@@ -308,7 +264,7 @@ impl utoipa::ToSchema for AuditAction {
     }
 }
 
-/// A diff that holds no secret value.
+/// Holds no secret value.
 ///
 /// The type keeps the JSON private. Only [`diff`] and [`RedactedDiff::empty`] build a value. A
 /// caller can therefore not pass raw secret data.
@@ -316,12 +272,11 @@ impl utoipa::ToSchema for AuditAction {
 pub struct RedactedDiff(Value);
 
 impl RedactedDiff {
-    /// Returns a diff with no changed field. It serialises as `{}`.
+    /// Serialises as `{}`.
     pub fn empty() -> Self {
         Self(Value::Object(Map::new()))
     }
 
-    /// Returns the JSON of the diff.
     pub fn as_value(&self) -> &Value {
         &self.0
     }
@@ -422,7 +377,6 @@ pub fn redact_value(value: &Value, redact: &[&str], parent_has_secret: bool) -> 
     }
 }
 
-/// Returns true if the field is sensitive.
 fn is_sensitive(key: &str, redact: &[&str], parent_has_secret: bool) -> bool {
     if redact.iter().any(|name| name.eq_ignore_ascii_case(key)) {
         return true;
@@ -434,7 +388,6 @@ fn is_sensitive(key: &str, redact: &[&str], parent_has_secret: bool) -> bool {
     lower == "value" && parent_has_secret
 }
 
-/// Returns the redacted marker of a changed field.
 fn redacted() -> Value {
     let mut object = Map::new();
     object.insert("old".to_owned(), Value::String(REDACTED.to_owned()));
@@ -442,7 +395,6 @@ fn redacted() -> Value {
     Value::Object(object)
 }
 
-/// Returns a changed field with both sides redacted.
 fn changed_redacted(
     before: Option<&Value>,
     after: Option<&Value>,
@@ -465,25 +417,18 @@ fn changed_redacted(
     Value::Object(object)
 }
 
-/// The input of an insert.
 #[derive(Debug, Clone)]
 pub struct AuditEvent {
-    /// The actor of the operation.
     pub actor: Actor,
-    /// The source IP address of the request. It is optional.
     pub source_ip: Option<IpAddr>,
-    /// The action.
     pub action: AuditAction,
-    /// The type of the object of the operation.
     pub object_type: String,
-    /// The identifier of the object of the operation. It is optional.
     pub object_id: Option<Uuid>,
-    /// The diff of the operation. It is optional. It holds no secret.
+    /// Holds no secret.
     pub diff: Option<RedactedDiff>,
 }
 
 impl AuditEvent {
-    /// Creates an event with a system actor and no diff.
     pub fn new(action: AuditAction, object_type: impl Into<String>) -> Self {
         Self {
             actor: Actor::System,
@@ -496,64 +441,44 @@ impl AuditEvent {
     }
 }
 
-/// A stored audit record.
 #[derive(Debug, Clone)]
 pub struct AuditRecord {
-    /// The identifier of the record.
     pub id: AuditLogId,
-    /// The tenant of the record.
     pub tenant_id: TenantId,
-    /// The time of the record.
     pub occurred_at: OffsetDateTime,
-    /// The actor of the operation.
     pub actor: Actor,
-    /// The source IP address of the request.
     pub source_ip: Option<IpAddr>,
-    /// The action.
     pub action: AuditAction,
-    /// The type of the object of the operation.
     pub object_type: String,
-    /// The identifier of the object of the operation.
     pub object_id: Option<Uuid>,
-    /// The diff of the operation as JSON.
     pub diff: Option<Value>,
 }
 
-/// The filter of a list.
 #[derive(Debug, Clone, Default)]
 pub struct AuditFilter {
-    /// The tenant of the record. The platform list filters by it. A tenant list ignores it, because
-    /// Row-Level Security shows its own rows only.
+    /// The platform list filters by it; a tenant list ignores it, because Row-Level Security shows
+    /// its own rows only.
     pub tenant_id: Option<TenantId>,
-    /// The start of the time range. It includes the value.
+    /// Start of the time range, inclusive.
     pub from: Option<OffsetDateTime>,
-    /// The end of the time range. It includes the value.
+    /// End of the time range, inclusive.
     pub to: Option<OffsetDateTime>,
-    /// The action.
     pub action: Option<AuditAction>,
-    /// The actor.
     pub actor: Option<Actor>,
-    /// The type of the object.
     pub object_type: Option<String>,
-    /// The identifier of the object.
     pub object_id: Option<Uuid>,
 }
 
-/// The key of the last record of a page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuditCursor {
-    /// The time of the record.
     pub occurred_at: OffsetDateTime,
-    /// The identifier of the record.
     pub id: AuditLogId,
 }
 
-/// The page of a list.
 #[derive(Debug, Clone, Copy)]
 pub struct AuditPage {
-    /// The number of records. The list limits the value to [`MAX_PAGE_LIMIT`].
+    /// Clamped to [`MAX_PAGE_LIMIT`].
     pub limit: i64,
-    /// The last record of the previous page. The list returns the older records.
     pub after: Option<AuditCursor>,
 }
 
@@ -566,16 +491,12 @@ impl Default for AuditPage {
     }
 }
 
-/// One page of audit records.
 #[derive(Debug, Clone)]
 pub struct AuditPageResult {
-    /// The records of the page. The list holds at most `limit` records.
     pub records: Vec<AuditRecord>,
-    /// True if the table holds more records after this page.
     pub has_more: bool,
 }
 
-/// Inserts a record in the tenant of the transaction.
 pub async fn insert(tx: &mut TenantTx<'_>, event: &AuditEvent) -> Result<AuditLogId, DbError> {
     let tenant = tx.tenant();
     insert_row(tx.as_conn(), tenant, event).await
@@ -621,7 +542,7 @@ pub async fn insert_platform(
     insert_row(tx.as_conn(), tenant, event).await
 }
 
-/// Inserts a record for an existing tenant in a platform transaction (issue #20).
+/// Inserts a record for an existing tenant in a platform transaction.
 ///
 /// A platform operation on an existing tenant (suspend, resume or delete) uses this function. The
 /// function sets the GUC `restichub.audit_tenant_id` for one insert and clears it again, so the
@@ -642,7 +563,6 @@ pub async fn insert_platform_for(
     }
 }
 
-/// Sets or clears the GUC `restichub.audit_tenant_id` of the transaction.
 async fn set_audit_tenant(
     conn: &mut PgConnection,
     tenant: Option<TenantId>,
@@ -656,7 +576,6 @@ async fn set_audit_tenant(
     Ok(())
 }
 
-/// Inserts a record with a connection.
 async fn insert_row(
     conn: &mut PgConnection,
     tenant: TenantId,
@@ -683,7 +602,6 @@ async fn insert_row(
     Ok(id)
 }
 
-/// Lists the records of the tenant of the transaction.
 pub async fn list(
     tx: &mut TenantTx<'_>,
     filter: &AuditFilter,
@@ -692,7 +610,6 @@ pub async fn list(
     list_rows(tx.as_conn(), filter, page).await
 }
 
-/// Lists the records of every tenant in a platform transaction.
 pub async fn list_platform(
     tx: &mut PlatformTx<'_>,
     filter: &AuditFilter,
@@ -757,7 +674,6 @@ async fn list_rows(
     Ok(AuditPageResult { records, has_more })
 }
 
-/// The column tuple of one audit row.
 type Row = (
     Uuid,
     Uuid,
@@ -801,7 +717,7 @@ impl TryFrom<Row> for AuditRecord {
     }
 }
 
-/// Returns true if the year of the time is in the range 1970 to 9999.
+/// True for a year in the range 1970 to 9999.
 pub fn is_supported_time(value: OffsetDateTime) -> bool {
     (1970..=MAX_YEAR).contains(&value.year())
 }
@@ -859,7 +775,6 @@ mod diff_tests {
 
     #[test]
     fn ac_au_01_diff_redacts_a_deleted_object() {
-        // Delete: an object with a secret to None.
         let before = json!({"token": "canary"});
         let value = diff(Some(&before), None, &[]);
         let text = value.as_value().to_string();
@@ -882,7 +797,6 @@ mod diff_tests {
 
     #[test]
     fn ac_au_01_diff_redacts_on_a_type_change() {
-        // Object to scalar.
         let before = json!({"data": {"secret": "canary"}});
         let after = json!({"data": "plain"});
         let value = diff(Some(&before), Some(&after), &[]);

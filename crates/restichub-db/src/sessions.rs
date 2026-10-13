@@ -12,10 +12,9 @@ use crate::DbError;
 use crate::ids::{SessionId, UserId};
 use crate::tx::TenantTx;
 
-/// The number of seconds below which the `last_seen_at` update is skipped.
+/// Skips the `last_seen_at` update below this many seconds.
 pub const TOUCH_INTERVAL_SECONDS: i64 = 60;
 
-/// Creates a session in the tenant of the transaction and returns its identifier.
 pub async fn create(
     tx: &mut TenantTx<'_>,
     user_id: UserId,
@@ -45,9 +44,7 @@ pub async fn create(
     Ok(id)
 }
 
-/// Removes one session of the tenant of the transaction.
-///
-/// The function returns true if the session existed.
+/// True if the session existed.
 pub async fn delete(tx: &mut TenantTx<'_>, id: SessionId) -> Result<bool, DbError> {
     let result = sqlx::query("DELETE FROM sessions WHERE id = $1")
         .bind(id)
@@ -57,7 +54,6 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: SessionId) -> Result<bool, DbErro
     Ok(result.rows_affected() == 1)
 }
 
-/// Removes every session of a user in the tenant of the transaction.
 pub async fn delete_for_user(tx: &mut TenantTx<'_>, user_id: UserId) -> Result<u64, DbError> {
     let result = sqlx::query("DELETE FROM sessions WHERE user_id = $1")
         .bind(user_id)
@@ -67,9 +63,7 @@ pub async fn delete_for_user(tx: &mut TenantTx<'_>, user_id: UserId) -> Result<u
     Ok(result.rows_affected())
 }
 
-/// Removes every session of a user except one session in the tenant of the transaction.
-///
-/// A password change keeps the current session and removes the others.
+/// Used by a password change, which keeps the current session and removes the others.
 pub async fn delete_for_user_except(
     tx: &mut TenantTx<'_>,
     user_id: UserId,

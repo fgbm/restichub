@@ -19,19 +19,15 @@ use crate::DbError;
 use crate::ids::SecretId;
 use crate::tx::TenantTx;
 
-/// The encrypted value of one secret.
-///
 /// The type holds the associated data inputs (`purpose`, `key_version`) and the ciphertext. It
 /// holds no plaintext.
 #[derive(Debug, Clone)]
 pub struct CiphertextRow {
-    /// The stable purpose of the value. The purpose is part of the associated data.
+    /// Part of the associated data.
     pub purpose: String,
-    /// The version of the tenant key that encrypted the value.
     pub key_version: i32,
-    /// The 96-bit nonce of the encryption.
+    /// 96-bit nonce of the encryption.
     pub nonce: Vec<u8>,
-    /// The authenticated ciphertext of the value.
     pub ciphertext: Vec<u8>,
 }
 
@@ -68,7 +64,6 @@ pub async fn load_ciphertext(
     read_row(tx, id).await
 }
 
-/// Reads the encrypted value of one secret of the tenant of the transaction.
 async fn read_row(tx: &mut TenantTx<'_>, id: SecretId) -> Result<Option<CiphertextRow>, DbError> {
     let row = sqlx::query_as::<_, (String, i32, Vec<u8>, Vec<u8>)>(
         "SELECT purpose, key_version, nonce, ciphertext FROM secrets WHERE id = $1",

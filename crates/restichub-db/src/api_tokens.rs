@@ -15,50 +15,34 @@ use crate::enums::Role;
 use crate::ids::{ApiTokenId, UserId};
 use crate::tx::TenantTx;
 
-/// The number of seconds below which the `last_used_at` update is skipped.
+/// Skips the `last_used_at` update below this many seconds.
 pub const TOUCH_INTERVAL_SECONDS: i64 = 60;
 
-/// The data of a new API token.
 #[derive(Debug, Clone)]
 pub struct NewApiToken<'a> {
-    /// The name for the user interface.
     pub name: &'a str,
-    /// The SHA-256 hash of the token value.
+    /// SHA-256 of the token value.
     pub token_hash: &'a [u8],
-    /// The first characters of the token value, for display.
     pub display_prefix: &'a str,
-    /// The role of the token in the tenant.
     pub role: Role,
-    /// The user that created the token.
     pub created_by: UserId,
-    /// The optional expiry time.
     pub expires_at: Option<OffsetDateTime>,
 }
 
-/// An API token row.
 #[derive(Debug, Clone)]
 pub struct ApiToken {
-    /// The identifier of the token.
     pub id: ApiTokenId,
-    /// The name for the user interface.
     pub name: String,
-    /// The role of the token.
     pub role: Role,
-    /// The first characters of the token value.
     pub display_prefix: String,
-    /// The user that created the token.
     pub created_by: UserId,
-    /// The creation time.
     pub created_at: OffsetDateTime,
-    /// The optional expiry time.
     pub expires_at: Option<OffsetDateTime>,
-    /// The time of the last use.
     pub last_used_at: Option<OffsetDateTime>,
-    /// The revocation time. A revoked token is refused.
+    /// Revoked tokens are refused.
     pub revoked_at: Option<OffsetDateTime>,
 }
 
-/// Creates an API token in the tenant of the transaction and returns its identifier.
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewApiToken<'_>) -> Result<ApiTokenId, DbError> {
     let id = ApiTokenId::new();
     sqlx::query(
@@ -80,7 +64,6 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewApiToken<'_>) -> Result<ApiT
     Ok(id)
 }
 
-/// Lists the API tokens of the tenant of the transaction.
 pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<ApiToken>, DbError> {
     let rows = sqlx::query_as::<_, ApiTokenRow>(
         "SELECT id, name, role, display_prefix, created_by, created_at, expires_at, last_used_at, \
@@ -93,7 +76,6 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<ApiToken>, DbError> {
     Ok(rows.into_iter().map(ApiToken::from).collect())
 }
 
-/// Reads one API token of the tenant of the transaction.
 pub async fn get(tx: &mut TenantTx<'_>, id: ApiTokenId) -> Result<Option<ApiToken>, DbError> {
     let row = sqlx::query_as::<_, ApiTokenRow>(
         "SELECT id, name, role, display_prefix, created_by, created_at, expires_at, last_used_at, \
@@ -126,7 +108,6 @@ pub async fn revoke(
     Ok(result.rows_affected() == 1)
 }
 
-/// Updates `last_used_at` when the stored value is older than [`TOUCH_INTERVAL_SECONDS`].
 pub async fn touch(
     tx: &mut TenantTx<'_>,
     id: ApiTokenId,
@@ -145,7 +126,6 @@ pub async fn touch(
     Ok(())
 }
 
-/// The column tuple of one API token row.
 type ApiTokenRow = (
     Uuid,
     String,

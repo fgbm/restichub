@@ -1,5 +1,3 @@
-//! Row-Level Security and tenant isolation tests.
-
 use super::*;
 use crate::PLATFORM_TENANT_ID;
 use crate::test_util::test_database;
@@ -301,7 +299,7 @@ async fn db_every_relation_has_forced_rls_and_a_policy() -> TestResult {
         "the table kek_check is missing"
     );
 
-    // Every SECURITY DEFINER function is in the allow-list and sets the search path (N9).
+    // Every SECURITY DEFINER function is in the allow-list and sets the search path.
     let functions: Vec<(String, Option<Vec<String>>)> = sqlx::query_as(
         "SELECT p.proname, p.proconfig \
          FROM pg_proc p \

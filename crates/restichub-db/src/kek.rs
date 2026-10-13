@@ -1,4 +1,4 @@
-//! The `kek_check` row (ADR-0023, section Secrets; issue #20).
+//! The `kek_check` row (ADR-0023, section Secrets).
 //!
 //! The platform tenant holds the `kek_check` rows. The control plane creates one row on the first
 //! start and verifies it on every later start, so it refuses to start with an incorrect key
@@ -9,14 +9,11 @@ use crate::DbError;
 use crate::ids::TenantId;
 use crate::tx::TenantTx;
 
-/// The stored `kek_check` row of the tenant of the transaction.
 #[derive(Debug, Clone)]
 pub struct KekCheckRow {
-    /// The key ID of the key encryption key that created the check.
     pub kek_id: String,
-    /// The 96-bit nonce of the encryption.
+    /// 96-bit nonce of the encryption.
     pub nonce: Vec<u8>,
-    /// The authenticated ciphertext of the fixed plaintext.
     pub ciphertext: Vec<u8>,
 }
 
@@ -37,7 +34,6 @@ pub async fn read_check(tx: &mut TenantTx<'_>) -> Result<Option<KekCheckRow>, Db
     }))
 }
 
-/// Inserts a `kek_check` row in the tenant of the transaction.
 pub async fn insert_check(
     tx: &mut TenantTx<'_>,
     kek_id: &str,
@@ -57,20 +53,15 @@ pub async fn insert_check(
     Ok(())
 }
 
-/// The active key row of one tenant.
 #[derive(Debug, Clone)]
 pub struct TenantKey {
-    /// The version of the key.
     pub key_version: i32,
-    /// The key ID of the key encryption key that wrapped the data encryption key.
     pub kek_id: String,
-    /// The wrapped data encryption key.
     pub wrapped_dek: Vec<u8>,
-    /// The 96-bit nonce of the wrapping.
+    /// 96-bit nonce of the wrapping.
     pub nonce: Vec<u8>,
 }
 
-/// Reads the active key row of a tenant in a tenant transaction.
 pub async fn read_tenant_key(
     tx: &mut TenantTx<'_>,
     tenant: TenantId,
