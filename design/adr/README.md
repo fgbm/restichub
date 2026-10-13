@@ -32,3 +32,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0024](0024-single-tenant-mode.md) | Single-tenant mode | partly superseded by ADR-0025 (installation-wide user accounts) |
 | [0025](0025-installation-wide-user-accounts.md) | Installation-wide user accounts | accepted |
 | [0026](0026-agent-pki-identity-and-key-rotation.md) | Agent PKI, identity and key rotation | accepted |
+| [0027](0027-web-ui-component-primitives.md) | Web UI component primitives | accepted |
