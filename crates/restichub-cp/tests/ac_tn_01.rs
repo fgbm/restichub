@@ -1,138 +1,486 @@
-//! AC-TN-01: a cross-tenant object identifier returns 404.
+//! AC-TN-01: a cross-tenant object identifier returns HTTP 404 and changes nothing (FR-TN-01).
 //!
-//! The test is table-driven. It reads [`ROUTES`] and covers every route with an `{id}`
-//! placeholder. A new `{id}` route without a fixture stops the test.
+//! The test is table-driven over the served OpenAPI document and the route table of
+//! [`ROUTES`]. Every operation with a path parameter that names an object needs one fixture row;
+//! an operation without a row stops the test with its method and path. The fixtures live in the
+//! registry [`FIXTURES`], keyed by the route path pattern, so a later epic (agents, jobs,
+//! repositories) adds one row for a new route.
+//!
+//! The cross-tenant case needs two tenants, so the harness runs in multi-tenant mode. Single mode
+//! serves one tenant and hides the platform routes (AC-TN-06, ADR-0024); the last test records that.
+
+#![allow(clippy::expect_used)]
 
 mod common;
 
-use axum::http::StatusCode;
+use std::collections::BTreeMap;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
+use restichub_cp::context::{Access, Operation, minimum_role};
 use restichub_cp::routes::ROUTES;
-use serde_json::json;
+use restichub_db::test_util::TestDatabase;
+use restichub_db::{Role, TenantId, audit};
+use serde_json::Value;
 
 use common::{
-    app, create_tenant, create_tenant_with_key, create_user, list_tokens, list_users, request,
-    seed_api_token, seed_secret, seed_session, send, token_revoked, user_disabled,
+    app_single, app_with_kek, body_json, count, create_tenant_with_key, create_user, list_tokens,
+    request, seed_api_token, seed_secret, seed_session, send_response,
 };
 
-/// The fixture of one `{id}` route: the body of an unsafe method.
+// The roles of one tenant (requirements section 2). A Platform Admin is absent: it acts in the
+// platform tenant only.
+const ROLES: [Role; 3] = [Role::Viewer, Role::Operator, Role::Admin];
+
+/// The canary names of the tenant B objects. The response of a tenant A call must hold none.
+const CANARY_USER: &str = "canary-bob";
+const CANARY_SECRET: &str = "canary-secret";
+
+/// The kind of tenant B object whose identifier the isolation check puts into the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Object {
+    User,
+    Secret,
+    ApiToken,
+}
+
+/// The isolation fixture of one route path pattern from the route table (AC-TN-01).
 ///
-/// The key is `(method, path)`. The test fails when a `{id}` route has no entry.
-const FIXTURES: &[(&str, &str)] = &[
-    ("get", "/api/v1/platform/tenants/{id}"),
-    ("post", "/api/v1/platform/tenants/{id}/suspend"),
-    ("post", "/api/v1/platform/tenants/{id}/resume"),
-    ("delete", "/api/v1/platform/tenants/{id}"),
-    ("get", "/api/v1/users/{id}"),
-    ("patch", "/api/v1/users/{id}"),
-    ("delete", "/api/v1/users/{id}"),
-    ("post", "/api/v1/users/{id}/password"),
-    ("delete", "/api/v1/api-tokens/{id}"),
-    ("get", "/api/v1/secrets/{id}"),
-    ("put", "/api/v1/secrets/{id}/value"),
-    ("delete", "/api/v1/secrets/{id}"),
+/// The registry is keyed by the path pattern of the route table. The methods of one path share a
+/// row, and a new route adds one row only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fixture {
+    /// The path holds the identifier of a tenant B object (the `{id}` family).
+    Object(Object),
+    /// The endpoint returns a collection. The response must hold no tenant B data.
+    Collection,
+    /// A platform operation (ADR-0023). It is platform-scoped by design, so it is no cross-tenant
+    /// call. The test checks that a tenant Admin of tenant A gets HTTP 403 or 404 on it.
+    Platform,
+    /// The route holds no tenant object: a public probe, authentication or the instance metadata.
+    Exempt,
+}
+
+/// The isolation fixture of each route path pattern.
+const FIXTURES: &[(&str, Fixture)] = &[
+    ("/healthz", Fixture::Exempt),
+    ("/readyz", Fixture::Exempt),
+    ("/api/v1/openapi.json", Fixture::Exempt),
+    ("/api/v1/auth/sign-in", Fixture::Exempt),
+    ("/api/v1/auth/sign-out", Fixture::Exempt),
+    ("/api/v1/auth/me", Fixture::Exempt),
+    ("/api/v1/auth/password", Fixture::Exempt),
+    ("/api/v1/setup", Fixture::Exempt),
+    ("/api/v1/setup/status", Fixture::Exempt),
+    ("/api/v1/instance", Fixture::Exempt),
+    ("/api/v1/audit", Fixture::Collection),
+    ("/api/v1/platform/audit", Fixture::Platform),
+    ("/api/v1/platform/tenants", Fixture::Platform),
+    ("/api/v1/platform/tenants/{id}", Fixture::Platform),
+    ("/api/v1/platform/tenants/{id}/suspend", Fixture::Platform),
+    ("/api/v1/platform/tenants/{id}/resume", Fixture::Platform),
+    ("/api/v1/users", Fixture::Collection),
+    ("/api/v1/users/{id}", Fixture::Object(Object::User)),
+    ("/api/v1/users/{id}/password", Fixture::Object(Object::User)),
+    ("/api/v1/api-tokens", Fixture::Collection),
+    ("/api/v1/api-tokens/{id}", Fixture::Object(Object::ApiToken)),
+    ("/api/v1/secrets", Fixture::Collection),
+    ("/api/v1/secrets/{id}", Fixture::Object(Object::Secret)),
+    (
+        "/api/v1/secrets/{id}/value",
+        Fixture::Object(Object::Secret),
+    ),
 ];
 
-fn body_for(method: &str, path: &str) -> Option<serde_json::Value> {
-    match (method, path) {
-        ("patch", _) => Some(json!({"display_name": "changed"})),
-        ("put", _) => Some(json!({"value": "a new value"})),
-        ("post", path) if path.ends_with("/password") => {
-            Some(json!({"new_password": "a long enough password"}))
+fn fixture_for(method: &str, path: &str) -> Fixture {
+    FIXTURES
+        .iter()
+        .find(|(pattern, _)| *pattern == path)
+        .map(|(_, fixture)| *fixture)
+        .unwrap_or_else(|| panic!("the operation {method} {path} has no isolation fixture"))
+}
+
+/// The `(method, path)` pairs of the served OpenAPI document.
+fn document_operations(document: &Value) -> Vec<(String, String)> {
+    let paths = document
+        .get("paths")
+        .and_then(Value::as_object)
+        .expect("the OpenAPI document holds no paths");
+    let mut operations = Vec::new();
+    for (path, item) in paths {
+        let methods = item
+            .as_object()
+            .unwrap_or_else(|| panic!("the path {path} is not an object"));
+        for method in methods.keys() {
+            operations.push((method.clone(), path.clone()));
         }
-        _ => None,
+    }
+    operations.sort();
+    operations
+}
+
+/// Sends a request and returns the status, the content type and the body.
+async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Option<String>, Value) {
+    let response = send_response(app, request).await;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let body = body_json(response).await;
+    (status, content_type, body)
+}
+
+/// Asserts the result of a tenant A call on an object identifier of tenant B.
+///
+/// The authorization layer refuses a role below the minimum role of the operation before the
+/// object lookup, so the status is HTTP 403 for that role and HTTP 404 for an allowed role.
+fn assert_cross_tenant(
+    role: Role,
+    operation: Operation,
+    method: &str,
+    path: &str,
+    status: StatusCode,
+    content_type: Option<String>,
+    problem: &Value,
+) {
+    if role.allows(minimum_role(operation)) {
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{method} {path} as {} with an identifier of tenant B",
+            role.as_str()
+        );
+        assert_eq!(
+            content_type.as_deref(),
+            Some("application/problem+json"),
+            "{method} {path} must answer with a problem document"
+        );
+        assert_eq!(
+            problem.get("code").and_then(Value::as_str),
+            Some("not_found"),
+            "{method} {path} must answer with the code not_found"
+        );
+    } else {
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "{method} {path} as {} must return HTTP 403",
+            role.as_str()
+        );
     }
 }
 
+/// Asserts that a tenant A Admin cannot reach a platform operation.
+fn assert_platform_refused(method: &str, uri: &str, status: StatusCode) {
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND,
+        "the platform operation {method} {uri} as a tenant Admin gave {status}"
+    );
+}
+
 #[tokio::test]
-async fn ac_tn_01_api_cross_tenant_ids_return_404() {
+async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    let tenant_a = create_tenant(db.database(), "cross-a").await;
+
+    // Tenant A and tenant B are real tenants. The secret fixtures need a data encryption key.
+    let tenant_a = create_tenant_with_key(db.database(), "cross-a").await;
     let tenant_b = create_tenant_with_key(db.database(), "cross-b").await;
 
-    // Tenant A has an Admin session.
-    let cookie_a = seed_session(db.database(), tenant_a, "admin-a", "admin").await;
-    // Tenant B has a user, an API token and a secret.
-    let user_b = create_user(db.database(), tenant_b, "bob", "phc", "viewer").await;
+    // The tenant B objects. Their identifiers go into the path of a tenant A call.
+    let user_b = create_user(db.database(), tenant_b, CANARY_USER, "phc", "viewer").await;
+    let secret_b = seed_secret(db.database(), tenant_b, CANARY_SECRET).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
     let token_b = list_tokens(db.database(), tenant_b)
         .await
         .first()
         .map(|token| token.id)
-        .unwrap_or_default();
-    let secret_b = seed_secret(db.database(), tenant_b, "cross-secret").await;
+        .expect("tenant B holds an API token");
+    // One audit record of tenant B, so a spurious write from tenant A shows up below.
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant_b)
+        .await
+        .expect("cannot begin the transaction");
+    let mut event = audit::AuditEvent::new(audit::AuditAction::ApiTokenCreate, "api_token");
+    event.object_id = Some(token_b.as_uuid());
+    audit::insert(&mut tx, &event)
+        .await
+        .expect("cannot insert the audit record");
+    tx.commit().await.expect("cannot commit the audit record");
 
-    let app = app(db.database());
+    // Tenant A holds one session and one API token for each role.
+    let mut sessions: Vec<(Role, String)> = Vec::new();
+    let mut bearer: Vec<(Role, String)> = Vec::new();
+    for role in ROLES {
+        let username = format!("session-{}", role.as_str());
+        let cookie = seed_session(db.database(), tenant_a, &username, role.as_str()).await;
+        sessions.push((role, cookie));
+        let token = seed_api_token(db.database(), tenant_a, role.as_str()).await;
+        bearer.push((role, token));
+    }
+    let admin_cookie = sessions
+        .iter()
+        .find(|(role, _)| *role == Role::Admin)
+        .map(|(_, cookie)| cookie.clone())
+        .expect("tenant A holds an Admin session");
+    let admin_token = bearer
+        .iter()
+        .find(|(role, _)| *role == Role::Admin)
+        .map(|(_, token)| token.clone())
+        .expect("tenant A holds an Admin token");
 
-    // Every route with an `{id}` placeholder has a fixture, and the other way round.
-    let id_routes: Vec<(String, String)> = ROUTES
-        .iter()
-        .filter(|route| route.path.contains("{id}"))
-        .map(|route| (route.method.to_owned(), route.path.to_owned()))
-        .collect();
-    let fixtures: Vec<(String, String)> = FIXTURES
-        .iter()
-        .map(|(method, path)| ((*method).to_owned(), (*path).to_owned()))
-        .collect();
+    let app = app_with_kek(db.database());
+
+    let (status, _, document) =
+        call(&app, request("GET", "/api/v1/openapi.json", None, None)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let b_ids = [
+        tenant_b.to_string(),
+        user_b.to_string(),
+        secret_b.to_string(),
+        token_b.to_string(),
+    ];
+    let before = snapshot_tenant(&db, tenant_b).await;
+    let audit_before = count(db.database(), tenant_b, "audit_log").await;
+
+    let mut index = 0usize;
+    for (method, path) in document_operations(&document) {
+        index += 1;
+        let route = ROUTES
+            .iter()
+            .find(|route| route.method == method && route.path == path)
+            .unwrap_or_else(|| {
+                panic!("the OpenAPI operation {method} {path} is not in the route table")
+            });
+        let http_method = method.to_ascii_uppercase();
+        let body = common::write_body(&http_method, &path, index, false);
+        match fixture_for(&method, &path) {
+            Fixture::Exempt => {}
+            Fixture::Platform => {
+                // A platform operation is platform-scoped by design. A tenant Admin of tenant A
+                // must not reach it.
+                let uri = path.replace("{id}", &tenant_b.to_string());
+                let response = call(
+                    &app,
+                    request(
+                        &http_method,
+                        &uri,
+                        Some(admin_cookie.as_str()),
+                        body.clone(),
+                    ),
+                )
+                .await;
+                assert_platform_refused(&http_method, &uri, response.0);
+                let response = call(
+                    &app,
+                    common::bearer_request(&http_method, &uri, admin_token.as_str(), body.clone()),
+                )
+                .await;
+                assert_platform_refused(&http_method, &uri, response.0);
+            }
+            Fixture::Object(object) => {
+                let id = match object {
+                    Object::User => user_b.to_string(),
+                    Object::Secret => secret_b.to_string(),
+                    Object::ApiToken => token_b.to_string(),
+                };
+                let uri = path.replace("{id}", &id);
+                let Access::Protected(operation) = route.access else {
+                    panic!("the object route {http_method} {path} is public");
+                };
+                for (role, cookie) in &sessions {
+                    let (status, content_type, problem) = call(
+                        &app,
+                        request(&http_method, &uri, Some(cookie.as_str()), body.clone()),
+                    )
+                    .await;
+                    assert_cross_tenant(
+                        *role,
+                        operation,
+                        &http_method,
+                        &path,
+                        status,
+                        content_type,
+                        &problem,
+                    );
+                }
+                for (role, token) in &bearer {
+                    let (status, content_type, problem) = call(
+                        &app,
+                        common::bearer_request(&http_method, &uri, token.as_str(), body.clone()),
+                    )
+                    .await;
+                    assert_cross_tenant(
+                        *role,
+                        operation,
+                        &http_method,
+                        &path,
+                        status,
+                        content_type,
+                        &problem,
+                    );
+                }
+            }
+            Fixture::Collection => {
+                // A collection endpoint holds no object identifier. The response of tenant A must
+                // hold no tenant B data.
+                let (status, _, response) = call(
+                    &app,
+                    request(&http_method, &path, Some(&admin_cookie), body),
+                )
+                .await;
+                let expected = if http_method == "POST" {
+                    StatusCode::CREATED
+                } else {
+                    StatusCode::OK
+                };
+                assert_eq!(
+                    status, expected,
+                    "{http_method} {path} as tenant A Admin must return {expected}"
+                );
+                let text = response.to_string();
+                for needle in [
+                    tenant_b.to_string(),
+                    user_b.to_string(),
+                    secret_b.to_string(),
+                    token_b.to_string(),
+                    CANARY_USER.to_owned(),
+                    CANARY_SECRET.to_owned(),
+                ] {
+                    assert!(
+                        !text.contains(&needle),
+                        "{http_method} {path} of tenant A holds tenant B data: {needle}"
+                    );
+                }
+            }
+        }
+    }
+
+    // No cross-tenant call changes a row of tenant B.
+    let after = snapshot_tenant(&db, tenant_b).await;
     assert_eq!(
-        id_routes, fixtures,
-        "a route with an {{id}} placeholder has no fixture"
+        before, after,
+        "a cross-tenant call changed the rows of tenant B"
+    );
+    assert_eq!(
+        count(db.database(), tenant_b, "audit_log").await,
+        audit_before,
+        "a cross-tenant call wrote an audit record for tenant B"
     );
 
-    // Each fixture uses an identifier of tenant B. A tenant route returns 404 for tenant A. A
-    // platform route returns 403 for tenant A, because tenant A is not the platform tenant.
-    for (method, path) in FIXTURES {
-        let id = if path.contains("api-tokens") {
-            token_b.to_string()
-        } else if path.contains("secrets") {
-            secret_b.to_string()
-        } else {
-            user_b.to_string()
-        };
-        let uri = path.replace("{id}", &id);
-        let http_method = method.to_ascii_uppercase();
-        let body = body_for(method, path);
-        let (status, _, _) = send(&app, request(&http_method, &uri, Some(&cookie_a), body)).await;
-        let expected = if path.starts_with("/api/v1/platform/") {
-            StatusCode::FORBIDDEN
-        } else {
-            StatusCode::NOT_FOUND
-        };
-        assert_eq!(
-            status, expected,
-            "{http_method} {path} with an identifier of tenant B must return {expected}"
+    // No audit record of tenant A names a tenant B object.
+    for (object_id, diff) in audit_rows(&db, tenant_a).await {
+        for id in &b_ids {
+            assert_ne!(
+                &object_id, id,
+                "an audit record of tenant A names the tenant B object {id}"
+            );
+            assert!(
+                !diff.contains(id),
+                "the diff of an audit record of tenant A names the tenant B object {id}"
+            );
+        }
+        assert!(
+            !diff.contains(CANARY_USER) && !diff.contains(CANARY_SECRET),
+            "the diff of an audit record of tenant A names a tenant B object"
         );
     }
 
-    assert!(
-        !user_disabled(db.database(), tenant_b, user_b).await,
-        "the user of tenant B must not be disabled"
-    );
-    assert!(
-        !token_revoked(db.database(), tenant_b, token_b).await,
-        "the token of tenant B must not be revoked"
-    );
-    assert!(
-        list_users(db.database(), tenant_b)
-            .await
-            .iter()
-            .any(|user| user.id == user_b),
-        "the user of tenant B must exist"
-    );
-    let secret_exists = {
-        let mut tx = db
-            .database()
-            .begin_tenant(tenant_b)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
-        let secret = restichub_db::secrets::get(&mut tx, secret_b)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
-        tx.commit().await.unwrap_or_else(|error| panic!("{error}"));
-        secret.is_some()
-    };
-    assert!(secret_exists, "the secret of tenant B must exist");
-
     db.cleanup().await;
+}
+
+/// The cross-tenant case needs two tenants, so the harness runs in multi mode. Single mode serves
+/// one tenant and hides the platform routes (AC-TN-06). The test records the mode boundary.
+#[tokio::test]
+async fn ac_tn_01_single_mode_has_one_tenant_and_hides_the_platform_routes() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let app = app_single(db.database());
+    for route in ROUTES {
+        if !route.access.is_platform() {
+            continue;
+        }
+        let uri = route
+            .path
+            .replace("{id}", &restichub_db::TenantId::new().to_string());
+        let http_method = route.method.to_ascii_uppercase();
+        let (status, _, problem) = call(&app, request(&http_method, &uri, None, None)).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "single mode must hide the platform route {http_method} {uri}"
+        );
+        assert_eq!(
+            problem.get("code").and_then(Value::as_str),
+            Some("not_found")
+        );
+    }
+    db.cleanup().await;
+}
+
+/// The rows of a tenant in every table that holds `tenant_id`, read through the owner connection.
+///
+/// The owner login is subject to `FORCE ROW LEVEL SECURITY` (ADR-0023). The function sets the
+/// tenant setting, so Row-Level Security shows the rows of the tenant only.
+async fn snapshot_tenant(db: &TestDatabase, tenant: TenantId) -> BTreeMap<String, String> {
+    let tables: Vec<(String,)> = sqlx::query_as(
+        "SELECT table_name FROM information_schema.columns \
+         WHERE table_schema = 'public' AND column_name = 'tenant_id' ORDER BY table_name",
+    )
+    .fetch_all(db.owner_pool())
+    .await
+    .expect("cannot list the tenant tables");
+    let mut tx = db
+        .owner_pool()
+        .begin()
+        .await
+        .expect("cannot begin the owner transaction");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    let mut snapshot = BTreeMap::new();
+    for (table,) in tables {
+        let query = format!(
+            "SELECT coalesce(string_agg(row_to_json(t)::text, E'\\n' \
+             ORDER BY row_to_json(t)::text), '') FROM \"{table}\" t"
+        );
+        let (dump,): (String,) = sqlx::query_as(sqlx::AssertSqlSafe(query))
+            .fetch_one(&mut *tx)
+            .await
+            .expect("cannot dump the tenant rows");
+        snapshot.insert(table, dump);
+    }
+    tx.commit().await.expect("cannot commit the snapshot");
+    snapshot
+}
+
+/// The `(object_id, diff)` of each audit record of a tenant.
+async fn audit_rows(db: &TestDatabase, tenant: TenantId) -> Vec<(String, String)> {
+    let mut tx = db
+        .owner_pool()
+        .begin()
+        .await
+        .expect("cannot begin the owner transaction");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT coalesce(object_id::text, ''), coalesce(diff::text, '') FROM audit_log",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .expect("cannot read the audit records");
+    tx.commit().await.expect("cannot commit the audit read");
+    rows
 }

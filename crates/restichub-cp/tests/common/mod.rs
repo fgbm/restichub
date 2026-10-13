@@ -22,7 +22,7 @@ use restichub_db::{
     Database, PLATFORM_TENANT_ID, Role, TenantId, TenantStatus, api_tokens, memberships, sessions,
     tenants, users,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use time::OffsetDateTime;
 use tower::ServiceExt;
 
@@ -93,6 +93,53 @@ pub fn bearer_request(method: &str, uri: &str, token: &str, body: Option<Value>)
     let mut request = builder.body(body).expect("cannot build the request");
     request.extensions_mut().insert(peer());
     request
+}
+
+/// Builds a body that passes the JSON extraction for an operation (AC-AU-02, AC-TN-01).
+///
+/// A malformed body would stop a request before the handler runs the authorization and the
+/// isolation checks, so the two tests send a valid body. A Platform Admin acts in the platform
+/// tenant, where the only valid role is `platform_admin`.
+pub fn write_body(method: &str, path: &str, index: usize, platform_admin: bool) -> Option<Value> {
+    let role = if platform_admin {
+        "platform_admin"
+    } else {
+        "viewer"
+    };
+    match (method, path) {
+        ("GET", _) | ("DELETE", _) => None,
+        ("POST", "/api/v1/users") => Some(json!({
+            "username": format!("matrix-{index}"),
+            "password": "a long enough password",
+            "display_name": "Matrix",
+            "role": role,
+        })),
+        ("POST", "/api/v1/users/{id}/password") => {
+            Some(json!({"new_password": "a long enough password"}))
+        }
+        ("POST", "/api/v1/api-tokens") => Some(json!({"name": "matrix", "role": role})),
+        ("POST", "/api/v1/secrets") => Some(json!({
+            "name": format!("matrix-secret-{index}"),
+            "purpose": "repository_password",
+            "value": "matrix-value",
+        })),
+        ("PUT", _) => Some(json!({"value": "matrix-value"})),
+        ("POST", "/api/v1/platform/tenants") => Some(json!({
+            "name": format!("matrix-{index}"),
+            "first_admin": {
+                "username": format!("admin-{index}"),
+                "display_name": "Matrix",
+                "password": "a long enough password",
+            },
+        })),
+        ("POST", "/api/v1/auth/password") => Some(json!({
+            "current_password": "wrong",
+            "new_password": "a long enough password",
+        })),
+        ("POST", "/api/v1/auth/sign-out") => None,
+        ("PATCH", _) => Some(json!({"display_name": "Matrix"})),
+        _ => Some(json!({})),
+    }
 }
 
 pub async fn body_json(response: axum::response::Response) -> Value {

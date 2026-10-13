@@ -1,17 +1,15 @@
-//! The role and operation matrix (AC-AU-02) and the cross-tenant token isolation (AC-TN-04).
+//! The role and operation matrix (AC-AU-02). The cross-tenant API token isolation (AC-TN-04) is in
+//! `ac_tn_04.rs`.
 
 mod common;
 
 use axum::http::StatusCode;
 use restichub_cp::context::{Access, Operation, minimum_role};
 use restichub_cp::routes::ROUTES;
-use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens, audit, memberships};
-use serde_json::{Value, json};
+use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens, memberships};
+use serde_json::Value;
 
-use common::{
-    app, app_with_kek, create_tenant, create_tenant_with_key, create_user, request, seed_api_token,
-    seed_session, send,
-};
+use common::{app, app_with_kek, create_tenant_with_key, create_user, request, seed_session, send};
 
 /// The four roles in the order of the requirements section 2.
 const ROLES: [Role; 4] = [
@@ -24,53 +22,6 @@ const ROLES: [Role; 4] = [
 /// Builds a username that is not in use for a fresh session.
 fn unique(role: Role, index: usize) -> String {
     format!("user-{}-{index}", role.as_str())
-}
-
-/// Builds a body that passes the JSON extraction for an operation.
-///
-/// The matrix checks the authorization result. A malformed body would stop the request before the
-/// handler runs the authorization check, so the test sends a valid body. A Platform Admin acts in
-/// the platform tenant, where the only valid role is `platform_admin`.
-fn body_for(method: &str, path: &str, index: usize, platform_admin: bool) -> Option<Value> {
-    let role = if platform_admin {
-        "platform_admin"
-    } else {
-        "viewer"
-    };
-    match (method, path) {
-        ("GET", _) | ("DELETE", _) => None,
-        ("POST", "/api/v1/users") => Some(json!({
-            "username": format!("matrix-{index}"),
-            "password": "a long enough password",
-            "display_name": "Matrix",
-            "role": role,
-        })),
-        ("POST", "/api/v1/users/{id}/password") => {
-            Some(json!({"new_password": "a long enough password"}))
-        }
-        ("POST", "/api/v1/api-tokens") => Some(json!({"name": "matrix", "role": role})),
-        ("POST", "/api/v1/secrets") => Some(json!({
-            "name": format!("matrix-secret-{index}"),
-            "purpose": "repository_password",
-            "value": "matrix-value",
-        })),
-        ("PUT", _) => Some(json!({"value": "matrix-value"})),
-        ("POST", "/api/v1/platform/tenants") => Some(json!({
-            "name": format!("matrix-{index}"),
-            "first_admin": {
-                "username": format!("admin-{index}"),
-                "display_name": "Matrix",
-                "password": "a long enough password",
-            },
-        })),
-        ("POST", "/api/v1/auth/password") => Some(json!({
-            "current_password": "wrong",
-            "new_password": "a long enough password",
-        })),
-        ("POST", "/api/v1/auth/sign-out") => None,
-        ("PATCH", _) => Some(json!({"display_name": "Matrix"})),
-        _ => Some(json!({})),
-    }
 }
 
 #[tokio::test]
@@ -199,7 +150,7 @@ async fn ac_au_02_role_operation_matrix() {
             .await;
             let path = route.path.replace("{id}", &id);
             let method = route.method.to_ascii_uppercase();
-            let body = body_for(&method, route.path, index, role == Role::PlatformAdmin);
+            let body = common::write_body(&method, route.path, index, role == Role::PlatformAdmin);
             let (status, _, _) = send(&app, request(&method, &path, Some(&cookie), body)).await;
 
             let allowed_by_role = role.rank() >= minimum.rank();
@@ -315,99 +266,6 @@ async fn ac_au_02_platform_tenant_refuses_a_lower_role() {
         "{token:?}"
     );
     drop(tx);
-
-    db.cleanup().await;
-}
-
-#[tokio::test]
-async fn ac_tn_04_api_token_of_tenant_a_cannot_access_tenant_b() {
-    let Some(db) = common::test_db().await else {
-        return;
-    };
-    let tenant_a = create_tenant(db.database(), "tenant-a").await;
-    let tenant_b = create_tenant(db.database(), "tenant-b").await;
-
-    // Seed a user and an audit record of tenant B.
-    let user_b = create_user(db.database(), tenant_b, "bob", "phc", "admin").await;
-    let mut tx = db
-        .database()
-        .begin_tenant(tenant_b)
-        .await
-        .unwrap_or_else(|e| panic!("{e}"));
-    let mut event = audit::AuditEvent::new(audit::AuditAction::UserCreate, "user");
-    event.object_id = Some(user_b.as_uuid());
-    audit::insert(&mut tx, &event)
-        .await
-        .unwrap_or_else(|e| panic!("{e}"));
-    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
-
-    // Seed a user and an audit record of tenant A.
-    let user_a = create_user(db.database(), tenant_a, "alice", "phc", "admin").await;
-    let mut tx = db
-        .database()
-        .begin_tenant(tenant_a)
-        .await
-        .unwrap_or_else(|e| panic!("{e}"));
-    let mut event = audit::AuditEvent::new(audit::AuditAction::UserCreate, "user");
-    event.object_id = Some(user_a.as_uuid());
-    audit::insert(&mut tx, &event)
-        .await
-        .unwrap_or_else(|e| panic!("{e}"));
-    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
-
-    let token_a = seed_api_token(db.database(), tenant_a, "admin").await;
-    let app = app(db.database());
-
-    // The token of tenant A cannot read a user of tenant B (HTTP 404).
-    let (status, _, _) = send(
-        &app,
-        common::bearer_request(
-            "GET",
-            &format!("/api/v1/users/{}", user_b.as_uuid()),
-            &token_a,
-            None,
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-
-    // The audit list of tenant A holds no event of tenant B.
-    let (status, _, page) = send(
-        &app,
-        common::bearer_request("GET", "/api/v1/audit", &token_a, None),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let items = page
-        .get("items")
-        .and_then(Value::as_array)
-        .unwrap_or_else(|| panic!("no items"));
-    assert!(!items.is_empty(), "tenant A must see its own event");
-    for item in items {
-        assert_eq!(
-            item.get("tenant_id").and_then(Value::as_str),
-            Some(tenant_a.to_string().as_str()),
-            "the audit list of tenant A holds an event of another tenant"
-        );
-    }
-
-    // The token of tenant A cannot read a user of tenant B through the list either.
-    let (status, _, page) = send(
-        &app,
-        common::bearer_request("GET", "/api/v1/users", &token_a, None),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let items = page
-        .get("items")
-        .and_then(Value::as_array)
-        .unwrap_or_else(|| panic!("no items"));
-    for item in items {
-        assert_ne!(
-            item.get("id").and_then(Value::as_str),
-            Some(user_b.to_string().as_str())
-        );
-    }
 
     db.cleanup().await;
 }
