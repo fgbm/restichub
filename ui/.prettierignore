@@ -3,3 +3,5 @@ build/
 node_modules/
 package-lock.json
 src/lib/api/schema.d.ts
+# Static design mockups: plain HTML, no build step, not part of the app.
+mockups/

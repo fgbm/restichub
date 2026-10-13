@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
 	{
-		ignores: ['.svelte-kit/', 'build/', 'node_modules/', 'src/lib/api/schema.d.ts']
+		ignores: ['.svelte-kit/', 'build/', 'node_modules/', 'src/lib/api/schema.d.ts', 'mockups/']
 	},
 	js.configs.recommended,
 	...tseslint.configs.recommended,
