@@ -48,18 +48,14 @@ pub use kek::{
 };
 pub use secret::{EncryptedSecret, SecretPurpose, decrypt_secret, encrypt_secret};
 
-/// A secret string.
-///
-/// The type hides the value in `Debug` and zeroizes the value on drop.
+/// Hides the value in `Debug` and zeroizes it on drop.
 pub struct SecretString(String);
 
 impl SecretString {
-    /// Wraps a value.
     pub fn new(value: String) -> Self {
         Self(value)
     }
 
-    /// Returns the secret value.
     pub fn expose_secret(&self) -> &str {
         &self.0
     }
@@ -99,18 +95,13 @@ impl<'de> serde::Deserialize<'de> for SecretString {
     }
 }
 
-/// Reads environment variables.
-///
-/// The control plane uses this trait to read configuration values and secrets. A test uses a
+/// The control plane reads configuration values and secrets through this trait; a test uses a
 /// map instead of the process environment.
 pub trait EnvReader {
-    /// Returns the value of the variable `name`.
-    ///
-    /// The function returns `None` if the variable is not set.
+    /// `None` if the variable is not set.
     fn get(&self, name: &str) -> Option<String>;
 }
 
-/// The process environment.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemEnv;
 
@@ -120,50 +111,28 @@ impl EnvReader for SystemEnv {
     }
 }
 
-/// The error of a secret read.
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
-    /// The file path and the environment variable are both set.
     #[error("both the secret file and the environment variable are set")]
     BothSourcesSet,
-    /// No source is set.
     #[error("the secret source is not set")]
     Missing,
-    /// The file cannot be read.
     #[error("cannot read the secret file {path}")]
     FileRead {
-        /// The path of the file.
         path: PathBuf,
-        /// The cause.
         #[source]
         source: std::io::Error,
     },
-    /// The path is a symbolic link.
     #[error("the secret file {path} is a symbolic link")]
-    Symlink {
-        /// The path of the file.
-        path: PathBuf,
-    },
-    /// The path is not a regular file.
+    Symlink { path: PathBuf },
     #[error("the secret file {path} is not a regular file")]
-    NotRegularFile {
-        /// The path of the file.
-        path: PathBuf,
-    },
-    /// The file permissions are wider than the owner.
+    NotRegularFile { path: PathBuf },
     #[error(
         "the secret file {path} is readable, writable or executable by the group or by other users"
     )]
-    FilePermissions {
-        /// The path of the file.
-        path: PathBuf,
-    },
-    /// The file does not hold valid UTF-8.
+    FilePermissions { path: PathBuf },
     #[error("the secret file {path} does not hold valid UTF-8")]
-    NotUtf8 {
-        /// The path of the file.
-        path: PathBuf,
-    },
+    NotUtf8 { path: PathBuf },
 }
 
 /// Reads a secret value from one source.
@@ -216,7 +185,7 @@ pub(crate) fn read_secret_file(path: &Path) -> Result<SecretString, SecretError>
     read_all(file, path)
 }
 
-/// Opens the file for reading and refuses to follow a symbolic link on Unix.
+/// Refuses to follow a symbolic link on Unix (`O_NOFOLLOW`).
 #[cfg(unix)]
 fn open_readonly(path: &Path) -> Result<File, SecretError> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -231,7 +200,6 @@ fn open_readonly(path: &Path) -> Result<File, SecretError> {
         })
 }
 
-/// Opens the file for reading.
 #[cfg(not(unix))]
 fn open_readonly(path: &Path) -> Result<File, SecretError> {
     File::open(path).map_err(|source| SecretError::FileRead {
@@ -240,7 +208,6 @@ fn open_readonly(path: &Path) -> Result<File, SecretError> {
     })
 }
 
-/// Refuses a symbolic link before the open.
 fn check_not_symlink(path: &Path) -> Result<(), SecretError> {
     let metadata = std::fs::symlink_metadata(path).map_err(|source| SecretError::FileRead {
         path: path.to_path_buf(),
@@ -254,13 +221,12 @@ fn check_not_symlink(path: &Path) -> Result<(), SecretError> {
     Ok(())
 }
 
-/// Checks that the file is readable by the owner only.
 #[cfg(unix)]
 fn check_mode(metadata: &std::fs::Metadata, path: &Path) -> Result<(), SecretError> {
     use std::os::unix::fs::PermissionsExt;
 
     let mode = metadata.permissions().mode();
-    // The group and the other bits are 0o077.
+    // Group and other bits are 0o077.
     if mode & 0o077 != 0 {
         return Err(SecretError::FilePermissions {
             path: path.to_path_buf(),
@@ -269,13 +235,12 @@ fn check_mode(metadata: &std::fs::Metadata, path: &Path) -> Result<(), SecretErr
     Ok(())
 }
 
-/// Checks the file permissions. The function does nothing on a non-Unix platform.
+/// Does nothing on a non-Unix platform.
 #[cfg(not(unix))]
 fn check_mode(_metadata: &std::fs::Metadata, _path: &Path) -> Result<(), SecretError> {
     Ok(())
 }
 
-/// Reads the whole file into a zeroizing buffer and trims one trailing line break.
 fn read_all(mut file: File, path: &Path) -> Result<SecretString, SecretError> {
     let mut buffer = Zeroizing::new(Vec::new());
     file.read_to_end(&mut buffer)
@@ -309,7 +274,6 @@ mod tests {
 
     use super::{EnvReader, SecretError, SecretString, read_secret};
 
-    /// A test environment.
     struct MapEnv(HashMap<String, String>);
 
     impl MapEnv {

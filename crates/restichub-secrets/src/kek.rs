@@ -25,22 +25,17 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::error::{CryptoError, KekError};
 use crate::{EnvReader, SecretString, read_secret_file};
 
-/// The name of the environment variable that holds the KEK.
 pub const KEK_ENV: &str = "RESTICHUB_KEK";
 
-/// The name of the configuration parameter that holds the path of the KEK file.
 pub const KEK_FILE_PARAM: &str = "kek_file";
 
-/// The length of a KEK in bytes.
+/// KEK length in bytes.
 pub const KEK_LEN: usize = 32;
 
-/// The domain string of the key ID derivation.
 const KEK_ID_DOMAIN: &[u8] = b"restichub-kek-id-v1";
 
-/// The key ID of a KEK.
-///
-/// The key ID is 16 lowercase hexadecimal characters. The type shows the value in `Debug`, because
-/// the key ID is not secret material.
+/// 16 lowercase hexadecimal characters. The type shows the value in `Debug`, because the key ID
+/// is not secret material.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KekId(String);
 
@@ -62,7 +57,6 @@ impl KekId {
         }
     }
 
-    /// Returns the key ID as a string.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -74,13 +68,9 @@ impl fmt::Display for KekId {
     }
 }
 
-/// A key encryption key.
-///
-/// The type is 32 bytes. The type zeroizes the value on drop and shows `<redacted>` in `Debug`.
+/// 32 bytes; zeroizes the value on drop and shows `<redacted>` in `Debug`.
 pub struct Kek {
-    /// The KEK bytes.
     bytes: [u8; KEK_LEN],
-    /// The derived key ID.
     id: KekId,
 }
 
@@ -95,14 +85,11 @@ impl Kek {
         Self { bytes: stored, id }
     }
 
-    /// Returns the key ID.
     pub fn id(&self) -> &KekId {
         &self.id
     }
 
-    /// Returns the KEK bytes.
-    ///
-    /// The function is crate-internal, so the exact key never leaves the crate.
+    /// Crate-internal, so the exact key never leaves the crate.
     pub(crate) fn bytes(&self) -> &[u8; KEK_LEN] {
         &self.bytes
     }
@@ -131,35 +118,29 @@ fn derive_kek_id(key: &[u8; KEK_LEN]) -> KekId {
     let digest = hasher.finalize();
     let mut hex = String::with_capacity(16);
     for byte in &digest[..8] {
-        // A write to a `String` cannot fail.
+        // Writing to a `String` cannot fail.
         let _ = write!(hex, "{byte:02x}");
     }
     KekId(hex)
 }
 
-/// A source of key encryption keys.
-///
 /// The trait is not asynchronous, so a provider can be used from a synchronous or an asynchronous
 /// caller. The method [`KekProvider::by_id`] prepares the rotation of the KEK: a provider can hold
 /// the current KEK and the previous KEKs. The trait requires `Debug`, so a log line can show the
 /// key ID without the key.
 pub trait KekProvider: Send + Sync + fmt::Debug {
-    /// Returns the current KEK.
     fn current(&self) -> &Kek;
 
-    /// Returns the KEK with the key ID `id`.
-    ///
-    /// The function returns `None` if this provider does not hold this KEK.
+    /// `None` if this provider does not hold this KEK.
     fn by_id(&self, id: &KekId) -> Option<&Kek>;
 }
 
-/// The file or environment source of the KEK.
+/// File or environment source of the KEK.
 ///
 /// The path is optional. If the path is set, the KEK comes from the file. If the path is not set,
 /// the KEK comes from the environment variable [`KEK_ENV`].
 #[derive(Debug, Default, Clone)]
 pub struct KekConfig {
-    /// The path of the KEK file.
     pub file_path: Option<PathBuf>,
 }
 
@@ -187,19 +168,15 @@ pub fn load_kek_provider(
     }
 }
 
-/// The KEK provider that reads a file.
-///
 /// The provider obeys the same file rules as the database password: the file is a regular file,
 /// it is not a symbolic link, and its permissions are no wider than the owner on Unix. The
 /// provider also refuses a file when the environment variable [`KEK_ENV`] is set, because the
 /// operator must set one source only.
 pub struct FileKekProvider {
-    /// The KEK.
     kek: Kek,
 }
 
 impl FileKekProvider {
-    /// Loads the KEK from the file at `file_path`.
     pub fn load(file_path: &Path, env: &dyn EnvReader) -> Result<Self, KekError> {
         if env.get(KEK_ENV).is_some() {
             return Err(KekError::BothSourcesSet);
@@ -229,20 +206,16 @@ impl fmt::Debug for FileKekProvider {
     }
 }
 
-/// The KEK provider that reads the environment variable [`KEK_ENV`].
 pub struct EnvKekProvider {
-    /// The KEK.
     kek: Kek,
 }
 
 impl EnvKekProvider {
-    /// Loads the KEK from the environment variable [`KEK_ENV`].
     pub fn load(env: &dyn EnvReader) -> Result<Self, KekError> {
         let value = env.get(KEK_ENV).ok_or(KekError::MissingSource)?;
         Self::from_value(&value)
     }
 
-    /// Builds the provider from a base64 value.
     fn from_value(value: &str) -> Result<Self, KekError> {
         let kek = parse_kek(value, KEK_ENV)?;
         Ok(Self { kek })
@@ -298,13 +271,11 @@ pub fn generate_kek_encoded() -> Result<SecretString, CryptoError> {
     Ok(SecretString::new(STANDARD.encode(bytes.as_slice())))
 }
 
-/// Encodes a KEK as base64. A test uses this function.
 #[cfg(test)]
 pub(crate) fn encode_kek(kek: &Kek) -> String {
     STANDARD.encode(kek.bytes())
 }
 
-/// Parses a base64 KEK value. A test uses this function.
 #[cfg(test)]
 pub(crate) fn decode_kek(encoded: &str) -> Result<Kek, KekError> {
     parse_kek(encoded, KEK_FILE_PARAM)
@@ -323,7 +294,6 @@ mod tests {
     #[cfg(unix)]
     use crate::SecretError;
 
-    /// A test environment.
     struct MapEnv(HashMap<String, String>);
 
     impl MapEnv {

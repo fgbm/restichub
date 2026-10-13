@@ -13,20 +13,15 @@ use crate::crypto::{cipher, open, random_nonce, seal};
 use crate::error::{CryptoError, KekError};
 use crate::kek::{Kek, KekId};
 
-/// The domain string of the `kek_check` associated data.
 const KEK_CHECK_DOMAIN: &[u8] = b"restichub-kek-check-v1\0";
 
-/// The fixed plaintext of the `kek_check` value.
 const KEK_CHECK_PLAINTEXT: &[u8] = b"restichub-kek-check-plaintext-v1";
 
-/// The `kek_check` value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KekCheck {
-    /// The key ID of the KEK that created the check.
     pub kek_id: KekId,
-    /// The 96-bit nonce of the encryption.
+    /// 96-bit nonce of the encryption.
     pub nonce: [u8; NONCE_LEN],
-    /// The authenticated ciphertext of the fixed plaintext.
     pub ciphertext: Vec<u8>,
 }
 

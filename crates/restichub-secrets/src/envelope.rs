@@ -23,23 +23,17 @@ use crate::kek::{Kek, KekId, KekProvider};
 /// The length of a data encryption key in bytes.
 pub const DEK_LEN: usize = KEY_LEN;
 
-/// The domain string of the wrapped DEK associated data.
 const DEK_DOMAIN: &[u8] = b"restichub-dek-v1\0";
 
-/// A data encryption key.
-///
-/// The type is 32 bytes. The type zeroizes the value on drop and shows `<redacted>` in `Debug`.
+/// 32 bytes; zeroizes the value on drop and shows `<redacted>` in `Debug`.
 pub struct Dek([u8; DEK_LEN]);
 
 impl Dek {
-    /// Creates a DEK from 32 bytes.
     pub fn from_bytes(bytes: [u8; DEK_LEN]) -> Self {
         Self(bytes)
     }
 
-    /// Returns the DEK bytes.
-    ///
-    /// The function is crate-internal, so the exact key never leaves the crate.
+    /// Crate-internal, so the exact key never leaves the crate.
     pub(crate) fn bytes(&self) -> &[u8; DEK_LEN] {
         &self.0
     }
@@ -57,21 +51,17 @@ impl Drop for Dek {
     }
 }
 
-/// Returns a new random data encryption key from the operating system random number generator.
 pub fn generate_dek() -> Result<Dek, CryptoError> {
     let mut bytes = Zeroizing::new([0_u8; DEK_LEN]);
     getrandom::fill(&mut *bytes).map_err(CryptoError::Random)?;
     Ok(Dek(*bytes))
 }
 
-/// A data encryption key that the KEK wrapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrappedDek {
-    /// The key ID of the KEK that wrapped the DEK.
     pub kek_id: KekId,
-    /// The 96-bit nonce of the wrapping.
+    /// 96-bit nonce of the wrapping.
     pub nonce: [u8; NONCE_LEN],
-    /// The authenticated ciphertext of the DEK.
     pub ciphertext: Vec<u8>,
 }
 
@@ -122,7 +112,6 @@ pub fn unwrap_dek(
     Ok(Dek::from_bytes(bytes))
 }
 
-/// Builds the associated data of the wrapped DEK.
 fn dek_aad(tenant_id: Uuid, key_version: i32) -> Vec<u8> {
     let mut aad = Vec::with_capacity(DEK_DOMAIN.len() + 16 + 4);
     aad.extend_from_slice(DEK_DOMAIN);
@@ -141,7 +130,6 @@ mod tests {
     use crate::error::CryptoError;
     use crate::kek::{Kek, KekId, KekProvider};
 
-    /// A provider that holds one KEK. A test uses this type.
     #[derive(Debug)]
     struct OneKek(Kek);
 

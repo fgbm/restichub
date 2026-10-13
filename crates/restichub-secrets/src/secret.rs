@@ -17,13 +17,10 @@ use crate::crypto::{cipher, open, random_nonce, seal};
 use crate::envelope::Dek;
 use crate::error::CryptoError;
 
-/// The domain string of the secret value associated data.
 const SECRET_DOMAIN: &[u8] = b"restichub-secret-v1\0";
 
-/// The purpose of a secret value.
-///
-/// The purpose is a part of the associated data. The string value of each variant is stable and
-/// MUST NOT change: a change makes every stored ciphertext of that purpose undecryptable.
+/// A part of the associated data. The string value of each variant is stable and MUST NOT
+/// change: a change makes every stored ciphertext of that purpose undecryptable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde",
@@ -31,18 +28,13 @@ const SECRET_DOMAIN: &[u8] = b"restichub-secret-v1\0";
 )]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum SecretPurpose {
-    /// The password of a restic repository.
     RepositoryPassword,
-    /// The access key ID of an S3 backend.
     S3AccessKey,
-    /// The secret access key of an S3 backend.
     S3SecretKey,
-    /// The password of a REST server backend.
     RestServerPassword,
 }
 
 impl SecretPurpose {
-    /// Returns the stable string of the purpose.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::RepositoryPassword => "repository_password",
@@ -69,12 +61,10 @@ impl SecretPurpose {
     }
 }
 
-/// An encrypted secret value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncryptedSecret {
-    /// The 96-bit nonce of the encryption.
+    /// 96-bit nonce of the encryption.
     pub nonce: [u8; NONCE_LEN],
-    /// The authenticated ciphertext of the secret value.
     pub ciphertext: Vec<u8>,
 }
 

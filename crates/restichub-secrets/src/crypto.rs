@@ -10,10 +10,10 @@ use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use crate::error::CryptoError;
 
-/// The length of an AES-GCM nonce in bytes.
+/// AES-GCM nonce length in bytes.
 pub const NONCE_LEN: usize = 12;
 
-/// The length of an AES-256 key in bytes.
+/// AES-256 key length in bytes.
 pub(crate) const KEY_LEN: usize = 32;
 
 /// Builds the AES-256-GCM cipher for a 32-byte key.
@@ -31,20 +31,18 @@ pub(crate) fn cipher(key: &[u8; KEY_LEN]) -> Aes256Gcm {
 /// The assertion holds while the crate enables the `zeroize` feature of `aes-gcm`.
 fn assert_zeroizes_on_drop<T: ZeroizeOnDrop>() {}
 
-/// The compile-time assertion. The function is empty and it is never called.
+/// Empty and never called; it exists for the compile-time assertion.
 #[allow(dead_code)]
 fn cipher_zeroizes_on_drop() {
     assert_zeroizes_on_drop::<Aes256Gcm>();
 }
 
-/// Returns a random 96-bit nonce from the operating system random number generator.
 pub(crate) fn random_nonce() -> Result<[u8; NONCE_LEN], CryptoError> {
     let mut nonce = [0_u8; NONCE_LEN];
     getrandom::fill(&mut nonce).map_err(CryptoError::Random)?;
     Ok(nonce)
 }
 
-/// Authenticates and encrypts `plaintext` with `cipher` and `aad`.
 pub(crate) fn seal(
     cipher: &Aes256Gcm,
     nonce: [u8; NONCE_LEN],
@@ -63,7 +61,6 @@ pub(crate) fn seal(
         .map_err(CryptoError::Encrypt)
 }
 
-/// Authenticates and decrypts `ciphertext` with `cipher` and `aad`.
 pub(crate) fn open(
     cipher: &Aes256Gcm,
     nonce: [u8; NONCE_LEN],
