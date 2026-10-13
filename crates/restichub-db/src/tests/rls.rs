@@ -72,6 +72,25 @@ async fn db_a_foreign_tenant_id_write_is_rejected() -> TestResult {
     assert_code(reference, "42501");
     drop(tx);
 
+    // The runtime role changes the role and the disabled flag of a membership only: it cannot move
+    // the membership to another account (42501, ADR-0025).
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let moved = sqlx::query("UPDATE memberships SET user_id = $1")
+        .bind(seed_b.user)
+        .execute(tx.as_conn())
+        .await;
+    assert_code(moved, "42501");
+    drop(tx);
+
+    // The role update of the own membership still works.
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let role = sqlx::query("UPDATE memberships SET role = 'viewer' WHERE user_id = $1")
+        .bind(seed_a.user)
+        .execute(tx.as_conn())
+        .await?;
+    assert_eq!(role.rows_affected(), 1);
+    tx.commit().await?;
+
     // The database function refuses the foreign account to a tenant scope too.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let (added,): (bool,) = sqlx::query_as("SELECT auth_add_membership($1, $2, $3)")

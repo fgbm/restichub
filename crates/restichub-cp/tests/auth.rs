@@ -111,24 +111,7 @@ async fn sign_in_failures_are_identical() {
     .await;
     // An account with no membership in any active tenant.
     let orphan_hash = password::hash_password("correct horse battery").unwrap_or_default();
-    {
-        let mut tx = db
-            .database()
-            .begin_tenant(tenant)
-            .await
-            .unwrap_or_else(|e| panic!("{e}"));
-        restichub_db::users::create(
-            &mut tx,
-            &restichub_db::users::NewUser {
-                username: "orphan",
-                password_hash: &orphan_hash,
-                display_name: "Orphan",
-            },
-        )
-        .await
-        .unwrap_or_else(|e| panic!("{e}"));
-        tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
-    }
+    common::seed_memberless_account(&db, "orphan", &orphan_hash).await;
     let app = app(db.database());
 
     // An unknown account, a wrong password and an account with no active membership.

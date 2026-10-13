@@ -531,25 +531,7 @@ async fn an_account_without_a_membership_is_not_found() {
     let app = app(db.database());
 
     // An account row with no membership in the tenant. The control plane never creates this state.
-    let orphan = {
-        let mut tx = db
-            .database()
-            .begin_tenant(tenant)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
-        let user = restichub_db::users::create(
-            &mut tx,
-            &restichub_db::users::NewUser {
-                username: "orphan",
-                password_hash: "phc",
-                display_name: "Orphan",
-            },
-        )
-        .await
-        .unwrap_or_else(|error| panic!("{error}"));
-        tx.commit().await.unwrap_or_else(|error| panic!("{error}"));
-        user
-    };
+    let orphan = common::seed_memberless_account(&db, "orphan", "phc").await;
 
     // The account is not a member of the tenant, so the read gives HTTP 404 (ADR-0025).
     let (status, _, body) = send(

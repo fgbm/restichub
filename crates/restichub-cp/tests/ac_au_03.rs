@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use axum::http::StatusCode;
 use restichub_cp::password;
-use restichub_db::audit::{AuditFilter, AuditPage};
+use restichub_db::audit::{AuditAction, AuditFilter, AuditPage};
 use restichub_db::{PLATFORM_TENANT_ID, TenantId, audit};
 use serde_json::{Value, json};
 
@@ -85,6 +85,33 @@ async fn audit_actions(db: &restichub_db::Database, tenant: TenantId) -> Vec<Str
         .into_iter()
         .map(|record| record.action.as_str().to_owned())
         .collect()
+}
+
+/// The source tenant named by the `session_switch` record of a tenant.
+async fn switch_source_tenant(db: &restichub_db::Database, tenant: TenantId) -> Option<String> {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let records = audit::list(
+        &mut tx,
+        &AuditFilter {
+            action: Some(AuditAction::SessionSwitch),
+            ..AuditFilter::default()
+        },
+        &AuditPage::default(),
+    )
+    .await
+    .expect("cannot list the audit records")
+    .records;
+    tx.commit().await.expect("cannot commit the read");
+    records.into_iter().find_map(|record| {
+        record.diff.and_then(|diff| {
+            diff.pointer("/new/source_tenant_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+    })
 }
 
 #[tokio::test]
@@ -260,6 +287,11 @@ async fn ac_au_05_switch_rotates_the_session_and_audits_both_tenants() {
             .iter()
             .any(|action| action == "session_switch")
     );
+    // The target-tenant record names the tenant the session moved from.
+    assert_eq!(
+        switch_source_tenant(db.database(), beta).await,
+        Some(alpha.to_string())
+    );
 
     // A tenant without a membership gives HTTP 403.
     let (status, _, _) = send(
@@ -285,24 +317,7 @@ async fn ac_au_06_no_active_membership_and_the_enumeration_defence() {
     let tenant = create_tenant(db.database(), "ac-au-06").await;
     // An account with a real password and no membership.
     let hash = password::hash_password("correct horse battery").unwrap_or_default();
-    {
-        let mut tx = db
-            .database()
-            .begin_tenant(tenant)
-            .await
-            .expect("cannot begin the transaction");
-        restichub_db::users::create(
-            &mut tx,
-            &restichub_db::users::NewUser {
-                username: "memberless",
-                password_hash: &hash,
-                display_name: "Memberless",
-            },
-        )
-        .await
-        .expect("cannot create the account");
-        tx.commit().await.expect("cannot commit the account");
-    }
+    common::seed_memberless_account(&db, "memberless", &hash).await;
     account(
         db.database(),
         tenant,

@@ -108,13 +108,14 @@ async fn db_platform_audit_writes_an_existing_tenant() -> TestResult {
 
     // Seed the platform tenant, so the visibility check below is meaningful.
     let mut tx = db.database().begin_tenant(PLATFORM_TENANT_ID).await?;
-    users::create(
+    users::create_member(
         &mut tx,
         &NewUser {
             username: "root",
             password_hash: "phc",
             display_name: "Root",
         },
+        crate::Role::PlatformAdmin,
     )
     .await?;
     sqlx::query(

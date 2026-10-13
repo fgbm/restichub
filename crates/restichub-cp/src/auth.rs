@@ -338,7 +338,14 @@ pub async fn switch_tenant(
     )
     .await?;
     users::set_last_tenant(&mut tx, user_id, new_session_id, tenant_id).await?;
-    let event = context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
+    let mut event =
+        context.audit_event(AuditAction::SessionSwitch, "session", session_id.as_uuid());
+    // The target-tenant record names the tenant the session moved from.
+    event.diff = Some(diff(
+        None,
+        Some(&serde_json::json!({"source_tenant_id": source_tenant.to_string()})),
+        &[],
+    ));
     restichub_db::audit::insert(&mut tx, &event).await?;
     let member = users::get_member(&mut tx, user_id).await?;
     let tenant = tenants::get(&mut tx, tenant_id).await?;
@@ -351,7 +358,12 @@ pub async fn switch_tenant(
     // transaction under the tenant policy, so a failure here must not deny the caller the new
     // cookie: the switch is already committed.
     if let Err(error) = write_switch_audit(&state, source_tenant, &context, session_id).await {
-        tracing::warn!(?error, "the source-tenant switch audit failed");
+        tracing::warn!(
+            source_tenant = %source_tenant,
+            session_id = %session_id,
+            ?error,
+            "the source-tenant switch audit failed"
+        );
     }
 
     let insecure = state.auth().config.insecure_cookies;

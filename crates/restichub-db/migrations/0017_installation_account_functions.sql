@@ -192,32 +192,6 @@ AS $$
     LIMIT 1
 $$;
 
--- Creates an account in the platform tenant, with no membership. The id comes from the caller
--- (UUIDv7). `auth_create_member` creates an account together with its first membership.
-CREATE FUNCTION auth_create_account(
-    new_id uuid,
-    account_name text,
-    new_password_hash text,
-    new_display_name text
-)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp
-AS $$
-BEGIN
-    INSERT INTO public.users (id, tenant_id, username, password_hash, display_name)
-    VALUES (
-        new_id,
-        '00000000-0000-7000-8000-000000000000'::uuid,
-        account_name,
-        new_password_hash,
-        new_display_name
-    );
-    PERFORM 1 FROM public.users WHERE id = new_id FOR UPDATE;
-END
-$$;
-
 -- Creates an account and its first membership in one step. A tenant transaction creates the
 -- account in its own tenant only; the platform scope (the setup and the tenant creation) creates
 -- the first member of any active tenant (ADR-0025). The insert takes the account row lock, so no
@@ -514,7 +488,6 @@ ALTER FUNCTION auth_self_password_hash(uuid, uuid) OWNER TO restichub_auth;
 ALTER FUNCTION auth_list_memberships(uuid) OWNER TO restichub_auth;
 ALTER FUNCTION auth_tenant_members() OWNER TO restichub_auth;
 ALTER FUNCTION auth_tenant_member(uuid) OWNER TO restichub_auth;
-ALTER FUNCTION auth_create_account(uuid, text, text, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_create_member(uuid, text, text, text, uuid, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_admin_set_password(uuid, text) OWNER TO restichub_auth;
 ALTER FUNCTION auth_admin_set_display_name(uuid, text) OWNER TO restichub_auth;
@@ -532,7 +505,6 @@ REVOKE ALL ON FUNCTION auth_self_password_hash(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_list_memberships(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_tenant_members() FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_tenant_member(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION auth_create_account(uuid, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_create_member(uuid, text, text, text, uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_admin_set_password(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_admin_set_display_name(uuid, text) FROM PUBLIC;
@@ -550,7 +522,6 @@ GRANT EXECUTE ON FUNCTION auth_self_password_hash(uuid, uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_list_memberships(uuid) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_tenant_members() TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_tenant_member(uuid) TO restichub_app;
-GRANT EXECUTE ON FUNCTION auth_create_account(uuid, text, text, text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_create_member(uuid, text, text, text, uuid, text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_admin_set_password(uuid, text) TO restichub_app;
 GRANT EXECUTE ON FUNCTION auth_admin_set_display_name(uuid, text) TO restichub_app;
@@ -566,7 +537,10 @@ GRANT EXECUTE ON FUNCTION auth_add_membership(uuid, uuid, text) TO restichub_app
 -- return a password hash. A membership insert runs through `auth_create_member` or
 -- `auth_add_membership`.
 REVOKE SELECT, INSERT, UPDATE, DELETE ON users FROM restichub_app;
-REVOKE INSERT ON memberships FROM restichub_app;
+-- The runtime role changes the role and the disabled flag of a membership only, and it removes no
+-- membership row (ADR-0025).
+REVOKE INSERT, UPDATE, DELETE ON memberships FROM restichub_app;
+GRANT UPDATE (role, disabled) ON memberships TO restichub_app;
 
 -- The definer role creates no object after the migration (N5). It keeps USAGE.
 REVOKE CREATE ON SCHEMA public FROM restichub_auth;

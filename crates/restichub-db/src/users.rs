@@ -141,20 +141,6 @@ pub async fn self_password_hash(
     Ok(row.map(|(hash,)| hash))
 }
 
-/// Creates an account in the platform tenant. The row commits with the caller's transaction.
-pub async fn create(tx: &mut TenantTx<'_>, new: &NewUser<'_>) -> Result<UserId, DbError> {
-    let id = UserId::new();
-    sqlx::query("SELECT auth_create_account($1, $2, $3, $4)")
-        .bind(id)
-        .bind(new.username)
-        .bind(new.password_hash)
-        .bind(new.display_name)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
-    Ok(id)
-}
-
 /// Creates an account with its first membership in the tenant of the transaction (ADR-0025). The
 /// database function creates both rows in one step, takes the account row lock and applies the
 /// scope rule.

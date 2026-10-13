@@ -326,6 +326,40 @@ pub async fn set_tenant_status(db: &Database, tenant: TenantId, status: &str) {
     tx.commit().await.expect("cannot commit the status");
 }
 
+/// Inserts an account row with no membership. The control plane never creates this state, and the
+/// runtime role writes no account row, so the owner connection writes it.
+pub async fn seed_memberless_account(
+    db: &TestDatabase,
+    username: &str,
+    password_hash: &str,
+) -> restichub_db::UserId {
+    let id = restichub_db::UserId::new();
+    let mut tx = db
+        .owner_pool()
+        .begin()
+        .await
+        .expect("cannot begin the transaction");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(PLATFORM_TENANT_ID.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query(
+        "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(id)
+    .bind(PLATFORM_TENANT_ID)
+    .bind(username)
+    .bind(password_hash)
+    .bind(username)
+    .execute(&mut *tx)
+    .await
+    .expect("cannot insert the account");
+    tx.commit().await.expect("cannot commit the account");
+    id
+}
+
 pub async fn create_user(
     db: &Database,
     tenant: TenantId,

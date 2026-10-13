@@ -246,22 +246,24 @@ async fn db_the_lower_case_unique_indexes_hold() -> TestResult {
 
     // The username is unique for the tenant and ignores the letter case.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
-    users::create(
+    users::create_member(
         &mut tx,
         &NewUser {
             username: "Alice",
             password_hash: "phc",
             display_name: "Alice",
         },
+        crate::Role::Admin,
     )
     .await?;
-    let duplicate_user = users::create(
+    let duplicate_user = users::create_member(
         &mut tx,
         &NewUser {
             username: "alice",
             password_hash: "phc",
             display_name: "Alice",
         },
+        crate::Role::Admin,
     )
     .await;
     assert!(duplicate_user.is_err(), "the username must be unique");

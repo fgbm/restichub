@@ -90,12 +90,3 @@ pub async fn count_admins(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
     .map_err(DbError::Query)?;
     Ok(count)
 }
-
-pub async fn delete(tx: &mut TenantTx<'_>, user_id: UserId) -> Result<(), DbError> {
-    sqlx::query("DELETE FROM memberships WHERE user_id = $1")
-        .bind(user_id)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
-    Ok(())
-}
