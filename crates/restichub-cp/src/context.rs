@@ -128,21 +128,17 @@ pub fn minimum_role(operation: Operation) -> Role {
     }
 }
 
-/// Checks the role of a request body against the tenant and the actor.
+/// Checks the role of a request body against the actor.
 ///
 /// The function applies the rules:
 ///
-/// - The platform tenant holds the role `platform_admin` only (FR-TN-02). The roles Admin,
-///   Operator and Viewer apply in one tenant.
-/// - The role `platform_admin` is valid in the platform tenant only.
+/// - The role `platform_admin` is never a membership and never an API token role in the MVP. The
+///   Platform Admin is an account right (ADR-0029). The roles Admin, Operator and Viewer apply in
+///   one tenant.
 /// - An actor cannot grant a role above its own. A token cannot create a token with a higher role
 ///   than its own, and a user cannot either.
 pub fn allowed_role(context: &RequestContext, role: Role) -> Result<(), ApiError> {
-    let platform = context.tenant_id == restichub_db::PLATFORM_TENANT_ID;
-    if platform && role != Role::PlatformAdmin {
-        return Err(ApiError::forbidden());
-    }
-    if !platform && role == Role::PlatformAdmin {
+    if role == Role::PlatformAdmin {
         return Err(ApiError::forbidden());
     }
     if !context.role.allows(role) {
@@ -357,10 +353,13 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
         return Err(ApiError::unauthenticated());
     }
     let role = if lookup.tenant_id == restichub_db::PLATFORM_TENANT_ID {
-        if !account.platform_admin {
-            return Err(ApiError::unauthenticated());
+        // A session with no organization. A Platform Admin reaches the platform screens; another
+        // account reaches the account operations only and sees the empty state (ADR-0029).
+        if account.platform_admin {
+            Role::PlatformAdmin
+        } else {
+            Role::Viewer
         }
-        Role::PlatformAdmin
     } else {
         // The account lives in the platform tenant, so the member read goes through the definer
         // function of migration 0017 (ADR-0025).
@@ -400,21 +399,24 @@ async fn authenticate_bearer(state: &AppState, value: &str) -> Result<RequestCon
     if lookup.expires_at.is_some_and(|expires| expires <= now) {
         return Err(ApiError::unauthenticated());
     }
+    // The MVP holds no platform-scope API token (ADR-0029). A token of the internal platform tenant
+    // never authenticates, and no token carries the Platform Admin right.
+    if lookup.tenant_id == restichub_db::PLATFORM_TENANT_ID {
+        return Err(ApiError::unauthenticated());
+    }
     let mut tx = state.db().begin_tenant(lookup.tenant_id).await?;
     let tenant = tenants::get(&mut tx, lookup.tenant_id).await?;
     if tenant.is_none_or(|tenant| tenant.status != restichub_db::TenantStatus::Active) {
         return Err(ApiError::unauthenticated());
     }
     let role = lookup.role;
-    // A platform API token carries the Platform Admin right (ADR-0029).
-    let platform_admin = role == Role::PlatformAdmin;
     api_tokens::touch(&mut tx, lookup.token_id, now).await?;
     tx.commit().await?;
     Ok(RequestContext {
         tenant_id: lookup.tenant_id,
         actor: Actor::ApiToken(lookup.token_id),
         role,
-        platform_admin,
+        platform_admin: false,
         session_id: None,
         source_ip: None,
         session_expires_at: None,
