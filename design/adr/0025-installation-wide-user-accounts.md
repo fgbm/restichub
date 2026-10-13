@@ -1,6 +1,6 @@
 # ADR-0025: Installation-wide user accounts
 
-- Status: accepted
+- Status: partly superseded by ADR-0029 (the Platform Admin is an account right)
 - Date: 2026-10-13
 - Requirements: FR-AU-01..04, FR-TN-01, FR-TN-06
 
@@ -20,6 +20,8 @@ The operator decided that a person has one account in the installation. The pers
 - The account rows live in the platform tenant. The column `tenant_id` holds the platform tenant id, so ADR-0006 stays true.
 - An account holds: id, username, password_hash, display_name, disabled, last_used_tenant_id, created_at, updated_at.
 - A membership `(tenant_id, user_id, role, disabled)` lives in each tenant under Row-Level Security. A Platform Admin is a membership in the platform tenant.
+
+> Superseded by ADR-0029: the Platform Admin is a boolean right on the account (`users.platform_admin`), not a membership. The membership roles are Admin, Operator and Viewer only.
 - The role belongs to the membership, not to the account. One account can be an Admin in one tenant and a Viewer in another.
 
 ### Sign-in
@@ -29,6 +31,8 @@ The operator decided that a person has one account in the installation. The pers
 - The control plane verifies the password with Argon2id (ADR-0023). If the account is absent, it verifies a dummy hash. The answer and the time are then the same for every unknown name.
 - The control plane lists the active memberships of the account in active tenants. The count decides the session:
   - Zero memberships give `invalid_credentials`. This answer is the same as a wrong password.
+
+> Superseded by ADR-0029: an account with zero memberships signs in. A Platform Admin reaches the platform screens; another account sees the empty state "no organizations, ask an administrator".
   - One membership gives a session in the tenant of that membership.
   - Several memberships give a session in the last used tenant of the account. If the account has no last used tenant, the first membership by tenant name gives the session.
 - The session row stays tenant-scoped (`tenant_id`, `user_id`). The control plane stores the used tenant on the account.
