@@ -127,7 +127,7 @@
 			<a class="tab" href="empty-first-run.html"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Overview</a>
 			<a class="tab" href="hosts.html"><svg class="icon"><use href="icons.svg#i-host" /></svg> Hosts <span class="counter">24</span></a>
 			<a class="tab" href="job.html"><svg class="icon"><use href="icons.svg#i-job" /></svg> Jobs <span class="counter">6</span></a>
-			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-clock" /></svg> Plans</a>
+			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-calendar" /></svg> Plans</a>
 			<a class="tab" href="repositories.html"><svg class="icon"><use href="icons.svg#i-repository" /></svg> Repositories</a>
 			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-profile" /></svg> Profiles</a>
 			<a class="tab" href="#"><svg class="icon"><use href="icons.svg#i-restore" /></svg> Restore</a>
@@ -164,7 +164,7 @@
 			</div>
 			<div class="sidenav-group">
 				<div class="sidenav-group-label">Danger zone</div>
-				<a class="sidenav-link" href="settings.html#danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Danger zone</a>
+				<a class="sidenav-link" href="settings.html#danger"><svg class="icon"><use href="icons.svg#i-octagon" /></svg> Delete tenant</a>
 			</div>
 		</nav>
 				<div class="stack">
@@ -289,7 +289,7 @@
 				</div>
 			</div>
 
-			<dialog class="dialog" id="d-create-user" data-autodialog style="--dialog-width: 440px">
+			<dialog class="dialog" id="d-create-user" style="--dialog-width: 440px">
 				<div class="dialog-head">
 					<div class="dialog-title">Create a user</div>
 					<button class="btn btn--icon btn--sm dialog-close" aria-label="Close" data-close-dialog><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
@@ -305,7 +305,7 @@
 						<label class="field"><span class="field-label">Role</span>
 							<span class="select-wrap"><select class="select"><option>Viewer</option><option>Operator</option><option>Admin</option></select><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></span>
 						</label>
-						<label class="checkbox"><input type="checkbox" checked /><span>Send an invitation email</span></label>
+						<label class="field"><span class="field-label">Initial password <span class="req">*</span></span><input class="input" type="password" value="initial-password" autocomplete="new-password" /><span class="field-hint">Use 12 characters or more.</span></label>
 					</form>
 				</div>
 				<div class="dialog-foot">

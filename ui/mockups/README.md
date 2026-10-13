@@ -34,7 +34,7 @@ Open the pages through the server. A `file://` address does not load the icon sp
 | `audit.html` | The audit log and the change panel. |
 | `users.html` | Settings, Access: the users and the create dialog. |
 | `api-tokens.html` | Settings, Access: the tokens and the value-once dialog. |
-| `secrets.html` | Settings, Access: the secret metadata and the replace dialog. |
+| `secrets.html` | Settings, Access: the metadata, the add dialog and the replace dialog. |
 | `settings.html` | The tenant settings and the danger zone. |
 | `empty-first-run.html` | The Overview before the first host. |
 | `sign-in.html` | The sign-in card. |
