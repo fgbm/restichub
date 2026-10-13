@@ -218,16 +218,16 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-IN-01 | The CP generates an installation script (PowerShell and shell) with an embedded one-time token. | M |
+| FR-IN-01 | The CP generates the ready agent registration command with the one-time enrollment token, for Windows and for Linux. The Web UI shows the command one time. | M |
 | FR-IN-02 | Packages: MSI (GPO and Intune compatible), deb, rpm, pkg, container image of the agent. | 1.0 |
 | FR-IN-03 | Remote installation over SSH: Linux, macOS, Windows with OpenSSH. | 1.0 |
 | FR-IN-04 | Remote installation over WinRM: NTLM, Kerberos, HTTPS. Behind an abstraction with a fallback. | 1.0 (after spike P3) |
 | FR-IN-05 | The CP does not store credentials for remote installation. It uses them once and records the operation in the audit log. | 1.0 |
 | FR-IN-06 | Agent removal: stop the service, remove the files, revoke the certificate. | 1.0 |
-| FR-IN-07 | The agent registers by hand. A person on the host unpacks the agent package and runs `restichub-agent register --url <control-plane-url>`. The command reads the one-time enrollment token from the standard input by default, or from a file with `--token-file <path>`. The command has no token flag. The agent generates its key pair, enrolls and stores its identity in the protected configuration directory. | M |
+| FR-IN-07 | The agent registers by hand. A person on the host unpacks the agent package and runs `restichub-agent register --url <control-plane-url> --token <token>`. The `--token` flag is the documented default. The options `--token-file <path>` and the standard input are optional, for a script. The token is single use with a short TTL and an Admin can revoke it. The agent generates its key pair, enrolls and stores its identity in the protected configuration directory. | M |
 | FR-IN-08 | The agent installs itself as an operating system service. A person on the host runs `restichub-agent install-service`. The command writes and enables a Windows service or a systemd unit (launchd on macOS in 1.0). | M (Windows, Linux), 1.0 (macOS) |
 
-FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by hand (ADR-0032) and the enrollment token never goes into a command-line argument.
+FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by hand (ADR-0032).
 
 ### 3.13. User interface, API, audit
 

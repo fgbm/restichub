@@ -175,9 +175,9 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Preconditions:** the person signs in as the Admin. A Windows or Linux host is ready.
 - **Main flow:**
   1. Open the "Agents" screen and create an enrollment token with labels.
-  2. Copy the token value. The screen shows the value one time, with the ready registration command.
+  2. Copy the command. The screen shows the full registration command, with the token, one time.
   3. On the host, unpack the agent package.
-  4. Run `restichub-agent register --url <control-plane-url>`. Supply the token on the standard input, or name a file with `--token-file`.
+  4. Run the command, for example `restichub-agent register --url <control-plane-url> --token <token>`. A script can use `--token-file` or the standard input.
   5. The agent generates its key pair and sends the certificate signing request and the token to the control plane.
   6. The control plane signs the certificate and returns it. The agent stores its identity in the protected configuration directory.
   7. Run `restichub-agent install-service` to register the operating system service.
@@ -185,7 +185,6 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Alternative flows:**
   - A used or an expired token is refused with a clear error.
   - The 11th enrollment request from one address in one minute gives HTTP 429.
-  - The token never appears in a command-line argument (ADR-0032).
 - **Requirements:** FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01, FR-IN-07, FR-IN-08.
 - **Acceptance criteria:** AC-ID-01, AC-ID-05, AC-IN-02, AC-IN-03.
 - **Status:** Blocked by #1. The child issues are #46 (enrollment tokens), #47 (agent registry) and #48 (enrollment exchange).

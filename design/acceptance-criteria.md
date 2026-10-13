@@ -209,5 +209,5 @@ The MVP is accepted when all these conditions are true:
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
 | AC-IN-01 | FR-AG-11, FR-IN-07 | Open the agent package. **Expected:** it contains `restichub-agent`, `restic`, the restic BSD-2-Clause license text and a third-party notice. The SHA-256 of `restic` equals the pinned value from the restic `SHA256SUMS`. | A |
-| AC-IN-02 | FR-IN-07 | Register a host by hand and supply a valid token on the standard input. **Expected:** the host appears active with the certificate of ADR-0026. A scan of the process list during the registration finds no token in any process argument. | S |
+| AC-IN-02 | FR-ID-01, FR-IN-07 | Register a host with `restichub-agent register --url <url> --token <token>`. **Expected:** the host appears active with the certificate of ADR-0026. The control plane consumes the token. A second registration with the same token, an expired token and a token that an Admin revoked are each refused with a clear error. | A |
 | AC-IN-03 | FR-IN-08 | Run `restichub-agent install-service` on Windows and on Linux. **Expected:** the operating system registers the service and it starts after a reboot. | A |
