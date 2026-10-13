@@ -98,7 +98,7 @@ impl Operation {
         )
     }
 
-    /// Every operation. A new variant stops the build in [`the_platform_tenant_allow_list`] and in
+    /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
     pub const ALL: [Operation; 21] = [
         Operation::AuditRead,
