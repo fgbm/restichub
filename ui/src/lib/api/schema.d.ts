@@ -658,6 +658,8 @@ export interface components {
          * @example secret_create
          * @example secret_replace
          * @example secret_delete
+         * @example signing_key_rotate
+         * @example signing_key_retire
          */
         AuditAction: string;
         AuditItem: {
