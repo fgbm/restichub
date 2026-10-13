@@ -4,6 +4,62 @@
  */
 
 export interface paths {
+    "/api/v1/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the agents of the tenant with keyset pagination and an optional status filter. */
+        get: operations["list_agents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one agent of the tenant. */
+        get: operations["get_agent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Renames an agent of the tenant. */
+        patch: operations["rename_agent"];
+        trace?: never;
+    };
+    "/api/v1/agents/{id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revokes an agent of the tenant (FR-ID-04, AC-ID-04).
+         * @description The endpoint is idempotent: a second call changes nothing. The status change and the audit
+         *     record commit in one transaction.
+         */
+        post: operations["revoke_agent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/api-tokens": {
         parameters: {
             query?: never;
@@ -179,6 +235,46 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/enrollment-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the enrollment token metadata of the tenant. */
+        get: operations["list_enrollment_tokens"];
+        put?: never;
+        /** Creates an enrollment token in the tenant. */
+        post: operations["create_enrollment_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/enrollment-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revokes an unused enrollment token of the tenant (a soft change).
+         * @description A used or an already revoked token gives HTTP 409 and changes nothing. An unknown token gives
+         *     HTTP 404. The conditional update and the re-read answer without a time-of-check gap, and a
+         *     failed revoke writes no audit record.
+         */
+        delete: operations["revoke_enrollment_token"];
         options?: never;
         head?: never;
         patch?: never;
@@ -618,6 +714,32 @@ export interface components {
          * @enum {string}
          */
         AdminState: "none" | "present";
+        AgentListResponse: {
+            items: components["schemas"]["AgentView"][];
+            /** @description Null when the table holds no later agent. */
+            next_cursor?: string | null;
+        };
+        /**
+         * @description The status of an enrolled agent (ADR-0026, FR-ID-04).
+         * @enum {string}
+         */
+        AgentStatus: "active" | "revoked";
+        AgentView: {
+            agent_version: string;
+            arch: string;
+            /** @description In RFC 3339. */
+            certificate_expires_at: string;
+            /** @description Lower-case hexadecimal. */
+            certificate_serial: string;
+            created_at: string;
+            hostname: string;
+            id: string;
+            last_seen_at?: string | null;
+            os: string;
+            revoked_at?: string | null;
+            revoked_by_user_id?: string | null;
+            status: components["schemas"]["AgentStatus"];
+        };
         ApiTokenListResponse: {
             items: components["schemas"]["ApiTokenView"][];
         };
@@ -643,8 +765,9 @@ export interface components {
          * @example job_cancel
          * @example restore_start
          * @example secret_delivered
-         * @example agent_enrolled
-         * @example agent_revoked
+         * @example agent_enroll
+         * @example agent_revoke
+         * @example agent_update
          * @example remote_install
          * @example tenant_create
          * @example tenant_suspend
@@ -655,6 +778,8 @@ export interface components {
          * @example user_delete
          * @example api_token_create
          * @example api_token_revoke
+         * @example enrollment_token_create
+         * @example enrollment_token_revoke
          * @example secret_create
          * @example secret_replace
          * @example secret_delete
@@ -698,6 +823,28 @@ export interface components {
             /** @description Unique in the installation; ignores the letter case. */
             username: string;
         };
+        CreateEnrollmentTokenRequest: {
+            /**
+             * @description Carried to the enrolled agent row in the registry. Each holds 1 to 63 characters from
+             *     `a-z`, `0-9` and `-`. Duplicates are removed.
+             */
+            labels?: string[] | null;
+            /**
+             * Format: int64
+             * @description The time to live in seconds. Between 60 and 86400. The default is 3600.
+             */
+            ttl_seconds?: number | null;
+        };
+        CreateEnrollmentTokenResponse: {
+            created_at: string;
+            display_prefix: string;
+            /** @description In RFC 3339. */
+            expires_at: string;
+            id: string;
+            labels: string[];
+            /** @description Returned only here. */
+            token: string;
+        };
         /**
          * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
          *     a [`SecretString`], so the buffer is zeroized on drop.
@@ -738,6 +885,24 @@ export interface components {
             role: components["schemas"]["Role"];
             /** @description Unique in the installation; ignores the letter case. */
             username: string;
+        };
+        EnrollmentTokenListResponse: {
+            items: components["schemas"]["EnrollmentTokenView"][];
+            /** @description Null when the table holds no later token. */
+            next_cursor?: string | null;
+        };
+        EnrollmentTokenView: {
+            /** @description In RFC 3339. */
+            created_at: string;
+            created_by: string;
+            display_prefix: string;
+            /** @description In RFC 3339. */
+            expires_at: string;
+            id: string;
+            labels: string[];
+            revoked_at?: string | null;
+            revoked_by_user_id?: string | null;
+            used_at?: string | null;
         };
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken";
@@ -817,6 +982,9 @@ export interface components {
             status: number;
             title: string;
             type: string;
+        };
+        RenameAgentRequest: {
+            hostname: string;
         };
         /**
          * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
@@ -980,6 +1148,219 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_agents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `active` or `revoked`. */
+                status: string | null;
+                cursor: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The agents of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentListResponse"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the agent. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The agent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    rename_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the agent. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description The renamed agent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    revoke_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the agent. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The agent is revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     list_tokens: {
         parameters: {
             query?: never;
@@ -1447,6 +1828,164 @@ export interface operations {
             };
             /** @description The request is not authenticated. */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_enrollment_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cursor: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The enrollment tokens of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentTokenListResponse"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_enrollment_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEnrollmentTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The token is created. The value appears once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateEnrollmentTokenResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    revoke_enrollment_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the token. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The token is revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The token is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The token is used or already revoked. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

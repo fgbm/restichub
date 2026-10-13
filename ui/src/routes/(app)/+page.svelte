@@ -1,5 +1,13 @@
 <script lang="ts">
-	import { Alert, Button, Card, EmptyState, Icon, PageHeader, Panel } from '#lib/components/ui/index.ts';
+	import {
+		Alert,
+		Button,
+		Card,
+		EmptyState,
+		Icon,
+		PageHeader,
+		Panel
+	} from '#lib/components/ui/index.ts';
 	import type { IconName } from '#lib/components/ui/index.ts';
 	import { t } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -73,57 +81,52 @@
 <PageHeader title={t('overview.title')} description={t('overview.description')} bordered />
 
 {#if hasTenant}
-<div class="overview">
-	<Alert tone="info" title={t('overview.welcomeTitle')}>{t('overview.welcomeBody')}</Alert>
+	<div class="overview">
+		<Alert tone="info" title={t('overview.welcomeTitle')}>{t('overview.welcomeBody')}</Alert>
 
-	<Panel title={t('overview.getStarted')} flush>
-		{#snippet actions()}
-			<span>{t('overview.progress', { done, total: steps.length })}</span>
-		{/snippet}
-		<ol class="checklist">
-			{#each steps as step, index (step.title)}
-				<li class="checklist__item" class:checklist__item--done={step.done}>
-					<span class="checklist__mark">
-						{#if step.done}
-							<Icon name="check" size="xs" />
-						{:else}
-							{index + 1}
+		<Panel title={t('overview.getStarted')} flush>
+			{#snippet actions()}
+				<span>{t('overview.progress', { done, total: steps.length })}</span>
+			{/snippet}
+			<ol class="checklist">
+				{#each steps as step, index (step.title)}
+					<li class="checklist__item" class:checklist__item--done={step.done}>
+						<span class="checklist__mark">
+							{#if step.done}
+								<Icon name="check" size="xs" />
+							{:else}
+								{index + 1}
+							{/if}
+						</span>
+						<div class="checklist__main">
+							<p class="checklist__title">{step.title}</p>
+							<p class="checklist__body">{step.body}</p>
+						</div>
+						{#if step.action}
+							<Button disabled>{step.action}</Button>
 						{/if}
-					</span>
-					<div class="checklist__main">
-						<p class="checklist__title">{step.title}</p>
-						<p class="checklist__body">{step.body}</p>
-					</div>
-					{#if step.action}
-						<Button disabled>{step.action}</Button>
-					{/if}
-				</li>
-			{/each}
-		</ol>
-	</Panel>
+					</li>
+				{/each}
+			</ol>
+		</Panel>
 
-	<div class="empties">
-		{#each empties as empty (empty.icon)}
-			<EmptyState icon={empty.icon} title={t(empty.title)} description={t(empty.body)} bordered />
-		{/each}
+		<div class="empties">
+			{#each empties as empty (empty.icon)}
+				<EmptyState icon={empty.icon} title={t(empty.title)} description={t(empty.body)} bordered />
+			{/each}
+		</div>
+
+		<Panel title={t('overview.how.title')}>
+			<ul class="hints">
+				{#each hints as hint (hint)}
+					<li><Icon name="check" size="xs" />{t(hint)}</li>
+				{/each}
+			</ul>
+		</Panel>
 	</div>
-
-	<Panel title={t('overview.how.title')}>
-		<ul class="hints">
-			{#each hints as hint (hint)}
-				<li><Icon name="check" size="xs" />{t(hint)}</li>
-			{/each}
-		</ul>
-	</Panel>
-</div>
-
 {:else}
 	<Card>
-		<EmptyState
-			title={t('overview.title')}
-			description={t('overview.noOrganizations')}
-			bordered
-		/>
+		<EmptyState title={t('overview.title')} description={t('overview.noOrganizations')} bordered />
 	</Card>
 {/if}
 

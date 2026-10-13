@@ -6,9 +6,9 @@
 		Alert,
 		Button,
 		Checkbox,
+		Dialog,
 		PageHeader,
 		Select,
-		SidePanel,
 		Table,
 		TextField
 	} from '#lib/components/ui/index.ts';
@@ -277,7 +277,7 @@
 	{/snippet}
 </Table>
 
-<SidePanel bind:open={createOpen} title={t('platformUsers.createTitle')}>
+<Dialog bind:open={createOpen} title={t('platformUsers.createTitle')}>
 	{#if createError}
 		<Alert tone="danger" title={createError} />
 	{/if}
@@ -347,9 +347,9 @@
 			{t('common.create')}
 		</Button>
 	{/snippet}
-</SidePanel>
+</Dialog>
 
-<SidePanel bind:open={manageOpen} title={manageUser?.username ?? ''}>
+<Dialog bind:open={manageOpen} title={manageUser?.username ?? ''}>
 	{#if manageUser}
 		<h3>{t('platformUsers.memberships')}</h3>
 		{#if manageUser.memberships.length === 0}
@@ -404,13 +404,13 @@
 			</Button>
 		{/if}
 	{/if}
-</SidePanel>
+</Dialog>
 
 <style>
 	.membership {
 		display: flex;
 		align-items: flex-end;
-		gap: var(--space-2);
+		gap: var(--rh-space-2);
 	}
 
 	.membership__name {
