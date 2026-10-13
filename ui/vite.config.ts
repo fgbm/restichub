@@ -23,6 +23,9 @@ export default defineConfig({
 					'default-src': ['self'],
 					'img-src': ['self', 'data:'],
 					'style-src': ['self'],
+					// SvelteKit wraps the inline bootstrap script in a `display: contents` div.
+					// Its style attribute is allowed by hash only (ADR-0027).
+					'style-src-attr': ['self', "'unsafe-hashes'", "'sha256-tcbDxjMo+xKqM21aCGYbs/QAJqB7yUXC06oPWDapBgc='"],
 					'script-src': ['self'],
 					'connect-src': ['self'],
 					'form-action': ['self']
