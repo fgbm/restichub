@@ -62,12 +62,20 @@ pub enum AgentEvent {
     },
 }
 
+/// One open agent stream. The generation tells the cleanup of an older stream
+/// from the current one, so a reconnect survives it (FR-ID-08).
+struct Connection {
+    generation: u64,
+    tx: mpsc::Sender<ControlMessage>,
+}
+
 struct State {
-    agents: Mutex<HashMap<String, mpsc::Sender<ControlMessage>>>,
+    agents: Mutex<HashMap<String, Connection>>,
     events: broadcast::Sender<AgentEvent>,
     connects: AtomicU64,
     rejected: AtomicU64,
     results: AtomicU64,
+    next_generation: AtomicU64,
     expected: usize,
 }
 
@@ -100,6 +108,7 @@ impl TestControlPlane {
             connects: AtomicU64::new(0),
             rejected: AtomicU64::new(0),
             results: AtomicU64::new(0),
+            next_generation: AtomicU64::new(0),
             expected,
         });
         let service = ControlPlane {
@@ -200,7 +209,9 @@ impl TestControlPlane {
     /// Sends a signed job without a check, for a forged or tampered job
     /// (AC-PR-01).
     pub fn send_raw(&self, agent_id: &str, signed: SignedJob) -> bool {
-        let sender = crate::lock(&self.state.agents).get(agent_id).cloned();
+        let sender = crate::lock(&self.state.agents)
+            .get(agent_id)
+            .map(|connection| connection.tx.clone());
         let Some(sender) = sender else {
             return false;
         };
@@ -212,7 +223,9 @@ impl TestControlPlane {
 
     /// Stops a running job of one agent (FR-SC-09).
     pub fn cancel(&self, agent_id: &str, job_id: &str, grace_seconds: u32) -> bool {
-        let sender = crate::lock(&self.state.agents).get(agent_id).cloned();
+        let sender = crate::lock(&self.state.agents)
+            .get(agent_id)
+            .map(|connection| connection.tx.clone());
         let Some(sender) = sender else {
             return false;
         };
@@ -227,8 +240,10 @@ impl TestControlPlane {
 
     /// Sends a heartbeat to every connected agent (FR-ID-07).
     pub fn ping(&self, nonce: u64) {
-        let senders: Vec<mpsc::Sender<ControlMessage>> =
-            crate::lock(&self.state.agents).values().cloned().collect();
+        let senders: Vec<mpsc::Sender<ControlMessage>> = crate::lock(&self.state.agents)
+            .values()
+            .map(|connection| connection.tx.clone())
+            .collect();
         for sender in senders {
             let _ = sender.try_send(ControlMessage {
                 payload: Some(control_message::Payload::Ping(Ping { nonce })),
@@ -275,7 +290,14 @@ impl AgentService for ControlPlane {
 
         let mut inbound = request.into_inner();
         let (tx, rx) = mpsc::channel(CONTROL_CHANNEL);
-        crate::lock(&self.state.agents).insert(agent_id.clone(), tx.clone());
+        let generation = self.state.next_generation.fetch_add(1, Ordering::Relaxed);
+        crate::lock(&self.state.agents).insert(
+            agent_id.clone(),
+            Connection {
+                generation,
+                tx: tx.clone(),
+            },
+        );
         self.state.connects.fetch_add(1, Ordering::Relaxed);
 
         let hello = ControlMessage {
@@ -293,7 +315,15 @@ impl AgentService for ControlPlane {
             while let Ok(Some(message)) = inbound.message().await {
                 handle_message(&state, &id, &message);
             }
-            crate::lock(&state.agents).remove(&id);
+            // A reconnect can insert the next stream before this task runs. The
+            // remove touches only the stream that this task opened.
+            let mut agents = crate::lock(&state.agents);
+            if agents
+                .get(&id)
+                .is_some_and(|connection| connection.generation == generation)
+            {
+                agents.remove(&id);
+            }
         });
 
         Ok(Response::new(Box::pin(ReceiverStream::new(rx).map(Ok))))
