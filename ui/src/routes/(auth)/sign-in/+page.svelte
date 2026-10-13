@@ -42,6 +42,8 @@
 			// The account is installation-wide; the sign-in asks for no tenant (ADR-0025).
 			const me = await service.signIn({ username, password });
 			setSession(me);
+			// The `next` value is a validated in-app path and the base path is empty.
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
 			await goto(next);
 		} catch (error) {
 			if (error instanceof NetworkError) {
