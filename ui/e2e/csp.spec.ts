@@ -83,3 +83,38 @@ test('the floating primitives need no inline style', async ({ page }) => {
 	expect(await pageViolations(page)).toEqual([]);
 	expect(consoleViolations).toEqual([]);
 });
+
+test('the icons and an open dialog need no inline style', async ({ page }) => {
+	const consoleViolations = await watch(page);
+	await page.goto('/sign-in');
+	await page.locator('#signin-username').fill('admin');
+	await page.locator('#signin-password').fill('secret');
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+	await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
+
+	// The overview draws the icons as inline SVG elements, not as a sprite reference.
+	await expect(page.locator('svg.icon[data-icon="host"]')).toBeVisible();
+
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Audit log' })
+		.click();
+	await page.getByRole('button', { name: 'Details' }).first().click();
+	const panel = page.getByRole('dialog');
+	await expect(panel).toHaveClass(/rh-panel/);
+	await expect(panel.locator('svg.icon[data-icon="x"]')).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(panel).toBeHidden();
+
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'API tokens' })
+		.click();
+	await page.getByRole('button', { name: 'Create token' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Create an API token' });
+	await expect(dialog).toHaveClass(/rh-dialog/);
+	await expect(dialog.getByRole('button', { name: 'Close' })).toBeVisible();
+
+	expect(await pageViolations(page)).toEqual([]);
+	expect(consoleViolations).toEqual([]);
+});
