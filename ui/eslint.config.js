@@ -32,7 +32,10 @@ export default tseslint.config(
 			'@typescript-eslint/no-unused-vars': [
 				'error',
 				{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
-			]
+			],
+			// The production policy is `style-src 'self'` without `unsafe-inline` (ADR-0027).
+			// A `style` attribute or a `style:` directive would need `unsafe-inline`.
+			'svelte/no-inline-styles': 'error'
 		}
 	},
 	prettier
