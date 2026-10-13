@@ -4,6 +4,8 @@ English text in ResticHub obeys ASD-STE100 Simplified Technical English, Issue 9
 
 This guide applies to: documentation, design documents, UI text, error messages, log messages, commit messages.
 
+This guide does not apply to code comments and doc comments. Those use plain short technical English; the rules are in [AGENTS.md](../../AGENTS.md), section Code rules.
+
 ## 1. Words
 
 <!-- vale off -->

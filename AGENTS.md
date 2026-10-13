@@ -11,7 +11,7 @@ Read this file before you change the repository.
 
 ## Rules
 
-- Write all repository text in English by ASD-STE100 ([design/style/ste-en.md](design/style/ste-en.md)). Exception: Russian documentation in `docs/src/content/docs/ru/` obeys [design/style/ru-technical.md](design/style/ru-technical.md).
+- Write all repository text in English by ASD-STE100 ([design/style/ste-en.md](design/style/ste-en.md)). Code comments and doc comments are outside this scope; the Code rules below apply to them. Exception: Russian documentation in `docs/src/content/docs/ru/` obeys [design/style/ru-technical.md](design/style/ru-technical.md).
 - Use the terms from the project glossary. Do not use synonyms.
 - Each test that covers an acceptance criterion refers to its ID, for example `ac_ag_05_exit_code_mapping`.
 - Never put secrets in logs, process arguments or files on the agent.
@@ -26,6 +26,7 @@ Read this file before you change the repository.
 - Do not restate a name or the code in a comment. Do not narrate steps. Do not refer to a review finding or the change history.
 - A doc comment is for the public library API only. One sentence is enough, unless the contract is subtle.
 - Do not add a doc comment to a field or a function whose name says everything.
+- Code comments use plain short English, not STE. The first line of a doc comment never restates the item name.
 - An OpenAPI field description is only where it adds information: units, format, allowed values or invariants.
 - Use `?` with a `From` conversion for an error. Do not add a `map_err` chain that only wraps into an internal error.
 - Never drop the cause with `map_err(|_| ...)`.
