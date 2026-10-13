@@ -1,6 +1,6 @@
 # ADR-0023: Control plane core: storage, authentication and secret format
 
-- Status: partly superseded by ADR-0025 (installation-wide user accounts)
+- Status: partly superseded by ADR-0025 (installation-wide user accounts) and ADR-0028 (organization create without an administrator)
 - Date: 2026-10-12
 - Requirements: FR-TN-01..03, FR-TN-05, FR-RP-03, FR-RP-05, FR-AU-01, FR-AU-03
 
@@ -175,6 +175,8 @@ These notes refine sections Tenant isolation and Secrets for the tenant administ
 - The list returns the status, the creation time and the user count of each tenant. It filters by status and it pages with a keyset cursor. The default list excludes a deleted tenant. The count comes from the function `tenant_user_counts`, which is `SECURITY DEFINER`. The function returns rows only when the scope is `platform`; a tenant transaction gets no row.
 - The create validates the name: 1 to 63 characters from `a-z`, `0-9` and `-`, the first character a letter, and not `platform`. The index `tenants_name_lower_unique` makes the name unique and gives HTTP 409 on a duplicate.
 - The create writes the tenant row, the first Admin user and its membership in one transaction. The transaction also writes a fresh data encryption key (DEK). The current key encryption key (KEK) wraps the DEK. The record `tenant_create` belongs to the platform tenant. The record `user_create` belongs to the new tenant. Both records hold the actor and the source IP of the request.
+
+> Superseded by ADR-0028: the create writes the tenant row, the key row and the `tenant_create` record only. It writes no user and no `user_create` record. The first Admin is added through the platform user management.
 - A status change names the allowed source status in the update (suspend: `active`; resume: `suspended`; delete: `suspended`). A concurrent change therefore wins or loses cleanly. When the update touches no row, the function re-reads the status. A status equal to the target is an idempotent no-op (HTTP 204, no record). Another status is a conflict (HTTP 409).
 - The suspend, the resume and the delete write the audit record in the platform tenant and in the affected tenant. The status change and the records commit in one transaction. The delete is a soft delete: the status becomes `deleted`, the sign-in and the API tokens stop, and no row is removed in the MVP. A later retention task removes the rows of a deleted tenant. The platform tenant is never suspended or deleted (HTTP 409).
 - The function `tenants::is_dispatch_allowed` returns true for an `active` tenant only. The dispatcher of epic #7 uses it. The agents of a suspended tenant stay connected (epic #1).

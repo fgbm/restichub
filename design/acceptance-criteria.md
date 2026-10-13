@@ -161,6 +161,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-TN-04 | FR-TN-05 | Use an API token of tenant A. **Expected:** no access to objects of tenant B. The audit log of tenant A has no events of tenant B. | A |
 | AC-TN-05 | FR-TN-04 (1.0) | Quota of 10 agents. **Expected:** the CP rejects the 11th enrollment with a clear error. | A |
 | AC-TN-06 | FR-TN-06 | Start the CP in single-tenant mode and complete the setup. **Expected:** sign-in has no tenant field, platform endpoints return 404, all objects belong to tenant `default`. Switch to multi-tenant mode and restart. **Expected:** the CP issues a setup token for the Platform Admin, and the data of `default` stays available. | A |
+| AC-TN-07 | FR-TN-02 | The Platform Admin creates an organization with the name only. **Expected:** the organization is active, the user count is 0, the admin state is `none`, and the platform audit log holds `tenant_create` alone. | A |
 
 ## 12. User interface, API, roles, audit
 
@@ -176,6 +177,9 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-AU-05 | FR-AU-04 | Switch tenants with `POST /api/v1/auth/switch`. **Expected:** a new session in the target tenant, the old session is gone, the cookie rotates. The audit log holds `session_switch` in both tenants. A tenant without membership gives HTTP 403. | A |
 | AC-AU-06 | FR-AU-04 | Sign in when the account has no active membership (the memberships are absent, or their tenants are suspended or deleted). **Expected:** HTTP 401 `invalid_credentials`, with the same answer and a similar time as a wrong password. | S |
 | AC-AU-07 | FR-AU-04 | A tenant Admin resets the password or the display name of a shared account. It creates an account with a username that exists in another tenant. **Expected:** HTTP 403 `shared_account` for the first two calls, HTTP 409 `username_taken` for the create. | A |
+| AC-AU-08 | FR-AU-04 | The Platform Admin creates an account and adds a membership in the first organization, then a membership in the second. **Expected:** the account signs in and reaches the first, and the switch to the second works (AC-AU-04). | A |
+| AC-AU-09 | FR-TN-02 | The Platform Admin calls `GET /api/v1/platform/users`. **Expected:** the list holds every account of every organization with its memberships and roles. A tenant Admin gets HTTP 403. | A |
+| AC-AU-10 | FR-AU-04 | Create an account with an email that another account holds. **Expected:** HTTP 409 `email_taken`. The control plane treats the email of a new account as unverified. | A |
 
 ## 13. Non-functional requirements
 
