@@ -5,7 +5,9 @@
 //! plane unwraps a key on demand (ADR-0026, section CA key format).
 //!
 //! A rotation schedules the retirement of the old current key, promotes the next key and inserts a
-//! new next key. A retired row is outside the active set; its identifier is a revoked key.
+//! new next key. A retired row is outside the active set; its identifier is a revoked key. A
+//! retired row is kept, because it is the data side of the re-sync of an agent more than one
+//! rotation behind (ADR-0026).
 
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -22,6 +24,9 @@ pub struct SigningKeyRow {
     pub kek_id: String,
     pub nonce: Vec<u8>,
     pub wrapped_key: Vec<u8>,
+    /// Binds the unwrapped key to the row: the load compares it with the unwrapped key, so a
+    /// swapped blob fails (T19).
+    pub public_key: Vec<u8>,
     pub created_at: OffsetDateTime,
     /// The old current key retires when the agents acknowledge the new set or this time passes.
     pub retire_after: Option<OffsetDateTime>,
@@ -38,6 +43,17 @@ pub struct NewSigningKey<'a> {
     pub kek_id: &'a str,
     pub nonce: &'a [u8],
     pub wrapped_key: &'a [u8],
+    pub public_key: &'a [u8],
+}
+
+/// A cheap change token of the table: the row count and the newest row time.
+///
+/// A rotation inserts a next key, so the token changes. A caller that holds a loaded key set
+/// compares the token before it signs and reloads on a change (ADR-0026).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Version {
+    pub rows: i64,
+    pub newest: Option<OffsetDateTime>,
 }
 
 /// The rows of the tenant of the transaction, oldest first.
@@ -50,13 +66,14 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<SigningKeyRow>, DbError> 
             String,
             Vec<u8>,
             Vec<u8>,
+            Vec<u8>,
             OffsetDateTime,
             Option<OffsetDateTime>,
             Option<OffsetDateTime>,
         ),
     >(
-        "SELECT id, role, kek_id, nonce, wrapped_key, created_at, retire_after, retired_at \
-         FROM signing_keys ORDER BY created_at, id",
+        "SELECT id, role, kek_id, nonce, wrapped_key, public_key, created_at, retire_after, \
+         retired_at FROM signing_keys ORDER BY created_at, id",
     )
     .fetch_all(tx.as_conn())
     .await
@@ -64,13 +81,24 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<SigningKeyRow>, DbError> 
     Ok(rows
         .into_iter()
         .map(
-            |(id, role, kek_id, nonce, wrapped_key, created_at, retire_after, retired_at)| {
+            |(
+                id,
+                role,
+                kek_id,
+                nonce,
+                wrapped_key,
+                public_key,
+                created_at,
+                retire_after,
+                retired_at,
+            )| {
                 SigningKeyRow {
                     id,
                     role,
                     kek_id,
                     nonce,
                     wrapped_key,
+                    public_key,
                     created_at,
                     retire_after,
                     retired_at,
@@ -80,10 +108,20 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<SigningKeyRow>, DbError> 
         .collect())
 }
 
+/// The change token of the table, for a cheap freshness check before a signature (ADR-0026).
+pub async fn version(tx: &mut TenantTx<'_>) -> Result<Version, DbError> {
+    let (rows, newest): (i64, Option<OffsetDateTime>) =
+        sqlx::query_as("SELECT count(*), max(created_at) FROM signing_keys")
+            .fetch_one(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    Ok(Version { rows, newest })
+}
+
 pub async fn insert(tx: &mut TenantTx<'_>, new: &NewSigningKey<'_>) -> Result<(), DbError> {
     sqlx::query(
-        "INSERT INTO signing_keys (tenant_id, id, role, kek_id, nonce, wrapped_key) \
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO signing_keys (tenant_id, id, role, kek_id, nonce, wrapped_key, public_key) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(tx.tenant())
     .bind(new.id)
@@ -91,6 +129,7 @@ pub async fn insert(tx: &mut TenantTx<'_>, new: &NewSigningKey<'_>) -> Result<()
     .bind(new.kek_id)
     .bind(new.nonce)
     .bind(new.wrapped_key)
+    .bind(new.public_key)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -152,16 +191,18 @@ pub async fn retire_due(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<u6
     Ok(result.rows_affected())
 }
 
-/// Retires every pending key, because all known online agents acknowledged the new set (ADR-0026).
-pub async fn retire_all_pending(
+/// Retires one pending key, because the agent that held it acknowledged the new set (ADR-0026).
+pub async fn retire_pending(
     tx: &mut TenantTx<'_>,
+    id: Uuid,
     now: OffsetDateTime,
 ) -> Result<u64, DbError> {
     let result = sqlx::query(
         "UPDATE signing_keys SET retired_at = $1 \
-         WHERE retired_at IS NULL AND retire_after IS NOT NULL",
+         WHERE id = $2 AND retired_at IS NULL AND retire_after IS NOT NULL",
     )
     .bind(now)
+    .bind(id)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

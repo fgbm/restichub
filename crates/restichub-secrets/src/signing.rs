@@ -2,8 +2,8 @@
 //!
 //! The control plane wraps each Ed25519 job signing key with the key encryption key (KEK) with
 //! AES-256-GCM, a random 96-bit nonce and the associated data
-//! `restichub-signing-key-v1\0 || tenant_id || role`. The associated data binds the ciphertext to
-//! one tenant and one role, so a swapped blob fails the check (T19).
+//! `restichub-signing-key-v1\0 || tenant_id || key_id || role`. The associated data binds the
+//! ciphertext to one tenant, one key row and one role, so a swapped blob fails the check (T19).
 //!
 //! The role is the stored value of `restichub_db::SigningKeyRole` (`current` or `next`). This crate
 //! holds the bytes only; the closed set lives with the storage type.
@@ -31,18 +31,20 @@ pub struct WrappedSigningKey {
 
 /// Wraps the signing key `key` with the key encryption key `kek`.
 ///
-/// The associated data is `restichub-signing-key-v1\0 || tenant_id || role`, with the 4 length
-/// bytes of the role in big-endian order before the role bytes (ADR-0026, section CA key format).
-/// `role` is the value of a `restichub_db::SigningKeyRole`.
+/// The associated data is `restichub-signing-key-v1\0 || tenant_id || key_id || role`, with the 4
+/// length bytes of the role in big-endian order before the role bytes (ADR-0026, section CA key
+/// format). `role` is the value of a `restichub_db::SigningKeyRole`. The `key_id` is the 16-byte
+/// identifier of the row.
 pub fn wrap_signing_key(
     kek: &Kek,
     tenant_id: Uuid,
+    key_id: Uuid,
     role: &str,
     key: &[u8],
 ) -> Result<WrappedSigningKey, CryptoError> {
     let nonce = random_nonce()?;
     let cipher = cipher(kek.bytes());
-    let aad = signing_aad(tenant_id, role);
+    let aad = signing_aad(tenant_id, key_id, role);
     let ciphertext = seal(&cipher, nonce, key, &aad)?;
     Ok(WrappedSigningKey {
         kek_id: kek.id().clone(),
@@ -58,6 +60,7 @@ pub fn wrap_signing_key(
 pub fn unwrap_signing_key(
     provider: &dyn KekProvider,
     tenant_id: Uuid,
+    key_id: Uuid,
     role: &str,
     wrapped: &WrappedSigningKey,
 ) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
@@ -65,16 +68,17 @@ pub fn unwrap_signing_key(
         .by_id(&wrapped.kek_id)
         .ok_or_else(|| CryptoError::UnknownKek(wrapped.kek_id.clone()))?;
     let cipher = cipher(kek.bytes());
-    let aad = signing_aad(tenant_id, role);
+    let aad = signing_aad(tenant_id, key_id, role);
     let plaintext = open(&cipher, wrapped.nonce, &wrapped.ciphertext, &aad)?;
     Ok(Zeroizing::new(plaintext))
 }
 
-fn signing_aad(tenant_id: Uuid, role: &str) -> Vec<u8> {
+fn signing_aad(tenant_id: Uuid, key_id: Uuid, role: &str) -> Vec<u8> {
     let role = role.as_bytes();
-    let mut aad = Vec::with_capacity(SIGNING_KEY_DOMAIN.len() + 16 + 4 + role.len());
+    let mut aad = Vec::with_capacity(SIGNING_KEY_DOMAIN.len() + 16 + 16 + 4 + role.len());
     aad.extend_from_slice(SIGNING_KEY_DOMAIN);
     aad.extend_from_slice(tenant_id.as_bytes());
+    aad.extend_from_slice(key_id.as_bytes());
     aad.extend_from_slice(&(role.len() as u32).to_be_bytes());
     aad.extend_from_slice(role);
     aad
@@ -114,14 +118,22 @@ mod tests {
         Uuid::from_u128(0x0189_1234_5678_9abc_def0_1122_3344_5566)
     }
 
+    fn key_id() -> Uuid {
+        Uuid::from_u128(0x0189_0000_0000_7000_8000_0000_0000_0001)
+    }
+
     #[test]
     fn signing_aad_known_answer() {
-        let aad = signing_aad(tenant(), "current");
+        let aad = signing_aad(tenant(), key_id(), "current");
         let expected: Vec<u8> = [
             b"restichub-signing-key-v1\0".as_slice(),
             &[
                 0x01, 0x89, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44,
                 0x55, 0x66,
+            ],
+            &[
+                0x01, 0x89, 0x00, 0x00, 0x00, 0x00, 0x70, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x01,
             ],
             &[0x00, 0x00, 0x00, 0x07],
             b"current".as_slice(),
@@ -133,8 +145,17 @@ mod tests {
     #[test]
     fn signing_aad_distinguishes_the_role() {
         assert_ne!(
-            signing_aad(tenant(), "current"),
-            signing_aad(tenant(), "next")
+            signing_aad(tenant(), key_id(), "current"),
+            signing_aad(tenant(), key_id(), "next")
+        );
+    }
+
+    #[test]
+    fn signing_aad_distinguishes_the_key_id() {
+        let other = Uuid::from_u128(2);
+        assert_ne!(
+            signing_aad(tenant(), key_id(), "current"),
+            signing_aad(tenant(), other, "current")
         );
     }
 
@@ -142,10 +163,10 @@ mod tests {
     fn signing_key_round_trip() {
         let key = kek(1);
         let material = b"ed25519-seed-placeholder-32bytes!".to_vec();
-        let result = wrap_signing_key(&key, tenant(), "current", &material)
+        let result = wrap_signing_key(&key, tenant(), key_id(), "current", &material)
             .ok()
             .and_then(|wrapped| {
-                unwrap_signing_key(&provider(1), tenant(), "current", &wrapped).ok()
+                unwrap_signing_key(&provider(1), tenant(), key_id(), "current", &wrapped).ok()
             })
             .map(|plain| plain.to_vec());
         assert_eq!(result, Some(material));
@@ -153,45 +174,57 @@ mod tests {
 
     #[test]
     fn unknown_kek_fails() {
-        let wrapped = wrap_signing_key(&kek(1), tenant(), "next", b"key");
+        let wrapped = wrap_signing_key(&kek(1), tenant(), key_id(), "next", b"key");
         let result = wrapped
             .ok()
             .as_ref()
-            .map(|wrapped| unwrap_signing_key(&provider(2), tenant(), "next", wrapped));
+            .map(|wrapped| unwrap_signing_key(&provider(2), tenant(), key_id(), "next", wrapped));
         assert!(matches!(result, Some(Err(CryptoError::UnknownKek(_)))));
     }
 
     #[test]
     fn aad_swap_role_fails() {
         // A blob wrapped for the current key must not unwrap as the next key (T19).
-        let wrapped = wrap_signing_key(&kek(1), tenant(), "current", b"key");
+        let wrapped = wrap_signing_key(&kek(1), tenant(), key_id(), "current", b"key");
         let result = wrapped
             .ok()
             .as_ref()
-            .map(|wrapped| unwrap_signing_key(&provider(1), tenant(), "next", wrapped));
+            .map(|wrapped| unwrap_signing_key(&provider(1), tenant(), key_id(), "next", wrapped));
+        assert!(matches!(result, Some(Err(CryptoError::Decrypt(_)))));
+    }
+
+    #[test]
+    fn aad_swap_key_id_fails() {
+        // A blob wrapped for one row must not unwrap as another row (T19).
+        let wrapped = wrap_signing_key(&kek(1), tenant(), key_id(), "current", b"key");
+        let other = Uuid::from_u128(2);
+        let result = wrapped
+            .ok()
+            .as_ref()
+            .map(|wrapped| unwrap_signing_key(&provider(1), tenant(), other, "current", wrapped));
         assert!(matches!(result, Some(Err(CryptoError::Decrypt(_)))));
     }
 
     #[test]
     fn aad_swap_tenant_id_fails() {
-        let wrapped = wrap_signing_key(&kek(1), tenant(), "current", b"key");
+        let wrapped = wrap_signing_key(&kek(1), tenant(), key_id(), "current", b"key");
         let other = Uuid::from_u128(1);
         let result = wrapped
             .ok()
             .as_ref()
-            .map(|wrapped| unwrap_signing_key(&provider(1), other, "current", wrapped));
+            .map(|wrapped| unwrap_signing_key(&provider(1), other, key_id(), "current", wrapped));
         assert!(matches!(result, Some(Err(CryptoError::Decrypt(_)))));
     }
 
     #[test]
     fn tampered_ciphertext_fails() {
-        let result = wrap_signing_key(&kek(1), tenant(), "current", b"key")
+        let result = wrap_signing_key(&kek(1), tenant(), key_id(), "current", b"key")
             .ok()
             .map(|mut wrapped| {
                 if let Some(byte) = wrapped.ciphertext.first_mut() {
                     *byte ^= 0xff;
                 }
-                unwrap_signing_key(&provider(1), tenant(), "current", &wrapped)
+                unwrap_signing_key(&provider(1), tenant(), key_id(), "current", &wrapped)
             });
         assert!(matches!(result, Some(Err(CryptoError::Decrypt(_)))));
     }

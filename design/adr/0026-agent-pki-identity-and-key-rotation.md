@@ -56,16 +56,18 @@ The P4 spike ([p4-stream-load.md](../spikes/p4-stream-load.md)) gives the reconn
 - One key set serves all tenants (ADR-0005, ADR-0006). The set holds the current key and the next key.
 - The control plane sends the key set to the agent over the stream.
 - Each job names its `signer_key_id`. The agent verifies the job with that key.
-- A rotation retires the old key when all known online agents acknowledged the new set. The control plane retires the old key at most 7 days after the rotation starts, also when an agent did not answer.
+- A rotation retires the old key when the agent that holds it acknowledged the new set. A rotation refuses while an earlier rotation still holds its overlap. The control plane retires the old key at most 7 days after the rotation starts, also when an agent did not answer.
 - An agent that was offline longer re-syncs the key set at its reconnect.
 - The control plane wraps each job signing key with the KEK, in the manner of a CA key.
+- Re-sync of an agent more than one rotation behind (2026-10-13): the control plane keeps every retired key row. It holds the whole chain of keys. It sends the chain of `KeyUpdate` messages, one step per rotation. Each message is signed by the key that the agent already holds. The agent reaches the current key in a few steps. The chain uses the retained rows, so a re-enrollment is not needed. The data side is the retained rows; the delivery and the acknowledgement are issue #50.
 
 ### CA key format
 
 - A CA private key uses AES-256-GCM with a random 96-bit nonce.
 - The associated data is the bytes `restichub-ca-key-v1\0`, then the 16 tenant ID bytes. Then come the 4 length bytes of the CA role in big-endian order and the CA role bytes. The CA role is `root` or `issuing`.
-- A wrapped job signing key uses the same form. The associated data is the bytes `restichub-signing-key-v1\0`, then the 16 tenant ID bytes. Then come the 4 length bytes of the key role in big-endian order and the key role bytes. The key role is `current` or `next`.
-- The tenant ID and the role in the associated data bind the ciphertext to one key. The start check refuses a swapped blob. The role binds the associated data, and the unwrapped key must match the certificate of the row (T19).
+- A wrapped job signing key uses the same form. The associated data is the bytes `restichub-signing-key-v1\0`, then the 16 tenant ID bytes, then the 16 key ID bytes. Then come the 4 length bytes of the key role in big-endian order and the key role bytes. The key role is `current` or `next`.
+- The tenant ID, the key ID and the role in the associated data bind the ciphertext to one key row. The start check refuses a swapped blob. The unwrapped key must match the `public_key` of the row, and a CA key must match the certificate of the row (T19).
+- The key ID in the associated data (2026-10-13): the review of #49 found a gap. The tenant and the role alone do not bind a blob to its row. The associated data now carries the 16 key ID bytes. The `signing_keys.public_key` column holds the public key of the wrapped key. The start refuses a key that does not match its row.
 
 ## Consequences
 

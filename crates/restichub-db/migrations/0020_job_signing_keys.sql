@@ -3,7 +3,9 @@
 -- One key set serves all tenants and lives in the platform tenant. The set holds the current key
 -- that signs the jobs and the next key that the agents receive before a rotation. The key
 -- encryption key (KEK) wraps each private key with the associated data
--- `restichub-signing-key-v1\0 || tenant_id || role` (ADR-0026, section CA key format).
+-- `restichub-signing-key-v1\0 || tenant_id || key_id || role` (ADR-0026, section CA key format).
+-- The key ID in the associated data binds a blob to its row, and `public_key` binds the unwrapped
+-- key to the row (T19).
 --
 -- A rotation promotes the next key to current, generates a new next key and marks the old current
 -- key for retirement. A key with `retired_at` set is no longer used and its identifier is sent to
@@ -17,6 +19,7 @@ CREATE TABLE signing_keys (
     kek_id text NOT NULL,
     nonce bytea NOT NULL,
     wrapped_key bytea NOT NULL,
+    public_key bytea NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     retire_after timestamptz,
     retired_at timestamptz,

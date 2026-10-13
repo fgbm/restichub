@@ -45,6 +45,7 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 http-body-util = "0.1"
+prost = "0.14"
 restichub-canary-scan = { path = "../restichub-canary-scan" }
 restichub-db = { workspace = true, features = ["test-util"] }
 rustls-webpki = { workspace = true }

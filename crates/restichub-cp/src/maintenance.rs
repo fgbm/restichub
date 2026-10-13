@@ -10,11 +10,15 @@ use std::time::Duration;
 use restichub_db::{Database, DbError, PLATFORM_TENANT_ID, sessions, setup, tenants};
 use time::OffsetDateTime;
 
+use crate::clock::Clock;
+use crate::job_signing::{JobSigningError, JobSigningService};
 use crate::rate_limit::RateLimiter;
 
 pub const CLEANUP_INTERVAL: Duration = Duration::from_secs(3600);
 
 pub const LIMITER_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
+pub const SIGNING_KEY_RETIRE_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// Removes the expired sessions and the expired and used setup tokens.
 ///
@@ -55,6 +59,41 @@ async fn cleanup_setup(db: &Database, now: OffsetDateTime) -> Result<(), DbError
     setup::delete_expired_or_used(&mut tx, now).await?;
     tx.commit().await?;
     Ok(())
+}
+
+/// Retires the job signing keys whose rotation overlap ended (ADR-0026).
+///
+/// The clock is injectable, so a test advances the overlap window without a sleep.
+pub async fn retire_signing_keys(
+    db: &Database,
+    signing: &JobSigningService,
+    clock: &dyn Clock,
+) -> Result<(), JobSigningError> {
+    signing.retire_due(db, clock.now()).await?;
+    Ok(())
+}
+
+/// Starts the periodic retirement of the job signing keys.
+///
+/// The task bounds the rotation overlap without a manual call (ADR-0026). It runs in one process;
+/// two instances both run it and the retirement is idempotent.
+pub fn spawn_signing_key_retirement(
+    db: Database,
+    signing: JobSigningService,
+    clock: Arc<dyn Clock>,
+    interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        // The first tick of `interval` fires immediately. Skip it.
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            if let Err(error) = retire_signing_keys(&db, &signing, clock.as_ref()).await {
+                tracing::warn!(%error, "the job signing key retirement failed");
+            }
+        }
+    })
 }
 
 /// Starts the periodic maintenance task.

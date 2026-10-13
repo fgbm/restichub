@@ -6,19 +6,22 @@
 //! the manner of a CA key (ADR-0026, section Job signing keys).
 //!
 //! A rotation promotes the next key to current, generates a new next key and schedules the
-//! retirement of the old current key. The old key retires when all known online agents acknowledge
-//! the new set, or at most [`ROTATION_OVERLAP`] after the rotation starts. An agent that was
-//! offline longer re-syncs the key set at its reconnect; the delivery is [`KeySet::key_update`].
+//! retirement of the old current key. The old key retires when the agent that held it acknowledges
+//! the new set, or at most [`ROTATION_OVERLAP`] after the rotation starts; a periodic control plane
+//! task calls [`JobSigningService::retire_due`], so the bound holds without a manual call. An agent
+//! that was offline longer re-syncs the key set at its reconnect; the delivery is
+//! [`KeySet::key_update`]. A signature checks the table version first and reloads a key set that
+//! another control plane rotated.
 //!
 //! The plaintext key never leaves this module. The types hold no `Debug` that shows a key, and the
 //! key set is never written to a log or to a process argument.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use prost_types::Timestamp;
 use restichub_db::audit::{self, AuditAction, AuditEvent};
-use restichub_db::signing::{self, NewSigningKey, SigningKeyRow};
+use restichub_db::signing::{self, NewSigningKey, SigningKeyRow, Version};
 use restichub_db::{Database, DbError, PLATFORM_TENANT_ID, SigningKeyRole};
 use restichub_proto::agent::v1::{Job, KeyUpdate, SignedJob, SigningKeyUpdate};
 use restichub_proto::signing::{sign_job, sign_key_update};
@@ -51,12 +54,18 @@ pub enum JobSigningError {
     Random(#[source] getrandom::Error),
     #[error("the installation has no job signing key set")]
     Missing,
+    #[error("every stored job signing key is retired; the installation has no active key set")]
+    AllRetired,
+    #[error("a job signing key is still in its rotation overlap; the next rotation must wait")]
+    RotationPending,
     #[error("the installation holds no active {role:?} job signing key")]
     NoActiveRole { role: SigningKeyRole },
     #[error("the installation holds more than one active {role:?} job signing key")]
     MultipleActiveRole { role: SigningKeyRole },
     #[error("the stored job signing key {id} is not a valid Ed25519 key")]
     BadKey { id: Uuid },
+    #[error("the stored job signing key {id} does not match its stored public key")]
+    KeyMismatch { id: Uuid },
     #[error("the stored nonce of the job signing key {id} is not 96 bits")]
     BadNonce {
         id: Uuid,
@@ -91,12 +100,14 @@ impl SigningKeyPair {
     }
 
     fn from_stored(id: Uuid, bytes: &[u8]) -> Result<Self, JobSigningError> {
-        let bytes: [u8; KEY_LEN] = bytes
-            .try_into()
-            .map_err(|_| JobSigningError::BadKey { id })?;
+        let seed: Zeroizing<[u8; KEY_LEN]> = Zeroizing::new(
+            bytes
+                .try_into()
+                .map_err(|_| JobSigningError::BadKey { id })?,
+        );
         Ok(Self {
             id: id.to_string(),
-            key: SigningKey::from_bytes(&bytes),
+            key: SigningKey::from_bytes(&seed),
         })
     }
 }
@@ -156,31 +167,46 @@ impl KeySet {
     }
 }
 
+/// The loaded key set with the table version it was read at, for the freshness check before a
+/// signature (ADR-0026).
+#[derive(Debug)]
+struct CachedSet {
+    version: Version,
+    set: Arc<KeySet>,
+}
+
 /// Owns the job signing key set of the installation.
 #[derive(Debug, Clone)]
 pub struct JobSigningService {
     provider: Arc<dyn KekProvider>,
+    cache: Arc<Mutex<Option<CachedSet>>>,
 }
 
 impl JobSigningService {
     pub fn new(provider: Arc<dyn KekProvider>) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            cache: Arc::new(Mutex::new(None)),
+        }
     }
 
     /// Creates the key set on the first start and keeps it healthy on every later start.
     ///
     /// An advisory lock serializes two starts, so exactly one start creates the set. A later start
     /// loads the stored keys; an incorrect KEK fails the unwrap, so the control plane refuses to
-    /// start (AC-PR-02).
+    /// start (AC-PR-02). A non-empty table with every row retired also refuses the start; the
+    /// operator must investigate rather than let a silent new set replace the revoked keys.
     pub async fn ensure_initialized(&self, db: &Database) -> Result<KeySet, JobSigningError> {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
         tx.lock(SIGNING_KEY_LOCK).await?;
         let rows = signing::list(&mut tx).await?;
-        if rows.iter().all(|row| row.retired_at.is_some()) {
+        if rows.is_empty() {
             self.generate_and_insert(&mut tx, SigningKeyRole::Current)
                 .await?;
             self.generate_and_insert(&mut tx, SigningKeyRole::Next)
                 .await?;
+        } else if rows.iter().all(|row| row.retired_at.is_some()) {
+            return Err(JobSigningError::AllRetired);
         }
         tx.commit().await?;
         self.load(db).await?.ok_or(JobSigningError::Missing)
@@ -197,12 +223,48 @@ impl JobSigningService {
         Ok(Some(self.build(&rows)?))
     }
 
+    /// Signs with the current key after a version check (FR-PR-03).
+    ///
+    /// The service checks the key set version before each signature and reloads the set when
+    /// another control plane rotated it, so a long-lived instance never signs with a stale current
+    /// key (ADR-0026).
+    pub async fn sign_job(&self, db: &Database, job: &Job) -> Result<SignedJob, JobSigningError> {
+        Ok(self.current_set(db).await?.sign_job(job))
+    }
+
+    async fn current_set(&self, db: &Database) -> Result<Arc<KeySet>, JobSigningError> {
+        let version = {
+            let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
+            let version = signing::version(&mut tx).await?;
+            tx.commit().await?;
+            version
+        };
+        if let Some(set) = self.cached(&version) {
+            return Ok(set);
+        }
+        let set = Arc::new(self.load(db).await?.ok_or(JobSigningError::Missing)?);
+        if let Ok(mut cache) = self.cache.lock() {
+            *cache = Some(CachedSet {
+                version,
+                set: Arc::clone(&set),
+            });
+        }
+        Ok(set)
+    }
+
+    fn cached(&self, version: &Version) -> Option<Arc<KeySet>> {
+        let cache = self.cache.lock().ok()?;
+        let cached = cache.as_ref()?;
+        (&cached.version == version).then(|| Arc::clone(&cached.set))
+    }
+
     /// Rotates the key set (ADR-0026).
     ///
     /// The next key becomes the current key, a new next key is generated and the old current key is
     /// scheduled for retirement after [`ROTATION_OVERLAP`]. An advisory lock serializes two
     /// rotations. The new current key signs the jobs at once; the agents already hold it from the
-    /// earlier delivery.
+    /// earlier delivery. A rotation refuses while an earlier rotation still holds its overlap, so
+    /// one overlap row exists at a time and the re-sync path stays simple.
     pub async fn rotate(
         &self,
         db: &Database,
@@ -211,17 +273,24 @@ impl JobSigningService {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
         tx.lock(SIGNING_KEY_LOCK).await?;
         let rows = signing::list(&mut tx).await?;
+        if rows
+            .iter()
+            .any(|row| row.retire_after.is_some() && row.retired_at.is_none())
+        {
+            return Err(JobSigningError::RotationPending);
+        }
         let current = active_row(&rows, SigningKeyRole::Current)?.id;
         let next_row = active_row(&rows, SigningKeyRole::Next)?;
         let next = next_row.id;
-        // The associated data of the wrapped key binds the role, so the promoted key is re-wrapped
-        // under the current role (ADR-0026, section CA key format).
+        // The associated data of the wrapped key binds the role and the key ID, so the promoted key
+        // is re-wrapped under the current role (ADR-0026, section CA key format).
         let material = self.unwrap_bytes(next_row)?;
 
         signing::schedule_retire(&mut tx, current, now + ROTATION_OVERLAP).await?;
         let wrapped = wrap_signing_key(
             self.provider.current(),
             PLATFORM_TENANT_ID.as_uuid(),
+            next,
             SigningKeyRole::Current.as_str(),
             &material,
         )?;
@@ -255,15 +324,19 @@ impl JobSigningService {
         Ok(retired)
     }
 
-    /// Retires every pending old key, because all known online agents acknowledged the new set
-    /// (ADR-0026). Returns the number of retired keys.
+    /// Retires one old key, because the agent that held it acknowledged the new set (ADR-0026).
+    ///
+    /// The advisory lock is the same as the rotation lock, so an acknowledgement and a rotation do
+    /// not interleave. Only the named key retires; a newer rotation's overlap key stays.
     pub async fn retire_acknowledged(
         &self,
         db: &Database,
+        key_id: Uuid,
         now: OffsetDateTime,
     ) -> Result<u64, JobSigningError> {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
-        let retired = signing::retire_all_pending(&mut tx, now).await?;
+        tx.lock(SIGNING_KEY_LOCK).await?;
+        let retired = signing::retire_pending(&mut tx, key_id, now).await?;
         tx.commit().await?;
         Ok(retired)
     }
@@ -297,7 +370,13 @@ impl JobSigningService {
 
     fn unwrap_row(&self, row: &SigningKeyRow) -> Result<SigningKeyPair, JobSigningError> {
         let key = self.unwrap_bytes(row)?;
-        SigningKeyPair::from_stored(row.id, &key)
+        let pair = SigningKeyPair::from_stored(row.id, &key)?;
+        // The AAD binds the blob to the row ID; the public key binds the unwrapped key to the row,
+        // so a swapped blob fails even if the AAD check passes (T19).
+        if pair.verifying_key().to_bytes().as_slice() != row.public_key.as_slice() {
+            return Err(JobSigningError::KeyMismatch { id: row.id });
+        }
+        Ok(pair)
     }
 
     fn unwrap_bytes(&self, row: &SigningKeyRow) -> Result<Zeroizing<Vec<u8>>, JobSigningError> {
@@ -313,6 +392,7 @@ impl JobSigningService {
         Ok(unwrap_signing_key(
             self.provider.as_ref(),
             PLATFORM_TENANT_ID.as_uuid(),
+            row.id,
             row.role.as_str(),
             &wrapped,
         )?)
@@ -327,9 +407,11 @@ impl JobSigningService {
         let mut seed = Zeroizing::new([0_u8; KEY_LEN]);
         getrandom::fill(seed.as_mut_slice()).map_err(JobSigningError::Random)?;
         let key = SigningKey::from_bytes(&seed);
+        let public_key = key.verifying_key().to_bytes();
         let wrapped = wrap_signing_key(
             self.provider.current(),
             PLATFORM_TENANT_ID.as_uuid(),
+            id,
             role.as_str(),
             key.as_bytes().as_slice(),
         )?;
@@ -341,6 +423,7 @@ impl JobSigningService {
                 kek_id: wrapped.kek_id.as_str(),
                 nonce: &wrapped.nonce,
                 wrapped_key: &wrapped.ciphertext,
+                public_key: public_key.as_slice(),
             },
         )
         .await?;
