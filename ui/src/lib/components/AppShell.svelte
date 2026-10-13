@@ -137,7 +137,12 @@
 		</nav>
 
 		<main id="main" class="content">
-			<div class="content__inner">{@render children()}</div>
+			<div class="content__inner">
+				<!-- A tenant switch remounts the screen, so its data reloads for the new tenant. -->
+				{#key session?.tenant?.id}
+					{@render children()}
+				{/key}
+			</div>
 		</main>
 	</div>
 </div>
