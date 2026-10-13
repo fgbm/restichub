@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { navSectionsForRole, settingsGroupsForRole } from './navigation';
+import { landingHref, settingsGroupsForRole, tabsForMode, type NavMode } from './navigation';
 
-function hrefs(role: Parameters<typeof navSectionsForRole>[0], platformAdmin: boolean): string[] {
-	return navSectionsForRole(role, platformAdmin).flatMap((section) =>
-		section.items.map((item) => item.href)
-	);
+function hrefs(
+	mode: NavMode,
+	role: Parameters<typeof tabsForMode>[1],
+	platformAdmin: boolean
+): string[] {
+	return tabsForMode(mode, role, platformAdmin).map((item) => item.href);
 }
 
 describe('navigation', () => {
 	it('shows only the tabs whose screens exist, in the order of the design', () => {
-		expect(hrefs('admin', false)).toEqual([
+		expect(hrefs('organization', 'admin', false)).toEqual([
 			'/(app)',
 			'/(app)/hosts',
 			'/(app)/audit',
@@ -18,26 +20,59 @@ describe('navigation', () => {
 	});
 
 	it('hides Settings from an Operator and a Viewer', () => {
-		expect(hrefs('operator', false)).toEqual(['/(app)', '/(app)/hosts', '/(app)/audit']);
-		expect(hrefs('viewer', false)).toEqual(['/(app)', '/(app)/hosts', '/(app)/audit']);
+		expect(hrefs('organization', 'operator', false)).toEqual([
+			'/(app)',
+			'/(app)/hosts',
+			'/(app)/audit'
+		]);
+		expect(hrefs('organization', 'viewer', false)).toEqual([
+			'/(app)',
+			'/(app)/hosts',
+			'/(app)/audit'
+		]);
 	});
 
-	it('adds the platform section for the Platform Admin right in any organization', () => {
-		const sections = navSectionsForRole('viewer', true);
-		const platform = sections.find((section) => section.platform);
-		expect(platform?.items.map((item) => item.href)).toEqual([
+	it('keeps the platform tabs out of the organization tab set', () => {
+		expect(hrefs('organization', 'admin', true)).toEqual([
+			'/(app)',
+			'/(app)/hosts',
+			'/(app)/audit',
+			'/(app)/settings'
+		]);
+	});
+
+	it('gives the platform mode exactly Organizations, Users and Audit', () => {
+		const tabs = tabsForMode('platform', 'viewer', true);
+		expect(tabs.map((item) => item.href)).toEqual([
 			'/(app)/platform/tenants',
 			'/(app)/platform/users',
 			'/(app)/platform/audit'
 		]);
+		expect(tabs.map((item) => item.labelKey)).toEqual([
+			'nav.platform.organizations',
+			'nav.platform.users',
+			'nav.platform.audit'
+		]);
+		expect(tabs.map((item) => item.icon)).toEqual(['box', 'users', 'audit']);
 	});
 
-	it('shows the platform section without an organization', () => {
-		expect(hrefs(null, true)).toEqual([
-			'/(app)/platform/tenants',
-			'/(app)/platform/users',
-			'/(app)/platform/audit'
-		]);
+	it('gives the platform mode without an organization', () => {
+		expect(hrefs('platform', null, true)).toHaveLength(3);
+	});
+
+	it('gives no platform tabs without the Platform Admin right', () => {
+		expect(hrefs('platform', 'admin', false)).toEqual([]);
+	});
+
+	it('lands a Platform Admin without an organization in the platform mode', () => {
+		expect(landingHref({ tenant: null, platform_admin: true }, false)).toBe(
+			'/(app)/platform/tenants'
+		);
+		expect(landingHref({ tenant: { id: 't', name: 'acme' }, platform_admin: true }, false)).toBe(
+			'/(app)'
+		);
+		expect(landingHref({ tenant: null, platform_admin: false }, false)).toBe('/(app)');
+		expect(landingHref({ tenant: null, platform_admin: true }, true)).toBe('/(app)');
 	});
 
 	it('puts users and API tokens under Settings, Access for an Admin', () => {

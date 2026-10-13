@@ -146,7 +146,7 @@
 </script>
 
 <svelte:head>
-	<title>{t('tenants.title')} · {t('app.name')}</title>
+	<title>{t('tenants.title')} · {t('nav.platformMode')} · {t('app.name')}</title>
 </svelte:head>
 
 <PageHeader

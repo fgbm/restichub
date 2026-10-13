@@ -95,13 +95,17 @@ test('the icons and an open dialog need no inline style', async ({ page }) => {
 	// The shell and the overview draw the icons as inline SVG elements, not as a sprite reference.
 	const nav = page.getByRole('navigation', { name: 'Primary navigation' });
 	await expect(nav.locator('svg.icon[data-icon="overview"]')).toBeVisible();
-	await expect(nav.locator('svg.icon[data-icon="shield"]')).toBeVisible();
 	await expect(page.locator('main svg.icon[data-icon="host"]')).toBeVisible();
 
-	// The organization switcher marks the current organization with an icon.
+	// The organization switcher marks the current organization and the platform entry with an icon.
 	await page.getByRole('button', { name: 'Switch organization' }).click();
 	await expect(
 		page.getByRole('menuitemradio', { name: /acme/ }).locator('svg.icon[data-icon="check"]')
+	).toBeVisible();
+	await expect(
+		page
+			.getByRole('menuitem', { name: 'Platform administration' })
+			.locator('svg.icon[data-icon="shield"]')
 	).toBeVisible();
 	await page.keyboard.press('Escape');
 

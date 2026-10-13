@@ -10,15 +10,15 @@ export const en = {
 	'app.name': 'ResticHub',
 	'app.skipToContent': 'Skip to content',
 	'nav.section.administration': 'Administration',
-	'nav.section.platform': 'Platform',
 	'nav.overview': 'Overview',
 	'nav.users': 'Users',
 	'nav.hosts': 'Hosts',
 	'nav.apiTokens': 'API tokens',
 	'nav.audit': 'Audit',
-	'nav.platformAudit': 'Platform audit',
-	'nav.tenants': 'Organizations',
-	'nav.platformUsers': 'Platform users',
+	'nav.platformMode': 'Platform administration',
+	'nav.platform.organizations': 'Organizations',
+	'nav.platform.users': 'Users',
+	'nav.platform.audit': 'Audit',
 	'nav.settings': 'Settings',
 	'nav.primary': 'Primary navigation',
 
@@ -227,7 +227,7 @@ export const en = {
 	'users.roles.viewer': 'Read only, including the organization audit log.',
 
 	// Platform users (installation-wide accounts)
-	'platformUsers.title': 'Platform users',
+	'platformUsers.title': 'Users',
 	'platformUsers.description': 'Create installation accounts and manage their memberships.',
 	'platformUsers.create': 'Create user',
 	'platformUsers.createTitle': 'Create an installation account',

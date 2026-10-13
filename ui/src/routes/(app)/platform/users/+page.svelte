@@ -279,7 +279,7 @@
 </script>
 
 <svelte:head>
-	<title>{t('platformUsers.title')} · {t('app.name')}</title>
+	<title>{t('platformUsers.title')} · {t('nav.platformMode')} · {t('app.name')}</title>
 </svelte:head>
 
 <PageHeader

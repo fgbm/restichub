@@ -91,7 +91,9 @@ for (const scheme of ['light', 'dark'] as const) {
 		await shot(page, 'token-value-dialog', scheme);
 		await page.keyboard.press('Escape');
 
-		await open(page, 'Organizations');
+		await page.getByRole('button', { name: 'Switch organization' }).click();
+		await page.getByRole('menuitem', { name: 'Platform administration' }).click();
+		await page.getByRole('heading', { level: 1 }).waitFor();
 		await page.getByText('initech').waitFor();
 		await shot(page, 'platform-organizations', scheme);
 
@@ -103,9 +105,20 @@ for (const scheme of ['light', 'dark'] as const) {
 		await shot(page, 'delete-org-dialog', scheme);
 		await page.keyboard.press('Escape');
 
-		await open(page, 'Platform users');
+		await open(page, 'Users');
 		await page.locator('tbody tr').first().waitFor();
 		await shot(page, 'platform-users', scheme);
+
+		await open(page, 'Audit');
+		await page.locator('tbody tr').first().waitFor();
+		await shot(page, 'platform-audit', scheme);
+
+		await page.getByRole('button', { name: 'Switch organization' }).click();
+		await page.getByRole('menu').waitFor();
+		await shot(page, 'switcher-platform-mode', scheme);
+		await page.getByRole('menuitemradio', { name: /acme/ }).click();
+		await page.getByText('Get started').waitFor();
+		await shot(page, 'back-in-organization', scheme);
 	});
 
 	test(`capture the empty hosts screen in the ${scheme} theme`, async ({ page }) => {

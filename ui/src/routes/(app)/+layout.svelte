@@ -3,9 +3,11 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { AppShell } from '#lib/components/index.ts';
 	import { t } from '#lib/i18n/index.ts';
-	import { isInstanceLoaded, loadInstance } from '#lib/stores/instance.svelte.ts';
+	import { landingHref } from '#lib/navigation.ts';
+	import { isInstanceLoaded, isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
 	import { getSession, isLoaded, loadSession } from '#lib/stores/session.svelte.ts';
 
 	let { children }: { children: Snippet } = $props();
@@ -17,6 +19,12 @@
 		if (!isInstanceLoaded()) await loadInstance();
 		if (!isLoaded()) await loadSession();
 		if (!getSession()) await goto(resolve('/(auth)/sign-in'));
+	});
+
+	$effect(() => {
+		if (!session || page.url.pathname !== resolve('/(app)')) return;
+		const target = landingHref(session, isSingleTenant());
+		if (target !== '/(app)') void goto(resolve(target), { replaceState: true });
 	});
 </script>
 

@@ -7,6 +7,9 @@
 	 * seven memberships. The list holds real organizations only; an account with no membership sees
 	 * the empty state (ADR-0029).
 	 *
+	 * For a Platform Admin a separate entry after a divider opens the platform screens. The entry is
+	 * a link, not an organization: it never calls the switch API, and the filter does not hide it.
+	 *
 	 * The keyboard moves with the arrows (`aria-activedescendant` names the active item), selects
 	 * with Enter and closes with Escape; the focus returns to the button. A click outside closes
 	 * the menu. A failed switch shows a toast; a lost session redirects to the sign-in screen.
@@ -17,9 +20,12 @@
 	import { ApiError, UnauthorizedError, service } from '#lib/api/index.ts';
 	import type { Role, TenantAccess } from '#lib/api/index.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
+	import { PLATFORM_HOME } from '#lib/navigation.ts';
 	import { clearSession, getSession, setSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import Icon from './ui/Icon.svelte';
+
+	let { platformMode = false }: { platformMode?: boolean } = $props();
 
 	let open = $state(false);
 	let tenants = $state<TenantAccess[]>([]);
@@ -39,6 +45,9 @@
 
 	const session = $derived(getSession());
 	const currentId = $derived(session?.tenant?.id ?? '');
+	// In platform mode no organization is the current one in the menu.
+	const checkedId = $derived(platformMode ? '' : currentId);
+	const platformEntry = $derived(session?.platform_admin ?? false);
 	const query = $derived(filter.trim().toLowerCase());
 
 	function matches(tenant: TenantAccess): boolean {
@@ -47,13 +56,23 @@
 
 	// The list holds real organizations only (ADR-0029).
 	const regular = $derived(tenants.filter((tenant) => matches(tenant)));
-	const options = $derived(regular);
+	const PLATFORM = 'platform';
+	type Option = TenantAccess | typeof PLATFORM;
+	const options = $derived<Option[]>(platformEntry ? [...regular, PLATFORM] : regular);
+	const platformIndex = $derived(platformEntry ? regular.length : -1);
 	const showFilter = $derived(tenants.length > 7);
-	const activeId = $derived(options[activeIndex] ? itemId(options[activeIndex]) : undefined);
+	const activeId = $derived(
+		options[activeIndex] !== undefined ? itemId(options[activeIndex]) : undefined
+	);
 
-	function itemId(tenant: TenantAccess): string {
-		return `tenant-switch-item-${tenant.id}`;
+	function itemId(option: Option): string {
+		return option === PLATFORM ? 'tenant-switch-platform' : `tenant-switch-item-${option.id}`;
 	}
+
+	// The filter changes the list, so the active item must stay inside it.
+	$effect(() => {
+		if (activeIndex >= options.length) activeIndex = Math.max(0, options.length - 1);
+	});
 
 	async function load(): Promise<void> {
 		try {
@@ -72,10 +91,12 @@
 		filter = '';
 		// The list is reloaded on every open, so a membership added elsewhere shows up.
 		await load();
-		activeIndex = Math.max(
-			0,
-			tenants.findIndex((tenant) => tenant.id === currentId)
-		);
+		activeIndex = platformMode
+			? Math.max(0, platformIndex)
+			: Math.max(
+					0,
+					tenants.findIndex((tenant) => tenant.id === currentId)
+				);
 		await tick();
 		if (showFilter) filterInput?.focus();
 		else menu?.focus();
@@ -90,6 +111,11 @@
 	async function toggle(): Promise<void> {
 		if (open) close();
 		else await openMenu();
+	}
+
+	async function selectPlatform(): Promise<void> {
+		close();
+		await goto(resolve(PLATFORM_HOME));
 	}
 
 	async function select(tenant: TenantAccess): Promise<void> {
@@ -108,9 +134,16 @@
 				}
 				const code = error instanceof ApiError ? error.code : undefined;
 				pushToast('danger', tErrorCode(code) ?? t('alert.problemTitle'));
+				close();
+				return;
 			}
 		}
 		close();
+		if (platformMode) await goto(resolve('/(app)'));
+	}
+
+	function choose(option: Option): Promise<void> {
+		return option === PLATFORM ? selectPlatform() : select(option);
 	}
 
 	function onDocumentClick(event: MouseEvent): void {
@@ -139,10 +172,10 @@
 			return;
 		}
 		if (event.key === 'Enter' && open) {
-			const tenant = options[activeIndex];
-			if (tenant) {
+			const option = options[activeIndex];
+			if (option !== undefined) {
 				event.preventDefault();
-				void select(tenant);
+				void choose(option);
 			}
 		}
 	}
@@ -165,7 +198,12 @@
 		onclick={toggle}
 		onkeydown={onKeydown}
 	>
-		<span class="switcher__name">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
+		{#if platformMode}
+			<Icon name="shield" size="xs" />
+			<span class="switcher__name">{t('nav.platformMode')}</span>
+		{:else}
+			<span class="switcher__name">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
+		{/if}
 		<Icon name="chevron-down" size="xs" />
 	</button>
 
@@ -192,27 +230,46 @@
 					/>
 				</label>
 			{/if}
-			{#if regular.length === 0}
-				<p class="switcher__empty">{t('topbar.noOrganizations')}</p>
-			{/if}
-			{#each regular as tenant, index (tenant.id)}
+			<div class="switcher__list">
+				{#if regular.length === 0}
+					<p class="switcher__empty">{t('topbar.noOrganizations')}</p>
+				{/if}
+				{#each regular as tenant, index (tenant.id)}
+					<button
+						type="button"
+						id={itemId(tenant)}
+						class="switcher__item"
+						class:switcher__item--active={index === activeIndex}
+						role="menuitemradio"
+						aria-checked={tenant.id === checkedId}
+						onmouseenter={() => (activeIndex = index)}
+						onclick={() => select(tenant)}
+					>
+						<span class="switcher__item-name">{tenant.name}</span>
+						<span class="switcher__item-role">{t(roleKeys[tenant.role])}</span>
+						<span class="switcher__item-check">
+							{#if tenant.id === checkedId}<Icon name="check" size="xs" />{/if}
+						</span>
+					</button>
+				{/each}
+			</div>
+			<!-- Outside the scrolled list, so a long list never hides the entry. -->
+			{#if platformEntry}
+				<div class="switcher__divider" role="separator"></div>
 				<button
 					type="button"
-					id={itemId(tenant)}
-					class="switcher__item"
-					class:switcher__item--active={index === activeIndex}
-					role="menuitemradio"
-					aria-checked={tenant.id === currentId}
-					onmouseenter={() => (activeIndex = index)}
-					onclick={() => select(tenant)}
+					id={itemId(PLATFORM)}
+					class="switcher__item switcher__item--platform"
+					class:switcher__item--active={activeIndex === platformIndex}
+					role="menuitem"
+					aria-current={platformMode ? 'page' : undefined}
+					onmouseenter={() => (activeIndex = platformIndex)}
+					onclick={selectPlatform}
 				>
-					<span class="switcher__item-name">{tenant.name}</span>
-					<span class="switcher__item-role">{t(roleKeys[tenant.role])}</span>
-					<span class="switcher__item-check">
-						{#if tenant.id === currentId}<Icon name="check" size="xs" />{/if}
-					</span>
+					<Icon name="shield" />
+					<span class="switcher__item-name">{t('nav.platformMode')}</span>
 				</button>
-			{/each}
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -248,9 +305,10 @@
 		position: absolute;
 		left: 0;
 		top: calc(100% + 6px);
+		display: flex;
+		flex-direction: column;
 		min-width: 280px;
 		max-height: 24rem;
-		overflow-y: auto;
 		padding: var(--rh-space-1);
 		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
@@ -268,6 +326,19 @@
 		padding: var(--rh-space-2);
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	.switcher__list {
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow-y: auto;
+	}
+
+	.switcher__divider {
+		flex: none;
+		height: var(--rh-border-width);
+		margin: var(--rh-space-1) calc(-1 * var(--rh-space-1));
+		background-color: var(--rh-color-border);
 	}
 
 	.switcher__group-title {
@@ -331,6 +402,10 @@
 	.switcher__item--active,
 	.switcher__item:hover {
 		background-color: var(--rh-color-hover);
+	}
+
+	.switcher__item--platform {
+		flex: none;
 	}
 
 	.switcher__item-name {

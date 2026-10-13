@@ -7,10 +7,10 @@
 	import type { Role } from '#lib/api/index.ts';
 	import { getLocale, setLocale, t, type MessageKey } from '#lib/i18n/index.ts';
 	import {
-		navSectionsForRole,
+		platformNavigation,
 		settingsNavigation,
-		type NavHref,
-		type NavItem
+		tabsForMode,
+		type NavHref
 	} from '#lib/navigation.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
@@ -23,19 +23,22 @@
 	let { children }: { children: Snippet } = $props();
 
 	const session = $derived(getSession());
-	// Single mode hides the platform section (ADR-0024). The platform section appears with the
-	// Platform Admin right; the administration section needs a current organization (ADR-0029).
-	const sections = $derived(
-		navSectionsForRole(session?.role ?? null, session?.platform_admin ?? false).filter(
-			(section) =>
-				!(isSingleTenant() && section.platform) && (section.platform || !!session?.tenant)
-		)
+	const pathname = $derived(page.url.pathname);
+
+	// Single mode has no platform screens (ADR-0024). The organization tabs need a current
+	// organization; the platform tabs need the Platform Admin right (ADR-0029).
+	const platformAdmin = $derived(!isSingleTenant() && (session?.platform_admin ?? false));
+	const platformMode = $derived(
+		platformAdmin && platformNavigation.items.some((item) => isActive(item.href))
 	);
-	const tenantTabs = $derived(sections.find((section) => !section.platform)?.items ?? []);
-	const platformTabs = $derived(sections.find((section) => section.platform)?.items ?? []);
+	const tenantTabs = $derived(
+		session?.tenant ? tabsForMode('organization', session.role, platformAdmin) : []
+	);
+	const tabs = $derived(
+		platformMode ? tabsForMode('platform', session?.role ?? null, platformAdmin) : tenantTabs
+	);
 	const settingsTab = $derived(tenantTabs.find((item) => item.href === '/(app)/settings'));
 
-	const pathname = $derived(page.url.pathname);
 	const locale = $derived(getLocale());
 	const theme = $derived(getTheme());
 
@@ -81,11 +84,7 @@
 				{ label: t(settingsItem.labelKey) }
 			];
 		}
-		const platformItem = platformTabs.find((item) => isActive(item.href));
-		if (platformItem) {
-			return [{ label: t(platformItem.labelKey) }];
-		}
-		const item = tenantTabs.find((tab: NavItem) => isActive(tab.href));
+		const item = tabs.find((tab) => isActive(tab.href));
 		return item ? [{ label: t(item.labelKey) }] : [];
 	});
 
@@ -182,7 +181,7 @@
 			{#if isSingleTenant()}
 				<span class="breadcrumb__tenant">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
 			{:else}
-				<TenantSwitcher />
+				<TenantSwitcher {platformMode} />
 			{/if}
 			{#each crumbs as crumb, index (index)}
 				<span class="breadcrumb__sep" aria-hidden="true">/</span>
@@ -226,7 +225,7 @@
 	</header>
 
 	<nav class="tabs" aria-label={t('nav.primary')}>
-		{#each tenantTabs as item (item.href)}
+		{#each tabs as item (item.href)}
 			<a
 				class="tab"
 				href={resolve(item.href)}
@@ -236,25 +235,6 @@
 				{t(item.labelKey)}
 			</a>
 		{/each}
-		{#if platformTabs.length > 0}
-			<!-- The platform screens do not depend on the current organization (ADR-0029). -->
-			<div class="tabs__platform" role="group" aria-labelledby="platform-tabs-label">
-				<span class="tabs__platform-label" id="platform-tabs-label">
-					<Icon name="shield" size="xs" />
-					{t('nav.section.platform')}
-				</span>
-				{#each platformTabs as item (item.href)}
-					<a
-						class="tab"
-						href={resolve(item.href)}
-						aria-current={isActive(item.href) ? 'page' : undefined}
-					>
-						<Icon name={item.icon} />
-						{t(item.labelKey)}
-					</a>
-				{/each}
-			</div>
-		{/if}
 	</nav>
 
 	<main id="main" class="page">
@@ -456,30 +436,6 @@
 		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
 		border-bottom-color: var(--rh-color-accent);
-	}
-
-	.tabs__platform {
-		display: flex;
-		align-items: stretch;
-		gap: var(--rh-space-1);
-		margin-left: auto;
-		padding-left: var(--rh-space-3);
-	}
-
-	.tabs__platform-label {
-		display: inline-flex;
-		flex: none;
-		align-items: center;
-		gap: var(--rh-space-1);
-		margin-right: var(--rh-space-1);
-		padding-left: var(--rh-space-3);
-		border-left: var(--rh-border-width) solid var(--rh-color-border);
-		color: var(--rh-color-text-subtle);
-		font-size: var(--rh-font-size-xs);
-		font-weight: var(--rh-font-weight-semibold);
-		white-space: nowrap;
-		/* The divider spans only the middle of the bar. */
-		margin-block: var(--rh-space-3);
 	}
 
 	.page {

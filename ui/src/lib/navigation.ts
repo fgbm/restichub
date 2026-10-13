@@ -31,9 +31,9 @@ export interface NavItem {
 export interface NavSection {
 	labelKey: MessageKey;
 	items: NavItem[];
-	/** True for the platform section, which single mode hides (ADR-0024). */
-	platform: boolean;
 }
+
+export type NavMode = 'organization' | 'platform';
 
 export interface SettingsItem {
 	href: SettingsHref;
@@ -48,47 +48,47 @@ export interface SettingsGroup {
 }
 
 // The order follows the full tab set of the design; a tab appears only when its screen exists.
-export const navigation: NavSection[] = [
-	{
-		labelKey: 'nav.section.administration',
-		platform: false,
-		items: [
-			{ href: '/(app)', labelKey: 'nav.overview', icon: 'overview', roles: ALL_ROLES },
-			{
-				href: '/(app)/hosts',
-				labelKey: 'nav.hosts',
-				icon: 'host',
-				roles: ['admin', 'operator', 'viewer']
-			},
-			{ href: '/(app)/audit', labelKey: 'nav.audit', icon: 'audit', roles: ALL_ROLES },
-			{ href: '/(app)/settings', labelKey: 'nav.settings', icon: 'settings', roles: ADMIN_ROLES }
-		]
-	},
-	{
-		labelKey: 'nav.section.platform',
-		platform: true,
-		items: [
-			{
-				href: '/(app)/platform/tenants',
-				labelKey: 'nav.tenants',
-				icon: 'box',
-				roles: ['platform_admin']
-			},
-			{
-				href: '/(app)/platform/users',
-				labelKey: 'nav.platformUsers',
-				icon: 'users',
-				roles: ['platform_admin']
-			},
-			{
-				href: '/(app)/platform/audit',
-				labelKey: 'nav.platformAudit',
-				icon: 'audit',
-				roles: ['platform_admin']
-			}
-		]
-	}
-];
+export const navigation: NavSection = {
+	labelKey: 'nav.section.administration',
+	items: [
+		{ href: '/(app)', labelKey: 'nav.overview', icon: 'overview', roles: ALL_ROLES },
+		{
+			href: '/(app)/hosts',
+			labelKey: 'nav.hosts',
+			icon: 'host',
+			roles: ['admin', 'operator', 'viewer']
+		},
+		{ href: '/(app)/audit', labelKey: 'nav.audit', icon: 'audit', roles: ALL_ROLES },
+		{ href: '/(app)/settings', labelKey: 'nav.settings', icon: 'settings', roles: ADMIN_ROLES }
+	]
+};
+
+// The platform screens have their own tab set; the switcher entry opens them (ADR-0029).
+export const platformNavigation: NavSection = {
+	labelKey: 'nav.platformMode',
+	items: [
+		{
+			href: '/(app)/platform/tenants',
+			labelKey: 'nav.platform.organizations',
+			icon: 'box',
+			roles: ['platform_admin']
+		},
+		{
+			href: '/(app)/platform/users',
+			labelKey: 'nav.platform.users',
+			icon: 'users',
+			roles: ['platform_admin']
+		},
+		{
+			href: '/(app)/platform/audit',
+			labelKey: 'nav.platform.audit',
+			icon: 'audit',
+			roles: ['platform_admin']
+		}
+	]
+};
+
+export const PLATFORM_HOME: NavHref = '/(app)/platform/tenants';
 
 export const settingsNavigation: SettingsGroup[] = [
 	{
@@ -111,20 +111,25 @@ export const settingsNavigation: SettingsGroup[] = [
 ];
 
 /**
- * The sections for the current actor.
+ * The primary tabs for the current actor.
  *
- * The platform section appears with the Platform Admin right, independently of the current
- * organization (ADR-0029). The administration items follow the role of the current membership.
+ * The platform tabs need the Platform Admin right, not a membership (ADR-0029). The organization
+ * tabs follow the role of the current membership.
  */
-export function navSectionsForRole(role: Role | null, platformAdmin: boolean): NavSection[] {
-	return navigation
-		.map((section) => ({
-			...section,
-			items: section.items.filter((item) =>
-				section.platform ? platformAdmin : role ? item.roles.includes(role) : false
-			)
-		}))
-		.filter((section) => section.items.length > 0);
+export function tabsForMode(mode: NavMode, role: Role | null, platformAdmin: boolean): NavItem[] {
+	if (mode === 'platform') return platformAdmin ? platformNavigation.items : [];
+	return role ? navigation.items.filter((item) => item.roles.includes(role)) : [];
+}
+
+/**
+ * The first screen after the sign-in. A Platform Admin without a current organization has no
+ * organization screen to open, so it starts in the platform screens. Single mode has none.
+ */
+export function landingHref(
+	me: { tenant?: unknown; platform_admin: boolean },
+	singleTenant: boolean
+): NavHref {
+	return me.platform_admin && !me.tenant && !singleTenant ? PLATFORM_HOME : '/(app)';
 }
 
 export function settingsGroupsForRole(role: Role | null): SettingsGroup[] {

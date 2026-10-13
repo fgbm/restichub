@@ -11,15 +11,15 @@ export const ru: Record<MessageKey, string> = {
 	'app.name': 'ResticHub',
 	'app.skipToContent': 'Перейти к содержимому',
 	'nav.section.administration': 'Администрирование',
-	'nav.section.platform': 'Платформа',
 	'nav.overview': 'Обзор',
 	'nav.users': 'Пользователи',
 	'nav.hosts': 'Хосты',
 	'nav.apiTokens': 'Токены API',
 	'nav.audit': 'Аудит',
-	'nav.platformAudit': 'Аудит платформы',
-	'nav.tenants': 'Организации',
-	'nav.platformUsers': 'Пользователи платформы',
+	'nav.platformMode': 'Администрирование платформы',
+	'nav.platform.organizations': 'Организации',
+	'nav.platform.users': 'Пользователи',
+	'nav.platform.audit': 'Аудит',
 	'nav.settings': 'Настройки',
 	'nav.primary': 'Основная навигация',
 
@@ -230,7 +230,7 @@ export const ru: Record<MessageKey, string> = {
 	'users.roles.viewer': 'Только чтение, включая журнал аудита организации.',
 
 	// Platform users (installation-wide accounts)
-	'platformUsers.title': 'Пользователи платформы',
+	'platformUsers.title': 'Пользователи',
 	'platformUsers.description':
 		'Создавайте учётные записи установки и управляйте их членством в организациях.',
 	'platformUsers.create': 'Создать пользователя',

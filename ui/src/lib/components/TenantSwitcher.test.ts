@@ -1,6 +1,6 @@
 /*
  * The tenant switcher (ADR-0025): the menu, the roles, the check mark, the filter, the keyboard,
- * the reload on open, the error toast and the click outside.
+ * the reload on open, the error toast, the click outside and the platform entry (ADR-0029).
  */
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -40,7 +40,7 @@ const tenants = [
 	{ id: 't_02', name: 'globex', role: 'operator' as const }
 ];
 
-function session(id: string, name: string) {
+function session(id: string, name: string, platformAdmin = false) {
 	return {
 		user: {
 			id: 'u_01',
@@ -52,7 +52,7 @@ function session(id: string, name: string) {
 		},
 		tenant: { id, name },
 		role: 'admin' as const,
-		platform_admin: false
+		platform_admin: platformAdmin
 	};
 }
 
@@ -199,5 +199,130 @@ describe('the tenant switcher', () => {
 		);
 		// The internal platform tenant is no entry (ADR-0029).
 		expect(screen.queryByRole('menuitemradio', { name: /Platform/ })).toBeNull();
+	});
+
+	it('shows no platform entry without the Platform Admin right', async () => {
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+		expect(screen.queryByRole('menuitem', { name: 'Platform administration' })).toBeNull();
+		expect(screen.queryByRole('separator')).toBeNull();
+	});
+
+	it('shows the platform entry after a divider and opens the platform screens', async () => {
+		setSession(session('t_01', 'acme', true));
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		const entry = await screen.findByRole('menuitem', { name: 'Platform administration' });
+		expect(screen.getByRole('separator')).toBeInTheDocument();
+		expect(entry).not.toHaveAttribute('aria-checked');
+		expect(entry.querySelector('svg[data-icon="shield"]')).not.toBeNull();
+		expect(entry.querySelector('svg[data-icon="check"]')).toBeNull();
+		expect(entry).toHaveTextContent('Platform administration');
+
+		await user.click(entry);
+		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(app)/platform/tenants'));
+		expect(mocks.switchTenant).not.toHaveBeenCalled();
+		expect(mocks.invalidateAll).not.toHaveBeenCalled();
+		expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+	});
+
+	it('reaches the platform entry with the arrow keys and opens it with Enter', async () => {
+		setSession(session('t_01', 'acme', true));
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		const menu = await screen.findByRole('menu');
+		await user.keyboard('{ArrowDown}{ArrowDown}');
+		expect(menu).toHaveAttribute('aria-activedescendant', 'tenant-switch-platform');
+		await user.keyboard('{Enter}');
+
+		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(app)/platform/tenants'));
+		expect(mocks.switchTenant).not.toHaveBeenCalled();
+	});
+
+	it('keeps the platform entry when the filter matches no organization', async () => {
+		setSession(session('t_01', 'acme', true));
+		mocks.listMemberships.mockResolvedValue(
+			Array.from({ length: 8 }, (_, index) => ({
+				id: `t_0${index + 1}`,
+				name: `org${index + 1}`,
+				role: 'viewer' as const
+			}))
+		);
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		const filter = await screen.findByRole('searchbox', { name: 'Filter organizations' });
+		await user.type(filter, 'zzz');
+		await waitFor(() => expect(screen.queryAllByRole('menuitemradio')).toHaveLength(0));
+		expect(screen.getByRole('menuitem', { name: 'Platform administration' })).toBeInTheDocument();
+		expect(screen.getByRole('menu')).toHaveAttribute(
+			'aria-activedescendant',
+			'tenant-switch-platform'
+		);
+	});
+
+	it('shows the empty state and the platform entry for an admin with no membership', async () => {
+		setSession({ ...session('t_01', 'acme', true), tenant: null });
+		mocks.listMemberships.mockResolvedValue([]);
+		const user = userEvent.setup();
+		render(TenantSwitcher);
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await waitFor(() => expect(screen.getByText('No organizations')).toBeInTheDocument());
+		expect(screen.getByRole('menuitem', { name: 'Platform administration' })).toBeInTheDocument();
+	});
+
+	it('names the platform mode on the button and marks no organization in it', async () => {
+		setSession(session('t_01', 'acme', true));
+		const user = userEvent.setup();
+		render(TenantSwitcher, { platformMode: true });
+
+		const button = screen.getByRole('button', { name: 'Switch organization' });
+		expect(button).toHaveTextContent('Platform administration');
+		expect(button).not.toHaveTextContent('acme');
+		expect(button.querySelector('svg[data-icon="shield"]')).not.toBeNull();
+
+		await user.click(button);
+		const entry = await screen.findByRole('menuitem', { name: 'Platform administration' });
+		expect(entry).toHaveAttribute('aria-current', 'page');
+		expect(screen.getByRole('menu')).toHaveAttribute(
+			'aria-activedescendant',
+			'tenant-switch-platform'
+		);
+		for (const item of screen.getAllByRole('menuitemradio')) {
+			expect(item).toHaveAttribute('aria-checked', 'false');
+		}
+	});
+
+	it('leaves the platform mode for the current organization without a switch', async () => {
+		setSession(session('t_01', 'acme', true));
+		const user = userEvent.setup();
+		render(TenantSwitcher, { platformMode: true });
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(await screen.findByRole('menuitemradio', { name: /acme/ }));
+
+		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(app)'));
+		expect(mocks.switchTenant).not.toHaveBeenCalled();
+	});
+
+	it('leaves the platform mode for another organization with a switch', async () => {
+		setSession(session('t_01', 'acme', true));
+		const user = userEvent.setup();
+		render(TenantSwitcher, { platformMode: true });
+
+		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(await screen.findByRole('menuitemradio', { name: /globex/ }));
+
+		await waitFor(() => expect(mocks.switchTenant).toHaveBeenCalledWith('t_02'));
+		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(app)'));
 	});
 });

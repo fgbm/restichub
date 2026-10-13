@@ -44,7 +44,7 @@
 	let objectType = $state('');
 	let objectId = $state('');
 
-	const title = $derived(scope === 'platform' ? t('nav.platformAudit') : t('audit.title'));
+	const title = $derived(scope === 'platform' ? t('nav.platform.audit') : t('audit.title'));
 
 	function isoOrUndefined(value: string): string | undefined {
 		return value ? new Date(value).toISOString() : undefined;
@@ -232,7 +232,9 @@
 </script>
 
 <svelte:head>
-	<title>{title} · {t('app.name')}</title>
+	<title
+		>{scope === 'platform' ? `${title} · ${t('nav.platformMode')}` : title} · {t('app.name')}</title
+	>
 </svelte:head>
 
 {#snippet timeCell(row: AuditRecord)}
