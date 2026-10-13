@@ -21,6 +21,14 @@ pub struct TenantLookup {
     pub status: TenantStatus,
 }
 
+/// One active membership of an account in an active tenant (ADR-0025).
+#[derive(Debug, Clone)]
+pub struct MembershipLookup {
+    pub tenant_id: TenantId,
+    pub tenant_name: String,
+    pub role: Role,
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionLookup {
     pub tenant_id: TenantId,
@@ -105,4 +113,56 @@ pub async fn find_api_token(
             revoked_at,
         },
     ))
+}
+
+/// Lists the active memberships of an account in active tenants (ADR-0025).
+pub async fn list_memberships(
+    db: &Database,
+    account_id: UserId,
+) -> Result<Vec<MembershipLookup>, DbError> {
+    let rows = sqlx::query_as::<_, (Uuid, String, Role)>(
+        "SELECT tenant_id, tenant_name, role FROM auth_list_memberships($1)",
+    )
+    .bind(account_id)
+    .fetch_all(db.pool())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows
+        .into_iter()
+        .map(|(tenant_id, tenant_name, role)| MembershipLookup {
+            tenant_id: TenantId::from_uuid(tenant_id),
+            tenant_name,
+            role,
+        })
+        .collect())
+}
+
+/// True when the account has an active membership in an active tenant other than the given one.
+pub async fn account_is_shared(
+    db: &Database,
+    account_id: UserId,
+    tenant_id: TenantId,
+) -> Result<bool, DbError> {
+    let (shared,): (bool,) = sqlx::query_as("SELECT auth_account_is_shared($1, $2)")
+        .bind(account_id)
+        .bind(tenant_id)
+        .fetch_one(db.pool())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(shared)
+}
+
+/// Deletes the sessions of an account. A password change keeps the current session.
+pub async fn delete_account_sessions(
+    tx: &mut crate::TenantTx<'_>,
+    account_id: UserId,
+    keep_session: Option<SessionId>,
+) -> Result<u64, DbError> {
+    let (deleted,): (i64,) = sqlx::query_as("SELECT auth_delete_account_sessions($1, $2)")
+        .bind(account_id)
+        .bind(keep_session)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(deleted as u64)
 }

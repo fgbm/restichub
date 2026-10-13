@@ -67,7 +67,8 @@ async fn db_a_tenant_creation_commits_atomically() -> TestResult {
         count_in_tenant(db.database(), committed, "tenant_keys").await?,
         1
     );
-    assert_eq!(count_in_tenant(db.database(), committed, "users").await?, 1);
+    // The account lives in the platform tenant; the new tenant holds its membership (ADR-0025).
+    assert_eq!(count_in_tenant(db.database(), committed, "users").await?, 0);
     assert_eq!(
         count_in_tenant(db.database(), committed, "memberships").await?,
         1

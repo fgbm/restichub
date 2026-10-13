@@ -12,7 +12,13 @@ async fn ac_tn_01_db_tenant_a_cannot_read_tenant_b_rows() -> TestResult {
 
     let mut tx_b = db.database().begin_tenant(tenant_b).await?;
     for table in TENANT_TABLES {
-        assert_eq!(count_rows(&mut tx_b, table).await?, 1, "tenant B: {table}");
+        // An account lives in the platform tenant, so a tenant holds no account row (ADR-0025).
+        let expected = if table == "users" { 0 } else { 1 };
+        assert_eq!(
+            count_rows(&mut tx_b, table).await?,
+            expected,
+            "tenant B: {table}"
+        );
     }
     tx_b.commit().await?;
 
@@ -35,8 +41,8 @@ async fn db_a_foreign_tenant_id_write_is_rejected() -> TestResult {
     let seed_b = seed_tenant(db.database(), tenant_b).await?;
     let seed_a = seed_tenant(db.database(), tenant_a).await?;
 
-    // The `WITH CHECK` clause rejects a row of tenant B (42501). Each negative write runs in its
-    // own transaction, so an aborted transaction does not hide the next result.
+    // The `WITH CHECK` clause rejects a user row of tenant B (42501). Each negative write runs in
+    // its own transaction, so an aborted transaction does not hide the next result.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let write = sqlx::query(
         "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
@@ -49,7 +55,8 @@ async fn db_a_foreign_tenant_id_write_is_rejected() -> TestResult {
     assert_code(write, "42501");
     drop(tx);
 
-    // The composite foreign key rejects a reference to a user of tenant B (23503).
+    // An account is installation-wide, so a membership in tenant A may reference the account of
+    // tenant B (a shared account, ADR-0025).
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let reference =
         sqlx::query("INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'viewer')")
@@ -57,10 +64,10 @@ async fn db_a_foreign_tenant_id_write_is_rejected() -> TestResult {
             .bind(seed_b.user)
             .execute(tx.as_conn())
             .await;
-    assert_code(reference, "23503");
+    assert!(reference.is_ok(), "{reference:?}");
     drop(tx);
 
-    // The session of tenant B is not visible, so the foreign key fails.
+    // A session of tenant A may reference the same installation-wide account.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let session_ref = sqlx::query(
         "INSERT INTO sessions (id, tenant_id, user_id, token_hash, expires_at) \
@@ -72,40 +79,7 @@ async fn db_a_foreign_tenant_id_write_is_rejected() -> TestResult {
     .bind(vec![9u8; 32])
     .execute(tx.as_conn())
     .await;
-    assert_code(session_ref, "23503");
-    drop(tx);
-
-    // The token of tenant B is not visible, so the foreign key fails.
-    let mut tx = db.database().begin_tenant(tenant_a).await?;
-    let token_ref = sqlx::query(
-        "INSERT INTO api_tokens \
-         (id, tenant_id, name, token_hash, display_prefix, role, created_by) \
-         VALUES ($1, $2, 't', $3, 'rh_x', 'admin', $4)",
-    )
-    .bind(ApiTokenId::new())
-    .bind(tenant_a)
-    .bind(vec![9u8; 32])
-    .bind(seed_b.user)
-    .execute(tx.as_conn())
-    .await;
-    assert_code(token_ref, "23503");
-    drop(tx);
-
-    // The secret references a user of tenant B, so the foreign key fails.
-    let mut tx = db.database().begin_tenant(tenant_a).await?;
-    let secret_ref = sqlx::query(
-        "INSERT INTO secrets \
-         (id, tenant_id, name, purpose, key_version, nonce, ciphertext, created_by) \
-         VALUES ($1, $2, 's', 'p', 1, $3, $4, $5)",
-    )
-    .bind(SecretId::new())
-    .bind(tenant_a)
-    .bind(vec![5u8; 12])
-    .bind(vec![6u8; 32])
-    .bind(seed_b.user)
-    .execute(tx.as_conn())
-    .await;
-    assert_code(secret_ref, "23503");
+    assert!(session_ref.is_ok(), "{session_ref:?}");
     drop(tx);
 
     // The seed of tenant A is complete, so the references above are the only difference.
@@ -148,8 +122,10 @@ async fn db_an_update_cannot_move_a_row_to_another_tenant() -> TestResult {
     let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
     seed_tenant(db.database(), tenant_a).await?;
 
+    // A tenant-scoped row cannot move to another tenant: the `WITH CHECK` clause of the policy
+    // rejects the new tenant id (42501).
     let mut tx = db.database().begin_tenant(tenant_a).await?;
-    let move_row = sqlx::query("UPDATE users SET tenant_id = $1")
+    let move_row = sqlx::query("UPDATE sessions SET tenant_id = $1")
         .bind(tenant_b)
         .execute(tx.as_conn())
         .await;

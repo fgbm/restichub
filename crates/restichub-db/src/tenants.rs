@@ -148,18 +148,16 @@ pub async fn create_with_bootstrap(
 
     if let Some(admin) = &input.admin {
         let user = UserId::new();
-        sqlx::query(
-            "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
-             VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(user)
-        .bind(tenant)
-        .bind(admin.username)
-        .bind(admin.password_hash)
-        .bind(admin.display_name)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+        // The account row lives in the platform tenant (ADR-0025). The definer function writes it
+        // while the transaction keeps the tenant scope of the new tenant.
+        sqlx::query("SELECT auth_create_account($1, $2, $3, $4)")
+            .bind(user)
+            .bind(admin.username)
+            .bind(admin.password_hash)
+            .bind(admin.display_name)
+            .execute(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
         sqlx::query("INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')")
             .bind(tenant)
             .bind(user)

@@ -1,4 +1,11 @@
-use super::TestResult;
+use std::borrow::Cow;
+
+use sqlx::AssertSqlSafe;
+use sqlx::migrate::Migrator;
+use sqlx::postgres::PgPoolOptions;
+
+use super::{TestResult, admin_pool, admin_query};
+use crate::MIGRATOR;
 use crate::test_util::test_database;
 
 #[tokio::test]
@@ -28,6 +35,86 @@ async fn db_verify_migrations_detects_a_newer_schema() -> TestResult {
         .await?;
     db.database().verify_migrations().await?;
 
+    db.cleanup().await;
+    Ok(())
+}
+
+/// AC-AU-03..07 support: a username that exists in two tenants stops the account migration
+/// (ADR-0025). The message names the two tenants and the username.
+#[tokio::test]
+async fn db_the_account_migration_refuses_a_duplicate_username() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let admin = admin_pool(&db).await?;
+    let name = format!("restichub_mig_{}", uuid::Uuid::now_v7().simple());
+    admin_query(&admin, &format!("CREATE DATABASE \"{name}\"")).await?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(db.admin_options().database(name.as_str()))
+        .await?;
+
+    // Apply the migrations that precede the account model.
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 14)
+        .cloned()
+        .collect();
+    let up_to_14 = Migrator {
+        migrations: Cow::Owned(before),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+        table_name: Cow::Borrowed("_sqlx_migrations"),
+        create_schemas: Cow::Owned(Vec::new()),
+    };
+    up_to_14.run(&pool).await?;
+
+    // Two tenants hold the same username, without the letter case.
+    let tenant_a = uuid::Uuid::now_v7();
+    let tenant_b = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO tenants (id, tenant_id, name) VALUES ($1, $1, 'dup-a'), ($2, $2, 'dup-b')",
+    )
+    .bind(tenant_a)
+    .bind(tenant_b)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
+         VALUES ($1, $3, 'dup', 'phc', 'Dup'), ($2, $4, 'DUP', 'phc', 'Dup')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(uuid::Uuid::now_v7())
+    .bind(tenant_a)
+    .bind(tenant_b)
+    .execute(&pool)
+    .await?;
+
+    // The account migration stops and names the two tenants and the username.
+    let sql = MIGRATOR
+        .iter()
+        .find(|migration| migration.version == 15)
+        .expect("the account migration is present")
+        .sql
+        .as_str()
+        .to_owned();
+    let result = sqlx::raw_sql(AssertSqlSafe(sql)).execute(&pool).await;
+    let error = result.expect_err("a duplicate username must stop the migration");
+    let message = error.to_string();
+    assert!(
+        message.contains("dup") && message.contains("dup-a") && message.contains("dup-b"),
+        "the message must name the username and the two tenants: {message}"
+    );
+
+    pool.close().await;
+    admin_query(
+        &admin,
+        &format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"),
+    )
+    .await?;
+    admin.close().await;
     db.cleanup().await;
     Ok(())
 }

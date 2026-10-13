@@ -81,7 +81,7 @@ pub async fn mark_all_used(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result
 }
 
 pub async fn user_count(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
-    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM memberships")
         .fetch_one(tx.as_conn())
         .await
         .map_err(DbError::Query)?;

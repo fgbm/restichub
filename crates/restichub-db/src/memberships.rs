@@ -1,7 +1,8 @@
 //! Membership operations.
 //!
-//! A membership gives a user a role in a tenant (requirements section 2). The role of a request
-//! comes from the membership of the actor. The table has the general tenant policy.
+//! A membership gives an account a role in a tenant (ADR-0025). The role of a request comes from
+//! the membership of the actor. A membership can be disabled in its tenant. The table has the
+//! general tenant policy.
 
 use uuid::Uuid;
 
@@ -14,21 +15,25 @@ use crate::tx::TenantTx;
 pub struct Membership {
     pub user_id: UserId,
     pub role: Role,
+    pub disabled: bool,
 }
 
 pub async fn role_of(tx: &mut TenantTx<'_>, user_id: UserId) -> Result<Option<Role>, DbError> {
-    let row = sqlx::query_as::<_, (Role,)>("SELECT role FROM memberships WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_optional(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+    let row = sqlx::query_as::<_, (Role,)>(
+        "SELECT role FROM memberships WHERE user_id = $1 AND NOT disabled",
+    )
+    .bind(user_id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     Ok(row.map(|(role,)| role))
 }
 
+/// Adds a membership or changes its role. A disabled membership is re-enabled.
 pub async fn set_role(tx: &mut TenantTx<'_>, user_id: UserId, role: Role) -> Result<(), DbError> {
     sqlx::query(
         "INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, $3) \
-         ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role",
+         ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role, disabled = false",
     )
     .bind(tx.tenant())
     .bind(user_id)
@@ -39,30 +44,46 @@ pub async fn set_role(tx: &mut TenantTx<'_>, user_id: UserId, role: Role) -> Res
     Ok(())
 }
 
-pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Membership>, DbError> {
-    let rows = sqlx::query_as::<_, (Uuid, Role)>("SELECT user_id, role FROM memberships")
-        .fetch_all(tx.as_conn())
+/// Disables or enables the membership in the tenant of the transaction.
+pub async fn set_disabled(
+    tx: &mut TenantTx<'_>,
+    user_id: UserId,
+    disabled: bool,
+) -> Result<bool, DbError> {
+    let result = sqlx::query("UPDATE memberships SET disabled = $2 WHERE user_id = $1")
+        .bind(user_id)
+        .bind(disabled)
+        .execute(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Membership>, DbError> {
+    let rows =
+        sqlx::query_as::<_, (Uuid, Role, bool)>("SELECT user_id, role, disabled FROM memberships")
+            .fetch_all(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
     Ok(rows
         .into_iter()
-        .map(|(user_id, role)| Membership {
+        .map(|(user_id, role, disabled)| Membership {
             user_id: UserId::from_uuid(user_id),
             role,
+            disabled,
         })
         .collect())
 }
 
-/// Counts the memberships with an administrator role in the tenant of the transaction.
+/// Counts the active memberships with an administrator role in the tenant of the transaction.
 ///
-/// The count covers the roles `admin` and `platform_admin` and skips the memberships of a disabled
-/// user. A disabled Admin therefore does not count as an Admin. The rule "an Admin cannot remove
-/// the last Admin of a tenant" uses it. The caller holds the tenant lock ([`TenantTx::lock`]).
+/// The count covers the roles `admin` and `platform_admin` and skips a disabled membership. A
+/// disabled membership therefore does not count as an Admin. The rule "an Admin cannot remove the
+/// last Admin of a tenant" uses it. The caller holds the tenant lock ([`TenantTx::lock`]).
 pub async fn count_admins(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
     let (count,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM memberships m \
-         JOIN users u ON u.tenant_id = m.tenant_id AND u.id = m.user_id \
-         WHERE m.role IN ('admin', 'platform_admin') AND NOT u.disabled",
+        "SELECT count(*) FROM memberships \
+         WHERE role IN ('admin', 'platform_admin') AND NOT disabled",
     )
     .fetch_one(tx.as_conn())
     .await

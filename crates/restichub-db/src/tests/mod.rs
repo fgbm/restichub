@@ -26,11 +26,23 @@ use crate::{Database, TenantId, TenantTx, users};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// The list of SECURITY DEFINER functions in the schema.
-const SECURITY_DEFINER_ALLOWED: [&str; 4] = [
+const SECURITY_DEFINER_ALLOWED: [&str; 16] = [
     "auth_find_tenant",
     "auth_find_session",
     "auth_find_api_token",
     "tenant_user_counts",
+    "auth_find_account",
+    "auth_find_account_by_id",
+    "auth_list_memberships",
+    "auth_account_is_shared",
+    "auth_tenant_members",
+    "auth_tenant_member",
+    "auth_create_account",
+    "auth_set_account_password",
+    "auth_set_account_display_name",
+    "auth_set_account_disabled",
+    "auth_set_last_tenant",
+    "auth_delete_account_sessions",
 ];
 
 const TENANT_TABLES: [&str; 8] = [
@@ -81,10 +93,11 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     api_hash[15] ^= 0x02;
 
     let mut tx = db.begin_tenant(tenant).await?;
+    let username = format!("alice-{tenant}");
     let user = users::create(
         &mut tx,
         &NewUser {
-            username: "alice",
+            username: &username,
             password_hash: "phc$secret",
             display_name: "Alice",
         },
@@ -201,7 +214,7 @@ fn bootstrap(name: &str) -> crate::tenants::BootstrapTenant<'_> {
                 .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
         ),
         admin: Some(crate::tenants::BootstrapAdmin {
-            username: "admin",
+            username: name,
             password_hash: "phc$admin",
             display_name: "Admin",
         }),
