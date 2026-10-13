@@ -204,7 +204,9 @@ export class MockApiService {
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
-	private setupDone = false;
+	// The mock stands for a ready instance, so the screens behind the sign-in are reachable without
+	// the setup step. The setup screen stays reachable at its own route.
+	private setupDone = true;
 
 	private me(): Me {
 		const tenant = this.memberships.find((item) => item.id === this.currentTenant);

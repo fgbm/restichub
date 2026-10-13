@@ -356,6 +356,26 @@ body {
 	background-color: var(--rh-color-canvas);
 }
 
+/* The SvelteKit mount point. The rule is external, because a `style` attribute
+   on the element needs `style-src 'unsafe-inline'` (ADR-0027). */
+.app-root {
+	display: contents;
+}
+
+/* The SvelteKit announcer keeps its own style attribute. This external rule keeps the
+   element hidden in a browser that ignores `unsafe-hashes` for a style attribute. */
+#svelte-announcer {
+	position: absolute;
+	left: 0;
+	top: 0;
+	clip: rect(0 0 0 0);
+	clip-path: inset(50%);
+	overflow: hidden;
+	white-space: nowrap;
+	width: 1px;
+	height: 1px;
+}
+
 a {
 	color: var(--rh-color-link);
 	text-decoration: none;
