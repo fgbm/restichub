@@ -226,6 +226,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "restichub-agent-identity-{name}-{}",
@@ -233,6 +234,19 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[cfg(not(unix))]
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        // The parent of the configuration directory must be SYSTEM and Administrators only, so the
+        // test builds a protected base and puts the identity inside it.
+        let base = std::env::temp_dir().join(format!(
+            "restichub-agent-identity-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        crate::paths::create_protected_dir(&base).expect("cannot create the protected base");
+        base.join("agent")
     }
 
     #[test]

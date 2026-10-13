@@ -47,7 +47,7 @@ impl Drop for OwnedDescriptor {
     }
 }
 
-/// Makes `dir` with a protected DACL for SYSTEM and Administrators (FR-AG-04).
+/// Makes `dir` and its parent with a protected DACL for SYSTEM and Administrators (FR-AG-04).
 ///
 /// # Errors
 ///
@@ -55,16 +55,20 @@ impl Drop for OwnedDescriptor {
 /// another owner or with a write access for another account, or when the access control cannot be
 /// set.
 pub fn ensure_config_dir(dir: &Path) -> Result<()> {
-    if let Some(parent) = dir.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        ensure_admin_dir(parent)
+    if let Some(parent) = dir.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        create_protected_dir(parent)
             .with_context(|| format!("cannot protect the parent directory {}", parent.display()))?;
     }
-    ensure_admin_dir(dir)
+    create_protected_dir(dir)
 }
 
-fn ensure_admin_dir(dir: &Path) -> Result<()> {
+/// Makes `dir` with a protected DACL, or refuses an existing `dir` (FR-AG-04).
+///
+/// # Errors
+///
+/// Returns an error when the directory cannot be created, when it exists with another owner or with
+/// a write access for another account, or when the access control cannot be set.
+pub fn create_protected_dir(dir: &Path) -> Result<()> {
     if dir.exists() {
         check_admin_only(dir)?;
     } else {
@@ -276,22 +280,52 @@ fn wide_path(path: &Path) -> Vec<u16> {
 }
 
 /// The value of one SDDL component, for example `BA` in `O:BA`.
+///
+/// The components are concatenated without a separator: the owner ends where the next tag starts.
 fn component<'a>(sddl: &'a str, tag: char) -> Option<&'a str> {
-    let marker = format!("{tag}:");
-    let start = sddl.find(&marker)? + marker.len();
-    let rest = &sddl[start..];
-    let end = rest.find(':').unwrap_or(rest.len());
-    Some(&rest[..end])
+    components(sddl)
+        .into_iter()
+        .find(|(found, _)| *found == tag)
+        .map(|(_, value)| value)
+}
+
+/// The `(tag, value)` of every top-level SDDL component, for example `('O', "BA")`.
+///
+/// A tag is one of `O`, `G`, `D` and `S` followed by a colon. A value holds no colon, so the next
+/// tag begins after the value.
+fn components(sddl: &str) -> Vec<(char, &str)> {
+    let bytes = sddl.as_bytes();
+    let mut found = Vec::new();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        let tag = bytes[index] as char;
+        if bytes[index + 1] != b':' || !matches!(tag, 'O' | 'G' | 'D' | 'S') {
+            index += 1;
+            continue;
+        }
+        let start = index + 2;
+        let mut end = sddl.len();
+        let mut scan = start;
+        while scan + 1 < bytes.len() {
+            let next = bytes[scan] as char;
+            if bytes[scan + 1] == b':' && matches!(next, 'O' | 'G' | 'D' | 'S') {
+                end = scan;
+                break;
+            }
+            scan += 1;
+        }
+        found.push((tag, &sddl[start..end]));
+        index = end;
+    }
+    found
 }
 
 /// The `(rights, trustee)` pair of every access control entry in the DACL.
 fn aces(sddl: &str) -> Vec<(String, String)> {
-    let dacl = match sddl.split_once("D:") {
-        Some((_, rest)) => rest.split("S:").next().unwrap_or(rest),
-        None => return Vec::new(),
-    };
+    let mut rest = component(sddl, 'D')
+        .unwrap_or_default()
+        .trim_start_matches('P');
     let mut entries = Vec::new();
-    let mut rest = dacl.trim_start_matches('P');
     while let Some(open) = rest.find('(') {
         let Some(close) = rest[open..].find(')') else {
             break;
@@ -350,11 +384,13 @@ mod tests {
 
     #[test]
     fn a_directory_that_another_account_owns_is_refused() {
-        let dir = temp("owner");
-        // A plain directory keeps the creating account as the owner, not Administrators.
+        // The base is SYSTEM and Administrators only, so the refusal names the inner directory.
+        let base = temp("base");
+        create_protected_dir(&base).expect("cannot create the protected base");
+        let dir = base.join("agent");
         std::fs::create_dir_all(&dir).expect("cannot create the directory");
         assert!(ensure_config_dir(&dir).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -368,7 +404,7 @@ mod tests {
     #[test]
     fn the_key_file_is_admin_only() {
         let dir = temp("dir");
-        ensure_config_dir(&dir).expect("cannot create the protected directory");
+        create_protected_dir(&dir).expect("cannot create the protected directory");
         let file = dir.join("agent-key.pem");
         create_protected_file(&file, b"key").expect("cannot write the protected file");
         check_admin_only(&file).expect("the key file must be SYSTEM and Administrators only");
