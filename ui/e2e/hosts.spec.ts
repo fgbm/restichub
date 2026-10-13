@@ -20,12 +20,13 @@ test('the hosts screen creates an enrollment token and shows it once', async ({ 
 	await page.locator('#host-labels').fill('web');
 	await page.getByRole('button', { name: 'Create token' }).click();
 
-	await expect(
-		page.getByText('re_EXAMPLEONLYVALUE00000000000000000000000000', { exact: true })
-	).toBeVisible();
-	// The command carries this installation URL, not a placeholder (ADR-0032).
 	const origin = await page.evaluate(() => window.location.origin);
-	await expect(page.getByText(`restichub-agent register --url ${origin} --token`)).toBeVisible();
+	const value = 're_EXAMPLEONLYVALUE00000000000000000000000000';
+	const fields = page.locator('.copy-field input');
+	await expect(fields.first()).toHaveValue(value);
+	// The command carries this installation URL, not a placeholder (ADR-0032).
+	await expect(fields.nth(1)).toHaveValue(
+		`restichub-agent register --url ${origin} --token ${value}`
+	);
 	await expect(page.getByText('The token works once and expires in one hour.')).toBeVisible();
-	await expect(page.getByText('<control-plane>')).toHaveCount(0);
 });
