@@ -79,3 +79,15 @@ The platform tenant row stays internal. The `ca_keys` table (ADR-0026) and the s
 - The migration revokes every API token of the platform tenant with the role `platform_admin`. It keeps the rows for the audit trail.
 - The control plane refuses to create a token with the role `platform_admin` and refuses to authenticate a token of the platform tenant. No token path gives `platform_admin = true`.
 - A later record may add a platform token that is bound to its creator. It must state how the right of the creator binds to the token.
+
+## Note 2026-10-13: the platform administration entry
+
+This note changes the user interface only. The API and the authorization do not change.
+
+- For a Platform Admin, the organization switcher shows a separate "Platform administration" entry after a divider, below the organizations.
+- The entry is a navigation entry, not an organization. It has no role and no check mark. It does not call the switch operation.
+- The entry opens the platform screens. These screens use their own tab set: Organizations, Users and Audit. The organization tabs are not visible there.
+- The tab bar of an organization does not show the platform screens. The switcher entry is the only path to them.
+- To select an organization in the switcher closes the platform screens and opens the overview of that organization.
+- A Platform Admin without a current organization starts on the platform screens after the sign-in.
+- An account without the right does not see the entry.
