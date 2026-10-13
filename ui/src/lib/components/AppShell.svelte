@@ -14,6 +14,7 @@
 		type MessageKey
 	} from '#lib/i18n/index.ts';
 	import { navSectionsForRole, type NavHref } from '#lib/navigation.ts';
+	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
 	import { getTheme, setTheme, themes, type Theme } from '#lib/stores/theme.svelte.ts';
 	import Toast from './Toast.svelte';
@@ -28,7 +29,12 @@
 	});
 
 	const session = $derived(getSession());
-	const sections = $derived(navSectionsForRole(session?.role ?? null));
+	// Single mode hides the platform section (ADR-0024).
+	const sections = $derived(
+		navSectionsForRole(session?.role ?? null).filter(
+			(section) => !(isSingleTenant() && section.platform)
+		)
+	);
 	const pathname = $derived(page.url.pathname);
 	const locale = $derived(getLocale());
 	const theme = $derived(getTheme());
@@ -55,7 +61,9 @@
 	<header class="topbar">
 		<div class="topbar__brand">
 			<span class="topbar__product">{t('app.name')}</span>
-			<span class="topbar__tenant">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
+			{#if !isSingleTenant()}
+				<span class="topbar__tenant">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
+			{/if}
 		</div>
 
 		<details class="menu">

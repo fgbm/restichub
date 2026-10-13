@@ -5,6 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { AppShell } from '#lib/components/index.ts';
 	import { t } from '#lib/i18n/index.ts';
+	import { isInstanceLoaded, loadInstance } from '#lib/stores/instance.svelte.ts';
 	import { getSession, isLoaded, loadSession } from '#lib/stores/session.svelte.ts';
 
 	let { children }: { children: Snippet } = $props();
@@ -13,6 +14,7 @@
 	const loaded = $derived(isLoaded());
 
 	onMount(async () => {
+		if (!isInstanceLoaded()) await loadInstance();
 		if (!isLoaded()) await loadSession();
 		if (!getSession()) await goto(resolve('/(auth)/sign-in'));
 	});

@@ -7,6 +7,7 @@
 	import { ApiError, NetworkError, service } from '#lib/api/index.ts';
 	import { Button, FormField, InlineAlert, TextField } from '#lib/components/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { getSetupRequired, isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
 	import { setSession } from '#lib/stores/session.svelte.ts';
 
 	let tenant = $state('');
@@ -26,16 +27,14 @@
 	}
 
 	const next = $derived(safeNext(page.url.searchParams.get('next')));
+	// Single mode hides the tenant field; the control plane uses the tenant `default`.
+	const single = $derived(isSingleTenant());
 
 	// An installation without a user needs the setup first. The sign-in form stays
 	// in place when the check fails.
 	onMount(async () => {
-		try {
-			const status = await service.setupStatus();
-			if (status.setup_required) await goto(resolve('/(auth)/setup'));
-		} catch {
-			// The form stays.
-		}
+		await loadInstance();
+		if (getSetupRequired() === true) await goto(resolve('/(auth)/setup'));
 	});
 
 	async function onSubmit(event: SubmitEvent): Promise<void> {
@@ -44,7 +43,12 @@
 		errorCode = undefined;
 		errorTitle = undefined;
 		try {
-			const me = await service.signIn({ tenant, username, password });
+			// The tenant is absent in single mode, so the control plane uses `default`.
+			const me = await service.signIn({
+				tenant: single ? undefined : tenant,
+				username,
+				password
+			});
 			setSession(me);
 			await goto(resolve(next.replace(/^\//, '') as PathnameWithSearchOrHash));
 		} catch (error) {
@@ -64,7 +68,7 @@
 </script>
 
 <h1 class="title">{t('signIn.title')}</h1>
-<p class="description">{t('signIn.description')}</p>
+<p class="description">{t(single ? 'signIn.descriptionSingle' : 'signIn.description')}</p>
 
 {#if errorTitle}
 	<div class="alert">
@@ -73,15 +77,17 @@
 {/if}
 
 <form class="form" onsubmit={onSubmit}>
-	<FormField label={t('signIn.tenant')} for="signin-tenant" required>
-		<TextField
-			id="signin-tenant"
-			bind:value={tenant}
-			autocomplete="organization"
-			placeholder={t('signIn.tenantPlaceholder')}
-			required
-		/>
-	</FormField>
+	{#if !single}
+		<FormField label={t('signIn.tenant')} for="signin-tenant" required>
+			<TextField
+				id="signin-tenant"
+				bind:value={tenant}
+				autocomplete="organization"
+				placeholder={t('signIn.tenantPlaceholder')}
+				required
+			/>
+		</FormField>
+	{/if}
 
 	<FormField label={t('signIn.username')} for="signin-username" required>
 		<TextField id="signin-username" bind:value={username} autocomplete="username" required />

@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, NetworkError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem } from '#lib/api/index.ts';
 	import { Button, FormField, InlineAlert, TextField } from '#lib/components/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let setupToken = $state('');
@@ -21,6 +23,9 @@
 	// alert instead of the message next to an input.
 	const formFields = ['setup_token', 'username', 'display_name', 'password'];
 
+	// Single mode creates the tenant `default` and its first Admin. Both modes need
+	// the one-time setup token, so the field stays (ADR-0024).
+	const single = $derived(isSingleTenant());
 	const passwordTooShort = $derived(password.length > 0 && password.length < 12);
 	const passwordMismatch = $derived(confirmPassword.length > 0 && password !== confirmPassword);
 	const canSubmit = $derived(
@@ -29,6 +34,10 @@
 			password.length >= 12 &&
 			password === confirmPassword
 	);
+
+	onMount(() => {
+		void loadInstance();
+	});
 
 	async function onSubmit(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
@@ -43,7 +52,7 @@
 				password,
 				display_name: displayName
 			});
-			pushToast('success', t('setup.done'));
+			pushToast('success', t(single ? 'setup.doneSingle' : 'setup.done'));
 			await goto(resolve('/(auth)/sign-in'));
 		} catch (error) {
 			if (error instanceof NetworkError) {
@@ -65,7 +74,7 @@
 </script>
 
 <h1 class="title">{t('setup.title')}</h1>
-<p class="description">{t('setup.description')}</p>
+<p class="description">{t(single ? 'setup.descriptionSingle' : 'setup.description')}</p>
 
 {#if errorTitle}
 	<div class="alert">
@@ -77,6 +86,7 @@
 	<FormField
 		label={t('setup.setupToken')}
 		for="setup-token"
+		hint={t('setup.tokenHint')}
 		error={fieldError(problem, 'setup_token')}
 		required
 	>
@@ -154,7 +164,7 @@
 	</FormField>
 
 	<Button type="submit" variant="primary" loading={submitting} disabled={!canSubmit}>
-		{t('setup.submit')}
+		{t(single ? 'setup.submitSingle' : 'setup.submit')}
 	</Button>
 </form>
 

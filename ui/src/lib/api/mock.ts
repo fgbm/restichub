@@ -14,6 +14,7 @@ import type {
 	CreateApiTokenRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
+	Instance,
 	Me,
 	ResetPasswordRequest,
 	SetupRequest,
@@ -206,7 +207,11 @@ export class MockApiService {
 	}
 
 	async setupStatus(): Promise<SetupStatus> {
-		return { setup_required: !this.setupDone };
+		return { setup_required: !this.setupDone, tenancy_mode: 'multi' };
+	}
+
+	async instance(): Promise<Instance> {
+		return { tenancy_mode: 'multi', setup_required: !this.setupDone };
 	}
 
 	async setup(_request: SetupRequest): Promise<Me> {

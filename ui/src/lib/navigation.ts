@@ -24,11 +24,14 @@ export interface NavItem {
 export interface NavSection {
 	labelKey: MessageKey;
 	items: NavItem[];
+	/** True for the platform section, which single mode hides (ADR-0024). */
+	platform: boolean;
 }
 
 export const navigation: NavSection[] = [
 	{
 		labelKey: 'nav.section.administration',
+		platform: false,
 		items: [
 			{ href: '/(app)', labelKey: 'nav.overview', roles: ALL_ROLES },
 			{ href: '/(app)/users', labelKey: 'nav.users', roles: ['platform_admin', 'admin'] },
@@ -42,6 +45,7 @@ export const navigation: NavSection[] = [
 	},
 	{
 		labelKey: 'nav.section.platform',
+		platform: true,
 		items: [
 			{
 				href: '/(app)/platform/tenants',

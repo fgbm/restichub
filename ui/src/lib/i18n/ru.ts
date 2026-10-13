@@ -84,6 +84,7 @@ export const ru: Record<MessageKey, string> = {
 	// Sign-in
 	'signIn.title': 'Вход',
 	'signIn.description': 'Укажите арендатора, имя пользователя и пароль.',
+	'signIn.descriptionSingle': 'Укажите имя пользователя и пароль.',
 	'signIn.tenant': 'Арендатор',
 	'signIn.tenantPlaceholder': 'имя арендатора',
 	'signIn.username': 'Имя пользователя',
@@ -96,6 +97,9 @@ export const ru: Record<MessageKey, string> = {
 	'setup.title': 'Первоначальная настройка',
 	'setup.description':
 		'Создайте первого администратора платформы. Используйте одноразовый токен настройки.',
+	'setup.descriptionSingle':
+		'Создайте первого администратора. Используйте одноразовый токен настройки.',
+	'setup.tokenHint': 'Найдите значение в журнале контрольной плоскости (`docker compose logs cp`).',
 	'setup.setupToken': 'Токен настройки',
 	'setup.username': 'Имя пользователя',
 	'setup.displayName': 'Отображаемое имя',
@@ -104,7 +108,9 @@ export const ru: Record<MessageKey, string> = {
 	'setup.passwordHint': 'Используйте 12 символов или больше.',
 	'setup.passwordMismatch': 'Пароли не совпадают.',
 	'setup.submit': 'Создать администратора платформы',
+	'setup.submitSingle': 'Создать администратора',
 	'setup.done': 'Администратор платформы готов. Войдите, чтобы продолжить.',
+	'setup.doneSingle': 'Администратор готов. Войдите, чтобы продолжить.',
 	'setup.backToSignIn': 'Вернуться ко входу',
 
 	// Overview

@@ -16,6 +16,7 @@ export const endpoints = {
 		status: '/setup/status',
 		create: '/setup'
 	},
+	instance: '/instance',
 	users: {
 		list: '/users',
 		create: '/users',

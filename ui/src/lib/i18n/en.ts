@@ -83,6 +83,7 @@ export const en = {
 	// Sign-in
 	'signIn.title': 'Sign in',
 	'signIn.description': 'Enter your tenant, user name and password.',
+	'signIn.descriptionSingle': 'Enter your user name and password.',
 	'signIn.tenant': 'Tenant',
 	'signIn.tenantPlaceholder': 'tenant name',
 	'signIn.username': 'User name',
@@ -94,6 +95,8 @@ export const en = {
 	// Setup
 	'setup.title': 'Initial setup',
 	'setup.description': 'Create the first Platform Admin. Use the one-time setup token.',
+	'setup.descriptionSingle': 'Create the first administrator. Use the one-time setup token.',
+	'setup.tokenHint': 'Find the value in the control plane log (`docker compose logs cp`).',
 	'setup.setupToken': 'Setup token',
 	'setup.username': 'User name',
 	'setup.displayName': 'Display name',
@@ -102,7 +105,9 @@ export const en = {
 	'setup.passwordHint': 'Use 12 characters or more.',
 	'setup.passwordMismatch': 'The passwords do not match.',
 	'setup.submit': 'Create the Platform Admin',
+	'setup.submitSingle': 'Create the administrator',
 	'setup.done': 'The Platform Admin is ready. Sign in to continue.',
+	'setup.doneSingle': 'The administrator is ready. Sign in to continue.',
 	'setup.backToSignIn': 'Back to sign in',
 
 	// Overview

@@ -17,6 +17,7 @@ import type {
 	CreateApiTokenRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
+	Instance,
 	Me,
 	ResetPasswordRequest,
 	SetupRequest,
@@ -37,6 +38,8 @@ export interface ApiService {
 
 	setupStatus(): Promise<SetupStatus>;
 	setup(request: SetupRequest): Promise<Me>;
+
+	instance(): Promise<Instance>;
 
 	listUsers(): Promise<User[]>;
 	createUser(request: CreateUserRequest): Promise<User>;
@@ -66,6 +69,8 @@ const httpService: ApiService = {
 
 	setupStatus: () => api.get<SetupStatus>(endpoints.setup.status),
 	setup: (request) => api.post<Me>(endpoints.setup.create, request),
+
+	instance: () => api.get<Instance>(endpoints.instance),
 
 	listUsers: () =>
 		api.get<UserListResponse>(endpoints.users.list).then((response) => response.items),

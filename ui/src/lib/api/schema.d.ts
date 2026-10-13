@@ -140,6 +140,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["instance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -331,8 +347,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Creates the first Platform Admin.
-         * @description The endpoint needs the CSRF header and it is rate-limited for each source IP, as sign-in is. The platform tenant lock and the row lock of the token serialize two setup requests with the same token, so exactly one succeeds.
+         * Creates the first administrator.
+         * @description The endpoint needs the one-time setup token, the CSRF header and the per-IP rate limit of sign-in. In multi mode it creates the first Platform Admin. In single mode it creates the tenant `default` and its first Admin.
          */
         post: operations["setup"];
         delete?: never;
@@ -348,7 +364,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Reports if the setup is required. */
+        /** Reports if the setup is required and the tenancy mode. */
         get: operations["status"];
         put?: never;
         post?: never;
@@ -565,6 +581,12 @@ export interface components {
         };
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy";
+        /** @description The mode and the setup state of the installation. */
+        InstanceResponse: {
+            /** @description True while the installation has no administrator. */
+            setup_required: boolean;
+            tenancy_mode: components["schemas"]["TenancyMode"];
+        };
         MeResponse: {
             role: components["schemas"]["Role"];
             tenant: components["schemas"]["TenantView"];
@@ -662,17 +684,22 @@ export interface components {
             display_name: string;
             /** @description At least 12 characters. */
             password: string;
-            setup_token: string;
+            /** @description The one-time token that the control plane prints at start. */
+            setup_token?: string | null;
             username: string;
         };
         SetupStatusResponse: {
-            /** @description True while the platform tenant has no user. */
+            /** @description True while the installation has no administrator. */
             setup_required: boolean;
+            tenancy_mode: components["schemas"]["TenancyMode"];
         };
         SignInRequest: {
             password: string;
-            /** @description Ignores the letter case. */
-            tenant: string;
+            /**
+             * @description Required in multi mode; ignored in single mode, which uses the tenant `default` (ADR-0024).
+             *     Ignores the letter case.
+             */
+            tenant?: string | null;
             username: string;
         };
         SignInResponse: {
@@ -680,6 +707,13 @@ export interface components {
             tenant: components["schemas"]["TenantView"];
             user: components["schemas"]["UserView"];
         };
+        /**
+         * @description The tenancy mode of the installation (ADR-0024).
+         *
+         *     The mode changes the API surface and the user interface. It never changes the storage model.
+         * @enum {string}
+         */
+        TenancyMode: "single" | "multi";
         TenantListResponse: {
             items: components["schemas"]["PlatformTenantView"][];
             /** @description Null when the table holds no later tenant. */
@@ -1111,6 +1145,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    instance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The instance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceResponse"];
                 };
             };
         };
@@ -1805,7 +1859,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The Platform Admin is created. */
+            /** @description The administrator is created. */
             201: {
                 headers: {
                     [name: string]: unknown;
