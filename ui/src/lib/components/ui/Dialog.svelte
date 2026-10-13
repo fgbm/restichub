@@ -2,17 +2,24 @@
 	import type { Snippet } from 'svelte';
 	import { Dialog as Primitive } from 'bits-ui';
 	import { t } from '#lib/i18n/index.ts';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
 	let {
 		open = $bindable(false),
 		title,
 		description,
+		size = 'md',
+		icon,
 		children,
 		footer
 	}: {
 		open?: boolean;
 		title: string;
 		description?: string;
+		size?: 'sm' | 'md' | 'lg';
+		/** An icon before the title. The mockup shows it in the danger color for a destructive action. */
+		icon?: IconName;
 		children?: Snippet;
 		footer?: Snippet;
 	} = $props();
@@ -21,16 +28,29 @@
 <Primitive.Root bind:open>
 	<Primitive.Portal>
 		<Primitive.Overlay class="rh-dialog-overlay" />
-		<Primitive.Content class="rh-dialog">
+		<Primitive.Content class="rh-dialog rh-dialog--{size}">
 			<header class="rh-dialog__head">
-				<Primitive.Title class="rh-dialog__title">{title}</Primitive.Title>
-				<Primitive.Close class="rh-dialog__close" aria-label={t('common.close')}>✕</Primitive.Close>
+				<Primitive.Title class="rh-dialog__title">
+					{#if icon}
+						<Icon name={icon} />
+					{/if}
+					{title}
+				</Primitive.Title>
+				<Primitive.Close class="rh-dialog__close" aria-label={t('common.close')}>
+					<Icon name="i-x" size="xs" />
+				</Primitive.Close>
 			</header>
-			{#if description}
-				<Primitive.Description class="rh-dialog__description">{description}</Primitive.Description>
-			{/if}
-			{#if children}
-				<div class="rh-dialog__body">{@render children()}</div>
+			{#if description || children}
+				<div class="rh-dialog__body">
+					{#if description}
+						<Primitive.Description class="rh-dialog__description"
+							>{description}</Primitive.Description
+						>
+					{/if}
+					{#if children}
+						{@render children()}
+					{/if}
+				</div>
 			{/if}
 			{#if footer}
 				<div class="rh-dialog__footer">{@render footer()}</div>
@@ -61,6 +81,14 @@
 		box-shadow: var(--rh-shadow-overlay);
 	}
 
+	:global(.rh-dialog--sm) {
+		width: min(400px, calc(100vw - 32px));
+	}
+
+	:global(.rh-dialog--lg) {
+		width: min(480px, calc(100vw - 32px));
+	}
+
 	:global(.rh-dialog__head) {
 		display: flex;
 		align-items: center;
@@ -69,9 +97,16 @@
 	}
 
 	:global(.rh-dialog__title) {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
 		margin: 0;
 		font-size: var(--rh-font-size-lg);
 		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	:global(.rh-dialog__title .icon) {
+		color: var(--rh-color-danger);
 	}
 
 	:global(.rh-dialog__close) {
@@ -85,7 +120,6 @@
 		border-radius: var(--rh-radius-md);
 		background: transparent;
 		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-base);
 		cursor: pointer;
 	}
 
@@ -94,18 +128,17 @@
 		color: var(--rh-color-text);
 	}
 
-	:global(.rh-dialog__description) {
-		margin: 0;
-		padding: 0 var(--rh-space-4);
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-base);
-	}
-
 	:global(.rh-dialog__body) {
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-4);
-		padding: var(--rh-space-4);
+		padding: 0 var(--rh-space-4) var(--rh-space-4);
+	}
+
+	:global(.rh-dialog__description) {
+		margin: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-base);
 	}
 
 	:global(.rh-dialog__footer) {
