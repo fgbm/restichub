@@ -41,6 +41,44 @@ function iso(minutesAgo: number): string {
 	return new Date(Date.now() - minutesAgo * 60_000).toISOString();
 }
 
+// The mock starts without an agent. A review capture sets this storage key to see a filled list.
+const SAMPLE_AGENTS_KEY = 'restichub.mock.agents';
+
+function makeAgents(): Agent[] {
+	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_AGENTS_KEY) !== 'sample') {
+		return [];
+	}
+	const agent = (
+		id: string,
+		hostname: string,
+		os: string,
+		arch: string,
+		version: string,
+		seen: number,
+		status: Agent['status'] = 'active'
+	): Agent => ({
+		id,
+		hostname,
+		os,
+		arch,
+		agent_version: version,
+		status,
+		last_seen_at: iso(seen),
+		created_at: iso(60 * 24 * 30),
+		certificate_expires_at: iso(-60 * 24 * 60),
+		certificate_serial: '0f' + id.padStart(14, '0'),
+		revoked_at: status === 'revoked' ? iso(60) : null
+	});
+	return [
+		agent('1', 'win-fs01', 'windows', 'amd64', '0.4.2', 14),
+		agent('2', 'srv-db-01', 'linux', 'amd64', '0.4.2', 26),
+		agent('3', 'win-dc01', 'windows', 'amd64', '0.4.1', 60),
+		agent('4', 'nas-backup', 'linux', 'arm64', '0.4.2', 120),
+		agent('5', 'mac-build-01', 'darwin', 'arm64', '0.4.0', 60 * 48),
+		agent('6', 'srv-app-02', 'linux', 'amd64', '0.3.9', 180, 'revoked')
+	];
+}
+
 function makeUsers(): User[] {
 	return [
 		{
@@ -265,7 +303,7 @@ export class MockApiService {
 	private tenants: Tenant[] = makeTenants();
 	private platformUsers: PlatformUser[] = makePlatformUsers();
 	private tokens: ApiToken[] = makeTokens();
-	private agents: Agent[] = [];
+	private agents: Agent[] = makeAgents();
 	private enrollmentTokens: EnrollmentToken[] = [];
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
