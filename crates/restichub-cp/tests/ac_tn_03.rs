@@ -56,12 +56,17 @@ async fn ac_tn_03_a_suspended_tenant_cannot_sign_in_and_the_platform_audit_has_t
 
     let body =
         json!({"tenant": "suspend-ac", "username": "alice", "password": "correct horse battery"});
-    let (status, _, _) = send(
+    let (status, _, problem) = send(
         &app,
         request("POST", "/api/v1/auth/sign-in", None, Some(body)),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // The suspended membership is skipped; the account signs in with no organization (ADR-0029).
+    assert_eq!(status, StatusCode::OK, "{problem}");
+    assert!(
+        problem.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{problem}"
+    );
 
     let (status, _, _) = send(
         &app,

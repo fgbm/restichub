@@ -10,7 +10,10 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use utoipa::ToSchema;
 
-use restichub_db::{tenants::Tenant, users::Member};
+use restichub_db::{
+    tenants::Tenant,
+    users::{Account, Member},
+};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserView {
@@ -33,6 +36,18 @@ impl UserView {
             disabled: member.disabled || member.account_disabled,
             role: member.role,
             shared: member.shared,
+        }
+    }
+
+    /// The account of a session with no organization (ADR-0029).
+    pub fn from_account(account: &Account, role: Role) -> Self {
+        Self {
+            id: account.id.to_string(),
+            username: account.username.clone(),
+            display_name: account.display_name.clone(),
+            disabled: account.disabled,
+            role,
+            shared: false,
         }
     }
 }
@@ -113,6 +128,8 @@ pub struct PlatformUserView {
     pub email_verified: bool,
     /// A Platform Admin set it for the whole installation.
     pub disabled: bool,
+    /// True when the account holds the installation-wide right (ADR-0029).
+    pub platform_admin: bool,
     pub memberships: Vec<PlatformMembershipView>,
 }
 
@@ -125,6 +142,7 @@ impl PlatformUserView {
             email: account.email.clone(),
             email_verified: account.email_verified,
             disabled: account.disabled,
+            platform_admin: account.platform_admin,
             memberships,
         }
     }

@@ -328,17 +328,28 @@ async fn ac_au_06_no_active_membership_and_the_enumeration_defence() {
     .await;
     let app = app(db.database());
 
-    // The answer of an absent account and of an account with no membership is identical.
+    // An absent account and a wrong password give the same answer (the enumeration defence).
     let (s1, _, b1) = sign_in(&app, "nobody", "correct horse battery").await;
-    let (s2, _, b2) = sign_in(&app, "memberless", "correct horse battery").await;
     let (s3, _, b3) = sign_in(&app, "alice", "wrong password value").await;
-    for (status, body) in [(s1, &b1), (s2, &b2), (s3, &b3)] {
+    for (status, body) in [(s1, &b1), (s3, &b3)] {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(
             body.get("code").and_then(Value::as_str),
             Some("invalid_credentials")
         );
     }
+
+    // An account with no active membership signs in with no organization (ADR-0029).
+    let (s2, _, b2) = sign_in(&app, "memberless", "correct horse battery").await;
+    assert_eq!(s2, StatusCode::OK, "{b2}");
+    assert!(
+        b2.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{b2}"
+    );
+    assert_eq!(
+        b2.get("platform_admin").and_then(Value::as_bool),
+        Some(false)
+    );
 
     // The time path is identical: the absent account verifies a dummy hash, so both requests
     // spend the Argon2id time. A missing hash would answer in well under a millisecond.
@@ -574,12 +585,12 @@ async fn a_suspended_tenant_is_skipped_and_refused() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // The account whose only membership is in the suspended tenant cannot sign in.
+    // The account whose only membership is in the suspended tenant signs in with no organization.
     let (status, _, body) = sign_in(&app, "bob", "correct horse battery").await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
-    assert_eq!(
-        body.get("code").and_then(Value::as_str),
-        Some("invalid_credentials")
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{body}"
     );
 
     db.cleanup().await;
@@ -978,9 +989,13 @@ async fn ac_au_07_a_role_change_keeps_a_disabled_membership_disabled() {
     assert_eq!(body.get("disabled").and_then(Value::as_bool), Some(true));
     assert_eq!(body.get("role").and_then(Value::as_str), Some("operator"));
 
-    // The membership stays disabled, so bob cannot sign in.
-    let (status, _, _) = sign_in(&app, "bob", "correct horse battery").await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // The membership stays disabled, so bob signs in with no organization.
+    let (status, _, body) = sign_in(&app, "bob", "correct horse battery").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{body}"
+    );
 
     db.cleanup().await;
 }
@@ -1016,12 +1031,7 @@ async fn the_last_platform_admin_and_the_caller_are_protected() {
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
     // Disabling the last active Platform Admin is refused.
-    let creator = common::list_users(db.database(), PLATFORM_TENANT_ID)
-        .await
-        .into_iter()
-        .find(|member| member.username == "platform-token-owner")
-        .map(|member| member.id)
-        .expect("the token creator is a member");
+    let creator = common::find_account_id(db.database(), "platform-token-owner").await;
     let (status, _, _) = send(
         &app,
         common::bearer_request(
@@ -1029,6 +1039,19 @@ async fn the_last_platform_admin_and_the_caller_are_protected() {
             &format!("/api/v1/platform/users/{creator}"),
             &token,
             Some(json!({"disabled": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Removing the right from the last active Platform Admin is refused too (ADR-0029).
+    let (status, _, _) = send(
+        &app,
+        common::bearer_request(
+            "PATCH",
+            &format!("/api/v1/platform/users/{creator}"),
+            &token,
+            Some(json!({"platform_admin": false})),
         ),
     )
     .await;
@@ -1102,14 +1125,14 @@ async fn add_membership_refuses_the_platform_tenant() {
 /// The last active Platform Admin cannot lose its rights through the tenant route either: the
 /// account route and the platform route share the lock and the same active count (ADR-0025).
 #[tokio::test]
-async fn the_last_active_platform_admin_is_protected_on_the_tenant_route() {
+async fn the_last_active_platform_admin_is_protected_on_the_platform_route() {
     let Some(db) = common::test_db().await else {
         return;
     };
     let first = create_user(
         db.database(),
         PLATFORM_TENANT_ID,
-        "tenant-route-a",
+        "platform-route-a",
         "phc",
         "platform_admin",
     )
@@ -1117,7 +1140,7 @@ async fn the_last_active_platform_admin_is_protected_on_the_tenant_route() {
     let second = create_user(
         db.database(),
         PLATFORM_TENANT_ID,
-        "tenant-route-b",
+        "platform-route-b",
         "phc",
         "platform_admin",
     )
@@ -1125,43 +1148,37 @@ async fn the_last_active_platform_admin_is_protected_on_the_tenant_route() {
     let cookie = session_cookie(db.database(), PLATFORM_TENANT_ID, first).await;
     let app = app(db.database());
 
-    // The platform route disables the account of the second Platform Admin.
+    // The caller removes the right from the second Platform Admin: allowed.
     let (status, _, body) = send(
         &app,
         request(
             "PATCH",
             &format!("/api/v1/platform/users/{second}"),
             Some(&cookie),
-            Some(json!({"disabled": true})),
+            Some(json!({"platform_admin": false})),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
-    // The first is the last active Platform Admin. The tenant route refuses to disable its own
-    // account, its own membership and its own session.
-    let (status, _, _) = send(
-        &app,
-        request(
-            "PATCH",
-            &format!("/api/v1/users/{first}"),
-            Some(&cookie),
-            Some(json!({"disabled": true})),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    let (status, _, _) = send(
-        &app,
-        request(
-            "DELETE",
-            &format!("/api/v1/users/{first}"),
-            Some(&cookie),
-            None,
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    // The caller cannot remove its own right and cannot disable its own account (ADR-0029).
+    for body in [json!({"platform_admin": false}), json!({"disabled": true})] {
+        let (status, _, _) = send(
+            &app,
+            request(
+                "PATCH",
+                &format!("/api/v1/platform/users/{first}"),
+                Some(&cookie),
+                Some(body),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    // The platform tenant holds no organization, so a tenant data route is refused (ADR-0029).
+    let (status, _, _) = send(&app, request("GET", "/api/v1/users", Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 
     db.cleanup().await;
 }
@@ -1272,8 +1289,8 @@ async fn an_admin_cannot_remove_its_own_rights() {
     db.cleanup().await;
 }
 
-/// Two platform routes that disable each other serialize on the same lock, so at most one wins and
-/// at least one Platform Admin stays active (ADR-0025).
+/// Two platform routes that remove each other's right serialize on the same lock, so at most one
+/// wins and at least one Platform Admin stays active (ADR-0029).
 #[tokio::test]
 async fn a_concurrent_cross_route_disable_keeps_one_platform_admin() {
     let Some(db) = common::test_db().await else {
@@ -1299,39 +1316,34 @@ async fn a_concurrent_cross_route_disable_keeps_one_platform_admin() {
     let second_cookie = session_cookie(db.database(), PLATFORM_TENANT_ID, second).await;
     let app = app(db.database());
 
-    // The first disables the second through the platform route; the second disables the first
-    // through the tenant route.
-    let (platform_route, tenant_route) = tokio::join!(
+    // Each caller removes the right from the other.
+    let (a, b) = tokio::join!(
         send(
             &app,
             request(
                 "PATCH",
                 &format!("/api/v1/platform/users/{second}"),
                 Some(&first_cookie),
-                Some(json!({"disabled": true})),
+                Some(json!({"platform_admin": false})),
             )
         ),
         send(
             &app,
             request(
                 "PATCH",
-                &format!("/api/v1/users/{first}"),
+                &format!("/api/v1/platform/users/{first}"),
                 Some(&second_cookie),
-                Some(json!({"disabled": true})),
+                Some(json!({"platform_admin": false})),
             )
         ),
     );
-    let statuses = [platform_route.0, tenant_route.0];
+    let statuses = [a.0, b.0];
     assert!(
         statuses.iter().filter(|status| status.is_success()).count() <= 1,
-        "at most one disable must succeed: {statuses:?}"
+        "at most one removal must succeed: {statuses:?}"
     );
 
-    let active = common::list_users(db.database(), PLATFORM_TENANT_ID)
-        .await
-        .into_iter()
-        .filter(|member| member.role.is_admin() && !member.disabled && !member.account_disabled)
-        .count();
+    let active = common::platform_admin_count(db.database()).await;
     assert!(active >= 1, "at least one Platform Admin must stay active");
 
     db.cleanup().await;
