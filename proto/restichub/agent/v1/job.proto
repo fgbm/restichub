@@ -16,8 +16,9 @@ message SignedJob {
   bytes job = 1;
   // Ed25519 signature of the context prefix and the job bytes.
   bytes signature = 2;
-  // Identifier of the key that made the signature.
-  string key_id = 3;
+  // Identifier of the key that signed the job. The agent verifies the job with
+  // this key (ADR-0026).
+  string signer_key_id = 3;
 }
 
 // Job is one run of a plan (FR-PR-03).

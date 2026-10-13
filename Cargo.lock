@@ -1803,6 +1803,7 @@ dependencies = [
  "getrandom 0.4.3",
  "http-body-util",
  "libc",
+ "prost",
  "prost-types",
  "rcgen",
  "restichub-canary-scan",

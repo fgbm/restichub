@@ -9,15 +9,19 @@
 mod pki_support;
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use prost::Message;
 use prost_types::Timestamp;
 use restichub_canary_scan::{Canary, Scanner};
+use restichub_cp::clock::ManualClock;
 use restichub_cp::job_signing::{JobSigningError, JobSigningService, ROTATION_OVERLAP};
+use restichub_cp::maintenance;
 use restichub_db::signing::{self, SigningKeyRow};
 use restichub_db::{Database, PLATFORM_TENANT_ID, SigningKeyRole};
-use restichub_proto::agent::v1::{Job, RejectReason};
+use restichub_proto::agent::v1::{Job, KeyUpdate, RejectReason};
 use restichub_proto::signing::{Expected, KeyRing, Rejection, verify_job};
 use restichub_secrets::{CryptoError, KekId, KekProvider, WrappedSigningKey, unwrap_signing_key};
 use time::OffsetDateTime;
+use uuid::Uuid;
 
 use pki_support::{base64_encode, dump_all, hex, other_kek, provider, test_db};
 
@@ -64,6 +68,7 @@ async fn active_keys(db: &Database, kek: &dyn KekProvider) -> Vec<(String, [u8; 
             let key = unwrap_signing_key(
                 kek,
                 PLATFORM_TENANT_ID.as_uuid(),
+                row.id,
                 row.role.as_str(),
                 &wrapped(&row),
             )
@@ -87,6 +92,7 @@ async fn active_key(
             let key = unwrap_signing_key(
                 kek,
                 PLATFORM_TENANT_ID.as_uuid(),
+                row.id,
                 row.role.as_str(),
                 &wrapped(&row),
             )
@@ -147,21 +153,87 @@ async fn swap_wrapped_keys(
         .execute(&mut *tx)
         .await
         .expect("cannot set the tenant scope");
-    for (id, other) in [(first, second), (second, first)] {
-        sqlx::query(
-            "UPDATE signing_keys SET wrapped_key = \
-                 (SELECT wrapped_key FROM signing_keys WHERE id = $1), \
-                 nonce = (SELECT nonce FROM signing_keys WHERE id = $1), \
-                 kek_id = (SELECT kek_id FROM signing_keys WHERE id = $1) \
-             WHERE id = $2",
-        )
-        .bind(other)
+    // The FROM subquery reads both rows before the update, so the two blobs exchange in one
+    // statement.
+    sqlx::query(
+        "UPDATE signing_keys AS s SET \
+             wrapped_key = CASE WHEN s.id = $1 THEN t.second_key ELSE t.first_key END, \
+             nonce = CASE WHEN s.id = $1 THEN t.second_nonce ELSE t.first_nonce END, \
+             kek_id = CASE WHEN s.id = $1 THEN t.second_kek ELSE t.first_kek END \
+         FROM ( \
+             SELECT \
+                 (SELECT wrapped_key FROM signing_keys WHERE id = $1) AS first_key, \
+                 (SELECT nonce FROM signing_keys WHERE id = $1) AS first_nonce, \
+                 (SELECT kek_id FROM signing_keys WHERE id = $1) AS first_kek, \
+                 (SELECT wrapped_key FROM signing_keys WHERE id = $2) AS second_key, \
+                 (SELECT nonce FROM signing_keys WHERE id = $2) AS second_nonce, \
+                 (SELECT kek_id FROM signing_keys WHERE id = $2) AS second_kek \
+         ) AS t \
+         WHERE s.id IN ($1, $2)",
+    )
+    .bind(first)
+    .bind(second)
+    .execute(&mut *tx)
+    .await
+    .expect("cannot swap the row");
+    tx.commit().await.expect("cannot commit the swap");
+}
+
+/// Sets `retire_after` on one row in the owner connection, to build an abnormal overlap state.
+async fn set_retire_after(
+    db: &restichub_db::test_util::TestDatabase,
+    id: Uuid,
+    when: OffsetDateTime,
+) {
+    let mut tx = db
+        .owner_pool()
+        .begin()
+        .await
+        .expect("cannot begin the owner transaction");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(PLATFORM_TENANT_ID.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query("UPDATE signing_keys SET retire_after = $1 WHERE id = $2")
+        .bind(when)
         .bind(id)
         .execute(&mut *tx)
         .await
-        .expect("cannot swap the row");
-    }
-    tx.commit().await.expect("cannot commit the swap");
+        .expect("cannot schedule the retirement");
+    tx.commit().await.expect("cannot commit the retirement");
+}
+
+/// Retires every row in the owner connection, to build the all-retired state.
+async fn retire_all_rows(db: &restichub_db::test_util::TestDatabase) {
+    let mut tx = db
+        .owner_pool()
+        .begin()
+        .await
+        .expect("cannot begin the owner transaction");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(PLATFORM_TENANT_ID.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query(
+        "UPDATE signing_keys SET retired_at = now(), retire_after = now() \
+         WHERE retired_at IS NULL",
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("cannot retire the rows");
+    tx.commit().await.expect("cannot commit the retirement");
+}
+
+/// The identifier of the one row that is scheduled for retirement and not yet retired.
+async fn pending_key(db: &Database) -> Uuid {
+    key_rows(db)
+        .await
+        .into_iter()
+        .find(|row| row.retire_after.is_some() && row.retired_at.is_none())
+        .map(|row| row.id)
+        .expect("a pending key is present")
 }
 
 #[tokio::test]
@@ -199,7 +271,7 @@ async fn the_signing_path_signs_a_job_that_the_agent_verifies() {
         active_key(db.database(), provider().as_ref(), SigningKeyRole::Current).await;
 
     let signed = set.sign_job(&job());
-    assert_eq!(signed.key_id, current_id);
+    assert_eq!(signed.signer_key_id, current_id);
 
     let mut ring = KeyRing::new();
     assert!(ring.insert(current_id, verifying(&current_seed)).is_ok());
@@ -327,12 +399,13 @@ async fn ac_pr_09_a_rotation_sends_the_new_key_and_the_revoked_key_ids() {
 
     // The promoted key signs the jobs at once; the agent already holds it.
     let signed = after.sign_job(&job());
-    assert_eq!(signed.key_id, first_next);
+    assert_eq!(signed.signer_key_id, first_next);
     assert_eq!(verify_job(&signed, &ring, &expected()), Ok(job()));
 
-    // All known online agents acknowledged the new set, so the old key retires.
+    // The agent that held the old current key acknowledged the new set, so the old key retires.
+    let first_current_id: Uuid = first_current.parse().expect("the key ID is a UUID");
     let retired = service
-        .retire_acknowledged(db.database(), OffsetDateTime::now_utc())
+        .retire_acknowledged(db.database(), first_current_id, OffsetDateTime::now_utc())
         .await
         .expect("cannot retire the old key");
     assert_eq!(retired, 1);
@@ -465,6 +538,213 @@ async fn two_concurrent_first_starts_create_one_key_set() {
             .count(),
         1
     );
+
+    db.cleanup().await;
+}
+
+/// Item 1 (#49): the periodic control plane task retires the old key after the overlap, so the
+/// seven-day bound holds without a manual call. The clock is injectable, so no test sleeps.
+#[tokio::test]
+async fn the_periodic_retirement_retires_the_old_key_after_the_overlap() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let service = create_set(db.database()).await;
+    let before = service
+        .load(db.database())
+        .await
+        .expect("cannot load the key set")
+        .expect("the key set is present");
+    let old_current = before.current_key_id().to_owned();
+
+    let now = OffsetDateTime::now_utc();
+    service
+        .rotate(db.database(), now)
+        .await
+        .expect("cannot rotate the key set");
+
+    // The clock advances past the overlap; the periodic step reads it and retires the old key.
+    let clock = ManualClock::new(now);
+    clock.advance((ROTATION_OVERLAP + time::Duration::seconds(1)).whole_seconds());
+    maintenance::retire_signing_keys(db.database(), &service, &clock)
+        .await
+        .expect("cannot retire the old key");
+
+    let set = service
+        .load(db.database())
+        .await
+        .expect("cannot load the key set")
+        .expect("the key set is present");
+    assert!(set.revoked_key_ids().contains(&old_current));
+
+    let update = set.key_update(OffsetDateTime::now_utc());
+    let decoded =
+        KeyUpdate::decode(update.key_update.as_slice()).expect("the key update must decode");
+    assert!(decoded.revoked_key_ids.contains(&old_current));
+
+    db.cleanup().await;
+}
+
+/// Item 3 (#49): a rotation refuses while an earlier rotation still holds its overlap.
+#[tokio::test]
+async fn a_rotation_with_an_open_overlap_is_refused() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let service = create_set(db.database()).await;
+    let now = OffsetDateTime::now_utc();
+    service
+        .rotate(db.database(), now)
+        .await
+        .expect("cannot rotate the key set");
+
+    let second = service.rotate(db.database(), now).await;
+    assert!(
+        matches!(second, Err(JobSigningError::RotationPending)),
+        "{second:?}"
+    );
+
+    // Once the pending key is acknowledged, the next rotation is allowed.
+    let pending = pending_key(db.database()).await;
+    service
+        .retire_acknowledged(db.database(), pending, now)
+        .await
+        .expect("cannot retire the pending key");
+    assert!(
+        service.rotate(db.database(), now).await.is_ok(),
+        "the rotation must be allowed after the acknowledgement"
+    );
+
+    db.cleanup().await;
+}
+
+/// Item 3 (#49): `retire_acknowledged` retires only the named key and leaves a newer rotation's
+/// key alone.
+#[tokio::test]
+async fn retire_acknowledged_retires_only_the_named_key() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let service = create_set(db.database()).await;
+    let now = OffsetDateTime::now_utc();
+    let rotated = service
+        .rotate(db.database(), now)
+        .await
+        .expect("cannot rotate the key set");
+    let older = pending_key(db.database()).await;
+    let newer: Uuid = rotated
+        .current_key_id()
+        .parse()
+        .expect("the key ID is a UUID");
+    // A second pending row is an abnormal state; the method must still touch only the named key.
+    set_retire_after(&db, newer, now + time::Duration::days(1)).await;
+
+    let retired = service
+        .retire_acknowledged(db.database(), older, now)
+        .await
+        .expect("cannot retire the old key");
+    assert_eq!(retired, 1);
+
+    let rows = key_rows(db.database()).await;
+    let newer_row = rows
+        .iter()
+        .find(|row| row.id == newer)
+        .expect("the newer row is present");
+    assert!(
+        newer_row.retired_at.is_none(),
+        "the newer rotation's key must stay pending"
+    );
+    let older_row = rows
+        .iter()
+        .find(|row| row.id == older)
+        .expect("the older row is present");
+    assert!(older_row.retired_at.is_some());
+
+    db.cleanup().await;
+}
+
+/// Item 4 (#49): the start creates a key set only when the table is empty; every row retired
+/// refuses the start.
+#[tokio::test]
+async fn every_retired_key_set_refuses_the_start() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let service = create_set(db.database()).await;
+    retire_all_rows(&db).await;
+
+    let error = service.ensure_initialized(db.database()).await;
+    assert!(
+        matches!(error, Err(JobSigningError::AllRetired)),
+        "{error:?}"
+    );
+
+    db.cleanup().await;
+}
+
+/// Item 2 (T19): a blob swapped between the retired current key and the active current key does
+/// not unwrap, because the associated data binds the key ID and the public key binds the row.
+#[tokio::test]
+async fn t19_a_swapped_retired_and_active_blob_is_refused() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let service = create_set(db.database()).await;
+    let (first_current, _) =
+        active_key(db.database(), provider().as_ref(), SigningKeyRole::Current).await;
+    let now = OffsetDateTime::now_utc();
+    let rotated = service
+        .rotate(db.database(), now)
+        .await
+        .expect("cannot rotate the key set");
+    let active_current = rotated.current_key_id().to_owned();
+    service
+        .retire_acknowledged(
+            db.database(),
+            first_current.parse().expect("the key ID is a UUID"),
+            now,
+        )
+        .await
+        .expect("cannot retire the old key");
+
+    swap_wrapped_keys(&db, first_current, active_current).await;
+
+    let error = service.ensure_initialized(db.database()).await;
+    assert!(
+        matches!(error, Err(JobSigningError::Crypto(CryptoError::Decrypt(_)))),
+        "{error:?}"
+    );
+
+    db.cleanup().await;
+}
+
+/// Item 7 (#49): a rotation on one control plane is visible to another signing service, which
+/// reloads the key set on the changed version and signs with the new current key.
+#[tokio::test]
+async fn a_rotation_is_visible_to_another_signing_service() {
+    let Some(db) = test_db().await else {
+        return;
+    };
+    let first = create_set(db.database()).await;
+    let second = JobSigningService::new(provider());
+
+    let before = second
+        .sign_job(db.database(), &job())
+        .await
+        .expect("cannot sign the job");
+    let before_current = before.signer_key_id.clone();
+
+    let rotated = first
+        .rotate(db.database(), OffsetDateTime::now_utc())
+        .await
+        .expect("cannot rotate the key set");
+    assert_ne!(rotated.current_key_id(), before_current);
+
+    let after = second
+        .sign_job(db.database(), &job())
+        .await
+        .expect("cannot sign the job");
+    assert_eq!(after.signer_key_id, rotated.current_key_id());
 
     db.cleanup().await;
 }

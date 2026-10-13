@@ -189,7 +189,7 @@ pub fn sign_job(job: &Job, key_id: impl Into<String>, key: &SigningKey) -> Signe
     SignedJob {
         job: bytes,
         signature,
-        key_id: key_id.into(),
+        signer_key_id: key_id.into(),
     }
 }
 
@@ -226,7 +226,7 @@ pub fn verify_job(
     expected: &Expected,
 ) -> Result<Job, Rejection> {
     let key = keys
-        .get(&signed.key_id)
+        .get(&signed.signer_key_id)
         .ok_or_else(no_job_id(RejectReason::UnknownKey))?;
 
     let signature = signature_from_bytes(&signed.signature)

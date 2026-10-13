@@ -98,6 +98,15 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         restichub_cp::maintenance::CLEANUP_INTERVAL,
     );
 
+    // The periodic retirement bounds the job signing key rotation overlap without a manual call
+    // (ADR-0026). It is a control plane task, not job scheduling (ADR-0002).
+    restichub_cp::maintenance::spawn_signing_key_retirement(
+        database.clone(),
+        job_signing.clone(),
+        Arc::new(restichub_cp::clock::SystemClock),
+        restichub_cp::maintenance::SIGNING_KEY_RETIRE_INTERVAL,
+    );
+
     let auth = restichub_cp::server::AuthState::new(config.auth.clone());
     restichub_cp::maintenance::spawn_limiter_sweep(
         auth.user_limiter.clone(),

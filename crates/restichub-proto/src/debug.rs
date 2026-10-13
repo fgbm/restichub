@@ -18,7 +18,7 @@ impl fmt::Debug for SignedJob {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SignedJob")
-            .field("key_id", &self.key_id)
+            .field("signer_key_id", &self.signer_key_id)
             .field("job_bytes", &self.job.len())
             .field("signature_bytes", &self.signature.len())
             .finish()
@@ -117,7 +117,7 @@ mod tests {
             payload: Some(control_message::Payload::SignedJob(SignedJob {
                 job: job.encode_to_vec(),
                 signature: vec![0; 64],
-                key_id: "key-1".to_owned(),
+                signer_key_id: "key-1".to_owned(),
             })),
         };
         assert!(!format!("{control:?}").contains(CANARY));
