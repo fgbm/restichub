@@ -456,22 +456,6 @@ pub async fn seed_api_token(db: &Database, tenant: TenantId, role: &str) -> Stri
     seed_token(db, tenant, role, creator).await
 }
 
-/// Creates a Platform Admin API token and returns its value.
-///
-/// The platform tenant holds the role `platform_admin` only (FR-TN-02), so the creator holds that
-/// role.
-pub async fn seed_platform_api_token(db: &Database) -> String {
-    let creator = create_user(
-        db,
-        PLATFORM_TENANT_ID,
-        "platform-token-owner",
-        "phc",
-        "platform_admin",
-    )
-    .await;
-    seed_token(db, PLATFORM_TENANT_ID, "platform_admin", creator).await
-}
-
 /// Creates an Admin API token whose creator is not an Admin and returns its value.
 ///
 /// The token acts with the Admin role, but the creator does not count as an Admin. A test uses this

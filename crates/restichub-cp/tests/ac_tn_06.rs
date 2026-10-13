@@ -19,7 +19,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use common::{
-    app, app_single_with_kek, app_with_kek, count, create_tenant, request, seed_platform_api_token,
+    app, app_single_with_kek, app_with_kek, count, create_tenant, request, seed_api_token,
     seed_session, send, set_tenant_status,
 };
 
@@ -517,7 +517,8 @@ async fn ac_tn_06_single_mode_platform_routes_are_404_for_every_role() {
     };
     let app = app_single_with_kek(db.database());
     let tenant = create_tenant(db.database(), "default").await;
-    let bearer = seed_platform_api_token(db.database()).await;
+    // A bearer token of the tenant serves the same 404 check (ADR-0029 removes the platform token).
+    let bearer = seed_api_token(db.database(), tenant, "admin").await;
     let id = Uuid::now_v7().to_string();
     let mut index = 0;
 
@@ -718,13 +719,10 @@ async fn single_mode_platform_credentials_are_unauthenticated() {
     };
     let app = app_single_with_kek(db.database());
     let cookie = seed_session(db.database(), PLATFORM_TENANT_ID, "root", "platform_admin").await;
-    let bearer = seed_platform_api_token(db.database()).await;
 
     for path in ["/api/v1/users", "/api/v1/audit", "/api/v1/auth/me"] {
         let (status, _, _) = send(&app, request("GET", path, Some(&cookie), None)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "cookie {path}");
-        let (status, _, _) = send(&app, common::bearer_request("GET", path, &bearer, None)).await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED, "bearer {path}");
     }
 
     db.cleanup().await;

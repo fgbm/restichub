@@ -672,3 +672,270 @@ async fn ac_au_12_13_the_membership_list_holds_real_organizations_only() {
 
     db.cleanup().await;
 }
+
+/// Reads the platform audit items for one action and one tenant.
+async fn platform_audit(app: &Router, cookie: &str, action: &str, tenant: &str) -> Vec<Value> {
+    let uri = format!("/api/v1/platform/audit?action={action}&tenant_id={tenant}");
+    let (status, _, page) = send(app, request("GET", &uri, Some(cookie), None)).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    page.get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn holds_object_id(items: &[Value], id: &str) -> bool {
+    items
+        .iter()
+        .any(|item| item.get("object_id").and_then(Value::as_str) == Some(id))
+}
+
+/// The membership add writes the target organization record and the platform record in one
+/// transaction (ADR-0029).
+#[tokio::test]
+async fn add_membership_writes_both_audit_records() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let cookie = platform_admin(db.database()).await;
+    let app = app_with_kek(db.database());
+    let tenant_a = create_tenant(db.database(), "audit-add").await.to_string();
+
+    let body = json!({
+        "username": "audit-owner",
+        "display_name": "Owner",
+        "password": "a long enough password",
+    });
+    let (status, account) = create_account(&app, &cookie, body).await;
+    assert_eq!(status, StatusCode::CREATED, "{account}");
+    let user_id = account
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/platform/users/{user_id}/memberships"),
+            Some(&cookie),
+            Some(json!({"tenant_id": tenant_a, "role": "operator"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{problem}");
+
+    // Platform audit: the record must be there.
+    let platform_items = platform_audit(
+        &app,
+        &cookie,
+        "user_update",
+        &PLATFORM_TENANT_ID.to_string(),
+    )
+    .await;
+    assert!(
+        holds_object_id(&platform_items, &user_id),
+        "the platform record is missing: {platform_items:?}"
+    );
+    // The target organization audit holds the record.
+    let tenant_items = platform_audit(&app, &cookie, "user_update", &tenant_a).await;
+    assert!(
+        holds_object_id(&tenant_items, &user_id),
+        "the organization record is missing: {tenant_items:?}"
+    );
+
+    db.cleanup().await;
+}
+
+/// A role change and a membership removal are also platform audit records (ADR-0029).
+#[tokio::test]
+async fn a_role_change_and_a_removal_are_in_the_platform_audit() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let cookie = platform_admin(db.database()).await;
+    let app = app_with_kek(db.database());
+    let tenant_a = create_tenant(db.database(), "audit-role").await.to_string();
+
+    let body = json!({
+        "username": "role-audit",
+        "display_name": "Role",
+        "password": "a long enough password",
+        "memberships": [{"tenant_id": tenant_a, "role": "viewer"}],
+    });
+    let (status, account) = create_account(&app, &cookie, body).await;
+    assert_eq!(status, StatusCode::CREATED, "{account}");
+    let user_id = account
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+
+    let path = format!("/api/v1/platform/users/{user_id}/memberships/{tenant_a}");
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "PATCH",
+            &path,
+            Some(&cookie),
+            Some(json!({"role": "operator"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{problem}");
+    let (status, _, problem) = send(&app, request("DELETE", &path, Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{problem}");
+
+    let platform_items = platform_audit(
+        &app,
+        &cookie,
+        "user_update",
+        &PLATFORM_TENANT_ID.to_string(),
+    )
+    .await;
+    let count = platform_items
+        .iter()
+        .filter(|item| item.get("object_id").and_then(Value::as_str) == Some(user_id.as_str()))
+        .count();
+    assert!(
+        count >= 2,
+        "the platform records for the role change and the removal are missing: {platform_items:?}"
+    );
+
+    db.cleanup().await;
+}
+
+/// The Platform Admin right is enough to grant a role, whatever the role of the caller in its
+/// current organization (ADR-0029).
+#[tokio::test]
+async fn a_platform_admin_with_a_viewer_org_role_grants_admin() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let cookie = platform_admin(db.database()).await;
+    let app = app_with_kek(db.database());
+    let tenant_a = create_tenant(db.database(), "viewer-grant")
+        .await
+        .to_string();
+
+    // A Platform Admin with the Viewer role in organization A.
+    let body = json!({
+        "username": "viewer-granter",
+        "display_name": "Granter",
+        "password": "a long enough password",
+        "platform_admin": true,
+        "memberships": [{"tenant_id": tenant_a, "role": "viewer"}],
+    });
+    let (status, account) = create_account(&app, &cookie, body).await;
+    assert_eq!(status, StatusCode::CREATED, "{account}");
+    let sign_in = json!({"username": "viewer-granter", "password": "a long enough password"});
+    let (status, session, me) = send(
+        &app,
+        request("POST", "/api/v1/auth/sign-in", None, Some(sign_in)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me.get("role").and_then(Value::as_str), Some("viewer"));
+    let session = session.expect("a session cookie");
+
+    // The Viewer-role Platform Admin creates an account and grants the Admin role.
+    let body = json!({
+        "username": "grantee",
+        "display_name": "Grantee",
+        "password": "a long enough password",
+    });
+    let (status, grantee) = create_account(&app, &session, body).await;
+    assert_eq!(status, StatusCode::CREATED, "{grantee}");
+    let grantee_id = grantee
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/platform/users/{grantee_id}/memberships"),
+            Some(&session),
+            Some(json!({"tenant_id": tenant_a, "role": "admin"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{problem}");
+
+    db.cleanup().await;
+}
+
+/// Two concurrent account creates race on the unique username and email indexes. The loser gets
+/// HTTP 409, not HTTP 500 (ADR-0028).
+#[tokio::test]
+async fn a_concurrent_account_create_is_a_conflict() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let cookie = platform_admin(db.database()).await;
+    let app = app_with_kek(db.database());
+
+    let body = |username: &str, email: &str| {
+        json!({
+            "username": username,
+            "display_name": "Race",
+            "password": "a long enough password",
+            "email": email,
+        })
+    };
+    let (a, b) = tokio::join!(
+        create_account(&app, &cookie, body("race-name", "race-name@example.com")),
+        create_account(&app, &cookie, body("race-name", "race-name@example.com")),
+    );
+    let statuses = [a.0, b.0];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CREATED)
+            .count(),
+        1,
+        "exactly one create must win: {statuses:?}"
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count(),
+        1,
+        "the loser must be a conflict, not an internal error: {statuses:?}"
+    );
+
+    // Race on the email index gives `email_taken`.
+    let (c, d) = tokio::join!(
+        create_account(
+            &app,
+            &cookie,
+            body("race-email-a", "race-email@example.com")
+        ),
+        create_account(
+            &app,
+            &cookie,
+            body("race-email-b", "race-email@example.com")
+        ),
+    );
+    let email_statuses = [c.0, d.0];
+    let email_problems = [c.1, d.1];
+    assert_eq!(
+        email_statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CREATED)
+            .count(),
+        1,
+        "exactly one create must win: {email_statuses:?}"
+    );
+    assert!(
+        email_problems
+            .iter()
+            .any(|problem| { problem.get("code").and_then(Value::as_str) == Some("email_taken") }),
+        "the loser must answer email_taken: {email_problems:?}"
+    );
+
+    db.cleanup().await;
+}

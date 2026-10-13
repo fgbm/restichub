@@ -235,6 +235,10 @@ pub async fn update_user(
         return Err(ApiError::not_found());
     };
     ensure_target_not_above_actor(&context, member.role)?;
+    // A tenant scope must not change an account that holds the installation-wide right (ADR-0029).
+    if member.platform_admin {
+        return Err(ApiError::forbidden());
+    }
 
     let role_lost_admin = new_role.is_some_and(|role| !role.is_admin());
     let disabling = body.disabled == Some(true);
@@ -325,6 +329,11 @@ pub async fn delete_user(
         return Err(ApiError::not_found());
     };
     ensure_target_not_above_actor(&context, member.role)?;
+    // A tenant scope must not remove the membership of an account that holds the installation-wide
+    // right (ADR-0029).
+    if member.platform_admin {
+        return Err(ApiError::forbidden());
+    }
     // The caller cannot disable its own membership: the session would keep a role that the
     // membership no longer grants (ADR-0025).
     if context.actor == Actor::User(user_id) {
@@ -382,6 +391,11 @@ pub async fn reset_password(
         return Err(ApiError::not_found());
     };
     ensure_target_not_above_actor(&context, member.role)?;
+    // A tenant scope must not reset the password of an account that holds the installation-wide
+    // right (ADR-0029).
+    if member.platform_admin {
+        return Err(ApiError::forbidden());
+    }
 
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, body.new_password.clone())

@@ -156,11 +156,12 @@ pub async fn create_account(
         Some(value) => Some(validation::validate_email("email", value)?),
         None => None,
     };
-    // A membership names a role below the Platform Admin (the platform tenant is refused).
+    // A membership names a real organization role. The platform right is enough to grant any of
+    // them, whatever the role of the caller in its current organization (ADR-0029).
     let mut requested: Vec<(TenantId, Role)> = Vec::with_capacity(body.memberships.len());
     for input in &body.memberships {
         let tenant_id = parse_tenant_id(&input.tenant_id)?;
-        if input.role == Role::PlatformAdmin || !context.role.allows(input.role) {
+        if input.role == Role::PlatformAdmin {
             return Err(ApiError::forbidden());
         }
         requested.push((tenant_id, input.role));
@@ -199,7 +200,8 @@ pub async fn create_account(
             platform_admin: body.platform_admin,
         },
     )
-    .await?;
+    .await
+    .map_err(map_account_unique)?;
     match status {
         CreateAccountStatus::Ok => {}
         CreateAccountStatus::UsernameTaken => return Err(ApiError::username_taken()),
@@ -293,52 +295,45 @@ pub async fn add_membership(
     context.authorize(Operation::PlatformUsersWrite)?;
     let user_id = parse_uuid(&id)?;
     let tenant_id = parse_tenant_id(&body.tenant_id)?;
-    // The platform tenant holds the platform_admin role only.
-    if body.role == Role::PlatformAdmin || !context.role.allows(body.role) {
+    // The platform right is enough to grant any organization role (ADR-0029).
+    if body.role == Role::PlatformAdmin {
         return Err(ApiError::forbidden());
     }
-
     if users::find_account_by_id(state.db(), user_id)
         .await?
         .is_none()
     {
         return Err(ApiError::not_found());
     }
-    // The platform tenant is refused: a Platform Admin membership is created by the setup only.
+    // The platform tenant is refused: it is never a membership target (ADR-0029).
     if tenant_id == PLATFORM_TENANT_ID {
         return Err(ApiError::forbidden());
     }
-    let tenant = {
-        let mut tx = state.db().begin_platform().await?;
-        let tenant = tenant_repo::get_platform(&mut tx, tenant_id).await?;
-        tx.commit().await?;
-        tenant
-    };
+
+    // The membership write and both audit records commit in one platform transaction.
+    let mut tx = state.db().begin_platform().await?;
+    let tenant = tenant_repo::get_platform(&mut tx, tenant_id).await?;
     let Some(tenant) = tenant else {
         return Err(ApiError::not_found());
     };
     if tenant.status != TenantStatus::Active {
         return Err(ApiError::forbidden());
     }
-
     // The database function takes the account row lock, then re-enables a disabled membership and
-    // sets the role. It needs the platform scope, so the write runs in a platform transaction.
-    let added = {
-        let mut tx = state.db().begin_platform().await?;
-        let added = auth::add_membership(&mut tx, user_id, tenant_id, body.role).await?;
-        tx.commit().await?;
-        added
-    };
+    // sets the role.
+    let added = auth::add_membership(&mut tx, user_id, tenant_id, body.role).await?;
     if !added {
         return Err(ApiError::forbidden());
     }
-    // The membership change is an audit record in the target tenant.
-    let mut tx = state.db().begin_tenant(tenant_id).await?;
-    let event = context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
-    restichub_db::audit::insert(&mut tx, &event).await?;
-    tx.commit().await?;
+    // The membership change is an audit record in the target organization.
+    let mut tenant_event = context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
+    tenant_event.diff = Some(diff(
+        None,
+        Some(&serde_json::json!({"added": true, "role": body.role.as_str()})),
+        &[],
+    ));
+    restichub_db::audit::insert_platform_for(&mut tx, tenant_id, &tenant_event).await?;
     // The self-add of a membership is an audit record in the platform audit too (ADR-0029).
-    let mut tx = state.db().begin_platform().await?;
     let mut platform_event =
         context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
     platform_event.diff = Some(diff(
@@ -389,7 +384,8 @@ pub async fn set_membership_role(
     context.authorize(Operation::PlatformUsersWrite)?;
     let user_id = parse_uuid(&id)?;
     let tenant_id = parse_tenant_id(&tenant_id)?;
-    if body.role == Role::PlatformAdmin || !context.role.allows(body.role) {
+    // The platform right is enough to change any organization role (ADR-0029).
+    if body.role == Role::PlatformAdmin {
         return Err(ApiError::forbidden());
     }
     let mut tx = state.db().begin_platform().await?;
@@ -406,6 +402,18 @@ pub async fn set_membership_role(
         &[],
     ));
     restichub_db::audit::insert_platform_for(&mut tx, tenant_id, &event).await?;
+    // A change of the caller's own membership is an audit record in the platform audit too.
+    let mut platform_event =
+        context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
+    platform_event.diff = Some(diff(
+        None,
+        Some(&serde_json::json!({
+            "tenant_id": tenant_id.to_string(),
+            "role": body.role.as_str(),
+        })),
+        &[],
+    ));
+    restichub_db::audit::insert_platform(&mut tx, PLATFORM_TENANT_ID, &platform_event).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -455,6 +463,17 @@ pub async fn remove_membership(
         &[],
     ));
     restichub_db::audit::insert_platform_for(&mut tx, tenant_id, &event).await?;
+    // The removal of the caller's own membership is an audit record in the platform audit too.
+    let mut platform_event =
+        context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
+    platform_event.diff = Some(diff(
+        None,
+        Some(&serde_json::json!({
+            "removed": tenant_id.to_string(),
+        })),
+        &[],
+    ));
+    restichub_db::audit::insert_platform(&mut tx, PLATFORM_TENANT_ID, &platform_event).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -562,6 +581,18 @@ fn map_email_taken(error: DbError) -> ApiError {
         ApiError::email_taken()
     } else {
         ApiError::from(error)
+    }
+}
+
+/// A concurrent account create races on the unique username or email index. The constraint name
+/// tells the two apart (ADR-0028).
+fn map_account_unique(error: DbError) -> ApiError {
+    if !error.is_unique_violation() {
+        return ApiError::from(error);
+    }
+    match error.unique_constraint().as_deref() {
+        Some("users_email_lower_unique") => ApiError::email_taken(),
+        _ => ApiError::username_taken(),
     }
 }
 

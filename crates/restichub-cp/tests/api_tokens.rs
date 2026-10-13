@@ -205,3 +205,82 @@ async fn an_expired_token_is_refused() {
 
     db.cleanup().await;
 }
+
+/// The MVP holds no platform-scope API token: no endpoint creates a `platform_admin` token
+/// (ADR-0029).
+#[tokio::test]
+async fn no_endpoint_creates_a_platform_admin_token() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "no-platform-token").await;
+    let admin = admin_cookie(&db, tenant).await;
+    let platform = seed_session(db.database(), PLATFORM_TENANT_ID, "root", "platform_admin").await;
+    let app = app(db.database());
+
+    for cookie in [&admin, &platform] {
+        let (status, _, problem) = send(
+            &app,
+            request(
+                "POST",
+                "/api/v1/api-tokens",
+                Some(cookie),
+                Some(json!({"name": "p", "role": "platform_admin"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    }
+
+    db.cleanup().await;
+}
+
+/// A token of the internal platform tenant never authenticates, also when its row is live
+/// (ADR-0029).
+#[tokio::test]
+async fn a_platform_tenant_token_never_authenticates() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let creator = common::create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "platform-token-owner",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let (value, prefix) = restichub_cp::token::random_api_token().unwrap_or_default();
+    let hash = restichub_cp::token::hash_token(&value);
+    let mut tx = db
+        .database()
+        .begin_tenant(PLATFORM_TENANT_ID)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    api_tokens::create(
+        &mut tx,
+        &api_tokens::NewApiToken {
+            name: "platform",
+            token_hash: &hash,
+            display_prefix: &prefix,
+            role: restichub_db::Role::PlatformAdmin,
+            created_by: creator,
+            expires_at: None,
+        },
+    )
+    .await
+    .unwrap_or_else(|e| panic!("{e}"));
+    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
+
+    let app = app(db.database());
+    for path in [
+        "/api/v1/auth/me",
+        "/api/v1/platform/tenants",
+        "/api/v1/users",
+    ] {
+        let (status, _, _) = send(&app, bearer_request("GET", path, &value, None)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+    }
+
+    db.cleanup().await;
+}

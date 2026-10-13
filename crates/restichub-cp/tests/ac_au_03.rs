@@ -1005,8 +1005,15 @@ async fn the_last_platform_admin_and_the_caller_are_protected() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    // The caller is a platform API token whose creator is a Platform Admin.
-    let token = common::seed_platform_api_token(db.database()).await;
+    // Two Platform Admins: the caller and a second one.
+    let caller = common::create_user(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "first-admin",
+        "phc",
+        "platform_admin",
+    )
+    .await;
     let second = common::create_user(
         db.database(),
         PLATFORM_TENANT_ID,
@@ -1015,47 +1022,39 @@ async fn the_last_platform_admin_and_the_caller_are_protected() {
         "platform_admin",
     )
     .await;
+    let cookie = common::session_cookie(db.database(), PLATFORM_TENANT_ID, caller).await;
     let app = app(db.database());
 
     // Disabling the second Platform Admin leaves one active one and succeeds.
     let (status, _, body) = send(
         &app,
-        common::bearer_request(
+        request(
             "PATCH",
             &format!("/api/v1/platform/users/{second}"),
-            &token,
+            Some(&cookie),
             Some(json!({"disabled": true})),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
-    // Disabling the last active Platform Admin is refused.
-    let creator = common::find_account_id(db.database(), "platform-token-owner").await;
-    let (status, _, _) = send(
-        &app,
-        common::bearer_request(
-            "PATCH",
-            &format!("/api/v1/platform/users/{creator}"),
-            &token,
-            Some(json!({"disabled": true})),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-
-    // Removing the right from the last active Platform Admin is refused too (ADR-0029).
-    let (status, _, _) = send(
-        &app,
-        common::bearer_request(
-            "PATCH",
-            &format!("/api/v1/platform/users/{creator}"),
-            &token,
-            Some(json!({"platform_admin": false})),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    // The caller is the last active Platform Admin now. It cannot disable itself and cannot remove
+    // its own right (ADR-0029).
+    for body in [json!({"disabled": true}), json!({"platform_admin": false})] {
+        let (status, _, _) = send(
+            &app,
+            request(
+                "PATCH",
+                &format!("/api/v1/platform/users/{caller}"),
+                Some(&cookie),
+                Some(body),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    // At least one active Platform Admin remains.
+    assert!(common::platform_admin_count(db.database()).await >= 1);
 
     db.cleanup().await;
 }
@@ -1392,6 +1391,153 @@ async fn the_account_create_limit_counts_the_tenant() {
     )
     .await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+
+    db.cleanup().await;
+}
+
+/// AC-AU-07: a tenant Admin must not touch an account that holds the Platform Admin right, also
+/// when the account is a member of that organization only (ADR-0029).
+#[tokio::test]
+async fn ac_au_07_a_tenant_admin_cannot_touch_a_platform_admin() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "pa-org").await;
+    let platform = seed_session(db.database(), PLATFORM_TENANT_ID, "root", "platform_admin").await;
+    let app = app(db.database());
+
+    // The Platform Admin is a member of exactly one organization.
+    let body = json!({
+        "username": "pa",
+        "display_name": "Platform Admin",
+        "password": "correct horse battery",
+        "platform_admin": true,
+        "memberships": [{"tenant_id": tenant.to_string(), "role": "viewer"}],
+    });
+    let (status, _, created) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/platform/users",
+            Some(&platform),
+            Some(body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let pa = created
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+
+    // The session of the Platform Admin in the organization.
+    let (status, pa_session, me) = sign_in(&app, "pa", "correct horse battery").await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let pa_session = pa_session.expect("a session cookie");
+
+    // Admin of the organization.
+    let admin = seed_session(db.database(), tenant, "admin", "admin").await;
+
+    // Every tenant-scope write on the Platform Admin is refused.
+    let cases: [(&str, String, Option<Value>); 5] = [
+        (
+            "PATCH",
+            format!("/api/v1/users/{pa}"),
+            Some(json!({"display_name": "Renamed"})),
+        ),
+        (
+            "PATCH",
+            format!("/api/v1/users/{pa}"),
+            Some(json!({"disabled": true})),
+        ),
+        (
+            "PATCH",
+            format!("/api/v1/users/{pa}"),
+            Some(json!({"role": "viewer"})),
+        ),
+        ("DELETE", format!("/api/v1/users/{pa}"), None),
+        (
+            "POST",
+            format!("/api/v1/users/{pa}/password"),
+            Some(json!({"new_password": "a long enough password"})),
+        ),
+    ];
+    for (method, path, body) in cases {
+        let (status, _, problem) = send(&app, request(method, &path, Some(&admin), body)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {problem}");
+    }
+
+    // No write removed the session: the Platform Admin still reaches its account.
+    let (status, _, _) = send(
+        &app,
+        request("GET", "/api/v1/auth/me", Some(&pa_session), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    db.cleanup().await;
+}
+
+/// An account with no membership and no right signs in and reaches only the account operations; the
+/// sign-in record goes to the platform audit with the account id (ADR-0029).
+#[tokio::test]
+async fn a_signin_with_no_membership_and_no_right_reaches_only_the_account_operations() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let hash = password::hash_password("correct horse battery").unwrap_or_default();
+    let plain = common::seed_memberless_account(&db, "plain", &hash).await;
+    let platform = seed_session(db.database(), PLATFORM_TENANT_ID, "root", "platform_admin").await;
+    let app = app(db.database());
+
+    let (status, cookie, body) = sign_in(&app, "plain", "correct horse battery").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{body}"
+    );
+    assert_eq!(
+        body.get("platform_admin").and_then(Value::as_bool),
+        Some(false)
+    );
+    let cookie = cookie.expect("a session cookie");
+
+    // Account operations work.
+    let (status, _, me) = send(&app, request("GET", "/api/v1/auth/me", Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert!(
+        me.get("tenant").map(Value::is_null).unwrap_or(false),
+        "{me}"
+    );
+
+    // Every tenant data route and every platform route is refused.
+    for path in [
+        "/api/v1/users",
+        "/api/v1/audit",
+        "/api/v1/platform/tenants",
+        "/api/v1/platform/users",
+    ] {
+        let (status, _, _) = send(&app, request("GET", path, Some(&cookie), None)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+    }
+
+    // The sign-in record of the account is in the platform audit.
+    let uri = format!("/api/v1/platform/audit?action=sign_in&tenant_id={PLATFORM_TENANT_ID}");
+    let (status, _, page) = send(&app, request("GET", &uri, Some(&platform), None)).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let found = page
+        .get("items")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("object_id").and_then(Value::as_str) == Some(plain.to_string().as_str())
+            })
+        });
+    assert!(
+        found,
+        "the sign-in record of the account is missing: {page}"
+    );
 
     db.cleanup().await;
 }
