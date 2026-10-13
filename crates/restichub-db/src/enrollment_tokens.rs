@@ -13,8 +13,8 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::ids::{EnrollmentTokenId, UserId};
-use crate::tx::TenantTx;
+use crate::ids::{EnrollmentTokenId, TenantId, UserId};
+use crate::tx::{EnrollmentTx, TenantTx};
 
 /// Default time to live of a token (ADR-0032: one hour).
 pub const DEFAULT_TTL_SECONDS: i64 = 60 * 60;
@@ -236,6 +236,102 @@ pub async fn consume(
     Ok(after
         .and_then(|state| state.refusal(now))
         .unwrap_or(ConsumeOutcome::AlreadyUsed))
+}
+
+/// Why the enrollment exchange refused a token that exists (FR-ID-01, AC-IN-02).
+///
+/// The value goes to the audit record of the tenant, never to the client: the client sees one
+/// generic refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrollmentRefusal {
+    Used,
+    Expired,
+    Revoked,
+}
+
+impl EnrollmentRefusal {
+    /// The stable string of the refusal. It is the `outcome` of the database function.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Used => "used",
+            Self::Expired => "expired",
+            Self::Revoked => "revoked",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "used" => Some(Self::Used),
+            "expired" => Some(Self::Expired),
+            "revoked" => Some(Self::Revoked),
+            _ => None,
+        }
+    }
+}
+
+/// The result of the cross-tenant token lookup of the enrollment exchange (FR-ID-01, FR-TN-03).
+#[derive(Debug, Clone)]
+pub enum EnrollmentConsume {
+    /// The token is valid. The row is marked used and the transaction is now scoped to `tenant_id`.
+    Consumed {
+        tenant_id: TenantId,
+        token_id: EnrollmentTokenId,
+        labels: Vec<String>,
+    },
+    /// The token exists but is refused. The transaction is scoped to `tenant_id` for the audit.
+    Refused {
+        tenant_id: TenantId,
+        token_id: EnrollmentTokenId,
+        reason: EnrollmentRefusal,
+    },
+    /// No token holds this hash.
+    Unknown,
+}
+
+/// Consumes a one-time token by its hash across the installation (FR-ID-01, FR-TN-03, AC-ID-01).
+///
+/// The token belongs to one tenant, which the enrollment endpoint does not know before the lookup.
+/// The `SECURITY DEFINER` function `enroll_consume_token` of migration 0025 does the lookup and the
+/// atomic consume under one row lock. On a hit the function returns the tenant, so the caller
+/// continues in a tenant transaction and creates the agent row in the same transaction; a consumed
+/// token therefore never stays without an agent. The caller records the refusal reason in the
+/// tenant of the refused token.
+pub async fn consume_for_enrollment(
+    tx: &mut EnrollmentTx<'_>,
+    token_hash: &[u8],
+    now: OffsetDateTime,
+) -> Result<EnrollmentConsume, DbError> {
+    let row: Option<(String, Uuid, Uuid, Vec<String>)> = sqlx::query_as(
+        "SELECT outcome, tenant_id, token_id, labels FROM enroll_consume_token($1, $2)",
+    )
+    .bind(token_hash)
+    .bind(now)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    let Some((outcome, tenant_id, token_id, labels)) = row else {
+        return Ok(EnrollmentConsume::Unknown);
+    };
+    let tenant_id = TenantId::from_uuid(tenant_id);
+    let token_id = EnrollmentTokenId::from_uuid(token_id);
+    if outcome == "consumed" {
+        tx.enter_tenant(tenant_id).await?;
+        return Ok(EnrollmentConsume::Consumed {
+            tenant_id,
+            token_id,
+            labels,
+        });
+    }
+    let Some(reason) = EnrollmentRefusal::parse(&outcome) else {
+        return Err(DbError::UnknownEnrollmentOutcome(outcome));
+    };
+    tx.enter_tenant(tenant_id).await?;
+    Ok(EnrollmentConsume::Refused {
+        tenant_id,
+        token_id,
+        reason,
+    })
 }
 
 /// The fields that decide whether a token is still spendable.

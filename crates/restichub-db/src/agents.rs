@@ -27,6 +27,8 @@ pub struct Agent {
     pub os: String,
     pub arch: String,
     pub agent_version: String,
+    pub restic_version: String,
+    pub labels: Vec<String>,
     pub certificate_serial: Vec<u8>,
     pub certificate_expires_at: OffsetDateTime,
     pub status: AgentStatus,
@@ -69,10 +71,14 @@ pub struct AgentPageResult {
 /// token labels.
 #[derive(Debug, Clone)]
 pub struct NewAgent<'a> {
+    /// The certificate SAN URI carries this id, so the caller chooses it before the issue.
+    pub id: AgentId,
     pub hostname: &'a str,
     pub os: &'a str,
     pub arch: &'a str,
     pub agent_version: &'a str,
+    pub restic_version: &'a str,
+    pub labels: &'a [String],
     pub certificate_serial: &'a [u8],
     pub certificate_expires_at: OffsetDateTime,
     pub last_seen_at: Option<OffsetDateTime>,
@@ -80,12 +86,12 @@ pub struct NewAgent<'a> {
 
 /// Creates an active registry row for the enrollment exchange (#48).
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewAgent<'_>) -> Result<AgentId, DbError> {
-    let id = AgentId::new();
+    let id = new.id;
     sqlx::query(
         "INSERT INTO agents \
-         (id, tenant_id, hostname, os, arch, agent_version, certificate_serial, \
-          certificate_expires_at, status, last_seen_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9)",
+         (id, tenant_id, hostname, os, arch, agent_version, restic_version, labels, \
+          certificate_serial, certificate_expires_at, status, last_seen_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', $11)",
     )
     .bind(id)
     .bind(tx.tenant())
@@ -93,6 +99,8 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewAgent<'_>) -> Result<AgentId
     .bind(new.os)
     .bind(new.arch)
     .bind(new.agent_version)
+    .bind(new.restic_version)
+    .bind(new.labels)
     .bind(new.certificate_serial)
     .bind(new.certificate_expires_at)
     .bind(new.last_seen_at)
@@ -114,9 +122,9 @@ pub async fn list(
         None => (None, None),
     };
     let mut agents: Vec<Agent> = sqlx::query_as::<_, AgentRow>(
-        "SELECT id, hostname, os, arch, agent_version, certificate_serial, \
-                certificate_expires_at, status, last_seen_at, created_at, revoked_at, \
-                revoked_by_user_id \
+        "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
+                certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
+                revoked_at, revoked_by_user_id \
          FROM agents \
          WHERE ($1::text IS NULL OR status = $1) \
            AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid)) \
@@ -141,9 +149,9 @@ pub async fn list(
 /// Reads one agent of the tenant. An agent of another tenant is absent (AC-TN-01).
 pub async fn get(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option<Agent>, DbError> {
     let row = sqlx::query_as::<_, AgentRow>(
-        "SELECT id, hostname, os, arch, agent_version, certificate_serial, \
-                certificate_expires_at, status, last_seen_at, created_at, revoked_at, \
-                revoked_by_user_id \
+        "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
+                certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
+                revoked_at, revoked_by_user_id \
          FROM agents WHERE id = $1",
     )
     .bind(id)
@@ -196,6 +204,8 @@ type AgentRow = (
     String,
     String,
     String,
+    String,
+    Vec<String>,
     Vec<u8>,
     OffsetDateTime,
     AgentStatus,
@@ -213,6 +223,8 @@ impl From<AgentRow> for Agent {
             os,
             arch,
             agent_version,
+            restic_version,
+            labels,
             certificate_serial,
             certificate_expires_at,
             status,
@@ -227,6 +239,8 @@ impl From<AgentRow> for Agent {
             os,
             arch,
             agent_version,
+            restic_version,
+            labels,
             certificate_serial,
             certificate_expires_at,
             status,

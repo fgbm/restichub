@@ -32,6 +32,11 @@ impl<'a> TenantTx<'a> {
         Ok(Self { tx, tenant })
     }
 
+    /// Continues the open transaction of an [`EnrollmentTx`] under one tenant.
+    pub(crate) fn from_parts(tx: Transaction<'a, Postgres>, tenant: TenantId) -> Self {
+        Self { tx, tenant }
+    }
+
     pub fn tenant(&self) -> TenantId {
         self.tenant
     }
@@ -105,6 +110,53 @@ impl<'a> PlatformTx<'a> {
     /// Crate-internal.
     pub(crate) fn as_conn(&mut self) -> &mut PgConnection {
         &mut self.tx
+    }
+
+    pub async fn commit(self) -> Result<(), DbError> {
+        self.tx.commit().await.map_err(DbError::Query)
+    }
+}
+
+/// The transaction of the enrollment exchange (ADR-0026, FR-ID-01, FR-TN-03).
+///
+/// The endpoint reads the one-time token before it knows the tenant, so the transaction starts
+/// without a tenant scope. The token lookup runs through the `SECURITY DEFINER` function of
+/// migration 0025, which returns the tenant. `enter_tenant` then sets the scope and
+/// [`EnrollmentTx::into_tenant_tx`] continues as a [`TenantTx`]. The consume and the agent row
+/// commit in one transaction, so a consumed token never stays without an agent.
+pub struct EnrollmentTx<'a> {
+    tx: Transaction<'a, Postgres>,
+    tenant: Option<TenantId>,
+}
+
+impl<'a> EnrollmentTx<'a> {
+    pub async fn begin(pool: &'a PgPool) -> Result<Self, DbError> {
+        let mut tx = pool.begin().await.map_err(DbError::Query)?;
+        set_role(&mut tx).await?;
+        // A session-level value does not survive a pooled connection.
+        set_config(&mut tx, "restichub.scope", "").await?;
+        set_config(&mut tx, "restichub.tenant_id", "").await?;
+        Ok(Self { tx, tenant: None })
+    }
+
+    /// Sets the tenant scope of the transaction after the token lookup.
+    pub(crate) async fn enter_tenant(&mut self, tenant: TenantId) -> Result<(), DbError> {
+        set_config(&mut self.tx, "restichub.tenant_id", &tenant.to_string()).await?;
+        self.tenant = Some(tenant);
+        Ok(())
+    }
+
+    /// Crate-internal.
+    pub(crate) fn as_conn(&mut self) -> &mut PgConnection {
+        &mut self.tx
+    }
+
+    /// Continues the transaction as a tenant transaction.
+    ///
+    /// Fails when the token lookup did not enter a tenant yet.
+    pub fn into_tenant_tx(self) -> Result<TenantTx<'a>, DbError> {
+        let tenant = self.tenant.ok_or(DbError::EnrollmentTenantUnset)?;
+        Ok(TenantTx::from_parts(self.tx, tenant))
     }
 
     pub async fn commit(self) -> Result<(), DbError> {
