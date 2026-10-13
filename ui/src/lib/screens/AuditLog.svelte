@@ -199,7 +199,9 @@
 	<title>{title} · {t('app.name')}</title>
 </svelte:head>
 
-<PageHeader {title} description={t('audit.description')} />
+<PageHeader {title} description={t('audit.description')}>
+	<Button icon="i-refresh" {loading} onclick={load}>{t('common.refresh')}</Button>
+</PageHeader>
 
 <form
 	class="filters"
@@ -273,7 +275,20 @@
 		selected = record;
 		panelOpen = true;
 	}}
-/>
+>
+	{#snippet rowActions(record)}
+		<Button
+			size="sm"
+			icon="i-eye"
+			onclick={() => {
+				selected = record;
+				panelOpen = true;
+			}}
+		>
+			{t('audit.details')}
+		</Button>
+	{/snippet}
+</Table>
 
 <div class="load-more">
 	{#if nextCursor}

@@ -14,7 +14,10 @@ const mocks = vi.hoisted(() => ({ instance: vi.fn(), setup: vi.fn(), goto: vi.fn
 const store = vi.hoisted(() => ({ single: false, setupRequired: null as boolean | null }));
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
-vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
+vi.mock('$app/paths', () => ({
+	resolve: (path: string) => path,
+	asset: (path: string) => `/${path}`
+}));
 
 vi.mock('#lib/stores/instance.svelte.ts', () => ({
 	getTenancyMode: () => (store.single ? 'single' : 'multi'),

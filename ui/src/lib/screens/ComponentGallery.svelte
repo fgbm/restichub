@@ -15,6 +15,8 @@
 		Dialog,
 		DropdownMenu,
 		EmptyState,
+		Icon,
+		iconNames,
 		PageHeader,
 		Pagination,
 		Panel,
@@ -78,6 +80,18 @@
 			<Button size="sm">Small</Button>
 			<Button loading>Loading</Button>
 			<Button disabled>Disabled</Button>
+			<Button icon="i-plus">With icon</Button>
+			<Button icon="i-refresh" aria-label="Refresh" />
+			<Button variant="primary" full>Full width</Button>
+		</div>
+	</section>
+
+	<section>
+		<h2>Icons</h2>
+		<div class="icons">
+			{#each iconNames as name (name)}
+				<span class="icon-cell" title={name}><Icon {name} /></span>
+			{/each}
 		</div>
 	</section>
 
@@ -106,6 +120,7 @@
 			<StatusPill tone="queued">Queued</StatusPill>
 			<StatusPill tone="failed">Failed</StatusPill>
 			<StatusPill tone="cancelled">Cancelled</StatusPill>
+			<StatusPill tone="failed" icon="i-alert">Failed with icon</StatusPill>
 		</div>
 	</section>
 
@@ -146,7 +161,8 @@
 		<h2>Table</h2>
 		<Table {columns} {rows} rowKey={(row) => row.id} caption="Hosts">
 			{#snippet rowActions(row)}
-				<Button variant="ghost" size="sm">Open {row.name}</Button>
+				<Button variant="ghost" size="sm" icon="i-eye" aria-label="Open {row.name}" />
+				<Button variant="ghost" size="sm" icon="i-more" aria-label="More actions for {row.name}" />
 			{/snippet}
 		</Table>
 	</section>
@@ -156,8 +172,8 @@
 		<div class="grid">
 			<Card><p>Card content</p></Card>
 			<Panel title="Panel" subtitle="A titled box"><p>Panel content</p></Panel>
-			<EmptyState title="No hosts" description="Add the first host.">
-				<Button variant="primary">Add host</Button>
+			<EmptyState icon="i-host" title="No hosts" description="Add the first host.">
+				<Button variant="primary" icon="i-plus">Add host</Button>
 			</EmptyState>
 		</div>
 		<div class="stack">
@@ -223,5 +239,21 @@
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 		gap: var(--rh-space-4);
+	}
+
+	.icons {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+		gap: var(--rh-space-2);
+	}
+
+	.icon-cell {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		height: 40px;
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+		color: var(--rh-color-text-muted);
 	}
 </style>

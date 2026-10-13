@@ -23,7 +23,10 @@ const store = vi.hoisted(() => ({
 }));
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
-vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
+vi.mock('$app/paths', () => ({
+	resolve: (path: string) => path,
+	asset: (path: string) => `/${path}`
+}));
 vi.mock('$app/state', () => ({
 	page: {
 		get url() {

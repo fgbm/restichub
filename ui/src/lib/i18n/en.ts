@@ -99,6 +99,8 @@ export const en = {
 	'setup.description': 'Create the first Platform Admin. Use the one-time setup token.',
 	'setup.descriptionSingle': 'Create the first administrator. Use the one-time setup token.',
 	'setup.tokenHint': 'Find the value in the control plane log (`docker compose logs cp`).',
+	'setup.tokenNotice':
+		'The control plane wrote the setup token to its log. The token is valid one time only.',
 	'setup.setupToken': 'Setup token',
 	'setup.username': 'User name',
 	'setup.displayName': 'Display name',
@@ -114,8 +116,37 @@ export const en = {
 
 	// Overview
 	'overview.title': 'Overview',
-	'overview.description': 'The state of the installation.',
-	'overview.placeholder': 'This section shows the state of the installation in a later version.',
+	'overview.description':
+		'The state of the installation. This page fills with data after the first host.',
+	'overview.welcome.title': 'Welcome to ResticHub',
+	'overview.welcome.body':
+		'Three steps connect the first host, the first repository and the first backup. Each step takes a few minutes.',
+	'overview.getStarted': 'Get started',
+	'overview.step.admin.title': 'Create the Platform Admin',
+	'overview.step.admin.body': 'The account manages the installation.',
+	'overview.step.agent.title': 'Enroll the first agent',
+	'overview.step.agent.body':
+		'Run the installation script on a host. The script holds a one-time token.',
+	'overview.step.repository.title': 'Add a repository',
+	'overview.step.repository.body':
+		'A restic repository holds the snapshots. The control plane keeps its password and the maintenance host.',
+	'overview.step.profile.title': 'Create a profile',
+	'overview.step.profile.body':
+		'A profile is the backup definition. Assign it to a host and set a schedule.',
+	'overview.empty.hosts.title': 'No hosts yet',
+	'overview.empty.hosts.body':
+		'Enrolled hosts appear here with their status and their last backup.',
+	'overview.empty.jobs.title': 'No jobs yet',
+	'overview.empty.jobs.body': 'Jobs appear here with their steps and their live log.',
+	'overview.empty.repositories.title': 'No repositories yet',
+	'overview.empty.repositories.body': 'Repositories appear here with their size and their growth.',
+	'overview.how.title': 'How ResticHub works',
+	'overview.how.control':
+		'The control plane decides when a job runs. The agent runs restic and sends the result.',
+	'overview.how.agent':
+		'The agent reaches the repository directly. The control plane never holds the backup data.',
+	'overview.how.maintenance':
+		'One maintenance host runs forget, prune and check for each repository.',
 
 	// Organizations
 	'tenants.title': 'Organizations',
@@ -202,6 +233,7 @@ export const en = {
 	'audit.columns.sourceIp': 'Source IP',
 	'audit.detailTitle': 'Audit record',
 	'audit.detailSubtitle': 'Record {id}',
+	'audit.details': 'Details',
 	'audit.noMore': 'No more records.',
 	'audit.loaded': 'Loaded {count} records.',
 	'audit.actorType.user': 'User',

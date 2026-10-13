@@ -102,6 +102,8 @@ export const ru: Record<MessageKey, string> = {
 	'setup.descriptionSingle':
 		'Создайте первого администратора. Используйте одноразовый токен настройки.',
 	'setup.tokenHint': 'Найдите значение в журнале контрольной плоскости (`docker compose logs cp`).',
+	'setup.tokenNotice':
+		'Контрольная плоскость записала токен настройки в свой журнал. Токен действителен один раз.',
 	'setup.setupToken': 'Токен настройки',
 	'setup.username': 'Имя пользователя',
 	'setup.displayName': 'Отображаемое имя',
@@ -117,8 +119,36 @@ export const ru: Record<MessageKey, string> = {
 
 	// Overview
 	'overview.title': 'Обзор',
-	'overview.description': 'Состояние установки.',
-	'overview.placeholder': 'Этот раздел покажет состояние установки в следующей версии.',
+	'overview.description': 'Состояние установки. Страница наполняется данными после первого узла.',
+	'overview.welcome.title': 'Добро пожаловать в ResticHub',
+	'overview.welcome.body':
+		'Три шага соединяют первый узел, первое хранилище и первую резервную копию. Каждый шаг занимает несколько минут.',
+	'overview.getStarted': 'Начало работы',
+	'overview.step.admin.title': 'Создайте администратора платформы',
+	'overview.step.admin.body': 'Эта учётная запись управляет установкой.',
+	'overview.step.agent.title': 'Подключите первый агент',
+	'overview.step.agent.body':
+		'Запустите сценарий установки на узле. Сценарий содержит одноразовый токен.',
+	'overview.step.repository.title': 'Добавьте хранилище',
+	'overview.step.repository.body':
+		'Хранилище restic содержит снимки. Контрольная плоскость хранит его пароль и узел обслуживания.',
+	'overview.step.profile.title': 'Создайте профиль',
+	'overview.step.profile.body':
+		'Профиль задаёт резервное копирование. Назначьте его узлу и задайте расписание.',
+	'overview.empty.hosts.title': 'Узлов пока нет',
+	'overview.empty.hosts.body':
+		'Подключённые узлы появятся здесь со своим состоянием и последней резервной копией.',
+	'overview.empty.jobs.title': 'Заданий пока нет',
+	'overview.empty.jobs.body': 'Задания появятся здесь со своими шагами и журналом.',
+	'overview.empty.repositories.title': 'Хранилищ пока нет',
+	'overview.empty.repositories.body': 'Хранилища появятся здесь со своим размером и ростом.',
+	'overview.how.title': 'Как работает ResticHub',
+	'overview.how.control':
+		'Контрольная плоскость решает, когда запускать задание. Агент запускает restic и отправляет результат.',
+	'overview.how.agent':
+		'Агент обращается к хранилищу напрямую. Контрольная плоскость не хранит данные копий.',
+	'overview.how.maintenance':
+		'Один узел обслуживания запускает forget, prune и check для каждого хранилища.',
 
 	// Tenants
 	'tenants.title': 'Организации',
@@ -205,6 +235,7 @@ export const ru: Record<MessageKey, string> = {
 	'audit.columns.sourceIp': 'IP источника',
 	'audit.detailTitle': 'Запись аудита',
 	'audit.detailSubtitle': 'Запись {id}',
+	'audit.details': 'Подробности',
 	'audit.noMore': 'Записей больше нет.',
 	'audit.loaded': 'Загружено записей: {count}.',
 	'audit.actorType.user': 'Пользователь',

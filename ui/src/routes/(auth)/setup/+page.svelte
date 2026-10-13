@@ -89,6 +89,10 @@
 	<div class="alert">
 		<Alert tone="danger" title={errorTitle} code={errorCode} />
 	</div>
+{:else}
+	<div class="alert">
+		<Alert tone="info" title={t('setup.tokenNotice')} />
+	</div>
 {/if}
 
 <form class="form" onsubmit={onSubmit}>
@@ -135,7 +139,7 @@
 		autocomplete="new-password"
 		required
 	/>
-	<Button type="submit" variant="primary" loading={submitting} disabled={!canSubmit}>
+	<Button type="submit" variant="primary" full loading={submitting} disabled={!canSubmit}>
 		{t(single ? 'setup.submitSingle' : 'setup.submit')}
 	</Button>
 </form>

@@ -101,7 +101,7 @@
 		autocomplete="current-password"
 		required
 	/>
-	<Button type="submit" variant="primary" loading={submitting}>
+	<Button type="submit" variant="primary" full loading={submitting}>
 		{submitting ? t('signIn.submitting') : t('signIn.submit')}
 	</Button>
 </form>
