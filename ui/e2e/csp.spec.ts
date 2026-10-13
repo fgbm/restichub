@@ -3,10 +3,19 @@ import { expect, test, type Page } from '@playwright/test';
 // The production policy is `style-src 'self'` without `unsafe-inline` (ADR-0027).
 // The test fails on any `securitypolicyviolation` event and on the CSP console error.
 
+// Registers both collectors. The console messages collect on the Node side. The
+// `securitypolicyviolation` events collect in the page, because an event can arrive after the
+// assertion that triggered it.
 async function watch(page: Page): Promise<string[]> {
-	const violations: string[] = [];
-	await page.exposeFunction('__cspViolation', (detail: string) => violations.push(detail));
+	const consoleViolations: string[] = [];
+	page.on('console', (message) => {
+		if (/Content Security Policy/i.test(message.text())) {
+			consoleViolations.push(message.text());
+		}
+	});
 	await page.addInitScript(() => {
+		const violations: string[] = [];
+		(window as unknown as { __cspViolations: string[] }).__cspViolations = violations;
 		document.addEventListener('securitypolicyviolation', (event) => {
 			// Chromium reports a violation of a style attribute in a template as a Document
 			// target, so the target is not always an element.
@@ -15,16 +24,29 @@ async function watch(page: Page): Promise<string[]> {
 			const detail = element
 				? element.tagName + ' style=' + (element.getAttribute('style') ?? '')
 				: String(target);
-			(window as unknown as { __cspViolation: (detail: string) => void }).__cspViolation(
-				event.violatedDirective + ' | ' + detail
-			);
+			violations.push(event.violatedDirective + ' | ' + detail);
 		});
 	});
-	return violations;
+	return consoleViolations;
+}
+
+// Reads the page-side violations after a settle step. One task plus a frame lets a pending
+// `securitypolicyviolation` event reach the listener before the assertion.
+async function pageViolations(page: Page): Promise<string[]> {
+	return page.evaluate(
+		() =>
+			new Promise<string[]>((resolve) => {
+				setTimeout(() => {
+					requestAnimationFrame(() =>
+						resolve((window as unknown as { __cspViolations: string[] }).__cspViolations)
+					);
+				}, 0);
+			})
+	);
 }
 
 test('the built page carries the strict policy', async ({ page }) => {
-	const violations = await watch(page);
+	const consoleViolations = await watch(page);
 	const response = await page.goto('/sign-in');
 	// The heading names the sign-in screen, so a redirect to the setup screen fails here.
 	await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
@@ -40,11 +62,12 @@ test('the built page carries the strict policy', async ({ page }) => {
 		.filter({ has: page.locator('#signin-password') });
 	await password.getByRole('button', { name: 'Show' }).click();
 	await expect(password.locator('#signin-password')).toHaveAttribute('type', 'text');
-	expect(violations).toEqual([]);
+	expect(await pageViolations(page)).toEqual([]);
+	expect(consoleViolations).toEqual([]);
 });
 
 test('the floating primitives need no inline style', async ({ page }) => {
-	const violations = await watch(page);
+	const consoleViolations = await watch(page);
 	await page.goto('/sign-in');
 	await page.locator('#signin-username').fill('admin');
 	await page.locator('#signin-password').fill('secret');
@@ -57,5 +80,6 @@ test('the floating primitives need no inline style', async ({ page }) => {
 	await page.locator('.rh-menu__trigger').click();
 	await expect(page.getByRole('menuitem', { name: 'Sign out' })).toBeVisible();
 
-	expect(violations).toEqual([]);
+	expect(await pageViolations(page)).toEqual([]);
+	expect(consoleViolations).toEqual([]);
 });

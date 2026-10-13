@@ -147,8 +147,15 @@ fn csp() -> &'static str {
 /// for a prerendered page, and appended once. The placeholder page holds no inline script, so the
 /// default policy applies.
 fn build_csp() -> String {
-    let policy = UiAssets::get(INDEX)
-        .and_then(|file| meta_csp(&file.data))
+    let html = UiAssets::get(INDEX);
+    csp_from_html(html.as_ref().map(|file| file.data.as_ref()))
+}
+
+/// Builds the header from the policy in the meta tag of `html`, or from [`DEFAULT_CSP`] when the
+/// HTML holds no meta tag (the placeholder page or a build without the UI).
+fn csp_from_html(html: Option<&[u8]>) -> String {
+    let policy = html
+        .and_then(meta_csp)
         .unwrap_or_else(|| DEFAULT_CSP.to_owned());
     let base = strip_directives(&policy, &["frame-ancestors", "base-uri"]);
     format!("{base}; frame-ancestors 'none'; base-uri 'none'")
@@ -207,7 +214,8 @@ pub fn asset_paths() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        IMMUTABLE_CACHE, NO_CACHE, cache_control, content_type, looks_like_asset, strip_directives,
+        DEFAULT_CSP, IMMUTABLE_CACHE, NO_CACHE, cache_control, content_type, csp_from_html,
+        looks_like_asset, strip_directives,
     };
 
     #[test]
@@ -252,6 +260,22 @@ mod tests {
         assert!(!looks_like_asset("/users"));
         assert!(!looks_like_asset("/users/42"));
         assert!(!looks_like_asset("/platform/tenants"));
+    }
+
+    #[test]
+    fn the_header_reuses_the_meta_policy() {
+        let html = br#"<meta http-equiv="content-security-policy" content="default-src 'self'; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-abc='; script-src 'self'; frame-ancestors 'self'; base-uri 'self'">"#;
+        let policy = csp_from_html(Some(html));
+        assert!(policy.contains("style-src 'self'"));
+        assert!(policy.contains("style-src-attr 'unsafe-hashes' 'sha256-"));
+        assert!(!policy.contains("unsafe-inline"));
+        assert_eq!(policy.matches("frame-ancestors").count(), 1);
+        assert_eq!(policy.matches("base-uri").count(), 1);
+    }
+
+    #[test]
+    fn the_default_policy_has_no_unsafe_inline() {
+        assert!(!DEFAULT_CSP.contains("unsafe-inline"));
     }
 
     #[test]

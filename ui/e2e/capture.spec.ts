@@ -1,13 +1,13 @@
 import { test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
-// Captures the screens for a review. It runs only with CAPTURE set, so CI skips it.
-test.skip(!process.env.CAPTURE, 'set CAPTURE to write the screenshots');
-
-const dir = (process.env.CAPTURE_DIR ?? '/tmp/rh-ds2/after') as string;
+// Captures the screens for a review. It runs only with CAPTURE and CAPTURE_DIR set, so CI skips it.
+const dir = process.env.CAPTURE_DIR;
+test.skip(!process.env.CAPTURE || !dir, 'set CAPTURE and CAPTURE_DIR to write the screenshots');
 
 test('capture the screens', async ({ page }) => {
-	mkdirSync(dir, { recursive: true });
+	const out = dir as string;
+	mkdirSync(out, { recursive: true });
 	await page.setViewportSize({ width: 1280, height: 900 });
 
 	await page.goto('/setup');
@@ -19,7 +19,7 @@ test('capture the screens', async ({ page }) => {
 	await page.getByRole('button', { name: 'Create the Platform Admin' }).click();
 
 	await page.locator('#signin-username').waitFor();
-	await page.screenshot({ path: dir + '/sign-in.png', fullPage: true });
+	await page.screenshot({ path: out + '/sign-in.png', fullPage: true });
 
 	await page.locator('#signin-username').fill('admin');
 	await page.locator('#signin-password').fill('secret');
@@ -28,9 +28,9 @@ test('capture the screens', async ({ page }) => {
 
 	await page.goto('/users');
 	await page.getByRole('heading', { level: 1 }).waitFor();
-	await page.screenshot({ path: dir + '/users.png', fullPage: true });
+	await page.screenshot({ path: out + '/users.png', fullPage: true });
 
 	await page.goto('/platform/tenants');
 	await page.getByRole('heading', { level: 1 }).waitFor();
-	await page.screenshot({ path: dir + '/tenants.png', fullPage: true });
+	await page.screenshot({ path: out + '/tenants.png', fullPage: true });
 });
