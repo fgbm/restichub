@@ -83,3 +83,26 @@ test('the floating primitives need no inline style', async ({ page }) => {
 	expect(await pageViolations(page)).toEqual([]);
 	expect(consoleViolations).toEqual([]);
 });
+
+test('the external icon sprite needs no inline style', async ({ page }) => {
+	const consoleViolations = await watch(page);
+	await page.goto('/sign-in');
+	await page.locator('#signin-username').fill('admin');
+	await page.locator('#signin-password').fill('secret');
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+
+	// The overview renders sprite icons: the welcome banner, the steps and the empty states.
+	await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
+	const icon = page.locator('svg.icon use').first();
+	await expect(icon).toHaveAttribute('href', /\/icons\.svg#/);
+
+	// The symbol paints: an external `<use>` resolves under `default-src 'self'`.
+	const rendered = await icon.evaluate((element) => {
+		const box = (element as unknown as SVGGraphicsElement).getBBox();
+		return box.width + box.height;
+	});
+	expect(rendered).toBeGreaterThan(0);
+
+	expect(await pageViolations(page)).toEqual([]);
+	expect(consoleViolations).toEqual([]);
+});
