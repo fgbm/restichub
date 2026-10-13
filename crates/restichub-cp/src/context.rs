@@ -35,6 +35,7 @@ pub enum Operation {
     PlatformAuditRead,
     PlatformTenantsRead,
     PlatformTenantsWrite,
+    PlatformUsersRead,
     PlatformUsersWrite,
     AuthMe,
     AuthSignOut,
@@ -60,6 +61,7 @@ impl Operation {
             Self::PlatformAuditRead
                 | Self::PlatformTenantsRead
                 | Self::PlatformTenantsWrite
+                | Self::PlatformUsersRead
                 | Self::PlatformUsersWrite
         )
     }
@@ -89,6 +91,7 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::PlatformAuditRead => Role::PlatformAdmin,
         Operation::PlatformTenantsRead => Role::PlatformAdmin,
         Operation::PlatformTenantsWrite => Role::PlatformAdmin,
+        Operation::PlatformUsersRead => Role::PlatformAdmin,
         Operation::PlatformUsersWrite => Role::PlatformAdmin,
         Operation::AuthMe => Role::Viewer,
         Operation::AuthSignOut => Role::Viewer,

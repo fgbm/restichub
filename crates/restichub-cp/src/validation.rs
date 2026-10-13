@@ -19,6 +19,8 @@ pub const MAX_TOKEN_NAME: usize = 64;
 /// Limit in characters of one enrollment token label.
 pub const MAX_LABEL: usize = 63;
 /// Limit in characters.
+pub const MAX_EMAIL: usize = 254;
+/// Limit in characters.
 pub const MAX_SECRET_NAME: usize = 64;
 /// Limit in bytes.
 pub const MAX_SECRET_VALUE: usize = 64 * 1024;
@@ -93,6 +95,41 @@ pub fn validate_username(field: &'static str, value: &str) -> Result<String, Val
         return Err(ValidationError::new(field, Reason::InvalidCharacter));
     }
     Ok(value.to_owned())
+}
+
+/// Validates an email address and returns the lower-case value.
+///
+/// The value holds one `@`, a non-empty local part and a domain with a dot (ADR-0028). The
+/// comparison of the stored value ignores the letter case, so the function lower-cases the result.
+pub fn validate_email(field: &'static str, value: &str) -> Result<String, ValidationError> {
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        return Err(ValidationError::new(field, Reason::Empty));
+    }
+    if value.len() > MAX_EMAIL {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err(ValidationError::new(field, Reason::InvalidCharacter));
+    }
+    let mut parts = value.split('@');
+    let (local, domain) = match (parts.next(), parts.next(), parts.next()) {
+        (Some(local), Some(domain), None) if !local.is_empty() && domain.contains('.') => {
+            (local, domain)
+        }
+        _ => return Err(ValidationError::new(field, Reason::InvalidFormat)),
+    };
+    if local.starts_with('.')
+        || local.ends_with('.')
+        || domain.starts_with('.')
+        || domain.ends_with('.')
+    {
+        return Err(ValidationError::new(field, Reason::InvalidFormat));
+    }
+    Ok(value)
 }
 
 pub fn validate_display_name(field: &'static str, value: &str) -> Result<String, ValidationError> {
@@ -238,9 +275,9 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        MAX_DISPLAY_NAME, MAX_SECRET_NAME, MAX_SECRET_VALUE, MAX_TENANT_NAME, MAX_USERNAME,
-        validate_display_name, validate_expiry, validate_secret_name, validate_secret_value,
-        validate_tenant_name, validate_token_name, validate_username,
+        MAX_DISPLAY_NAME, MAX_EMAIL, MAX_SECRET_NAME, MAX_SECRET_VALUE, MAX_TENANT_NAME,
+        MAX_USERNAME, validate_display_name, validate_email, validate_expiry, validate_secret_name,
+        validate_secret_value, validate_tenant_name, validate_token_name, validate_username,
     };
 
     const FIELD: &str = "value";
@@ -260,6 +297,21 @@ mod tests {
         assert!(validate_username(FIELD, "semi;colon").is_err());
         assert!(validate_username(FIELD, &"a".repeat(MAX_USERNAME + 1)).is_err());
         assert!(validate_username(FIELD, &"a".repeat(MAX_USERNAME)).is_ok());
+    }
+
+    #[test]
+    fn an_email_is_lower_cased_and_checked() {
+        assert_eq!(
+            validate_email(FIELD, "  Alice@Example.COM  ").as_deref(),
+            Ok("alice@example.com")
+        );
+        assert!(validate_email(FIELD, "").is_err());
+        assert!(validate_email(FIELD, "no-at-sign").is_err());
+        assert!(validate_email(FIELD, "a@b").is_err());
+        assert!(validate_email(FIELD, "@example.com").is_err());
+        assert!(validate_email(FIELD, "a@.com").is_err());
+        assert!(validate_email(FIELD, "with space@example.com").is_err());
+        assert!(validate_email(FIELD, &format!("a@{}", "b".repeat(MAX_EMAIL))).is_err());
     }
 
     #[test]
