@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError, assignableRoles, service } from '#lib/api/index.ts';
-	import type { ApiToken, ApiTokenCreated, Role } from '#lib/api/index.ts';
+	import { ApiError, assignableRoles, fieldError, service } from '#lib/api/index.ts';
+	import type { ApiProblem, ApiToken, ApiTokenCreated, Role } from '#lib/api/index.ts';
 	import {
 		Button,
 		CopyField,
@@ -25,6 +25,7 @@
 	let createOpen = $state(false);
 	let creating = $state(false);
 	let createError = $state<string | null>(null);
+	let createProblem = $state<ApiProblem | null>(null);
 	let newName = $state('');
 	let newRole = $state<Role>('viewer');
 	let newExpiry = $state('');
@@ -42,7 +43,7 @@
 	});
 
 	const roleOptions = $derived<SelectOption[]>(
-		assignableRoles(getSession()?.tenant?.id).map((role) => ({
+		assignableRoles(getSession()?.role).map((role) => ({
 			value: role,
 			label: roleKeys[role]
 		}))
@@ -92,9 +93,10 @@
 
 	function openCreate(): void {
 		newName = '';
-		newRole = assignableRoles(getSession()?.tenant?.id)[0];
+		newRole = assignableRoles(getSession()?.role)[0];
 		newExpiry = '';
 		createError = null;
+		createProblem = null;
 		createdToken = null;
 		createOpen = true;
 	}
@@ -102,6 +104,7 @@
 	async function createToken(): Promise<void> {
 		creating = true;
 		createError = null;
+		createProblem = null;
 		try {
 			createdToken = await service.createToken({
 				name: newName,
@@ -111,7 +114,8 @@
 			pushToast('success', t('tokens.created'));
 			await load();
 		} catch (problem) {
-			createError = messageOf(problem);
+			createProblem = problem instanceof ApiError ? problem.problem : null;
+			createError = createProblem?.field ? null : messageOf(problem);
 		} finally {
 			creating = false;
 		}
@@ -178,14 +182,43 @@
 		{#if createError}
 			<InlineAlert tone="danger" title={createError} />
 		{/if}
-		<FormField label={t('tokens.name')} for="token-name" required>
-			<TextField id="token-name" bind:value={newName} placeholder={t('tokens.namePlaceholder')} />
+		<FormField
+			label={t('tokens.name')}
+			for="token-name"
+			error={fieldError(createProblem, 'name')}
+			required
+		>
+			<TextField
+				id="token-name"
+				bind:value={newName}
+				invalid={Boolean(fieldError(createProblem, 'name'))}
+				placeholder={t('tokens.namePlaceholder')}
+			/>
 		</FormField>
-		<FormField label={t('users.role')} for="token-role" required>
-			<Select id="token-role" bind:value={newRole} options={roleOptions} />
+		<FormField
+			label={t('users.role')}
+			for="token-role"
+			error={fieldError(createProblem, 'role')}
+			required
+		>
+			<Select
+				id="token-role"
+				bind:value={newRole}
+				options={roleOptions}
+				invalid={Boolean(fieldError(createProblem, 'role'))}
+			/>
 		</FormField>
-		<FormField label={t('tokens.expiresAt')} for="token-expiry">
-			<TextField id="token-expiry" type="date" bind:value={newExpiry} />
+		<FormField
+			label={t('tokens.expiresAt')}
+			for="token-expiry"
+			error={fieldError(createProblem, 'expires_at')}
+		>
+			<TextField
+				id="token-expiry"
+				type="date"
+				bind:value={newExpiry}
+				invalid={Boolean(fieldError(createProblem, 'expires_at'))}
+			/>
 		</FormField>
 		<div class="dialog-actions">
 			<Button onclick={closeCreate}>{t('common.cancel')}</Button>

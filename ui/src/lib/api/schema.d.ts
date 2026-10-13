@@ -250,6 +250,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the metadata of the secrets of the tenant. */
+        get: operations["list_secrets"];
+        put?: never;
+        /**
+         * Creates a secret in the tenant.
+         * @description The response holds the metadata only. The control plane never returns the value (AC-RP-02).
+         */
+        post: operations["create_secret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/secrets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reads the metadata of one secret of the tenant.
+         * @description The response holds the metadata and the marker `set`. It never holds the value (AC-RP-02).
+         */
+        get: operations["get_secret"];
+        put?: never;
+        post?: never;
+        /**
+         * Removes a secret of the tenant.
+         * @description Epic #5 adds the reference check: the endpoint will return HTTP 409 when a repository references
+         *     the secret.
+         */
+        delete: operations["delete_secret"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/secrets/{id}/value": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replaces the value of a secret of the tenant. */
+        put: operations["replace_secret_value"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/setup": {
         parameters: {
             query?: never;
@@ -403,12 +466,14 @@ export interface components {
             /** @description The revocation time. */
             revoked_at?: string | null;
             /** @description The role of the token. */
-            role: string;
+            role: components["schemas"]["Role"];
         };
+        /** @enum {string} */
+        AuditAction: "sign_in" | "sign_in_failed" | "sign_out" | "config_create" | "config_update" | "config_delete" | "job_run" | "job_cancel" | "restore_start" | "secret_delivered" | "agent_enrolled" | "agent_revoked" | "remote_install" | "tenant_create" | "tenant_suspend" | "tenant_resume" | "tenant_delete" | "user_create" | "user_update" | "user_delete" | "api_token_create" | "api_token_revoke" | "secret_create" | "secret_replace" | "secret_delete";
         /** @description One audit record in the API. */
         AuditItem: {
             /** @description The action. */
-            action: string;
+            action: components["schemas"]["AuditAction"];
             /** @description The actor identifier. */
             actor_id?: string | null;
             /** @description The actor type. */
@@ -441,6 +506,20 @@ export interface components {
             current_password: string;
             /** @description The new password. It must hold at least 12 characters. */
             new_password: string;
+        };
+        /**
+         * @description The body of the create-secret request.
+         *
+         *     The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
+         *     a [`SecretString`], so the buffer is zeroized on drop.
+         */
+        CreateSecretRequest: {
+            /** @description The name of the secret. It holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
+            name: string;
+            /** @description The purpose of the value. */
+            purpose: components["schemas"]["SecretPurpose"];
+            /** @description The value. It holds 1 to 64 KiB bytes. */
+            value: string;
         };
         /** @description The first administrator of a new tenant. */
         CreateTenantAdmin: {
@@ -481,7 +560,7 @@ export interface components {
             /** @description The name for the user interface. */
             name: string;
             /** @description The role of the token. */
-            role: string;
+            role: components["schemas"]["Role"];
             /** @description The token value. The control plane returns it only here. */
             token: string;
         };
@@ -496,10 +575,15 @@ export interface components {
             /** @description The username. It is unique for the tenant and ignores the letter case. */
             username: string;
         };
+        /**
+         * @description The stable code of a problem response.
+         * @enum {string}
+         */
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy";
         /** @description The body of the self response. */
         MeResponse: {
             /** @description The role of the actor in the tenant. */
-            role: string;
+            role: components["schemas"]["Role"];
             /** @description The tenant. */
             tenant: components["schemas"]["TenantView"];
             user?: components["schemas"]["UserView"] | null;
@@ -516,8 +600,8 @@ export interface components {
             id: string;
             /** @description The name of the tenant. */
             name: string;
-            /** @description The status: `active`, `suspended` or `deleted`. */
-            status: string;
+            /** @description The status of the tenant. */
+            status: components["schemas"]["TenantStatus"];
             /**
              * Format: int64
              * @description The number of users of the tenant.
@@ -527,7 +611,11 @@ export interface components {
         /** @description The body of an RFC 9457 problem response. */
         ProblemBody: {
             /** @description The stable code in snake_case. */
-            code: string;
+            code: components["schemas"]["ErrorCode"];
+            /** @description The field of the request that is not valid. Only `invalid_argument` sets it. */
+            field?: string | null;
+            /** @description The reason code in snake_case. Only `invalid_argument` sets it. */
+            reason?: string | null;
             /** @description The request ID of the request. */
             request_id: string;
             /**
@@ -540,10 +628,79 @@ export interface components {
             /** @description The type of the problem. */
             type: string;
         };
+        /**
+         * @description The body of the replace-secret request.
+         *
+         *     The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
+         *     a [`SecretString`], so the buffer is zeroized on drop.
+         */
+        ReplaceSecretRequest: {
+            /** @description The new value. It holds 1 to 64 KiB bytes. */
+            value: string;
+        };
         /** @description The body of the admin password reset request. */
         ResetPasswordRequest: {
             /** @description The new password. It must hold at least 12 characters. */
             new_password: string;
+        };
+        /**
+         * @description The role of an actor in a tenant (requirements section 2).
+         * @enum {string}
+         */
+        Role: "platform_admin" | "admin" | "operator" | "viewer";
+        /**
+         * @description The metadata of one secret with the marker that the value is set (issue #17, FR-RP-05).
+         *
+         *     The field `value` holds the marker `set` only. The API never returns the value (AC-RP-02).
+         */
+        SecretDetailView: {
+            /** @description The time the secret was created in RFC 3339. */
+            created_at: string;
+            /** @description The identifier of the user that created the secret. It is null for an API token actor. */
+            created_by?: string | null;
+            /** @description The identifier of the secret. */
+            id: string;
+            /** @description The name of the secret. */
+            name: string;
+            /** @description The stable purpose of the value. */
+            purpose: string;
+            /** @description The time the value was last replaced in RFC 3339. */
+            updated_at: string;
+            /** @description The marker `set`. The value itself never leaves the control plane. */
+            value: string;
+        };
+        /** @description A list of secret metadata. */
+        SecretListResponse: {
+            /** @description The metadata of the secrets. The list never holds a value. */
+            items: components["schemas"]["SecretView"][];
+        };
+        /**
+         * @description The purpose of a secret value.
+         *
+         *     The purpose is a part of the associated data. The string value of each variant is stable and
+         *     MUST NOT change: a change makes every stored ciphertext of that purpose undecryptable.
+         * @enum {string}
+         */
+        SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password";
+        /**
+         * @description The metadata of a secret in a response (issue #17, FR-RP-05).
+         *
+         *     The view never holds the value. The API cannot return a secret value after a user saves it
+         *     (AC-RP-02).
+         */
+        SecretView: {
+            /** @description The time the secret was created in RFC 3339. */
+            created_at: string;
+            /** @description The identifier of the user that created the secret. It is null for an API token actor. */
+            created_by?: string | null;
+            /** @description The identifier of the secret. */
+            id: string;
+            /** @description The name of the secret. */
+            name: string;
+            /** @description The stable purpose of the value. */
+            purpose: string;
+            /** @description The time the value was last replaced in RFC 3339. */
+            updated_at: string;
         };
         /** @description The body of the setup request. */
         SetupRequest: {
@@ -573,7 +730,7 @@ export interface components {
         /** @description The body of the sign-in response. */
         SignInResponse: {
             /** @description The role of the user in the tenant. */
-            role: string;
+            role: components["schemas"]["Role"];
             /** @description The tenant. */
             tenant: components["schemas"]["TenantView"];
             /** @description The user. */
@@ -586,6 +743,11 @@ export interface components {
             /** @description The cursor of the next page. It is null when the table holds no later tenant. */
             next_cursor?: string | null;
         };
+        /**
+         * @description The status of a tenant (FR-TN-02, issue #20).
+         * @enum {string}
+         */
+        TenantStatus: "active" | "suspended" | "deleted";
         /** @description A tenant in a response. */
         TenantView: {
             /** @description The identifier of the tenant. */
@@ -616,7 +778,7 @@ export interface components {
             /** @description The identifier of the user. */
             id: string;
             /** @description The role of the user in the tenant. */
-            role: string;
+            role: components["schemas"]["Role"];
             /** @description The username. */
             username: string;
         };
@@ -707,7 +869,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The role is not sufficient or the role is too high. */
+            /** @description The role is not sufficient. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -817,14 +979,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
             };
             /** @description The role is not sufficient. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
             };
         };
     };
@@ -1096,14 +1262,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
             };
             /** @description The role is not sufficient. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
             };
         };
     };
@@ -1451,6 +1621,263 @@ export interface operations {
             };
         };
     };
+    list_secrets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The metadata of the secrets of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretListResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSecretRequest"];
+            };
+        };
+        responses: {
+            /** @description The secret is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the secret. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The metadata of the secret and the marker `set`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretDetailView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The secret is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the secret. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The secret is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The secret is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    replace_secret_value: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the secret. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceSecretRequest"];
+            };
+        };
+        responses: {
+            /** @description The value is replaced. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The value is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The secret is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     setup: {
         parameters: {
             query?: never;
@@ -1627,7 +2054,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The role is not sufficient or the role is too high. */
+            /** @description The role is not sufficient. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1734,7 +2161,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The role is not sufficient or the target role is too high. */
+            /** @description The role is not sufficient. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1806,7 +2233,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The role is not sufficient or the target role is too high. */
+            /** @description The role is not sufficient. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1876,7 +2303,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The role is not sufficient or the target role is too high. */
+            /** @description The role is not sufficient. */
             403: {
                 headers: {
                     [name: string]: unknown;

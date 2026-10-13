@@ -255,7 +255,21 @@ export const en = {
 	'error.rate_limited': 'Too many attempts. Wait and try again.',
 	'error.conflict': 'The record already exists.',
 	'error.internal_error': 'The control plane has an internal problem.',
-	'error.network': 'The control plane did not answer.'
+	'error.network': 'The control plane did not answer.',
+	'error.field': 'Correct this field.',
+
+	// Validation reasons
+	'reason.empty': 'This field is required.',
+	'reason.too_short': 'This value is too short.',
+	'reason.too_long': 'This value is too long.',
+	'reason.invalid_character': 'This value holds a character that is not allowed.',
+	'reason.reserved': 'This value is reserved.',
+	'reason.not_in_future': 'The time must be in the future.',
+	'reason.too_far_in_future': 'The time is too far in the future.',
+	'reason.invalid_format': 'The format is not valid.',
+	'reason.unknown': 'The value is not known.',
+	'reason.invalid_credentials': 'The value is not correct.',
+	'reason.invalid_body': 'The request body is not valid.'
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -2,26 +2,25 @@
  * Domain types of the UI.
  *
  * The types come from the generated OpenAPI schema (`schema.d.ts`, built by
- * `npm run gen:api`). The generated `role` and `status` fields are free strings
- * and the generated audit `diff` is an opaque object, so the UI narrows them to
- * its own types.
+ * `npm run gen:api`). The generated `role`, `status`, `purpose` and audit
+ * `action` fields are already closed unions, so the UI re-exports them. The
+ * generated audit `diff` is an opaque object, so the UI replaces it with its own
+ * diff shape.
  */
 import type { components } from './schema';
 
 /** The roles of the control plane (requirements section 2). */
-export type Role = 'platform_admin' | 'admin' | 'operator' | 'viewer';
-
-/** The identifier of the platform tenant (requirements section 2, FR-TN-02). */
-export const PLATFORM_TENANT_ID = '00000000-0000-7000-8000-000000000000';
+export type Role = components['schemas']['Role'];
 
 /**
- * The roles that a new user or API token may hold in a tenant.
+ * The roles that a new user or API token may hold.
  *
  * The platform tenant holds the role `platform_admin` only (FR-TN-02). The
- * other roles apply in one tenant.
+ * other roles apply in one tenant. The actor role tells which tenant it is: the
+ * role `platform_admin` exists in the platform tenant only.
  */
-export function assignableRoles(tenantId: string | null | undefined): Role[] {
-	if (tenantId === PLATFORM_TENANT_ID) return ['platform_admin'];
+export function assignableRoles(role: Role | null | undefined): Role[] {
+	if (role === 'platform_admin') return ['platform_admin'];
 	return ['admin', 'operator', 'viewer'];
 }
 
@@ -43,14 +42,11 @@ export interface AuditChange {
  */
 export type AuditDiff = Record<string, unknown>;
 
-/** A user. The generated `role` is a free string; the UI knows the four roles. */
-export type User = Omit<components['schemas']['UserView'], 'role'> & { role: Role };
+/** A user. */
+export type User = components['schemas']['UserView'];
 
 /** The current actor and its tenant. */
-export type Me = Omit<components['schemas']['MeResponse'], 'role' | 'user'> & {
-	role: Role;
-	user?: User | null;
-};
+export type Me = components['schemas']['MeResponse'];
 
 /** The setup status. */
 export type SetupStatus = components['schemas']['SetupStatusResponse'];
@@ -74,25 +70,19 @@ export type UpdateUserRequest = components['schemas']['UpdateUserRequest'];
 export type ResetPasswordRequest = components['schemas']['ResetPasswordRequest'];
 
 /** A list of users. */
-export type UserListResponse = Omit<components['schemas']['UserListResponse'], 'items'> & {
-	items: User[];
-};
+export type UserListResponse = components['schemas']['UserListResponse'];
 
 /** An API token in a list response. */
-export type ApiToken = Omit<components['schemas']['ApiTokenView'], 'role'> & { role: Role };
+export type ApiToken = components['schemas']['ApiTokenView'];
 
 /** The API token of a create response. The value appears one time only. */
-export type ApiTokenCreated = Omit<components['schemas']['CreateTokenResponse'], 'role'> & {
-	role: Role;
-};
+export type ApiTokenCreated = components['schemas']['CreateTokenResponse'];
 
 /** The body of the create-token request. */
 export type CreateApiTokenRequest = components['schemas']['CreateTokenRequest'];
 
 /** A list of API tokens. */
-export type ApiTokenListResponse = Omit<components['schemas']['ApiTokenListResponse'], 'items'> & {
-	items: ApiToken[];
-};
+export type ApiTokenListResponse = components['schemas']['ApiTokenListResponse'];
 
 /**
  * One audit record. The generated `diff` type is an opaque object, so the UI
@@ -120,21 +110,14 @@ export interface AuditQuery {
 	limit?: number;
 }
 
-/** The status of a tenant (issue #20). */
-export type TenantStatus = 'active' | 'suspended' | 'deleted';
+/** The status of a tenant. */
+export type TenantStatus = components['schemas']['TenantStatus'];
 
-/**
- * A tenant in the platform administration (issue #20). The generated `status`
- * is a free string; the UI knows the three statuses.
- */
-export type Tenant = Omit<components['schemas']['PlatformTenantView'], 'status'> & {
-	status: TenantStatus;
-};
+/** A tenant in the platform administration. */
+export type Tenant = components['schemas']['PlatformTenantView'];
 
 /** A list of tenants. */
-export type TenantListResponse = Omit<components['schemas']['TenantListResponse'], 'items'> & {
-	items: Tenant[];
-};
+export type TenantListResponse = components['schemas']['TenantListResponse'];
 
 /** The body of the create-tenant request. */
 export type CreateTenantRequest = components['schemas']['CreateTenantRequest'];

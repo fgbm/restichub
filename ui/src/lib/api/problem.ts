@@ -2,8 +2,11 @@
  * RFC 9457 problem documents.
  *
  * The control plane answers a failed request with a problem document. The UI
- * shows the `title` and the `code`, and logs the `requestId`.
+ * shows the `title` and the `code`, and logs the `requestId`. A validation
+ * problem holds the `field` that failed and an optional `reason` code, so a form
+ * shows the message next to the input.
  */
+import { t, tErrorReason } from '#lib/i18n/index.ts';
 import type { components } from './schema';
 
 /** A problem document as the UI uses it. */
@@ -13,6 +16,8 @@ export interface ApiProblem {
 	title: string;
 	requestId?: string;
 	type?: string;
+	field?: string;
+	reason?: string;
 }
 
 function asString(value: unknown): string | undefined {
@@ -34,7 +39,9 @@ export function parseProblem(body: unknown, status: number): ApiProblem {
 			code: asString(wire.code) ?? `http_${status}`,
 			title,
 			requestId: asString(wire.request_id),
-			type: asString(wire.type)
+			type: asString(wire.type),
+			field: asString(wire.field),
+			reason: asString(wire.reason)
 		};
 	}
 	return {
@@ -42,6 +49,20 @@ export function parseProblem(body: unknown, status: number): ApiProblem {
 		code: `http_${status}`,
 		title: defaultTitle(status)
 	};
+}
+
+/**
+ * The message of a field of a validation problem, or `undefined`.
+ *
+ * The function returns a message only when the problem names the field. A form
+ * passes the name of each input.
+ */
+export function fieldError(
+	problem: ApiProblem | null | undefined,
+	field: string
+): string | undefined {
+	if (!problem || problem.field !== field) return undefined;
+	return tErrorReason(problem.reason) ?? t('error.field');
 }
 
 function defaultTitle(status: number): string {

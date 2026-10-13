@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Tenant } from '#lib/api/index.ts';
+	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import type { ApiProblem, Tenant } from '#lib/api/index.ts';
 	import {
 		Button,
 		DataTable,
@@ -26,6 +26,7 @@
 	let newAdminPassword = $state('');
 	let creating = $state(false);
 	let createError = $state<string | null>(null);
+	let createProblem = $state<ApiProblem | null>(null);
 
 	let deleteTarget = $state<Tenant | null>(null);
 	let deleteOpen = $state(false);
@@ -86,6 +87,7 @@
 	async function createTenant(): Promise<void> {
 		creating = true;
 		createError = null;
+		createProblem = null;
 		try {
 			await service.createTenant({
 				name: newName,
@@ -103,7 +105,8 @@
 			newAdminPassword = '';
 			await load();
 		} catch (problem) {
-			createError = messageOf(problem);
+			createProblem = problem instanceof ApiError ? problem.problem : null;
+			createError = createProblem?.field ? null : messageOf(problem);
 		} finally {
 			creating = false;
 		}
@@ -180,30 +183,59 @@
 	{#if createError}
 		<InlineAlert tone="danger" title={createError} />
 	{/if}
-	<FormField label={t('tenants.name')} for="tenant-name" required>
+	<FormField
+		label={t('tenants.name')}
+		for="tenant-name"
+		error={fieldError(createProblem, 'name')}
+		required
+	>
 		<TextField
 			id="tenant-name"
 			bind:value={newName}
+			invalid={Boolean(fieldError(createProblem, 'name'))}
 			placeholder={t('tenants.namePlaceholder')}
 			mono
 		/>
 	</FormField>
-	<FormField label={t('tenants.adminUsername')} for="tenant-admin-username" required>
-		<TextField id="tenant-admin-username" bind:value={newAdminUsername} mono autocomplete="off" />
+	<FormField
+		label={t('tenants.adminUsername')}
+		for="tenant-admin-username"
+		error={fieldError(createProblem, 'first_admin.username')}
+		required
+	>
+		<TextField
+			id="tenant-admin-username"
+			bind:value={newAdminUsername}
+			invalid={Boolean(fieldError(createProblem, 'first_admin.username'))}
+			mono
+			autocomplete="off"
+		/>
 	</FormField>
-	<FormField label={t('tenants.adminDisplayName')} for="tenant-admin-display-name" required>
-		<TextField id="tenant-admin-display-name" bind:value={newAdminDisplayName} autocomplete="off" />
+	<FormField
+		label={t('tenants.adminDisplayName')}
+		for="tenant-admin-display-name"
+		error={fieldError(createProblem, 'first_admin.display_name')}
+		required
+	>
+		<TextField
+			id="tenant-admin-display-name"
+			bind:value={newAdminDisplayName}
+			invalid={Boolean(fieldError(createProblem, 'first_admin.display_name'))}
+			autocomplete="off"
+		/>
 	</FormField>
 	<FormField
 		label={t('tenants.adminPassword')}
 		for="tenant-admin-password"
 		hint={t('setup.passwordHint')}
+		error={fieldError(createProblem, 'first_admin.password')}
 		required
 	>
 		<TextField
 			id="tenant-admin-password"
 			type="password"
 			bind:value={newAdminPassword}
+			invalid={Boolean(fieldError(createProblem, 'first_admin.password'))}
 			autocomplete="new-password"
 		/>
 	</FormField>

@@ -257,5 +257,19 @@ export const ru: Record<MessageKey, string> = {
 	'error.rate_limited': 'Слишком много попыток. Подождите и повторите.',
 	'error.conflict': 'Запись уже существует.',
 	'error.internal_error': 'В сервере управления внутренняя проблема.',
-	'error.network': 'Сервер управления не ответил.'
+	'error.network': 'Сервер управления не ответил.',
+	'error.field': 'Исправьте это поле.',
+
+	// Validation reasons
+	'reason.empty': 'Это поле обязательно.',
+	'reason.too_short': 'Значение слишком короткое.',
+	'reason.too_long': 'Значение слишком длинное.',
+	'reason.invalid_character': 'Значение содержит недопустимый символ.',
+	'reason.reserved': 'Значение зарезервировано.',
+	'reason.not_in_future': 'Время должно быть в будущем.',
+	'reason.too_far_in_future': 'Время слишком далеко в будущем.',
+	'reason.invalid_format': 'Неверный формат.',
+	'reason.unknown': 'Значение неизвестно.',
+	'reason.invalid_credentials': 'Значение указано неверно.',
+	'reason.invalid_body': 'Тело запроса указано неверно.'
 };

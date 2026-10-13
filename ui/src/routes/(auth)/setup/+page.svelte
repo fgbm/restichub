@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { ApiError, NetworkError, service } from '#lib/api/index.ts';
+	import { ApiError, NetworkError, fieldError, service } from '#lib/api/index.ts';
+	import type { ApiProblem } from '#lib/api/index.ts';
 	import { Button, FormField, InlineAlert, TextField } from '#lib/components/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -14,6 +15,7 @@
 	let submitting = $state(false);
 	let errorCode = $state<string | undefined>();
 	let errorTitle = $state<string | undefined>();
+	let problem = $state<ApiProblem | null>(null);
 
 	const passwordTooShort = $derived(password.length > 0 && password.length < 12);
 	const passwordMismatch = $derived(confirmPassword.length > 0 && password !== confirmPassword);
@@ -29,6 +31,7 @@
 		submitting = true;
 		errorCode = undefined;
 		errorTitle = undefined;
+		problem = null;
 		try {
 			await service.setup({
 				setup_token: setupToken,
@@ -43,8 +46,11 @@
 				errorCode = 'network';
 				errorTitle = t('error.network');
 			} else if (error instanceof ApiError) {
-				errorCode = error.code;
-				errorTitle = tErrorCode(error.code) ?? t('alert.problemTitle');
+				problem = error.problem;
+				if (!problem.field) {
+					errorCode = error.code;
+					errorTitle = tErrorCode(error.code) ?? t('alert.problemTitle');
+				}
 			} else {
 				errorTitle = t('alert.problemTitle');
 			}
@@ -64,23 +70,57 @@
 {/if}
 
 <form class="form" onsubmit={onSubmit}>
-	<FormField label={t('setup.setupToken')} for="setup-token" required>
-		<TextField id="setup-token" bind:value={setupToken} mono autocomplete="off" required />
+	<FormField
+		label={t('setup.setupToken')}
+		for="setup-token"
+		error={fieldError(problem, 'setup_token')}
+		required
+	>
+		<TextField
+			id="setup-token"
+			bind:value={setupToken}
+			invalid={Boolean(fieldError(problem, 'setup_token'))}
+			mono
+			autocomplete="off"
+			required
+		/>
 	</FormField>
 
-	<FormField label={t('setup.username')} for="setup-username" required>
-		<TextField id="setup-username" bind:value={username} autocomplete="username" required />
+	<FormField
+		label={t('setup.username')}
+		for="setup-username"
+		error={fieldError(problem, 'username')}
+		required
+	>
+		<TextField
+			id="setup-username"
+			bind:value={username}
+			invalid={Boolean(fieldError(problem, 'username'))}
+			autocomplete="username"
+			required
+		/>
 	</FormField>
 
-	<FormField label={t('setup.displayName')} for="setup-display-name" required>
-		<TextField id="setup-display-name" bind:value={displayName} autocomplete="name" required />
+	<FormField
+		label={t('setup.displayName')}
+		for="setup-display-name"
+		error={fieldError(problem, 'display_name')}
+		required
+	>
+		<TextField
+			id="setup-display-name"
+			bind:value={displayName}
+			invalid={Boolean(fieldError(problem, 'display_name'))}
+			autocomplete="name"
+			required
+		/>
 	</FormField>
 
 	<FormField
 		label={t('setup.password')}
 		for="setup-password"
 		hint={t('setup.passwordHint')}
-		error={passwordTooShort ? t('setup.passwordHint') : undefined}
+		error={passwordTooShort ? t('setup.passwordHint') : fieldError(problem, 'password')}
 		required
 	>
 		<TextField
@@ -88,7 +128,7 @@
 			type="password"
 			bind:value={password}
 			autocomplete="new-password"
-			invalid={passwordTooShort}
+			invalid={passwordTooShort || Boolean(fieldError(problem, 'password'))}
 			required
 		/>
 	</FormField>

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError, assignableRoles, service } from '#lib/api/index.ts';
-	import type { Role, User } from '#lib/api/index.ts';
+	import { ApiError, assignableRoles, fieldError, service } from '#lib/api/index.ts';
+	import type { ApiProblem, Role, User } from '#lib/api/index.ts';
 	import {
 		Button,
 		DataTable,
@@ -24,6 +24,7 @@
 	let createOpen = $state(false);
 	let creating = $state(false);
 	let createError = $state<string | null>(null);
+	let createProblem = $state<ApiProblem | null>(null);
 	let busyId = $state<string | null>(null);
 
 	let newUsername = $state('');
@@ -39,7 +40,7 @@
 	});
 
 	const roleOptions = $derived<SelectOption[]>(
-		assignableRoles(getSession()?.tenant?.id).map((role) => ({
+		assignableRoles(getSession()?.role).map((role) => ({
 			value: role,
 			label: roleKeys[role]
 		}))
@@ -84,15 +85,17 @@
 	function openCreate(): void {
 		newUsername = '';
 		newDisplayName = '';
-		newRole = assignableRoles(getSession()?.tenant?.id)[0];
+		newRole = assignableRoles(getSession()?.role)[0];
 		newPassword = '';
 		createError = null;
+		createProblem = null;
 		createOpen = true;
 	}
 
 	async function createUser(): Promise<void> {
 		creating = true;
 		createError = null;
+		createProblem = null;
 		try {
 			await service.createUser({
 				username: newUsername,
@@ -104,7 +107,8 @@
 			createOpen = false;
 			await load();
 		} catch (problem) {
-			createError = messageOf(problem);
+			createProblem = problem instanceof ApiError ? problem.problem : null;
+			createError = createProblem?.field ? null : messageOf(problem);
 		} finally {
 			creating = false;
 		}
@@ -145,25 +149,58 @@
 	{#if createError}
 		<InlineAlert tone="danger" title={createError} />
 	{/if}
-	<FormField label={t('users.username')} for="user-username" required>
-		<TextField id="user-username" bind:value={newUsername} mono autocomplete="off" />
+	<FormField
+		label={t('users.username')}
+		for="user-username"
+		error={fieldError(createProblem, 'username')}
+		required
+	>
+		<TextField
+			id="user-username"
+			bind:value={newUsername}
+			invalid={Boolean(fieldError(createProblem, 'username'))}
+			mono
+			autocomplete="off"
+		/>
 	</FormField>
-	<FormField label={t('users.displayName')} for="user-display-name" required>
-		<TextField id="user-display-name" bind:value={newDisplayName} autocomplete="off" />
+	<FormField
+		label={t('users.displayName')}
+		for="user-display-name"
+		error={fieldError(createProblem, 'display_name')}
+		required
+	>
+		<TextField
+			id="user-display-name"
+			bind:value={newDisplayName}
+			invalid={Boolean(fieldError(createProblem, 'display_name'))}
+			autocomplete="off"
+		/>
 	</FormField>
-	<FormField label={t('users.role')} for="user-role" required>
-		<Select id="user-role" bind:value={newRole} options={roleOptions} />
+	<FormField
+		label={t('users.role')}
+		for="user-role"
+		error={fieldError(createProblem, 'role')}
+		required
+	>
+		<Select
+			id="user-role"
+			bind:value={newRole}
+			options={roleOptions}
+			invalid={Boolean(fieldError(createProblem, 'role'))}
+		/>
 	</FormField>
 	<FormField
 		label={t('setup.password')}
 		for="user-password"
 		hint={t('setup.passwordHint')}
+		error={fieldError(createProblem, 'password')}
 		required
 	>
 		<TextField
 			id="user-password"
 			type="password"
 			bind:value={newPassword}
+			invalid={Boolean(fieldError(createProblem, 'password'))}
 			autocomplete="new-password"
 		/>
 	</FormField>

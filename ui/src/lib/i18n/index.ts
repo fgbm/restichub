@@ -9,5 +9,6 @@ export {
 	tAuditAction,
 	tAuditActorType,
 	tErrorCode,
+	tErrorReason,
 	type Locale
 } from './i18n.svelte';

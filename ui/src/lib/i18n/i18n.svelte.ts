@@ -74,6 +74,17 @@ export function tErrorCode(code: string | undefined): string | undefined {
 }
 
 /**
+ * Translate a validation reason code. If the catalog has no message for the
+ * code, the caller shows a generic message for the field.
+ */
+export function tErrorReason(reason: string | undefined): string | undefined {
+	if (!reason) return undefined;
+	const key = `reason.${reason}` as MessageKey;
+	if (key in en) return t(key);
+	return undefined;
+}
+
+/**
  * Translate an audit action. The server stores a snake_case name. If the catalog
  * has no message for the name, the function returns the raw name.
  */
