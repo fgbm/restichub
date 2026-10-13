@@ -11,3 +11,4 @@
 | `restichub-cp` | binary | Control plane (ADR-0007) |
 | `restichub-emulator` | binary | Agent emulator for load tests (bench S2) |
 | `restichub-fake-restic` | binary | Recorded restic CLI emulator for agent tests (FR-AG-06, FR-AG-09, FR-AG-11, FR-PR-10) |
+| `restichub-canary-scan` | binary | Canary secret scan for the end-to-end tests and the benches (NFR-SEC-04, NFR-SEC-05) |

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, Once, OnceLock};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use base64::Engine as _;
+use restichub_canary_scan::{Canary, Scanner};
 use restichub_cp::delivery::SecretReader;
 use restichub_cp::server::SECRET_BODY_LIMIT;
 use restichub_db::audit::{AuditAction, AuditFilter, AuditPage, AuditRecord};
@@ -130,15 +130,6 @@ async fn audit_records(
         .records;
     tx.commit().await?;
     Ok(records)
-}
-
-/// Builds the hexadecimal form of a byte slice.
-fn hex(bytes: &[u8]) -> String {
-    let mut text = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        text.push_str(&format!("{byte:02x}"));
-    }
-    text
 }
 
 /// Adds a key version of a tenant and makes it the active one.
@@ -358,15 +349,11 @@ async fn ac_rp_02_a_database_dump_does_not_contain_the_canary()
     let _id = create_secret(&app, &cookie, "dump", CANARY).await;
 
     let dump = dump_all(&db, tenant).await?;
-    assert!(!dump.contains(CANARY), "the dump holds the canary");
+    let scanner = Scanner::new(&[Canary::parse(CANARY)]);
+    let findings = scanner.scan("dump", dump.as_bytes());
     assert!(
-        !dump.contains(&hex(CANARY.as_bytes())),
-        "the dump holds the canary in hexadecimal"
-    );
-    let encoded = base64::engine::general_purpose::STANDARD.encode(CANARY.as_bytes());
-    assert!(
-        !dump.contains(&encoded),
-        "the dump holds the canary in base64"
+        findings.is_empty(),
+        "the dump holds the canary: {findings:?}"
     );
     // The dump reaches the ciphertext of the secret and the audit record, so the check is not
     // vacuous. The platform scope reads every audit row (migration 0006).
@@ -736,9 +723,11 @@ async fn ac_rp_02_the_logs_hold_no_canary() -> Result<(), Box<dyn std::error::Er
 
     let logs = captured_logs();
     assert!(!logs.is_empty(), "the capture must hold some output");
+    let scanner = Scanner::new(&[Canary::parse(CANARY)]);
+    let findings = scanner.scan("logs", logs.as_bytes());
     assert!(
-        !logs.contains(CANARY),
-        "the tracing output holds the canary: {logs}"
+        findings.is_empty(),
+        "the tracing output holds the canary: {findings:?}"
     );
 
     db.cleanup().await;

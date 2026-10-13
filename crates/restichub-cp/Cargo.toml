@@ -38,6 +38,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 http-body-util = "0.1"
+restichub-canary-scan = { path = "../restichub-canary-scan" }
 restichub-db = { workspace = true, features = ["test-util"] }
 sqlx = { workspace = true }
 tower = { workspace = true, features = ["util"] }

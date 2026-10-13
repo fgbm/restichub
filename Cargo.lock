@@ -1570,6 +1570,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "restichub-canary-scan"
+version = "0.0.0"
+dependencies = [
+ "base64",
+]
+
+[[package]]
 name = "restichub-common"
 version = "0.0.0"
 
@@ -1587,6 +1594,7 @@ dependencies = [
  "base64",
  "getrandom 0.4.3",
  "http-body-util",
+ "restichub-canary-scan",
  "restichub-db",
  "restichub-proto",
  "restichub-secrets",
