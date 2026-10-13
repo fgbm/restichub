@@ -7,12 +7,16 @@
 		Button,
 		CopyField,
 		Dialog,
+		DropdownMenu,
+		EmptyState,
 		PageHeader,
+		StatusPill,
 		Table,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type { TableColumn } from '#lib/components/ui/index.ts';
-	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
+	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -41,29 +45,34 @@
 		t('hosts.installPlaceholder', { url: origin, token: createdToken?.token ?? '<token>' })
 	);
 
-	function formatDate(value: string | null | undefined): string {
-		if (!value) return t('common.never');
-		return new Date(value).toLocaleString(getLocale());
-	}
-
 	const columns = $derived<TableColumn<Agent>[]>([
-		{ key: 'hostname', header: t('hosts.hostname') },
-		{ key: 'os', header: t('hosts.os') },
-		{ key: 'arch', header: t('hosts.arch') },
-		{ key: 'agent_version', header: t('hosts.version'), mono: true },
+		{
+			key: 'hostname',
+			header: t('hosts.host'),
+			value: (row) => `${row.hostname} ${row.os} ${row.arch}`,
+			render: hostCell
+		},
 		{
 			key: 'status',
 			header: t('hosts.status'),
-			cell: (row) => t(row.status === 'revoked' ? 'hosts.status.revoked' : 'hosts.status.active'),
-			badge: (row) => (row.status === 'revoked' ? 'danger' : 'success')
+			value: (row) => statusLabel(row),
+			render: statusCell
 		},
+		{ key: 'agent_version', header: t('hosts.agent'), render: versionCell },
 		{
 			key: 'last_seen_at',
 			header: t('hosts.lastSeen'),
-			cell: (row) => formatDate(row.last_seen_at)
+			value: (row) => row.last_seen_at ?? '',
+			render: lastSeenCell
 		},
-		{ key: 'created_at', header: t('hosts.created'), cell: (row) => formatDate(row.created_at) }
+		{ key: 'created_at', header: t('hosts.created'), render: createdCell }
 	]);
+
+	function statusLabel(agent: Agent): string {
+		return t(agent.status === 'revoked' ? 'hosts.status.revoked' : 'hosts.status.active');
+	}
+
+	const empty = $derived(!loading && !error && agents.length === 0);
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -141,53 +150,112 @@
 	}
 </script>
 
+{#snippet timeCell(value: string | null | undefined)}
+	{#if value}
+		<time datetime={value} title={formatTime(value)}>{relativeTime(value)}</time>
+	{:else}
+		{t('common.never')}
+	{/if}
+{/snippet}
+
+{#snippet lastSeenCell(agent: Agent)}
+	{@render timeCell(agent.last_seen_at)}
+{/snippet}
+
+{#snippet createdCell(agent: Agent)}
+	{@render timeCell(agent.created_at)}
+{/snippet}
+
+{#snippet hostCell(agent: Agent)}
+	<span class="host">
+		<span class="host__name">{agent.hostname}</span>
+		<span class="host__meta">{agent.os} · {agent.arch}</span>
+	</span>
+{/snippet}
+
+{#snippet statusCell(agent: Agent)}
+	<StatusPill tone={agent.status === 'revoked' ? 'neutral' : 'success'}>
+		{statusLabel(agent)}
+	</StatusPill>
+{/snippet}
+
+{#snippet versionCell(agent: Agent)}
+	<span class="host__version">{agent.agent_version}</span>
+{/snippet}
+
 <svelte:head>
 	<title>{t('hosts.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<PageHeader title={t('hosts.title')} description={t('hosts.description')}>
+<PageHeader
+	title={t('hosts.title')}
+	description={t('hosts.description')}
+	count={loading ? undefined : agents.length}
+	bordered
+>
 	{#if canWrite}
 		<Button variant="primary" icon="plus" onclick={openAdd}>{t('hosts.add')}</Button>
 	{/if}
 </PageHeader>
 
-<Table
-	{columns}
-	rows={agents}
-	{loading}
-	{error}
-	rowKey={(agent) => agent.id}
-	emptyIcon="host"
-	emptyTitle={t('hosts.emptyTitle')}
-	emptyDescription={t('hosts.emptyDescription')}
->
-	{#snippet rowActions(agent)}
-		{#if canWrite && agent.status === 'active'}
-			<Button
-				size="sm"
-				variant="ghost"
-				icon="octagon"
-				onclick={() => {
-					revokeTarget = agent;
-					revokeOpen = true;
-				}}
-			>
-				{t('hosts.revoke')}
-			</Button>
-		{/if}
-	{/snippet}
-</Table>
+<div class="hosts">
+	{#if empty}
+		<EmptyState
+			icon="host"
+			title={t('hosts.emptyTitle')}
+			description={t('hosts.emptyDescription')}
+			bordered
+		>
+			{#if canWrite}
+				<Button variant="primary" onclick={openAdd}>{t('hosts.addFirst')}</Button>
+			{/if}
+		</EmptyState>
+	{:else}
+		<Table
+			{columns}
+			rows={agents}
+			{loading}
+			{error}
+			rowKey={(agent) => agent.id}
+			filterPlaceholder={t('hosts.searchPlaceholder')}
+		>
+			{#snippet rowActions(agent)}
+				{#if canWrite && agent.status === 'active'}
+					<DropdownMenu
+						icon="more"
+						align="end"
+						label={t('hosts.moreActions', { name: agent.hostname })}
+						items={[
+							{
+								label: t('hosts.revokeAgent'),
+								icon: 'octagon',
+								tone: 'danger',
+								onSelect: () => {
+									revokeTarget = agent;
+									revokeOpen = true;
+								}
+							}
+						]}
+					/>
+				{/if}
+			{/snippet}
+		</Table>
+	{/if}
+</div>
 
 <Dialog
 	bind:open={addOpen}
-	icon="host"
+	size={createdToken ? 'lg' : 'md'}
 	title={createdToken ? t('hosts.tokenTitle') : t('hosts.addTitle')}
+	description={createdToken ? undefined : t('hosts.addDescription')}
+	onsubmit={createdToken ? closeAdd : createToken}
 >
 	{#if createdToken}
-		<Alert tone="attention" title={t('hosts.tokenBody')} />
+		<Alert tone="attention" icon="key" title={t('tokens.valueOnceBody')}>
+			{t('hosts.tokenNote')}
+		</Alert>
 		<CopyField value={createdToken.token} label={t('hosts.tokenValue')} secret />
 		<CopyField value={installCommand} label={t('hosts.installCommand')} />
-		<p>{t('hosts.tokenNote')}</p>
 	{:else}
 		{#if createError}
 			<Alert tone="danger" title={createError} />
@@ -202,17 +270,17 @@
 	{/if}
 	{#snippet footer()}
 		{#if createdToken}
-			<Button variant="primary" onclick={closeAdd}>{t('common.close')}</Button>
+			<Button type="submit" variant="primary">{t('common.done')}</Button>
 		{:else}
 			<Button onclick={closeAdd}>{t('common.cancel')}</Button>
-			<Button variant="primary" loading={creating} onclick={createToken}>
+			<Button type="submit" variant="primary" loading={creating}>
 				{t('hosts.createToken')}
 			</Button>
 		{/if}
 	{/snippet}
 </Dialog>
 
-<Dialog bind:open={revokeOpen} icon="octagon" title={t('hosts.revokeTitle')}>
+<Dialog bind:open={revokeOpen} size="sm" icon="octagon" title={t('hosts.revokeTitle')}>
 	<p>
 		{t('hosts.revokeBody', { name: revokeTarget?.hostname ?? '' })}
 	</p>
@@ -223,3 +291,29 @@
 		</Button>
 	{/snippet}
 </Dialog>
+
+<style>
+	.hosts {
+		margin-top: var(--rh-space-4);
+	}
+
+	.host {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.host__name {
+		font-weight: var(--rh-font-weight-semibold);
+		white-space: nowrap;
+	}
+
+	.host__meta {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.host__version {
+		font-family: var(--rh-font-mono);
+		font-size: var(--rh-font-size-sm);
+	}
+</style>

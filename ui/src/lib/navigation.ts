@@ -3,16 +3,20 @@
  * use it.
  */
 import type { Role } from '#lib/api/index.ts';
+import type { IconName } from '#lib/components/ui/index.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
 
 const ALL_ROLES: Role[] = ['platform_admin', 'admin', 'operator', 'viewer'];
+const ADMIN_ROLES: Role[] = ['platform_admin', 'admin'];
+
+export type SettingsHref = '/(app)/settings/access/users' | '/(app)/settings/access/api-tokens';
 
 export type NavHref =
 	| '/(app)'
-	| '/(app)/users'
 	| '/(app)/hosts'
-	| '/(app)/api-tokens'
 	| '/(app)/audit'
+	| '/(app)/settings'
+	| SettingsHref
 	| '/(app)/platform/tenants'
 	| '/(app)/platform/users'
 	| '/(app)/platform/audit';
@@ -20,6 +24,7 @@ export type NavHref =
 export interface NavItem {
 	href: NavHref;
 	labelKey: MessageKey;
+	icon: IconName;
 	roles: Role[];
 }
 
@@ -30,24 +35,33 @@ export interface NavSection {
 	platform: boolean;
 }
 
+export interface SettingsItem {
+	href: SettingsHref;
+	labelKey: MessageKey;
+	icon: IconName;
+	roles: Role[];
+}
+
+export interface SettingsGroup {
+	labelKey: MessageKey;
+	items: SettingsItem[];
+}
+
+// The order follows the full tab set of the design; a tab appears only when its screen exists.
 export const navigation: NavSection[] = [
 	{
 		labelKey: 'nav.section.administration',
 		platform: false,
 		items: [
-			{ href: '/(app)', labelKey: 'nav.overview', roles: ALL_ROLES },
-			{ href: '/(app)/users', labelKey: 'nav.users', roles: ['platform_admin', 'admin'] },
+			{ href: '/(app)', labelKey: 'nav.overview', icon: 'overview', roles: ALL_ROLES },
 			{
 				href: '/(app)/hosts',
 				labelKey: 'nav.hosts',
+				icon: 'host',
 				roles: ['admin', 'operator', 'viewer']
 			},
-			{
-				href: '/(app)/api-tokens',
-				labelKey: 'nav.apiTokens',
-				roles: ['platform_admin', 'admin']
-			},
-			{ href: '/(app)/audit', labelKey: 'nav.audit', roles: ALL_ROLES }
+			{ href: '/(app)/audit', labelKey: 'nav.audit', icon: 'audit', roles: ALL_ROLES },
+			{ href: '/(app)/settings', labelKey: 'nav.settings', icon: 'settings', roles: ADMIN_ROLES }
 		]
 	},
 	{
@@ -57,17 +71,40 @@ export const navigation: NavSection[] = [
 			{
 				href: '/(app)/platform/tenants',
 				labelKey: 'nav.tenants',
+				icon: 'box',
 				roles: ['platform_admin']
 			},
 			{
 				href: '/(app)/platform/users',
 				labelKey: 'nav.platformUsers',
+				icon: 'users',
 				roles: ['platform_admin']
 			},
 			{
 				href: '/(app)/platform/audit',
 				labelKey: 'nav.platformAudit',
+				icon: 'audit',
 				roles: ['platform_admin']
+			}
+		]
+	}
+];
+
+export const settingsNavigation: SettingsGroup[] = [
+	{
+		labelKey: 'settings.group.access',
+		items: [
+			{
+				href: '/(app)/settings/access/users',
+				labelKey: 'nav.users',
+				icon: 'users',
+				roles: ADMIN_ROLES
+			},
+			{
+				href: '/(app)/settings/access/api-tokens',
+				labelKey: 'nav.apiTokens',
+				icon: 'key',
+				roles: ADMIN_ROLES
 			}
 		]
 	}
@@ -88,4 +125,13 @@ export function navSectionsForRole(role: Role | null, platformAdmin: boolean): N
 			)
 		}))
 		.filter((section) => section.items.length > 0);
+}
+
+export function settingsGroupsForRole(role: Role | null): SettingsGroup[] {
+	return settingsNavigation
+		.map((group) => ({
+			...group,
+			items: group.items.filter((item) => (role ? item.roles.includes(role) : false))
+		}))
+		.filter((group) => group.items.length > 0);
 }

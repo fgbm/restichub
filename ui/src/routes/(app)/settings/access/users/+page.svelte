@@ -2,17 +2,23 @@
 	import { onMount } from 'svelte';
 	import { ApiError, assignableRoles, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Role, User } from '#lib/api/index.ts';
+	import { SettingsLayout } from '#lib/components/index.ts';
 	import {
 		Alert,
+		Badge,
 		Button,
-		PageHeader,
+		Dialog,
+		DropdownMenu,
+		Icon,
+		Panel,
+		PasswordField,
 		Select,
-		SidePanel,
+		StatusPill,
 		Table,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import type { IconName, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -24,7 +30,6 @@
 	let creating = $state(false);
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
-	let busyId = $state<string | null>(null);
 
 	let resetOpen = $state(false);
 	let resetUser = $state<User | null>(null);
@@ -44,6 +49,8 @@
 	let newRole = $state<Role>('viewer');
 	let newPassword = $state('');
 
+	const tenantName = $derived(getSession()?.tenant?.name ?? '');
+
 	const roleKeys = $derived<Record<Role, string>>({
 		platform_admin: t('users.role.platformAdmin'),
 		admin: t('users.role.admin'),
@@ -51,34 +58,49 @@
 		viewer: t('users.role.viewer')
 	});
 
+	// The least privilege comes first and is the default.
+	const roles = $derived([...assignableRoles(getSession()?.role)].reverse());
+
 	const roleOptions = $derived<SelectOption[]>(
-		assignableRoles(getSession()?.role).map((role) => ({
+		roles.map((role) => ({
 			value: role,
 			label: roleKeys[role]
 		}))
 	);
 
-	// A shared account belongs to another tenant; the label tells a tenant Admin that it cannot
-	// reset the password or change the display name (ADR-0025).
+	const roleHelp: { role: Role; icon: IconName; body: MessageKey }[] = [
+		{ role: 'admin', icon: 'shield', body: 'users.roles.admin' },
+		{ role: 'operator', icon: 'shield', body: 'users.roles.operator' },
+		{ role: 'viewer', icon: 'eye', body: 'users.roles.viewer' }
+	];
+
+	function initials(user: User): string {
+		return (user.display_name || user.username)
+			.split(/\s+/)
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((part) => part[0]?.toUpperCase() ?? '')
+			.join('');
+	}
+
 	const columns = $derived<TableColumn<User>[]>([
 		{
-			key: 'username',
-			header: t('users.username'),
-			mono: true,
-			cell: (row) => (row.shared ? `${row.username} \u00b7 ${t('users.shared')}` : row.username)
+			key: 'display_name',
+			header: t('users.user'),
+			value: (row) => `${row.display_name} ${row.username}`,
+			render: userCell
 		},
-		{ key: 'display_name', header: t('users.displayName') },
 		{
 			key: 'role',
 			header: t('users.role'),
 			cell: (row) => roleKeys[row.role],
-			badge: (row) => (row.role === 'admin' ? 'info' : 'neutral')
+			badge: () => 'neutral'
 		},
 		{
 			key: 'disabled',
 			header: t('common.status'),
-			cell: (row) => (row.disabled ? t('common.disabled') : t('common.enabled')),
-			badge: (row) => (row.disabled ? 'warning' : 'success')
+			value: (row) => (row.disabled ? t('common.disabled') : t('common.active')),
+			render: stateCell
 		}
 	]);
 
@@ -104,14 +126,17 @@
 	function openCreate(): void {
 		newUsername = '';
 		newDisplayName = '';
-		newRole = assignableRoles(getSession()?.role)[0];
+		newRole = roles[0];
 		newPassword = '';
 		createError = null;
 		createProblem = null;
 		createOpen = true;
 	}
 
+	const canCreate = $derived(!!newUsername && !!newDisplayName && newPassword.length >= 12);
+
 	async function createUser(): Promise<void> {
+		if (!canCreate) return;
 		creating = true;
 		createError = null;
 		createProblem = null;
@@ -143,7 +168,7 @@
 	}
 
 	async function resetPassword(): Promise<void> {
-		if (!resetUser) return;
+		if (!resetUser || newResetPassword.length < 12) return;
 		resetting = true;
 		resetError = null;
 		try {
@@ -159,53 +184,105 @@
 	}
 
 	async function toggleDisabled(user: User): Promise<void> {
-		busyId = user.id;
 		try {
 			await service.updateUser(user.id, { disabled: !user.disabled });
 			pushToast('success', user.disabled ? t('users.enabledToast') : t('users.disabledToast'));
 			await load();
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
-		} finally {
-			busyId = null;
 		}
 	}
 </script>
+
+{#snippet userCell(user: User)}
+	<span class="user">
+		<span class="user__avatar" aria-hidden="true">{initials(user)}</span>
+		<span class="user__text">
+			<span class="user__line">
+				<span class="user__name">{user.display_name}</span>
+				{#if user.shared}
+					<Badge icon="users">{t('users.shared')}</Badge>
+				{/if}
+			</span>
+			<span class="user__login">{user.username}</span>
+		</span>
+	</span>
+{/snippet}
+
+{#snippet stateCell(user: User)}
+	<StatusPill tone={user.disabled ? 'neutral' : 'success'}>
+		{user.disabled ? t('common.disabled') : t('common.active')}
+	</StatusPill>
+{/snippet}
 
 <svelte:head>
 	<title>{t('users.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<PageHeader title={t('users.title')} description={t('users.description')}>
-	<Button variant="primary" onclick={openCreate}>{t('users.create')}</Button>
-</PageHeader>
-
-<Table {columns} rows={users} {loading} {error} rowKey={(user) => user.id}>
-	{#snippet rowActions(user)}
-		<Button
-			size="sm"
-			variant="ghost"
-			disabled={user.shared}
-			title={user.shared ? t('users.sharedResetHint') : t('users.resetPassword')}
-			aria-label={t('users.resetPassword')}
-			onclick={() => openReset(user)}
-		>
-			{t('users.resetPassword')}
-		</Button>
-		<Button
-			size="sm"
-			variant="ghost"
-			loading={busyId === user.id}
-			onclick={() => toggleDisabled(user)}
-		>
-			{user.disabled ? t('users.enable') : t('users.disable')}
-		</Button>
+<SettingsLayout
+	title={t('users.title')}
+	description={t('users.description', { name: tenantName })}
+	count={loading ? undefined : users.length}
+>
+	{#snippet actions()}
+		<Button variant="primary" icon="plus" onclick={openCreate}>{t('users.create')}</Button>
 	{/snippet}
-</Table>
 
-<SidePanel bind:open={createOpen} title={t('users.createTitle')}>
+	<Alert variant="inline" icon="users" title={t('users.sharedNote')} />
+
+	<Table
+		{columns}
+		rows={users}
+		{loading}
+		{error}
+		rowKey={(user) => user.id}
+		filterPlaceholder={t('users.searchPlaceholder')}
+	>
+		{#snippet rowActions(user)}
+			<span class="row-actions">
+				<Button
+					size="sm"
+					icon="key"
+					disabled={user.shared}
+					title={user.shared ? t('users.sharedResetHint') : t('users.resetPassword')}
+					aria-label={t('users.resetFor', { name: user.display_name })}
+					onclick={() => openReset(user)}
+				/>
+				<DropdownMenu
+					icon="more"
+					align="end"
+					label={t('users.moreActions', { name: user.display_name })}
+					items={[
+						{
+							label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
+							icon: 'octagon',
+							tone: 'danger',
+							onSelect: () => toggleDisabled(user)
+						}
+					]}
+				/>
+			</span>
+		{/snippet}
+	</Table>
+
+	<Panel title={t('users.roles')} flush>
+		<ul class="roles">
+			{#each roleHelp as item (item.role)}
+				<li class="roles__row">
+					<span class="roles__icon"><Icon name={item.icon} /></span>
+					<span class="roles__text">
+						<span class="roles__name">{roleKeys[item.role]}</span>
+						<span class="roles__body">{t(item.body)}</span>
+					</span>
+				</li>
+			{/each}
+		</ul>
+	</Panel>
+</SettingsLayout>
+
+<Dialog bind:open={createOpen} title={t('users.createTitle')} onsubmit={createUser}>
 	{#if createError}
-		<Alert tone="danger" title={createError} />
+		<Alert variant="inline" tone="danger" title={createError} />
 	{/if}
 	<TextField
 		id="user-username"
@@ -221,6 +298,7 @@
 		label={t('users.displayName')}
 		error={fieldError(createProblem, 'display_name')}
 		bind:value={newDisplayName}
+		placeholder={t('users.displayNamePlaceholder')}
 		autocomplete="off"
 		required
 	/>
@@ -232,51 +310,133 @@
 		options={roleOptions}
 		required
 	/>
-	<TextField
+	<PasswordField
 		id="user-password"
-		label={t('setup.password')}
+		label={t('users.initialPassword')}
 		help={t('setup.passwordHint')}
 		error={fieldError(createProblem, 'password')}
 		bind:value={newPassword}
-		type="password"
 		autocomplete="new-password"
 		required
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
-		<Button
-			variant="primary"
-			loading={creating}
-			disabled={!newUsername || !newDisplayName || newPassword.length < 12}
-			onclick={createUser}
-		>
-			{t('common.create')}
+		<Button type="submit" variant="primary" loading={creating} disabled={!canCreate}>
+			{t('users.create')}
 		</Button>
 	{/snippet}
-</SidePanel>
+</Dialog>
 
-<SidePanel bind:open={resetOpen} title={t('users.resetTitle')}>
+<Dialog bind:open={resetOpen} title={t('users.resetTitle')} onsubmit={resetPassword}>
 	{#if resetError}
-		<Alert tone="danger" title={resetError} />
+		<Alert variant="inline" tone="danger" title={resetError} />
 	{/if}
-	<TextField
+	<p>{t('users.resetHint', { name: resetUser?.display_name ?? '' })}</p>
+	<PasswordField
 		id="user-reset-password"
 		label={t('setup.password')}
 		help={t('setup.passwordHint')}
 		bind:value={newResetPassword}
-		type="password"
 		autocomplete="new-password"
 		required
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (resetOpen = false)}>{t('common.cancel')}</Button>
 		<Button
+			type="submit"
 			variant="primary"
 			loading={resetting}
 			disabled={newResetPassword.length < 12}
-			onclick={resetPassword}
 		>
 			{t('users.resetPassword')}
 		</Button>
 	{/snippet}
-</SidePanel>
+</Dialog>
+
+<style>
+	.user {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.user__avatar {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-pill);
+		background-color: var(--rh-color-neutral-bg);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-2xs);
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.user__text {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.user__line {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--rh-space-3);
+	}
+
+	.user__name {
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.user__login {
+		color: var(--rh-color-text-muted);
+		font-family: var(--rh-font-mono);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.row-actions {
+		display: inline-flex;
+		gap: var(--rh-space-1);
+	}
+
+	.roles {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.roles__row {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-3);
+		padding: var(--rh-space-3) var(--rh-space-4);
+		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
+	}
+
+	.roles__row:first-child {
+		border-top: 0;
+	}
+
+	.roles__icon {
+		display: inline-flex;
+		width: 28px;
+		justify-content: center;
+		color: var(--rh-color-text-muted);
+	}
+
+	.roles__text {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.roles__name {
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.roles__body {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+</style>

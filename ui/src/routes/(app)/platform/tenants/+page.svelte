@@ -23,6 +23,7 @@
 
 	let deleteTarget = $state<Tenant | null>(null);
 	let deleteOpen = $state(false);
+	let deleteTyped = $state('');
 	let deleting = $state(false);
 	let busyId = $state<string | null>(null);
 
@@ -83,7 +84,15 @@
 
 	onMount(load);
 
+	function openCreate(): void {
+		newName = '';
+		createError = null;
+		createProblem = null;
+		createOpen = true;
+	}
+
 	async function createTenant(): Promise<void> {
+		if (!newName) return;
 		creating = true;
 		createError = null;
 		createProblem = null;
@@ -120,7 +129,7 @@
 	}
 
 	async function confirmDelete(): Promise<void> {
-		if (!deleteTarget) return;
+		if (!deleteTarget || deleteTyped !== deleteTarget.name) return;
 		deleting = true;
 		try {
 			await service.deleteTenant(deleteTarget.id);
@@ -140,39 +149,54 @@
 	<title>{t('tenants.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<PageHeader title={t('tenants.title')} description={t('tenants.description')}>
-	<Button variant="primary" onclick={() => (createOpen = true)}>{t('tenants.create')}</Button>
+<PageHeader
+	title={t('tenants.title')}
+	description={t('tenants.description')}
+	count={loading ? undefined : tenants.length}
+	bordered
+>
+	<Button variant="primary" icon="plus" onclick={openCreate}>{t('tenants.create')}</Button>
 </PageHeader>
 
-<Table {columns} rows={tenants} {loading} {error} rowKey={(tenant) => tenant.id}>
-	{#snippet rowActions(tenant)}
-		{#if tenant.status !== 'deleted'}
-			<Button
-				size="sm"
-				variant="ghost"
-				loading={busyId === tenant.id}
-				onclick={() => toggleStatus(tenant)}
-			>
-				{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
-			</Button>
-			<Button
-				size="sm"
-				variant="ghost"
-				disabled={tenant.status !== 'suspended'}
-				onclick={() => {
-					deleteTarget = tenant;
-					deleteOpen = true;
-				}}
-			>
-				{t('common.delete')}
-			</Button>
-		{/if}
-	{/snippet}
-</Table>
+<div class="tenants">
+	<Table
+		{columns}
+		rows={tenants}
+		{loading}
+		{error}
+		rowKey={(tenant) => tenant.id}
+		filterPlaceholder={t('tenants.searchPlaceholder')}
+	>
+		{#snippet rowActions(tenant)}
+			{#if tenant.status !== 'deleted'}
+				<Button
+					size="sm"
+					variant="ghost"
+					loading={busyId === tenant.id}
+					onclick={() => toggleStatus(tenant)}
+				>
+					{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
+				</Button>
+				<Button
+					size="sm"
+					variant="ghost"
+					disabled={tenant.status !== 'suspended'}
+					onclick={() => {
+						deleteTarget = tenant;
+						deleteTyped = '';
+						deleteOpen = true;
+					}}
+				>
+					{t('common.delete')}
+				</Button>
+			{/if}
+		{/snippet}
+	</Table>
+</div>
 
-<Dialog bind:open={createOpen} title={t('tenants.createTitle')}>
+<Dialog bind:open={createOpen} title={t('tenants.createTitle')} onsubmit={createTenant}>
 	{#if createError}
-		<Alert tone="danger" title={createError} />
+		<Alert variant="inline" tone="danger" title={createError} />
 	{/if}
 	<TextField
 		id="tenant-name"
@@ -185,20 +209,45 @@
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
-		<Button variant="primary" loading={creating} disabled={!newName} onclick={createTenant}>
-			{t('common.create')}
+		<Button type="submit" variant="primary" loading={creating} disabled={!newName}>
+			{t('tenants.create')}
 		</Button>
 	{/snippet}
 </Dialog>
 
-<Dialog bind:open={deleteOpen} title={t('tenants.deleteTitle')}>
+<Dialog
+	bind:open={deleteOpen}
+	size="lg"
+	icon="octagon"
+	title={t('tenants.deleteTitle')}
+	onsubmit={confirmDelete}
+>
 	<p>
 		{t('tenants.deleteBody', { name: deleteTarget?.name ?? '' })}
 	</p>
+	<TextField
+		id="tenant-delete-confirm"
+		label={t('tenants.deleteConfirm', { name: deleteTarget?.name ?? '' })}
+		bind:value={deleteTyped}
+		placeholder={t('tenants.namePlaceholder')}
+		mono
+		autocomplete="off"
+	/>
 	{#snippet footer()}
 		<Button onclick={() => (deleteOpen = false)}>{t('common.cancel')}</Button>
-		<Button variant="danger" loading={deleting} onclick={confirmDelete}>
-			{t('common.delete')}
+		<Button
+			type="submit"
+			variant="danger"
+			loading={deleting}
+			disabled={!deleteTarget || deleteTyped !== deleteTarget.name}
+		>
+			{t('tenants.delete')}
 		</Button>
 	{/snippet}
 </Dialog>
+
+<style>
+	.tenants {
+		margin-top: var(--rh-space-4);
+	}
+</style>

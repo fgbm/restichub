@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import {
 		Alert,
 		Button,
@@ -19,14 +21,15 @@
 		body: string;
 		done: boolean;
 		action?: string;
+		onAction?: () => void;
 	}
 
 	const session = $derived(getSession());
 	// An account with no current organization sees the empty state (ADR-0029).
 	const hasTenant = $derived(!!getSession()?.tenant);
 
-	// Only the first step can be done here: the hosts, repositories and profiles
-	// screens arrive later, so their actions stay disabled.
+	// The repositories and profiles screens arrive later, so their actions stay disabled.
+	const canSeeHosts = $derived(['admin', 'operator', 'viewer'].includes(session?.role ?? ''));
 	const steps = $derived<Step[]>([
 		{
 			title: isSingleTenant() ? t('setup.submitSingle') : t('overview.step.admin.title'),
@@ -39,7 +42,8 @@
 			title: t('overview.step.agent.title'),
 			body: t('overview.step.agent.body'),
 			done: false,
-			action: t('overview.step.agent.action')
+			action: t('overview.step.agent.action'),
+			onAction: canSeeHosts ? () => void goto(resolve('/(app)/hosts')) : undefined
 		},
 		{
 			title: t('overview.step.repository.title'),
@@ -103,7 +107,7 @@
 							<p class="checklist__body">{step.body}</p>
 						</div>
 						{#if step.action}
-							<Button disabled>{step.action}</Button>
+							<Button disabled={!step.onAction} onclick={step.onAction}>{step.action}</Button>
 						{/if}
 					</li>
 				{/each}

@@ -4,13 +4,20 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { service } from '#lib/api/index.ts';
-	import { getLocale, setLocale, t } from '#lib/i18n/index.ts';
-	import { navSectionsForRole, type NavHref } from '#lib/navigation.ts';
+	import type { Role } from '#lib/api/index.ts';
+	import { getLocale, setLocale, t, type MessageKey } from '#lib/i18n/index.ts';
+	import {
+		navSectionsForRole,
+		settingsNavigation,
+		type NavHref,
+		type NavItem
+	} from '#lib/navigation.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
 	import { getTheme, setTheme } from '#lib/stores/theme.svelte.ts';
-	import { DropdownMenu, ToastRegion } from './ui/index.ts';
+	import { Badge, DropdownMenu, Icon, ToastRegion } from './ui/index.ts';
 	import type { MenuItem } from './ui/index.ts';
+	import Brandmark from './Brandmark.svelte';
 	import TenantSwitcher from './TenantSwitcher.svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -24,11 +31,27 @@
 				!(isSingleTenant() && section.platform) && (section.platform || !!session?.tenant)
 		)
 	);
+	const tenantTabs = $derived(sections.find((section) => !section.platform)?.items ?? []);
+	const platformTabs = $derived(sections.find((section) => section.platform)?.items ?? []);
+	const settingsTab = $derived(tenantTabs.find((item) => item.href === '/(app)/settings'));
+
 	const pathname = $derived(page.url.pathname);
 	const locale = $derived(getLocale());
 	const theme = $derived(getTheme());
 
+	const roleKeys: Record<Role, MessageKey> = {
+		platform_admin: 'users.role.platformAdmin',
+		admin: 'users.role.admin',
+		operator: 'users.role.operator',
+		viewer: 'users.role.viewer'
+	};
+
 	const displayName = $derived(session?.user?.display_name ?? t('topbar.account'));
+	const accountSub = $derived(
+		session?.tenant && session.role
+			? `${t(roleKeys[session.role])} · ${session.tenant.name}`
+			: t('topbar.noTenant')
+	);
 	const initials = $derived(
 		displayName
 			.split(/\s+/)
@@ -38,13 +61,64 @@
 			.join('')
 	);
 
+	interface Crumb {
+		label: string;
+		href?: NavHref;
+	}
+
+	function isActive(href: NavHref): boolean {
+		const target = resolve(href);
+		return target === '/' ? pathname === '/' : pathname.startsWith(target);
+	}
+
+	const crumbs = $derived.by<Crumb[]>(() => {
+		const settingsItem = settingsNavigation
+			.flatMap((group) => group.items)
+			.find((item) => isActive(item.href));
+		if (settingsItem) {
+			return [
+				{ label: t('nav.settings'), href: '/(app)/settings' },
+				{ label: t(settingsItem.labelKey) }
+			];
+		}
+		const platformItem = platformTabs.find((item) => isActive(item.href));
+		if (platformItem) {
+			return [{ label: t(platformItem.labelKey) }];
+		}
+		const item = tenantTabs.find((tab: NavItem) => isActive(tab.href));
+		return item ? [{ label: t(item.labelKey) }] : [];
+	});
+
+	let prefersDark = $state(false);
+	$effect(() => {
+		const query = window.matchMedia('(prefers-color-scheme: dark)');
+		prefersDark = query.matches;
+		const update = (event: MediaQueryListEvent) => (prefersDark = event.matches);
+		query.addEventListener('change', update);
+		return () => query.removeEventListener('change', update);
+	});
+	const dark = $derived(theme === 'dark' || (theme === 'system' && prefersDark));
+
+	function toggleTheme(): void {
+		setTheme(dark ? 'light' : 'dark');
+	}
+
 	const accountItems = $derived<MenuItem[]>([
-		// The Platform Admin right appears on the account menu, not as an organization (ADR-0029).
-		...(session?.platform_admin ? [{ label: t('users.role.platformAdmin') }] : []),
+		...(settingsTab
+			? [
+					{
+						label: t('nav.settings'),
+						icon: 'settings' as const,
+						onSelect: () => void goto(resolve('/(app)/settings'))
+					}
+				]
+			: []),
 		{
 			label: t('topbar.theme.light'),
 			group: 'theme',
+			groupLabel: t('topbar.theme'),
 			checked: theme === 'light',
+			separatorBefore: !!settingsTab,
 			onSelect: () => setTheme('light')
 		},
 		{
@@ -62,6 +136,7 @@
 		{
 			label: 'English',
 			group: 'language',
+			groupLabel: t('topbar.language'),
 			checked: locale === 'en',
 			separatorBefore: true,
 			onSelect: () => setLocale('en')
@@ -74,20 +149,12 @@
 		},
 		{
 			label: t('topbar.signOut'),
+			icon: 'arrow-right',
 			tone: 'danger',
 			separatorBefore: true,
 			onSelect: signOut
 		}
 	]);
-
-	function isActive(href: NavHref): boolean {
-		const target = resolve(href);
-		return target === '/' ? pathname === '/' : pathname.startsWith(target);
-	}
-
-	function toggleTheme(): void {
-		setTheme(theme === 'dark' ? 'light' : 'dark');
-	}
 
 	async function signOut(): Promise<void> {
 		try {
@@ -105,63 +172,96 @@
 <div class="shell">
 	<header class="topbar">
 		<a class="brand" href={resolve('/(app)')}>
-			<span class="brandmark" aria-hidden="true">
-				<svg viewBox="0 0 20 20">
-					<path class="brandmark__solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" />
-					<path d="M2.5 10.6 10 14.5l7.5-3.9" />
-				</svg>
-			</span>
+			<Brandmark />
 			<span>{t('app.name')}</span>
 		</a>
 
 		<span class="topbar__divider"></span>
 
-		{#if isSingleTenant()}
-			<span class="topbar__tenant">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
-		{:else}
-			<TenantSwitcher />
-		{/if}
+		<nav class="breadcrumb" aria-label={t('topbar.breadcrumb')}>
+			{#if isSingleTenant()}
+				<span class="breadcrumb__tenant">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
+			{:else}
+				<TenantSwitcher />
+			{/if}
+			{#each crumbs as crumb, index (index)}
+				<span class="breadcrumb__sep" aria-hidden="true">/</span>
+				{#if index === crumbs.length - 1}
+					<span aria-current="page">{crumb.label}</span>
+				{:else if crumb.href}
+					<a href={resolve(crumb.href)}>{crumb.label}</a>
+				{:else}
+					<span>{crumb.label}</span>
+				{/if}
+			{/each}
+		</nav>
 
 		<div class="spacer"></div>
 
-		<button type="button" class="icon-btn" aria-label={t('topbar.theme')} onclick={toggleTheme}>
-			<span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+		<button
+			type="button"
+			class="icon-btn"
+			aria-label={dark ? t('theme.switchToLight') : t('theme.switchToDark')}
+			title={dark ? t('theme.switchToLight') : t('theme.switchToDark')}
+			onclick={toggleTheme}
+		>
+			<Icon name={dark ? 'sun' : 'moon'} />
 		</button>
 
-		<DropdownMenu items={accountItems} align="end">
-			<span class="account">
-				<span class="avatar" aria-hidden="true">{initials}</span>
-				<span class="account__name">{displayName}</span>
-				<span aria-hidden="true">▾</span>
-			</span>
+		<DropdownMenu items={accountItems} align="end" menuClass="rh-menu--account">
+			{#snippet header()}
+				<p class="account-head__name">{displayName}</p>
+				<p class="account-head__sub">{accountSub}</p>
+				{#if session?.platform_admin}
+					<!-- The Platform Admin right is an account right, not an organization (ADR-0029). -->
+					<span class="account-head__right">
+						<Badge tone="accent" icon="shield">{t('users.role.platformAdmin')}</Badge>
+					</span>
+				{/if}
+			{/snippet}
+			<span class="avatar" aria-hidden="true">{initials}</span>
+			<span class="account__name">{displayName}</span>
+			<Icon name="chevron-down" size="xs" />
 		</DropdownMenu>
 	</header>
 
 	<nav class="tabs" aria-label={t('nav.primary')}>
-		{#each sections as section, index (section.labelKey)}
-			{#if section.platform && index > 0}
-				<span class="tabs__divider" aria-hidden="true"></span>
-			{/if}
-			{#each section.items as item (item.href)}
-				<a
-					class="tab"
-					class:tab--platform={section.platform}
-					href={resolve(item.href)}
-					aria-current={isActive(item.href) ? 'page' : undefined}
-				>
-					{t(item.labelKey)}
-				</a>
-			{/each}
+		{#each tenantTabs as item (item.href)}
+			<a
+				class="tab"
+				href={resolve(item.href)}
+				aria-current={isActive(item.href) ? 'page' : undefined}
+			>
+				<Icon name={item.icon} />
+				{t(item.labelKey)}
+			</a>
 		{/each}
+		{#if platformTabs.length > 0}
+			<!-- The platform screens do not depend on the current organization (ADR-0029). -->
+			<div class="tabs__platform" role="group" aria-labelledby="platform-tabs-label">
+				<span class="tabs__platform-label" id="platform-tabs-label">
+					<Icon name="shield" size="xs" />
+					{t('nav.section.platform')}
+				</span>
+				{#each platformTabs as item (item.href)}
+					<a
+						class="tab"
+						href={resolve(item.href)}
+						aria-current={isActive(item.href) ? 'page' : undefined}
+					>
+						<Icon name={item.icon} />
+						{t(item.labelKey)}
+					</a>
+				{/each}
+			</div>
+		{/if}
 	</nav>
 
 	<main id="main" class="page">
-		<div class="page__inner">
-			<!-- A tenant switch remounts the screen, so its data reloads for the new tenant. -->
-			{#key session?.tenant?.id}
-				{@render children()}
-			{/key}
-		</div>
+		<!-- A tenant switch remounts the screen, so its data reloads for the new tenant. -->
+		{#key session?.tenant?.id}
+			{@render children()}
+		{/key}
 	</main>
 </div>
 
@@ -214,41 +314,43 @@
 		text-decoration: none;
 	}
 
-	.brandmark {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 26px;
-		height: 26px;
-		border-radius: 7px;
-		background-color: var(--rh-color-accent);
-		color: var(--rh-color-text-on-accent);
-	}
-
-	.brandmark svg {
-		width: 16px;
-		height: 16px;
-		fill: none;
-		stroke: currentColor;
-		stroke-width: 1.7;
-		stroke-linejoin: round;
-		stroke-linecap: round;
-	}
-
-	.brandmark__solid {
-		fill: currentColor;
-		stroke: none;
-	}
-
 	.topbar__divider {
+		flex: none;
 		width: 1px;
 		height: 22px;
 		background-color: var(--rh-color-border);
 	}
 
-	.topbar__tenant {
+	.breadcrumb {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+		min-width: 0;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-base);
+	}
+
+	.breadcrumb__sep {
+		color: var(--rh-color-text-subtle);
+	}
+
+	.breadcrumb a {
+		color: var(--rh-color-text-muted);
+	}
+
+	.breadcrumb a:hover {
+		color: var(--rh-color-text);
+	}
+
+	.breadcrumb [aria-current='page'] {
+		color: var(--rh-color-text);
+		font-weight: var(--rh-font-weight-semibold);
+		white-space: nowrap;
+	}
+
+	.breadcrumb__tenant {
+		color: var(--rh-color-text);
+		font-weight: var(--rh-font-weight-semibold);
 	}
 
 	.spacer {
@@ -257,27 +359,22 @@
 
 	.icon-btn {
 		display: inline-flex;
+		flex: none;
 		align-items: center;
 		justify-content: center;
 		width: var(--rh-control-height);
 		height: var(--rh-control-height);
-		border: var(--rh-border-width) solid transparent;
+		padding: 0;
+		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
-		background: transparent;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-md);
+		background-color: var(--rh-color-control-bg);
+		color: var(--rh-color-text);
 		cursor: pointer;
 	}
 
 	.icon-btn:hover {
-		background-color: var(--rh-color-hover);
-		color: var(--rh-color-text);
-	}
-
-	.account {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--rh-space-2);
+		border-color: var(--rh-color-border-strong);
+		background-color: var(--rh-color-control-bg-hover);
 	}
 
 	.avatar {
@@ -298,6 +395,26 @@
 		font-weight: var(--rh-font-weight-medium);
 	}
 
+	:global(.rh-menu--account) {
+		min-width: 240px;
+	}
+
+	.account-head__name {
+		margin: 0;
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.account-head__sub {
+		margin: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.account-head__right {
+		display: flex;
+		margin-top: var(--rh-space-2);
+	}
+
 	.tabs {
 		display: flex;
 		align-items: stretch;
@@ -309,12 +426,18 @@
 		box-shadow: inset 0 calc(-1 * var(--rh-border-width)) 0 var(--rh-color-border);
 		overflow-x: auto;
 		overflow-y: hidden;
-		scrollbar-width: thin;
+		scrollbar-width: none;
+	}
+
+	.tabs::-webkit-scrollbar {
+		display: none;
 	}
 
 	.tab {
 		display: inline-flex;
+		flex: none;
 		align-items: center;
+		gap: var(--rh-space-2);
 		height: 44px;
 		padding: 0 var(--rh-space-3);
 		border-bottom: 2px solid transparent;
@@ -335,31 +458,56 @@
 		border-bottom-color: var(--rh-color-accent);
 	}
 
-	.tabs__divider {
-		align-self: center;
-		width: 1px;
-		height: 22px;
-		margin: 0 var(--rh-space-2);
-		background-color: var(--rh-color-border);
+	.tabs__platform {
+		display: flex;
+		align-items: stretch;
+		gap: var(--rh-space-1);
+		margin-left: auto;
+		padding-left: var(--rh-space-3);
 	}
 
-	.tab--platform {
-		color: var(--rh-color-accent);
-	}
-
-	.tab--platform:hover,
-	.tab--platform[aria-current='page'] {
-		color: var(--rh-color-accent);
+	.tabs__platform-label {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		gap: var(--rh-space-1);
+		margin-right: var(--rh-space-1);
+		padding-left: var(--rh-space-3);
+		border-left: var(--rh-border-width) solid var(--rh-color-border);
+		color: var(--rh-color-text-subtle);
+		font-size: var(--rh-font-size-xs);
+		font-weight: var(--rh-font-weight-semibold);
+		white-space: nowrap;
+		/* The divider spans only the middle of the bar. */
+		margin-block: var(--rh-space-3);
 	}
 
 	.page {
 		flex: 1;
+		width: 100%;
 		min-width: 0;
+		max-width: var(--rh-layout-content-max-width);
+		margin: 0 auto;
 		padding: var(--rh-space-6) var(--rh-space-4) var(--rh-space-12);
 	}
 
-	.page__inner {
-		max-width: var(--rh-layout-content-max-width);
-		margin: 0 auto;
+	@media (max-width: 640px) {
+		.topbar {
+			gap: var(--rh-space-2);
+		}
+
+		.breadcrumb [aria-current='page'],
+		.breadcrumb__sep,
+		.breadcrumb a {
+			display: none;
+		}
+
+		.account__name {
+			display: none;
+		}
+
+		.page {
+			padding: var(--rh-space-4) var(--rh-space-3) var(--rh-space-8);
+		}
 	}
 </style>

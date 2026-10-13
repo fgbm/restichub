@@ -16,6 +16,7 @@
 		loading = false,
 		error = null,
 		filterable = true,
+		filterPlaceholder,
 		paginated = true,
 		pageSize = 10,
 		caption,
@@ -32,6 +33,7 @@
 		loading?: boolean;
 		error?: string | null;
 		filterable?: boolean;
+		filterPlaceholder?: string;
 		/** Client-side pagination. Set to `false` for cursor pagination. */
 		paginated?: boolean;
 		pageSize?: number;
@@ -124,7 +126,7 @@
 				<input
 					type="search"
 					bind:value={filter}
-					placeholder={t('table.filterPlaceholder')}
+					placeholder={filterPlaceholder ?? t('table.filterPlaceholder')}
 					aria-label={t('common.filter')}
 				/>
 			</label>
