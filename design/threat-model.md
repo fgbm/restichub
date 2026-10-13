@@ -21,7 +21,7 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 2. Agent and control plane.
 3. Agent and repository backend.
 4. Control plane and PostgreSQL.
-5. Tenant and tenant in one installation.
+5. Tenant and tenant in one installation. The account rows are installation-wide (ADR-0025).
 
 ## 3. Threats and controls
 
@@ -40,6 +40,9 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | T11 | Denial of service through enrollment. | Rate limit (FR-ID-05). | A distributed attack. Use a reverse proxy with rate limits. |
 | T12 | Option injection through step string fields. | Argument construction and validation (ADR-0021, AC-PR-08). | Unknown restic behavior in new step types. |
 | T13 | A forged signing key update. | Key update rules (FR-PR-11, AC-PR-09). | The first public key needs a trusted delivery path. |
+| T14 | A tenant Admin takes over an account of another tenant. | The account row is installation-wide and separate from the membership (ADR-0025). A tenant Admin cannot reset the password or change the display name of a shared account (HTTP 403 `shared_account`). It cannot attach an existing foreign account or disable the account. | None for an account with no membership in another tenant. |
+| T15 | Username enumeration through the account create endpoint. | The create endpoint needs the Admin role and has a rate limit. Invitations by email arrive in 1.0 (ADR-0025). | **Accepted.** The answer HTTP 409 `username_taken` reveals an existing name. A tenant Admin can probe names. |
+| T16 | Session fixation on the tenant switch. | The switch deletes the old session and rotates the cookie. The new session token is 256 random bits (ADR-0023, ADR-0025). | None. |
 
 ## 4. Recommendations for operators
 

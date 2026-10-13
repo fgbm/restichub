@@ -170,6 +170,11 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-UI-03 | FR-UI-04 | Change the language to English and to Russian. **Expected:** the i18n linter finds no text without a translation. | A |
 | AC-AU-01 | FR-AU-01 | Do each operation from the list in FR-AU-01. **Expected:** the audit log has a record with user, time, IP address and diff. The API has no endpoint that changes or deletes audit records. | A |
 | AC-AU-02 | Section 2 | Table-driven test "role × operation". **Expected:** a Viewer gets HTTP 403 for each write operation. An Operator cannot manage users or revoke agents. | A |
+| AC-AU-03 | FR-AU-04 | Sign in with the username and the password only. The account has one active membership. **Expected:** a session in that tenant. The sign-in screen has no tenant field. | A |
+| AC-AU-04 | FR-AU-04 | Sign in with the username and the password only. The account has two active memberships. **Expected:** a session in the last used tenant, or in the first by name when the account has no last used tenant. `GET /api/v1/auth/tenants` lists the two memberships only. | A |
+| AC-AU-05 | FR-AU-04 | Switch tenants with `POST /api/v1/auth/switch`. **Expected:** a new session in the target tenant, the old session is gone, the cookie rotates. The audit log holds `session_switch` in both tenants. A tenant without membership gives HTTP 403. | A |
+| AC-AU-06 | FR-AU-04 | Sign in when the account has no active membership (the memberships are absent, or their tenants are suspended or deleted). **Expected:** HTTP 401 `invalid_credentials`, with the same answer and a similar time as a wrong password. | S |
+| AC-AU-07 | FR-AU-04 | A tenant Admin resets the password or the display name of a shared account. It creates an account with a username that exists in another tenant. **Expected:** HTTP 403 `shared_account` for the first two calls, HTTP 409 `username_taken` for the create. | A |
 
 ## 13. Non-functional requirements
 

@@ -238,6 +238,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-AU-01 | Audit log: sign-in, configuration changes, run, cancellation, restore, delivery of secrets to agents, agent enrollment and revocation, remote installation. Each record has user, time, IP address and diff. | M |
 | FR-AU-02 | The audit log is append-only and protected by a hash chain. Export to syslog. | 1.0 |
 | FR-AU-03 | Authentication: local users with password, TOTP, OIDC, LDAP or Active Directory. | M (local), 1.0 (TOTP, OIDC), L (LDAP) |
+| FR-AU-04 | A user account is installation-wide. A user signs in with the username and the password only, without a tenant name, and switches between the tenants after the sign-in. | M |
 
 ## 4. Non-functional requirements
 

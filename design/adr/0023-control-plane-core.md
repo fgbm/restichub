@@ -1,6 +1,6 @@
 # ADR-0023: Control plane core: storage, authentication and secret format
 
-- Status: accepted
+- Status: partly superseded by ADR-0025 (installation-wide user accounts)
 - Date: 2026-10-12
 - Requirements: FR-TN-01..03, FR-TN-05, FR-RP-03, FR-RP-05, FR-AU-01, FR-AU-03
 
@@ -36,12 +36,16 @@ This record fixes the shape of the core once. Later work then does not change th
 
 ### Local authentication
 
+> Superseded by ADR-0025 for the account identity and the sign-in rate-limit keys.
+
 - The password hash is Argon2id (`argon2` crate, m = 19456 KiB, t = 2, p = 1, PHC string).
 - The minimum password length is 12.
 - Sign-in has a rate limit for each user and each source IP.
 - An unknown user and a wrong password give the same error and a similar time.
 
 ### Sessions
+
+> Superseded by ADR-0025 for the scope of a password change: the change is installation-wide and it ends the sessions in all tenants.
 
 - A session token is 256 random bits from the OS CSPRNG. The database keeps only the SHA-256 hash of the token.
 - The cookie is `__Host-restichub_session` with HttpOnly, Secure, SameSite=Strict and Path=/.
@@ -136,6 +140,8 @@ These notes also refine section Secrets. The record fixes the format of the encr
 - The delivery path reads the ciphertext of a secret and writes the `secret_delivered` audit record in one transaction. The caller must commit before it sends the value to the agent. A rollback removes the record, and the agent then does not receive the value. The control plane decrypts a secret with the key version that the row stores. A rotated tenant can then still deliver a secret that an older key version encrypted.
 
 These notes refine section Local authentication. Issue #18 puts them into the code.
+
+> Superseded by ADR-0025 for the rate-limit keys and the user administration rules.
 
 - The platform tenant holds the role `platform_admin` only (FR-TN-02). The roles Admin, Operator and Viewer apply in one tenant. Migration 0011 adds a check constraint to `memberships` and `api_tokens` for this rule. The API layer refuses the role too.
 - An actor cannot change, disable, delete or reset the password of a user whose role rank is above its own. An actor cannot grant a role above its own either.

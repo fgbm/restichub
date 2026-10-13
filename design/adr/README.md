@@ -28,5 +28,6 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0020](0020-replay-protection-job-journal.md) | Replay protection with a job journal | accepted |
 | [0021](0021-restic-argument-construction.md) | restic argument construction and validation | accepted |
 | [0022](0022-sftp-deferred-to-1-0.md) | SFTP is deferred to 1.0 | accepted |
-| [0023](0023-control-plane-core.md) | Control plane core: storage, authentication and secret format | accepted |
-| [0024](0024-single-tenant-mode.md) | Single-tenant mode | accepted |
+| [0023](0023-control-plane-core.md) | Control plane core: storage, authentication and secret format | partly superseded by ADR-0025 (installation-wide user accounts) |
+| [0024](0024-single-tenant-mode.md) | Single-tenant mode | partly superseded by ADR-0025 (installation-wide user accounts) |
+| [0025](0025-installation-wide-user-accounts.md) | Installation-wide user accounts | accepted |

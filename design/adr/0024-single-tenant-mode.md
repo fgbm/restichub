@@ -1,6 +1,6 @@
 # ADR-0024: Single-tenant mode
 
-- Status: accepted
+- Status: partly superseded by ADR-0025 (installation-wide user accounts)
 - Date: 2026-10-12
 - Requirements: FR-TN-01..06
 
@@ -11,6 +11,8 @@ Most installations serve one organization. The operator of such an installation 
 The multi-tenancy decision (ADR-0006) is expensive to change after the first migration. The mode must therefore not change the storage model.
 
 ## Decision
+
+> Superseded by ADR-0025 for the sign-in form: the sign-in asks for no tenant name in either mode.
 
 - The storage model does not change. Each table keeps `tenant_id`. Row-Level Security stays. ADR-0006 stays in force. The mode changes only the configuration, the API surface and the user interface.
 - The setting `tenancy.mode` (environment variable `RESTICHUB_TENANCY_MODE`) has the values `single` and `multi`. The default is `single`.
@@ -37,6 +39,8 @@ The multi-tenancy decision (ADR-0006) is expensive to change after the first mig
 ## Implementation notes
 
 These notes refine the decision. The decision itself does not change. Issue #30 puts them into the code.
+
+> Superseded by ADR-0025 for the sign-in field: in multi mode the sign-in no longer requires a tenant name.
 
 - The setting `tenancy.mode` (environment variable `RESTICHUB_TENANCY_MODE`) has the values `single` and `multi`. The default is `single`. The setting `tenancy.default_tenant` (environment variable `RESTICHUB_TENANCY_DEFAULT_TENANT`) names the tenant of single mode. The default is `default`. The name obeys the tenant name rule, so the reserved name `platform` is refused. The control plane validates both settings at start.
 - The mode lives in the process configuration only. It changes no table, no policy and no query. Row-Level Security and the tenant checks run in the same way in both modes.
