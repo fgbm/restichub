@@ -2733,3 +2733,100 @@ th[aria-sort='descending'] .th-btn {
 	height: auto;
 	max-height: 360px;
 }
+
+/* --------------------------------------- tenant switcher, settings sub-nav */
+
+.tenant-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	height: 26px;
+	padding: 0 var(--space-2);
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--color-text);
+	font: inherit;
+	font-weight: var(--fw-semibold);
+	white-space: nowrap;
+	cursor: pointer;
+}
+.tenant-switch:hover {
+	background: var(--color-hover);
+}
+.tenant-switch[aria-expanded='true'] {
+	background: var(--color-hover);
+}
+
+.menu-search {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	height: var(--hit-min);
+	margin: var(--space-1) var(--space-2);
+	padding: 0 var(--space-2);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius);
+	background: var(--color-input-bg);
+	color: var(--color-text-muted);
+}
+.menu-search:focus-within {
+	border-color: var(--color-focus);
+	box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+.menu-search input {
+	flex: 1 1 auto;
+	min-width: 0;
+	border: 0;
+	background: none;
+	outline: 0;
+	color: var(--color-text);
+	font-size: var(--fs-sm);
+}
+.menu-search input::placeholder {
+	color: var(--color-text-subtle);
+}
+
+.menu-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.menu-role {
+	color: var(--color-text-subtle);
+	font-size: var(--fs-xs);
+}
+.menu-check {
+	display: inline-flex;
+	justify-content: center;
+	width: 16px;
+	color: var(--color-accent);
+}
+
+.subnav .sidenav-group + .sidenav-group {
+	margin-top: var(--space-3);
+}
+
+.tooltip--left .tooltip__bubble {
+	bottom: auto;
+	top: 50%;
+	left: auto;
+	right: calc(100% + 10px);
+	transform: translateY(-50%);
+	width: max-content;
+	max-width: 260px;
+	white-space: normal;
+	text-align: center;
+	line-height: var(--lh-base);
+}
+.tooltip--left .tooltip__bubble::after {
+	top: 50%;
+	left: 100%;
+	bottom: auto;
+	transform: translateY(-50%);
+	border: 5px solid transparent;
+	border-top-color: transparent;
+	border-left-color: var(--color-text);
+}

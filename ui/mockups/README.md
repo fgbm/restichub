@@ -25,18 +25,27 @@ Open the pages through the server. A `file://` address does not load the icon sp
 | `principles.html` | The design principles and the color tokens. |
 | `components.html` | Every element in its states. |
 | `shell-a.html` | The Hosts page with the top tabs. |
-| `shell-b.html` | The Hosts page with the left sidebar. |
+| `tenant-switch.html` | The Hosts page with the tenant menu open. |
 | `hosts.html` | The Hosts list. |
 | `hosts-ru.html` | The Hosts list in Russian. |
 | `host.html` | The host detail. |
 | `job.html` | The job run. |
 | `repositories.html` | The repositories. |
 | `audit.html` | The audit log and the change panel. |
-| `users.html` | The users and the create dialog. |
-| `settings.html` | The settings and the danger zone. |
+| `users.html` | Settings, Access: the users and the create dialog. |
+| `api-tokens.html` | Settings, Access: the tokens and the value-once dialog. |
+| `secrets.html` | Settings, Access: the secret metadata and the replace dialog. |
+| `settings.html` | The tenant settings and the danger zone. |
 | `empty-first-run.html` | The Overview before the first host. |
 | `sign-in.html` | The sign-in card. |
 | `setup.html` | The first setup. |
+
+## Shell and tenant
+
+The screens use shell A: the top bar and the underline tabs under it.
+The tenant part of the breadcrumb is a button. The menu lists the tenants of the account.
+A switch shows the toast "Switched to name".
+Users, API tokens and secrets live in Settings, group Access.
 
 ## Theme
 
@@ -80,6 +89,8 @@ The third column tells if the element needs keyboard behavior, an ARIA role or a
 | Side panel | closed, open | Yes: a native `dialog` with a right edge. |
 | Underline tabs | active, inactive | Yes: arrow keys and a roving tab index. |
 | Breadcrumb | default, current | Yes: a `nav` with a label. |
+| Tenant switcher | closed, open, current tenant | Yes: a button with `aria-expanded`; the menu items are `menuitemradio`; arrow keys move, Escape closes. |
+| Tenant switcher menu | tenants with roles, filter, Platform entry | Yes: the current item carries `aria-checked`; the filter field has a name. |
 | Pagination | default, current, disabled | Yes: buttons with a name. |
 | Box row list | default, hover, selected | No. |
 | Data table | sortable, selected, empty, loading | Yes: `aria-sort` and a row name. |

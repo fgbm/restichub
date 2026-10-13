@@ -424,7 +424,7 @@ C:\Users\*\Documents</textarea>
 					<div class="demo-state">
 						<span class="demo-label">Breadcrumb</span>
 						<nav class="breadcrumb" aria-label="Breadcrumb">
-							<a href="#">acme</a><span class="breadcrumb-sep">/</span>
+							<button class="tenant-switch" aria-haspopup="true" aria-expanded="false">acme <svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg></button><span class="breadcrumb-sep">/</span>
 							<a href="#">Hosts</a><span class="breadcrumb-sep">/</span>
 							<span aria-current="page">win-fs01</span>
 						</nav>
@@ -435,6 +435,49 @@ C:\Users\*\Documents</textarea>
 							<button class="segmented-item" role="tab" aria-selected="true">Overview</button>
 							<button class="segmented-item" role="tab" aria-selected="false">Logs</button>
 							<button class="segmented-item" role="tab" aria-selected="false">Statistics</button>
+						</div>
+					</div>
+				</div>
+
+				<div class="section-head" style="margin-top: var(--space-6)">
+					<h3 class="section-title">Tenant switcher</h3>
+				</div>
+				<p class="section-sub" style="margin-bottom: var(--space-4)">The tenant part of the breadcrumb is a button. The menu lists the tenants of the account with the role next to each. The filter appears above seven tenants. The Platform entry appears for a Platform Admin only, after a divider.</p>
+				<div class="grid-3">
+					<div class="demo-cell">
+						<span class="demo-label">Closed</span>
+						<button class="tenant-switch" aria-haspopup="true" aria-expanded="false">acme <svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg></button>
+					</div>
+					<div class="demo-cell">
+						<span class="demo-label">Open, eight tenants, Platform Admin</span>
+						<button class="tenant-switch" aria-haspopup="true" aria-expanded="true">acme <svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg></button>
+						<div class="menu menu--left" style="position: static; display: block; min-width: 280px">
+							<div class="menu-section">
+								<div class="menu-label">Your tenants</div>
+								<label class="menu-search">
+									<svg class="icon icon--xs"><use href="icons.svg#i-search" /></svg>
+									<input type="search" placeholder="Filter tenants" />
+								</label>
+								<button class="menu-item" role="menuitemradio" aria-checked="true"><span class="menu-name">acme</span><span class="menu-role">Admin</span><span class="menu-check"><svg class="icon icon--xs"><use href="icons.svg#i-check" /></svg></span></button>
+								<button class="menu-item" role="menuitemradio" aria-checked="false"><span class="menu-name">globex</span><span class="menu-role">Operator</span><span class="menu-check"></span></button>
+								<button class="menu-item" role="menuitemradio" aria-checked="false"><span class="menu-name">initech</span><span class="menu-role">Viewer</span><span class="menu-check"></span></button>
+								<button class="menu-item" role="menuitemradio" aria-checked="false"><span class="menu-name">northwind</span><span class="menu-role">Admin</span><span class="menu-check"></span></button>
+								<button class="menu-item" role="menuitemradio" aria-checked="false"><span class="menu-name">umbrella</span><span class="menu-role">Viewer</span><span class="menu-check"></span></button>
+								<button class="menu-item" role="menuitemradio" aria-checked="false"><span class="menu-name">brightline</span><span class="menu-role">Operator</span><span class="menu-check"></span></button>
+								<button class="menu-item" role="menuitemradio" aria-checked="false"><span class="menu-name">redwood</span><span class="menu-role">Admin</span><span class="menu-check"></span></button>
+								<button class="menu-item" role="menuitemradio" aria-checked="false"><span class="menu-name">summit</span><span class="menu-role">Viewer</span><span class="menu-check"></span></button>
+							</div>
+							<div class="menu-section">
+								<button class="menu-item" role="menuitem"><svg class="icon"><use href="icons.svg#i-overview" /></svg> Platform</button>
+							</div>
+						</div>
+					</div>
+					<div class="demo-cell">
+						<span class="demo-label">After a switch</span>
+						<div class="toast toast--success">
+							<svg class="icon icon--lg toast-icon"><use href="icons.svg#i-check-circle" /></svg>
+							<div class="toast-body"><div class="toast-title">Switched to globex</div></div>
+							<button class="btn btn--icon btn--sm" aria-label="Dismiss" data-toast-close><svg class="icon icon--xs"><use href="icons.svg#i-x" /></svg></button>
 						</div>
 					</div>
 				</div>

@@ -147,7 +147,7 @@
 			var opener = event.target.closest('[data-open-dialog]');
 			if (opener) {
 				var dialog = document.getElementById(opener.getAttribute('data-open-dialog'));
-				if (dialog && dialog.showModal) dialog.showModal();
+				if (dialog && dialog.showModal && !dialog.open) dialog.showModal();
 				return;
 			}
 			var closer = event.target.closest('[data-close-dialog]');
@@ -179,6 +179,11 @@
 				var aside = document.getElementById(this.getAttribute('data-open-panel'));
 				if (aside) aside.setAttribute('data-open', 'true');
 			});
+		}
+		/* A dialog that shows a state opens on load. */
+		var autos = document.querySelectorAll('dialog[data-autodialog]');
+		for (var a = 0; a < autos.length; a++) {
+			if (autos[a].showModal) autos[a].showModal();
 		}
 	}
 
