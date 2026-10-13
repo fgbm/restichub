@@ -1,15 +1,24 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
-	import type { Agent, EnrollmentTokenCreated, ApiProblem } from '#lib/api/index.ts';
+	import type {
+		Agent,
+		EnrollmentToken,
+		EnrollmentTokenCreated,
+		ApiProblem
+	} from '#lib/api/index.ts';
 	import {
 		Alert,
+		Badge,
 		Button,
+		ConfirmDialog,
 		CopyField,
 		Dialog,
 		DropdownMenu,
 		EmptyState,
+		Icon,
 		PageHeader,
+		Panel,
 		StatusPill,
 		Table,
 		TextField
@@ -20,7 +29,11 @@
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
+	// The host name the control plane accepts (validate_display_name).
+	const HOSTNAME_MAX_LENGTH = 128;
+
 	let agents = $state<Agent[]>([]);
+	let enrollmentTokens = $state<EnrollmentToken[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
@@ -30,6 +43,17 @@
 	let createProblem = $state<ApiProblem | null>(null);
 	let labels = $state('');
 	let createdToken = $state<EnrollmentTokenCreated | null>(null);
+
+	let cancelTarget = $state<EnrollmentToken | null>(null);
+	let cancelOpen = $state(false);
+	let cancelling = $state(false);
+
+	let renameTarget = $state<Agent | null>(null);
+	let renameOpen = $state(false);
+	let renaming = $state(false);
+	let renameName = $state('');
+	let renameError = $state<string | null>(null);
+	let renameProblem = $state<ApiProblem | null>(null);
 
 	let revokeTarget = $state<Agent | null>(null);
 	let revokeOpen = $state(false);
@@ -43,6 +67,22 @@
 	});
 	const installCommand = $derived(
 		t('hosts.installPlaceholder', { url: origin, token: createdToken?.token ?? '<token>' })
+	);
+
+	// A token stays in the pending list only while it can still enroll a host (FR-ID-01).
+	const pending = $derived(
+		enrollmentTokens.filter(
+			(token) =>
+				!token.used_at && !token.revoked_at && new Date(token.expires_at).getTime() > Date.now()
+		)
+	);
+
+	const renameLength = $derived(Array.from(renameName.trim()).length);
+	const renameValid = $derived(renameLength >= 1 && renameLength <= HOSTNAME_MAX_LENGTH);
+	const renameFieldError = $derived(
+		renameLength > HOSTNAME_MAX_LENGTH
+			? t('hosts.renameTooLong')
+			: fieldError(renameProblem, 'hostname')
 	);
 
 	const columns = $derived<TableColumn<Agent>[]>([
@@ -72,6 +112,12 @@
 		return t(agent.status === 'revoked' ? 'hosts.status.revoked' : 'hosts.status.active');
 	}
 
+	// The token row shows the creator's name when the caller created it (getSession is the caller).
+	function createdByLabel(token: EnrollmentToken): string {
+		const user = getSession()?.user;
+		return user && user.id === token.created_by ? user.display_name : token.created_by;
+	}
+
 	const empty = $derived(!loading && !error && agents.length === 0);
 
 	function messageOf(problem: unknown): string {
@@ -83,7 +129,12 @@
 		loading = true;
 		error = null;
 		try {
-			agents = await service.listAgents();
+			const [agentList, tokenList] = await Promise.all([
+				service.listAgents(),
+				service.listEnrollmentTokens()
+			]);
+			agents = agentList;
+			enrollmentTokens = tokenList;
 		} catch (problem) {
 			error = messageOf(problem);
 		} finally {
@@ -114,6 +165,8 @@
 				labels: parsed.length > 0 ? parsed : undefined
 			});
 			pushToast('success', t('hosts.tokenCreated'));
+			// The new token shows in the pending list behind the dialog.
+			await load();
 		} catch (problem) {
 			createProblem = problem instanceof ApiError ? problem.problem : null;
 			createError = fieldError(createProblem, 'labels') ? null : messageOf(problem);
@@ -132,6 +185,56 @@
 	$effect(() => {
 		if (!addOpen) createdToken = null;
 	});
+
+	function openCancel(token: EnrollmentToken): void {
+		cancelTarget = token;
+		cancelOpen = true;
+	}
+
+	async function confirmCancel(): Promise<void> {
+		if (!cancelTarget) return;
+		cancelling = true;
+		try {
+			await service.revokeEnrollmentToken(cancelTarget.id);
+			pushToast('success', t('hosts.pending.cancelled'));
+			cancelOpen = false;
+			cancelTarget = null;
+			await load();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			cancelling = false;
+		}
+	}
+
+	function openRename(agent: Agent): void {
+		renameTarget = agent;
+		renameName = agent.hostname;
+		renameError = null;
+		renameProblem = null;
+		renameOpen = true;
+	}
+
+	async function renameHost(): Promise<void> {
+		if (!renameTarget || !renameValid) return;
+		renaming = true;
+		renameError = null;
+		renameProblem = null;
+		try {
+			await service.renameAgent(renameTarget.id, renameName.trim());
+			pushToast('success', t('hosts.renamed'));
+			renameOpen = false;
+			await load();
+		} catch (problem) {
+			renameProblem = problem instanceof ApiError ? problem.problem : null;
+			renameError =
+				renameLength > HOSTNAME_MAX_LENGTH || fieldError(renameProblem, 'hostname')
+					? null
+					: messageOf(problem);
+		} finally {
+			renaming = false;
+		}
+	}
 
 	async function confirmRevoke(): Promise<void> {
 		if (!revokeTarget) return;
@@ -197,6 +300,42 @@
 	{/if}
 </PageHeader>
 
+{#if pending.length > 0}
+	<div class="pending">
+		<Panel title={t('hosts.pending.title')} subtitle={t('hosts.pending.subtitle')} flush>
+			<ul class="pending__list">
+				{#each pending as token (token.id)}
+					<li class="pending__row">
+						<span class="pending__icon"><Icon name="key" /></span>
+						<span class="pending__body">
+							<span class="pending__head">
+								<span class="pending__prefix">{token.display_prefix}</span>
+								{#each token.labels as label (label)}
+									<Badge tone="neutral">{label}</Badge>
+								{/each}
+							</span>
+							<span class="pending__meta">
+								{t('hosts.pending.meta', {
+									name: createdByLabel(token),
+									created: relativeTime(token.created_at),
+									expires: relativeTime(token.expires_at)
+								})}
+							</span>
+						</span>
+						{#if canWrite}
+							<span class="pending__action">
+								<Button size="sm" onclick={() => openCancel(token)}>
+									{t('hosts.pending.cancel')}
+								</Button>
+							</span>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</Panel>
+	</div>
+{/if}
+
 {#if empty}
 	<EmptyState
 		icon="host"
@@ -225,9 +364,15 @@
 					label={t('hosts.moreActions', { name: agent.hostname })}
 					items={[
 						{
+							label: t('hosts.rename'),
+							icon: 'tag',
+							onSelect: () => openRename(agent)
+						},
+						{
 							label: t('hosts.revokeAgent'),
 							icon: 'octagon',
 							tone: 'danger',
+							separatorBefore: true,
 							onSelect: () => {
 								revokeTarget = agent;
 								revokeOpen = true;
@@ -277,6 +422,38 @@
 	{/snippet}
 </Dialog>
 
+<ConfirmDialog
+	bind:open={cancelOpen}
+	title={t('hosts.pending.cancelTitle')}
+	message={t('hosts.pending.cancelBody', { prefix: cancelTarget?.display_prefix ?? '' })}
+	confirmLabel={t('hosts.pending.cancel')}
+	cancelLabel={t('hosts.pending.keep')}
+	tone="danger"
+	loading={cancelling}
+	onConfirm={confirmCancel}
+/>
+
+<Dialog bind:open={renameOpen} size="sm" title={t('hosts.renameTitle')} onsubmit={renameHost}>
+	{#if renameError}
+		<Alert tone="danger" title={renameError} />
+	{/if}
+	<TextField
+		id="host-rename"
+		label={t('hosts.hostname')}
+		help={t('hosts.renameHint')}
+		error={renameFieldError}
+		bind:value={renameName}
+		maxlength={HOSTNAME_MAX_LENGTH}
+		required
+	/>
+	{#snippet footer()}
+		<Button onclick={() => (renameOpen = false)}>{t('common.cancel')}</Button>
+		<Button type="submit" variant="primary" loading={renaming} disabled={!renameValid}>
+			{t('hosts.rename')}
+		</Button>
+	{/snippet}
+</Dialog>
+
 <Dialog bind:open={revokeOpen} size="sm" icon="octagon" title={t('hosts.revokeTitle')}>
 	<p>
 		{t('hosts.revokeBody', { name: revokeTarget?.hostname ?? '' })}
@@ -308,5 +485,63 @@
 	.host__version {
 		font-family: var(--rh-font-mono);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	.pending {
+		margin-bottom: var(--rh-space-4);
+	}
+
+	.pending__list {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.pending__row {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-3);
+		padding: var(--rh-space-3) var(--rh-space-4);
+		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
+	}
+
+	.pending__row:first-child {
+		border-top: 0;
+	}
+
+	.pending__icon {
+		display: inline-flex;
+		flex: none;
+		width: 28px;
+		justify-content: center;
+		color: var(--rh-color-text-muted);
+	}
+
+	.pending__body {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-1);
+		min-width: 0;
+	}
+
+	.pending__head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.pending__prefix {
+		font-family: var(--rh-font-mono);
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.pending__meta {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.pending__action {
+		margin-left: auto;
 	}
 </style>

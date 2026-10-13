@@ -331,6 +331,20 @@ export const en = {
 	'hosts.tokenNote': 'The token works once and expires in one hour.',
 	'hosts.installCommand': 'Install command',
 	'hosts.installPlaceholder': 'restichub-agent register --url {url} --token {token}',
+	'hosts.pending.title': 'Pending registrations',
+	'hosts.pending.subtitle': 'Enrollment tokens that wait for a host.',
+	'hosts.pending.meta': 'Created by {name} · {created} · expires {expires}',
+	'hosts.pending.cancel': 'Cancel',
+	'hosts.pending.keep': 'Keep',
+	'hosts.pending.cancelTitle': 'Cancel the registration?',
+	'hosts.pending.cancelBody':
+		'This action revokes the enrollment token with the prefix "{prefix}". A host cannot register with it afterwards. Continue?',
+	'hosts.pending.cancelled': 'The registration is cancelled.',
+	'hosts.rename': 'Rename',
+	'hosts.renameTitle': 'Rename the host',
+	'hosts.renameHint': 'The host name holds 1 to 128 characters.',
+	'hosts.renameTooLong': 'The host name holds at most 128 characters.',
+	'hosts.renamed': 'The host is renamed.',
 
 	// Audit log
 	'audit.title': 'Audit log',

@@ -336,6 +336,20 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.tokenNote': 'Токен действует один раз и истекает через час.',
 	'hosts.installCommand': 'Команда установки',
 	'hosts.installPlaceholder': 'restichub-agent register --url {url} --token {token}',
+	'hosts.pending.title': 'Ожидают подключения',
+	'hosts.pending.subtitle': 'Токены регистрации, которые ждут хост.',
+	'hosts.pending.meta': 'Создан: {name} · {created} · истекает {expires}',
+	'hosts.pending.cancel': 'Отменить',
+	'hosts.pending.keep': 'Оставить',
+	'hosts.pending.cancelTitle': 'Отменить регистрацию?',
+	'hosts.pending.cancelBody':
+		'Это действие отзовёт токен регистрации с префиксом «{prefix}». Хост не сможет зарегистрироваться с ним. Продолжить?',
+	'hosts.pending.cancelled': 'Регистрация отменена.',
+	'hosts.rename': 'Переименовать',
+	'hosts.renameTitle': 'Переименовать хост',
+	'hosts.renameHint': 'Имя хоста содержит от 1 до 128 символов.',
+	'hosts.renameTooLong': 'Имя хоста содержит не более 128 символов.',
+	'hosts.renamed': 'Хост переименован.',
 
 	// Audit log
 	'audit.title': 'Журнал аудита',

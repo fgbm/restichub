@@ -30,3 +30,40 @@ test('the hosts screen creates an enrollment token and shows it once', async ({ 
 	);
 	await expect(page.getByText('The token works once and expires in one hour.')).toBeVisible();
 });
+
+test('a created registration appears pending and a cancel removes it', async ({ page }) => {
+	await signIn(page);
+	await page.getByRole('link', { name: 'Hosts' }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Hosts' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Add host' }).click();
+	await page.locator('#host-labels').fill('web');
+	await page.getByRole('button', { name: 'Create token' }).click();
+	await page.locator('.copy-field').first().waitFor();
+	await page.getByRole('button', { name: 'Done' }).click();
+
+	await expect(page.getByText('Pending registrations')).toBeVisible();
+	await expect(page.getByText('web')).toBeVisible();
+
+	await page.getByRole('button', { name: 'Cancel' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Cancel the registration?' });
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+	await expect(page.getByText('Pending registrations')).toBeHidden();
+});
+
+test('an Admin renames a host', async ({ page }) => {
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
+	await signIn(page);
+	await page.getByRole('link', { name: 'Hosts' }).click();
+	await page.getByText('win-fs01').waitFor();
+
+	await page.getByRole('button', { name: 'More actions for win-fs01' }).click();
+	await page.getByRole('menuitem', { name: 'Rename' }).click();
+
+	const dialog = page.getByRole('dialog', { name: 'Rename the host' });
+	await dialog.locator('#host-rename').fill('win-fs01-renamed');
+	await dialog.getByRole('button', { name: 'Rename' }).click();
+
+	await expect(page.getByText('win-fs01-renamed')).toBeVisible();
+});

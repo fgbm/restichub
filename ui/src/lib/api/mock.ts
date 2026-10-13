@@ -502,7 +502,8 @@ export class MockApiService {
 		request: CreateEnrollmentTokenRequest
 	): Promise<EnrollmentTokenCreated> {
 		const now = new Date();
-		const ttl = request.ttl_seconds ?? 900;
+		// ADR-0032: the default time to live is one hour.
+		const ttl = request.ttl_seconds ?? 3600;
 		const value = 're_EXAMPLEONLYVALUE00000000000000000000000000';
 		const prefix = value.slice(3, 11);
 		const created: EnrollmentTokenCreated = {
