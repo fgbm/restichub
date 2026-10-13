@@ -1,0 +1,356 @@
+//! The enrollment client of the agent (ADR-0026, FR-ID-02, ADR-0032).
+//!
+//! `register` builds an ECDSA P-256 key and a certificate signing request, sends them with the
+//! one-time token over HTTPS and reads the certificate, the CA chain and the signed job signing key
+//! set. The client verifies the control plane with the system roots or with the CA from `--ca-file`
+//! and never disables verification (ADR-0032).
+
+use std::path::Path;
+use std::sync::Arc;
+
+use anyhow::{Context, Result, bail};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use bytes::Bytes;
+use http_body_util::{BodyExt as _, Full};
+use hyper::header;
+use hyper_util::rt::TokioIo;
+use rustls::{ClientConfig, RootCertStore};
+use rustls_pki_types::{CertificateDer, ServerName};
+use serde::{Deserialize, Serialize};
+use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
+
+use crate::pem;
+
+/// The enrollment route of the agent listener (ADR-0026).
+pub const ENROLL_PATH: &str = "/agent/v1/enroll";
+
+/// Host details that the agent reports at enrollment (FR-IN-07).
+#[derive(Debug, Clone)]
+pub struct Facts {
+    pub hostname: String,
+    pub os: String,
+    pub arch: String,
+    pub agent_version: String,
+    pub restic_version: String,
+}
+
+/// The material that the control plane returns at enrollment (ADR-0026).
+#[derive(Debug)]
+pub struct Enrolled {
+    pub agent_id: String,
+    pub tenant_id: String,
+    pub certificate_der: Vec<u8>,
+    /// Issuing CA first, root last.
+    pub ca_chain_der: Vec<Vec<u8>>,
+    pub signing_key_update: Vec<u8>,
+    pub grpc_endpoint: Option<String>,
+}
+
+/// Speaks to the enrollment endpoint over verified HTTPS (ADR-0032).
+pub struct Client {
+    tls: Arc<ClientConfig>,
+}
+
+impl Client {
+    /// Builds the client. A `ca_file` replaces the system roots with the CA in the PEM file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the CA file or the system roots hold no usable certificate.
+    pub fn new(ca_file: Option<&Path>) -> Result<Self> {
+        // A single crypto provider keeps `ClientConfig::builder` deterministic.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let roots = match ca_file {
+            Some(path) => roots_from_file(path)?,
+            None => system_roots()?,
+        };
+        let tls = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        Ok(Self { tls: Arc::new(tls) })
+    }
+
+    /// Sends the certificate signing request and the token to the control plane (FR-IN-07).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on a network failure, a TLS failure, a refusal or a rate limit.
+    pub async fn enroll(
+        &self,
+        url: &str,
+        token: &str,
+        facts: &Facts,
+        csr_der: &[u8],
+    ) -> Result<Enrolled> {
+        let origin = Origin::parse(url)?;
+        let request = EnrollRequest {
+            token,
+            csr: STANDARD.encode(csr_der),
+            hostname: &facts.hostname,
+            os: &facts.os,
+            arch: &facts.arch,
+            agent_version: &facts.agent_version,
+            restic_version: &facts.restic_version,
+        };
+        let body = serde_json::to_vec(&request).context("cannot serialize the request")?;
+        let response = self.post(&origin, body).await?;
+        match response.status {
+            201 => parse_response(&response.body),
+            429 => bail!(
+                "the control plane is rate limiting the enrollment{}",
+                retry_suffix(response.retry_after)
+            ),
+            status => bail!(
+                "the control plane refused the enrollment: HTTP {status} {}",
+                describe_problem(&response.body)
+            ),
+        }
+    }
+
+    async fn post(&self, origin: &Origin, body: Vec<u8>) -> Result<HttpResponse> {
+        let tcp = TcpStream::connect((origin.host.as_str(), origin.port))
+            .await
+            .with_context(|| format!("cannot connect to {}:{}", origin.host, origin.port))?;
+        let connector = TlsConnector::from(self.tls.clone());
+        let server_name = ServerName::try_from(origin.host.clone()).map_err(|error| {
+            anyhow::anyhow!("`{}` is not a valid server name: {error}", origin.host)
+        })?;
+        let stream = connector
+            .connect(server_name, tcp)
+            .await
+            .context("the TLS handshake with the control plane failed")?;
+        let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+            .await
+            .context("cannot start the HTTP connection")?;
+        let task = tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let request = hyper::Request::builder()
+            .method(hyper::Method::POST)
+            .uri(ENROLL_PATH)
+            .header(header::HOST, &origin.authority)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json")
+            .body(Full::new(Bytes::from(body)))
+            .context("cannot build the request")?;
+        let response = sender
+            .send_request(request)
+            .await
+            .context("cannot send the request")?;
+        let status = response.status().as_u16();
+        let retry_after = response
+            .headers()
+            .get(header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .context("cannot read the response")?
+            .to_bytes()
+            .to_vec();
+        // The connection stays open after the response, so the task ends only when the sender drops.
+        drop(sender);
+        let _ = task.await;
+        Ok(HttpResponse {
+            status,
+            retry_after,
+            body,
+        })
+    }
+}
+
+struct HttpResponse {
+    status: u16,
+    retry_after: Option<u64>,
+    body: Vec<u8>,
+}
+
+#[derive(Serialize)]
+struct EnrollRequest<'a> {
+    token: &'a str,
+    csr: String,
+    hostname: &'a str,
+    os: &'a str,
+    arch: &'a str,
+    agent_version: &'a str,
+    restic_version: &'a str,
+}
+
+#[derive(Deserialize)]
+struct EnrollResponse {
+    agent_id: String,
+    tenant_id: String,
+    certificate: String,
+    ca_chain: Vec<String>,
+    signing_key_update: String,
+    grpc_endpoint: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Problem {
+    title: String,
+    #[serde(default)]
+    field: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+fn parse_response(body: &[u8]) -> Result<Enrolled> {
+    let response: EnrollResponse =
+        serde_json::from_slice(body).context("the enrollment response is not valid JSON")?;
+    let ca_chain_der = response
+        .ca_chain
+        .iter()
+        .map(|entry| {
+            STANDARD
+                .decode(entry)
+                .context("a chain entry is not base64")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Enrolled {
+        agent_id: response.agent_id,
+        tenant_id: response.tenant_id,
+        certificate_der: STANDARD
+            .decode(&response.certificate)
+            .context("the certificate is not base64")?,
+        ca_chain_der,
+        signing_key_update: STANDARD
+            .decode(&response.signing_key_update)
+            .context("the key update is not base64")?,
+        grpc_endpoint: response.grpc_endpoint,
+    })
+}
+
+fn describe_problem(body: &[u8]) -> String {
+    let Ok(problem) = serde_json::from_slice::<Problem>(body) else {
+        return "with an unreadable body".to_owned();
+    };
+    match (&problem.field, &problem.reason) {
+        (Some(field), Some(reason)) => format!("{} ({field}: {reason})", problem.title),
+        _ => problem.title,
+    }
+}
+
+fn retry_suffix(retry_after: Option<u64>) -> String {
+    match retry_after {
+        Some(seconds) => format!("; retry after {seconds} s"),
+        None => String::new(),
+    }
+}
+
+fn roots_from_file(path: &Path) -> Result<RootCertStore> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read the CA file {}", path.display()))?;
+    let mut roots = RootCertStore::empty();
+    let mut added = 0;
+    for der in pem::decode_all(&text)? {
+        roots
+            .add(CertificateDer::from(der))
+            .context("the CA file holds a bad certificate")?;
+        added += 1;
+    }
+    if added == 0 {
+        bail!("the CA file {} holds no certificate", path.display());
+    }
+    Ok(roots)
+}
+
+fn system_roots() -> Result<RootCertStore> {
+    let result = rustls_native_certs::load_native_certs();
+    let mut roots = RootCertStore::empty();
+    for cert in result.certs {
+        let _ = roots.add(cert);
+    }
+    if roots.is_empty() {
+        bail!("the system holds no trusted root certificate; give --ca-file");
+    }
+    Ok(roots)
+}
+
+struct Origin {
+    host: String,
+    port: u16,
+    authority: String,
+}
+
+impl Origin {
+    fn parse(url: &str) -> Result<Self> {
+        let rest = url
+            .strip_prefix("https://")
+            .context("the URL must start with `https://`")?;
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+        if authority.is_empty() {
+            bail!("the control plane URL holds no host");
+        }
+        let (host, port) = split_authority(authority)?;
+        Ok(Self {
+            host,
+            port,
+            authority: authority.to_owned(),
+        })
+    }
+}
+
+fn split_authority(authority: &str) -> Result<(String, u16)> {
+    if let Some(rest) = authority.strip_prefix('[') {
+        let (host, after) = rest
+            .split_once(']')
+            .context("the IPv6 address is not closed")?;
+        let port = match after.strip_prefix(':') {
+            Some(port) => port.parse().context("the port is not a number")?,
+            None => 443,
+        };
+        return Ok((host.to_owned(), port));
+    }
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !host.contains(':') => Ok((
+            host.to_owned(),
+            port.parse().context("the port is not a number")?,
+        )),
+        _ => Ok((authority.to_owned(), 443)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn an_https_url_gives_the_host_and_the_port() {
+        let origin = Origin::parse("https://cp.example:8443").expect("parse");
+        assert_eq!(origin.host, "cp.example");
+        assert_eq!(origin.port, 8443);
+        assert_eq!(origin.authority, "cp.example:8443");
+    }
+
+    #[test]
+    fn a_url_without_a_port_uses_443() {
+        let origin = Origin::parse("https://cp.example").expect("parse");
+        assert_eq!(origin.port, 443);
+    }
+
+    #[test]
+    fn a_path_is_ignored() {
+        let origin = Origin::parse("https://cp.example:8443/base").expect("parse");
+        assert_eq!(origin.host, "cp.example");
+        assert_eq!(origin.port, 8443);
+    }
+
+    #[test]
+    fn an_ipv6_url_is_parsed() {
+        let origin = Origin::parse("https://[2001:db8::1]:8443").expect("parse");
+        assert_eq!(origin.host, "2001:db8::1");
+        assert_eq!(origin.port, 8443);
+    }
+
+    #[test]
+    fn a_plain_http_url_is_refused() {
+        assert!(Origin::parse("http://cp.example").is_err());
+    }
+}
