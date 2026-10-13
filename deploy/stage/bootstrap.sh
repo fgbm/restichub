@@ -11,7 +11,7 @@ target="${1:-.env}"
 
 if [ -e "$target" ]; then
 	echo "$target already exists; remove it to generate a new one" >&2
-	exit 1
+	exit 0
 fi
 
 # 32 random bytes in standard base64. The key encryption key is decoded with the
