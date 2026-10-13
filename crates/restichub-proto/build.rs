@@ -5,7 +5,6 @@
 
 const PROTO_FILES: &[&str] = &[
     "restichub/agent/v1/control.proto",
-    "restichub/agent/v1/enrollment.proto",
     "restichub/agent/v1/job.proto",
     "restichub/agent/v1/results.proto",
     "restichub/agent/v1/steps.proto",
@@ -19,7 +18,6 @@ const SECRET_MESSAGES: &[&str] = &[
     ".restichub.agent.v1.S3Credentials",
     ".restichub.agent.v1.RestCredentials",
     ".restichub.agent.v1.SftpCredentials",
-    ".restichub.agent.v1.EnrollRequest",
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -8,7 +8,7 @@
 use std::fmt;
 
 use crate::agent::v1::{
-    EnrollRequest, RepositoryAccess, RestCredentials, S3Credentials, SftpCredentials, SignedJob,
+    RepositoryAccess, RestCredentials, S3Credentials, SftpCredentials, SignedJob,
     repository_access::BackendCredentials,
 };
 
@@ -81,20 +81,6 @@ impl fmt::Debug for SftpCredentials {
     }
 }
 
-impl fmt::Debug for EnrollRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("EnrollRequest")
-            .field("token", &MASK)
-            .field("csr_der_bytes", &self.csr_der.len())
-            .field("hostname", &self.hostname)
-            .field("os", &self.os)
-            .field("arch", &self.arch)
-            .field("agent_version", &self.agent_version)
-            .finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,15 +121,5 @@ mod tests {
             })),
         };
         assert!(!format!("{control:?}").contains(CANARY));
-
-        let enroll = EnrollRequest {
-            token: CANARY.to_owned(),
-            csr_der: vec![1, 2, 3],
-            hostname: "host".to_owned(),
-            os: "linux".to_owned(),
-            arch: "x86_64".to_owned(),
-            agent_version: "0.0.0".to_owned(),
-        };
-        assert!(!format!("{enroll:?}").contains(CANARY));
     }
 }
