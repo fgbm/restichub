@@ -19,6 +19,7 @@
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { clearSession, getSession, setSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import Icon from './ui/Icon.svelte';
 
 	let open = $state(false);
 	let tenants = $state<TenantAccess[]>([]);
@@ -165,7 +166,7 @@
 		onkeydown={onKeydown}
 	>
 		<span class="switcher__name">{session?.tenant?.name ?? t('topbar.noTenant')}</span>
-		<span class="switcher__caret" aria-hidden="true">▾</span>
+		<Icon name="chevron-down" size="xs" />
 	</button>
 
 	{#if open}
@@ -180,14 +181,16 @@
 		>
 			<p class="switcher__group-title">{t('topbar.yourTenants')}</p>
 			{#if showFilter}
-				<input
-					bind:this={filterInput}
-					class="switcher__filter"
-					type="search"
-					placeholder={t('topbar.filterTenants')}
-					aria-label={t('topbar.filterTenants')}
-					bind:value={filter}
-				/>
+				<label class="switcher__filter">
+					<Icon name="search" size="xs" />
+					<input
+						bind:this={filterInput}
+						type="search"
+						placeholder={t('topbar.filterTenants')}
+						aria-label={t('topbar.filterTenants')}
+						bind:value={filter}
+					/>
+				</label>
 			{/if}
 			{#if regular.length === 0}
 				<p class="switcher__empty">{t('topbar.noOrganizations')}</p>
@@ -205,8 +208,8 @@
 				>
 					<span class="switcher__item-name">{tenant.name}</span>
 					<span class="switcher__item-role">{t(roleKeys[tenant.role])}</span>
-					<span class="switcher__item-check" aria-hidden="true">
-						{tenant.id === currentId ? '✓' : ''}
+					<span class="switcher__item-check">
+						{#if tenant.id === currentId}<Icon name="check" size="xs" />{/if}
 					</span>
 				</button>
 			{/each}
@@ -217,80 +220,110 @@
 <style>
 	.switcher {
 		position: relative;
+		display: inline-flex;
 	}
 
 	.switcher__button {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
 		gap: var(--rh-space-1);
-		padding: var(--rh-space-1) var(--rh-space-2);
-		border: var(--rh-border-width) solid transparent;
+		height: 26px;
+		padding: 0 var(--rh-space-2);
+		border: 0;
 		border-radius: var(--rh-radius-sm);
 		background: transparent;
 		color: var(--rh-color-text);
-		font-size: var(--rh-font-size-sm);
+		font: inherit;
+		font-weight: var(--rh-font-weight-semibold);
+		white-space: nowrap;
 		cursor: pointer;
 	}
 
-	.switcher__button:hover {
+	.switcher__button:hover,
+	.switcher__button[aria-expanded='true'] {
 		background-color: var(--rh-color-hover);
-	}
-
-	.switcher__name {
-		font-weight: var(--rh-font-weight-medium);
 	}
 
 	.switcher__menu {
 		position: absolute;
 		left: 0;
-		top: calc(100% + var(--rh-space-1));
-		min-width: 16rem;
+		top: calc(100% + 6px);
+		min-width: 280px;
 		max-height: 24rem;
 		overflow-y: auto;
-		padding: var(--rh-space-2);
+		padding: var(--rh-space-1);
 		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
 		background-color: var(--rh-color-surface);
-		box-shadow: var(--rh-shadow-overlay);
-		z-index: var(--rh-z-topbar);
+		box-shadow: var(--rh-shadow-menu);
+		z-index: var(--rh-z-overlay);
+	}
+
+	.switcher__menu:focus-visible {
+		outline: none;
 	}
 
 	.switcher__empty {
-		margin: var(--rh-space-2);
+		margin: 0;
+		padding: var(--rh-space-2);
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 	}
 
 	.switcher__group-title {
-		margin: var(--rh-space-2) var(--rh-space-2) var(--rh-space-1);
-		font-size: var(--rh-font-size-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		margin: 0;
+		padding: var(--rh-space-1) var(--rh-space-2);
 		color: var(--rh-color-text-subtle);
+		font-size: var(--rh-font-size-xs);
+		font-weight: var(--rh-font-weight-semibold);
 	}
 
 	.switcher__filter {
-		width: 100%;
-		margin-bottom: var(--rh-space-1);
-		padding: var(--rh-space-1) var(--rh-space-2);
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+		height: var(--rh-control-height);
+		margin: var(--rh-space-1) var(--rh-space-2);
+		padding: 0 var(--rh-space-2);
 		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-sm);
-		background-color: var(--rh-color-surface);
+		border-radius: var(--rh-radius-md);
+		background-color: var(--rh-color-input-bg);
+		color: var(--rh-color-text-muted);
+	}
+
+	.switcher__filter:focus-within {
+		border-color: var(--rh-color-focus);
+		box-shadow: 0 0 0 3px var(--rh-color-focus-ring);
+	}
+
+	.switcher__filter input {
+		flex: 1 1 auto;
+		min-width: 0;
+		border: 0;
+		background: none;
+		outline: 0;
 		color: var(--rh-color-text);
+		font-family: inherit;
 		font-size: var(--rh-font-size-sm);
+	}
+
+	.switcher__filter input::placeholder {
+		color: var(--rh-color-text-subtle);
 	}
 
 	.switcher__item {
 		display: flex;
 		align-items: center;
-		gap: var(--rh-space-2);
+		gap: var(--rh-space-3);
 		width: 100%;
-		padding: var(--rh-space-1) var(--rh-space-2);
+		height: var(--rh-control-height);
+		padding: 0 var(--rh-space-2);
 		border: 0;
 		border-radius: var(--rh-radius-sm);
-		background: transparent;
+		background: none;
 		color: var(--rh-color-text);
-		font-size: var(--rh-font-size-sm);
+		font-family: inherit;
+		font-size: var(--rh-font-size-base);
 		text-align: left;
 		cursor: pointer;
 	}
@@ -301,16 +334,22 @@
 	}
 
 	.switcher__item-name {
-		flex: 1;
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.switcher__item-role {
-		color: var(--rh-color-text-muted);
+		color: var(--rh-color-text-subtle);
 		font-size: var(--rh-font-size-xs);
 	}
 
 	.switcher__item-check {
-		width: 1ch;
+		display: inline-flex;
+		justify-content: center;
+		width: 16px;
 		color: var(--rh-color-accent);
 	}
 </style>

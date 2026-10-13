@@ -92,12 +92,22 @@ test('the icons and an open dialog need no inline style', async ({ page }) => {
 	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 	await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
 
-	// The overview draws the icons as inline SVG elements, not as a sprite reference.
-	await expect(page.locator('svg.icon[data-icon="host"]')).toBeVisible();
+	// The shell and the overview draw the icons as inline SVG elements, not as a sprite reference.
+	const nav = page.getByRole('navigation', { name: 'Primary navigation' });
+	await expect(nav.locator('svg.icon[data-icon="overview"]')).toBeVisible();
+	await expect(nav.locator('svg.icon[data-icon="shield"]')).toBeVisible();
+	await expect(page.locator('main svg.icon[data-icon="host"]')).toBeVisible();
+
+	// The organization switcher marks the current organization with an icon.
+	await page.getByRole('button', { name: 'Switch organization' }).click();
+	await expect(
+		page.getByRole('menuitemradio', { name: /acme/ }).locator('svg.icon[data-icon="check"]')
+	).toBeVisible();
+	await page.keyboard.press('Escape');
 
 	await page
 		.getByRole('navigation', { name: 'Primary navigation' })
-		.getByRole('link', { name: 'Audit log' })
+		.getByRole('link', { name: 'Audit', exact: true })
 		.click();
 	await page.getByRole('button', { name: 'Details' }).first().click();
 	const panel = page.getByRole('dialog');
@@ -106,10 +116,16 @@ test('the icons and an open dialog need no inline style', async ({ page }) => {
 	await page.keyboard.press('Escape');
 	await expect(panel).toBeHidden();
 
+	// The API tokens screen lives under Settings, Access.
 	await page
 		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Settings' })
+		.click();
+	await page
+		.getByRole('navigation', { name: 'Settings sections' })
 		.getByRole('link', { name: 'API tokens' })
 		.click();
+	await expect(page).toHaveURL(/\/settings\/access\/api-tokens$/);
 	await page.getByRole('button', { name: 'Create token' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Create an API token' });
 	await expect(dialog).toHaveClass(/rh-dialog/);
@@ -117,4 +133,35 @@ test('the icons and an open dialog need no inline style', async ({ page }) => {
 
 	expect(await pageViolations(page)).toEqual([]);
 	expect(consoleViolations).toEqual([]);
+});
+
+// The mock keeps the session in memory, so the test follows a link instead of a page load.
+async function follow(page: Page, href: string): Promise<void> {
+	await page.evaluate((target) => {
+		const link = document.createElement('a');
+		link.href = target;
+		link.id = 'e2e-old-link';
+		link.textContent = target;
+		document.body.append(link);
+	}, href);
+	const link = page.locator('#e2e-old-link');
+	await link.click();
+	await link.evaluate((element) => element.remove());
+}
+
+test('the old users and API tokens addresses open the settings screens', async ({ page }) => {
+	await page.goto('/sign-in');
+	await page.locator('#signin-username').fill('admin');
+	await page.locator('#signin-password').fill('secret');
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+	await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
+
+	await follow(page, '/api-tokens');
+	await expect(page).toHaveURL(/\/settings\/access\/api-tokens$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'API tokens' })).toBeVisible();
+
+	await follow(page, '/users');
+	await expect(page).toHaveURL(/\/settings\/access\/users$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
+	await expect(page).toHaveTitle('Users · ResticHub');
 });

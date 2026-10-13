@@ -132,6 +132,10 @@
 	}
 
 	:global(.rh-dialog__title .icon) {
+		color: var(--rh-color-text-muted);
+	}
+
+	:global(.rh-dialog__title .icon[data-icon='octagon']) {
 		color: var(--rh-color-danger);
 	}
 

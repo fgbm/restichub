@@ -79,8 +79,10 @@ describe('the tenant switcher', () => {
 
 		const current = screen.getByRole('menuitemradio', { name: /acme/ });
 		expect(current).toHaveAttribute('aria-checked', 'true');
+		expect(current.querySelector('svg[data-icon="check"]')).not.toBeNull();
 		const other = screen.getByRole('menuitemradio', { name: /globex/ });
 		expect(other).toHaveAttribute('aria-checked', 'false');
+		expect(other.querySelector('svg[data-icon="check"]')).toBeNull();
 	});
 
 	it('ac_au_12_shows_the_empty_state_when_the_account_holds_no_membership', async () => {

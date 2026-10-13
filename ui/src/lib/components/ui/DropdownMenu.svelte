@@ -10,6 +10,8 @@
 		align = 'start',
 		icon,
 		label,
+		menuClass = '',
+		header,
 		children
 	}: {
 		items?: MenuItem[];
@@ -17,6 +19,10 @@
 		/** Without children the trigger is a small icon button and needs `label`. */
 		icon?: IconName;
 		label?: string;
+		/** Extra class on the floating menu, for example a wider minimum width. */
+		menuClass?: string;
+		/** Static content above the items, such as the account name. */
+		header?: Snippet;
 		children?: Snippet;
 	} = $props();
 
@@ -53,13 +59,22 @@
 		{@render children?.()}
 	</Primitive.Trigger>
 	<Primitive.Portal>
-		<Primitive.Content class="rh-menu" {align} sideOffset={6}>
+		<Primitive.Content class="rh-menu {menuClass}" {align} sideOffset={6}>
+			{#if header}
+				<div class="rh-menu__head">{@render header()}</div>
+				<Primitive.Separator class="rh-menu__separator" />
+			{/if}
 			{#each blocks as block, blockIndex (blockIndex)}
 				{#if block.group}
 					{#if block.items[0].separatorBefore}
 						<Primitive.Separator class="rh-menu__separator" />
 					{/if}
 					<Primitive.RadioGroup value={checkedValue(block)} onValueChange={() => {}}>
+						{#if block.items[0].groupLabel}
+							<Primitive.GroupHeading class="rh-menu__label">
+								{block.items[0].groupLabel}
+							</Primitive.GroupHeading>
+						{/if}
 						{#each block.items as item (item.label)}
 							<Primitive.RadioItem
 								class="rh-menu__item"
@@ -179,6 +194,17 @@
 		display: inline-flex;
 		margin-left: auto;
 		color: var(--rh-color-accent);
+	}
+
+	:global(.rh-menu__head) {
+		padding: var(--rh-space-2);
+	}
+
+	:global(.rh-menu__label) {
+		padding: var(--rh-space-1) var(--rh-space-2);
+		color: var(--rh-color-text-subtle);
+		font-size: var(--rh-font-size-xs);
+		font-weight: var(--rh-font-weight-semibold);
 	}
 
 	:global(.rh-menu__separator) {

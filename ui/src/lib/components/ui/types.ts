@@ -28,6 +28,8 @@ export interface MenuItem {
 	separatorBefore?: boolean;
 	/** Items with the same group are exclusive; `checked` marks the current one. */
 	group?: string;
+	/** Heading of the group; read from the first item of the group. */
+	groupLabel?: string;
 	checked?: boolean;
 }
 

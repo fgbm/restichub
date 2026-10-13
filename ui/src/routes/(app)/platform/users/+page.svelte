@@ -7,6 +7,7 @@
 		Button,
 		Checkbox,
 		Dialog,
+		DropdownMenu,
 		PageHeader,
 		PasswordField,
 		Select,
@@ -139,6 +140,7 @@
 	}
 
 	async function createUser(): Promise<void> {
+		if (!newUsername || !newDisplayName || newPassword.length < 12) return;
 		creating = true;
 		createError = null;
 		createProblem = null;
@@ -231,7 +233,7 @@
 	}
 
 	async function grantRight(): Promise<void> {
-		if (!grantUser) return;
+		if (!grantUser || grantPassword.length < 12) return;
 		granting = true;
 		grantError = null;
 		try {
@@ -280,38 +282,64 @@
 	<title>{t('platformUsers.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<PageHeader title={t('platformUsers.title')} description={t('platformUsers.description')}>
-	<Button variant="primary" onclick={openCreate}>{t('platformUsers.create')}</Button>
+<PageHeader
+	title={t('platformUsers.title')}
+	description={t('platformUsers.description')}
+	count={loading ? undefined : accounts.length}
+	bordered
+>
+	<Button variant="primary" icon="plus" onclick={openCreate}>{t('platformUsers.create')}</Button>
 </PageHeader>
 
-<Table {columns} rows={accounts} {loading} {error} rowKey={(user) => user.id}>
-	{#snippet rowActions(user)}
-		<Button size="sm" variant="ghost" onclick={() => openManage(user)}>
-			{t('platformUsers.memberships')}
-		</Button>
-		<Button
-			size="sm"
-			variant="ghost"
-			loading={busyKey === `right:${user.id}`}
-			title={user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin')}
-			onclick={() => (user.platform_admin ? revokeRight(user) : openGrant(user))}
-		>
-			{user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin')}
-		</Button>
-		<Button
-			size="sm"
-			variant="ghost"
-			loading={busyKey === `disable:${user.id}`}
-			onclick={() => toggleDisabled(user)}
-		>
-			{user.disabled ? t('users.enable') : t('users.disable')}
-		</Button>
-	{/snippet}
-</Table>
+<div class="accounts">
+	<Table
+		{columns}
+		rows={accounts}
+		{loading}
+		{error}
+		rowKey={(user) => user.id}
+		filterPlaceholder={t('users.searchPlaceholder')}
+	>
+		{#snippet rowActions(user)}
+			<span class="row-actions">
+				<Button
+					size="sm"
+					icon="users"
+					title={t('platformUsers.memberships')}
+					aria-label={t('platformUsers.membershipsFor', { name: user.username })}
+					onclick={() => openManage(user)}
+				/>
+				<DropdownMenu
+					icon="more"
+					align="end"
+					label={t('users.moreActions', { name: user.username })}
+					items={[
+						{
+							label: user.platform_admin
+								? t('platformUsers.revokeAdmin')
+								: t('platformUsers.grantAdmin'),
+							icon: 'shield',
+							disabled: busyKey !== null,
+							onSelect: () => (user.platform_admin ? revokeRight(user) : openGrant(user))
+						},
+						{
+							label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
+							icon: 'octagon',
+							tone: 'danger',
+							separatorBefore: true,
+							disabled: busyKey !== null,
+							onSelect: () => toggleDisabled(user)
+						}
+					]}
+				/>
+			</span>
+		{/snippet}
+	</Table>
+</div>
 
-<Dialog bind:open={createOpen} title={t('platformUsers.createTitle')}>
+<Dialog bind:open={createOpen} title={t('platformUsers.createTitle')} onsubmit={createUser}>
 	{#if createError}
-		<Alert tone="danger" title={createError} />
+		<Alert variant="inline" tone="danger" title={createError} />
 	{/if}
 	<TextField
 		id="platform-user-username"
@@ -339,13 +367,12 @@
 		type="email"
 		autocomplete="off"
 	/>
-	<TextField
+	<PasswordField
 		id="platform-user-password"
-		label={t('setup.password')}
+		label={t('users.initialPassword')}
 		help={t('setup.passwordHint')}
 		error={fieldError(createProblem, 'password')}
 		bind:value={newPassword}
-		type="password"
 		autocomplete="new-password"
 		required
 	/>
@@ -371,17 +398,17 @@
 	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
 		<Button
+			type="submit"
 			variant="primary"
 			loading={creating}
 			disabled={!newUsername || !newDisplayName || newPassword.length < 12}
-			onclick={createUser}
 		>
-			{t('common.create')}
+			{t('platformUsers.create')}
 		</Button>
 	{/snippet}
 </Dialog>
 
-<Dialog bind:open={manageOpen} title={manageUser?.username ?? ''}>
+<Dialog bind:open={manageOpen} size="lg" icon="users" title={manageUser?.username ?? ''}>
 	{#if manageUser}
 		<h3>{t('platformUsers.memberships')}</h3>
 		{#if manageUser.memberships.length === 0}
@@ -438,9 +465,14 @@
 	{/if}
 </Dialog>
 
-<Dialog bind:open={grantOpen} title={t('platformUsers.grantTitle')}>
+<Dialog
+	bind:open={grantOpen}
+	icon="shield"
+	title={t('platformUsers.grantTitle')}
+	onsubmit={grantRight}
+>
 	{#if grantError}
-		<Alert tone="danger" title={grantError} />
+		<Alert variant="inline" tone="danger" title={grantError} />
 	{/if}
 	<p>{t('platformUsers.grantHint', { name: grantUser?.username ?? '' })}</p>
 	<PasswordField
@@ -453,18 +485,22 @@
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (grantOpen = false)}>{t('common.cancel')}</Button>
-		<Button
-			variant="primary"
-			loading={granting}
-			disabled={grantPassword.length < 12}
-			onclick={grantRight}
-		>
+		<Button type="submit" variant="primary" loading={granting} disabled={grantPassword.length < 12}>
 			{t('platformUsers.grantAdmin')}
 		</Button>
 	{/snippet}
 </Dialog>
 
 <style>
+	.accounts {
+		margin-top: var(--rh-space-4);
+	}
+
+	.row-actions {
+		display: inline-flex;
+		gap: var(--rh-space-1);
+	}
+
 	.membership {
 		display: flex;
 		align-items: flex-end;
