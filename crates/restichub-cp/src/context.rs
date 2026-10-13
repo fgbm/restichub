@@ -1,7 +1,8 @@
 //! The request context of an authenticated request (ADR-0023, section Roles).
 //!
 //! The extractor [`RequestContext`] authenticates a request from the session cookie or from the
-//! `Authorization: Bearer` header. It builds the tenant, the actor, the role and the session.
+//! `Authorization: Bearer` header. It builds the tenant, the actor, the role, the session and the
+//! source IP of the request.
 //!
 //! A request that holds a session cookie and a bearer token at the same time gives HTTP 400
 //! `ambiguous_credentials`. A request with no credential gives HTTP 401 `unauthenticated`.
@@ -9,68 +10,22 @@
 //! A cookie-authenticated unsafe method needs the header `X-ResticHub-CSRF: 1`. A bearer-token
 //! request does not need it.
 //!
-//! The module also holds the authorization table "operation to minimum role" and the
-//! [`ROUTE_OPERATIONS`] table. The router and the AC-AU-02 test share the table.
+//! The module also holds the authorization table "operation to minimum role". The routes table of
+//! [`crate::routes`] refers to an [`Operation`], and the AC-AU-02 test reads the same table.
+
+use std::net::IpAddr;
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
-use restichub_db::audit::Actor;
-use restichub_db::{SessionId, TenantId, api_tokens, auth, memberships, sessions, tenants, users};
+use restichub_db::audit::{Actor, AuditAction, AuditEvent};
+use restichub_db::{
+    Role, SessionId, TenantId, TenantTx, api_tokens, auth, memberships, sessions, tenants, users,
+};
 
+use crate::client_ip::ClientIp;
 use crate::error::ApiError;
-use crate::server::{AppState, request_id_of};
+use crate::server::AppState;
 use crate::token;
-
-/// The role of an authenticated actor (requirements section 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    /// The Platform Admin manages tenants.
-    PlatformAdmin,
-    /// The Admin manages one tenant.
-    Admin,
-    /// The Operator runs jobs.
-    Operator,
-    /// The Viewer reads data.
-    Viewer,
-}
-
-impl Role {
-    /// Returns the stable name of the role.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PlatformAdmin => "platform_admin",
-            Self::Admin => "admin",
-            Self::Operator => "operator",
-            Self::Viewer => "viewer",
-        }
-    }
-
-    /// Parses the stable name of a role.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "platform_admin" => Some(Self::PlatformAdmin),
-            "admin" => Some(Self::Admin),
-            "operator" => Some(Self::Operator),
-            "viewer" => Some(Self::Viewer),
-            _ => None,
-        }
-    }
-
-    /// Returns the rank of the role. A higher rank includes the lower roles.
-    pub fn rank(self) -> u8 {
-        match self {
-            Self::PlatformAdmin => 4,
-            Self::Admin => 3,
-            Self::Operator => 2,
-            Self::Viewer => 1,
-        }
-    }
-
-    /// Returns true if the role includes the minimum role.
-    pub fn allows(self, minimum: Self) -> bool {
-        self.rank() >= minimum.rank()
-    }
-}
 
 /// An operation of the API.
 ///
@@ -106,25 +61,6 @@ pub enum Operation {
 }
 
 impl Operation {
-    /// Returns the stable name of the operation.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::AuditRead => "audit.read",
-            Self::PlatformAuditRead => "platform.audit.read",
-            Self::PlatformTenantsRead => "platform.tenants.read",
-            Self::PlatformTenantsWrite => "platform.tenants.write",
-            Self::AuthMe => "auth.me",
-            Self::AuthSignOut => "auth.sign_out",
-            Self::AuthPasswordChange => "auth.password",
-            Self::UsersRead => "users.read",
-            Self::UsersWrite => "users.write",
-            Self::ApiTokensRead => "api_tokens.read",
-            Self::ApiTokensWrite => "api_tokens.write",
-            Self::SecretsRead => "secrets.read",
-            Self::SecretsWrite => "secrets.write",
-        }
-    }
-
     /// Returns true if the operation acts on the platform.
     pub fn is_platform(self) -> bool {
         matches!(
@@ -171,21 +107,17 @@ pub fn minimum_role(operation: Operation) -> Role {
 /// - The role `platform_admin` is valid in the platform tenant only.
 /// - An actor cannot grant a role above its own. A token cannot create a token with a higher role
 ///   than its own, and a user cannot either.
-pub fn allowed_role(
-    context: &RequestContext,
-    value: &str,
-    request_id: &str,
-) -> Result<Role, ApiError> {
-    let role = Role::parse(value).ok_or_else(|| ApiError::invalid_argument(request_id))?;
+pub fn allowed_role(context: &RequestContext, value: &str) -> Result<Role, ApiError> {
+    let role = Role::parse(value).ok_or_else(|| ApiError::invalid_argument("role"))?;
     let platform = context.tenant_id == restichub_db::PLATFORM_TENANT_ID;
     if platform && role != Role::PlatformAdmin {
-        return Err(ApiError::forbidden(request_id));
+        return Err(ApiError::forbidden());
     }
     if !platform && role == Role::PlatformAdmin {
-        return Err(ApiError::forbidden(request_id));
+        return Err(ApiError::forbidden());
     }
     if !context.role.allows(role) {
-        return Err(ApiError::forbidden(request_id));
+        return Err(ApiError::forbidden());
     }
     Ok(role)
 }
@@ -195,12 +127,10 @@ pub fn allowed_role(
 /// An actor cannot change, disable, delete or reset the password of a user with a higher role.
 pub fn ensure_target_not_above_actor(
     context: &RequestContext,
-    target_role: &str,
-    request_id: &str,
+    target_role: Role,
 ) -> Result<(), ApiError> {
-    let target = Role::parse(target_role).ok_or_else(|| ApiError::internal_error(request_id))?;
-    if !context.role.allows(target) {
-        return Err(ApiError::forbidden(request_id));
+    if !context.role.allows(target_role) {
+        return Err(ApiError::forbidden());
     }
     Ok(())
 }
@@ -214,180 +144,7 @@ pub enum Access {
     Protected(Operation),
 }
 
-/// One route and its access rule.
-#[derive(Debug, Clone, Copy)]
-pub struct RouteOperation {
-    /// The HTTP method in lower case, as the OpenAPI document holds it.
-    pub method: &'static str,
-    /// The path template, as the OpenAPI document holds it.
-    pub path: &'static str,
-    /// The access rule.
-    pub access: Access,
-}
-
-/// The operation of each route.
-///
-/// The router and the AC-AU-02 test share the table. Each OpenAPI operation has exactly one entry.
-/// The public operations are listed here as [`Access::Public`].
-pub const ROUTE_OPERATIONS: &[RouteOperation] = &[
-    RouteOperation {
-        method: "get",
-        path: "/healthz",
-        access: Access::Public,
-    },
-    RouteOperation {
-        method: "get",
-        path: "/readyz",
-        access: Access::Public,
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/openapi.json",
-        access: Access::Public,
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/auth/sign-in",
-        access: Access::Public,
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/auth/sign-out",
-        access: Access::Protected(Operation::AuthSignOut),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/auth/me",
-        access: Access::Protected(Operation::AuthMe),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/auth/password",
-        access: Access::Protected(Operation::AuthPasswordChange),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/setup",
-        access: Access::Public,
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/setup/status",
-        access: Access::Public,
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/audit",
-        access: Access::Protected(Operation::AuditRead),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/platform/audit",
-        access: Access::Protected(Operation::PlatformAuditRead),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/platform/tenants",
-        access: Access::Protected(Operation::PlatformTenantsRead),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/platform/tenants",
-        access: Access::Protected(Operation::PlatformTenantsWrite),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/platform/tenants/{id}",
-        access: Access::Protected(Operation::PlatformTenantsRead),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/platform/tenants/{id}/suspend",
-        access: Access::Protected(Operation::PlatformTenantsWrite),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/platform/tenants/{id}/resume",
-        access: Access::Protected(Operation::PlatformTenantsWrite),
-    },
-    RouteOperation {
-        method: "delete",
-        path: "/api/v1/platform/tenants/{id}",
-        access: Access::Protected(Operation::PlatformTenantsWrite),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/users",
-        access: Access::Protected(Operation::UsersRead),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/users",
-        access: Access::Protected(Operation::UsersWrite),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/users/{id}",
-        access: Access::Protected(Operation::UsersRead),
-    },
-    RouteOperation {
-        method: "patch",
-        path: "/api/v1/users/{id}",
-        access: Access::Protected(Operation::UsersWrite),
-    },
-    RouteOperation {
-        method: "delete",
-        path: "/api/v1/users/{id}",
-        access: Access::Protected(Operation::UsersWrite),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/users/{id}/password",
-        access: Access::Protected(Operation::UsersWrite),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/api-tokens",
-        access: Access::Protected(Operation::ApiTokensRead),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/api-tokens",
-        access: Access::Protected(Operation::ApiTokensWrite),
-    },
-    RouteOperation {
-        method: "delete",
-        path: "/api/v1/api-tokens/{id}",
-        access: Access::Protected(Operation::ApiTokensWrite),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/secrets",
-        access: Access::Protected(Operation::SecretsRead),
-    },
-    RouteOperation {
-        method: "post",
-        path: "/api/v1/secrets",
-        access: Access::Protected(Operation::SecretsWrite),
-    },
-    RouteOperation {
-        method: "get",
-        path: "/api/v1/secrets/{id}",
-        access: Access::Protected(Operation::SecretsRead),
-    },
-    RouteOperation {
-        method: "put",
-        path: "/api/v1/secrets/{id}/value",
-        access: Access::Protected(Operation::SecretsWrite),
-    },
-    RouteOperation {
-        method: "delete",
-        path: "/api/v1/secrets/{id}",
-        access: Access::Protected(Operation::SecretsWrite),
-    },
-];
-
-/// The tenant, the actor, the role and the session of a request.
+/// The tenant, the actor, the role, the session and the source IP of a request.
 #[derive(Debug, Clone)]
 pub struct RequestContext {
     /// The tenant of the request.
@@ -398,16 +155,19 @@ pub struct RequestContext {
     pub role: Role,
     /// The session of the request. It is absent for an API token.
     pub session_id: Option<SessionId>,
+    /// The source IP address of the request.
+    pub source_ip: Option<IpAddr>,
 }
 
 impl RequestContext {
-    /// Creates a request context.
+    /// Creates a request context with no session and no source IP.
     pub fn new(tenant_id: TenantId, actor: Actor, role: Role) -> Self {
         Self {
             tenant_id,
             actor,
             role,
             session_id: None,
+            source_ip: None,
         }
     }
 
@@ -415,18 +175,46 @@ impl RequestContext {
     ///
     /// A platform operation needs the platform tenant too. A tenant-only operation is refused in
     /// the platform tenant.
-    pub fn authorize(&self, operation: Operation, request_id: &str) -> Result<(), ApiError> {
+    pub fn authorize(&self, operation: Operation) -> Result<(), ApiError> {
         if operation.is_platform() && self.tenant_id != restichub_db::PLATFORM_TENANT_ID {
-            return Err(ApiError::forbidden(request_id));
+            return Err(ApiError::forbidden());
         }
         if operation.is_tenant_only() && self.tenant_id == restichub_db::PLATFORM_TENANT_ID {
-            return Err(ApiError::forbidden(request_id));
+            return Err(ApiError::forbidden());
         }
         if self.role.allows(minimum_role(operation)) {
             Ok(())
         } else {
-            Err(ApiError::forbidden(request_id))
+            Err(ApiError::forbidden())
         }
+    }
+
+    /// Builds an audit event with the actor and the source IP of the request.
+    pub fn audit_event(
+        &self,
+        action: AuditAction,
+        object_type: &str,
+        object_id: uuid::Uuid,
+    ) -> AuditEvent {
+        let mut event = AuditEvent::new(action, object_type);
+        event.actor = self.actor.clone();
+        event.source_ip = self.source_ip;
+        event.object_id = Some(object_id);
+        event
+    }
+
+    /// Opens a tenant transaction for the context, runs the closure and commits.
+    ///
+    /// A failure of the closure rolls the transaction back.
+    pub async fn tenant_tx<T>(
+        &self,
+        state: &AppState,
+        f: impl AsyncFnOnce(&mut TenantTx<'_>) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
+        let mut tx = state.db().begin_tenant(self.tenant_id).await?;
+        let value = f(&mut tx).await?;
+        tx.commit().await?;
+        Ok(value)
     }
 }
 
@@ -437,146 +225,112 @@ impl FromRequestParts<AppState> for RequestContext {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let request_id = request_id_of(parts);
+        let client = ClientIp::from_request_parts(parts, state).await?;
         let name = token::session_cookie_name(state.auth().config.insecure_cookies);
         let cookie = token::session_cookie(&parts.headers, name);
         let bearer = token::bearer_token(&parts.headers);
         match (cookie, bearer) {
-            (Some(_), Some(_)) => Err(ApiError::ambiguous_credentials(&request_id)),
+            (Some(_), Some(_)) => Err(ApiError::ambiguous_credentials()),
             (Some(value), None) => {
-                let context = authenticate_session(state, &value, &request_id).await?;
+                let mut context = authenticate_session(state, &value).await?;
                 // A cookie-authenticated unsafe method needs the CSRF header.
                 if token::is_unsafe_method(&parts.method) && !token::csrf_ok(&parts.headers) {
-                    return Err(ApiError::csrf_required(&request_id));
+                    return Err(ApiError::csrf_required());
                 }
+                context.source_ip = Some(client.0);
                 Ok(context)
             }
-            (None, Some(value)) => authenticate_bearer(state, &value, &request_id).await,
-            (None, None) => Err(ApiError::unauthenticated(&request_id)),
+            (None, Some(value)) => {
+                let mut context = authenticate_bearer(state, &value).await?;
+                context.source_ip = Some(client.0);
+                Ok(context)
+            }
+            (None, None) => Err(ApiError::unauthenticated()),
         }
     }
 }
 
 /// Authenticates a request from a session cookie value.
-async fn authenticate_session(
-    state: &AppState,
-    value: &str,
-    request_id: &str,
-) -> Result<RequestContext, ApiError> {
+async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestContext, ApiError> {
     let hash = token::hash_token(value);
-    let lookup = auth::find_session(state.db(), &hash)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
+    let lookup = auth::find_session(state.db(), &hash).await?;
     let Some(lookup) = lookup else {
-        return Err(ApiError::unauthenticated(request_id));
+        return Err(ApiError::unauthenticated());
     };
     let now = state.auth().clock.now();
     if lookup.expires_at <= now {
-        tracing::debug!(request_id = %request_id, "the session is past its absolute lifetime");
-        return Err(ApiError::unauthenticated(request_id));
+        return Err(ApiError::unauthenticated());
     }
     let idle_deadline = lookup.last_seen_at + state.auth().config.session_idle;
     if idle_deadline <= now {
-        tracing::debug!(request_id = %request_id, "the session is idle");
-        return Err(ApiError::unauthenticated(request_id));
+        return Err(ApiError::unauthenticated());
     }
-    let mut tx = state
-        .db()
-        .begin_tenant(lookup.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
-    let tenant = tenants::get(&mut tx, lookup.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
-    if tenant.is_none_or(|tenant| tenant.status != "active") {
-        tracing::debug!(request_id = %request_id, "the tenant is not active");
-        return Err(ApiError::unauthenticated(request_id));
+    let mut tx = state.db().begin_tenant(lookup.tenant_id).await?;
+    let tenant = tenants::get(&mut tx, lookup.tenant_id).await?;
+    if tenant.is_none_or(|tenant| tenant.status != restichub_db::TenantStatus::Active) {
+        return Err(ApiError::unauthenticated());
     }
-    let user = users::get(&mut tx, lookup.user_id)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
+    let user = users::get(&mut tx, lookup.user_id).await?;
     let Some(user) = user else {
-        return Err(ApiError::unauthenticated(request_id));
+        return Err(ApiError::unauthenticated());
     };
     if user.disabled {
-        tracing::debug!(request_id = %request_id, "the user is disabled");
-        return Err(ApiError::unauthenticated(request_id));
+        return Err(ApiError::unauthenticated());
     }
-    let role = memberships::role_of(&mut tx, lookup.user_id)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
-    let Some(role) = role.and_then(|role| Role::parse(&role)) else {
-        return Err(ApiError::unauthenticated(request_id));
+    let role = memberships::role_of(&mut tx, lookup.user_id).await?;
+    let Some(role) = role else {
+        return Err(ApiError::unauthenticated());
     };
-    sessions::touch(&mut tx, lookup.session_id, now)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
+    sessions::touch(&mut tx, lookup.session_id, now).await?;
+    tx.commit().await?;
     Ok(RequestContext {
         tenant_id: lookup.tenant_id,
         actor: Actor::User(lookup.user_id),
         role,
         session_id: Some(lookup.session_id),
+        source_ip: None,
     })
 }
 
 /// Authenticates a request from a bearer token value.
-async fn authenticate_bearer(
-    state: &AppState,
-    value: &str,
-    request_id: &str,
-) -> Result<RequestContext, ApiError> {
+async fn authenticate_bearer(state: &AppState, value: &str) -> Result<RequestContext, ApiError> {
     let hash = token::hash_token(value);
-    let lookup = auth::find_api_token(state.db(), &hash)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
+    let lookup = auth::find_api_token(state.db(), &hash).await?;
     let Some(lookup) = lookup else {
-        return Err(ApiError::unauthenticated(request_id));
+        return Err(ApiError::unauthenticated());
     };
     let now = state.auth().clock.now();
     if lookup.revoked_at.is_some() {
-        return Err(ApiError::unauthenticated(request_id));
+        return Err(ApiError::unauthenticated());
     }
     if lookup.expires_at.is_some_and(|expires| expires <= now) {
-        return Err(ApiError::unauthenticated(request_id));
+        return Err(ApiError::unauthenticated());
     }
-    let mut tx = state
-        .db()
-        .begin_tenant(lookup.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
-    let tenant = tenants::get(&mut tx, lookup.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
-    if tenant.is_none_or(|tenant| tenant.status != "active") {
-        return Err(ApiError::unauthenticated(request_id));
+    let mut tx = state.db().begin_tenant(lookup.tenant_id).await?;
+    let tenant = tenants::get(&mut tx, lookup.tenant_id).await?;
+    if tenant.is_none_or(|tenant| tenant.status != restichub_db::TenantStatus::Active) {
+        return Err(ApiError::unauthenticated());
     }
-    let Some(role) = Role::parse(&lookup.role) else {
-        return Err(ApiError::unauthenticated(request_id));
-    };
-    api_tokens::touch(&mut tx, lookup.token_id, now)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
+    let role = lookup.role;
+    api_tokens::touch(&mut tx, lookup.token_id, now).await?;
+    tx.commit().await?;
     Ok(RequestContext {
         tenant_id: lookup.tenant_id,
         actor: Actor::ApiToken(lookup.token_id),
         role,
         session_id: None,
+        source_ip: None,
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use restichub_db::Role;
     use restichub_db::TenantId;
     use restichub_db::audit::Actor;
     use uuid::Uuid;
 
-    use super::{RequestContext, Role, ensure_target_not_above_actor};
+    use super::{RequestContext, ensure_target_not_above_actor};
 
     /// Builds a request context with a role.
     fn context(role: Role) -> RequestContext {
@@ -585,16 +339,9 @@ mod tests {
 
     #[test]
     fn an_actor_cannot_touch_a_higher_role() {
-        assert!(ensure_target_not_above_actor(&context(Role::Admin), "admin", "r").is_ok());
-        assert!(ensure_target_not_above_actor(&context(Role::Admin), "viewer", "r").is_ok());
-        assert!(
-            ensure_target_not_above_actor(&context(Role::Admin), "platform_admin", "r").is_err()
-        );
-        assert!(ensure_target_not_above_actor(&context(Role::Viewer), "operator", "r").is_err());
-    }
-
-    #[test]
-    fn an_unknown_target_role_is_refused() {
-        assert!(ensure_target_not_above_actor(&context(Role::Admin), "nope", "r").is_err());
+        assert!(ensure_target_not_above_actor(&context(Role::Admin), Role::Admin).is_ok());
+        assert!(ensure_target_not_above_actor(&context(Role::Admin), Role::Viewer).is_ok());
+        assert!(ensure_target_not_above_actor(&context(Role::Admin), Role::PlatformAdmin).is_err());
+        assert!(ensure_target_not_above_actor(&context(Role::Viewer), Role::Operator).is_err());
     }
 }

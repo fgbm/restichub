@@ -517,7 +517,7 @@ async fn an_admin_password_reset_kills_the_sessions_of_the_user() {
 
     // The membership is unchanged.
     let role = common::role_of(db.database(), tenant, user).await;
-    assert_eq!(role.as_deref(), Some("viewer"));
+    assert_eq!(role, Some(restichub_db::Role::Viewer));
 
     db.cleanup().await;
 }

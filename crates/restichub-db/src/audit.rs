@@ -22,6 +22,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::enums::ActorType;
 use crate::ids::{ApiTokenId, AuditLogId, SecretId, TenantId, UserId};
 use crate::tx::{PlatformTx, TenantTx};
 
@@ -66,10 +67,10 @@ impl Actor {
     /// Returns the stored value of the actor type.
     pub fn actor_type(&self) -> &str {
         match self {
-            Self::User(_) => "user",
-            Self::ApiToken(_) => "api_token",
-            Self::Agent(_) => "agent",
-            Self::System => "system",
+            Self::User(_) => ActorType::User.as_str(),
+            Self::ApiToken(_) => ActorType::ApiToken.as_str(),
+            Self::Agent(_) => ActorType::Agent.as_str(),
+            Self::System => ActorType::System.as_str(),
             Self::Unknown { actor_type, .. } => actor_type,
         }
     }
@@ -90,12 +91,14 @@ impl Actor {
     /// The function keeps an unknown type or a missing id as [`Actor::Unknown`]. A list therefore
     /// never fails on a row of a newer schema.
     fn from_parts(actor_type: String, actor_id: Option<Uuid>) -> Self {
-        let known = match actor_type.as_str() {
-            "system" => Some(Self::System),
-            "user" => actor_id.map(|id| Self::User(UserId::from_uuid(id))),
-            "api_token" => actor_id.map(|id| Self::ApiToken(ApiTokenId::from_uuid(id))),
-            "agent" => actor_id.map(Self::Agent),
-            _ => None,
+        let known = match ActorType::parse(&actor_type) {
+            Some(ActorType::System) => Some(Self::System),
+            Some(ActorType::User) => actor_id.map(|id| Self::User(UserId::from_uuid(id))),
+            Some(ActorType::ApiToken) => {
+                actor_id.map(|id| Self::ApiToken(ApiTokenId::from_uuid(id)))
+            }
+            Some(ActorType::Agent) => actor_id.map(Self::Agent),
+            None => None,
         };
         known.unwrap_or(Self::Unknown {
             actor_type,
@@ -232,6 +235,75 @@ impl AuditAction {
     /// Builds the action from a stored string. The function keeps an unknown string.
     fn from_db(value: String) -> Self {
         Self::parse(&value).unwrap_or(Self::Unknown(value))
+    }
+
+    /// Returns the known actions, in the stored order.
+    ///
+    /// The list excludes [`AuditAction::Unknown`]. The OpenAPI schema and the audit query use it.
+    pub fn known() -> &'static [Self] {
+        &[
+            Self::SignIn,
+            Self::SignInFailed,
+            Self::SignOut,
+            Self::ConfigCreate,
+            Self::ConfigUpdate,
+            Self::ConfigDelete,
+            Self::JobRun,
+            Self::JobCancel,
+            Self::RestoreStart,
+            Self::SecretDelivered,
+            Self::AgentEnrolled,
+            Self::AgentRevoked,
+            Self::RemoteInstall,
+            Self::TenantCreate,
+            Self::TenantSuspend,
+            Self::TenantResume,
+            Self::TenantDelete,
+            Self::UserCreate,
+            Self::UserUpdate,
+            Self::UserDelete,
+            Self::ApiTokenCreate,
+            Self::ApiTokenRevoke,
+            Self::SecretCreate,
+            Self::SecretReplace,
+            Self::SecretDelete,
+        ]
+    }
+}
+
+impl serde::Serialize for AuditAction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AuditAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).ok_or_else(|| serde::de::Error::custom("the audit action is not known"))
+    }
+}
+
+impl utoipa::PartialSchema for AuditAction {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        use utoipa::openapi::ObjectBuilder;
+        use utoipa::openapi::schema::Type;
+        ObjectBuilder::new()
+            .schema_type(Type::String)
+            .enum_values(Some(
+                Self::known()
+                    .iter()
+                    .map(|action| serde_json::Value::String(action.as_str().to_owned()))
+                    .collect::<Vec<_>>(),
+            ))
+            .build()
+            .into()
+    }
+}
+
+impl utoipa::ToSchema for AuditAction {
+    fn name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("AuditAction")
     }
 }
 

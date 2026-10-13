@@ -6,6 +6,7 @@
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::enums::Role;
 use crate::ids::UserId;
 use crate::tx::TenantTx;
 
@@ -15,12 +16,12 @@ pub struct Membership {
     /// The identifier of the user.
     pub user_id: UserId,
     /// The role of the user in the tenant.
-    pub role: String,
+    pub role: Role,
 }
 
 /// Returns the role of a user in the tenant of the transaction.
-pub async fn role_of(tx: &mut TenantTx<'_>, user_id: UserId) -> Result<Option<String>, DbError> {
-    let row = sqlx::query_as::<_, (String,)>("SELECT role FROM memberships WHERE user_id = $1")
+pub async fn role_of(tx: &mut TenantTx<'_>, user_id: UserId) -> Result<Option<Role>, DbError> {
+    let row = sqlx::query_as::<_, (Role,)>("SELECT role FROM memberships WHERE user_id = $1")
         .bind(user_id)
         .fetch_optional(tx.as_conn())
         .await
@@ -31,14 +32,14 @@ pub async fn role_of(tx: &mut TenantTx<'_>, user_id: UserId) -> Result<Option<St
 /// Sets the role of a user in the tenant of the transaction.
 ///
 /// The function inserts the membership or replaces its role.
-pub async fn set_role(tx: &mut TenantTx<'_>, user_id: UserId, role: &str) -> Result<(), DbError> {
+pub async fn set_role(tx: &mut TenantTx<'_>, user_id: UserId, role: Role) -> Result<(), DbError> {
     sqlx::query(
         "INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, $3) \
          ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role",
     )
     .bind(tx.tenant())
     .bind(user_id)
-    .bind(role)
+    .bind(role.as_str())
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -47,7 +48,7 @@ pub async fn set_role(tx: &mut TenantTx<'_>, user_id: UserId, role: &str) -> Res
 
 /// Lists the memberships of the tenant of the transaction.
 pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Membership>, DbError> {
-    let rows = sqlx::query_as::<_, (Uuid, String)>("SELECT user_id, role FROM memberships")
+    let rows = sqlx::query_as::<_, (Uuid, Role)>("SELECT user_id, role FROM memberships")
         .fetch_all(tx.as_conn())
         .await
         .map_err(DbError::Query)?;

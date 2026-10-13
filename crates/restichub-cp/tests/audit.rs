@@ -11,7 +11,7 @@ use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use restichub_cp::audit::AuditService;
-use restichub_cp::server::{AUDIT_PLATFORM_PATH, AUDIT_TENANT_PATH, AppState, router};
+use restichub_cp::server::{AppState, router};
 use restichub_db::audit::{self, Actor, AuditAction, AuditEvent, AuditFilter, AuditPage};
 use restichub_db::test_util::{TestDatabase, test_database};
 use restichub_db::{
@@ -25,6 +25,11 @@ use uuid::Uuid;
 
 /// The plaintext marker that must never appear in an audit row.
 const CANARY: &str = "canary-secret-value";
+
+/// The path of the tenant audit endpoint.
+const AUDIT_TENANT_PATH: &str = "/api/v1/audit";
+/// The path of the platform audit endpoint.
+const AUDIT_PLATFORM_PATH: &str = "/api/v1/platform/audit";
 
 /// The socket peer of a test request.
 fn peer() -> ConnectInfo<std::net::SocketAddr> {
@@ -84,7 +89,12 @@ async fn sign_in(
         },
     )
     .await?;
-    memberships::set_role(&mut tx, user, role).await?;
+    memberships::set_role(
+        &mut tx,
+        user,
+        restichub_db::Role::parse(role).ok_or("the role is known")?,
+    )
+    .await?;
     let value = restichub_cp::token::random_token()?;
     let hash = restichub_cp::token::hash_token(&value);
     let now = OffsetDateTime::now_utc();
@@ -171,13 +181,11 @@ async fn ac_au_01_audit_routes_refuse_a_mutation() -> Result<(), Box<dyn std::er
 #[tokio::test]
 async fn the_audit_endpoint_rejects_an_unauthenticated_request()
 -> Result<(), Box<dyn std::error::Error>> {
-    let response = lazy_app()?
-        .oneshot(
-            Request::builder()
-                .uri(AUDIT_TENANT_PATH)
-                .body(Body::empty())?,
-        )
-        .await?;
+    let mut request = Request::builder()
+        .uri(AUDIT_TENANT_PATH)
+        .body(Body::empty())?;
+    request.extensions_mut().insert(peer());
+    let response = lazy_app()?.oneshot(request).await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let content_type = response
         .headers()

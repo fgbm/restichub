@@ -1,12 +1,12 @@
 //! AC-TN-01: a cross-tenant object identifier returns 404 (issue #18).
 //!
-//! The test is table-driven. It reads [`ROUTE_OPERATIONS`] and covers every route with an `{id}`
+//! The test is table-driven. It reads [`ROUTES`] and covers every route with an `{id}`
 //! placeholder. A new `{id}` route without a fixture stops the test.
 
 mod common;
 
 use axum::http::StatusCode;
-use restichub_cp::context::ROUTE_OPERATIONS;
+use restichub_cp::routes::ROUTES;
 use serde_json::json;
 
 use common::{
@@ -67,7 +67,7 @@ async fn ac_tn_01_api_cross_tenant_ids_return_404() {
     let app = app(db.database());
 
     // Every route with an `{id}` placeholder has a fixture, and the other way round.
-    let id_routes: Vec<(String, String)> = ROUTE_OPERATIONS
+    let id_routes: Vec<(String, String)> = ROUTES
         .iter()
         .filter(|route| route.path.contains("{id}"))
         .map(|route| (route.method.to_owned(), route.path.to_owned()))

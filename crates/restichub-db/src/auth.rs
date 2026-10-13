@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::Database;
 use crate::DbError;
+use crate::enums::{Role, TenantStatus};
 use crate::ids::{ApiTokenId, SessionId, TenantId, UserId};
 
 /// A tenant found by name.
@@ -19,8 +20,8 @@ use crate::ids::{ApiTokenId, SessionId, TenantId, UserId};
 pub struct TenantLookup {
     /// The identifier of the tenant.
     pub id: TenantId,
-    /// The status: `active`, `suspended` or `deleted`.
-    pub status: String,
+    /// The status of the tenant.
+    pub status: TenantStatus,
 }
 
 /// A session found by token hash.
@@ -46,7 +47,7 @@ pub struct ApiTokenLookup {
     /// The identifier of the token.
     pub token_id: ApiTokenId,
     /// The role of the token.
-    pub role: String,
+    pub role: Role,
     /// The optional expiry time.
     pub expires_at: Option<OffsetDateTime>,
     /// The revocation time. A revoked token is refused.
@@ -55,11 +56,12 @@ pub struct ApiTokenLookup {
 
 /// Finds a tenant by name. The comparison ignores the letter case.
 pub async fn find_tenant(db: &Database, name: &str) -> Result<Option<TenantLookup>, DbError> {
-    let row = sqlx::query_as::<_, (Uuid, String)>("SELECT id, status FROM auth_find_tenant($1)")
-        .bind(name)
-        .fetch_optional(db.pool())
-        .await
-        .map_err(DbError::Query)?;
+    let row =
+        sqlx::query_as::<_, (Uuid, TenantStatus)>("SELECT id, status FROM auth_find_tenant($1)")
+            .bind(name)
+            .fetch_optional(db.pool())
+            .await
+            .map_err(DbError::Query)?;
     Ok(row.map(|(id, status)| TenantLookup {
         id: TenantId::from_uuid(id),
         status,
@@ -99,7 +101,7 @@ pub async fn find_api_token(
         (
             Uuid,
             Uuid,
-            String,
+            Role,
             Option<OffsetDateTime>,
             Option<OffsetDateTime>,
         ),

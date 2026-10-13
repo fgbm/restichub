@@ -10,6 +10,7 @@
 use axum::Json;
 use axum::extract::{FromRequestParts, Query, State};
 use axum::http::request::Parts;
+use restichub_db::ActorType;
 use restichub_db::DbError;
 use restichub_db::audit as repo;
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, AuditFilter, AuditPage, AuditRecord};
@@ -20,10 +21,9 @@ use time::format_description::well_known::Rfc3339;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use crate::client_ip::ClientIp;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
-use crate::server::{AppState, RequestIdHeader, request_id_of};
+use crate::server::AppState;
 
 /// The highest number of records of the audit API.
 const MAX_PAGE_LIMIT: i64 = repo::MAX_PAGE_LIMIT;
@@ -79,7 +79,7 @@ pub struct AuditItem {
     /// The source IP address.
     pub source_ip: Option<String>,
     /// The action.
-    pub action: String,
+    pub action: AuditAction,
     /// The object type.
     pub object_type: String,
     /// The object identifier.
@@ -98,7 +98,7 @@ impl From<&AuditRecord> for AuditItem {
             actor_type: record.actor.actor_type().to_owned(),
             actor_id: record.actor.actor_id().map(|id| id.to_string()),
             source_ip: record.source_ip.map(|ip| ip.to_string()),
-            action: record.action.as_str().to_owned(),
+            action: record.action.clone(),
             object_type: record.object_type.clone(),
             object_id: record.object_id.map(|id| id.to_string()),
             diff: record.diff.clone(),
@@ -173,16 +173,15 @@ impl AuditQuery {
         let Some(actor_type) = self.actor_type.as_deref() else {
             return Ok(None);
         };
-        let actor = match actor_type {
-            "system" => Actor::System,
-            "user" => Actor::User(restichub_db::UserId::from_uuid(parse_uuid(
+        let actor = match ActorType::parse(actor_type).ok_or(())? {
+            ActorType::System => Actor::System,
+            ActorType::User => Actor::User(restichub_db::UserId::from_uuid(parse_uuid(
                 self.actor_id.as_deref().ok_or(())?,
             )?)),
-            "api_token" => Actor::ApiToken(restichub_db::ApiTokenId::from_uuid(parse_uuid(
-                self.actor_id.as_deref().ok_or(())?,
-            )?)),
-            "agent" => Actor::Agent(parse_uuid(self.actor_id.as_deref().ok_or(())?)?),
-            _ => return Err(()),
+            ActorType::ApiToken => Actor::ApiToken(restichub_db::ApiTokenId::from_uuid(
+                parse_uuid(self.actor_id.as_deref().ok_or(())?)?,
+            )),
+            ActorType::Agent => Actor::Agent(parse_uuid(self.actor_id.as_deref().ok_or(())?)?),
         };
         Ok(Some(actor))
     }
@@ -214,7 +213,7 @@ impl FromRequestParts<AppState> for AuditParams {
             Ok(Query(query)) => Ok(Self(query)),
             Err(error) => {
                 tracing::debug!(%error, "the audit query is not valid");
-                Err(ApiError::invalid_argument(&request_id_of(parts)))
+                Err(ApiError::invalid_field("query", "invalid_format"))
             }
         }
     }
@@ -264,36 +263,25 @@ fn decode_cursor(value: &str) -> Result<repo::AuditCursor, ()> {
     responses(
         (status = 200, description = "The audit records of the tenant.", body = AuditPageResponse),
         (status = 400, description = "A query parameter is not valid."),
-        (status = 401, description = "The request is not authenticated."),
-        (status = 403, description = "The role is not sufficient.")
+        crate::error::ProtectedResponses
     )
 )]
 pub async fn list_tenant_audit(
     State(state): State<AppState>,
     context: RequestContext,
-    _client: ClientIp,
-    request_id: RequestIdHeader,
     params: AuditParams,
 ) -> Result<Json<AuditPageResponse>, ApiError> {
-    context.authorize(Operation::AuditRead, &request_id.0)?;
+    context.authorize(Operation::AuditRead)?;
     let query = params.0;
     let filter = query
         .filter()
-        .map_err(|_| ApiError::invalid_argument(&request_id.0))?;
+        .map_err(|_| ApiError::invalid_field("query", "invalid_format"))?;
     let page = query
         .page()
-        .map_err(|_| ApiError::invalid_argument(&request_id.0))?;
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id.0, &error))?;
-    let result = repo::list(&mut tx, &filter, &page)
-        .await
-        .map_err(|error| ApiError::internal(&request_id.0, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id.0, &error))?;
+        .map_err(|_| ApiError::invalid_field("cursor", "invalid_format"))?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    let result = repo::list(&mut tx, &filter, &page).await?;
+    tx.commit().await?;
     Ok(Json(response(result)))
 }
 
@@ -305,36 +293,25 @@ pub async fn list_tenant_audit(
     responses(
         (status = 200, description = "The audit records of the platform.", body = AuditPageResponse),
         (status = 400, description = "A query parameter is not valid."),
-        (status = 401, description = "The request is not authenticated."),
-        (status = 403, description = "The role is not sufficient.")
+        crate::error::ProtectedResponses
     )
 )]
 pub async fn list_platform_audit(
     State(state): State<AppState>,
     context: RequestContext,
-    _client: ClientIp,
-    request_id: RequestIdHeader,
     params: AuditParams,
 ) -> Result<Json<AuditPageResponse>, ApiError> {
-    context.authorize(Operation::PlatformAuditRead, &request_id.0)?;
+    context.authorize(Operation::PlatformAuditRead)?;
     let query = params.0;
     let filter = query
         .filter()
-        .map_err(|_| ApiError::invalid_argument(&request_id.0))?;
+        .map_err(|_| ApiError::invalid_field("query", "invalid_format"))?;
     let page = query
         .page()
-        .map_err(|_| ApiError::invalid_argument(&request_id.0))?;
-    let mut tx = state
-        .db()
-        .begin_platform()
-        .await
-        .map_err(|error| ApiError::internal(&request_id.0, &error))?;
-    let result = repo::list_platform(&mut tx, &filter, &page)
-        .await
-        .map_err(|error| ApiError::internal(&request_id.0, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id.0, &error))?;
+        .map_err(|_| ApiError::invalid_field("cursor", "invalid_format"))?;
+    let mut tx = state.db().begin_platform().await?;
+    let result = repo::list_platform(&mut tx, &filter, &page).await?;
+    tx.commit().await?;
     Ok(Json(response(result)))
 }
 

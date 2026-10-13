@@ -1,192 +1,267 @@
 //! The API error type (ADR-0023, section Errors).
 //!
 //! The control plane returns an error as an RFC 9457 `application/problem+json` response. The
-//! body holds a stable `code` in snake_case and the request ID. The body holds no internal
-//! detail. The control plane logs the internal detail with the request ID.
+//! body holds a stable `code` in snake_case and the request ID. The body holds no internal detail.
+//!
+//! The error carries no request ID: the extractors build an error before the request reaches a
+//! handler, and the request ID lives in the request extension. The response mapper of the server
+//! adds the request ID to the body and logs the internal cause once, where the request ID is
+//! known.
+
+use std::error::Error as StdError;
 
 use axum::Json;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use restichub_db::DbError;
+use restichub_secrets::{CryptoError, KekError};
 use serde::Serialize;
+use utoipa::ToSchema;
+
+use crate::password::PasswordError;
+use crate::token::TokenError;
+use crate::validation::ValidationError;
+
+/// The content type of an RFC 9457 problem response.
+pub const PROBLEM_CONTENT_TYPE: &str = "application/problem+json";
+
+/// The stable code of a problem response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    /// HTTP 404. The resource is not found.
+    NotFound,
+    /// HTTP 503. The database is not ready.
+    ServiceUnavailable,
+    /// HTTP 500. An internal operation failed.
+    InternalError,
+    /// HTTP 401. The request holds no credential.
+    Unauthenticated,
+    /// HTTP 401. The sign-in credentials are not valid.
+    InvalidCredentials,
+    /// HTTP 403. The role is not sufficient.
+    Forbidden,
+    /// HTTP 403. The CSRF header is missing.
+    CsrfRequired,
+    /// HTTP 409. The change conflicts with the current state.
+    Conflict,
+    /// HTTP 400. A field of the request is not valid.
+    InvalidArgument,
+    /// HTTP 413. The request body is too large.
+    PayloadTooLarge,
+    /// HTTP 500. The tenant holds no active key row.
+    TenantKeyMissing,
+    /// HTTP 400. The request holds a cookie and a bearer token at the same time.
+    AmbiguousCredentials,
+    /// HTTP 405. The route does not accept the method.
+    MethodNotAllowed,
+    /// HTTP 429. The rate limit is exhausted.
+    RateLimited,
+    /// HTTP 503. The password work is busy.
+    Busy,
+}
+
+impl ErrorCode {
+    /// Returns the stable string of the code.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::ServiceUnavailable => "service_unavailable",
+            Self::InternalError => "internal_error",
+            Self::Unauthenticated => "unauthenticated",
+            Self::InvalidCredentials => "invalid_credentials",
+            Self::Forbidden => "forbidden",
+            Self::CsrfRequired => "csrf_required",
+            Self::Conflict => "conflict",
+            Self::InvalidArgument => "invalid_argument",
+            Self::PayloadTooLarge => "payload_too_large",
+            Self::TenantKeyMissing => "tenant_key_missing",
+            Self::AmbiguousCredentials => "ambiguous_credentials",
+            Self::MethodNotAllowed => "method_not_allowed",
+            Self::RateLimited => "rate_limited",
+            Self::Busy => "busy",
+        }
+    }
+}
 
 /// An API error.
-#[derive(Debug, Clone)]
+///
+/// The type holds no request ID. The response mapper of the server adds the request ID to the body
+/// and logs [`ApiError::cause`] once.
+#[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
-    code: &'static str,
+    code: ErrorCode,
     title: &'static str,
-    request_id: String,
-    /// The `Retry-After` header value in seconds. Only `rate_limited` sets it.
+    field: Option<&'static str>,
+    reason: Option<&'static str>,
+    /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
     retry_after: Option<u64>,
+    /// The internal detail. The response body never holds it; the mapper logs it with the request
+    /// ID. The value holds no secret: every constructor takes a message, never a value.
+    cause: Option<String>,
 }
 
 impl ApiError {
-    /// Creates an error with no `Retry-After` header.
-    fn new(status: StatusCode, code: &'static str, title: &'static str, request_id: &str) -> Self {
+    /// Creates an error with no `Retry-After` header, no field and no cause.
+    fn new(status: StatusCode, code: ErrorCode, title: &'static str) -> Self {
         Self {
             status,
             code,
             title,
-            request_id: request_id.to_owned(),
+            field: None,
+            reason: None,
             retry_after: None,
+            cause: None,
         }
     }
 
     /// Creates a `404 not_found` error.
-    pub fn not_found(request_id: &str) -> Self {
-        Self::new(StatusCode::NOT_FOUND, "not_found", "Not Found", request_id)
+    pub fn not_found() -> Self {
+        Self::new(StatusCode::NOT_FOUND, ErrorCode::NotFound, "Not Found")
     }
 
     /// Creates a `503 service_unavailable` error.
-    pub fn service_unavailable(request_id: &str) -> Self {
+    pub fn service_unavailable() -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "service_unavailable",
+            ErrorCode::ServiceUnavailable,
             "Service Unavailable",
-            request_id,
         )
     }
 
-    /// Creates a `500 internal_error` error.
+    /// Creates a `500 internal_error` error with a cause.
     ///
-    /// The function logs the cause with the request ID. The response body holds no internal
-    /// detail.
-    pub fn internal(request_id: &str, error: &dyn std::error::Error) -> Self {
-        tracing::error!(request_id = %request_id, error = %error, "internal error");
-        Self::new(
+    /// The response mapper logs the cause with the request ID. The body holds no internal detail.
+    pub fn internal(cause: impl Into<String>) -> Self {
+        let mut error = Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            ErrorCode::InternalError,
             "Internal Server Error",
-            request_id,
-        )
+        );
+        error.cause = Some(cause.into());
+        error
     }
 
     /// Creates a `500 internal_error` error with no cause.
-    pub fn internal_error(request_id: &str) -> Self {
-        tracing::error!(request_id = %request_id, "internal error");
+    pub fn internal_error() -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            ErrorCode::InternalError,
             "Internal Server Error",
-            request_id,
         )
     }
 
     /// Creates a `401 unauthenticated` error.
-    pub fn unauthenticated(request_id: &str) -> Self {
+    pub fn unauthenticated() -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
-            "unauthenticated",
+            ErrorCode::Unauthenticated,
             "Unauthorized",
-            request_id,
         )
     }
 
     /// Creates a `401 invalid_credentials` error.
     ///
     /// Sign-in returns this error for every failure: an unknown tenant, an unknown user, a wrong
-    /// password, a disabled user and a suspended tenant. The control plane logs the real reason
-    /// with the request ID and never puts it in the response.
-    pub fn invalid_credentials(request_id: &str) -> Self {
+    /// password, a disabled user and a suspended tenant. The control plane logs the real reason and
+    /// never puts it in the response.
+    pub fn invalid_credentials() -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
-            "invalid_credentials",
+            ErrorCode::InvalidCredentials,
             "Unauthorized",
-            request_id,
         )
     }
 
     /// Creates a `403 forbidden` error.
-    pub fn forbidden(request_id: &str) -> Self {
-        Self::new(StatusCode::FORBIDDEN, "forbidden", "Forbidden", request_id)
+    pub fn forbidden() -> Self {
+        Self::new(StatusCode::FORBIDDEN, ErrorCode::Forbidden, "Forbidden")
     }
 
     /// Creates a `403 csrf_required` error.
     ///
     /// A cookie-authenticated unsafe request needs the header `X-ResticHub-CSRF: 1`.
-    pub fn csrf_required(request_id: &str) -> Self {
-        Self::new(
-            StatusCode::FORBIDDEN,
-            "csrf_required",
-            "Forbidden",
-            request_id,
-        )
+    pub fn csrf_required() -> Self {
+        Self::new(StatusCode::FORBIDDEN, ErrorCode::CsrfRequired, "Forbidden")
     }
 
     /// Creates a `409 conflict` error.
-    pub fn conflict(request_id: &str) -> Self {
-        Self::new(StatusCode::CONFLICT, "conflict", "Conflict", request_id)
+    pub fn conflict() -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorCode::Conflict, "Conflict")
     }
 
-    /// Creates a `400 invalid_argument` error.
-    pub fn invalid_argument(request_id: &str) -> Self {
-        Self::new(
+    /// Creates a `400 invalid_argument` error for a field.
+    ///
+    /// The field name is a stable identifier of the request, not user input.
+    pub fn invalid_argument(field: &'static str) -> Self {
+        let mut error = Self::new(
             StatusCode::BAD_REQUEST,
-            "invalid_argument",
+            ErrorCode::InvalidArgument,
             "Bad Request",
-            request_id,
-        )
+        );
+        error.field = Some(field);
+        error
+    }
+
+    /// Creates a `400 invalid_argument` error for a field with a reason code.
+    pub fn invalid_field(field: &'static str, reason: &'static str) -> Self {
+        let mut error = Self::invalid_argument(field);
+        error.reason = Some(reason);
+        error
     }
 
     /// Creates a `413 payload_too_large` error.
     ///
     /// A request body that is larger than the body limit of the route gives this error. The
     /// response holds no parser detail.
-    pub fn payload_too_large(request_id: &str) -> Self {
+    pub fn payload_too_large() -> Self {
         Self::new(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "payload_too_large",
+            ErrorCode::PayloadTooLarge,
             "Payload Too Large",
-            request_id,
         )
     }
 
     /// Creates a `500 tenant_key_missing` error.
     ///
-    /// The tenant holds no active key row, so the control plane cannot encrypt a secret. The
-    /// function logs the cause with the request ID. The response body holds no internal detail.
-    pub fn tenant_key_missing(request_id: &str) -> Self {
-        tracing::error!(
-            request_id = %request_id,
-            "the tenant holds no active key row; cannot encrypt a secret value"
-        );
-        Self::new(
+    /// The tenant holds no active key row, so the control plane cannot encrypt a secret.
+    pub fn tenant_key_missing() -> Self {
+        let mut error = Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "tenant_key_missing",
+            ErrorCode::TenantKeyMissing,
             "Internal Server Error",
-            request_id,
-        )
+        );
+        error.cause = Some("the tenant holds no active key row".to_owned());
+        error
     }
 
     /// Creates a `400 ambiguous_credentials` error.
     ///
     /// A request holds a session cookie and a bearer token at the same time.
-    pub fn ambiguous_credentials(request_id: &str) -> Self {
+    pub fn ambiguous_credentials() -> Self {
         Self::new(
             StatusCode::BAD_REQUEST,
-            "ambiguous_credentials",
+            ErrorCode::AmbiguousCredentials,
             "Bad Request",
-            request_id,
         )
     }
 
     /// Creates a `405 method_not_allowed` error.
-    pub fn method_not_allowed(request_id: &str) -> Self {
+    pub fn method_not_allowed() -> Self {
         Self::new(
             StatusCode::METHOD_NOT_ALLOWED,
-            "method_not_allowed",
+            ErrorCode::MethodNotAllowed,
             "Method Not Allowed",
-            request_id,
         )
     }
 
     /// Creates a `429 rate_limited` error with a `Retry-After` header.
-    pub fn rate_limited(request_id: &str, retry_after: u64) -> Self {
+    pub fn rate_limited(retry_after: u64) -> Self {
         let mut error = Self::new(
             StatusCode::TOO_MANY_REQUESTS,
-            "rate_limited",
+            ErrorCode::RateLimited,
             "Too Many Requests",
-            request_id,
         );
         error.retry_after = Some(retry_after.clamp(1, MAX_RETRY_AFTER));
         error
@@ -195,32 +270,79 @@ impl ApiError {
     /// Creates a `503 busy` error with a `Retry-After` header.
     ///
     /// The control plane returns this error when the password hash semaphore is saturated.
-    pub fn busy(request_id: &str, retry_after: u64) -> Self {
+    pub fn busy(retry_after: u64) -> Self {
         let mut error = Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "busy",
+            ErrorCode::Busy,
             "Service Unavailable",
-            request_id,
         );
         error.retry_after = Some(retry_after.clamp(1, MAX_RETRY_AFTER));
         error
-    }
-
-    /// Builds an error from a password operation failure.
-    ///
-    /// A saturated hash semaphore becomes `503 busy`. Every other failure is internal.
-    pub fn from_password(request_id: &str, error: &crate::password::PasswordError) -> Self {
-        match error {
-            crate::password::PasswordError::Busy => {
-                Self::busy(request_id, crate::password::HASH_WAIT.as_secs())
-            }
-            other => Self::internal(request_id, other),
-        }
     }
 }
 
 /// The largest `Retry-After` value in seconds.
 const MAX_RETRY_AFTER: u64 = 3600;
+
+/// Returns the full cause chain of an error as one message.
+///
+/// The function keeps every source, so a wrapped database error is not lost.
+fn cause_chain(error: &dyn StdError) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(error) = source {
+        message.push_str(": ");
+        message.push_str(&error.to_string());
+        source = error.source();
+    }
+    message
+}
+
+impl From<DbError> for ApiError {
+    fn from(error: DbError) -> Self {
+        Self::internal(cause_chain(&error))
+    }
+}
+
+impl From<CryptoError> for ApiError {
+    fn from(error: CryptoError) -> Self {
+        Self::internal(cause_chain(&error))
+    }
+}
+
+impl From<KekError> for ApiError {
+    fn from(error: KekError) -> Self {
+        Self::internal(cause_chain(&error))
+    }
+}
+
+impl From<TokenError> for ApiError {
+    fn from(error: TokenError) -> Self {
+        Self::internal(cause_chain(&error))
+    }
+}
+
+impl From<ValidationError> for ApiError {
+    fn from(error: ValidationError) -> Self {
+        Self::invalid_field(error.field, error.reason.as_str())
+    }
+}
+
+impl From<PasswordError> for ApiError {
+    fn from(error: PasswordError) -> Self {
+        match error {
+            PasswordError::Busy => Self::busy(crate::password::HASH_WAIT.as_secs()),
+            other => Self::internal(cause_chain(&other)),
+        }
+    }
+}
+
+/// The internal cause of a response, read by the response mapper.
+///
+/// The type lives in the response extension, so the mapper logs the cause once, with the request
+/// ID. The body never holds it.
+#[derive(Debug, Clone)]
+pub struct InternalCause(pub String);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -228,12 +350,15 @@ impl IntoResponse for ApiError {
             type_: "about:blank".to_owned(),
             title: self.title.to_owned(),
             status: self.status.as_u16(),
-            code: self.code.to_owned(),
-            request_id: self.request_id,
+            code: self.code,
+            // The response mapper fills the request ID from the request extension.
+            request_id: String::new(),
+            field: self.field.map(str::to_owned),
+            reason: self.reason.map(str::to_owned),
         };
         let mut response = (
             self.status,
-            [(header::CONTENT_TYPE, "application/problem+json")],
+            [(header::CONTENT_TYPE, PROBLEM_CONTENT_TYPE)],
             Json(body),
         )
             .into_response();
@@ -241,6 +366,9 @@ impl IntoResponse for ApiError {
             && let Ok(value) = header::HeaderValue::from_str(&retry_after.to_string())
         {
             response.headers_mut().insert(header::RETRY_AFTER, value);
+        }
+        if let Some(cause) = self.cause {
+            response.extensions_mut().insert(InternalCause(cause));
         }
         response
     }
@@ -257,9 +385,29 @@ pub struct ProblemBody {
     /// The HTTP status code.
     pub status: u16,
     /// The stable code in snake_case.
-    pub code: String,
+    pub code: ErrorCode,
     /// The request ID of the request.
     pub request_id: String,
+    /// The field of the request that is not valid. Only `invalid_argument` sets it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    /// The reason code in snake_case. Only `invalid_argument` sets it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The shared responses of a protected route: 401 and 403 with the problem body.
+///
+/// A handler uses the type in its `#[utoipa::path]` attribute, so the two responses have one
+/// definition.
+#[derive(utoipa::IntoResponses)]
+pub enum ProtectedResponses {
+    /// The request is not authenticated.
+    #[response(status = 401, description = "The request is not authenticated.")]
+    Unauthenticated(ProblemBody),
+    /// The role is not sufficient.
+    #[response(status = 403, description = "The role is not sufficient.")]
+    Forbidden(ProblemBody),
 }
 
 #[cfg(test)]
@@ -268,12 +416,12 @@ mod tests {
     use axum::response::IntoResponse;
     use http_body_util::BodyExt;
 
-    use super::ApiError;
+    use super::{ApiError, ErrorCode};
 
     #[tokio::test]
-    async fn the_problem_body_holds_the_code_and_the_request_id() {
-        let response = ApiError::not_found("request-1").into_response();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    async fn the_problem_body_holds_the_code_and_the_field() {
+        let response = ApiError::invalid_field("username", "too_long").into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let content_type = response
             .headers()
             .get(axum::http::header::CONTENT_TYPE)
@@ -292,12 +440,12 @@ mod tests {
             .and_then(|value| value.get("code"))
             .and_then(|value| value.as_str())
             .map(str::to_owned);
-        let request_id = body
+        let field = body
             .as_ref()
-            .and_then(|value| value.get("request_id"))
+            .and_then(|value| value.get("field"))
             .and_then(|value| value.as_str())
             .map(str::to_owned);
-        assert_eq!(code.as_deref(), Some("not_found"));
-        assert_eq!(request_id.as_deref(), Some("request-1"));
+        assert_eq!(code.as_deref(), Some(ErrorCode::InvalidArgument.as_str()));
+        assert_eq!(field.as_deref(), Some("username"));
     }
 }

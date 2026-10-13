@@ -7,6 +7,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::enums::TenantStatus;
 use crate::ids::{TenantId, UserId};
 use crate::tx::{PlatformTx, TenantTx};
 
@@ -23,8 +24,8 @@ pub struct Tenant {
     pub id: TenantId,
     /// The name of the tenant. The name is unique.
     pub name: String,
-    /// The status: `active`, `suspended` or `deleted`.
-    pub status: String,
+    /// The status of the tenant.
+    pub status: TenantStatus,
 }
 
 /// A tenant row with the data of the platform list and the platform read (issue #20, FR-TN-02).
@@ -37,8 +38,8 @@ pub struct TenantSummary {
     pub id: TenantId,
     /// The name of the tenant.
     pub name: String,
-    /// The status: `active`, `suspended` or `deleted`.
-    pub status: String,
+    /// The status of the tenant.
+    pub status: TenantStatus,
     /// The time the tenant was created.
     pub created_at: OffsetDateTime,
     /// The number of users of the tenant.
@@ -49,8 +50,8 @@ pub struct TenantSummary {
 #[derive(Debug, Clone, Default)]
 pub struct TenantFilter {
     /// The status of the tenant. The default list (no filter) excludes a deleted tenant. The value
-    /// `deleted` shows the deleted tenants.
-    pub status: Option<String>,
+    /// [`TenantStatus::Deleted`] shows the deleted tenants.
+    pub status: Option<TenantStatus>,
 }
 
 /// The key of the last tenant of a page.
@@ -94,8 +95,8 @@ pub struct TenantPageResult {
 /// The future dispatcher calls this function. Only an `active` tenant receives jobs. A suspended
 /// tenant and a deleted tenant receive none. The agents of the tenant stay connected (epic #1): the
 /// control plane does not close their connections when the tenant is suspended.
-pub fn is_dispatch_allowed(status: &str) -> bool {
-    status == "active"
+pub fn is_dispatch_allowed(status: TenantStatus) -> bool {
+    status == TenantStatus::Active
 }
 
 /// The first administrator of a new tenant (N2).
@@ -234,7 +235,7 @@ pub async fn create_with_bootstrap(
 
 /// Lists the tenants.
 pub async fn list(tx: &mut PlatformTx<'_>) -> Result<Vec<Tenant>, DbError> {
-    let rows = sqlx::query_as::<_, (Uuid, String, String)>(
+    let rows = sqlx::query_as::<_, (Uuid, String, TenantStatus)>(
         "SELECT id, name, status FROM tenants ORDER BY id",
     )
     .fetch_all(tx.as_conn())
@@ -254,11 +255,11 @@ pub async fn list(tx: &mut PlatformTx<'_>) -> Result<Vec<Tenant>, DbError> {
 pub async fn set_status(
     tx: &mut PlatformTx<'_>,
     id: TenantId,
-    status: &str,
+    status: TenantStatus,
 ) -> Result<bool, DbError> {
     let result = sqlx::query("UPDATE tenants SET status = $2, updated_at = now() WHERE id = $1")
         .bind(id)
-        .bind(status)
+        .bind(status.as_str())
         .execute(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
@@ -291,8 +292,8 @@ pub enum Transition {
 pub async fn set_status_from(
     tx: &mut PlatformTx<'_>,
     id: TenantId,
-    from: &str,
-    to: &str,
+    from: TenantStatus,
+    to: TenantStatus,
     platform_event: &crate::audit::AuditEvent,
     tenant_event: &crate::audit::AuditEvent,
 ) -> Result<Transition, DbError> {
@@ -300,8 +301,8 @@ pub async fn set_status_from(
         "UPDATE tenants SET status = $2, updated_at = now() WHERE id = $1 AND status = $3",
     )
     .bind(id)
-    .bind(to)
-    .bind(from)
+    .bind(to.as_str())
+    .bind(from.as_str())
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?
@@ -312,11 +313,12 @@ pub async fn set_status_from(
         crate::audit::insert_platform(tx, crate::PLATFORM_TENANT_ID, platform_event).await?;
         return Ok(Transition::Changed);
     }
-    let current: Option<(String,)> = sqlx::query_as("SELECT status FROM tenants WHERE id = $1")
-        .bind(id)
-        .fetch_optional(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+    let current: Option<(TenantStatus,)> =
+        sqlx::query_as("SELECT status FROM tenants WHERE id = $1")
+            .bind(id)
+            .fetch_optional(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
     match current {
         None => Ok(Transition::NotFound),
         Some((status,)) if status == to => Ok(Transition::AlreadyInTarget),
@@ -373,7 +375,7 @@ pub async fn list_platform(
          ORDER BY tenant.created_at DESC, tenant.id DESC \
          LIMIT $4",
     )
-    .bind(filter.status.as_deref())
+    .bind(filter.status.map(TenantStatus::as_str))
     .bind(cursor_time)
     .bind(cursor_id)
     .bind(limit + 1)
@@ -387,7 +389,7 @@ pub async fn list_platform(
 }
 
 /// The column tuple of one tenant summary row.
-type SummaryRow = (Uuid, String, String, OffsetDateTime, i64);
+type SummaryRow = (Uuid, String, TenantStatus, OffsetDateTime, i64);
 
 impl From<SummaryRow> for TenantSummary {
     fn from(row: SummaryRow) -> Self {
@@ -407,7 +409,7 @@ impl From<SummaryRow> for TenantSummary {
 /// The policy `tenants_self_read` shows the own row only. The function returns `None` for another
 /// tenant.
 pub async fn get(tx: &mut TenantTx<'_>, id: TenantId) -> Result<Option<Tenant>, DbError> {
-    let row = sqlx::query_as::<_, (Uuid, String, String)>(
+    let row = sqlx::query_as::<_, (Uuid, String, TenantStatus)>(
         "SELECT id, name, status FROM tenants WHERE id = $1",
     )
     .bind(id)

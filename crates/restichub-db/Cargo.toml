@@ -20,10 +20,12 @@ test-util = []
 restichub-db = { path = ".", features = ["test-util"] }
 
 [dependencies]
+serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+utoipa = { workspace = true }
 uuid = { workspace = true }

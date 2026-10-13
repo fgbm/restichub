@@ -1,14 +1,16 @@
 //! The HTTP server of the control plane.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use axum::extract::{DefaultBodyLimit, Request, State};
-use axum::http::{HeaderName, HeaderValue, Method, StatusCode, Uri, request::Parts};
+use axum::extract::{Request, State};
+use axum::http::{HeaderName, HeaderValue, Method, StatusCode, Uri, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{MethodRouter, delete, get, patch, post, put};
 use axum::{Json, Router};
+use http_body_util::BodyExt;
 use restichub_db::Database;
+use restichub_secrets::KekProvider;
 use tokio::sync::Semaphore;
 use tower_http::request_id::{
     MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
@@ -17,17 +19,17 @@ use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::{MakeSpan, TraceLayer};
 use tracing::Span;
 use utoipa::Modify;
-use utoipa::OpenApi;
 use utoipa::openapi::OpenApi as OpenApiDocument;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, Http, HttpAuthScheme, SecurityScheme};
+use utoipa_axum::router::OpenApiRouter;
 use uuid::Uuid;
 
 use crate::client_ip::TrustedProxies;
 use crate::clock::{Clock, SystemClock};
 use crate::config::AuthConfig;
-use crate::error::ApiError;
+use crate::error::{ApiError, InternalCause, PROBLEM_CONTENT_TYPE};
 use crate::rate_limit::RateLimiter;
-use restichub_secrets::KekProvider;
+use crate::routes::ROUTES;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -38,11 +40,6 @@ pub const BODY_LIMIT: usize = 16 * 1024;
 /// A secret value holds at most 64 KiB bytes. A request holds at most six of them and the metadata,
 /// so the limit is six values plus 4 KiB.
 pub const SECRET_BODY_LIMIT: usize = 6 * 64 * 1024 + 4 * 1024;
-
-/// The path of the tenant audit endpoint.
-pub const AUDIT_TENANT_PATH: &str = "/api/v1/audit";
-/// The path of the platform audit endpoint.
-pub const AUDIT_PLATFORM_PATH: &str = "/api/v1/platform/audit";
 
 /// The authentication state of the server.
 ///
@@ -187,14 +184,10 @@ impl AppState {
 
 /// Builds the HTTP router.
 ///
-/// The router registers one route for each entry of [`crate::context::ROUTE_OPERATIONS`], so the
-/// authorization table and the router cannot drift apart. A new operation without a handler stops
-/// the start with a clear message.
+/// The router registers one route for each entry of [`ROUTES`], so the routes table, the router
+/// and the OpenAPI document cannot drift apart.
 pub fn router(state: AppState) -> Router {
-    let mut router = Router::new();
-    for route in crate::context::ROUTE_OPERATIONS {
-        router = router.route(route.path, method_router(route.method, route.path));
-    }
+    let (router, _document) = openapi_router().split_for_parts();
     router
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
@@ -204,67 +197,94 @@ pub fn router(state: AppState) -> Router {
             REQUEST_TIMEOUT,
         ))
         .layer(TraceLayer::new_for_http().make_span_with(RequestSpan))
+        .layer(middleware::from_fn(finalize_problem))
         .layer(PropagateRequestIdLayer::new(request_id_header()))
         .layer(SetRequestIdLayer::new(request_id_header(), MakeRequestIdV7))
 }
 
-/// Returns the method router of one route.
-///
-/// The body-carrying authentication and setup routes get the small body limit [`BODY_LIMIT`].
-fn method_router(method: &str, path: &str) -> MethodRouter<AppState> {
-    match (method, path) {
-        ("get", "/healthz") => get(healthz),
-        ("get", "/readyz") => get(readyz),
-        ("get", "/api/v1/openapi.json") => get(openapi),
-        ("post", "/api/v1/auth/sign-in") => {
-            post(crate::auth::sign_in).layer(DefaultBodyLimit::max(BODY_LIMIT))
-        }
-        ("post", "/api/v1/auth/sign-out") => post(crate::auth::sign_out),
-        ("get", "/api/v1/auth/me") => get(crate::auth::me),
-        ("post", "/api/v1/auth/password") => {
-            post(crate::auth::change_password).layer(DefaultBodyLimit::max(BODY_LIMIT))
-        }
-        ("post", "/api/v1/setup") => {
-            post(crate::setup::setup).layer(DefaultBodyLimit::max(BODY_LIMIT))
-        }
-        ("get", "/api/v1/setup/status") => get(crate::setup::status),
-        ("get", AUDIT_TENANT_PATH) => get(crate::audit::list_tenant_audit),
-        ("get", AUDIT_PLATFORM_PATH) => get(crate::audit::list_platform_audit),
-        ("get", "/api/v1/platform/tenants") => get(crate::tenants::list_tenants),
-        ("post", "/api/v1/platform/tenants") => {
-            post(crate::tenants::create_tenant).layer(DefaultBodyLimit::max(BODY_LIMIT))
-        }
-        ("get", "/api/v1/platform/tenants/{id}") => get(crate::tenants::get_tenant),
-        ("post", "/api/v1/platform/tenants/{id}/suspend") => post(crate::tenants::suspend_tenant),
-        ("post", "/api/v1/platform/tenants/{id}/resume") => post(crate::tenants::resume_tenant),
-        ("delete", "/api/v1/platform/tenants/{id}") => delete(crate::tenants::delete_tenant),
-        ("get", "/api/v1/users") => get(crate::users::list_users),
-        ("post", "/api/v1/users") => {
-            post(crate::users::create_user).layer(DefaultBodyLimit::max(BODY_LIMIT))
-        }
-        ("get", "/api/v1/users/{id}") => get(crate::users::get_user),
-        ("patch", "/api/v1/users/{id}") => {
-            patch(crate::users::update_user).layer(DefaultBodyLimit::max(BODY_LIMIT))
-        }
-        ("delete", "/api/v1/users/{id}") => delete(crate::users::delete_user),
-        ("post", "/api/v1/users/{id}/password") => {
-            post(crate::users::reset_password).layer(DefaultBodyLimit::max(BODY_LIMIT))
-        }
-        ("get", "/api/v1/api-tokens") => get(crate::api_tokens::list_tokens),
-        ("post", "/api/v1/api-tokens") => {
-            post(crate::api_tokens::create_token).layer(DefaultBodyLimit::max(BODY_LIMIT))
-        }
-        ("delete", "/api/v1/api-tokens/{id}") => delete(crate::api_tokens::revoke_token),
-        ("get", "/api/v1/secrets") => get(crate::secrets::list_secrets),
-        ("post", "/api/v1/secrets") => {
-            post(crate::secrets::create_secret).layer(DefaultBodyLimit::max(SECRET_BODY_LIMIT))
-        }
-        ("get", "/api/v1/secrets/{id}") => get(crate::secrets::get_secret),
-        ("put", "/api/v1/secrets/{id}/value") => put(crate::secrets::replace_secret_value)
-            .layer(DefaultBodyLimit::max(SECRET_BODY_LIMIT)),
-        ("delete", "/api/v1/secrets/{id}") => delete(crate::secrets::delete_secret),
-        _ => panic!("the route {method} {path} has no handler"),
+/// Builds the router and the OpenAPI document from the routes table.
+fn openapi_router() -> OpenApiRouter<AppState> {
+    let mut router = OpenApiRouter::with_openapi(base_openapi());
+    for route in ROUTES {
+        router = router.routes((route.handler)());
     }
+    router
+}
+
+/// Returns the OpenAPI document of the control plane API.
+pub fn openapi_document() -> OpenApiDocument {
+    static DOCUMENT: OnceLock<OpenApiDocument> = OnceLock::new();
+    DOCUMENT
+        .get_or_init(|| openapi_router().into_openapi())
+        .clone()
+}
+
+/// Builds the OpenAPI document with the info and the security schemes.
+fn base_openapi() -> OpenApiDocument {
+    let mut document = utoipa::openapi::OpenApiBuilder::new()
+        .info(
+            utoipa::openapi::InfoBuilder::new()
+                .title("ResticHub API")
+                .version(env!("CARGO_PKG_VERSION"))
+                .build(),
+        )
+        .build();
+    SecurityAddon.modify(&mut document);
+    document
+}
+
+/// Adds the request ID to every problem response and logs the internal cause once.
+///
+/// The extractors and the handlers build an [`ApiError`] with no request ID. The mapper reads the
+/// request ID from the request extension and writes it into the body. It logs the cause of an
+/// internal error with the same request ID, so the cause is not lost.
+async fn finalize_problem(request: Request, next: Next) -> Response {
+    let request_id = request
+        .extensions()
+        .get::<RequestId>()
+        .and_then(|id| id.header_value().to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let mut response = next.run(request).await;
+    if let Some(cause) = response.extensions_mut().remove::<InternalCause>() {
+        tracing::error!(request_id = %request_id, error = %cause.0, "internal error");
+    }
+    if is_problem(&response) {
+        inject_request_id(response, &request_id).await
+    } else {
+        response
+    }
+}
+
+/// Returns true if the response is an RFC 9457 problem response.
+fn is_problem(response: &Response) -> bool {
+    response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        == Some(PROBLEM_CONTENT_TYPE)
+}
+
+/// Writes the request ID into the body of a problem response.
+async fn inject_request_id(response: Response, request_id: &str) -> Response {
+    let (mut parts, body) = response.into_parts();
+    let Ok(bytes) = body.collect().await.map(|body| body.to_bytes()) else {
+        return Response::from_parts(parts, axum::body::Body::empty());
+    };
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Response::from_parts(parts, axum::body::Body::from(bytes));
+    };
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "request_id".to_owned(),
+            serde_json::Value::String(request_id.to_owned()),
+        );
+    }
+    let Ok(new_bytes) = serde_json::to_vec(&value) else {
+        return Response::from_parts(parts, axum::body::Body::from(bytes));
+    };
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, axum::body::Body::from(new_bytes))
 }
 
 /// Liveness probe. The process is alive. The function does not touch the database.
@@ -273,7 +293,7 @@ fn method_router(method: &str, path: &str) -> MethodRouter<AppState> {
     path = "/healthz",
     responses((status = 200, description = "The process is alive."))
 )]
-async fn healthz() -> &'static str {
+pub(crate) async fn healthz() -> &'static str {
     "ok"
 }
 
@@ -286,11 +306,11 @@ async fn healthz() -> &'static str {
         (status = 503, description = "The database is not ready.")
     )
 )]
-async fn readyz(State(state): State<AppState>, request_id: RequestIdHeader) -> Response {
+pub(crate) async fn readyz(State(state): State<AppState>) -> Response {
     if state.db.is_ready().await {
         StatusCode::OK.into_response()
     } else {
-        ApiError::service_unavailable(&request_id.0).into_response()
+        ApiError::service_unavailable().into_response()
     }
 }
 
@@ -300,50 +320,9 @@ async fn readyz(State(state): State<AppState>, request_id: RequestIdHeader) -> R
     path = "/api/v1/openapi.json",
     responses((status = 200, description = "The OpenAPI document."))
 )]
-async fn openapi() -> impl IntoResponse {
-    Json(ApiDoc::openapi())
+pub(crate) async fn openapi() -> impl IntoResponse {
+    Json(openapi_document())
 }
-
-/// The OpenAPI document of the control plane API.
-#[derive(OpenApi)]
-#[openapi(
-    info(title = "ResticHub API", version = env!("CARGO_PKG_VERSION")),
-    paths(
-        healthz,
-        readyz,
-        openapi,
-        crate::audit::list_tenant_audit,
-        crate::audit::list_platform_audit,
-        crate::tenants::list_tenants,
-        crate::tenants::create_tenant,
-        crate::tenants::get_tenant,
-        crate::tenants::suspend_tenant,
-        crate::tenants::resume_tenant,
-        crate::tenants::delete_tenant,
-        crate::auth::sign_in,
-        crate::auth::sign_out,
-        crate::auth::me,
-        crate::auth::change_password,
-        crate::setup::setup,
-        crate::setup::status,
-        crate::users::list_users,
-        crate::users::create_user,
-        crate::users::get_user,
-        crate::users::update_user,
-        crate::users::delete_user,
-        crate::users::reset_password,
-        crate::api_tokens::list_tokens,
-        crate::api_tokens::create_token,
-        crate::api_tokens::revoke_token,
-        crate::secrets::list_secrets,
-        crate::secrets::create_secret,
-        crate::secrets::get_secret,
-        crate::secrets::replace_secret_value,
-        crate::secrets::delete_secret
-    ),
-    modifiers(&SecurityAddon)
-)]
-struct ApiDoc;
 
 /// Adds the two security schemes to the OpenAPI document.
 ///
@@ -372,12 +351,12 @@ impl Modify for SecurityAddon {
 /// and the repeated slashes, so `/API/v1/x` and `//api/v1/x` cannot reach the UI. A method other
 /// than GET and HEAD never serves the UI either. Every other path serves the embedded web UI, so
 /// the single-page application router handles the route. The UI never shadows a registered route.
-async fn not_found(method: Method, uri: Uri, request_id: RequestIdHeader) -> Response {
+async fn not_found(method: Method, uri: Uri) -> Response {
     if is_api_path(uri.path()) {
-        return ApiError::not_found(&request_id.0).into_response();
+        return ApiError::not_found().into_response();
     }
     if method != Method::GET && method != Method::HEAD {
-        return ApiError::method_not_allowed(&request_id.0).into_response();
+        return ApiError::method_not_allowed().into_response();
     }
     crate::ui::serve(uri)
 }
@@ -404,49 +383,8 @@ fn is_api_path(path: &str) -> bool {
 }
 
 /// The fallback handler for a known route with a method that the route does not accept.
-async fn method_not_allowed(request_id: RequestIdHeader) -> ApiError {
-    ApiError::method_not_allowed(&request_id.0)
-}
-
-/// Returns the request ID of a request.
-///
-/// The extractors use the function to build an error before the request reaches a handler.
-pub(crate) fn request_id_of(parts: &Parts) -> String {
-    request_id_of_headers(&parts.headers)
-}
-
-/// Returns the request ID from a header map.
-///
-/// The JSON extractor uses the function before it consumes the request.
-pub(crate) fn request_id_of_headers(headers: &axum::http::HeaderMap) -> String {
-    headers
-        .get(REQUEST_ID_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_owned()
-}
-
-/// The request ID of the current request.
-///
-/// The request ID comes from the `x-request-id` header. The middleware `MakeRequestIdV7` sets
-/// the header if it is absent.
-#[derive(Debug, Clone)]
-pub struct RequestIdHeader(pub String);
-
-impl<S> axum::extract::FromRequestParts<S> for RequestIdHeader
-where
-    S: Send + Sync,
-{
-    type Rejection = std::convert::Infallible;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let request_id = parts
-            .headers
-            .get(REQUEST_ID_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        Ok(Self(request_id.to_owned()))
-    }
+async fn method_not_allowed() -> ApiError {
+    ApiError::method_not_allowed()
 }
 
 /// Creates a request ID with UUIDv7.

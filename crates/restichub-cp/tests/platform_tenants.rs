@@ -188,6 +188,16 @@ async fn the_name_rules_are_enforced() {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "the name `{name}`: {body}");
+        // A validation problem names the field and gives a reason code, with no user input.
+        assert_eq!(
+            body.get("field").and_then(Value::as_str),
+            Some("name"),
+            "the name `{name}`: {body}"
+        );
+        assert!(
+            body.get("reason").and_then(Value::as_str).is_some(),
+            "the name `{name}`: {body}"
+        );
     }
 
     // The longest name is accepted.

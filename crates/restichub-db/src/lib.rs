@@ -17,6 +17,7 @@ pub mod api_tokens;
 pub mod audit;
 pub mod auth;
 pub mod delivery;
+pub mod enums;
 pub mod ids;
 pub mod kek;
 pub mod memberships;
@@ -30,6 +31,7 @@ pub mod users;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 
+pub use enums::{ActorType, Role, TenantStatus};
 pub use ids::{
     ApiTokenId, AuditLogId, PLATFORM_TENANT_ID, SecretId, SessionId, SetupTokenId, TenantId, UserId,
 };

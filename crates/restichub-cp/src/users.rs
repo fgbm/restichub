@@ -1,4 +1,4 @@
-//! The user management endpoints for the Admin role (issue #18, FR-AU-03).
+//! The user management endpoints for the Admin role (FR-AU-03).
 //!
 //! An Admin manages the users of the tenant. An Admin cannot remove the last active Admin of a
 //! tenant and cannot grant the role `platform_admin` unless the tenant is the platform tenant.
@@ -10,8 +10,8 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use restichub_db::audit::{AuditAction, AuditEvent, diff};
-use restichub_db::{UserId, memberships, sessions, users};
+use restichub_db::audit::{AuditAction, diff};
+use restichub_db::{Role, TenantTx, UserId, memberships, sessions, users};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -20,7 +20,7 @@ use crate::context::{Operation, RequestContext, allowed_role, ensure_target_not_
 use crate::error::ApiError;
 use crate::json::ApiJson;
 use crate::password;
-use crate::server::{AppState, RequestIdHeader};
+use crate::server::AppState;
 use crate::validation;
 use crate::views::UserView;
 
@@ -72,42 +72,30 @@ pub struct UserListResponse {
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The users of the tenant.", body = UserListResponse),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient.", body = crate::error::ProblemBody)
+        crate::error::ProtectedResponses,
     )
 )]
 pub async fn list_users(
     State(state): State<AppState>,
     context: RequestContext,
-    request_id: RequestIdHeader,
 ) -> Result<Json<UserListResponse>, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::UsersRead, &request_id)?;
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let list = users::list(&mut tx)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let roles = memberships::list(&mut tx)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let items = list
-        .iter()
-        .map(|user| {
-            let role = roles
-                .iter()
-                .find(|membership| membership.user_id == user.id)
-                .map(|membership| membership.role.as_str())
-                .unwrap_or("");
-            UserView::new(user, role)
+    context.authorize(Operation::UsersRead)?;
+    let (list, roles) = context
+        .tenant_tx(&state, async |tx| {
+            let list = users::list(tx).await?;
+            let roles = memberships::list(tx).await?;
+            Ok((list, roles))
         })
-        .collect();
+        .await?;
+    let mut items = Vec::with_capacity(list.len());
+    for user in &list {
+        let role = roles
+            .iter()
+            .find(|membership| membership.user_id == user.id)
+            .map(|membership| membership.role)
+            .ok_or_else(ApiError::internal_error)?;
+        items.push(UserView::new(user, role));
+    }
     Ok(Json(UserListResponse { items }))
 }
 
@@ -120,8 +108,7 @@ pub async fn list_users(
     responses(
         (status = 201, description = "The user is created.", body = UserView),
         (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient or the role is too high.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 409, description = "The username exists.", body = crate::error::ProblemBody),
         (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
     )
@@ -129,52 +116,32 @@ pub async fn list_users(
 pub async fn create_user(
     State(state): State<AppState>,
     context: RequestContext,
-    request_id: RequestIdHeader,
     ApiJson(body): ApiJson<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserView>), ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::UsersWrite, &request_id)?;
-    let role = allowed_role(&context, &body.role, &request_id)?;
-    let username = validation::validate_username(&body.username)
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
-    let display_name = validation::validate_display_name(&body.display_name)
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
-    password::validate_password(&body.password)
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
+    context.authorize(Operation::UsersWrite)?;
+    let role = allowed_role(&context, &body.role)?;
+    let username = validation::validate_username("username", &body.username)?;
+    let display_name = validation::validate_display_name("display_name", &body.display_name)?;
+    validation::validate_password("password", &body.password)?;
 
     // Check the username in one transaction.
     {
-        let mut tx = state
-            .db()
-            .begin_tenant(context.tenant_id)
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
-        let existing = users::find_for_auth(&mut tx, &username)
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
-        tx.commit()
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
+        let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+        let existing = users::find_for_auth(&mut tx, &username).await?;
+        tx.commit().await?;
         if existing.is_some() {
-            return Err(ApiError::conflict(&request_id));
+            return Err(ApiError::conflict());
         }
     }
 
     // Hash without a transaction.
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, body.password.clone())
-            .await
-            .map_err(|error| ApiError::from_password(&request_id, &error))?;
+            .await?;
 
     // Write the user under the tenant lock.
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.lock(ADMIN_LOCK)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    tx.lock(ADMIN_LOCK).await?;
     let user_id = users::create(
         &mut tx,
         &users::NewUser {
@@ -184,13 +151,9 @@ pub async fn create_user(
         },
     )
     .await
-    .map_err(|error| map_write_error(&request_id, &error))?;
-    memberships::set_role(&mut tx, user_id, role.as_str())
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let mut event = AuditEvent::new(AuditAction::UserCreate, "user");
-    event.actor = context.actor.clone();
-    event.object_id = Some(user_id.as_uuid());
+    .map_err(map_write_error)?;
+    memberships::set_role(&mut tx, user_id, role).await?;
+    let mut event = context.audit_event(AuditAction::UserCreate, "user", user_id.as_uuid());
     event.diff = Some(diff(
         None,
         Some(&serde_json::json!({
@@ -200,22 +163,13 @@ pub async fn create_user(
         })),
         &[],
     ));
-    restichub_db::audit::insert(&mut tx, &event)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let user = users::get(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    let user = users::get(&mut tx, user_id).await?;
+    tx.commit().await?;
     let Some(user) = user else {
-        return Err(ApiError::internal_error(&request_id));
+        return Err(ApiError::internal_error());
     };
-    Ok((
-        StatusCode::CREATED,
-        Json(UserView::new(&user, role.as_str())),
-    ))
+    Ok((StatusCode::CREATED, Json(UserView::new(&user, role))))
 }
 
 /// Reads one user of the tenant.
@@ -226,37 +180,30 @@ pub async fn create_user(
     params(("id" = String, Path, description = "The identifier of the user.")),
     responses(
         (status = 200, description = "The user.", body = UserView),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 404, description = "The user is not found.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn get_user(
     State(state): State<AppState>,
     context: RequestContext,
-    request_id: RequestIdHeader,
     Path(id): Path<String>,
 ) -> Result<Json<UserView>, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::UsersRead, &request_id)?;
-    let user_id = parse_uuid(&id, &request_id)?;
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let user = users::get(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let role = memberships::role_of(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    context.authorize(Operation::UsersRead)?;
+    let user_id = parse_uuid(&id)?;
+    let (user, role) = context
+        .tenant_tx(&state, async |tx| {
+            let user = users::get(tx, user_id).await?;
+            let role = memberships::role_of(tx, user_id).await?;
+            Ok((user, role))
+        })
+        .await?;
     match user {
-        Some(user) => Ok(Json(UserView::new(&user, role.as_deref().unwrap_or("")))),
-        None => Err(ApiError::not_found(&request_id)),
+        Some(user) => Ok(Json(UserView::new(
+            &user,
+            role.ok_or_else(ApiError::internal_error)?,
+        ))),
+        None => Err(ApiError::not_found()),
     }
 }
 
@@ -270,8 +217,7 @@ pub async fn get_user(
     responses(
         (status = 200, description = "The changed user.", body = UserView),
         (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient or the target role is too high.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 404, description = "The user is not found.", body = crate::error::ProblemBody),
         (status = 409, description = "The change removes the last Admin.", body = crate::error::ProblemBody)
     )
@@ -279,104 +225,71 @@ pub async fn get_user(
 pub async fn update_user(
     State(state): State<AppState>,
     context: RequestContext,
-    request_id: RequestIdHeader,
     Path(id): Path<String>,
     ApiJson(body): ApiJson<UpdateUserRequest>,
 ) -> Result<Json<UserView>, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::UsersWrite, &request_id)?;
-    let user_id = parse_uuid(&id, &request_id)?;
+    context.authorize(Operation::UsersWrite)?;
+    let user_id = parse_uuid(&id)?;
     let new_role = match &body.role {
-        Some(role) => Some(allowed_role(&context, role, &request_id)?),
+        Some(role) => Some(allowed_role(&context, role)?),
         None => None,
     };
     let display_name = match &body.display_name {
-        Some(value) => Some(
-            validation::validate_display_name(value)
-                .map_err(|_| ApiError::invalid_argument(&request_id))?,
-        ),
+        Some(value) => Some(validation::validate_display_name("display_name", value)?),
         None => None,
     };
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     // The lock serializes the last-admin check with the write.
-    tx.lock(ADMIN_LOCK)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let user = users::get(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    tx.lock(ADMIN_LOCK).await?;
+    let user = users::get(&mut tx, user_id).await?;
     let Some(user) = user else {
-        return Err(ApiError::not_found(&request_id));
+        return Err(ApiError::not_found());
     };
-    let current_role = memberships::role_of(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    if let Some(role) = &current_role {
-        ensure_target_not_above_actor(&context, role, &request_id)?;
+    let current_role = memberships::role_of(&mut tx, user_id).await?;
+    if let Some(role) = current_role {
+        ensure_target_not_above_actor(&context, role)?;
     }
     // The guard applies to an active Admin only. A disabled Admin is not the last Admin.
-    let active_admin = current_role.as_deref().is_some_and(is_admin) && !user.disabled;
-    let role_lost_admin = new_role.is_some_and(|role| !is_admin(role.as_str()));
+    let active_admin = current_role.is_some_and(Role::is_admin) && !user.disabled;
+    let role_lost_admin = new_role.is_some_and(|role| !role.is_admin());
     let disabling = body.disabled == Some(true);
     if active_admin && (role_lost_admin || disabling) {
-        guard_last_admin(&mut tx, &request_id).await?;
+        guard_last_admin(&mut tx).await?;
     }
     if let Some(display_name) = &display_name {
-        users::set_display_name(&mut tx, user_id, display_name)
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
+        users::set_display_name(&mut tx, user_id, display_name).await?;
     }
     if let Some(disabled) = body.disabled {
-        users::set_disabled(&mut tx, user_id, disabled)
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
+        users::set_disabled(&mut tx, user_id, disabled).await?;
         if disabled {
-            sessions::delete_for_user(&mut tx, user_id)
-                .await
-                .map_err(|error| ApiError::internal(&request_id, &error))?;
+            sessions::delete_for_user(&mut tx, user_id).await?;
         }
     }
     if let Some(role) = new_role {
-        memberships::set_role(&mut tx, user_id, role.as_str())
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
+        memberships::set_role(&mut tx, user_id, role).await?;
     }
-    let updated = users::get(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let final_role = memberships::role_of(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    let updated = users::get(&mut tx, user_id).await?;
+    let final_role = memberships::role_of(&mut tx, user_id).await?;
     let before = serde_json::json!({
         "display_name": user.display_name,
         "disabled": user.disabled,
-        "role": current_role,
+        "role": current_role.map(Role::as_str),
     });
     let after = serde_json::json!({
         "display_name": updated.as_ref().map(|user| user.display_name.clone()),
         "disabled": updated.as_ref().map(|user| user.disabled),
-        "role": final_role,
+        "role": final_role.map(Role::as_str),
     });
-    let mut event = AuditEvent::new(AuditAction::UserUpdate, "user");
-    event.actor = context.actor.clone();
-    event.object_id = Some(user_id.as_uuid());
+    let mut event = context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
     event.diff = Some(diff(Some(&before), Some(&after), &[]));
-    restichub_db::audit::insert(&mut tx, &event)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
     match updated {
         Some(user) => Ok(Json(UserView::new(
             &user,
-            final_role.as_deref().unwrap_or(""),
+            final_role.ok_or_else(ApiError::internal_error)?,
         ))),
-        None => Err(ApiError::internal_error(&request_id)),
+        None => Err(ApiError::internal_error()),
     }
 }
 
@@ -388,8 +301,7 @@ pub async fn update_user(
     params(("id" = String, Path, description = "The identifier of the user.")),
     responses(
         (status = 204, description = "The user is disabled."),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient or the target role is too high.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 404, description = "The user is not found.", body = crate::error::ProblemBody),
         (status = 409, description = "The user is the last Admin.", body = crate::error::ProblemBody)
     )
@@ -397,57 +309,35 @@ pub async fn update_user(
 pub async fn delete_user(
     State(state): State<AppState>,
     context: RequestContext,
-    request_id: RequestIdHeader,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::UsersWrite, &request_id)?;
-    let user_id = parse_uuid(&id, &request_id)?;
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.lock(ADMIN_LOCK)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let user = users::get(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    context.authorize(Operation::UsersWrite)?;
+    let user_id = parse_uuid(&id)?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    tx.lock(ADMIN_LOCK).await?;
+    let user = users::get(&mut tx, user_id).await?;
     let Some(user) = user else {
-        return Err(ApiError::not_found(&request_id));
+        return Err(ApiError::not_found());
     };
-    let current_role = memberships::role_of(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    if let Some(role) = &current_role {
-        ensure_target_not_above_actor(&context, role, &request_id)?;
+    let current_role = memberships::role_of(&mut tx, user_id).await?;
+    if let Some(role) = current_role {
+        ensure_target_not_above_actor(&context, role)?;
     }
     // The guard applies to an active Admin only. A disabled Admin is not the last Admin.
-    let active_admin = current_role.as_deref().is_some_and(is_admin) && !user.disabled;
+    let active_admin = current_role.is_some_and(Role::is_admin) && !user.disabled;
     if active_admin {
-        guard_last_admin(&mut tx, &request_id).await?;
+        guard_last_admin(&mut tx).await?;
     }
-    users::set_disabled(&mut tx, user_id, true)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    sessions::delete_for_user(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let mut event = AuditEvent::new(AuditAction::UserDelete, "user");
-    event.actor = context.actor.clone();
-    event.object_id = Some(user_id.as_uuid());
+    users::set_disabled(&mut tx, user_id, true).await?;
+    sessions::delete_for_user(&mut tx, user_id).await?;
+    let mut event = context.audit_event(AuditAction::UserDelete, "user", user_id.as_uuid());
     event.diff = Some(diff(
         Some(&serde_json::json!({"disabled": user.disabled})),
         Some(&serde_json::json!({"disabled": true})),
         &[],
     ));
-    restichub_db::audit::insert(&mut tx, &event)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -461,8 +351,7 @@ pub async fn delete_user(
     responses(
         (status = 204, description = "The password is changed."),
         (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient or the target role is too high.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 404, description = "The user is not found.", body = crate::error::ProblemBody),
         (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
     )
@@ -470,107 +359,68 @@ pub async fn delete_user(
 pub async fn reset_password(
     State(state): State<AppState>,
     context: RequestContext,
-    request_id: RequestIdHeader,
     Path(id): Path<String>,
     ApiJson(body): ApiJson<ResetPasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::UsersWrite, &request_id)?;
-    let user_id = parse_uuid(&id, &request_id)?;
-    password::validate_password(&body.new_password)
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
+    context.authorize(Operation::UsersWrite)?;
+    let user_id = parse_uuid(&id)?;
+    validation::validate_password("new_password", &body.new_password)?;
 
     // Read the target.
-    let (user, target_role) = {
-        let mut tx = state
-            .db()
-            .begin_tenant(context.tenant_id)
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
-        let user = users::get(&mut tx, user_id)
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
-        let role = memberships::role_of(&mut tx, user_id)
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
-        tx.commit()
-            .await
-            .map_err(|error| ApiError::internal(&request_id, &error))?;
-        (user, role)
-    };
+    let (user, target_role) = context
+        .tenant_tx(&state, async |tx| {
+            let user = users::get(tx, user_id).await?;
+            let role = memberships::role_of(tx, user_id).await?;
+            Ok((user, role))
+        })
+        .await?;
     if user.is_none() {
-        return Err(ApiError::not_found(&request_id));
+        return Err(ApiError::not_found());
     }
-    if let Some(role) = &target_role {
-        ensure_target_not_above_actor(&context, role, &request_id)?;
+    if let Some(role) = target_role {
+        ensure_target_not_above_actor(&context, role)?;
     }
 
     // Hash without a transaction.
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, body.new_password.clone())
-            .await
-            .map_err(|error| ApiError::from_password(&request_id, &error))?;
+            .await?;
 
     // Write the new hash.
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    users::set_password(&mut tx, user_id, &password_hash)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    sessions::delete_for_user(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let mut event = AuditEvent::new(AuditAction::UserUpdate, "user");
-    event.actor = context.actor.clone();
-    event.object_id = Some(user_id.as_uuid());
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    users::set_password(&mut tx, user_id, &password_hash).await?;
+    sessions::delete_for_user(&mut tx, user_id).await?;
+    let mut event = context.audit_event(AuditAction::UserUpdate, "user", user_id.as_uuid());
     event.diff = Some(diff(
         None,
         Some(&serde_json::json!({"password": "<reset>"})),
         &[],
     ));
-    restichub_db::audit::insert(&mut tx, &event)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Refuses the change when it would remove the last active Admin of the tenant.
-async fn guard_last_admin(
-    tx: &mut restichub_db::TenantTx<'_>,
-    request_id: &str,
-) -> Result<(), ApiError> {
-    let count = memberships::count_admins(tx)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?;
-    if count <= 1 {
-        return Err(ApiError::conflict(request_id));
+async fn guard_last_admin(tx: &mut TenantTx<'_>) -> Result<(), ApiError> {
+    if memberships::count_admins(tx).await? <= 1 {
+        return Err(ApiError::conflict());
     }
     Ok(())
 }
 
-/// Returns true for an administrator role.
-fn is_admin(role: &str) -> bool {
-    role == "admin" || role == "platform_admin"
-}
-
-/// Maps a write error to the API error.
-fn map_write_error(request_id: &str, error: &restichub_db::DbError) -> ApiError {
+/// Maps a write error to the API error. A duplicate username is a conflict.
+fn map_write_error(error: restichub_db::DbError) -> ApiError {
     if error.is_unique_violation() {
-        ApiError::conflict(request_id)
+        ApiError::conflict()
     } else {
-        ApiError::internal(request_id, error)
+        ApiError::from(error)
     }
 }
 
 /// Parses a UUID from a path parameter.
-fn parse_uuid(value: &str, request_id: &str) -> Result<UserId, ApiError> {
+fn parse_uuid(value: &str) -> Result<UserId, ApiError> {
     Uuid::parse_str(value)
         .map(UserId::from_uuid)
-        .map_err(|_| ApiError::invalid_argument(request_id))
+        .map_err(|_| ApiError::invalid_argument("id"))
 }

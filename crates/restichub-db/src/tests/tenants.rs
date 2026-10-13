@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::PLATFORM_TENANT_ID;
+use crate::enums::TenantStatus;
 use crate::tenants;
 use crate::test_util::test_database;
 use uuid::Uuid;
@@ -140,8 +141,15 @@ async fn db_a_concurrent_delete_and_resume_never_end_active() -> TestResult {
     let mut tx = db.database().begin_platform().await?;
     let suspend = AuditEvent::new(AuditAction::TenantSuspend, "tenant");
     assert_eq!(
-        tenants::set_status_from(&mut tx, tenant_a, "active", "suspended", &suspend, &suspend)
-            .await?,
+        tenants::set_status_from(
+            &mut tx,
+            tenant_a,
+            TenantStatus::Active,
+            TenantStatus::Suspended,
+            &suspend,
+            &suspend,
+        )
+        .await?,
         tenants::Transition::Changed
     );
     tx.commit().await?;
@@ -152,18 +160,30 @@ async fn db_a_concurrent_delete_and_resume_never_end_active() -> TestResult {
     let delete = async {
         let mut tx = database.begin_platform().await?;
         let event = AuditEvent::new(AuditAction::TenantDelete, "tenant");
-        let result =
-            tenants::set_status_from(&mut tx, tenant_a, "suspended", "deleted", &event, &event)
-                .await?;
+        let result = tenants::set_status_from(
+            &mut tx,
+            tenant_a,
+            TenantStatus::Suspended,
+            TenantStatus::Deleted,
+            &event,
+            &event,
+        )
+        .await?;
         tx.commit().await?;
         Ok::<_, crate::DbError>(result)
     };
     let resume = async {
         let mut tx = database.begin_platform().await?;
         let event = AuditEvent::new(AuditAction::TenantResume, "tenant");
-        let result =
-            tenants::set_status_from(&mut tx, tenant_a, "suspended", "active", &event, &event)
-                .await?;
+        let result = tenants::set_status_from(
+            &mut tx,
+            tenant_a,
+            TenantStatus::Suspended,
+            TenantStatus::Active,
+            &event,
+            &event,
+        )
+        .await?;
         tx.commit().await?;
         Ok::<_, crate::DbError>(result)
     };
@@ -181,15 +201,16 @@ async fn db_a_concurrent_delete_and_resume_never_end_active() -> TestResult {
     let status = tenants::get_platform(&mut tx, tenant_a)
         .await?
         .map(|tenant| tenant.status)
-        .unwrap_or_default();
+        .unwrap_or(TenantStatus::Active);
     tx.commit().await?;
     if delete_result == tenants::Transition::Changed {
         assert_eq!(
-            status, "deleted",
+            status,
+            TenantStatus::Deleted,
             "the tenant must not end active after a delete"
         );
     } else {
-        assert_eq!(status, "active");
+        assert_eq!(status, TenantStatus::Active);
     }
 
     db.cleanup().await;

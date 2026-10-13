@@ -34,7 +34,7 @@ async fn token_with_expiry(
             name: "expiring",
             token_hash: &hash,
             display_prefix: &prefix,
-            role,
+            role: restichub_db::Role::parse(role).unwrap_or(restichub_db::Role::Viewer),
             created_by: creator,
             expires_at: Some(expires_at),
         },

@@ -94,8 +94,12 @@ async fn ac_tn_03_a_suspended_tenant_cannot_sign_in_and_the_platform_audit_has_t
 
     // The dispatcher refuses jobs for the suspended tenant (epic #7). The agents stay connected
     // (epic #1).
-    assert!(!restichub_db::tenants::is_dispatch_allowed("suspended"));
-    assert!(restichub_db::tenants::is_dispatch_allowed("active"));
+    assert!(!restichub_db::tenants::is_dispatch_allowed(
+        restichub_db::TenantStatus::Suspended
+    ));
+    assert!(restichub_db::tenants::is_dispatch_allowed(
+        restichub_db::TenantStatus::Active
+    ));
 
     db.cleanup().await;
 }

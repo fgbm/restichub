@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::enums::Role;
 use crate::ids::{ApiTokenId, UserId};
 use crate::tx::TenantTx;
 
@@ -27,7 +28,7 @@ pub struct NewApiToken<'a> {
     /// The first characters of the token value, for display.
     pub display_prefix: &'a str,
     /// The role of the token in the tenant.
-    pub role: &'a str,
+    pub role: Role,
     /// The user that created the token.
     pub created_by: UserId,
     /// The optional expiry time.
@@ -42,7 +43,7 @@ pub struct ApiToken {
     /// The name for the user interface.
     pub name: String,
     /// The role of the token.
-    pub role: String,
+    pub role: Role,
     /// The first characters of the token value.
     pub display_prefix: String,
     /// The user that created the token.
@@ -70,7 +71,7 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewApiToken<'_>) -> Result<ApiT
     .bind(new.name)
     .bind(new.token_hash)
     .bind(new.display_prefix)
-    .bind(new.role)
+    .bind(new.role.as_str())
     .bind(new.created_by)
     .bind(new.expires_at)
     .execute(tx.as_conn())
@@ -148,7 +149,7 @@ pub async fn touch(
 type ApiTokenRow = (
     Uuid,
     String,
-    String,
+    Role,
     String,
     Uuid,
     OffsetDateTime,

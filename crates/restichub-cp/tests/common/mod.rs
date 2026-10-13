@@ -18,7 +18,9 @@ use restichub_cp::clock::Clock;
 use restichub_cp::config::AuthConfig;
 use restichub_cp::server::{AppState, AuthState, router};
 use restichub_db::test_util::{TestDatabase, test_database};
-use restichub_db::{Database, TenantId, api_tokens, memberships, sessions, tenants, users};
+use restichub_db::{
+    Database, Role, TenantId, TenantStatus, api_tokens, memberships, sessions, tenants, users,
+};
 use serde_json::Value;
 use time::OffsetDateTime;
 use tower::ServiceExt;
@@ -244,6 +246,7 @@ pub async fn seed_secret(db: &Database, tenant: TenantId, name: &str) -> restich
 
 /// Sets the status of a tenant through a platform transaction.
 pub async fn set_tenant_status(db: &Database, tenant: TenantId, status: &str) {
+    let status = TenantStatus::parse(status).expect("the status is known");
     let mut tx = db
         .begin_platform()
         .await
@@ -276,6 +279,7 @@ pub async fn create_user(
     )
     .await
     .expect("cannot create the user");
+    let role = Role::parse(role).expect("the role is known");
     memberships::set_role(&mut tx, user, role)
         .await
         .expect("cannot set the role");
@@ -350,7 +354,7 @@ async fn seed_token(
             name: "test-token",
             token_hash: &hash,
             display_prefix: &prefix,
-            role,
+            role: Role::parse(role).expect("the role is known"),
             created_by,
             expires_at: None,
         },
@@ -380,11 +384,7 @@ pub async fn list_users(db: &Database, tenant: TenantId) -> Vec<users::User> {
 }
 
 /// Returns the role of a user in a tenant.
-pub async fn role_of(
-    db: &Database,
-    tenant: TenantId,
-    user: restichub_db::UserId,
-) -> Option<String> {
+pub async fn role_of(db: &Database, tenant: TenantId, user: restichub_db::UserId) -> Option<Role> {
     let mut tx = db
         .begin_tenant(tenant)
         .await

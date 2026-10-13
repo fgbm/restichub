@@ -4,6 +4,7 @@ use super::*;
 use crate::PLATFORM_TENANT_ID;
 use crate::audit;
 use crate::audit::{AuditCursor, AuditFilter, AuditPage};
+use crate::enums::TenantStatus;
 use crate::tenants;
 use crate::test_util::test_database;
 use uuid::Uuid;
@@ -159,8 +160,15 @@ async fn db_platform_audit_writes_an_existing_tenant_and_counts_users() -> TestR
     // A platform operation writes the audit record of an existing tenant and keeps no tenant scope.
     let mut tx = db.database().begin_platform().await?;
     let event = AuditEvent::new(AuditAction::TenantSuspend, "tenant");
-    let transition =
-        tenants::set_status_from(&mut tx, tenant_a, "active", "suspended", &event, &event).await?;
+    let transition = tenants::set_status_from(
+        &mut tx,
+        tenant_a,
+        TenantStatus::Active,
+        TenantStatus::Suspended,
+        &event,
+        &event,
+    )
+    .await?;
     assert_eq!(transition, tenants::Transition::Changed);
 
     // After the audit write, the transaction reads and writes no row of tenant A, and it sees no
@@ -200,11 +208,25 @@ async fn db_platform_audit_writes_an_existing_tenant_and_counts_users() -> TestR
 
     // A repeated call is idempotent, and a wrong source status is refused.
     let mut tx = db.database().begin_platform().await?;
-    let transition =
-        tenants::set_status_from(&mut tx, tenant_a, "active", "suspended", &event, &event).await?;
+    let transition = tenants::set_status_from(
+        &mut tx,
+        tenant_a,
+        TenantStatus::Active,
+        TenantStatus::Suspended,
+        &event,
+        &event,
+    )
+    .await?;
     assert_eq!(transition, tenants::Transition::AlreadyInTarget);
-    let transition =
-        tenants::set_status_from(&mut tx, tenant_a, "deleted", "active", &event, &event).await?;
+    let transition = tenants::set_status_from(
+        &mut tx,
+        tenant_a,
+        TenantStatus::Deleted,
+        TenantStatus::Active,
+        &event,
+        &event,
+    )
+    .await?;
     assert_eq!(transition, tenants::Transition::Refused);
     tx.commit().await?;
 

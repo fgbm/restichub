@@ -24,7 +24,9 @@ const SECRET_DOMAIN: &[u8] = b"restichub-secret-v1\0";
 ///
 /// The purpose is a part of the associated data. The string value of each variant is stable and
 /// MUST NOT change: a change makes every stored ciphertext of that purpose undecryptable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, utoipa::ToSchema)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum SecretPurpose {
     /// The password of a restic repository.
     RepositoryPassword,

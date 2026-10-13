@@ -2,6 +2,7 @@
 
 use restichub_db::secrets::SecretMetadata;
 use restichub_db::tenants::TenantSummary;
+use restichub_db::{Role, TenantStatus};
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -21,18 +22,18 @@ pub struct UserView {
     /// True if the user is disabled.
     pub disabled: bool,
     /// The role of the user in the tenant.
-    pub role: String,
+    pub role: Role,
 }
 
 impl UserView {
     /// Builds the view from a user and a role.
-    pub fn new(user: &User, role: &str) -> Self {
+    pub fn new(user: &User, role: Role) -> Self {
         Self {
             id: user.id.to_string(),
             username: user.username.clone(),
             display_name: user.display_name.clone(),
             disabled: user.disabled,
-            role: role.to_owned(),
+            role,
         }
     }
 }
@@ -55,7 +56,7 @@ impl From<&Tenant> for TenantView {
     }
 }
 
-/// A tenant in a platform administration response (issue #20, FR-TN-02).
+/// A tenant in a platform administration response (FR-TN-02).
 ///
 /// The view holds the user count only. It never holds a user list or a secret of the tenant.
 #[derive(Debug, Serialize, ToSchema)]
@@ -64,8 +65,8 @@ pub struct PlatformTenantView {
     pub id: String,
     /// The name of the tenant.
     pub name: String,
-    /// The status: `active`, `suspended` or `deleted`.
-    pub status: String,
+    /// The status of the tenant.
+    pub status: TenantStatus,
     /// The time the tenant was created in RFC 3339.
     pub created_at: String,
     /// The number of users of the tenant.
@@ -77,7 +78,7 @@ impl From<&TenantSummary> for PlatformTenantView {
         Self {
             id: tenant.id.to_string(),
             name: tenant.name.clone(),
-            status: tenant.status.clone(),
+            status: tenant.status,
             created_at: format_time(tenant.created_at),
             user_count: tenant.user_count,
         }
@@ -89,7 +90,7 @@ fn format_time(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
-/// The metadata of a secret in a response (issue #17, FR-RP-05).
+/// The metadata of a secret in a response (FR-RP-05).
 ///
 /// The view never holds the value. The API cannot return a secret value after a user saves it
 /// (AC-RP-02).
@@ -122,7 +123,7 @@ impl From<&SecretMetadata> for SecretView {
     }
 }
 
-/// The metadata of one secret with the marker that the value is set (issue #17, FR-RP-05).
+/// The metadata of one secret with the marker that the value is set (FR-RP-05).
 ///
 /// The field `value` holds the marker `set` only. The API never returns the value (AC-RP-02).
 #[derive(Debug, Serialize, ToSchema)]

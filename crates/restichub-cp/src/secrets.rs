@@ -1,4 +1,4 @@
-//! The write-only secret API (issue #17, FR-RP-03, FR-RP-05).
+//! The write-only secret API (FR-RP-03, FR-RP-05).
 //!
 //! The control plane stores the repository passwords and the backend credentials of the tenants.
 //! The API creates a secret, replaces its value, lists the metadata and removes the secret. No
@@ -19,7 +19,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use restichub_db::audit::{Actor, AuditAction, AuditEvent, REDACTED, diff};
+use restichub_db::audit::{Actor, AuditAction, REDACTED, diff};
 use restichub_db::secrets::{self as repo, NewSecret};
 use restichub_db::{SecretId, UserId, kek};
 use restichub_secrets::{
@@ -31,11 +31,10 @@ use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::client_ip::ClientIp;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
-use crate::server::{AppState, RequestIdHeader};
+use crate::server::AppState;
 use crate::validation;
 use crate::views::{SecretDetailView, SecretView};
 
@@ -47,9 +46,8 @@ use crate::views::{SecretDetailView, SecretView};
 pub struct CreateSecretRequest {
     /// The name of the secret. It holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`.
     pub name: String,
-    /// The purpose of the value: `repository_password`, `s3_access_key`, `s3_secret_key` or
-    /// `rest_server_password`.
-    pub purpose: String,
+    /// The purpose of the value.
+    pub purpose: SecretPurpose,
     /// The value. It holds 1 to 64 KiB bytes.
     #[schema(value_type = String)]
     pub value: SecretString,
@@ -90,28 +88,17 @@ struct Encrypted {
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The metadata of the secrets of the tenant.", body = SecretListResponse),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient.", body = crate::error::ProblemBody)
+        crate::error::ProtectedResponses,
     )
 )]
 pub async fn list_secrets(
     State(state): State<AppState>,
     context: RequestContext,
-    request_id: RequestIdHeader,
 ) -> Result<Json<SecretListResponse>, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::SecretsRead, &request_id)?;
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let list = repo::list(&mut tx)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    context.authorize(Operation::SecretsRead)?;
+    let list = context
+        .tenant_tx(&state, async |tx| Ok(repo::list(tx).await?))
+        .await?;
     let items = list.iter().map(SecretView::from).collect();
     Ok(Json(SecretListResponse { items }))
 }
@@ -127,48 +114,27 @@ pub async fn list_secrets(
     responses(
         (status = 201, description = "The secret is created.", body = SecretView),
         (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn create_secret(
     State(state): State<AppState>,
     context: RequestContext,
-    client: ClientIp,
-    request_id: RequestIdHeader,
     ApiJson(body): ApiJson<CreateSecretRequest>,
 ) -> Result<(StatusCode, Json<SecretView>), ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::SecretsWrite, &request_id)?;
-    let name = validation::validate_secret_name(&body.name)
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
-    let purpose = SecretPurpose::parse(&body.purpose)
-        .ok_or_else(|| ApiError::invalid_argument(&request_id))?;
-    validation::validate_secret_value(body.value.expose_secret())
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
-    let provider = state
-        .kek()
-        .ok_or_else(|| ApiError::internal_error(&request_id))?;
+    context.authorize(Operation::SecretsWrite)?;
+    let name = validation::validate_secret_name("name", &body.name)?;
+    let purpose = body.purpose;
+    validation::validate_secret_value("value", body.value.expose_secret())?;
+    let provider = state.kek().ok_or_else(ApiError::internal_error)?;
 
     // The value lives in a `SecretString` only.
     let plaintext = body.value;
     // The identifier comes first: it is part of the associated data of the encryption.
     let secret_id = SecretId::new();
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let encrypted = encrypt_for_tenant(
-        &mut tx,
-        provider,
-        secret_id,
-        purpose,
-        &plaintext,
-        &request_id,
-    )
-    .await?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    let encrypted = encrypt_for_tenant(&mut tx, provider, secret_id, purpose, &plaintext).await?;
     repo::create(
         &mut tx,
         &NewSecret {
@@ -182,11 +148,8 @@ pub async fn create_secret(
         },
     )
     .await
-    .map_err(|error| map_write_error(&request_id, &error))?;
-    let mut event = AuditEvent::new(AuditAction::SecretCreate, "secret");
-    event.actor = context.actor.clone();
-    event.source_ip = Some(client.0);
-    event.object_id = Some(secret_id.as_uuid());
+    .map_err(map_write_error)?;
+    let mut event = context.audit_event(AuditAction::SecretCreate, "secret", secret_id.as_uuid());
     // The diff holds the marker `<redacted>` for the value. It never holds the plaintext.
     event.diff = Some(diff(
         None,
@@ -197,17 +160,11 @@ pub async fn create_secret(
         })),
         &[],
     ));
-    restichub_db::audit::insert(&mut tx, &event)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let metadata = repo::get(&mut tx, secret_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    let metadata = repo::get(&mut tx, secret_id).await?;
+    tx.commit().await?;
     let Some(metadata) = metadata else {
-        return Err(ApiError::internal_error(&request_id));
+        return Err(ApiError::internal_error());
     };
     Ok((StatusCode::CREATED, Json(SecretView::from(&metadata))))
 }
@@ -222,34 +179,23 @@ pub async fn create_secret(
     params(("id" = String, Path, description = "The identifier of the secret.")),
     responses(
         (status = 200, description = "The metadata of the secret and the marker `set`.", body = SecretDetailView),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn get_secret(
     State(state): State<AppState>,
     context: RequestContext,
-    request_id: RequestIdHeader,
     Path(id): Path<String>,
 ) -> Result<Json<SecretDetailView>, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::SecretsRead, &request_id)?;
-    let secret_id = parse_secret_id(&id, &request_id)?;
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let metadata = repo::get(&mut tx, secret_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    context.authorize(Operation::SecretsRead)?;
+    let secret_id = parse_secret_id(&id)?;
+    let metadata = context
+        .tenant_tx(&state, async |tx| Ok(repo::get(tx, secret_id).await?))
+        .await?;
     match metadata {
         Some(metadata) => Ok(Json(SecretDetailView::from(&metadata))),
-        None => Err(ApiError::not_found(&request_id)),
+        None => Err(ApiError::not_found()),
     }
 }
 
@@ -263,54 +209,32 @@ pub async fn get_secret(
     responses(
         (status = 204, description = "The value is replaced."),
         (status = 400, description = "The value is not valid.", body = crate::error::ProblemBody),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn replace_secret_value(
     State(state): State<AppState>,
     context: RequestContext,
-    client: ClientIp,
-    request_id: RequestIdHeader,
     Path(id): Path<String>,
     ApiJson(body): ApiJson<ReplaceSecretRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::SecretsWrite, &request_id)?;
-    let secret_id = parse_secret_id(&id, &request_id)?;
-    validation::validate_secret_value(body.value.expose_secret())
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
+    context.authorize(Operation::SecretsWrite)?;
+    let secret_id = parse_secret_id(&id)?;
+    validation::validate_secret_value("value", body.value.expose_secret())?;
 
     let plaintext = body.value;
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     // The read comes first and locks the row: a secret of another tenant is not visible and gives
     // HTTP 404, also when the key encryption key provider is absent (AC-TN-01). A concurrent
     // delete cannot remove the row between the read and the write.
-    let metadata = repo::get_for_update(&mut tx, secret_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    let metadata = repo::get_for_update(&mut tx, secret_id).await?;
     let Some(metadata) = metadata else {
-        return Err(ApiError::not_found(&request_id));
+        return Err(ApiError::not_found());
     };
-    let provider = state
-        .kek()
-        .ok_or_else(|| ApiError::internal_error(&request_id))?;
-    let purpose = SecretPurpose::parse(&metadata.purpose)
-        .ok_or_else(|| ApiError::internal_error(&request_id))?;
-    let encrypted = encrypt_for_tenant(
-        &mut tx,
-        provider,
-        secret_id,
-        purpose,
-        &plaintext,
-        &request_id,
-    )
-    .await?;
+    let provider = state.kek().ok_or_else(ApiError::internal_error)?;
+    let purpose = SecretPurpose::parse(&metadata.purpose).ok_or_else(ApiError::internal_error)?;
+    let encrypted = encrypt_for_tenant(&mut tx, provider, secret_id, purpose, &plaintext).await?;
     repo::replace(
         &mut tx,
         secret_id,
@@ -318,20 +242,12 @@ pub async fn replace_secret_value(
         encrypted.nonce.as_slice(),
         &encrypted.ciphertext,
     )
-    .await
-    .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let mut event = AuditEvent::new(AuditAction::SecretReplace, "secret");
-    event.actor = context.actor.clone();
-    event.source_ip = Some(client.0);
-    event.object_id = Some(secret_id.as_uuid());
+    .await?;
+    let mut event = context.audit_event(AuditAction::SecretReplace, "secret", secret_id.as_uuid());
     // The diff holds the marker `<redacted>` for the value. It never holds the plaintext.
     event.diff = Some(diff(None, Some(&json!({"value": REDACTED})), &[]));
-    restichub_db::audit::insert(&mut tx, &event)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -346,39 +262,24 @@ pub async fn replace_secret_value(
     params(("id" = String, Path, description = "The identifier of the secret.")),
     responses(
         (status = 204, description = "The secret is removed."),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The role is not sufficient.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
         (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn delete_secret(
     State(state): State<AppState>,
     context: RequestContext,
-    client: ClientIp,
-    request_id: RequestIdHeader,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let request_id = request_id.0;
-    context.authorize(Operation::SecretsWrite, &request_id)?;
-    let secret_id = parse_secret_id(&id, &request_id)?;
-    let mut tx = state
-        .db()
-        .begin_tenant(context.tenant_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let metadata = repo::get_for_update(&mut tx, secret_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    context.authorize(Operation::SecretsWrite)?;
+    let secret_id = parse_secret_id(&id)?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    let metadata = repo::get_for_update(&mut tx, secret_id).await?;
     let Some(metadata) = metadata else {
-        return Err(ApiError::not_found(&request_id));
+        return Err(ApiError::not_found());
     };
-    repo::delete(&mut tx, secret_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let mut event = AuditEvent::new(AuditAction::SecretDelete, "secret");
-    event.actor = context.actor.clone();
-    event.source_ip = Some(client.0);
-    event.object_id = Some(secret_id.as_uuid());
+    repo::delete(&mut tx, secret_id).await?;
+    let mut event = context.audit_event(AuditAction::SecretDelete, "secret", secret_id.as_uuid());
     // The diff holds the marker `<redacted>` for the value. It never holds the plaintext.
     event.diff = Some(diff(
         Some(&json!({
@@ -389,12 +290,8 @@ pub async fn delete_secret(
         None,
         &[],
     ));
-    restichub_db::audit::insert(&mut tx, &event)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -408,24 +305,20 @@ async fn encrypt_for_tenant(
     secret_id: SecretId,
     purpose: SecretPurpose,
     plaintext: &SecretString,
-    request_id: &str,
 ) -> Result<Encrypted, ApiError> {
     let tenant = tx.tenant();
     let key = kek::active_key(tx)
-        .await
-        .map_err(|error| ApiError::internal(request_id, &error))?
-        .ok_or_else(|| ApiError::tenant_key_missing(request_id))?;
-    let wrapped = wrapped_dek(&key, request_id)?;
-    let dek = unwrap_dek(provider, tenant.as_uuid(), key.key_version, &wrapped)
-        .map_err(|error| ApiError::internal(request_id, &error))?;
+        .await?
+        .ok_or_else(ApiError::tenant_key_missing)?;
+    let wrapped = wrapped_dek(&key)?;
+    let dek = unwrap_dek(provider, tenant.as_uuid(), key.key_version, &wrapped)?;
     let encrypted = encrypt_secret(
         &dek,
         tenant.as_uuid(),
         secret_id.as_uuid(),
         purpose,
         plaintext,
-    )
-    .map_err(|error| ApiError::internal(request_id, &error))?;
+    )?;
     Ok(Encrypted {
         key_version: key.key_version,
         nonce: encrypted.nonce,
@@ -434,14 +327,13 @@ async fn encrypt_for_tenant(
 }
 
 /// Builds the wrapped data encryption key (DEK) from the stored key row.
-fn wrapped_dek(key: &kek::TenantKey, request_id: &str) -> Result<WrappedDek, ApiError> {
-    let kek_id =
-        KekId::parse(&key.kek_id).map_err(|error| ApiError::internal(request_id, &error))?;
+fn wrapped_dek(key: &kek::TenantKey) -> Result<WrappedDek, ApiError> {
+    let kek_id = KekId::parse(&key.kek_id)?;
     let nonce = key
         .nonce
         .as_slice()
         .try_into()
-        .map_err(|_| ApiError::internal_error(request_id))?;
+        .map_err(|_| ApiError::internal("the stored nonce has a wrong length"))?;
     Ok(WrappedDek {
         kek_id,
         nonce,
@@ -458,17 +350,17 @@ fn actor_user(actor: &Actor) -> Option<UserId> {
 }
 
 /// Parses a secret identifier from a path parameter.
-fn parse_secret_id(value: &str, request_id: &str) -> Result<SecretId, ApiError> {
+fn parse_secret_id(value: &str) -> Result<SecretId, ApiError> {
     Uuid::parse_str(value)
         .map(SecretId::from_uuid)
-        .map_err(|_| ApiError::invalid_argument(request_id))
+        .map_err(|_| ApiError::invalid_argument("id"))
 }
 
 /// Maps a write error to the API error. A duplicate name is a conflict.
-fn map_write_error(request_id: &str, error: &restichub_db::DbError) -> ApiError {
+fn map_write_error(error: restichub_db::DbError) -> ApiError {
     if error.is_unique_violation() {
-        ApiError::conflict(request_id)
+        ApiError::conflict()
     } else {
-        ApiError::internal(request_id, error)
+        ApiError::from(error)
     }
 }

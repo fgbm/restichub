@@ -3,8 +3,9 @@
 mod common;
 
 use axum::http::StatusCode;
-use restichub_cp::context::{Access, Operation, ROUTE_OPERATIONS, Role, minimum_role};
-use restichub_db::{PLATFORM_TENANT_ID, api_tokens, audit, memberships};
+use restichub_cp::context::{Access, Operation, minimum_role};
+use restichub_cp::routes::ROUTES;
+use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens, audit, memberships};
 use serde_json::{Value, json};
 
 use common::{
@@ -110,7 +111,7 @@ async fn ac_au_02_the_router_route_list_matches_the_openapi_paths() {
             document_operations.push((method.clone(), path.clone()));
         }
     }
-    let mut table_operations: Vec<(String, String)> = ROUTE_OPERATIONS
+    let mut table_operations: Vec<(String, String)> = ROUTES
         .iter()
         .map(|route| (route.method.to_owned(), route.path.to_owned()))
         .collect();
@@ -123,8 +124,8 @@ async fn ac_au_02_the_router_route_list_matches_the_openapi_paths() {
     );
 
     // Each pair appears exactly once.
-    for route in ROUTE_OPERATIONS {
-        let count = ROUTE_OPERATIONS
+    for route in ROUTES {
+        let count = ROUTES
             .iter()
             .filter(|other| other.method == route.method && other.path == route.path)
             .count();
@@ -144,7 +145,7 @@ async fn ac_au_02_role_operation_matrix() {
     let id = uuid::Uuid::now_v7().to_string();
 
     let mut index = 0;
-    for route in ROUTE_OPERATIONS {
+    for route in ROUTES {
         let Access::Protected(operation) = route.access else {
             continue;
         };
@@ -247,7 +248,7 @@ async fn ac_au_02_platform_tenant_refuses_a_lower_role() {
         .begin_tenant(PLATFORM_TENANT_ID)
         .await
         .unwrap_or_else(|e| panic!("{e}"));
-    let membership = memberships::set_role(&mut tx, user, "admin").await;
+    let membership = memberships::set_role(&mut tx, user, Role::Admin).await;
     assert!(
         membership
             .as_ref()
@@ -268,7 +269,7 @@ async fn ac_au_02_platform_tenant_refuses_a_lower_role() {
             name: "lower",
             token_hash: &[1u8; 32],
             display_prefix: "rh_abcdefgh",
-            role: "viewer",
+            role: Role::Viewer,
             created_by: user,
             expires_at: None,
         },

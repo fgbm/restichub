@@ -10,7 +10,7 @@ use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::request::Parts;
 
 use crate::error::ApiError;
-use crate::server::{AppState, request_id_of};
+use crate::server::AppState;
 
 /// The networks whose `X-Forwarded-For` header the control plane trusts.
 #[derive(Debug, Clone, Default)]
@@ -138,7 +138,7 @@ impl FromRequestParts<AppState> for ClientIp {
             .extensions
             .get::<ConnectInfo<SocketAddr>>()
             .map(|ConnectInfo(address)| address.ip())
-            .ok_or_else(|| ApiError::internal_error(&request_id_of(parts)))?;
+            .ok_or_else(ApiError::internal_error)?;
         let forwarded = forwarded_for(parts);
         Ok(Self(resolve_client_ip(
             peer,

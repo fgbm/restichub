@@ -1,4 +1,4 @@
-//! The initial setup (issue #18, FR-AU-03).
+//! The initial setup (FR-AU-03).
 //!
 //! At start, when the platform tenant has no user, the server generates a one-time setup token. It
 //! stores only the SHA-256 hash with an expiry of 24 hours and prints the value once at WARN level.
@@ -15,7 +15,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
-use restichub_db::{PLATFORM_TENANT_ID, memberships, setup, users};
+use restichub_db::{PLATFORM_TENANT_ID, Role, memberships, setup, users};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -25,7 +25,7 @@ use crate::error::ApiError;
 use crate::json::ApiJson;
 use crate::password;
 use crate::rate_limit;
-use crate::server::{AppState, RequestIdHeader};
+use crate::server::AppState;
 use crate::token;
 use crate::validation;
 use crate::views::UserView;
@@ -34,7 +34,7 @@ use crate::views::UserView;
 pub const SETUP_TOKEN_TTL: time::Duration = time::Duration::hours(24);
 
 /// The role of the first user of the platform tenant.
-const PLATFORM_ADMIN_ROLE: &str = "platform_admin";
+const PLATFORM_ADMIN_ROLE: Role = Role::PlatformAdmin;
 
 /// The advisory lock scope of the initial setup.
 const SETUP_LOCK: &str = "restichub.setup:";
@@ -90,22 +90,10 @@ pub struct SetupStatusResponse {
     path = "/api/v1/setup/status",
     responses((status = 200, description = "The setup status.", body = SetupStatusResponse))
 )]
-pub async fn status(
-    State(state): State<AppState>,
-    request_id: RequestIdHeader,
-) -> Result<Json<SetupStatusResponse>, ApiError> {
-    let request_id = request_id.0;
-    let mut tx = state
-        .db()
-        .begin_tenant(PLATFORM_TENANT_ID)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let count = setup::user_count(&mut tx)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+pub async fn status(State(state): State<AppState>) -> Result<Json<SetupStatusResponse>, ApiError> {
+    let mut tx = state.db().begin_tenant(PLATFORM_TENANT_ID).await?;
+    let count = setup::user_count(&mut tx).await?;
+    tx.commit().await?;
     Ok(Json(SetupStatusResponse {
         setup_required: count == 0,
     }))
@@ -146,13 +134,11 @@ pub struct SetupRequest {
 pub async fn setup(
     State(state): State<AppState>,
     client: ClientIp,
-    request_id: RequestIdHeader,
     headers: HeaderMap,
     ApiJson(body): ApiJson<SetupRequest>,
 ) -> Result<(StatusCode, Json<UserView>), ApiError> {
-    let request_id = request_id.0;
     if !token::csrf_ok(&headers) {
-        return Err(ApiError::csrf_required(&request_id));
+        return Err(ApiError::csrf_required());
     }
     // The setup endpoint uses the same per-IP rate limit as sign-in.
     if let Err(wait) = state
@@ -160,42 +146,26 @@ pub async fn setup(
         .ip_limiter
         .check(&rate_limit::ip_key(client.0), Instant::now())
     {
-        return Err(ApiError::rate_limited(&request_id, wait.as_secs().max(1)));
+        return Err(ApiError::rate_limited(wait.as_secs().max(1)));
     }
-    let username = validation::validate_username(&body.username)
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
-    let display_name = validation::validate_display_name(&body.display_name)
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
-    password::validate_password(&body.password)
-        .map_err(|_| ApiError::invalid_argument(&request_id))?;
+    let username = validation::validate_username("username", &body.username)?;
+    let display_name = validation::validate_display_name("display_name", &body.display_name)?;
+    validation::validate_password("password", &body.password)?;
     let now = state.auth().clock.now();
-    let mut tx = state
-        .db()
-        .begin_tenant(PLATFORM_TENANT_ID)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    let mut tx = state.db().begin_tenant(PLATFORM_TENANT_ID).await?;
     // The lock serializes the whole setup for the platform tenant.
-    tx.lock(SETUP_LOCK)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    if setup::user_count(&mut tx)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?
-        > 0
-    {
-        return Err(ApiError::conflict(&request_id));
+    tx.lock(SETUP_LOCK).await?;
+    if setup::user_count(&mut tx).await? > 0 {
+        return Err(ApiError::conflict());
     }
     let hash = token::hash_token(&body.setup_token);
-    let token_id = setup::find_valid(&mut tx, &hash, now)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    let token_id = setup::find_valid(&mut tx, &hash, now).await?;
     let Some(token_id) = token_id else {
-        return Err(ApiError::invalid_credentials(&request_id));
+        return Err(ApiError::invalid_credentials());
     };
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, body.password.clone())
-            .await
-            .map_err(|error| ApiError::from_password(&request_id, &error))?;
+            .await?;
     let user_id = users::create(
         &mut tx,
         &users::NewUser {
@@ -204,17 +174,12 @@ pub async fn setup(
             display_name: &display_name,
         },
     )
-    .await
-    .map_err(|error| ApiError::internal(&request_id, &error))?;
-    memberships::set_role(&mut tx, user_id, PLATFORM_ADMIN_ROLE)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    .await?;
+    memberships::set_role(&mut tx, user_id, PLATFORM_ADMIN_ROLE).await?;
     // A second call with the same token sees `used_at` set and is refused.
-    let marked = setup::mark_used(&mut tx, token_id, now)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    let marked = setup::mark_used(&mut tx, token_id, now).await?;
     if !marked {
-        return Err(ApiError::conflict(&request_id));
+        return Err(ApiError::conflict());
     }
     let mut event = AuditEvent::new(AuditAction::UserCreate, "user");
     event.actor = Actor::System;
@@ -224,23 +189,17 @@ pub async fn setup(
         Some(&serde_json::json!({
             "username": username,
             "display_name": display_name,
-            "role": PLATFORM_ADMIN_ROLE,
+            "role": PLATFORM_ADMIN_ROLE.as_str(),
         })),
         &[],
     ));
-    restichub_db::audit::insert(&mut tx, &event)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    let user = users::get(&mut tx, user_id)
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::internal(&request_id, &error))?;
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    let user = users::get(&mut tx, user_id).await?;
+    tx.commit().await?;
     let Some(user) = user else {
-        return Err(ApiError::internal_error(&request_id));
+        return Err(ApiError::internal_error());
     };
-    tracing::info!(request_id = %request_id, "the first Platform Admin is created");
+    tracing::info!("the first Platform Admin is created");
     Ok((
         StatusCode::CREATED,
         Json(UserView::new(&user, PLATFORM_ADMIN_ROLE)),

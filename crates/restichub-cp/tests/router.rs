@@ -88,7 +88,14 @@ async fn an_unknown_api_route_is_a_problem() -> Result<(), Box<dyn std::error::E
         problem.get("code").and_then(Value::as_str),
         Some("not_found")
     );
-    assert!(problem.get("request_id").is_some());
+    // The response mapper adds the request ID from the request extension.
+    assert!(
+        problem
+            .get("request_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty()),
+        "the problem body must hold the request ID"
+    );
     Ok(())
 }
 
