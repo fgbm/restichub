@@ -13,6 +13,7 @@ export const en = {
 	'nav.overview': 'Overview',
 	'nav.users': 'Users',
 	'nav.hosts': 'Hosts',
+	'nav.repositories': 'Repositories',
 	'nav.apiTokens': 'API tokens',
 	'nav.audit': 'Audit',
 	'nav.platformMode': 'Platform administration',
@@ -346,6 +347,65 @@ export const en = {
 	'hosts.renameTooLong': 'The host name holds at most 128 characters.',
 	'hosts.renamed': 'The host is renamed.',
 
+	// Repositories
+	'repositories.title': 'Repositories',
+	'repositories.description':
+		'Each repository holds one restic backend. The control plane keeps the secrets and the maintenance host.',
+	'repositories.add': 'Add repository',
+	'repositories.addFirst': 'Add the first repository',
+	'repositories.addTitle': 'Add a repository',
+	'repositories.addDescription':
+		'Enter the backend address and the credentials. The control plane encrypts each secret value.',
+	'repositories.editTitle': 'Edit the repository',
+	'repositories.editDescription': 'Leave a secret field empty to keep the current value.',
+	'repositories.emptyTitle': 'No repositories yet',
+	'repositories.emptyDescription':
+		'Add a repository to give the agents a place for their snapshots.',
+	'repositories.repository': 'Repository',
+	'repositories.searchPlaceholder': 'Search repositories',
+	'repositories.backend': 'Backend',
+	'repositories.backendKind': 'Backend kind',
+	'repositories.backendKind.s3': 'S3-compatible',
+	'repositories.backendKind.rest': 'REST server',
+	'repositories.backendKind.local': 'Local path',
+	'repositories.endpoint': 'Endpoint',
+	'repositories.endpointPlaceholder': 'https://s3.example.net',
+	'repositories.bucket': 'Bucket',
+	'repositories.bucketPlaceholder': 'backups-prod',
+	'repositories.prefix': 'Prefix',
+	'repositories.prefixPlaceholder': 'snapshots/prod',
+	'repositories.region': 'Region',
+	'repositories.regionPlaceholder': 'us-east-1',
+	'repositories.path': 'Path',
+	'repositories.pathPlaceholder': '/mnt/backup/restic',
+	'repositories.maintenanceHost': 'Maintenance host',
+	'repositories.maintenanceHostHint': 'This host runs forget, prune and check for the repository.',
+	'repositories.maintenanceHostNone': 'None',
+	'repositories.status': 'Status',
+	'repositories.status.initialized': 'Initialized',
+	'repositories.status.notInitialized': 'Not initialized',
+	'repositories.secrets': 'Secrets',
+	'repositories.password': 'Repository password',
+	'repositories.passwordHint':
+		'ResticHub shows this value never again after you save it. You can only replace it.',
+	'repositories.passwordKeepHint': 'Leave the field empty to keep the current value.',
+	'repositories.s3AccessKey': 'S3 access key',
+	'repositories.s3SecretKey': 'S3 secret key',
+	'repositories.restPassword': 'REST server password',
+	'repositories.restPasswordHint':
+		'Optional. The control plane sends it to the agent with each job.',
+	'repositories.created': 'The repository is created.',
+	'repositories.updated': 'The repository is updated.',
+	'repositories.deleted': 'The repository is deleted.',
+	'repositories.moreActions': 'More actions for {name}',
+	'repositories.edit': 'Edit',
+	'repositories.delete': 'Delete repository',
+	'repositories.deleteTitle': 'Delete the repository?',
+	'repositories.deleteBody':
+		'This action removes the repository "{name}" and its stored secrets. The data in the backend stays. Continue?',
+	'repositories.valueNote':
+		'An agent holds the repository password only for the duration of one job. ResticHub shows the value never again after you save it. Replace it to rotate.',
+
 	// Audit log
 	'audit.title': 'Audit log',
 	'audit.description': 'Every recorded operation, with the actor and the change.',
@@ -411,6 +471,9 @@ export const en = {
 	'audit.action.secret_create': 'Create secret',
 	'audit.action.secret_replace': 'Replace secret',
 	'audit.action.secret_delete': 'Delete secret',
+	'audit.action.repository_create': 'Create repository',
+	'audit.action.repository_update': 'Change repository',
+	'audit.action.repository_delete': 'Delete repository',
 
 	// Diff view
 	'diff.title': 'Change',

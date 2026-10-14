@@ -95,6 +95,23 @@ export type CreateEnrollmentTokenRequest = components['schemas']['CreateEnrollme
 
 export type EnrollmentTokenListResponse = components['schemas']['EnrollmentTokenListResponse'];
 
+/** The backend settings of a repository (FR-RP-01). */
+export type BackendSettings = components['schemas']['BackendSettings'];
+
+export type RepositoryBackendKind = BackendSettings['kind'];
+
+/** The presence of the bound secrets. It never holds a value (AC-RP-02). */
+export type RepositoryCredentials = components['schemas']['CredentialsView'];
+
+/** One repository (FR-RP-01). */
+export type Repository = components['schemas']['RepositoryView'];
+
+export type RepositoryListResponse = components['schemas']['RepositoryListResponse'];
+
+export type CreateRepositoryRequest = components['schemas']['CreateRepositoryRequest'];
+
+export type UpdateRepositoryRequest = components['schemas']['UpdateRepositoryRequest'];
+
 /**
  * One audit record. The generated `diff` type is an opaque object, so the UI
  * replaces it with the diff shape that the control plane writes.

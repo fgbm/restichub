@@ -40,6 +40,11 @@ export const endpoints = {
 		create: '/enrollment-tokens',
 		byId: (id: string) => `/enrollment-tokens/${encodeURIComponent(id)}`
 	},
+	repositories: {
+		list: '/repositories',
+		create: '/repositories',
+		byId: (id: string) => `/repositories/${encodeURIComponent(id)}`
+	},
 	audit: {
 		list: '/audit'
 	},

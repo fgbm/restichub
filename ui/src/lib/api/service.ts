@@ -18,6 +18,7 @@ import type {
 	ChangePasswordRequest,
 	CreateApiTokenRequest,
 	CreateEnrollmentTokenRequest,
+	CreateRepositoryRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
 	CreatePlatformUserRequest,
@@ -30,6 +31,8 @@ import type {
 	PlatformUser,
 	PlatformUserListResponse,
 	RenameAgentRequest,
+	Repository,
+	RepositoryListResponse,
 	ResetPasswordRequest,
 	SetRoleRequest,
 	SetupRequest,
@@ -40,6 +43,7 @@ import type {
 	TenantAccessListResponse,
 	TenantListResponse,
 	UpdateAccountRequest,
+	UpdateRepositoryRequest,
 	UpdateUserRequest,
 	User,
 	UserListResponse
@@ -80,6 +84,12 @@ export interface ApiService {
 	listEnrollmentTokens(): Promise<EnrollmentToken[]>;
 	createEnrollmentToken(request: CreateEnrollmentTokenRequest): Promise<EnrollmentTokenCreated>;
 	revokeEnrollmentToken(id: string): Promise<void>;
+
+	/** The repositories of the tenant (FR-RP-01). */
+	listRepositories(): Promise<Repository[]>;
+	createRepository(request: CreateRepositoryRequest): Promise<Repository>;
+	updateRepository(id: string, request: UpdateRepositoryRequest): Promise<Repository>;
+	deleteRepository(id: string): Promise<void>;
 
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
@@ -139,6 +149,13 @@ const httpService: ApiService = {
 	createEnrollmentToken: (request) =>
 		api.post<EnrollmentTokenCreated>(endpoints.enrollmentTokens.create, request),
 	revokeEnrollmentToken: (id) => api.delete<void>(endpoints.enrollmentTokens.byId(id)),
+
+	listRepositories: () =>
+		api.get<RepositoryListResponse>(endpoints.repositories.list).then((response) => response.items),
+	createRepository: (request) => api.post<Repository>(endpoints.repositories.create, request),
+	updateRepository: (id, request) =>
+		api.patch<Repository>(endpoints.repositories.byId(id), request),
+	deleteRepository: (id) => api.delete<void>(endpoints.repositories.byId(id)),
 
 	listTenants: () =>
 		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),
