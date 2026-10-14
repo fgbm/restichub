@@ -55,12 +55,10 @@ const FILE_SDDL: &str = "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)";
 
 /// The security identifiers that may own or change the agent: SYSTEM, BUILTIN\Administrators and
 /// the TrustedInstaller service account that the Windows installer uses.
-const TRUSTED_SIDS: [&str; 4] = [
+const TRUSTED_SIDS: [&str; 3] = [
     "S-1-5-18",
     "S-1-5-32-544",
-    // The TrustedInstaller service account of the Windows installer. The second value is the
-    // well-known form of the same account.
-    "S-1-5-80-956008885-3444109722-1543130093-1000125183-2085213244",
+    // The TrustedInstaller service account of the Windows installer.
     "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
 ];
 
