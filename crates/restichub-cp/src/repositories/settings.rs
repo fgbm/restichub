@@ -253,13 +253,41 @@ fn validate_region(value: Option<&str>) -> Result<Option<String>, ApiError> {
     let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
-    if value.chars().count() > 64 || value.chars().any(char::is_control) {
+    if value.chars().count() > 64 || restichub_proto::validate::has_forbidden(value) {
         return Err(ApiError::invalid_field(
             "backend.region",
             Reason::InvalidFormat,
         ));
     }
     Ok(Some(value.to_owned()))
+}
+
+/// Builds the final restic location of the backend and checks it (ADR-0021).
+///
+/// The control plane stores the typed settings, so the location is built here to prove that the
+/// settings always give a form that restic opens without an external program.
+pub(super) fn repository_location(backend: &ValidatedBackend) -> Result<String, ApiError> {
+    let location = match backend.kind {
+        BackendKind::S3 => {
+            let endpoint = backend.s3_endpoint.as_deref().unwrap_or_default();
+            let bucket = backend.s3_bucket.as_deref().unwrap_or_default();
+            match backend.s3_prefix.as_deref() {
+                Some(prefix) => format!("s3:{endpoint}/{bucket}/{prefix}"),
+                None => format!("s3:{endpoint}/{bucket}"),
+            }
+        }
+        BackendKind::Rest => {
+            format!(
+                "rest:{}",
+                backend.rest_endpoint.as_deref().unwrap_or_default()
+            )
+        }
+        BackendKind::Local => backend.local_path.clone().unwrap_or_default(),
+    };
+    if !restichub_proto::validate::is_safe_repository_location(&location) {
+        return Err(ApiError::invalid_field("backend", Reason::InvalidFormat));
+    }
+    Ok(location)
 }
 
 /// The secret values of a create or an update, after validation.
@@ -320,10 +348,13 @@ pub(super) fn validate_credentials(
 }
 
 /// Creates the secret rows of the backend credentials and returns the secret identifiers.
+///
+/// The secret names derive from the repository identifier, not from the name, so a rename never
+/// collides with the secrets of another repository (FR-RP-01).
 pub(super) async fn bind_new_credentials(
     tx: &mut restichub_db::TenantTx<'_>,
     provider: &dyn restichub_secrets::KekProvider,
-    name: &str,
+    owner: &str,
     kind: &BackendKind,
     credentials: &Credentials,
     password: SecretId,
@@ -348,7 +379,7 @@ pub(super) async fn bind_new_credentials(
             create_bound_secret(
                 tx,
                 provider,
-                &format!("{name}.s3-access-key"),
+                &format!("{owner}.s3-access-key"),
                 SecretPurpose::S3AccessKey,
                 access,
                 created_by,
@@ -359,7 +390,7 @@ pub(super) async fn bind_new_credentials(
             create_bound_secret(
                 tx,
                 provider,
-                &format!("{name}.s3-secret-key"),
+                &format!("{owner}.s3-secret-key"),
                 SecretPurpose::S3SecretKey,
                 secret,
                 created_by,
@@ -374,7 +405,7 @@ pub(super) async fn bind_new_credentials(
             create_bound_secret(
                 tx,
                 provider,
-                &format!("{name}.rest-password"),
+                &format!("{owner}.rest-password"),
                 SecretPurpose::RestServerPassword,
                 value,
                 created_by,
@@ -390,7 +421,7 @@ pub(super) async fn bind_new_credentials(
 pub(super) async fn replace_credentials(
     tx: &mut restichub_db::TenantTx<'_>,
     provider: &dyn restichub_secrets::KekProvider,
-    name: &str,
+    owner: &str,
     kind: &BackendKind,
     secrets: &mut RepositorySecrets,
     s3_access_key: Option<SecretString>,
@@ -415,7 +446,7 @@ pub(super) async fn replace_credentials(
                     create_bound_secret(
                         tx,
                         provider,
-                        &format!("{name}.s3-access-key"),
+                        &format!("{owner}.s3-access-key"),
                         SecretPurpose::S3AccessKey,
                         &value,
                         created_by,
@@ -436,7 +467,7 @@ pub(super) async fn replace_credentials(
                     create_bound_secret(
                         tx,
                         provider,
-                        &format!("{name}.s3-secret-key"),
+                        &format!("{owner}.s3-secret-key"),
                         SecretPurpose::S3SecretKey,
                         &value,
                         created_by,
@@ -458,7 +489,7 @@ pub(super) async fn replace_credentials(
                     create_bound_secret(
                         tx,
                         provider,
-                        &format!("{name}.rest-password"),
+                        &format!("{owner}.rest-password"),
                         SecretPurpose::RestServerPassword,
                         &value,
                         created_by,
@@ -530,11 +561,32 @@ pub(super) fn current_diff(repository: &Repository) -> serde_json::Value {
             BackendKind::Rest => json!({"kind": "rest", "endpoint": repository.rest_endpoint}),
             BackendKind::Local => json!({"kind": "local", "path": repository.local_path}),
         },
-        "password": REDACTED,
-        "credentials": REDACTED,
         "maintenance_agent_id": repository.maintenance_agent_id.map(|id| id.to_string()),
         "initialized": repository.initialized,
     })
+}
+
+/// The diff of an update names the replaced secret fields.
+///
+/// `replaced` names the secret fields whose value changed. The list holds the field names only: a
+/// secret value is never written (FR-RP-05).
+pub(super) fn updated_diff(
+    name: &str,
+    backend: &ValidatedBackend,
+    agent: Option<AgentId>,
+    initialized: bool,
+    replaced: &[&str],
+) -> serde_json::Value {
+    let mut value = json!({
+        "name": name,
+        "backend": backend_value(backend),
+        "maintenance_agent_id": agent.map(|id| id.to_string()),
+        "initialized": initialized,
+    });
+    if !replaced.is_empty() {
+        value["replaced"] = json!(replaced);
+    }
+    value
 }
 
 fn backend_value(backend: &ValidatedBackend) -> serde_json::Value {

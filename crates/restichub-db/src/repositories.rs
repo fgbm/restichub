@@ -215,6 +215,19 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: RepositoryId) -> Result<bool, DbE
     Ok(result.rows_affected() == 1)
 }
 
+/// True when a repository of the tenant binds the secret as its password.
+///
+/// The password of a repository cannot change until the rotation of FR-RP-06 (1.0).
+pub async fn is_password_secret(tx: &mut TenantTx<'_>, secret: SecretId) -> Result<bool, DbError> {
+    let (bound,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM repositories WHERE password_secret_id = $1)")
+            .bind(secret)
+            .fetch_one(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    Ok(bound)
+}
+
 #[derive(sqlx::FromRow)]
 struct RepositoryRow {
     id: Uuid,

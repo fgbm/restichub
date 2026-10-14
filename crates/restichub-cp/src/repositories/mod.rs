@@ -28,7 +28,7 @@ use restichub_secrets::SecretPurpose;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
-use crate::secrets::{actor_user, create_bound_secret, replace_bound_secret};
+use crate::secrets::{actor_user, create_bound_secret};
 use crate::server::AppState;
 use crate::validation;
 use crate::validation::Reason;
@@ -39,8 +39,8 @@ pub use settings::{
 };
 use settings::{
     bind_new_credentials, created_diff, current_diff, ensure_agent, parse_optional_agent_id,
-    parse_repository_id, replace_credentials, validate_backend, validate_credentials,
-    validate_secret_value, validated_from_row,
+    parse_repository_id, replace_credentials, repository_location, updated_diff, validate_backend,
+    validate_credentials, validate_secret_value, validated_from_row,
 };
 
 /// Lists the repositories of the tenant.
@@ -126,6 +126,7 @@ pub async fn create_repository(
     } = body;
     let name = validation::validate_repository_name("name", &name)?;
     let backend = validate_backend(backend)?;
+    repository_location(&backend)?;
     validate_secret_value("password", &password)?;
     let credentials =
         validate_credentials(&backend.kind, s3_access_key, s3_secret_key, rest_password)?;
@@ -136,13 +137,14 @@ pub async fn create_repository(
         .kek()
         .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
     let repository_id = RepositoryId::new();
+    let owner = repository_id.to_string();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     ensure_agent(&mut tx, maintenance_agent_id).await?;
 
     let password_secret = create_bound_secret(
         &mut tx,
         provider,
-        &format!("{name}.password"),
+        &format!("{owner}.password"),
         SecretPurpose::RepositoryPassword,
         &password,
         created_by,
@@ -151,7 +153,7 @@ pub async fn create_repository(
     let secrets = bind_new_credentials(
         &mut tx,
         provider,
-        &name,
+        &owner,
         &backend.kind,
         &credentials,
         password_secret,
@@ -224,6 +226,11 @@ pub async fn update_repository(
         rest_password,
         maintenance_agent_id,
     } = body;
+    // The repository password cannot be replaced until the rotation of FR-RP-06 (1.0): a new
+    // password would not open the existing repository.
+    if password.is_some() {
+        return Err(ApiError::conflict());
+    }
 
     let provider = state
         .kek()
@@ -251,6 +258,7 @@ pub async fn update_repository(
             validated_from_row(&current, kind)
         }
     };
+    repository_location(&backend)?;
     let agent_set = match maintenance_agent_id {
         Some(value) => Some(parse_optional_agent_id(Some(&value))?),
         None => None,
@@ -267,21 +275,21 @@ pub async fn update_repository(
         s3_secret_key: current.s3_secret_key_secret_id,
         rest_password: current.rest_password_secret_id,
     };
-    if let Some(value) = password {
-        validate_secret_value("password", &value)?;
-        replace_bound_secret(
-            &mut tx,
-            provider,
-            secrets.password,
-            SecretPurpose::RepositoryPassword,
-            &value,
-        )
-        .await?;
+    let mut replaced: Vec<&str> = Vec::new();
+    if s3_access_key.is_some() {
+        replaced.push("s3_access_key");
     }
+    if s3_secret_key.is_some() {
+        replaced.push("s3_secret_key");
+    }
+    if rest_password.is_some() {
+        replaced.push("rest_password");
+    }
+    let owner = repository_id.to_string();
     replace_credentials(
         &mut tx,
         provider,
-        &name,
+        &owner,
         &backend.kind,
         &mut secrets,
         s3_access_key,
@@ -301,17 +309,24 @@ pub async fn update_repository(
             maintenance_agent_id: agent,
         },
     )
-    .await?;
+    .await
+    .map_err(map_write_error)?;
 
     let mut event = context.audit_event(
         AuditAction::RepositoryUpdate,
         "repository",
         repository_id.as_uuid(),
     );
-    // The audit record diff never holds a secret value.
+    // The diff names the replaced secret fields only. It never holds a secret value.
     event.diff = Some(diff(
         Some(&current_diff(&current)),
-        Some(&created_diff(&name, &backend)),
+        Some(&updated_diff(
+            &name,
+            &backend,
+            agent,
+            current.initialized,
+            &replaced,
+        )),
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;

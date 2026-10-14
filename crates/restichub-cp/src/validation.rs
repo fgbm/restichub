@@ -6,6 +6,8 @@
 
 use time::{Duration, OffsetDateTime};
 
+use restichub_proto::validate::has_forbidden;
+
 use crate::password::{self, PasswordError};
 
 /// Limit in characters.
@@ -272,9 +274,8 @@ pub fn validate_secret_value(field: &'static str, value: &str) -> Result<(), Val
 /// Validates a repository name and returns the trimmed value.
 ///
 /// A name holds 1 to [`MAX_REPOSITORY_NAME`] characters from the set `a-z`, `0-9`, `.`, `_` and
-/// `-`. The control plane builds the names of the derived secrets from it, so the length keeps the
-/// derived name within [`MAX_SECRET_NAME`] (FR-RP-01). The unique index of the `repositories` table
-/// makes the name unique for the tenant, so a duplicate gives a conflict at the database.
+/// `-`. The unique index of the `repositories` table makes the name unique for the tenant, so a
+/// duplicate gives a conflict at the database (FR-RP-01).
 pub fn validate_repository_name(
     field: &'static str,
     value: &str,
@@ -287,11 +288,13 @@ pub fn validate_repository_name(
     if count > MAX_REPOSITORY_NAME {
         return Err(ValidationError::new(field, Reason::TooLong));
     }
-    if !value.chars().all(|character| {
-        character.is_ascii_lowercase()
-            || character.is_ascii_digit()
-            || matches!(character, '.' | '_' | '-')
-    }) {
+    if has_forbidden(value)
+        || !value.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '.' | '_' | '-')
+        })
+    {
         return Err(ValidationError::new(field, Reason::InvalidCharacter));
     }
     Ok(value.to_owned())
@@ -299,8 +302,9 @@ pub fn validate_repository_name(
 
 /// Validates a backend endpoint and returns it.
 ///
-/// The endpoint is an absolute URL with the scheme `http` or `https` and a host (FR-RP-01). A
-/// rest-server URL and an S3-compatible endpoint use the same rule.
+/// The endpoint is an absolute URL with the scheme `http` or `https` and a host (FR-RP-01). The
+/// endpoint holds no user information, no query and no fragment: the rest-server credential comes
+/// from a secret field only. A rest-server URL and an S3-compatible endpoint use the same rule.
 pub fn validate_endpoint(field: &'static str, value: &str) -> Result<String, ValidationError> {
     let value = value.trim();
     if value.is_empty() {
@@ -309,10 +313,20 @@ pub fn validate_endpoint(field: &'static str, value: &str) -> Result<String, Val
     if value.chars().count() > MAX_ENDPOINT {
         return Err(ValidationError::new(field, Reason::TooLong));
     }
+    if has_forbidden(value) {
+        return Err(ValidationError::new(field, Reason::InvalidCharacter));
+    }
     let uri = value
         .parse::<axum::http::Uri>()
         .map_err(|_| ValidationError::new(field, Reason::InvalidFormat))?;
-    if !matches!(uri.scheme_str(), Some("http" | "https")) || uri.authority().is_none() {
+    let authority = uri
+        .authority()
+        .ok_or_else(|| ValidationError::new(field, Reason::InvalidFormat))?;
+    if !matches!(uri.scheme_str(), Some("http" | "https"))
+        || authority.as_str().contains('@')
+        || uri.query().is_some()
+        || value.contains('#')
+    {
         return Err(ValidationError::new(field, Reason::InvalidFormat));
     }
     Ok(value.to_owned())
@@ -339,7 +353,7 @@ pub fn validate_bucket(field: &'static str, value: &str) -> Result<String, Valid
             || character.is_ascii_digit()
             || matches!(character, '.' | '-')
     };
-    if !value.chars().all(allowed) {
+    if has_forbidden(value) || !value.chars().all(allowed) {
         return Err(ValidationError::new(field, Reason::InvalidCharacter));
     }
     let starts_ok = value.starts_with(|character: char| character.is_ascii_alphanumeric());
@@ -352,7 +366,8 @@ pub fn validate_bucket(field: &'static str, value: &str) -> Result<String, Valid
 
 /// Validates an S3 key prefix and returns the trimmed value, or `None` for an empty value.
 ///
-/// A prefix holds no leading slash and no control character (FR-RP-01).
+/// A prefix holds no leading slash, no `..` segment, no empty segment and no forbidden character
+/// (FR-RP-01).
 pub fn validate_s3_prefix(
     field: &'static str,
     value: &str,
@@ -364,7 +379,12 @@ pub fn validate_s3_prefix(
     if value.chars().count() > MAX_S3_PREFIX {
         return Err(ValidationError::new(field, Reason::TooLong));
     }
-    if value.starts_with('/') || value.chars().any(char::is_control) {
+    if value.starts_with('/')
+        || has_forbidden(value)
+        || value
+            .split('/')
+            .any(|segment| segment == ".." || segment.is_empty())
+    {
         return Err(ValidationError::new(field, Reason::InvalidFormat));
     }
     Ok(Some(value.to_owned()))
@@ -372,8 +392,8 @@ pub fn validate_s3_prefix(
 
 /// Validates a local path and returns the trimmed value.
 ///
-/// The path is absolute: it starts with `/`, a drive letter (`C:\`) or a UNC prefix (`\\`)
-/// (FR-RP-01). The path holds no control character.
+/// The path is absolute: it starts with `/` or a drive letter (`C:\`). A UNC path is not accepted.
+/// The path holds no `..` segment, no empty segment and no forbidden character (FR-RP-01).
 pub fn validate_local_path(field: &'static str, value: &str) -> Result<String, ValidationError> {
     let value = value.trim();
     if value.is_empty() {
@@ -387,8 +407,19 @@ pub fn validate_local_path(field: &'static str, value: &str) -> Result<String, V
         && bytes[0].is_ascii_alphabetic()
         && bytes[1] == b':'
         && matches!(bytes[2], b'\\' | b'/');
-    let absolute = value.starts_with('/') || value.starts_with("\\\\") || drive;
-    if !absolute || value.chars().any(char::is_control) {
+    if !(value.starts_with('/') || drive) {
+        return Err(ValidationError::new(field, Reason::InvalidFormat));
+    }
+    let body = if let Some(rest) = value.strip_prefix('/') {
+        rest
+    } else {
+        &value[3..]
+    };
+    if has_forbidden(value)
+        || body
+            .split(['/', '\\'])
+            .any(|segment| segment == ".." || segment.is_empty())
+    {
         return Err(ValidationError::new(field, Reason::InvalidFormat));
     }
     Ok(value.to_owned())
@@ -540,6 +571,10 @@ mod tests {
         assert!(validate_endpoint(FIELD, "s3.example.net").is_err());
         assert!(validate_endpoint(FIELD, "ftp://s3.example.net").is_err());
         assert!(validate_endpoint(FIELD, "https://").is_err());
+        // The endpoint holds no user information, no query and no fragment.
+        assert!(validate_endpoint(FIELD, "https://u:p@h.example.net").is_err());
+        assert!(validate_endpoint(FIELD, "https://h.example.net?x=1").is_err());
+        assert!(validate_endpoint(FIELD, "https://h.example.net#frag").is_err());
     }
 
     #[test]
@@ -565,6 +600,8 @@ mod tests {
             Some("snapshots/prod".to_owned())
         );
         assert!(validate_s3_prefix(FIELD, "/snapshots").is_err());
+        assert!(validate_s3_prefix(FIELD, "a/../b").is_err());
+        assert!(validate_s3_prefix(FIELD, "a//b").is_err());
     }
 
     #[test]
@@ -574,9 +611,14 @@ mod tests {
             Ok("/mnt/backup/restic")
         );
         assert!(validate_local_path(FIELD, "C:\\backup\\restic").is_ok());
-        assert!(validate_local_path(FIELD, "\\\\server\\share").is_ok());
         assert!(validate_local_path(FIELD, "").is_err());
         assert!(validate_local_path(FIELD, "relative/path").is_err());
+        // A UNC path is not accepted as an absolute path.
+        assert!(validate_local_path(FIELD, "\\\\server\\share").is_err());
+        // A `..` segment and an empty segment are refused.
+        assert!(validate_local_path(FIELD, "/mnt/../etc").is_err());
+        assert!(validate_local_path(FIELD, "/mnt//backup").is_err());
+        assert!(validate_local_path(FIELD, "C:\\a\\..\\b").is_err());
     }
 
     #[test]

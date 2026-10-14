@@ -59,6 +59,20 @@ async fn list_secrets(db: &restichub_db::Database, tenant: TenantId) -> Vec<Secr
     list
 }
 
+/// Reads the identifier of the secret of one purpose.
+async fn secret_id_by_purpose(
+    db: &restichub_db::Database,
+    tenant: TenantId,
+    purpose: &str,
+) -> restichub_db::SecretId {
+    list_secrets(db, tenant)
+        .await
+        .into_iter()
+        .find(|secret| secret.purpose == purpose)
+        .unwrap_or_else(|| panic!("the {purpose} secret"))
+        .id
+}
+
 /// Returns the plaintext of a stored value with the test key.
 async fn decrypt(
     db: &restichub_db::Database,
@@ -298,7 +312,7 @@ async fn a_viewer_cannot_write_and_the_platform_tenant_is_refused() {
 }
 
 #[tokio::test]
-async fn an_update_replaces_the_secret_and_an_empty_field_keeps_it() {
+async fn an_update_keeps_the_password_and_replaces_a_backend_credential() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -307,14 +321,10 @@ async fn an_update_replaces_the_secret_and_an_empty_field_keeps_it() {
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
 
     let id = create_repository(&app, &cookie, s3_body("s3-prod", "old-password", "a", "s")).await;
-    let password_id = list_secrets(db.database(), tenant)
-        .await
-        .into_iter()
-        .find(|secret| secret.purpose == "repository_password")
-        .expect("the password secret")
-        .id;
+    let password_id = secret_id_by_purpose(db.database(), tenant, "repository_password").await;
+    let access_id = secret_id_by_purpose(db.database(), tenant, "s3_access_key").await;
 
-    // An update without the password field keeps the value.
+    // A rename keeps the stored password value unchanged.
     let (status, _, _) = send(
         &app,
         request(
@@ -331,7 +341,7 @@ async fn an_update_replaces_the_secret_and_an_empty_field_keeps_it() {
         "old-password"
     );
 
-    // A filled field replaces the value of the same secret row.
+    // The repository password cannot be replaced until the rotation of FR-RP-06 (1.0).
     let (status, _, _) = send(
         &app,
         request(
@@ -342,19 +352,145 @@ async fn an_update_replaces_the_secret_and_an_empty_field_keeps_it() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(
         decrypt(db.database(), tenant, password_id).await,
-        "new-password"
+        "old-password"
     );
 
-    // The update writes one audit record of its own.
-    assert_eq!(
-        audit_records(db.database(), tenant, AuditAction::RepositoryUpdate)
-            .await
-            .len(),
-        2
-    );
+    // A backend credential may still be replaced.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/repositories/{id}"),
+            Some(&cookie),
+            Some(json!({"s3_access_key": "a2"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(decrypt(db.database(), tenant, access_id).await, "a2");
+
+    // The audit diff names the replaced secret field and holds no value.
+    let records = audit_records(db.database(), tenant, AuditAction::RepositoryUpdate).await;
+    // The password patch gave 409 and wrote no record; the rename and the credential patch did.
+    assert_eq!(records.len(), 2);
+    let diff = records[0].diff.as_ref().expect("the diff");
+    assert_eq!(diff["replaced"]["new"], json!(["s3_access_key"]));
+    assert!(!diff.to_string().contains("a2"));
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_repository_password_cannot_be_replaced_through_the_secrets_api() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+
+    create_repository(&app, &cookie, s3_body("s3-prod", "p", "a", "s")).await;
+    let password_id = list_secrets(db.database(), tenant)
+        .await
+        .into_iter()
+        .find(|secret| secret.purpose == "repository_password")
+        .expect("the password secret")
+        .id;
+
+    // A bound repository password cannot be replaced (FR-RP-06 is 1.0).
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PUT",
+            &format!("/api/v1/secrets/{password_id}/value"),
+            Some(&cookie),
+            Some(json!({"value": "new-password"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(decrypt(db.database(), tenant, password_id).await, "p");
+
+    // A standalone repository password secret is not bound, so it may be replaced.
+    let (status, _, created) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/secrets",
+            Some(&cookie),
+            Some(json!({"name": "standalone.password", "purpose": "repository_password", "value": "x"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let standalone = created["id"].as_str().expect("the identifier").to_owned();
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PUT",
+            &format!("/api/v1/secrets/{standalone}/value"),
+            Some(&cookie),
+            Some(json!({"value": "y"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_rename_allows_the_old_name_and_a_taken_name_gives_409() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+
+    let first = create_repository(&app, &cookie, s3_body("s3-prod", "p", "a", "s")).await;
+    create_repository(&app, &cookie, s3_body("s3-backup", "p", "a", "s")).await;
+
+    // A rename to a name that is taken is a conflict.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/repositories/{first}"),
+            Some(&cookie),
+            Some(json!({"name": "s3-backup"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Rename to a free name, then reuse the old name: the derived secret names follow the
+    // identifier, so the old name is free.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/repositories/{first}"),
+            Some(&cookie),
+            Some(json!({"name": "s3-prod-renamed"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/repositories",
+            Some(&cookie),
+            Some(s3_body("s3-prod", "p", "a", "s")),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
 
     db.cleanup().await;
 }
@@ -438,6 +574,77 @@ async fn the_validation_refuses_a_bad_backend_and_a_foreign_agent() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["field"], "backend.endpoint");
+
+    // The endpoint holds no user information, no query and no fragment (HIGH 1).
+    for endpoint in [
+        "https://u:p@s3.example.net",
+        "https://s3.example.net?x=1",
+        "https://s3.example.net#frag",
+    ] {
+        let (status, _, body) = send(
+            &app,
+            request(
+                "POST",
+                "/api/v1/repositories",
+                Some(&cookie),
+                Some(json!({
+                    "name": "s3-bad",
+                    "backend": {"kind": "s3", "endpoint": endpoint, "bucket": "backups"},
+                    "password": "p",
+                    "s3_access_key": "a",
+                    "s3_secret_key": "s",
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{endpoint}: {body}");
+        assert_eq!(body["field"], "backend.endpoint", "{endpoint}");
+    }
+
+    // A UNC path, a `..` segment and an empty segment are refused.
+    for path in ["\\\\server\\share", "/mnt/../etc", "/mnt//backup"] {
+        let (status, _, body) = send(
+            &app,
+            request(
+                "POST",
+                "/api/v1/repositories",
+                Some(&cookie),
+                Some(json!({
+                    "name": "local-bad",
+                    "backend": {"kind": "local", "path": path},
+                    "password": "p",
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {body}");
+        assert_eq!(body["field"], "backend.path", "{path}");
+    }
+
+    // A `..` segment in the S3 prefix is refused.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/repositories",
+            Some(&cookie),
+            Some(json!({
+                "name": "s3-bad-prefix",
+                "backend": {
+                    "kind": "s3",
+                    "endpoint": "https://s3.example.net",
+                    "bucket": "backups",
+                    "prefix": "a/../b",
+                },
+                "password": "p",
+                "s3_access_key": "a",
+                "s3_secret_key": "s",
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["field"], "backend.prefix");
 
     // A maintenance agent of another tenant is refused (FR-RP-08).
     let foreign_agent = seed_agent(db.database(), tenant_b, "nas-backup").await;
