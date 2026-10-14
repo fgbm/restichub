@@ -272,6 +272,11 @@ mod windows_job {
     /// Owns the job object and closes it on drop, which kills the tree (FR-AG-10).
     pub(super) struct JobObject(HANDLE);
 
+    // A Windows handle is a plain value that any thread may use, so the job travels with the
+    // `JobChild` across the runtime threads.
+    unsafe impl Send for JobObject {}
+    unsafe impl Sync for JobObject {}
+
     impl Drop for JobObject {
         fn drop(&mut self) {
             // SAFETY: the handle comes from `CreateJobObjectW` and is closed once.
