@@ -6,17 +6,21 @@
 //! `POST /agent/v1/enroll` over HTTP/1.1 and reads the certificate, the CA chain and the signed job
 //! signing key set.
 //!
-//! The endpoint is HTTPS in production. This client speaks plain HTTP, so the integration test runs
-//! the control plane without TLS. The emulator keeps the request small; the real client of the agent
-//! crate arrives with the agent (epic #1).
+//! The endpoint is HTTPS in production (ADR-0026). [`enroll_tls`] speaks HTTPS with the installation
+//! root CA; [`enroll`] speaks plain HTTP, so a test can drive the handler without TLS. The emulator
+//! keeps the request small; the real client of the agent crate arrives with the agent (epic #1).
 
 use anyhow::{Context, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
 use serde_json::json;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 /// The host facts that an agent reports at enrollment.
 #[derive(Debug, Clone)]
@@ -58,7 +62,16 @@ pub struct EnrollmentKeyBody {
 /// The enrollment route of the control plane (ADR-0026).
 pub const ENROLL_PATH: &str = "/agent/v1/enroll";
 
-/// Sends the enrollment request of one agent to `base_url` with `token`.
+/// The TLS trust material of an HTTPS enrollment (ADR-0026).
+#[derive(Debug, Clone)]
+pub struct EnrollTls {
+    /// Root certificate authority of the installation, in DER.
+    pub ca_der: Vec<u8>,
+    /// The DNS name in the certificate that the listener presents.
+    pub server_name: String,
+}
+
+/// Sends the enrollment request of one agent to `base_url` with `token` over plain HTTP.
 ///
 /// # Errors
 ///
@@ -68,6 +81,29 @@ pub async fn enroll(
     base_url: &str,
     token: &str,
     facts: &EnrollFacts,
+) -> anyhow::Result<EnrolledIdentity> {
+    enroll_with(base_url, token, facts, None).await
+}
+
+/// Sends the enrollment request of one agent over HTTPS with the installation root CA (ADR-0026).
+///
+/// # Errors
+///
+/// Returns an error when the TLS handshake, the request or the response fails.
+pub async fn enroll_tls(
+    base_url: &str,
+    token: &str,
+    facts: &EnrollFacts,
+    tls: &EnrollTls,
+) -> anyhow::Result<EnrolledIdentity> {
+    enroll_with(base_url, token, facts, Some(tls)).await
+}
+
+async fn enroll_with(
+    base_url: &str,
+    token: &str,
+    facts: &EnrollFacts,
+    tls: Option<&EnrollTls>,
 ) -> anyhow::Result<EnrolledIdentity> {
     let key =
         KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).context("cannot generate the agent key")?;
@@ -85,8 +121,12 @@ pub async fn enroll(
     });
     let body = serde_json::to_vec(&body).context("cannot serialize the request")?;
 
-    let (host, port) = split_origin(base_url)?;
-    let response = post(&host, port, ENROLL_PATH, &body).await?;
+    let (host, port, https) = split_origin(base_url)?;
+    let response = match (https, tls) {
+        (true, Some(tls)) => post_tls(&host, port, ENROLL_PATH, &body, tls).await?,
+        (true, None) => bail!("an https base URL needs the TLS trust material"),
+        (false, _) => post(&host, port, ENROLL_PATH, &body).await?,
+    };
     parse_response(&response, key.serialize_pem())
 }
 
@@ -95,6 +135,54 @@ async fn post(host: &str, port: u16, path: &str, body: &[u8]) -> anyhow::Result<
     let mut stream = TcpStream::connect((host, port))
         .await
         .with_context(|| format!("cannot connect to {host}:{port}"))?;
+    let head = format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream
+        .write_all(head.as_bytes())
+        .await
+        .context("cannot send the request head")?;
+    stream
+        .write_all(body)
+        .await
+        .context("cannot send the request body")?;
+    stream.flush().await.context("cannot flush the request")?;
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .context("cannot read the response")?;
+    split_response(&response)
+}
+
+/// Sends one HTTP/1.1 `POST` over TLS and returns the response body on HTTP 201.
+async fn post_tls(
+    host: &str,
+    port: u16,
+    path: &str,
+    body: &[u8],
+    tls: &EnrollTls,
+) -> anyhow::Result<Vec<u8>> {
+    let mut roots = RootCertStore::empty();
+    roots.add_parsable_certificates([CertificateDer::from(tls.ca_der.clone())]);
+    let provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
+    let config = ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&tokio_rustls::rustls::version::TLS13])
+        .context("cannot build the TLS client configuration")?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(config));
+    let server_name =
+        ServerName::try_from(tls.server_name.clone()).context("the server name is not valid")?;
+    let stream = TcpStream::connect((host, port))
+        .await
+        .with_context(|| format!("cannot connect to {host}:{port}"))?;
+    let mut stream = connector
+        .connect(server_name, stream)
+        .await
+        .context("the TLS handshake failed")?;
     let head = format!(
         "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n",
@@ -207,19 +295,23 @@ fn parse_response(body: &[u8], key_pem: String) -> anyhow::Result<EnrolledIdenti
     })
 }
 
-/// Splits `http://host:port` into the host and the port. A path in the URL is ignored. Only
-/// `http` is accepted.
-fn split_origin(base_url: &str) -> anyhow::Result<(String, u16)> {
-    let rest = base_url
-        .strip_prefix("http://")
-        .context("the base URL must start with `http://`")?;
+/// Splits `http://host:port` or `https://host:port` into the host, the port and the scheme. A path
+/// in the URL is ignored.
+fn split_origin(base_url: &str) -> anyhow::Result<(String, u16, bool)> {
+    let (rest, https, default_port) = if let Some(rest) = base_url.strip_prefix("https://") {
+        (rest, true, 443)
+    } else if let Some(rest) = base_url.strip_prefix("http://") {
+        (rest, false, 80)
+    } else {
+        bail!("the base URL must start with `http://` or `https://`");
+    };
     let authority = rest.split('/').next().unwrap_or(rest);
     let (host, port) = match authority.rsplit_once(':') {
         Some((host, port)) => (
             host,
             port.parse::<u16>().context("the port is not a number")?,
         ),
-        None => (authority, 80),
+        None => (authority, default_port),
     };
-    Ok((host.to_owned(), port))
+    Ok((host.to_owned(), port, https))
 }
