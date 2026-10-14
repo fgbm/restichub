@@ -366,8 +366,9 @@ mod tests {
         let bytes = std::fs::read(&program).expect("cannot read the fake binary");
         let expected = hex(&sha2::Sha256::digest(&bytes));
 
+        // The verified spawn creates the cache directory; a pre-created one fails the Windows
+        // access check (FR-AG-04).
         let cache = temp_path("pinned-cache");
-        std::fs::create_dir_all(&cache).expect("cannot create the cache");
         let line = command_line();
         let mut child = spawn_verified(&program, &expected, &line, &cache).expect("cannot start");
         let status = child.wait().expect("cannot wait");
@@ -386,7 +387,6 @@ mod tests {
             .expect("cannot write");
         drop(file);
         let cache = temp_path("wrong-cache");
-        std::fs::create_dir_all(&cache).expect("cannot create the cache");
         let line = command_line();
         let error = spawn_verified(&path, &"0".repeat(64), &line, &cache)
             .expect_err("a wrong hash must refuse the start");
