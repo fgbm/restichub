@@ -30,7 +30,7 @@ async fn ac_sc_03_a_prune_waits_for_three_backups_and_holds_the_later_backups() 
     // Three backups run on the repository.
     let mut running = Vec::new();
     for _ in 0..3 {
-        running.push(env.run_plan(plan).await.to_string());
+        running.push(env.run_fresh_plan(repository, agent.id).await.to_string());
     }
     env.pass().await;
     let sent = agent.jobs_within(QUIET).await;
@@ -43,7 +43,7 @@ async fn ac_sc_03_a_prune_waits_for_three_backups_and_holds_the_later_backups() 
     let prune = env
         .enqueue(JobKind::Prune, agent.id, repository, Some(plan))
         .await;
-    let late_backup = env.run_plan(plan).await;
+    let late_backup = env.run_fresh_plan(repository, agent.id).await;
     env.pass().await;
     assert!(agent.try_job(QUIET).await.is_none(), "the prune waits");
 
@@ -88,10 +88,8 @@ async fn ac_sc_08_one_job_for_each_agent_never_runs_two_jobs_at_once() {
     let env = Env::start(db, queue).await;
     let mut agent = env.connect_agent("limit-agent").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
     for _ in 0..10 {
-        env.run_plan(plan).await;
+        env.run_fresh_plan(repository, agent.id).await;
     }
 
     let mut seen = 0;
@@ -121,10 +119,8 @@ async fn ac_sc_08_two_jobs_for_each_repository_is_the_most() {
     let env = Env::start(db, queue).await;
     let mut agent = env.connect_agent("limit-repo").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
     for _ in 0..10 {
-        env.run_plan(plan).await;
+        env.run_fresh_plan(repository, agent.id).await;
     }
 
     env.pass().await;
@@ -156,10 +152,8 @@ async fn ac_sc_08_the_global_limit_holds_across_agents() {
     let mut second = env.connect_agent("global-b").await;
     for agent in [&first.id, &second.id] {
         let repository = env.create_repository(*agent, "pw").await;
-        let profile = env.create_profile(repository, json!({})).await;
-        let plan = env.create_plan(profile, *agent).await;
         for _ in 0..5 {
-            env.run_plan(plan).await;
+            env.run_fresh_plan(repository, *agent).await;
         }
     }
     env.pass().await;

@@ -7,10 +7,11 @@
 //!
 //! The pass of one tenant runs in one transaction under a tenant advisory lock, so two control plane
 //! instances never count the limits against each other. The rows are locked with
-//! `FOR UPDATE SKIP LOCKED`. The transaction marks each job `sent`, starts its lease and reads the
-//! secrets; it commits before the control plane sends the first byte (AC-RP-03). A job without an
-//! acknowledgement goes out again when its lease expires (AC-PR-04); the agent journal dedupes by
-//! `job_id`.
+//! `FOR UPDATE SKIP LOCKED`. The transaction builds and signs each job, marks it `sent`, stores the
+//! signed bytes encrypted, starts its lease and reads the secrets; it commits before the control
+//! plane sends the first byte (AC-RP-03). A job without an acknowledgement goes out again when its
+//! lease expires (AC-PR-04). The redelivery sends the stored signed bytes and builds nothing, and
+//! the agent journal dedupes by `job_id` (ADR-0020).
 //!
 //! A suspended tenant dispatches nothing, and its agents stay connected (AC-TN-03).
 
@@ -22,25 +23,31 @@ pub mod stale;
 use std::sync::Arc;
 use std::time::Duration;
 
+use prost::Message as _;
 use restichub_db::jobs::{self as job_repo, Job, JobOutcome};
 use restichub_db::queue as queue_repo;
 use restichub_db::{AgentId, DbError, JobId, JobStatus, TenantId, TenantStatus, TenantTx, tenants};
-use restichub_proto::agent::v1::{ControlMessage, control_message};
+use restichub_proto::agent::v1::{ControlMessage, SignedJob, control_message};
 use time::OffsetDateTime;
+use zeroize::Zeroizing;
 
 use crate::clock::Clock;
+use crate::delivery::{self, DeliveryError};
 use crate::server::AppState;
 use build::BuildError;
 use select::Limits;
 
-/// The largest number of waiting jobs that one tenant pass looks at.
-const BATCH: i64 = 100;
+/// The largest number of waiting jobs of one agent that a tenant pass looks at.
+const BATCH_PER_AGENT: i64 = 100;
 
 /// The result message of a job that never got an acknowledgement.
 const NOT_ACKNOWLEDGED: &str = "not_acknowledged";
 
 /// The result message of a job that the control plane could not sign.
 const SIGNING_FAILED: &str = "signing_failed";
+
+/// The result message of a sent job whose stored signed bytes are gone or unreadable.
+const SIGNED_JOB_UNAVAILABLE: &str = "signed_job_unavailable";
 
 const SAVEPOINT: &str = "queue_job";
 
@@ -121,7 +128,9 @@ pub async fn run_once(state: &AppState, now: OffsetDateTime) -> Result<(), DbErr
 struct Outgoing {
     id: JobId,
     agent: AgentId,
-    job: restichub_compiler::ValidatedJob,
+    signed: SignedJob,
+    /// A redelivery keeps its lease when the send fails; the next lease expiry sends it again.
+    redelivery: bool,
 }
 
 async fn dispatch_tenant(
@@ -136,7 +145,9 @@ async fn dispatch_tenant(
     if online.is_empty() || !queue_repo::try_lock_tenant(&mut tx).await? {
         return tx.commit().await;
     }
-    let waiting = queue_repo::dispatchable(&mut tx, now, online, BATCH).await?;
+    // A cancelled job that never got an acknowledgement ends with its lease.
+    queue_repo::cancel_unacknowledged(&mut tx, now).await?;
+    let waiting = queue_repo::dispatchable(&mut tx, now, online, BATCH_PER_AGENT).await?;
     if waiting.is_empty() {
         return tx.commit().await;
     }
@@ -164,25 +175,29 @@ async fn dispatch_tenant(
             continue;
         }
         tx.savepoint(SAVEPOINT).await?;
-        match build::build(state, &mut tx, &job, now).await {
-            Ok(validated) => {
-                queue_repo::mark_dispatched(&mut tx, job.id, now, now + lease).await?;
+        let prepared = if job.status == JobStatus::Sent {
+            redeliver(state, &mut tx, &job, now, now + lease).await
+        } else {
+            first_send(state, &mut tx, &job, now, now + lease).await
+        };
+        match prepared? {
+            Prepared::Send(signed) => {
                 tx.release_savepoint(SAVEPOINT).await?;
                 outgoing.push(Outgoing {
                     id: job.id,
                     agent: job.agent_id,
-                    job: validated,
+                    signed,
+                    redelivery: job.status == JobStatus::Sent,
                 });
             }
-            Err(BuildError::Refused(refusal)) => {
-                // The rollback also removes the secret delivery records of the refused job.
+            Prepared::Fail(code, result_code) => {
+                // The rollback also removes the secret delivery records of the failed job.
                 tx.rollback_to_savepoint(SAVEPOINT).await?;
-                tracing::warn!(job = %job.id, reason = refusal.code(), "the queue refused a job");
-                fail(&mut tx, &job, refusal.code(), refusal.result_code(), now).await?;
+                tracing::warn!(job = %job.id, reason = code, "the queue fails a job");
+                fail(&mut tx, &job, code, result_code, now).await?;
             }
-            Err(BuildError::Transient(cause)) => {
+            Prepared::Skip => {
                 tx.rollback_to_savepoint(SAVEPOINT).await?;
-                tracing::warn!(job = %job.id, %cause, "the queue could not build a job");
             }
         }
     }
@@ -190,9 +205,126 @@ async fn dispatch_tenant(
     tx.commit().await?;
 
     for item in outgoing {
-        send(state, tenant, item, now).await;
+        send(state, tenant, item).await;
     }
     Ok(())
+}
+
+/// What the pass does with one selected job.
+enum Prepared {
+    Send(SignedJob),
+    Fail(&'static str, restichub_db::JobResultCode),
+    /// A database or a key error. The job stays as it is and the next pass tries again.
+    Skip,
+}
+
+/// Builds, signs and stores the first send of a queued job (FR-PR-03).
+async fn first_send(
+    state: &AppState,
+    tx: &mut TenantTx<'_>,
+    job: &Job,
+    now: OffsetDateTime,
+    lease_until: OffsetDateTime,
+) -> Result<Prepared, DbError> {
+    let built = match build::build(state, tx, job, now).await {
+        Ok(built) => built,
+        Err(BuildError::Refused(refusal)) => {
+            return Ok(Prepared::Fail(refusal.code(), refusal.result_code()));
+        }
+        Err(BuildError::Transient(cause)) => {
+            tracing::warn!(job = %job.id, %cause, "the queue could not build a job");
+            return Ok(Prepared::Skip);
+        }
+    };
+    let (Some(signing), Some(provider)) = (state.job_signing(), state.kek()) else {
+        tracing::error!("the server holds no job signing key set or key provider");
+        return Ok(Prepared::Skip);
+    };
+    let signed = match signing.sign_job(state.db(), built.job.job()).await {
+        Ok(signed) => signed,
+        Err(error) => {
+            tracing::warn!(job = %job.id, %error, "the queue could not sign a job");
+            return Ok(Prepared::Fail(
+                SIGNING_FAILED,
+                restichub_db::JobResultCode::Failed,
+            ));
+        }
+    };
+    let bytes = Zeroizing::new(signed.encode_to_vec());
+    let sealed = match delivery::seal_signed_job(tx, provider, job.id, &bytes).await {
+        Ok(sealed) => sealed,
+        Err(DeliveryError::Database(error)) => return Err(error),
+        Err(error) => {
+            tracing::warn!(job = %job.id, %error, "the queue could not store a signed job");
+            return Ok(Prepared::Skip);
+        }
+    };
+    let stored = queue_repo::StoredSignedJob {
+        key_version: sealed.key_version,
+        nonce: sealed.nonce,
+        ciphertext: sealed.ciphertext,
+        secrets: built.secrets,
+    };
+    queue_repo::mark_dispatched(tx, job.id, now, lease_until, &stored).await?;
+    Ok(Prepared::Send(signed))
+}
+
+/// Sends the stored signed bytes of a `sent` job again, without a rebuild (ADR-0020).
+///
+/// The job carries its secrets again, so each delivery writes the `secret_delivered` records
+/// (AC-RP-03).
+async fn redeliver(
+    state: &AppState,
+    tx: &mut TenantTx<'_>,
+    job: &Job,
+    now: OffsetDateTime,
+    lease_until: OffsetDateTime,
+) -> Result<Prepared, DbError> {
+    let Some(provider) = state.kek() else {
+        tracing::error!("the server holds no key provider");
+        return Ok(Prepared::Skip);
+    };
+    let Some(stored) = queue_repo::signed_job(tx, job.id).await? else {
+        return Ok(Prepared::Fail(
+            SIGNED_JOB_UNAVAILABLE,
+            restichub_db::JobResultCode::Failed,
+        ));
+    };
+    let bytes = match delivery::open_signed_job(tx, provider, job.id, &stored).await {
+        Ok(bytes) => bytes,
+        Err(DeliveryError::Database(error)) => return Err(error),
+        Err(error) => {
+            tracing::warn!(job = %job.id, %error, "the queue could not open a stored signed job");
+            return Ok(Prepared::Fail(
+                SIGNED_JOB_UNAVAILABLE,
+                restichub_db::JobResultCode::Failed,
+            ));
+        }
+    };
+    let signed = match SignedJob::decode(bytes.as_slice()) {
+        Ok(signed) => signed,
+        Err(error) => {
+            tracing::warn!(job = %job.id, %error, "a stored signed job does not decode");
+            return Ok(Prepared::Fail(
+                SIGNED_JOB_UNAVAILABLE,
+                restichub_db::JobResultCode::Failed,
+            ));
+        }
+    };
+    if let Some(repository) = job.repository_id {
+        for secret in &stored.secrets {
+            restichub_db::audit::insert_secret_delivered(
+                tx,
+                *secret,
+                job.agent_id.as_uuid(),
+                job.id.as_uuid(),
+                repository.as_uuid(),
+            )
+            .await?;
+        }
+    }
+    queue_repo::mark_redelivered(tx, job.id, now, lease_until).await?;
+    Ok(Prepared::Send(signed))
 }
 
 async fn fail(
@@ -211,29 +343,17 @@ async fn fail(
     Ok(())
 }
 
-/// Signs the committed job and puts it on the stream of the agent (FR-PR-03).
-async fn send(state: &AppState, tenant: TenantId, item: Outgoing, now: OffsetDateTime) {
-    let Some(signing) = state.job_signing() else {
-        tracing::error!("the server holds no job signing key set");
-        revert(state, tenant, item.id).await;
-        return;
-    };
-    let signed = match signing.sign_job(state.db(), item.job.job()).await {
-        Ok(signed) => signed,
-        Err(error) => {
-            tracing::warn!(job = %item.id, %error, "the queue could not sign a job");
-            finish_failed(state, tenant, item.id, SIGNING_FAILED, now).await;
-            return;
-        }
-    };
+/// Puts the committed job on the stream of the agent (FR-PR-03).
+async fn send(state: &AppState, tenant: TenantId, item: Outgoing) {
     let sent = state.agent_registry().send_to_agent(
         item.agent,
         ControlMessage {
-            payload: Some(control_message::Payload::SignedJob(signed)),
+            payload: Some(control_message::Payload::SignedJob(item.signed)),
         },
     );
-    if !sent {
-        // The agent left between the select and the send. The job returns to the queue.
+    // The agent left between the select and the send. A first send returns to the queue; a
+    // redelivery keeps its lease and goes out again when the lease expires.
+    if !sent && !item.redelivery {
         revert(state, tenant, item.id).await;
     }
 }
@@ -247,29 +367,6 @@ async fn revert(state: &AppState, tenant: TenantId, job: JobId) {
     .await;
     if let Err(error) = result {
         tracing::warn!(%job, %error, "the queue could not return a job after a failed send");
-    }
-}
-
-async fn finish_failed(
-    state: &AppState,
-    tenant: TenantId,
-    job: JobId,
-    message: &str,
-    now: OffsetDateTime,
-) {
-    let outcome = JobOutcome {
-        status: JobStatus::Failed,
-        result_code: restichub_db::JobResultCode::Failed,
-        result_message: Some(message.to_owned()),
-    };
-    let result = async {
-        let mut tx = state.db().begin_tenant(tenant).await?;
-        job_repo::finish(&mut tx, job, &outcome, now).await?;
-        tx.commit().await
-    }
-    .await;
-    if let Err(error) = result {
-        tracing::warn!(%job, %error, "the queue could not fail a job");
     }
 }
 

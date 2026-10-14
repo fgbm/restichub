@@ -278,9 +278,14 @@ impl Env {
 
     /// Creates a local repository whose maintenance agent is `agent` and returns its identifier.
     pub async fn create_repository(&self, agent: AgentId, password: &str) -> Uuid {
+        self.create_repository_at(agent, password, "/srv/backup/restic")
+            .await
+    }
+
+    pub async fn create_repository_at(&self, agent: AgentId, password: &str, path: &str) -> Uuid {
         let body = json!({
             "name": format!("repo-{}", Uuid::now_v7()),
-            "backend": {"kind": "local", "path": "/srv/backup/restic"},
+            "backend": {"kind": "local", "path": path},
             "password": password,
             "maintenance_agent_id": agent.to_string(),
         });
@@ -333,6 +338,14 @@ impl Env {
         id_of(&response["plan"])
     }
 
+    /// Runs a new plan on its own profile. A plan holds one queued manual run at most, so a test that
+    /// needs many queued backups of one repository uses one plan for each.
+    pub async fn run_fresh_plan(&self, repository: Uuid, agent: AgentId) -> Uuid {
+        let profile = self.create_profile(repository, json!({})).await;
+        let plan = self.create_plan(profile, agent).await;
+        self.run_plan(plan).await
+    }
+
     /// Posts the manual run as an Operator and returns the new job.
     pub async fn run_plan(&self, plan: Uuid) -> Uuid {
         let (status, _, job) = send(
@@ -382,6 +395,19 @@ impl Env {
         .expect("cannot create the job");
         tx.commit().await.expect("cannot commit the job");
         id.as_uuid()
+    }
+
+    pub async fn plan_jobs(&self, plan: Uuid) -> Vec<Value> {
+        let (status, body) = self
+            .call(
+                &self.admin,
+                "GET",
+                &format!("/api/v1/jobs?plan_id={plan}"),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["items"].as_array().cloned().unwrap_or_default()
     }
 
     pub async fn job(&self, job: Uuid) -> Value {
@@ -579,6 +605,40 @@ impl FakeAgent {
             .expect("cannot send the step result");
     }
 
+    /// Reports a held repository lock as the real agent does: the step has the retry status and exit
+    /// code 11, and the stopped job has the status `failed` with the outcome `failed`.
+    pub async fn lock_held(&self, job_id: &str) {
+        self.tx
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::StepResult(StepResult {
+                    job_id: job_id.to_owned(),
+                    step_id: "backup".to_owned(),
+                    status: StepStatus::Retry as i32,
+                    exit_code: 11,
+                    ..StepResult::default()
+                })),
+            })
+            .await
+            .expect("cannot send the step result");
+        self.tx
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::JobResult(JobResult {
+                    job_id: job_id.to_owned(),
+                    status: StepStatus::Failed as i32,
+                    steps_total: 1,
+                    steps_succeeded: 0,
+                    steps_failed: 1,
+                    outcome: JobStatus::Failed as i32,
+                    error: Some(restichub_proto::agent::v1::ErrorDetail {
+                        code: "step_failed".to_owned(),
+                        params: Vec::new(),
+                    }),
+                })),
+            })
+            .await
+            .expect("cannot send the job result");
+    }
+
     pub async fn result(&self, job_id: &str, outcome: JobStatus, status: StepStatus) {
         self.tx
             .send(AgentMessage {
@@ -634,6 +694,25 @@ impl Emulator {
 }
 
 impl Env {
+    /// The signing keys that the enrollment gave the agent, as the agent holds them.
+    pub fn key_ring(identity: &EnrolledIdentity) -> KeyRing {
+        use base64::Engine as _;
+
+        let mut ring = KeyRing::new();
+        for key in &identity.signing_keys {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&key.public_key)
+                .expect("the public key is base64");
+            let bytes: [u8; 32] = bytes.as_slice().try_into().expect("a 32-byte key");
+            ring.insert(
+                key.key_id.clone(),
+                ed25519_dalek::VerifyingKey::from_bytes(&bytes).expect("a valid key"),
+            )
+            .expect("the ring must accept the enrollment key");
+        }
+        ring
+    }
+
     /// Enrolls an agent and runs the emulator with the executor against the listener.
     pub async fn start_emulator(
         &self,

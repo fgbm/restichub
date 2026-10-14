@@ -15,12 +15,14 @@
 use uuid::Uuid;
 
 use restichub_db::delivery::load_ciphertext_for_delivery;
-use restichub_db::kek::{TenantKey, key_by_version};
-use restichub_db::{DbError, SecretId, TenantTx};
+use restichub_db::kek::{TenantKey, active_key, key_by_version};
+use restichub_db::queue::StoredSignedJob;
+use restichub_db::{DbError, JobId, SecretId, TenantTx};
 use restichub_secrets::{
     CryptoError, EncryptedSecret, KekError, KekId, KekProvider, NONCE_LEN, SecretPurpose,
-    SecretString, WrappedDek, decrypt_secret, unwrap_dek,
+    SecretString, WrappedDek, decrypt_job_blob, decrypt_secret, encrypt_job_blob, unwrap_dek,
 };
+use zeroize::Zeroizing;
 
 /// Holds no plaintext and no key.
 #[derive(Debug, thiserror::Error)]
@@ -98,6 +100,70 @@ impl<'a> SecretReader<'a> {
         )?;
         Ok(plaintext)
     }
+}
+
+/// The ciphertext of a signed job, with the version of the tenant key that encrypted it.
+pub struct SealedJob {
+    pub key_version: i32,
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+}
+
+/// Encrypts the signed bytes of a job with the active tenant key, as a secret value (ADR-0017).
+pub async fn seal_signed_job(
+    tx: &mut TenantTx<'_>,
+    provider: &dyn KekProvider,
+    job_id: JobId,
+    bytes: &[u8],
+) -> Result<SealedJob, DeliveryError> {
+    let tenant = tx.tenant();
+    let key = active_key(tx).await?.ok_or(DeliveryError::KeyMissing)?;
+    let dek = unwrap_dek(
+        provider,
+        tenant.as_uuid(),
+        key.key_version,
+        &wrapped_dek(&key)?,
+    )?;
+    let encrypted = encrypt_job_blob(&dek, tenant.as_uuid(), job_id.as_uuid(), bytes)?;
+    Ok(SealedJob {
+        key_version: key.key_version,
+        nonce: encrypted.nonce.to_vec(),
+        ciphertext: encrypted.ciphertext,
+    })
+}
+
+/// Decrypts the signed bytes that [`seal_signed_job`] stored. The caller sends the bytes as they
+/// are, so a redelivery never builds or signs the job again (ADR-0020).
+pub async fn open_signed_job(
+    tx: &mut TenantTx<'_>,
+    provider: &dyn KekProvider,
+    job_id: JobId,
+    stored: &StoredSignedJob,
+) -> Result<Zeroizing<Vec<u8>>, DeliveryError> {
+    let tenant = tx.tenant();
+    let key = key_by_version(tx, stored.key_version)
+        .await?
+        .ok_or(DeliveryError::KeyMissing)?;
+    let dek = unwrap_dek(
+        provider,
+        tenant.as_uuid(),
+        key.key_version,
+        &wrapped_dek(&key)?,
+    )?;
+    // The error of the length check holds no cause: the stored nonce has a wrong length.
+    let Ok(nonce) = <[u8; NONCE_LEN]>::try_from(stored.nonce.as_slice()) else {
+        return Err(DeliveryError::BadMaterial);
+    };
+    let encrypted = EncryptedSecret {
+        nonce,
+        ciphertext: stored.ciphertext.clone(),
+    };
+    Ok(decrypt_job_blob(
+        &dek,
+        tenant.as_uuid(),
+        job_id.as_uuid(),
+        &encrypted,
+    )?)
 }
 
 fn wrapped_dek(key: &TenantKey) -> Result<WrappedDek, DeliveryError> {

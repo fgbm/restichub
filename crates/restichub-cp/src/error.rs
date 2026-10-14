@@ -46,6 +46,7 @@ pub enum ErrorCode {
     UsernameTaken,
     EmailTaken,
     AgentOffline,
+    AlreadyQueued,
 }
 
 impl ErrorCode {
@@ -70,6 +71,7 @@ impl ErrorCode {
             Self::UsernameTaken => "username_taken",
             Self::EmailTaken => "email_taken",
             Self::AgentOffline => "agent_offline",
+            Self::AlreadyQueued => "already_queued",
         }
     }
 }
@@ -282,6 +284,11 @@ impl ApiError {
     /// delivery. The user interface translates the code (NFR-DOC-04).
     pub fn agent_offline() -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::AgentOffline, "Conflict")
+    }
+
+    /// Creates a `409 already_queued` error: the plan already holds a queued manual run.
+    pub fn already_queued() -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorCode::AlreadyQueued, "Conflict")
     }
 }
 

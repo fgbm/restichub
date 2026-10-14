@@ -489,3 +489,25 @@ fn an_agent_endpoint_with_a_userinfo_is_refused() {
     let error = Config::load_with(&Cli::default(), &env).expect_err("a userinfo must be refused");
     assert!(error.to_string().contains("userinfo"), "{error}");
 }
+
+#[test]
+fn ac_pr_04_a_lease_below_fifteen_seconds_is_refused() {
+    let load = |lease: &str| {
+        let env = MapEnv::new(&[
+            ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+            ("RESTICHUB_QUEUE_LEASE_SECS", lease),
+        ]);
+        Config::load_with(&Cli::default(), &env)
+    };
+    assert!(matches!(
+        load("14"),
+        Err(ConfigError::Invalid {
+            name: "RESTICHUB_QUEUE_LEASE_SECS",
+            ..
+        })
+    ));
+    assert_eq!(
+        load("15").ok().map(|config| config.queue.lease.as_secs()),
+        Some(15)
+    );
+}

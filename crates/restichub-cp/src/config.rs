@@ -67,6 +67,8 @@ pub const QUEUE_GLOBAL_LIMIT_ENV: &str = "RESTICHUB_QUEUE_GLOBAL_LIMIT";
 /// The seconds that the control plane waits for an acknowledgement before it sends a job again
 /// (FR-PR-06).
 pub const QUEUE_LEASE_SECS_ENV: &str = "RESTICHUB_QUEUE_LEASE_SECS";
+/// The shortest lease that the configuration accepts.
+const MIN_QUEUE_LEASE: Duration = Duration::from_secs(15);
 /// The lock results after which a job goes to the dead-letter status (FR-SC-05).
 pub const QUEUE_LOCK_RETRY_LIMIT_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_LIMIT";
 /// The seconds before the first lock retry. The delay doubles for each retry (FR-SC-05).
@@ -727,7 +729,11 @@ fn queue_config(
         global_limit: number(env, QUEUE_GLOBAL_LIMIT_ENV, section.global_limit)?
             .unwrap_or(defaults.global_limit)
             .max(1),
-        lease: secs(QUEUE_LEASE_SECS_ENV, section.lease_secs, defaults.lease)?,
+        lease: lease(secs(
+            QUEUE_LEASE_SECS_ENV,
+            section.lease_secs,
+            defaults.lease,
+        )?)?,
         lock_retry_limit: number(env, QUEUE_LOCK_RETRY_LIMIT_ENV, section.lock_retry_limit)?
             .unwrap_or(defaults.lock_retry_limit)
             .max(1),
@@ -738,6 +744,20 @@ fn queue_config(
         )?,
         ..defaults
     })
+}
+
+/// A short lease makes the queue send a job again before the agent can acknowledge it.
+fn lease(value: Duration) -> Result<Duration, ConfigError> {
+    if value < MIN_QUEUE_LEASE {
+        return Err(ConfigError::Invalid {
+            name: QUEUE_LEASE_SECS_ENV,
+            reason: format!(
+                "the lease must be at least {} seconds",
+                MIN_QUEUE_LEASE.as_secs()
+            ),
+        });
+    }
+    Ok(value)
 }
 
 fn number<T: std::str::FromStr>(

@@ -46,7 +46,7 @@ async fn repository_jobs(env: &Env, repository: Uuid) -> Vec<serde_json::Value> 
 }
 
 #[tokio::test]
-async fn ac_sc_05_a_lock_result_retries_with_a_growing_delay_and_then_dead_letters() {
+async fn ac_sc_05_a_lock_result_retries_as_a_new_job_with_a_growing_delay_and_then_dead_letters() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -55,25 +55,31 @@ async fn ac_sc_05_a_lock_result_retries_with_a_growing_delay_and_then_dead_lette
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env.create_profile(repository, json!({})).await;
     let plan = env.create_plan(profile, agent.id).await;
-    let job = env.run_plan(plan).await;
+    let mut current = env.run_plan(plan).await;
 
     let mut delays = Vec::new();
+    let mut ids = vec![current];
     for attempt in 1..=5 {
         env.pass().await;
         let Some(signed) = agent.try_job(Duration::from_secs(3)).await else {
-            panic!("attempt {attempt}: {}", env.job(job).await);
+            panic!("attempt {attempt}: {}", env.job(current).await);
         };
         let id = queue_support::decode_job_id(&signed);
-        assert_eq!(id, job.to_string());
+        assert_eq!(id, current.to_string());
         agent.start(&env, &id).await;
-        // Fake restic exits with code 11: the agent reports the retry status.
-        agent
-            .result(&id, JobStatus::Failed, StepStatus::Retry)
-            .await;
+        // Fake restic exits with code 11: the step reports the retry status and the job result has
+        // the status `failed`, as the real agent sends it.
+        agent.lock_held(&id).await;
         if attempt < 5 {
-            eventually(|| async { env.job_status(job).await == "queued" }).await;
-            let body = env.job(job).await;
+            eventually(|| async { env.plan_jobs(plan).await.len() == attempt + 1 }).await;
+            let body = env.plan_jobs(plan).await.remove(0);
+            let next = Uuid::parse_str(body["id"].as_str().expect("id")).expect("job id");
+            assert_ne!(next, current, "the retry is a new job");
+            assert_eq!(body["status"], "queued");
             assert_eq!(body["attempt"], attempt);
+            let ended = env.job(current).await;
+            assert_eq!(ended["status"], "failed");
+            assert_eq!(ended["result_message"], "lock_retry");
             let run_at =
                 time::OffsetDateTime::parse(body["run_at"].as_str().expect("run_at"), &Rfc3339)
                     .expect("run_at is RFC 3339");
@@ -87,19 +93,23 @@ async fn ac_sc_05_a_lock_result_retries_with_a_growing_delay_and_then_dead_lette
                 "the job waits for run_at"
             );
             env.clock.advance(1);
+            current = next;
+            ids.push(current);
         } else {
-            eventually(|| async { env.job_status(job).await == "dead_letter" }).await;
+            eventually(|| async { env.job_status(current).await == "dead_letter" }).await;
         }
     }
 
     assert_eq!(delays, vec![30, 60, 120, 240], "the delay doubles");
-    let body = env.job(job).await;
+    let unique: std::collections::HashSet<_> = ids.iter().collect();
+    assert_eq!(unique.len(), 5, "each attempt has its own job identifier");
+    let body = env.job(current).await;
     assert_eq!(body["status"], "dead_letter");
     assert_eq!(body["result_message"], "lock_retries_exhausted");
     let alerts = audit_actions(&env, "job_dead_letter").await;
     assert_eq!(alerts.len(), 1, "the dead letter raises one alert record");
-    assert!(alerts[0].contains(&job.to_string()) || alerts[0].contains("attempts"));
-    // The dead letter is final: no later pass sends the job.
+    assert!(alerts[0].contains(&current.to_string()) || alerts[0].contains("attempts"));
+    // The dead letter is final: no later pass sends a job.
     env.clock.advance(7200);
     env.pass().await;
     assert!(agent.try_job(QUIET).await.is_none());

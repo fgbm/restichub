@@ -255,11 +255,9 @@ async fn two_dispatcher_instances_never_send_the_same_job_twice() {
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("twice-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
     let mut expected = Vec::new();
     for _ in 0..8 {
-        expected.push(env.run_plan(plan).await.to_string());
+        expected.push(env.run_fresh_plan(repository, agent.id).await.to_string());
     }
 
     let now = env.now();

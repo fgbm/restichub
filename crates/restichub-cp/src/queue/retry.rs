@@ -1,14 +1,15 @@
 //! The retry of a job after a repository lock (FR-SC-05, ADR-0010).
 //!
 //! Restic exit code 11 means that another operation holds the repository lock. The control plane
-//! does not fail the job: it returns the job to the queue with an exponential delay. After the
-//! retry limit the job moves to the terminal `dead_letter` status and an audit record raises the
-//! alert.
+//! does not give up: it ends the job and queues a new job with a new identifier and an exponential
+//! delay, because the agent journal returns the stored result for a known job identifier
+//! (ADR-0020). After the retry limit the job moves to the terminal `dead_letter` status and an
+//! audit record raises the alert.
 
 use restichub_db::audit::{AuditAction, AuditEvent, diff};
 use restichub_db::jobs::Job;
 use restichub_db::queue as queue_repo;
-use restichub_db::{DbError, JobKind, TenantTx};
+use restichub_db::{DbError, JobId, JobKind, TenantTx};
 use serde_json::json;
 use time::OffsetDateTime;
 
@@ -16,15 +17,20 @@ use super::QueueConfig;
 
 const MAX_RETRY_DELAY: time::Duration = time::Duration::hours(1);
 
+/// How long a retry waits in the queue after its delay.
+const RETRY_QUEUE_LIFETIME: time::Duration = time::Duration::hours(1);
+
 /// The stable result message of a dead-letter job. The user interface translates it (NFR-DOC-04).
 pub const DEAD_LETTER_MESSAGE: &str = "lock_retries_exhausted";
 
 /// What the control plane did with a job that reported a lock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LockOutcome {
-    /// The job is queued again and runs at the given time.
-    Retry(OffsetDateTime),
+    /// A new job is queued and runs at the given time.
+    Retry(JobId, OffsetDateTime),
     DeadLetter,
+    /// The job was not in flight any more, so nothing changed.
+    Stale,
 }
 
 /// True for a kind that the queue retries after a lock.
@@ -47,6 +53,8 @@ pub fn retry_delay(base: time::Duration, attempt: i32) -> time::Duration {
 }
 
 /// Applies a lock result to the job in the open transaction.
+///
+/// The retry keeps the plan and the fire time of the job and counts one more attempt.
 pub async fn apply_lock(
     tx: &mut TenantTx<'_>,
     config: &QueueConfig,
@@ -75,8 +83,14 @@ pub async fn apply_lock(
     }
     let base = time::Duration::try_from(config.lock_retry_base).unwrap_or(time::Duration::MINUTE);
     let run_at = now + retry_delay(base, attempt);
-    queue_repo::schedule_retry(tx, job.id, attempt, run_at).await?;
-    Ok(LockOutcome::Retry(run_at))
+    let expires_at = job
+        .expires_at
+        .map(|expiry| expiry.max(run_at + RETRY_QUEUE_LIFETIME));
+    let created = queue_repo::retry_as_new_job(tx, job, attempt, run_at, expires_at, now).await?;
+    Ok(match created {
+        Some(id) => LockOutcome::Retry(id, run_at),
+        None => LockOutcome::Stale,
+    })
 }
 
 #[cfg(test)]

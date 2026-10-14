@@ -10,10 +10,10 @@ use restichub_db::audit::{AuditAction, AuditEvent, diff};
 use restichub_db::jobs::{self as job_repo, NewJob};
 use restichub_db::queue as queue_repo;
 use restichub_db::{
-    AgentId, AgentStatus, DbError, JobId, JobKind, TenantId, TenantTx, agents as agents_repo,
-    repositories as repo,
+    AgentId, AgentStatus, DbError, JobId, JobKind, JobStatus, TenantId, TenantTx,
+    agents as agents_repo, repositories as repo,
 };
-use restichub_proto::agent::v1::StepResult;
+use restichub_proto::agent::v1::{StepResult, StepStatus};
 use serde_json::json;
 use time::OffsetDateTime;
 
@@ -97,17 +97,20 @@ pub async fn recover_tenant(
     tx.commit().await
 }
 
-/// Records a `StepResult` that reports a possible stale lock after a hard kill (FR-AG-10).
+/// Records what a `StepResult` says about the repository lock of a job (FR-AG-10, FR-SC-05).
 ///
-/// The identity comes from the certificate, never from the message (FR-PR-08), so a message for a
-/// job of another agent changes no row.
+/// The retry status (restic exit code 11) marks the job, because the job result of a stopped job
+/// has the status `failed` and carries no step status. A hard kill marks a possible stale lock.
+/// Only a job that is `sent` or `running` takes a mark. The identity comes from the certificate,
+/// never from the message (FR-PR-08), so a message for a job of another agent changes no row.
 pub async fn handle_step_result(
     state: &AppState,
     tenant: TenantId,
     agent: AgentId,
     result: &StepResult,
 ) {
-    if !result.possible_stale_lock {
+    let lock_held = result.status == StepStatus::Retry as i32;
+    if !result.possible_stale_lock && !lock_held {
         return;
     }
     let Some(job_id) = crate::jobs::parse_job_id_value(&result.job_id) else {
@@ -119,14 +122,19 @@ pub async fn handle_step_result(
         let Some(job) = job_repo::get_for_update(&mut tx, job_id).await? else {
             return Ok(());
         };
-        if job.agent_id == agent {
-            queue_repo::note_stale_lock(&mut tx, job_id, now).await?;
+        if job.agent_id == agent && matches!(job.status, JobStatus::Sent | JobStatus::Running) {
+            if lock_held {
+                queue_repo::note_lock_reported(&mut tx, job_id).await?;
+            }
+            if result.possible_stale_lock {
+                queue_repo::note_stale_lock(&mut tx, job_id, now).await?;
+            }
         }
         tx.commit().await
     }
     .await;
     if let Err(error) = outcome {
-        tracing::warn!(job = %job_id, %error, "the step result could not mark a possible stale lock");
+        tracing::warn!(job = %job_id, %error, "the step result could not mark the job");
     }
 }
 

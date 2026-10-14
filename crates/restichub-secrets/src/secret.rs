@@ -19,6 +19,8 @@ use crate::error::CryptoError;
 
 const SECRET_DOMAIN: &[u8] = b"restichub-secret-v1\0";
 
+const JOB_DOMAIN: &[u8] = b"restichub-signed-job-v1\0";
+
 /// A part of the associated data. The string value of each variant is stable and MUST NOT
 /// change: a change makes every stored ciphertext of that purpose undecryptable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +98,48 @@ pub fn decrypt_secret(
     Ok(SecretString::new(text.to_owned()))
 }
 
+/// Encrypts the signed bytes of a job that waits for its acknowledgement (ADR-0017, ADR-0020).
+///
+/// The key and the cipher equal those of a secret value. The associated data is `restichub-signed-job-v1\0
+/// || tenant_id || job_id`, so a blob decrypts for its own tenant and job only, and never as a
+/// secret value.
+pub fn encrypt_job_blob(
+    dek: &Dek,
+    tenant_id: Uuid,
+    job_id: Uuid,
+    plaintext: &[u8],
+) -> Result<EncryptedSecret, CryptoError> {
+    let nonce = random_nonce()?;
+    let cipher = cipher(dek.bytes());
+    let ciphertext = seal(&cipher, nonce, plaintext, &job_aad(tenant_id, job_id))?;
+    Ok(EncryptedSecret { nonce, ciphertext })
+}
+
+/// Decrypts the bytes that [`encrypt_job_blob`] wrote. The caller zeroizes the result.
+pub fn decrypt_job_blob(
+    dek: &Dek,
+    tenant_id: Uuid,
+    job_id: Uuid,
+    encrypted: &EncryptedSecret,
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    let cipher = cipher(dek.bytes());
+    let plaintext = open(
+        &cipher,
+        encrypted.nonce,
+        &encrypted.ciphertext,
+        &job_aad(tenant_id, job_id),
+    )?;
+    Ok(Zeroizing::new(plaintext))
+}
+
+fn job_aad(tenant_id: Uuid, job_id: Uuid) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(JOB_DOMAIN.len() + 32);
+    aad.extend_from_slice(JOB_DOMAIN);
+    aad.extend_from_slice(tenant_id.as_bytes());
+    aad.extend_from_slice(job_id.as_bytes());
+    aad
+}
+
 /// The length of the purpose is written as a big-endian `u32` before the purpose bytes, so the
 /// fields do not run together. The conversion of the length is checked.
 fn secret_aad(
@@ -120,7 +164,10 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::{SecretPurpose, decrypt_secret, encrypt_secret, secret_aad};
+    use super::{
+        SecretPurpose, decrypt_job_blob, decrypt_secret, encrypt_job_blob, encrypt_secret,
+        secret_aad,
+    };
     use crate::SecretString;
     use crate::envelope::Dek;
     use crate::error::CryptoError;
@@ -172,6 +219,20 @@ mod tests {
         ]
         .concat();
         assert_eq!(aad.ok(), Some(expected));
+    }
+
+    #[test]
+    fn a_job_blob_round_trips_for_its_own_job_only() {
+        let blob = b"signed job bytes";
+        let encrypted = encrypt_job_blob(&dek(), tenant(), secret_id(), blob).ok();
+        let opened = encrypted
+            .as_ref()
+            .and_then(|encrypted| decrypt_job_blob(&dek(), tenant(), secret_id(), encrypted).ok());
+        assert_eq!(opened.as_deref().map(Vec::as_slice), Some(blob.as_slice()));
+        let other_job = encrypted
+            .as_ref()
+            .and_then(|encrypted| decrypt_job_blob(&dek(), tenant(), Uuid::nil(), encrypted).ok());
+        assert!(other_job.is_none(), "a blob does not open for another job");
     }
 
     #[test]

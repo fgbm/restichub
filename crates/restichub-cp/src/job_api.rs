@@ -34,7 +34,7 @@ use crate::validation::Reason;
 const MANUAL_RUN_LIFETIME: time::Duration = time::Duration::hours(1);
 
 /// The seconds that the agent waits before it kills the process tree of a cancelled job (FR-AG-10).
-const CANCEL_GRACE_SECONDS: u32 = 30;
+pub(crate) const CANCEL_GRACE_SECONDS: u32 = 30;
 
 /// How long an `unlock_all` job waits in the queue for its agent.
 const UNLOCK_ALL_LIFETIME: time::Duration = time::Duration::hours(1);
@@ -159,6 +159,10 @@ pub async fn cancel_job(
     let Some(job) = job_repo::get_for_update(&mut tx, job_id).await? else {
         return Err(ApiError::not_found());
     };
+    // The `unlock_all` action is an Admin action, so only an Admin cancels it.
+    if job.kind == JobKind::UnlockAll {
+        context.authorize(Operation::RepositoriesWrite)?;
+    }
     let status = match job.status {
         JobStatus::Queued => {
             queue_repo::cancel_queued(&mut tx, job_id, now).await?;
@@ -171,11 +175,15 @@ pub async fn cancel_job(
                     grace_period_seconds: CANCEL_GRACE_SECONDS,
                 })),
             };
-            if !state.agent_registry().send_to_agent(job.agent_id, message) {
+            let delivered = state.agent_registry().send_to_agent(job.agent_id, message);
+            // A running job needs its agent. A sent job that the agent never acknowledged ends with
+            // its lease, so an offline agent does not block the cancel.
+            if !delivered && job.status == JobStatus::Running {
                 return Err(ApiError::agent_offline());
             }
-            // A job that the agent never acknowledged must not go out again after the cancel.
-            queue_repo::stop_redelivery(&mut tx, job_id).await?;
+            // The flag keeps the dispatcher from sending the job, and the acknowledgement of a job
+            // that the cancel overtook gets the cancel message again.
+            queue_repo::request_cancel(&mut tx, job_id).await?;
             StatusCode::ACCEPTED
         }
         JobStatus::Succeeded | JobStatus::Failed | JobStatus::Expired | JobStatus::DeadLetter => {
@@ -206,7 +214,7 @@ pub async fn cancel_job(
     post,
     path = "/api/v1/plans/{id}/run",
     summary = "Runs a plan now.",
-    description = "The job waits in the queue and starts as soon as the agent is online and the limits allow it.",
+    description = "The job waits in the queue and starts as soon as the agent is online and the limits allow it. A plan holds at most one queued manual run: a second run gives HTTP 409 `already_queued`.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the plan.")),
     responses(
@@ -214,7 +222,7 @@ pub async fn cancel_job(
         (status = 400, description = "The profile does not compile for the agent.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
         (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The agent of the plan is revoked.", body = crate::error::ProblemBody)
+        (status = 409, description = "The agent of the plan is revoked, or a manual run of the plan is already queued (`already_queued`).", body = crate::error::ProblemBody)
     )
 )]
 pub async fn run_plan(
@@ -243,6 +251,9 @@ pub async fn run_plan(
     };
     // The job builder compiles again at send time. The early check gives the user the field error.
     crate::profiles::compile_for_agent(&profile, &agent, now)?;
+    if queue_repo::has_queued_manual_run(&mut tx, plan_id).await? {
+        return Err(ApiError::already_queued());
+    }
 
     job_repo::create(
         &mut tx,
@@ -259,7 +270,14 @@ pub async fn run_plan(
         },
     )
     .await
-    .map_err(map_write_error)?;
+    // The partial unique index is the guard of two runs that race.
+    .map_err(|error| {
+        if error.is_unique_violation() {
+            ApiError::already_queued()
+        } else {
+            map_write_error(error)
+        }
+    })?;
     let mut event = context.audit_event(AuditAction::JobRun, "job", job_id.as_uuid());
     event.diff = Some(diff(
         None,

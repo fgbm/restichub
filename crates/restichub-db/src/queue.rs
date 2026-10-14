@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::enums::{JobKind, JobStatus};
-use crate::ids::{AgentId, JobId, PlanId, RepositoryId};
+use crate::ids::{AgentId, JobId, PlanId, RepositoryId, SecretId};
 use crate::jobs::{Job, JobRow, job_columns};
 use crate::tx::TenantTx;
 
@@ -112,32 +112,41 @@ pub async fn try_lock_tenant(tx: &mut TenantTx<'_>) -> Result<bool, DbError> {
 /// Only the kinds that the queue builds qualify: an on-demand `init` or `test_access` job is never
 /// a queue job (FR-RP-02).
 ///
-/// A `queued` job is dispatchable at once, or after `run_at` when a lock retry delayed it. A `sent` job is dispatchable again once its
-/// lease passed without an acknowledgement (FR-PR-06). Only the jobs of the given online agents
-/// qualify. A locked row of another instance is skipped.
+/// A `queued` job is dispatchable at once, or after `run_at` when a lock retry delayed it. A `sent`
+/// job is dispatchable again once its lease passed without an acknowledgement (FR-PR-06). A job
+/// past its queue lifetime and a job with a cancel request never qualify. Only the jobs of the
+/// given online agents qualify, and each agent contributes its `per_agent` oldest rows, so the
+/// backlog of one agent never hides the jobs of another. A locked row of another instance is
+/// skipped.
 pub async fn dispatchable(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
     online: &[AgentId],
-    limit: i64,
+    per_agent: i64,
 ) -> Result<Vec<Job>, DbError> {
     let agents: Vec<Uuid> = online.iter().map(|agent| agent.as_uuid()).collect();
+    // The window function cannot share a query level with `FOR UPDATE`, so the ranking selects the
+    // identifiers and the outer query locks the rows.
     let rows = sqlx::query_as::<_, JobRow>(concat!(
         "SELECT ",
         job_columns!(),
-        " FROM jobs \
-          WHERE ((status = 'queued' AND (attempt = 0 OR run_at <= $1)) \
-                 OR (status = 'sent' AND lease_until IS NOT NULL AND lease_until <= $1)) \
-            AND (expires_at IS NULL OR expires_at > $1) \
-            AND kind IN ('backup', 'forget', 'prune', 'check', 'unlock', 'unlock_all') \
-            AND agent_id = ANY($2) \
+        " FROM jobs WHERE id IN ( \
+              SELECT id FROM ( \
+                SELECT id, row_number() OVER (PARTITION BY agent_id ORDER BY created_at, id) AS rank \
+                FROM jobs \
+                WHERE ((status = 'queued' AND (attempt = 0 OR run_at <= $1)) \
+                       OR (status = 'sent' AND lease_until IS NOT NULL AND lease_until <= $1)) \
+                  AND NOT cancel_requested \
+                  AND (expires_at IS NULL OR expires_at > $1) \
+                  AND kind IN ('backup', 'forget', 'prune', 'check', 'unlock', 'unlock_all') \
+                  AND agent_id = ANY($2)) ranked \
+              WHERE rank <= $3) \
           ORDER BY created_at, id \
-          LIMIT $3 \
           FOR UPDATE SKIP LOCKED"
     ))
     .bind(now)
     .bind(&agents)
-    .bind(limit)
+    .bind(per_agent)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -154,17 +163,56 @@ pub async fn in_flight(tx: &mut TenantTx<'_>) -> Result<Vec<InFlight>, DbError> 
     .map_err(DbError::Query)
 }
 
-/// Marks a job as sent and starts its lease. `false` when the job is not waiting.
+/// The signed job of a `sent` row, encrypted with the data encryption key of the tenant.
+#[derive(Debug, Clone)]
+pub struct StoredSignedJob {
+    pub key_version: i32,
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+    /// The secrets that the job carries; each delivery writes their audit records.
+    pub secrets: Vec<SecretId>,
+}
+
+/// Marks a queued job as sent, stores its signed bytes and starts its lease. `false` when the job
+/// is not queued.
 pub async fn mark_dispatched(
+    tx: &mut TenantTx<'_>,
+    id: JobId,
+    now: OffsetDateTime,
+    lease_until: OffsetDateTime,
+    signed: &StoredSignedJob,
+) -> Result<bool, DbError> {
+    let secrets: Vec<Uuid> = signed.secrets.iter().map(|id| id.as_uuid()).collect();
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'sent', sent_at = $2, lease_until = $3, \
+                deliveries = deliveries + 1, signed_job = $4, signed_job_nonce = $5, \
+                signed_job_key_version = $6, signed_job_secrets = $7, updated_at = now() \
+         WHERE id = $1 AND status = 'queued'",
+    )
+    .bind(id)
+    .bind(now)
+    .bind(lease_until)
+    .bind(&signed.ciphertext)
+    .bind(&signed.nonce)
+    .bind(signed.key_version)
+    .bind(&secrets)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Starts a new lease for a `sent` job that goes out again. `false` when the job is not sent.
+pub async fn mark_redelivered(
     tx: &mut TenantTx<'_>,
     id: JobId,
     now: OffsetDateTime,
     lease_until: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE jobs SET status = 'sent', sent_at = $2, lease_until = $3, \
-                deliveries = deliveries + 1, updated_at = now() \
-         WHERE id = $1 AND status IN ('queued', 'sent')",
+        "UPDATE jobs SET sent_at = $2, lease_until = $3, deliveries = deliveries + 1, \
+                updated_at = now() \
+         WHERE id = $1 AND status = 'sent'",
     )
     .bind(id)
     .bind(now)
@@ -175,11 +223,89 @@ pub async fn mark_dispatched(
     Ok(result.rows_affected() == 1)
 }
 
-/// Ends the lease of a sent job, so the queue never sends it again after a cancel request.
-pub async fn stop_redelivery(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
+/// The ciphertext of a `sent` row, or `None` when the row holds none.
+pub async fn signed_job(
+    tx: &mut TenantTx<'_>,
+    id: JobId,
+) -> Result<Option<StoredSignedJob>, DbError> {
+    let row = sqlx::query_as::<_, (Option<Vec<u8>>, Option<Vec<u8>>, Option<i32>, Vec<Uuid>)>(
+        "SELECT signed_job, signed_job_nonce, signed_job_key_version, signed_job_secrets \
+         FROM jobs WHERE id = $1 AND status = 'sent'",
+    )
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(match row {
+        Some((Some(ciphertext), Some(nonce), Some(key_version), secrets)) => {
+            Some(StoredSignedJob {
+                key_version,
+                nonce,
+                ciphertext,
+                secrets: secrets.into_iter().map(SecretId::from_uuid).collect(),
+            })
+        }
+        _ => None,
+    })
+}
+
+/// Flags a sent or running job for cancel. The dispatcher never sends a flagged job.
+pub async fn request_cancel(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE jobs SET lease_until = NULL, updated_at = now() \
+        "UPDATE jobs SET cancel_requested = true, updated_at = now() \
+         WHERE id = $1 AND status IN ('sent', 'running')",
+    )
+    .bind(id)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Fails the flagged `sent` jobs whose lease passed without an acknowledgement, with the
+/// `cancelled` result.
+pub async fn cancel_unacknowledged(
+    tx: &mut TenantTx<'_>,
+    now: OffsetDateTime,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'failed', result_code = 'cancelled', finished_at = $1, \
+                lease_until = NULL, updated_at = now() \
+         WHERE status = 'sent' AND cancel_requested \
+           AND (lease_until IS NULL OR lease_until <= $1)",
+    )
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
+}
+
+/// A busy refusal is not a delivery: it frees the delivery count, and the job goes out again at
+/// `until`.
+pub async fn defer_busy(
+    tx: &mut TenantTx<'_>,
+    id: JobId,
+    until: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET lease_until = $2, deliveries = GREATEST(deliveries - 1, 0), \
+                updated_at = now() \
          WHERE id = $1 AND status = 'sent'",
+    )
+    .bind(id)
+    .bind(until)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Records that a step of a sent or running job reported a held repository lock.
+pub async fn note_lock_reported(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET lock_reported = true, updated_at = now() \
+         WHERE id = $1 AND status IN ('sent', 'running')",
     )
     .bind(id)
     .execute(tx.as_conn())
@@ -202,25 +328,57 @@ pub async fn revert_dispatch(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, D
     Ok(result.rows_affected() == 1)
 }
 
-/// Returns a job to the queue for a later retry (FR-SC-05).
-pub async fn schedule_retry(
+/// Ends a job that reported a held lock and queues its retry as a new row (FR-SC-05, ADR-0020).
+///
+/// The agent journal returns the stored result for a known `job_id`, so the retry needs its own
+/// identifier. The old row becomes `failed` first, so the active-job index of the repository allows
+/// the new row. `None` when the old row is already terminal.
+pub async fn retry_as_new_job(
     tx: &mut TenantTx<'_>,
-    id: JobId,
+    old: &Job,
     attempt: i32,
     run_at: OffsetDateTime,
-) -> Result<bool, DbError> {
-    let result = sqlx::query(
-        "UPDATE jobs SET status = 'queued', attempt = $2, run_at = $3, sent_at = NULL, \
-                started_at = NULL, lease_until = NULL, updated_at = now() \
+    expires_at: Option<OffsetDateTime>,
+    now: OffsetDateTime,
+) -> Result<Option<JobId>, DbError> {
+    let ended = sqlx::query(
+        "UPDATE jobs SET status = 'failed', result_code = 'failed', \
+                result_message = 'lock_retry', finished_at = $2, lease_until = NULL, \
+                updated_at = now() \
          WHERE id = $1 AND status IN ('sent', 'running')",
     )
-    .bind(id)
-    .bind(attempt)
-    .bind(run_at)
+    .bind(old.id)
+    .bind(now)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(result.rows_affected() == 1)
+    if ended.rows_affected() != 1 {
+        return Ok(None);
+    }
+    let id = JobId::new();
+    sqlx::query(
+        "INSERT INTO jobs \
+         (id, tenant_id, kind, agent_id, repository_id, plan_id, fire_time, status, expires_at, \
+          location_fingerprint, created_by, attempt, run_at, retry_of) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12, $13)",
+    )
+    .bind(id)
+    .bind(tx.tenant())
+    .bind(old.kind.as_str())
+    .bind(old.agent_id)
+    .bind(old.repository_id)
+    .bind(old.plan_id)
+    .bind(old.fire_time)
+    .bind(expires_at)
+    .bind(old.location_fingerprint.as_deref())
+    .bind(old.created_by)
+    .bind(attempt)
+    .bind(run_at)
+    .bind(old.id)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(Some(id))
 }
 
 /// Moves a job to the terminal `dead_letter` status after the last retry (FR-SC-05).
@@ -397,6 +555,22 @@ pub async fn has_success_since(
     .await
     .map_err(DbError::Query)?;
     Ok(found)
+}
+
+/// True when the plan holds a queued manual run: a backup without a fire time, a retry included.
+pub async fn has_queued_manual_run(
+    tx: &mut TenantTx<'_>,
+    plan_id: PlanId,
+) -> Result<bool, DbError> {
+    let (queued,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE plan_id = $1 AND fire_time IS NULL \
+                        AND kind = 'backup' AND status = 'queued')",
+    )
+    .bind(plan_id)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(queued)
 }
 
 /// True when the repository holds a queued, sent or running job of any kind.

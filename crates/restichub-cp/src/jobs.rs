@@ -35,14 +35,14 @@ use axum::http::StatusCode;
 use restichub_compiler::ValidatedJob;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::jobs::{self as job_repo, Job, JobOutcome, NewJob};
-use restichub_db::queue::JobDetail;
+use restichub_db::queue::{self as queue_repo, JobDetail};
 use restichub_db::repositories::{self as repo, Repository};
 use restichub_db::{
     AgentId, AgentStatus, BackendKind, JobId, JobKind, JobResultCode, JobStatus, RepositoryId,
     SecretId, TenantId, agents as agents_repo,
 };
 use restichub_proto::agent::v1::{
-    ControlMessage, InitStep, Job as ProtoJob, JobAck, JobRejected, JobResult,
+    CancelJob, ControlMessage, InitStep, Job as ProtoJob, JobAck, JobRejected, JobResult,
     JobStatus as ProtoJobStatus, LocalCredentials, RejectReason, RepositoryAccess, RestCredentials,
     S3Credentials, Step, StepStatus, TestAccessStep, control_message,
     repository_access::BackendCredentials, step,
@@ -71,6 +71,9 @@ const STEP_TIMEOUT_SECONDS: u32 = 600;
 
 /// Timeout of the full job (FR-AG-05).
 const JOB_TIMEOUT_SECONDS: u32 = 900;
+
+/// How long a job that a busy agent refused waits before it goes out again.
+const BUSY_DELAY: time::Duration = time::Duration::seconds(10);
 
 /// The largest accepted error code from an agent (FR-PR-08).
 const MAX_RESULT_MESSAGE_LEN: usize = 64;
@@ -426,6 +429,20 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
     }
     if let Err(error) = tx.commit().await {
         tracing::warn!(job = %job_id, %error, "the acknowledgement could not commit");
+        return;
+    }
+    // A cancel that raced the dispatch reached the agent before the job did, so the agent ignored
+    // it. The acknowledgement of the flagged job gets the cancel again.
+    if job.cancel_requested && !job.status.is_terminal() {
+        state.agent_registry().send_to_agent(
+            agent,
+            ControlMessage {
+                payload: Some(control_message::Payload::CancelJob(CancelJob {
+                    job_id: job_id.to_string(),
+                    grace_period_seconds: crate::job_api::CANCEL_GRACE_SECONDS,
+                })),
+            },
+        );
     }
 }
 
@@ -460,9 +477,16 @@ pub async fn handle_job_rejected(
         return;
     }
     // A busy agent only defers the job: it stays `sent` and the control plane delivers it again
-    // while it is valid (ADR-0020).
+    // after a short delay. The refusal is not a delivery (ADR-0020).
     if rejected.reason == RejectReason::Busy as i32 {
         tracing::info!(job = %job_id, "the agent is busy and defers the job");
+        if let Err(error) = queue_repo::defer_busy(&mut tx, job_id, now + BUSY_DELAY).await {
+            tracing::warn!(job = %job_id, %error, "the busy refusal could not defer the job");
+            return;
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::warn!(job = %job_id, %error, "the busy refusal could not commit");
+        }
         return;
     }
     let reason = reject_reason_code(rejected.reason);
@@ -541,9 +565,13 @@ pub async fn handle_job_result(
         tracing::warn!(job = %job_id, "the job result holds an unknown outcome");
         return;
     };
-    // Restic exit code 11 is a held lock, not a failure: the job returns to the queue or, after the
-    // last retry, to the dead-letter status (FR-SC-05).
-    if result.status == StepStatus::Retry as i32 && retry::is_retryable(job.kind) {
+    // Restic exit code 11 is a held lock, not a failure: the job returns to the queue as a new job
+    // or, after the last retry, to the dead-letter status (FR-SC-05). The agent reports the lock on
+    // the step, and the job result of a stopped job has the status `failed`, so the step result
+    // marks the row (see `queue::stale::handle_step_result`).
+    let lock_held = (job.lock_reported && outcome.result_code == JobResultCode::Failed)
+        || result.status == StepStatus::Retry as i32;
+    if lock_held && retry::is_retryable(job.kind) {
         if let Err(error) = retry::apply_lock(&mut tx, state.queue_config(), &job, now).await {
             tracing::warn!(job = %job_id, %error, "the lock result could not update the job");
             return;
@@ -773,6 +801,20 @@ pub(crate) async fn repository_access(
         }
     }
     Ok(access)
+}
+
+/// The secrets that [`repository_access`] reads for the repository, in the order of the reads.
+pub(crate) fn delivered_secrets(repository: &Repository) -> Vec<SecretId> {
+    let mut secrets = vec![repository.password_secret_id];
+    match repository.backend {
+        BackendKind::S3 => {
+            secrets.extend(repository.s3_access_key_secret_id);
+            secrets.extend(repository.s3_secret_key_secret_id);
+        }
+        BackendKind::Rest => secrets.extend(repository.rest_password_secret_id),
+        BackendKind::Local => {}
+    }
+    secrets
 }
 
 /// Reads one secret value for delivery, or `None` when the repository binds no such secret.

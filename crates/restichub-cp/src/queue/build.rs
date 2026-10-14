@@ -2,22 +2,23 @@
 //! FR-PR-05, FR-SC-05, ADR-0003).
 //!
 //! The row stores no command. The builder recompiles the stored profile of the plan against the
-//! facts of the agent at send time, so a profile or an agent that changed since the schedule fires
-//! gives a typed refusal and never a stale command. The job carries the secrets of its own
+//! facts of the agent at the first send, so a profile or an agent that changed since the schedule
+//! fires gives a typed refusal and never a stale command. A redelivery does not build: it sends the
+//! stored signed bytes (ADR-0020). The job carries the secrets of its own
 //! repository only (AC-PR-03). [`crate::delivery::SecretReader`] writes the `secret_delivered` audit record in the
 //! transaction of the caller (AC-RP-03); the dispatcher commits before it sends.
 
 use restichub_compiler::{ValidatedJob, compile};
 use restichub_db::jobs::Job;
 use restichub_db::{
-    AgentStatus, JobKind, JobResultCode, RepositoryId, TenantTx, agents as agents_repo,
+    AgentStatus, JobKind, JobResultCode, RepositoryId, SecretId, TenantTx, agents as agents_repo,
     plans as plans_repo, profiles as profiles_repo, repositories as repo,
 };
 use restichub_proto::agent::v1::{Job as ProtoJob, Step, UnlockAllStep, UnlockStep, step};
 use time::OffsetDateTime;
 
 use crate::delivery::DeliveryError;
-use crate::jobs::{repository_access, timestamp};
+use crate::jobs::{delivered_secrets, repository_access, timestamp};
 use crate::profiles::{compiler_profile_from_row, target_facts};
 use crate::server::AppState;
 
@@ -91,6 +92,12 @@ impl From<restichub_db::DbError> for BuildError {
     }
 }
 
+/// A job that is ready to sign, with the secrets that it carries.
+pub struct Built {
+    pub job: ValidatedJob,
+    pub secrets: Vec<SecretId>,
+}
+
 /// Recompiles the plan profile for the agent and assembles the job with the secrets of its own
 /// repository (FR-PR-03).
 pub async fn build(
@@ -98,7 +105,7 @@ pub async fn build(
     tx: &mut TenantTx<'_>,
     job: &Job,
     now: OffsetDateTime,
-) -> Result<ValidatedJob, BuildError> {
+) -> Result<Built, BuildError> {
     let Some(agent) = agents_repo::get(tx, job.agent_id).await? else {
         return Err(BuildError::Refused(Refusal::AgentRevoked));
     };
@@ -154,7 +161,14 @@ pub async fn build(
         repositories: vec![access],
         steps,
     };
-    ValidatedJob::new(proto_job).map_err(|_| BuildError::Refused(Refusal::JobInvalid))
+    let job = ValidatedJob::new(proto_job).map_err(|rejection| {
+        tracing::warn!(job = %job.id, reason = ?rejection.reason, "the queue built a job that does not validate");
+        BuildError::Refused(Refusal::JobInvalid)
+    })?;
+    Ok(Built {
+        job,
+        secrets: delivered_secrets(&repository),
+    })
 }
 
 fn delivery_error(error: DeliveryError) -> BuildError {
@@ -198,12 +212,18 @@ async fn plan_steps(
     if profile.repository_id != repository_id {
         return Err(BuildError::Refused(Refusal::RepositoryChanged));
     }
-    let target =
-        target_facts(agent, now).map_err(|_| BuildError::Refused(Refusal::AgentFactsInvalid))?;
-    let compiler_profile = compiler_profile_from_row(&profile)
-        .map_err(|_| BuildError::Refused(Refusal::CompileFailed))?;
-    let compiled = compile(&compiler_profile, &target)
-        .map_err(|_| BuildError::Refused(Refusal::CompileFailed))?;
+    let target = target_facts(agent, now).map_err(|error| {
+        tracing::warn!(job = %job.id, cause = ?error, "the agent facts do not give a compile target");
+        BuildError::Refused(Refusal::AgentFactsInvalid)
+    })?;
+    let compiler_profile = compiler_profile_from_row(&profile).map_err(|error| {
+        tracing::warn!(job = %job.id, cause = ?error, "the stored profile does not convert");
+        BuildError::Refused(Refusal::CompileFailed)
+    })?;
+    let compiled = compile(&compiler_profile, &target).map_err(|error| {
+        tracing::warn!(job = %job.id, cause = ?error, "the stored profile does not compile");
+        BuildError::Refused(Refusal::CompileFailed)
+    })?;
 
     let mut steps: Vec<Step> = match job.kind {
         JobKind::Backup => compiled

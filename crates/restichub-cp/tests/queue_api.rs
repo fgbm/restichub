@@ -52,7 +52,16 @@ async fn fr_sc_09_the_role_matrix_of_the_run_and_cancel_actions() {
     assert_eq!(body["status"], "queued");
     assert_eq!(body["kind"], "backup");
     let job = id_of(&body);
-    let (status, _) = env.call(&env.admin, "POST", &run, None).await;
+    let second_profile = env.create_profile(w.repository, json!({})).await;
+    let second_plan = env.create_plan(second_profile, w.agent.id).await;
+    let (status, _) = env
+        .call(
+            &env.admin,
+            "POST",
+            &format!("/api/v1/plans/{second_plan}/run"),
+            None,
+        )
+        .await;
     assert_eq!(status, StatusCode::ACCEPTED, "an Admin can run a plan");
 
     let cancel = format!("/api/v1/jobs/{job}/cancel");
@@ -205,12 +214,12 @@ async fn fr_sc_09_the_list_filters_and_paginates() {
     };
     let w = world(db).await;
     let env = &w.env;
+    env.run_plan(w.plan).await;
     for _ in 0..5 {
-        env.run_plan(w.plan).await;
+        let profile = env.create_profile(w.repository, json!({})).await;
+        let plan = env.create_plan(profile, w.agent.id).await;
+        env.run_plan(plan).await;
     }
-    let other_profile = env.create_profile(w.repository, json!({})).await;
-    let other_plan = env.create_plan(other_profile, w.agent.id).await;
-    env.run_plan(other_plan).await;
 
     let (status, body) = env
         .call(
@@ -221,7 +230,7 @@ async fn fr_sc_09_the_list_filters_and_paginates() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["items"].as_array().expect("items").len(), 5);
+    assert_eq!(body["items"].as_array().expect("items").len(), 1);
     assert!(body["items"][0]["plan_name"].is_string());
     assert_eq!(body["items"][0]["agent_hostname"], "api-host");
     assert!(body["items"][0]["repository_name"].is_string());

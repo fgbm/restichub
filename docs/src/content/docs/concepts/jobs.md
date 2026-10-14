@@ -14,24 +14,26 @@ A job is one run of a plan or one manual operation. The control plane keeps the 
 | Running (`running`) | The agent confirmed the job and runs it. |
 | Succeeded (`succeeded`) | Every step succeeded. |
 | Failed (`failed`) | A step failed, the job was cancelled, or the control plane refused it. The result code and the reason give the detail. |
-| Expired (`expired`) | The job was not run before its expiry time. |
+| Expired (`expired`) | The job waited in the queue longer than its queue lifetime. A running job never expires. |
 | Gave up (`dead_letter`) | The repository stayed locked after the last retry. |
 
 A job in a final state never changes again.
 
 ## Delivery
 
-The dispatcher builds each job when it sends the job. It compiles the stored profile of the plan again with the facts of the agent. If the profile no longer compiles, the job fails with the reason `compile_failed`. The control plane never sends a stored command.
+The dispatcher builds each job when it sends the job for the first time. It compiles the stored profile of the plan again with the facts of the agent. If the profile no longer compiles, the job fails with the reason `compile_failed`. The control plane never sends a stored command.
 
 A job carries the secrets of its own repository only (AC-PR-03). The control plane reads each secret when it sends the job and writes a `secret_delivered` audit record. The record holds no secret value (AC-RP-03).
 
 The control plane always sends `--retry-lock` with a restic command (FR-SC-05).
 
-The control plane signs each job. The agent checks the signature before it runs the job (FR-PR-03).
+The control plane signs each job. The agent checks the signature before it runs the job (FR-PR-03). The control plane keeps the signed job, encrypted with the key of the tenant, until the job reaches a final state.
 
 ## Lease and redelivery
 
-When the control plane sends a job, it starts a lease. The default lease is 60 seconds. If the agent does not confirm the job before the lease ends, the control plane sends the job again (FR-PR-06, AC-PR-04). The job has the same identifier each time. The agent keeps a journal and runs a known job once.
+When the control plane sends a job, it starts a lease. The default lease is 60 seconds. The smallest lease is 15 seconds. If the agent does not confirm the job before the lease ends, the control plane sends the job again (FR-PR-06, AC-PR-04). It sends the same signed bytes and does not build the job again. A change to the profile does not change a job that the control plane sent. Each delivery writes the `secret_delivered` audit records. The job has the same identifier each time. The agent keeps a journal and runs a known job once.
+
+If the agent answers that it is busy, the control plane sends the job again after 10 seconds. A busy answer does not count as a delivery.
 
 If the control plane sent a job five times without a confirmation, the job fails with the reason `not_acknowledged`.
 
@@ -61,9 +63,9 @@ The same values can be set in the `[queue]` section of the configuration file, w
 
 ## Lock retries
 
-Restic exits with code 11 when another operation holds the repository lock. The control plane does not fail the job. It returns the job to the queue with a delay (FR-SC-05, AC-SC-05).
+Restic exits with code 11 when another operation holds the repository lock. The control plane does not give up the plan. It queues the job again with a delay (FR-SC-05, AC-SC-05).
 
-The first delay is 30 seconds. The delay doubles for each retry. The largest delay is one hour. After five lock results, the job moves to the final state `dead_letter` and the control plane writes a `job_dead_letter` audit record. Use this record as the alert.
+The control plane ends the job that reported the lock and queues a new job with a new identifier. The agent keeps a journal and returns the stored result for a known identifier, so a retry needs its own identifier. The new job has the same plan and fire time, and counts one more attempt. The first delay is 30 seconds. The delay doubles for each retry. The largest delay is one hour. After five lock results, the job moves to the final state `dead_letter` and the control plane writes a `job_dead_letter` audit record. Use this record as the alert.
 
 | Setting | Default |
 |---|---|
@@ -84,7 +86,8 @@ Only an Admin can remove every lock. The action sends an `unlock_all` job. It ne
 An Operator can cancel a job (FR-SC-09).
 
 - A waiting job ends at once with the result `cancelled`.
-- For a sent or running job, the control plane sends a cancel message to the agent. If the agent is offline, the control plane answers with HTTP 409 `agent_offline`.
+- For a sent or running job, the control plane marks the job and sends a cancel message to the agent. The queue never sends a marked job. If the agent confirms a marked job late, the control plane sends the cancel message again. A marked job that the agent never confirmed fails with the result `cancelled` when its lease ends. If the agent of a running job is offline, the control plane answers with HTTP 409 `agent_offline`.
+- Only an Admin can cancel an `unlock_all` job.
 - A job in a final state cannot be cancelled.
 
 ## Refused jobs
@@ -106,7 +109,7 @@ If the control plane cannot build a job, the job fails with a reason code:
 
 | Role | Right |
 |---|---|
-| Admin, Operator | Run a plan and cancel a job. |
+| Admin, Operator | Run a plan and cancel a job. A plan holds one waiting manual run: a second run gives HTTP 409 `already_queued`. |
 | Admin | Run `unlock_all`. |
 | Viewer | Read the jobs. |
 

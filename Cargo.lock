@@ -2088,6 +2088,7 @@ dependencies = [
  "prost",
  "prost-types",
  "rcgen",
+ "restichub-agent",
  "restichub-canary-scan",
  "restichub-compiler",
  "restichub-db",

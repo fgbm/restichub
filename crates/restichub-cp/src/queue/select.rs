@@ -145,6 +145,9 @@ mod tests {
             attempt: 0,
             deliveries: 0,
             stale_lock_since: None,
+            cancel_requested: false,
+            lock_reported: false,
+            retry_of: None,
         }
     }
 

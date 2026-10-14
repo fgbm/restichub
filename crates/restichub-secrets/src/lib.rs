@@ -51,7 +51,10 @@ pub use kek::{
     EnvKekProvider, FileKekProvider, KEK_ENV, KEK_FILE_PARAM, KEK_LEN, Kek, KekConfig, KekId,
     KekProvider, generate_kek_encoded, load_kek_provider,
 };
-pub use secret::{EncryptedSecret, SecretPurpose, decrypt_secret, encrypt_secret};
+pub use secret::{
+    EncryptedSecret, SecretPurpose, decrypt_job_blob, decrypt_secret, encrypt_job_blob,
+    encrypt_secret,
+};
 pub use signing::{WrappedSigningKey, unwrap_signing_key, wrap_signing_key};
 
 /// Hides the value in `Debug` and zeroizes it on drop.

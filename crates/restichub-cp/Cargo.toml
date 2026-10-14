@@ -57,6 +57,7 @@ croner = { version = "4.0", default-features = false, features = ["chrono"] }
 [dev-dependencies]
 async-trait = "0.1"
 http-body-util = "0.1"
+restichub-agent = { path = "../restichub-agent" }
 restichub-canary-scan = { path = "../restichub-canary-scan" }
 restichub-db = { workspace = true, features = ["test-util"] }
 restichub-emulator = { path = "../restichub-emulator" }

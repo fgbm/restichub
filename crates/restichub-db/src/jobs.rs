@@ -69,7 +69,13 @@ macro_rules! job_columns {
             $p,
             "deliveries, ",
             $p,
-            "stale_lock_since"
+            "stale_lock_since, ",
+            $p,
+            "cancel_requested, ",
+            $p,
+            "lock_reported, ",
+            $p,
+            "retry_of"
         )
     };
 }
@@ -110,6 +116,12 @@ pub struct Job {
     pub deliveries: i32,
     /// Set while the repository lock of this job may be stale (FR-SC-06).
     pub stale_lock_since: Option<OffsetDateTime>,
+    /// Set when a user cancelled the job while it was sent or running.
+    pub cancel_requested: bool,
+    /// Set when a step of the job exited with restic code 11, a held repository lock (FR-SC-05).
+    pub lock_reported: bool,
+    /// The job whose lock result created this retry.
+    pub retry_of: Option<JobId>,
 }
 
 /// The values that the control plane writes for a new row in the `jobs` table.
@@ -164,7 +176,7 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewJob) -> Result<JobId, DbErro
 
 /// Creates one scheduled job for a plan and a fire time (FR-SC-02).
 ///
-/// The unique key `(plan_id, fire_time)` makes the create idempotent: a second control plane
+/// The unique key `(plan_id, fire_time, attempt)` makes the create idempotent: a second control plane
 /// instance, or a second run over the same fire time, inserts no row and gets `None` (AC-SC-02,
 /// ADR-0010).
 pub async fn create_scheduled(
@@ -176,7 +188,7 @@ pub async fn create_scheduled(
          (id, tenant_id, kind, agent_id, repository_id, plan_id, fire_time, status, expires_at, \
           location_fingerprint, created_by) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10) \
-         ON CONFLICT (plan_id, fire_time) DO NOTHING \
+         ON CONFLICT (plan_id, fire_time, attempt) DO NOTHING \
          RETURNING id",
     )
     .bind(new.id)
@@ -371,8 +383,8 @@ pub async fn cancel_for_plan(
     Ok(result.rows_affected())
 }
 
-/// Moves one overdue job to the terminal `expired` status. `false` when it is terminal
-/// or not overdue.
+/// Moves one overdue job to the terminal `expired` status. `false` when the job is not overdue in
+/// the sense of [`expire_overdue`].
 pub async fn mark_expired(
     tx: &mut TenantTx<'_>,
     id: JobId,
@@ -380,8 +392,9 @@ pub async fn mark_expired(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE jobs SET status = 'expired', finished_at = $2, updated_at = now() \
-         WHERE id = $1 AND status NOT IN ('succeeded', 'failed', 'expired', 'dead_letter') \
-           AND expires_at IS NOT NULL AND expires_at <= $2",
+         WHERE id = $1 AND expires_at IS NOT NULL AND expires_at <= $2 \
+           AND (status = 'queued' \
+                OR (status = 'sent' AND (lease_until IS NULL OR lease_until <= $2)))",
     )
     .bind(id)
     .bind(now)
@@ -391,15 +404,18 @@ pub async fn mark_expired(
     Ok(result.rows_affected() == 1)
 }
 
-/// Marks every overdue non-terminal job of the tenant `expired`.
+/// Marks every overdue job of the tenant `expired`.
 ///
-/// The periodic sweep calls it. The update is idempotent, so two control plane instances both run
-/// it without a conflict.
+/// The expiry is the queue lifetime: it ends a `queued` job, and a `sent` job whose lease passed
+/// too. A `running` job never expires here: the agent may still run it, and only the stale lock
+/// recovery ends it (FR-SC-06). The periodic sweep calls it. The update is idempotent, so two
+/// control plane instances both run it without a conflict.
 pub async fn expire_overdue(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<u64, DbError> {
     let result = sqlx::query(
         "UPDATE jobs SET status = 'expired', finished_at = $1, updated_at = now() \
-         WHERE status NOT IN ('succeeded', 'failed', 'expired', 'dead_letter') \
-           AND expires_at IS NOT NULL AND expires_at <= $1",
+         WHERE expires_at IS NOT NULL AND expires_at <= $1 \
+           AND (status = 'queued' \
+                OR (status = 'sent' AND (lease_until IS NULL OR lease_until <= $1)))",
     )
     .bind(now)
     .execute(tx.as_conn())
@@ -432,6 +448,9 @@ pub(crate) struct JobRow {
     attempt: i32,
     deliveries: i32,
     stale_lock_since: Option<OffsetDateTime>,
+    cancel_requested: bool,
+    lock_reported: bool,
+    retry_of: Option<Uuid>,
 }
 
 impl From<JobRow> for Job {
@@ -459,6 +478,9 @@ impl From<JobRow> for Job {
             attempt: row.attempt,
             deliveries: row.deliveries,
             stale_lock_since: row.stale_lock_since,
+            cancel_requested: row.cancel_requested,
+            lock_reported: row.lock_reported,
+            retry_of: row.retry_of.map(JobId::from_uuid),
         }
     }
 }
