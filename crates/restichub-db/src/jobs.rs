@@ -30,7 +30,7 @@ pub struct Job {
     /// A machine-readable error code from the agent. Never a secret and never prose (NFR-DOC-04).
     pub result_message: Option<String>,
     /// A hash of the repository location at create time. The control plane applies the
-    /// `initialized` flag only while it still matches (MEDIUM 4).
+    /// `initialized` flag only while it still matches.
     pub location_fingerprint: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
     pub sent_at: Option<OffsetDateTime>,
@@ -49,7 +49,7 @@ pub struct NewJob {
     pub agent_id: AgentId,
     pub repository_id: Option<RepositoryId>,
     pub expires_at: Option<OffsetDateTime>,
-    /// A hash of the repository location at create time. It holds no secret (MEDIUM 4).
+    /// A hash of the repository location at create time. It holds no secret.
     pub location_fingerprint: Option<String>,
     /// Absent for an API token actor.
     pub created_by: Option<UserId>,
@@ -204,7 +204,7 @@ pub async fn mark_refused(
     Ok(result.rows_affected() == 1)
 }
 
-/// True when the repository holds a job that is queued, sent or running (MEDIUM 3).
+/// True when the repository holds a job that is queued, sent or running.
 pub async fn has_active_for_repository(
     tx: &mut TenantTx<'_>,
     repository_id: RepositoryId,
@@ -220,7 +220,7 @@ pub async fn has_active_for_repository(
     Ok(active)
 }
 
-/// Moves one overdue job to the terminal `expired` status (MEDIUM 5). `false` when it is terminal
+/// Moves one overdue job to the terminal `expired` status. `false` when it is terminal
 /// or not overdue.
 pub async fn mark_expired(
     tx: &mut TenantTx<'_>,
@@ -240,7 +240,7 @@ pub async fn mark_expired(
     Ok(result.rows_affected() == 1)
 }
 
-/// Marks every overdue non-terminal job of the tenant `expired` (MEDIUM 5).
+/// Marks every overdue non-terminal job of the tenant `expired`.
 ///
 /// The periodic sweep calls it. The update is idempotent, so two control plane instances both run
 /// it without a conflict.

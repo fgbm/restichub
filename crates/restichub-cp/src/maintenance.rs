@@ -21,7 +21,7 @@ pub const LIMITER_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 pub const SIGNING_KEY_RETIRE_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// The job expiry sweep runs often, so a poll sees a terminal status soon after the expiry
-/// (MEDIUM 5).
+/// ( ).
 pub const JOB_EXPIRY_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Removes the expired sessions and the expired and used setup tokens.
@@ -100,7 +100,7 @@ pub fn spawn_signing_key_retirement(
     })
 }
 
-/// Moves the overdue jobs of every tenant to `expired` (MEDIUM 5).
+/// Moves the overdue jobs of every tenant to `expired`.
 ///
 /// The runtime role cannot cross the tenant boundary, so the function lists the tenants and expires
 /// the jobs of each tenant in its own transaction. The update is idempotent, so two control plane
@@ -135,7 +135,7 @@ pub async fn expire_jobs(db: &Database, now: OffsetDateTime) -> Result<(), DbErr
     Ok(())
 }
 
-/// Starts the periodic job expiry sweep (MEDIUM 5).
+/// Starts the periodic job expiry sweep.
 pub fn spawn_job_expiry(
     db: Database,
     clock: Arc<dyn Clock>,
