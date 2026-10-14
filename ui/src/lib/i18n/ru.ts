@@ -646,6 +646,8 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.forget_selected_nothing': 'forget не выбрал ни одного снимка',
 	'jobs.reason.agent_capability_missing':
 		'Агент слишком старый для этой политики хранения. Обновите агент.',
+	'jobs.reason.forget_without_tags':
+		'У политики хранения нет фильтра по тегам. Задание не отправлено.',
 	'jobs.reason.step_missing': 'В профиле больше нет этого шага.',
 	'jobs.reason.job_invalid': 'Задание не прошло проверку.',
 	'jobs.reason.unsupported_kind': 'Очередь не выполняет задания этого вида.',

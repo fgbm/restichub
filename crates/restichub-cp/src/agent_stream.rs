@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use restichub_db::agents as agent_repo;
 use restichub_db::{AgentId, AgentStatus, Database, TenantId};
+use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{
     AgentMessage, ControlMessage, Ping, ServerHello, SigningKeyUpdate, agent_message,
     agent_service_server::{AgentService, AgentServiceServer},
@@ -47,6 +48,9 @@ pub const LAST_SEEN_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The stream closes when the agent does not answer for three ping intervals (FR-ID-07).
 pub const IDLE_CLOSE: Duration = Duration::from_secs(3 * HEARTBEAT_INTERVAL.as_secs());
+
+/// The agent must send its `AgentHello` within this time, or the stream closes (FR-PR-09).
+pub const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Control messages buffered for one agent.
 /// The buffer of the messages that the control plane sends to one agent.
@@ -92,6 +96,19 @@ struct StreamEntry {
     generation: u64,
     close: watch::Sender<bool>,
     out: mpsc::Sender<ControlMessage>,
+    /// Set by the `AgentHello` of this connection. An entry without it is not online for the
+    /// dispatcher (FR-PR-09).
+    capabilities: Option<Vec<AgentCapability>>,
+}
+
+/// What a job send did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobSend {
+    Sent,
+    /// The agent holds no ready stream, or its buffer is full.
+    Offline,
+    /// The live connection lacks a capability that the message needs.
+    CapabilityMissing,
 }
 
 /// The in-process registry of the live streams (ADR-0026, section Revocation; FR-ID-04).
@@ -165,11 +182,40 @@ impl StreamRegistry {
                 generation,
                 close,
                 out,
+                capabilities: None,
             },
         ) {
             let _ = previous.close.send(true);
         }
         generation
+    }
+
+    /// Records the capabilities of the live connection and makes the stream ready for the
+    /// dispatcher. A newer stream of the agent keeps its own entry (FR-PR-09).
+    fn set_capabilities(
+        &self,
+        agent: AgentId,
+        generation: u64,
+        capabilities: Vec<AgentCapability>,
+    ) -> bool {
+        let mut inner = self.lock();
+        match inner.streams.get_mut(&agent) {
+            Some(entry) if entry.generation == generation => {
+                entry.capabilities = Some(capabilities);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Reads the hello of the live connection. `None` when the agent is not online. The job builder
+    /// reads it here and never from the stored agent row, because a downgraded agent keeps its
+    /// identity (FR-PR-09).
+    pub fn capabilities(&self, agent: AgentId) -> Option<Vec<AgentCapability>> {
+        self.lock()
+            .streams
+            .get(&agent)
+            .and_then(|entry| entry.capabilities.clone())
     }
 
     /// Removes the entry of a stream, unless a newer stream replaced it (FR-ID-08).
@@ -210,11 +256,33 @@ impl StreamRegistry {
     ///
     /// The queue dispatcher delivers `SignedJob` messages through this call.
     pub fn send_to_agent(&self, agent: AgentId, message: ControlMessage) -> bool {
-        self.lock()
-            .streams
-            .get(&agent)
-            .map(|entry| entry.out.try_send(message).is_ok())
-            .unwrap_or(false)
+        self.send_requiring(agent, message, &[]) == JobSend::Sent
+    }
+
+    /// Like [`Self::send_to_agent`], and refuses when the live connection lacks one of the
+    /// capabilities. The check and the send share one lock, so a reconnect cannot slip in between
+    /// (FR-PR-09).
+    pub fn send_requiring(
+        &self,
+        agent: AgentId,
+        message: ControlMessage,
+        required: &[AgentCapability],
+    ) -> JobSend {
+        let inner = self.lock();
+        let Some(entry) = inner.streams.get(&agent) else {
+            return JobSend::Offline;
+        };
+        let Some(capabilities) = &entry.capabilities else {
+            return JobSend::Offline;
+        };
+        if required.iter().any(|need| !capabilities.contains(need)) {
+            return JobSend::CapabilityMissing;
+        }
+        if entry.out.try_send(message).is_ok() {
+            JobSend::Sent
+        } else {
+            JobSend::Offline
+        }
     }
 
     /// True when the agent holds an open stream at this moment.
@@ -222,12 +290,20 @@ impl StreamRegistry {
     /// The on-demand job dispatcher checks it before it reads a secret, so an offline agent gives a
     /// clear error and no delivery record.
     pub fn is_online(&self, agent: AgentId) -> bool {
-        self.lock().streams.contains_key(&agent)
+        self.lock()
+            .streams
+            .get(&agent)
+            .is_some_and(|entry| entry.capabilities.is_some())
     }
 
     /// The agents that hold an open stream at this moment. The queue dispatcher sends to these only.
     pub fn online_agents(&self) -> Vec<AgentId> {
-        self.lock().streams.keys().copied().collect()
+        self.lock()
+            .streams
+            .iter()
+            .filter(|(_, entry)| entry.capabilities.is_some())
+            .map(|(agent, _)| *agent)
+            .collect()
     }
 
     /// Buffers one `last_seen_at` write. The flush task writes the buffer in one statement per tenant.
@@ -546,6 +622,30 @@ async fn run_stream(
     mut close_rx: watch::Receiver<bool>,
     mut rotation: Option<broadcast::Receiver<RotationEvent>>,
 ) {
+    // The dispatcher ignores the stream until the hello told which capabilities this connection
+    // has (FR-PR-09).
+    let hello = tokio::select! {
+        message = tokio::time::timeout(HELLO_TIMEOUT, inbound.message()) => match message {
+            Ok(Ok(Some(AgentMessage {
+                payload: Some(agent_message::Payload::AgentHello(hello)),
+            }))) => Some(hello),
+            _ => None,
+        },
+        _ = close_rx.changed() => None,
+    };
+    let Some(hello) = hello else {
+        state.agent_registry().remove(agent, generation);
+        return;
+    };
+    let capabilities = AgentCapability::parse_list(&hello.capabilities);
+    crate::agents::record_capabilities(&state, identity.tenant, agent, &capabilities).await;
+    if !state
+        .agent_registry()
+        .set_capabilities(agent, generation, capabilities)
+    {
+        return;
+    }
+
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_seen = tokio::time::interval(LAST_SEEN_INTERVAL);
@@ -669,10 +769,8 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
                 retire(state, pending);
             }
         }
-        Some(agent_message::Payload::AgentHello(hello)) => {
-            crate::agents::record_capabilities(state, identity.tenant, identity.agent, &hello)
-                .await;
-        }
+        // The first message was the hello. Capabilities do not change within a connection.
+        Some(agent_message::Payload::AgentHello(_)) => {}
         Some(agent_message::Payload::Pong(_)) => {}
         Some(agent_message::Payload::JobAck(ack)) => {
             crate::jobs::handle_job_ack(state, identity.tenant, identity.agent, &ack).await;
@@ -837,8 +935,10 @@ mod tests {
         registry.open(agent, close_a, tx_a);
         let (close_b, _b) = tokio::sync::watch::channel(false);
         let (tx_b, _rx_b) = tokio::sync::mpsc::channel(1);
-        registry.open(agent, close_b, tx_b);
+        let generation = registry.open(agent, close_b, tx_b);
         assert!(*a.borrow_and_update(), "the first stream must close");
+        assert!(registry.online_agents().is_empty(), "no hello yet");
+        assert!(registry.set_capabilities(agent, generation, Vec::new()));
         assert_eq!(registry.online_agents(), vec![agent]);
         assert!(registry.close_by_agent(agent));
     }

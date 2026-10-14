@@ -20,11 +20,11 @@ use restichub_cp::agent_listener::{
 use restichub_cp::pki::{CaService, CaStore};
 use restichub_cp::server::AppState;
 use restichub_db::test_util::TestDatabase;
-use restichub_db::{Database, PLATFORM_TENANT_ID, SigningKeyRole, TenantId, signing};
+use restichub_db::{AgentId, Database, PLATFORM_TENANT_ID, SigningKeyRole, TenantId, signing};
 use restichub_emulator::enroll::{EnrollFacts, EnrollTls, EnrolledIdentity, enroll_tls};
 use restichub_emulator::identity::TestPki;
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, ControlMessage, KeyUpdate, KeyUpdateAck, ServerHello,
+    AgentHello, AgentMessage, ControlMessage, KeyUpdate, KeyUpdateAck, Pong, ServerHello,
     SigningKeyUpdate, agent_message, agent_service_client::AgentServiceClient, control_message,
 };
 use restichub_proto::signing::KeyRing;
@@ -595,6 +595,38 @@ async fn ac_id_04_a_revoke_closes_an_open_stream() {
         stream_ends(&mut inbound).await,
         "the revoke must close the open stream"
     );
+
+    db.cleanup().await;
+}
+
+/// FR-PR-09: a stream whose first message is not the hello closes and never becomes online.
+#[tokio::test]
+async fn fr_pr_09_a_stream_without_a_hello_closes() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (listener, _tenant, token) = setup(&db).await;
+    let identity = listener.enroll(&token).await;
+    let agent = AgentId::from_uuid(Uuid::parse_str(&identity.agent_id).expect("the agent id"));
+
+    let mut client = listener.channel(&identity).await;
+    let (tx, rx) = mpsc::channel::<AgentMessage>(16);
+    let response = client
+        .connect(ReceiverStream::new(rx))
+        .await
+        .expect("the stream must open");
+    tx.send(AgentMessage {
+        payload: Some(agent_message::Payload::Pong(Pong { nonce: 1 })),
+    })
+    .await
+    .expect("cannot send the message");
+    let mut inbound = response.into_inner();
+
+    assert!(
+        stream_ends(&mut inbound).await,
+        "a stream without a hello must close"
+    );
+    assert!(!listener.state.agent_registry().is_online(agent));
 
     db.cleanup().await;
 }

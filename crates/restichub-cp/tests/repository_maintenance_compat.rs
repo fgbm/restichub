@@ -137,6 +137,128 @@ async fn fr_pr_09_the_hello_stores_the_capabilities() {
 }
 
 #[tokio::test]
+async fn fr_pr_09_a_hello_with_junk_stores_only_the_known_capabilities() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut names: Vec<String> = (0..10_000).map(|index| format!("junk-{index}")).collect();
+    names.push("forget-all-tags".to_owned());
+    names.push("forget-all-tags".to_owned());
+    let agent = env.connect_agent_with("junk-host", names).await;
+    assert_eq!(
+        env.stored_capabilities(agent.id).await,
+        ["forget-all-tags".to_owned()]
+    );
+    env.db.cleanup().await;
+}
+
+/// The agent row held the capability from an earlier connection. The agent came back from an older
+/// package with the same identity, so the new connection announces nothing.
+#[tokio::test]
+async fn fr_pr_09_a_downgraded_agent_never_gets_all_tags_in_a_first_send() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let capable = env.connect_agent("down-host").await;
+    let mut agent = env.reconnect_agent(&capable, Vec::new()).await;
+    let repository = initialized_repository(&env, agent.id).await;
+    let profile = env
+        .create_profile(
+            repository,
+            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
+        )
+        .await;
+    env.create_plan(profile, agent.id).await;
+
+    let job = run_retention(&env, repository).await;
+    env.pass().await;
+
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["result_message"], "agent_capability_missing");
+    assert!(agent.try_job(Duration::from_millis(300)).await.is_none());
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_pr_09_a_redelivery_to_a_downgraded_agent_fails_and_is_not_sent() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut capable = env.connect_agent("redeliver-host").await;
+    let repository = initialized_repository(&env, capable.id).await;
+    let profile = env
+        .create_profile(
+            repository,
+            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
+        )
+        .await;
+    env.create_plan(profile, capable.id).await;
+
+    let job = run_retention(&env, repository).await;
+    env.pass().await;
+    let signed = capable.job().await;
+    let sent = env.verify(&signed, &capable).await;
+    assert_eq!(
+        forget(&sent)
+            .filter
+            .as_ref()
+            .expect("a filter")
+            .all_tags
+            .len(),
+        2
+    );
+
+    let mut downgraded = env.reconnect_agent(&capable, Vec::new()).await;
+    env.clock.advance(61);
+    env.pass().await;
+
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["result_message"], "agent_capability_missing");
+    assert!(
+        downgraded
+            .try_job(Duration::from_millis(300))
+            .await
+            .is_none()
+    );
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_pr_09_a_reconnected_capable_agent_still_gets_all_tags() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let first = env.connect_agent_with("up-host", Vec::new()).await;
+    let mut agent = env
+        .reconnect_agent(&first, vec!["forget-all-tags".to_owned()])
+        .await;
+    let repository = initialized_repository(&env, agent.id).await;
+    let profile = env
+        .create_profile(
+            repository,
+            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
+        )
+        .await;
+    env.create_plan(profile, agent.id).await;
+
+    run_retention(&env, repository).await;
+    env.pass().await;
+    let signed = agent.job().await;
+    let job = env.verify(&signed, &agent).await;
+    assert_eq!(
+        forget(&job).filter.as_ref().expect("a filter").all_tags,
+        [format!("restichub-profile-{profile}"), "daily".to_owned()]
+    );
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
 async fn fr_rp_08_the_grouping_of_a_shared_profile_always_holds_the_host() {
     let Some(db) = common::test_db().await else {
         return;

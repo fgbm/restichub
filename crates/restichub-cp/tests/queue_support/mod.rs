@@ -238,6 +238,21 @@ impl Env {
     /// Like [`Env::connect_agent`], for an agent that announces `capabilities` only.
     pub async fn connect_agent_with(&self, hostname: &str, capabilities: Vec<String>) -> FakeAgent {
         let identity = self.enroll_agent(hostname).await;
+        self.open_agent_stream(identity, capabilities).await
+    }
+
+    /// Opens a new stream for an enrolled identity, as a restart or a downgrade does. This closes
+    /// the stream that the identity held before.
+    pub async fn reconnect_agent(&self, agent: &FakeAgent, capabilities: Vec<String>) -> FakeAgent {
+        self.open_agent_stream(agent.identity.clone(), capabilities)
+            .await
+    }
+
+    async fn open_agent_stream(
+        &self,
+        identity: EnrolledIdentity,
+        capabilities: Vec<String>,
+    ) -> FakeAgent {
         let client_tls = ClientTlsConfig::new()
             .ca_certificate(Certificate::from_pem(der_to_pem(
                 "CERTIFICATE",
@@ -279,9 +294,8 @@ impl Env {
         }
         assert!(hello_seen && update_seen, "the stream hello must arrive");
         let agent_id = AgentId::from_uuid(Uuid::parse_str(&identity.agent_id).expect("agent id"));
-        if !capabilities.is_empty() {
-            eventually(|| async { self.stored_capabilities(agent_id).await == capabilities }).await;
-        }
+        // The dispatcher sees the stream only after the hello fixed its capabilities.
+        eventually_online(&self.state, agent_id).await;
         FakeAgent {
             id: agent_id,
             identity,

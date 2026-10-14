@@ -29,10 +29,11 @@ use prost::Message as _;
 use restichub_db::jobs::{self as job_repo, Job, JobOutcome};
 use restichub_db::queue as queue_repo;
 use restichub_db::{AgentId, DbError, JobId, JobStatus, TenantId, TenantStatus, TenantTx, tenants};
-use restichub_proto::agent::v1::{ControlMessage, SignedJob, control_message};
+use restichub_proto::agent::v1::{ControlMessage, Job as ProtoJob, SignedJob, control_message};
 use time::OffsetDateTime;
 use zeroize::Zeroizing;
 
+use crate::agent_stream::JobSend;
 use crate::clock::Clock;
 use crate::delivery::{self, DeliveryError};
 use crate::server::AppState;
@@ -131,6 +132,8 @@ struct Outgoing {
     id: JobId,
     agent: AgentId,
     signed: SignedJob,
+    /// The capabilities that the live connection must hold at the moment of the send (FR-PR-09).
+    required: Vec<restichub_proto::AgentCapability>,
     /// A redelivery keeps its lease when the send fails; the next lease expiry sends it again.
     redelivery: bool,
 }
@@ -187,12 +190,13 @@ async fn dispatch_tenant(
             first_send(state, &mut tx, &job, now, now + lease).await
         };
         match prepared? {
-            Prepared::Send(signed) => {
+            Prepared::Send(signed, required) => {
                 tx.release_savepoint(SAVEPOINT).await?;
                 outgoing.push(Outgoing {
                     id: job.id,
                     agent: job.agent_id,
                     signed,
+                    required,
                     redelivery: job.status == JobStatus::Sent,
                 });
             }
@@ -218,7 +222,7 @@ async fn dispatch_tenant(
 
 /// What the pass does with one selected job.
 enum Prepared {
-    Send(SignedJob),
+    Send(SignedJob, Vec<restichub_proto::AgentCapability>),
     Fail(&'static str, restichub_db::JobResultCode),
     /// A database or a key error. The job stays as it is and the next pass tries again.
     Skip,
@@ -273,7 +277,8 @@ async fn first_send(
     };
     let timeout = i32::try_from(build::JOB_TIMEOUT_SECONDS).unwrap_or(i32::MAX);
     queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, &stored).await?;
-    Ok(Prepared::Send(signed))
+    let required = compat::required_capabilities(&built.job.job().steps);
+    Ok(Prepared::Send(signed, required))
 }
 
 /// Sends the stored signed bytes of a `sent` job again, without a rebuild (ADR-0020).
@@ -318,6 +323,26 @@ async fn redeliver(
             ));
         }
     };
+    // The stored job may carry a field that only a newer agent reads. The agent may have come back
+    // from an older release since the first send (FR-PR-09).
+    let required = match ProtoJob::decode(signed.job.as_slice()) {
+        Ok(stored_job) => compat::required_capabilities(&stored_job.steps),
+        Err(error) => {
+            tracing::warn!(job = %job.id, %error, "a stored job does not decode");
+            return Ok(Prepared::Fail(
+                SIGNED_JOB_UNAVAILABLE,
+                restichub_db::JobResultCode::Failed,
+            ));
+        }
+    };
+    let live = state
+        .agent_registry()
+        .capabilities(job.agent_id)
+        .unwrap_or_default();
+    if required.iter().any(|need| !live.contains(need)) {
+        let refusal = build::Refusal::AgentCapabilityMissing;
+        return Ok(Prepared::Fail(refusal.code(), refusal.result_code()));
+    }
     if let Some(repository) = job.repository_id {
         for secret in &stored.secrets {
             restichub_db::audit::insert_secret_delivered(
@@ -331,7 +356,7 @@ async fn redeliver(
         }
     }
     queue_repo::mark_redelivered(tx, job.id, now, lease_until).await?;
-    Ok(Prepared::Send(signed))
+    Ok(Prepared::Send(signed, required))
 }
 
 async fn fail(
@@ -352,15 +377,17 @@ async fn fail(
 
 /// Puts the committed job on the stream of the agent (FR-PR-03).
 async fn send(state: &AppState, tenant: TenantId, item: Outgoing) {
-    let sent = state.agent_registry().send_to_agent(
+    let sent = state.agent_registry().send_requiring(
         item.agent,
         ControlMessage {
             payload: Some(control_message::Payload::SignedJob(item.signed)),
         },
+        &item.required,
     );
-    // The agent left between the select and the send. A first send returns to the queue; a
-    // redelivery keeps its lease and goes out again when the lease expires.
-    if !sent && !item.redelivery {
+    // The agent left between the select and the send, or it came back with fewer capabilities. A
+    // first send returns to the queue and the next pass builds it again; a redelivery keeps its
+    // lease and the next lease expiry checks it again.
+    if sent != JobSend::Sent && !item.redelivery {
         revert(state, tenant, item.id).await;
     }
 }

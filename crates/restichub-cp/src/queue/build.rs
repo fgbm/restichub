@@ -41,6 +41,7 @@ pub enum Refusal {
     RepositoryChanged,
     NotMaintenanceAgent,
     AgentCapabilityMissing,
+    ForgetWithoutTags,
     AgentFactsInvalid,
     CompileFailed,
     StepMissing,
@@ -60,6 +61,7 @@ impl Refusal {
             Self::RepositoryChanged => "repository_changed",
             Self::NotMaintenanceAgent => "not_maintenance_agent",
             Self::AgentCapabilityMissing => "agent_capability_missing",
+            Self::ForgetWithoutTags => "forget_without_tags",
             Self::AgentFactsInvalid => "agent_facts_invalid",
             Self::CompileFailed => "compile_failed",
             Self::StepMissing => "step_missing",
@@ -74,6 +76,7 @@ impl Refusal {
         match self {
             Self::AgentFactsInvalid
             | Self::AgentCapabilityMissing
+            | Self::ForgetWithoutTags
             | Self::CompileFailed
             | Self::StepMissing
             | Self::SecretUnavailable => JobResultCode::ConfigError,
@@ -150,7 +153,13 @@ pub async fn build(
         }
     };
 
-    super::compat::fit_steps(&mut steps, &agent.capabilities).map_err(BuildError::Refused)?;
+    // The capabilities of the live connection, never the stored row: a downgraded agent keeps its
+    // identity (FR-PR-09). An offline agent gets none.
+    let capabilities = state
+        .agent_registry()
+        .capabilities(job.agent_id)
+        .unwrap_or_default();
+    super::compat::fit_steps(&mut steps, &capabilities).map_err(BuildError::Refused)?;
 
     let provider = state
         .kek()

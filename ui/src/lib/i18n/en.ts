@@ -641,6 +641,7 @@ export const en = {
 	'jobs.reason.forget_selected_nothing': 'Forget selected no snapshots',
 	'jobs.reason.agent_capability_missing':
 		'The agent is too old for this retention. Update the agent.',
+	'jobs.reason.forget_without_tags': 'The retention has no tag filter. The job was not sent.',
 	'jobs.reason.step_missing': 'The profile no longer holds this step.',
 	'jobs.reason.job_invalid': 'The job did not pass the validation.',
 	'jobs.reason.unsupported_kind': 'The queue does not run this kind of job.',

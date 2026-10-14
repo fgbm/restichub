@@ -40,10 +40,16 @@ Several profiles can use one repository. The retention of a profile removes only
 - The filter in the retention of the profile narrows the step. A snapshot must have the profile tag and all the filter tags. The filter paths and the filter hosts narrow the step more. A plan agent whose host name is not in the filter hosts gives no step. The host name compares with the host name that restic records in the snapshot. A template is not allowed in the filter hosts.
 - The filter tags always mean AND with the profile tag. The `forget` step that follows a backup uses the same rule.
 - The step always groups by host, because a profile can run on several agents. If the grouping of the profile has no host, the control plane adds it, and each host keeps its own snapshots.
-- An agent from an older release does not know the filter with more than one tag. A retention with filter tags fails with the reason `agent_capability_missing` until you update that agent.
+- An agent from an older release does not know the filter with more than one tag. A retention with filter tags fails with the reason `agent_capability_missing` until you update that agent. The control plane uses the capabilities that the agent announced on its current connection. If you install an older package of the agent, the control plane notices at the next connection and does not send the filter. This is safe: you can downgrade an agent at any time.
 - A `forget` step that selects no snapshot gives the job status `succeeded_with_warnings`. The reason is `forget_selected_nothing`.
 
-A snapshot that was made before the tag existed has no tag, and no retention selects it. Remove such snapshots by hand. A profile with a retention and without a plan gives no `forget` step.
+A snapshot that was made before this release has no profile tag, and no retention selects it. To put such snapshots under the retention, add the tag once. Run this command on the host of the agent for each profile, with the host name and the path of the backup:
+
+```sh
+restic tag --add restichub-profile-<id> --host <host> --path <path>
+```
+
+Otherwise, remove such snapshots by hand. A profile with a retention and without a plan gives no `forget` step.
 
 ### Check
 

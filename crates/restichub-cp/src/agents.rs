@@ -25,17 +25,21 @@ use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::validation::Reason;
 
-/// Stores the capabilities that an agent announced in its `AgentHello` (FR-PR-09). The job builder
-/// reads them. A failure leaves the old list, which only makes the builder more careful.
+/// Stores the capabilities of the last connection of an agent for the diagnostics (FR-PR-09). The
+/// job builder never reads them: it uses the capabilities of the live connection.
 pub async fn record_capabilities(
     state: &AppState,
     tenant: restichub_db::TenantId,
     agent: AgentId,
-    hello: &restichub_proto::agent::v1::AgentHello,
+    capabilities: &[restichub_proto::AgentCapability],
 ) {
+    let names: Vec<String> = capabilities
+        .iter()
+        .map(|capability| capability.as_str().to_owned())
+        .collect();
     let result = async {
         let mut tx = state.db().begin_tenant(tenant).await?;
-        repo::set_capabilities(&mut tx, agent, &hello.capabilities).await?;
+        repo::set_capabilities(&mut tx, agent, &names).await?;
         tx.commit().await
     }
     .await;
