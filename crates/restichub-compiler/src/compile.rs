@@ -179,7 +179,7 @@ fn validate_hooks(profile: &Profile, target: &TargetFacts) -> Result<(), Compile
         let mut seen = HashSet::new();
         for (parameter, value) in hook.parameters.iter().enumerate() {
             let name_field = FieldPath::new(format!("hooks[{index}].parameters[{parameter}].name"));
-            if !allowed.parameters.contains(&value.name) {
+            if !allowed.parameters.contains_key(&value.name) {
                 return Err(CompileError::UnknownHookParameter {
                     field: name_field,
                     name: value.name.clone(),
@@ -279,7 +279,7 @@ fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileE
     }
     let mut tags = Vec::new();
     for (index, tag) in profile.tags.iter().enumerate() {
-        tags.push(expand_field(tag, target, &format!("tags[{index}]"))?);
+        tags.push(expand_tag(tag, target, &format!("tags[{index}]"))?);
     }
 
     let options = &profile.options;
@@ -311,7 +311,7 @@ fn forget_step(
 
     let mut keep_tags = Vec::new();
     for (index, tag) in retention.keep_tags.iter().enumerate() {
-        keep_tags.push(expand_field(
+        keep_tags.push(expand_tag(
             tag,
             target,
             &format!("retention.keep_tags[{index}]"),
@@ -327,7 +327,7 @@ fn forget_step(
         )?);
     }
     for (index, tag) in retention.filter.tags.iter().enumerate() {
-        filter.tags.push(expand_field(
+        filter.tags.push(expand_tag(
             tag,
             target,
             &format!("retention.filter.tags[{index}]"),
@@ -444,7 +444,19 @@ fn phase_flag(phase: HookPhase) -> i32 {
 
 fn expand_field(value: &str, target: &TargetFacts, field: &str) -> Result<String, CompileError> {
     let expanded = template::expand(value, target).map_err(|error| template_error(error, field))?;
-    if has_control(&expanded) {
+    if restichub_proto::validate::has_forbidden(&expanded) {
+        return Err(CompileError::InvalidValue {
+            field: FieldPath::new(field),
+        });
+    }
+    Ok(expanded)
+}
+
+/// Expands a tag and rejects the forms that restic reads differently: an empty
+/// tag, a comma and surrounding space (AC-PR-08).
+fn expand_tag(value: &str, target: &TargetFacts, field: &str) -> Result<String, CompileError> {
+    let expanded = expand_field(value, target, field)?;
+    if expanded.is_empty() || expanded.contains(',') || expanded.trim() != expanded {
         return Err(CompileError::InvalidValue {
             field: FieldPath::new(field),
         });
@@ -462,28 +474,27 @@ fn template_error(error: TemplateError, field: &str) -> CompileError {
     }
 }
 
-/// Rejects a NUL, a carriage return or a line feed (AC-PR-08).
-fn has_control(value: &str) -> bool {
-    value
-        .bytes()
-        .any(|byte| byte == 0 || byte == b'\n' || byte == b'\r')
-}
-
 fn check_contract(profile: &Profile, steps: &[PlannedStep]) -> Result<(), CompileError> {
+    // The profile holds the repository identifier, not its location. The
+    // control plane validates the real location when it assembles the job, so
+    // this placeholder only satisfies the shared contract.
     let job = Job {
         job_id: "compile".to_owned(),
         tenant_id: "compile".to_owned(),
         agent_id: "compile".to_owned(),
         repositories: vec![RepositoryAccess {
             repository_id: profile.repository_id.clone(),
+            location: "/".to_owned(),
             ..RepositoryAccess::default()
         }],
         steps: steps.iter().map(|planned| planned.step.clone()).collect(),
         ..Job::default()
     };
-    restichub_proto::validate::validate_job(&job).map_err(|rejection| CompileError::StepsRejected {
-        reason: rejection.reason,
-    })
+    crate::job::ValidatedJob::new(job)
+        .map(|_| ())
+        .map_err(|rejection| CompileError::StepsRejected {
+            reason: rejection.reason,
+        })
 }
 
 #[cfg(test)]

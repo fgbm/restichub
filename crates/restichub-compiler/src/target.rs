@@ -1,6 +1,6 @@
 //! Facts about the target agent (FR-PF-03, FR-HK-04).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use time::OffsetDateTime;
@@ -82,11 +82,18 @@ impl fmt::Display for ResticVersion {
     }
 }
 
+/// One parameter of a hook in the agent allow-list (FR-HK-02).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookParameterSpec {
+    /// True when the value is a secret, so the preview masks it (AC-PF-01).
+    pub secret: bool,
+}
+
 /// One hook of the agent allow-list that the agent reported (FR-HK-04).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AllowListedHook {
-    /// Names of the arguments that the hook accepts (FR-HK-02).
-    pub parameters: BTreeSet<String>,
+    /// Accepted arguments, by name (FR-HK-02).
+    pub parameters: BTreeMap<String, HookParameterSpec>,
 }
 
 /// Facts that the compiler uses for one target agent (FR-PF-03).

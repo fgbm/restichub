@@ -10,14 +10,38 @@ use restichub_proto::agent::v1::{
     OverwriteMode, RepositoryAccess, StatsMode, Step, repository_access::BackendCredentials, step,
 };
 
-const MASK: &str = "***";
+use crate::job::ValidatedJob;
+
+/// Text that replaces a secret in the preview.
+pub const MASK: &str = "***";
+
+/// Environment variables that the preview shows without a mask. Every other
+/// value is masked, so a new secret variable is masked by default (AC-PF-01).
+const SAFE_ENV: &[&str] = &["AWS_DEFAULT_REGION"];
 
 /// A restic command line. `args` holds no secret; `env` holds the secrets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandLine {
-    pub program: String,
-    pub args: Vec<String>,
-    pub env: Vec<(String, String)>,
+    program: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+impl CommandLine {
+    #[must_use]
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
+    #[must_use]
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+
+    #[must_use]
+    pub fn env(&self) -> &[(String, String)] {
+        &self.env
+    }
 }
 
 /// A step that the builder cannot turn into a restic command.
@@ -27,16 +51,28 @@ pub enum ArgError {
     UnknownStep,
     #[error("a hook step is not a restic command")]
     NotRestic,
+    #[error("the step refers to a repository that the job does not hold")]
+    UnknownRepository,
 }
 
 /// Builds the restic arguments and environment of one step (ADR-0021).
 ///
+/// The step must belong to the validated job. Validation already checked the
+/// repository location, so the builder cannot receive an unsafe location.
+///
 /// # Errors
 ///
-/// Returns [`ArgError::UnknownStep`] for a step without a kind and
-/// [`ArgError::NotRestic`] for a hook step.
-pub fn build_command(step: &Step, repository: &RepositoryAccess) -> Result<CommandLine, ArgError> {
+/// Returns [`ArgError::UnknownStep`] for a step without a kind,
+/// [`ArgError::NotRestic`] for a hook step and [`ArgError::UnknownRepository`]
+/// for a step whose repository the job does not hold.
+pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLine, ArgError> {
     let kind = step.kind.as_ref().ok_or(ArgError::UnknownStep)?;
+    let Some(repository_id) = repository_id(kind) else {
+        return Err(ArgError::NotRestic);
+    };
+    let repository = validated
+        .repository(repository_id)
+        .ok_or(ArgError::UnknownRepository)?;
     let mut args = Vec::new();
     match kind {
         step::Kind::Backup(backup) => {
@@ -167,22 +203,60 @@ pub fn build_command(step: &Step, repository: &RepositoryAccess) -> Result<Comma
     })
 }
 
-/// Replaces the value of every secret environment variable with a mask (AC-PF-01).
+/// Masks every environment value except an explicit safe list, and masks the
+/// userinfo of `RESTIC_REPOSITORY` (AC-PF-01).
 pub fn mask_secrets(line: &mut CommandLine) {
     for (name, value) in &mut line.env {
-        if is_secret(name) {
+        if name == "RESTIC_REPOSITORY" {
+            *value = mask_userinfo(value);
+        } else if !is_safe_env(name) {
             *value = MASK.to_owned();
         }
     }
 }
 
-/// Returns true for an environment variable that holds a secret.
+/// Returns true for an environment variable that the preview shows in clear.
 #[must_use]
-pub fn is_secret(name: &str) -> bool {
-    matches!(
-        name,
-        "RESTIC_PASSWORD" | "AWS_SECRET_ACCESS_KEY" | "AWS_SESSION_TOKEN" | "RESTIC_REST_PASSWORD"
-    )
+pub fn is_safe_env(name: &str) -> bool {
+    SAFE_ENV.contains(&name)
+}
+
+/// Hides the credentials in the authority of a URL. `rest:https://u:p@h/`
+/// becomes `rest:https://***@h/`. A value without userinfo is unchanged.
+fn mask_userinfo(value: &str) -> String {
+    let Some(scheme_end) = value.find("://") else {
+        return value.to_owned();
+    };
+    let after = &value[scheme_end + 3..];
+    let Some(at) = after.find('@') else {
+        return value.to_owned();
+    };
+    let slash = after.find('/').unwrap_or(usize::MAX);
+    if at >= slash {
+        return value.to_owned();
+    }
+    let mut masked = String::with_capacity(value.len());
+    masked.push_str(&value[..scheme_end + 3]);
+    masked.push_str(MASK);
+    masked.push_str(&after[at..]);
+    masked
+}
+
+/// The repository identifier of a step that runs restic, or `None` for a hook.
+fn repository_id(kind: &step::Kind) -> Option<&str> {
+    match kind {
+        step::Kind::Backup(backup) => Some(&backup.repository_id),
+        step::Kind::Check(check) => Some(&check.repository_id),
+        step::Kind::Snapshots(snapshots) => Some(&snapshots.repository_id),
+        step::Kind::Ls(ls) => Some(&ls.repository_id),
+        step::Kind::Restore(restore) => Some(&restore.repository_id),
+        step::Kind::Unlock(unlock) => Some(&unlock.repository_id),
+        step::Kind::UnlockAll(unlock_all) => Some(&unlock_all.repository_id),
+        step::Kind::Forget(forget) => Some(&forget.repository_id),
+        step::Kind::Prune(prune) => Some(&prune.repository_id),
+        step::Kind::Stats(stats) => Some(&stats.repository_id),
+        step::Kind::Hook(_) => None,
+    }
 }
 
 fn repository_env(repository: &RepositoryAccess) -> Vec<(String, String)> {
@@ -290,9 +364,12 @@ fn overwrite_value(mode: OverwriteMode) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use restichub_proto::agent::v1::{BackupStep, HookStep, RepositoryAccess, Step, step};
+    use restichub_proto::agent::v1::{
+        BackupStep, HookStep, Job, RepositoryAccess, Step, UnlockStep, step,
+    };
 
-    use super::{ArgError, MASK, build_command, is_secret, mask_secrets};
+    use super::{ArgError, MASK, build_command, is_safe_env, mask_secrets};
+    use crate::job::ValidatedJob;
 
     const BAD_OPTION: &str = "--password-command=cmd /c calc";
     const BAD_SHORT: &str = "-x";
@@ -303,6 +380,21 @@ mod tests {
             location: "s3:s3.example.com/bucket".to_owned(),
             password: "topsecret".to_owned(),
             ..RepositoryAccess::default()
+        }
+    }
+
+    fn validated(step: Step) -> ValidatedJob {
+        let job = Job {
+            job_id: "job-1".to_owned(),
+            tenant_id: "tenant-1".to_owned(),
+            agent_id: "agent-1".to_owned(),
+            repositories: vec![repository()],
+            steps: vec![step],
+            ..Job::default()
+        };
+        match ValidatedJob::new(job) {
+            Ok(value) => value,
+            Err(error) => panic!("{error:?}"),
         }
     }
 
@@ -320,8 +412,19 @@ mod tests {
         }
     }
 
+    fn unlock() -> Step {
+        Step {
+            step_id: "unlock".to_owned(),
+            kind: Some(step::Kind::Unlock(UnlockStep {
+                repository_id: "repo-1".to_owned(),
+            })),
+            ..Step::default()
+        }
+    }
+
     fn line(step: &Step) -> super::CommandLine {
-        match build_command(step, &repository()) {
+        let validated = validated(step.clone());
+        match build_command(&validated, step) {
             Ok(value) => value,
             Err(error) => panic!("{error:?}"),
         }
@@ -331,61 +434,122 @@ mod tests {
     fn ac_pr_08_flag_like_positional_goes_after_dash_dash() {
         let step = backup(&[BAD_OPTION, BAD_SHORT], &[], &[]);
         let line = line(&step);
-        let marker = line.args.iter().position(|value| value == "--");
+        let marker = line.args().iter().position(|value| value == "--");
         assert_eq!(marker, Some(1));
-        assert_eq!(line.args.get(2).map(String::as_str), Some(BAD_OPTION));
-        assert_eq!(line.args.get(3).map(String::as_str), Some(BAD_SHORT));
+        assert_eq!(line.args().get(2).map(String::as_str), Some(BAD_OPTION));
+        assert_eq!(line.args().get(3).map(String::as_str), Some(BAD_SHORT));
     }
 
     #[test]
     fn ac_pr_08_flag_like_option_value_uses_attached_form() {
         let step = backup(&["/srv"], &[BAD_OPTION], &[BAD_SHORT]);
         let line = line(&step);
-        assert!(line.args.contains(&format!("--exclude={BAD_OPTION}")));
-        assert!(line.args.contains(&format!("--tag={BAD_SHORT}")));
-        assert!(!line.args.iter().any(|value| value == BAD_SHORT));
+        assert!(line.args().contains(&format!("--exclude={BAD_OPTION}")));
+        assert!(line.args().contains(&format!("--tag={BAD_SHORT}")));
+        assert!(!line.args().iter().any(|value| value == BAD_SHORT));
     }
 
     #[test]
     fn secrets_go_to_environment_not_arguments() {
         let line = line(&backup(&["/srv"], &[], &[]));
-        assert!(!line.args.iter().any(|value| value.contains("topsecret")));
+        assert!(!line.args().iter().any(|value| value.contains("topsecret")));
         assert!(
-            line.env
+            line.env()
                 .iter()
                 .any(|(name, value)| name == "RESTIC_PASSWORD" && value == "topsecret")
         );
     }
 
     #[test]
-    fn ac_pf_01_mask_secrets_masks_the_password() {
+    fn ac_pf_01_mask_secrets_masks_every_unsafe_value() {
         let mut line = line(&backup(&["/srv"], &[], &[]));
         mask_secrets(&mut line);
-        assert!(
-            line.env
-                .iter()
-                .all(|(name, value)| !is_secret(name) || value == MASK)
-        );
+        for (name, value) in line.env() {
+            if name == "RESTIC_REPOSITORY" {
+                assert!(!value.contains("topsecret"));
+            } else {
+                assert!(is_safe_env(name) || value == MASK, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn ac_pf_01_mask_secrets_masks_repository_userinfo() {
+        let mut repository = repository();
+        repository.location = "rest:https://user:pass@rest.example.com/".to_owned();
+        let job = Job {
+            job_id: "job-1".to_owned(),
+            tenant_id: "tenant-1".to_owned(),
+            agent_id: "agent-1".to_owned(),
+            repositories: vec![repository],
+            steps: vec![unlock()],
+            ..Job::default()
+        };
+        let validated = match ValidatedJob::new(job) {
+            Ok(value) => value,
+            Err(error) => panic!("{error:?}"),
+        };
+        let mut line = match build_command(&validated, &unlock()) {
+            Ok(value) => value,
+            Err(error) => panic!("{error:?}"),
+        };
+        mask_secrets(&mut line);
+        assert!(line.env().iter().any(|(name, value)| {
+            name == "RESTIC_REPOSITORY" && value == "rest:https://***@rest.example.com/"
+        }));
+    }
+
+    #[test]
+    fn ac_pr_08_rejects_program_running_location() {
+        for location in ["rclone:remote:path", "sftp:host:/srv", "-x", "local:/srv"] {
+            let mut repository = repository();
+            repository.location = location.to_owned();
+            let job = Job {
+                job_id: "job-1".to_owned(),
+                tenant_id: "tenant-1".to_owned(),
+                agent_id: "agent-1".to_owned(),
+                repositories: vec![repository],
+                steps: vec![unlock()],
+                ..Job::default()
+            };
+            assert!(ValidatedJob::new(job).is_err(), "{location}");
+        }
     }
 
     #[test]
     fn hook_step_is_not_a_restic_command() {
         let step = Step {
             step_id: "hook-0".to_owned(),
-            kind: Some(step::Kind::Hook(HookStep::default())),
+            kind: Some(step::Kind::Hook(HookStep {
+                hook_id: "pg_dump".to_owned(),
+                ..HookStep::default()
+            })),
             ..Step::default()
         };
-        assert_eq!(
-            build_command(&step, &repository()),
-            Err(ArgError::NotRestic)
-        );
+        let validated = validated(step.clone());
+        assert_eq!(build_command(&validated, &step), Err(ArgError::NotRestic));
     }
 
     #[test]
     fn step_without_kind_is_rejected() {
+        let validated = validated(unlock());
         assert_eq!(
-            build_command(&Step::default(), &repository()),
+            build_command(&validated, &Step::default()),
             Err(ArgError::UnknownStep)
+        );
+    }
+
+    #[test]
+    fn step_of_an_unknown_repository_is_rejected() {
+        let validated = validated(unlock());
+        let step = backup(&["/srv"], &[], &[]);
+        let mut step = step;
+        if let Some(step::Kind::Backup(backup)) = &mut step.kind {
+            backup.repository_id = "repo-9".to_owned();
+        }
+        assert_eq!(
+            build_command(&validated, &step),
+            Err(ArgError::UnknownRepository)
         );
     }
 }
