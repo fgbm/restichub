@@ -451,17 +451,26 @@ async fn run_job(
     let acked = Instant::now();
 
     let steps_total = u32::try_from(job.steps.len()).unwrap_or(u32::MAX);
+    let had_init = job
+        .steps
+        .iter()
+        .any(|step| matches!(step.kind, Some(step::Kind::Init(_))));
     let mut succeeded = 0u32;
     let mut failed = 0u32;
     let mut cancelled = false;
-    let mut failure_code: Option<i32> = None;
-    // Set when a test_access step found an existing repository, so a following init step is
-    // skipped (FR-RP-02). The control plane never re-initializes an existing repository.
-    let mut config_present = false;
+    // The exit code of a step that stopped the job outside the missing-repository probe.
+    let mut stopped_code: Option<i32> = None;
+    // Set when a test_access step reported that the repository does not exist (restic exit code
+    // 10). Only then does the init step run (FR-RP-02, AC-RP-01).
+    let mut probe_missing = false;
+    let mut init_succeeded = false;
 
     for step in &job.steps {
         let is_test_access = matches!(step.kind, Some(step::Kind::TestAccess(_)));
-        if matches!(step.kind, Some(step::Kind::Init(_))) && config_present {
+        let is_init = matches!(step.kind, Some(step::Kind::Init(_)));
+        // The agent runs init only after test_access reported a missing repository. Any other
+        // result of test_access skips it, so an existing repository is never re-initialized.
+        if is_init && !probe_missing {
             let now = now_timestamp();
             send_step_result(
                 &session.tx,
@@ -506,8 +515,8 @@ async fn run_job(
         match outcome.status {
             StepStatus::Success => {
                 succeeded += 1;
-                if is_test_access {
-                    config_present = true;
+                if is_init {
+                    init_succeeded = true;
                 }
             }
             StepStatus::Cancelled => {
@@ -516,26 +525,34 @@ async fn run_job(
             }
             _ => {
                 failed += 1;
-                if failure_code.is_none() {
-                    failure_code = Some(outcome.exit_code);
-                }
-                // A wrong password on an existing repository stops the job: no init runs
-                // (FR-RP-02, AC-RP-01).
-                if is_test_access && outcome.exit_code == 12 {
+                if is_test_access && outcome.exit_code == 10 {
+                    // The repository does not exist: the init step may run.
+                    probe_missing = true;
+                } else {
+                    // Every other failure stops the job with its own outcome: no init runs
+                    // (FR-RP-02, AC-RP-01).
+                    stopped_code = Some(outcome.exit_code);
                     break;
                 }
             }
         }
     }
 
-    let status = if cancelled {
-        StepStatus::Cancelled
-    } else if failed > 0 {
-        StepStatus::Failed
-    } else {
-        StepStatus::Success
+    let outcome = job_outcome(
+        cancelled,
+        stopped_code,
+        probe_missing,
+        had_init,
+        init_succeeded,
+    );
+    let status = match outcome {
+        JobStatus::Succeeded => StepStatus::Success,
+        JobStatus::Cancelled => StepStatus::Cancelled,
+        JobStatus::ConfigError => StepStatus::ConfigError,
+        JobStatus::Failed | JobStatus::NotInitialized | JobStatus::Unspecified => {
+            StepStatus::Failed
+        }
     };
-    let outcome = job_outcome(cancelled, failed, failure_code);
     let result = JobResult {
         job_id: job_id.clone(),
         status: status as i32,
@@ -614,21 +631,39 @@ fn job_result_message(result: JobResult) -> AgentMessage {
 
 /// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
 ///
-/// restic exit code 10 means the repository does not exist; a test_access step
-/// reports that as `NOT_INITIALIZED`, not as an error. Exit code 12 means the
-/// password or the backend credentials are wrong.
-fn job_outcome(cancelled: bool, failed: u32, failure_code: Option<i32>) -> JobStatus {
+/// The init chain: the agent runs init only after test_access exited with code 10 (a missing
+/// repository). A successful init after that probe is a successful job. A test_access that failed
+/// with any other code (1, 11, 12, a timeout, access denied) stops the job, and a standalone
+/// test_access with exit code 10 is the normal `NOT_INITIALIZED` result.
+fn job_outcome(
+    cancelled: bool,
+    stopped_code: Option<i32>,
+    probe_missing: bool,
+    had_init: bool,
+    init_succeeded: bool,
+) -> JobStatus {
     if cancelled {
         return JobStatus::Cancelled;
     }
-    if failed == 0 {
-        return JobStatus::Succeeded;
+    if let Some(code) = stopped_code {
+        // restic exit code 12 is a wrong password or wrong credentials (AC-RP-01).
+        return if code == 12 {
+            JobStatus::ConfigError
+        } else {
+            JobStatus::Failed
+        };
     }
-    match failure_code {
-        Some(10) => JobStatus::NotInitialized,
-        Some(12) => JobStatus::ConfigError,
-        _ => JobStatus::Failed,
+    if probe_missing {
+        if had_init {
+            return if init_succeeded {
+                JobStatus::Succeeded
+            } else {
+                JobStatus::Failed
+            };
+        }
+        return JobStatus::NotInitialized;
     }
+    JobStatus::Succeeded
 }
 
 /// The stable code that explains a failed or cancelled outcome (NFR-DOC-04). It holds no secret.
@@ -651,15 +686,44 @@ mod tests {
     use super::{job_error, job_outcome};
     use restichub_proto::agent::v1::JobStatus;
 
-    /// AC-RP-01: restic exit code 10 is a missing repository and 12 is a wrong password.
+    /// AC-RP-01: the init chain runs init only after test_access exit code 10.
     #[test]
-    fn ac_rp_01_maps_the_failing_exit_code_to_a_job_outcome() {
-        assert_eq!(job_outcome(false, 0, None), JobStatus::Succeeded);
-        assert_eq!(job_outcome(true, 0, None), JobStatus::Cancelled);
-        assert_eq!(job_outcome(false, 1, Some(12)), JobStatus::ConfigError);
-        assert_eq!(job_outcome(false, 1, Some(10)), JobStatus::NotInitialized);
-        assert_eq!(job_outcome(false, 1, Some(1)), JobStatus::Failed);
-        assert_eq!(job_error(JobStatus::Succeeded), None);
+    fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
+        // A repository that exists: test_access exit 0, init skipped.
+        assert_eq!(
+            job_outcome(false, None, false, true, false),
+            JobStatus::Succeeded
+        );
+        // A missing repository with a successful init.
+        assert_eq!(
+            job_outcome(false, None, true, true, true),
+            JobStatus::Succeeded
+        );
+        // A standalone test_access on a missing repository.
+        assert_eq!(
+            job_outcome(false, None, true, false, false),
+            JobStatus::NotInitialized
+        );
+        // A wrong password on an existing repository (exit code 12).
+        assert_eq!(
+            job_outcome(false, Some(12), false, true, false),
+            JobStatus::ConfigError
+        );
+        // Any other failure (exit codes 1, 11, a timeout).
+        assert_eq!(
+            job_outcome(false, Some(1), false, true, false),
+            JobStatus::Failed
+        );
+        assert_eq!(
+            job_outcome(false, Some(11), false, true, false),
+            JobStatus::Failed
+        );
+        // The control plane cancelled the job before any step finished.
+        assert_eq!(
+            job_outcome(true, None, false, true, false),
+            JobStatus::Cancelled
+        );
+        // The error code that a wrong password reports.
         assert_eq!(
             job_error(JobStatus::ConfigError).map(|error| error.code),
             Some("wrong_password".to_owned())
