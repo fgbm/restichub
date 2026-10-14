@@ -12,6 +12,7 @@
 pub mod arg;
 mod compile;
 mod error;
+mod job;
 mod option;
 mod preview;
 mod profile;
@@ -21,13 +22,16 @@ mod template;
 pub use arg::{ArgError, CommandLine};
 pub use compile::{Plan, PlannedStep, compile};
 pub use error::{CompileError, CronError, FieldPath, validate_cron};
+pub use job::ValidatedJob;
 pub use option::ResticOption;
-pub use preview::{PreviewStep, preview};
+pub use preview::{PreviewError, PreviewStep, preview};
 pub use profile::{
     BackupOptions, CheckOptions, GroupBy, HookParameter, HookPhase, HookRef, Profile, ProfilePaths,
     Retention, SnapshotFilter,
 };
-pub use target::{AllowListedHook, Architecture, OperatingSystem, ResticVersion, TargetFacts};
+pub use target::{
+    AllowListedHook, Architecture, HookParameterSpec, OperatingSystem, ResticVersion, TargetFacts,
+};
 pub use template::TemplateError;
 
 /// Reports `incompatible` when the installed restic is older than the option

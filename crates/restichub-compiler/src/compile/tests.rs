@@ -1,19 +1,22 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use proptest::prelude::*;
-use restichub_proto::agent::v1::{RepositoryAccess, step};
+use restichub_proto::agent::v1::{Job, RepositoryAccess, step};
 use time::{Date, Month, OffsetDateTime};
 
 use super::{Plan, compile};
 use crate::arg;
 use crate::error::CompileError;
+use crate::job::ValidatedJob;
 use crate::option::ResticOption;
 use crate::preview::preview;
 use crate::profile::{
     BackupOptions, CheckOptions, HookParameter, HookPhase, HookRef, Profile, ProfilePaths,
-    Retention,
+    Retention, SnapshotFilter,
 };
-use crate::target::{AllowListedHook, Architecture, OperatingSystem, ResticVersion, TargetFacts};
+use crate::target::{
+    AllowListedHook, Architecture, HookParameterSpec, OperatingSystem, ResticVersion, TargetFacts,
+};
 
 const BAD_OPTION: &str = "--password-command=cmd /c calc";
 const BAD_SHORT: &str = "-x";
@@ -31,7 +34,19 @@ fn allow_list() -> BTreeMap<String, AllowListedHook> {
     allow_list.insert(
         "pg_dump".to_owned(),
         AllowListedHook {
-            parameters: ["database".to_owned()].into_iter().collect::<BTreeSet<_>>(),
+            parameters: BTreeMap::from([(
+                "database".to_owned(),
+                HookParameterSpec { secret: false },
+            )]),
+        },
+    );
+    allow_list.insert(
+        "dump_secret".to_owned(),
+        AllowListedHook {
+            parameters: BTreeMap::from([(
+                "password".to_owned(),
+                HookParameterSpec { secret: true },
+            )]),
         },
     );
     allow_list
@@ -85,6 +100,25 @@ fn error(profile: &Profile, target: &TargetFacts) -> CompileError {
     match compile(profile, target) {
         Ok(value) => panic!("expected an error, got {value:?}"),
         Err(error) => error,
+    }
+}
+
+fn validated(plan: &Plan, repository: &RepositoryAccess) -> ValidatedJob {
+    let job = Job {
+        job_id: "job-1".to_owned(),
+        tenant_id: "tenant-1".to_owned(),
+        agent_id: "agent-1".to_owned(),
+        repositories: vec![repository.clone()],
+        steps: plan
+            .steps
+            .iter()
+            .map(|planned| planned.step.clone())
+            .collect(),
+        ..Job::default()
+    };
+    match ValidatedJob::new(job) {
+        Ok(value) => value,
+        Err(error) => panic!("{error:?}"),
     }
 }
 
@@ -263,28 +297,23 @@ fn ac_pr_08_injected_values_stay_out_of_option_positions() {
     profile.paths.all = vec![BAD_OPTION.to_owned(), BAD_SHORT.to_owned()];
     profile.excludes = vec![BAD_OPTION.to_owned()];
     profile.tags = vec![BAD_SHORT.to_owned()];
-    let backup = plan(&profile, &target())
-        .steps
-        .into_iter()
-        .find_map(|planned| match planned.step.kind {
-            Some(step::Kind::Backup(backup)) => Some(backup),
-            _ => None,
-        });
-    let backup = match backup {
-        Some(value) => value,
-        None => panic!("no backup step"),
+    let plan = plan(&profile, &target());
+    let validated = validated(&plan, &repository());
+    let step = match &plan.steps[0].step.kind {
+        Some(step::Kind::Backup(backup)) => step::Kind::Backup(backup.clone()),
+        other => panic!("unexpected step {other:?}"),
     };
     let step = restichub_proto::agent::v1::Step {
-        kind: Some(step::Kind::Backup(backup)),
+        kind: Some(step),
         ..restichub_proto::agent::v1::Step::default()
     };
-    let line = match arg::build_command(&step, &repository()) {
+    let line = match arg::build_command(&validated, &step) {
         Ok(value) => value,
         Err(error) => panic!("{error:?}"),
     };
 
     let mut positional = false;
-    for (index, argument) in line.args.iter().enumerate() {
+    for (index, argument) in line.args().iter().enumerate() {
         if argument == "--" {
             positional = true;
             continue;
@@ -294,10 +323,69 @@ fn ac_pr_08_injected_values_stay_out_of_option_positions() {
         }
         assert!(index == 0 || argument.starts_with("--"), "{argument}");
     }
-    assert!(line.args.contains(&BAD_OPTION.to_owned()));
-    assert!(line.args.contains(&BAD_SHORT.to_owned()));
-    assert!(line.args.contains(&format!("--exclude={BAD_OPTION}")));
-    assert!(line.args.contains(&format!("--tag={BAD_SHORT}")));
+    assert!(line.args().contains(&BAD_OPTION.to_owned()));
+    assert!(line.args().contains(&BAD_SHORT.to_owned()));
+    assert!(line.args().contains(&format!("--exclude={BAD_OPTION}")));
+    assert!(line.args().contains(&format!("--tag={BAD_SHORT}")));
+}
+
+#[test]
+fn ac_pr_08_rejects_empty_or_comma_tag() {
+    for bad in ["", ",", "a,b", " daily", "daily ", "a\tb"] {
+        let mut tagged = profile();
+        tagged.tags = vec![bad.to_owned()];
+        assert!(
+            matches!(error(&tagged, &target()), CompileError::InvalidValue { .. }),
+            "{bad:?}"
+        );
+    }
+
+    for bad in ["", ",", " keep"] {
+        let mut keep = profile();
+        keep.retention = Some(Retention {
+            keep_tags: vec![bad.to_owned()],
+            ..Retention::default()
+        });
+        assert!(
+            matches!(error(&keep, &target()), CompileError::InvalidValue { .. }),
+            "{bad:?}"
+        );
+
+        let mut filter = profile();
+        filter.retention = Some(Retention {
+            filter: SnapshotFilter {
+                tags: vec![bad.to_owned()],
+                ..SnapshotFilter::default()
+            },
+            ..Retention::default()
+        });
+        assert!(
+            matches!(error(&filter, &target()), CompileError::InvalidValue { .. }),
+            "{bad:?}"
+        );
+    }
+}
+
+#[test]
+fn ac_pr_08_rejects_format_characters() {
+    for bad in [
+        "a\u{202E}",
+        "a\u{200B}",
+        "a\u{2028}",
+        "a\u{2029}",
+        "a\u{001B}",
+        "a\u{007F}",
+    ] {
+        let mut profile = profile();
+        profile.paths.all = vec![bad.to_owned()];
+        assert!(
+            matches!(
+                error(&profile, &target()),
+                CompileError::InvalidValue { .. }
+            ),
+            "{bad:?}"
+        );
+    }
 }
 
 #[test]
@@ -348,7 +436,7 @@ fn empty_paths_are_rejected() {
 #[test]
 fn ac_pf_01_preview_masks_secrets() {
     let plan = plan(&profile(), &target());
-    let previews = match preview(&plan, &repository()) {
+    let previews = match preview(&plan, &repository(), &allow_list()) {
         Ok(value) => value,
         Err(error) => panic!("{error:?}"),
     };
@@ -363,9 +451,57 @@ fn ac_pf_01_preview_masks_secrets() {
     );
 }
 
+#[test]
+fn ac_pf_01_preview_masks_secret_hook_parameter() {
+    let mut profile = profile();
+    profile.hooks = vec![hook(
+        "dump_secret",
+        HookPhase::Before,
+        &[("password", "s3cr3t")],
+    )];
+    let plan = plan(&profile, &target());
+    let previews = match preview(&plan, &repository(), &allow_list()) {
+        Ok(value) => value,
+        Err(error) => panic!("{error:?}"),
+    };
+    assert!(previews[0].command.contains("password=***"));
+    assert!(!previews[0].command.contains("s3cr3t"));
+}
+
+#[test]
+fn ac_pf_01_preview_quotes_hook_parameter_value() {
+    let mut profile = profile();
+    profile.hooks = vec![hook("pg_dump", HookPhase::Before, &[("database", "my db")])];
+    let plan = plan(&profile, &target());
+    let previews = match preview(&plan, &repository(), &allow_list()) {
+        Ok(value) => value,
+        Err(error) => panic!("{error:?}"),
+    };
+    assert!(previews[0].command.contains("database='my db'"));
+}
+
+fn attack() -> impl Strategy<Value = String> {
+    prop_oneof![
+        Just(String::new()),
+        Just(",".to_owned()),
+        Just("a,b".to_owned()),
+        Just("-x".to_owned()),
+        Just("--".to_owned()),
+        Just("--password-command=cmd /c calc".to_owned()),
+        Just("\u{202E}".to_owned()),
+        Just("\u{FF0D}".to_owned()),
+        Just("{{os}}".to_owned()),
+        Just("%n".to_owned()),
+        any::<String>(),
+    ]
+}
+
 proptest! {
     #[test]
-    fn injection_values_never_become_options(values in prop::collection::vec(any::<String>(), 0..6)) {
+    fn injection_values_never_become_options(
+        values in prop::collection::vec(attack(), 0..6),
+        hook_values in prop::collection::vec(attack(), 0..3),
+    ) {
         let profile = Profile {
             repository_id: "repo-1".to_owned(),
             paths: ProfilePaths {
@@ -375,18 +511,73 @@ proptest! {
             excludes: values.clone(),
             exclude_files: values.clone(),
             tags: values.clone(),
+            retention: Some(Retention {
+                keep_last: 1,
+                keep_tags: values.clone(),
+                filter: SnapshotFilter {
+                    tags: values.clone(),
+                    ..SnapshotFilter::default()
+                },
+                ..Retention::default()
+            }),
+            check: Some(CheckOptions {
+                read_data_subset: "10%".to_owned(),
+            }),
+            hooks: vec![HookRef {
+                hook_id: "pg_dump".to_owned(),
+                phase: HookPhase::Before,
+                parameters: hook_values
+                    .iter()
+                    .map(|value| HookParameter {
+                        name: "database".to_owned(),
+                        value: value.clone(),
+                    })
+                    .collect(),
+            }],
             ..Profile::default()
         };
 
         let Ok(plan) = compile(&profile, &target()) else {
             return Ok(());
         };
+        let validated = match ValidatedJob::new(Job {
+            job_id: "job-1".to_owned(),
+            tenant_id: "tenant-1".to_owned(),
+            agent_id: "agent-1".to_owned(),
+            repositories: vec![repository()],
+            steps: plan.steps.iter().map(|planned| planned.step.clone()).collect(),
+            ..Job::default()
+        }) {
+            Ok(value) => value,
+            Err(error) => panic!("{error:?}"),
+        };
+
         for planned in &plan.steps {
-            let Ok(line) = arg::build_command(&planned.step, &repository()) else {
+            match &planned.step.kind {
+                Some(step::Kind::Backup(backup)) => {
+                    for tag in &backup.tags {
+                        prop_assert!(!tag.is_empty() && !tag.contains(',') && tag.trim() == tag);
+                    }
+                }
+                Some(step::Kind::Forget(forget)) => {
+                    for tag in &forget.keep_tags {
+                        prop_assert!(!tag.is_empty() && !tag.contains(',') && tag.trim() == tag);
+                    }
+                    if let Some(filter) = &forget.filter {
+                        for tag in &filter.tags {
+                            prop_assert!(!tag.is_empty() && !tag.contains(',') && tag.trim() == tag);
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            let Ok(line) = arg::build_command(&validated, &planned.step) else {
                 continue;
             };
             let mut positional = false;
-            for (index, argument) in line.args.iter().enumerate() {
+            for (index, argument) in line.args().iter().enumerate() {
+                prop_assert!(!restichub_proto::validate::has_forbidden(argument));
                 if argument == "--" {
                     positional = true;
                     continue;

@@ -4,10 +4,15 @@
 //! calls it before it runs a job. Validation keeps a job inside the typed
 //! contract: the job has steps, every step has a known kind, every step refers
 //! to a repository of the job, every required field is present, and every
-//! string field has no control character. A field with a format, for example a
-//! snapshot identifier or a size, must match that format. The SFTP private key
-//! is the one exception: a PEM key has line breaks, so that field rejects a NUL
-//! only.
+//! string field has no control or format character. A field with a format, for
+//! example a snapshot identifier or a size, must match that format. The SFTP
+//! private key is the one exception: a PEM key has line breaks, so that field
+//! rejects a NUL only.
+//!
+//! A tag rejects an empty value, a comma and surrounding space, because restic
+//! splits a tag on commas and reads an empty tag as "untagged". The repository
+//! location must be a form that restic opens without an external program
+//! (ADR-0021): `s3:`, `rest:` or an absolute local path.
 //!
 //! The agent builds the restic command line from the typed fields (ADR-0021).
 //! Validation rejects a flag-like value only where the field has a format. A
@@ -67,7 +72,7 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
             check_free(job, backup.paths.iter())?;
             check_free(job, backup.excludes.iter())?;
             check_free(job, backup.exclude_files.iter())?;
-            check_free(job, backup.tags.iter())?;
+            check_tags(job, backup.tags.iter())?;
         }
         step::Kind::Check(check) => {
             check_repository_id(job, repository_ids, &check.repository_id)?;
@@ -76,7 +81,7 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
         step::Kind::Snapshots(snapshots) => {
             check_repository_id(job, repository_ids, &snapshots.repository_id)?;
             check_free(job, snapshots.hosts.iter())?;
-            check_free(job, snapshots.tags.iter())?;
+            check_tags(job, snapshots.tags.iter())?;
             check_free(job, snapshots.paths.iter())?;
         }
         step::Kind::Ls(ls) => {
@@ -100,7 +105,7 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
         step::Kind::Forget(forget) => {
             check_repository_id(job, repository_ids, &forget.repository_id)?;
             check_format(job, &forget.keep_within, is_keep_within)?;
-            check_free(job, forget.keep_tags.iter())?;
+            check_tags(job, forget.keep_tags.iter())?;
             if let Some(filter) = &forget.filter {
                 check_filter(job, filter)?;
             }
@@ -126,18 +131,18 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
 
 fn check_filter(job: &Job, filter: &SnapshotsFilter) -> Result<(), Rejection> {
     check_free(job, filter.hosts.iter())?;
-    check_free(job, filter.tags.iter())?;
+    check_tags(job, filter.tags.iter())?;
     check_free(job, filter.paths.iter())
 }
 
 fn check_hook(job: &Job, hook: &HookStep) -> Result<(), Rejection> {
-    if hook.hook_id.is_empty() || has_control(&hook.hook_id) {
+    if hook.hook_id.is_empty() || has_forbidden(&hook.hook_id) {
         return Err(reject(job, RejectReason::Malformed));
     }
 
     let mut names = HashSet::new();
     for parameter in &hook.parameters {
-        if has_control(&parameter.name) || has_control(&parameter.value) {
+        if has_forbidden(&parameter.name) || has_forbidden(&parameter.value) {
             return Err(reject(job, RejectReason::Malformed));
         }
         if !names.insert(parameter.name.as_str()) {
@@ -150,6 +155,9 @@ fn check_hook(job: &Job, hook: &HookStep) -> Result<(), Rejection> {
 
 fn check_repository(job: &Job, repository: &RepositoryAccess) -> Result<(), Rejection> {
     if repository.repository_id.is_empty() {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+    if !is_safe_repository_location(&repository.location) {
         return Err(reject(job, RejectReason::Malformed));
     }
 
@@ -178,7 +186,7 @@ fn check_repository(job: &Job, repository: &RepositoryAccess) -> Result<(), Reje
     }
 
     for field in fields {
-        if has_control(field) {
+        if has_forbidden(field) {
             return Err(reject(job, RejectReason::Malformed));
         }
     }
@@ -204,7 +212,23 @@ fn check_free<'a>(
     values: impl IntoIterator<Item = &'a String>,
 ) -> Result<(), Rejection> {
     for value in values {
-        if has_control(value) {
+        if has_forbidden(value) {
+            return Err(reject(job, RejectReason::Malformed));
+        }
+    }
+    Ok(())
+}
+
+/// Rejects an empty tag, a tag with a comma and a tag with surrounding space.
+/// restic splits a tag on commas and reads an empty tag as "untagged", so these
+/// forms would change the set of tags.
+fn check_tags<'a>(
+    job: &Job,
+    values: impl IntoIterator<Item = &'a String>,
+) -> Result<(), Rejection> {
+    for value in values {
+        if value.is_empty() || value.contains(',') || value.trim() != value || has_forbidden(value)
+        {
             return Err(reject(job, RejectReason::Malformed));
         }
     }
@@ -213,7 +237,7 @@ fn check_free<'a>(
 
 /// Rejects a value that does not match `is_valid`; an empty value is allowed.
 fn check_format(job: &Job, value: &str, is_valid: fn(&str) -> bool) -> Result<(), Rejection> {
-    if has_control(value) {
+    if has_forbidden(value) {
         return Err(reject(job, RejectReason::Malformed));
     }
     if !value.is_empty() && !is_valid(value) {
@@ -227,24 +251,92 @@ fn check_required_format(
     value: &str,
     is_valid: fn(&str) -> bool,
 ) -> Result<(), Rejection> {
-    if value.is_empty() || has_control(value) || !is_valid(value) {
+    if value.is_empty() || has_forbidden(value) || !is_valid(value) {
         return Err(reject(job, RejectReason::Malformed));
     }
     Ok(())
 }
 
 fn check_required_free(job: &Job, value: &str) -> Result<(), Rejection> {
-    if value.is_empty() || has_control(value) {
+    if value.is_empty() || has_forbidden(value) {
         return Err(reject(job, RejectReason::Malformed));
     }
     Ok(())
 }
 
-/// Returns true when `value` has a NUL, a carriage return or a line feed.
-fn has_control(value: &str) -> bool {
-    value
-        .bytes()
-        .any(|byte| byte == 0 || byte == b'\n' || byte == b'\r')
+/// Returns true when `value` has a character that a value must not have: a
+/// control character (Cc), a format character (Cf, for example a bidirectional
+/// override), a line or paragraph separator (Zl, Zp), or DEL (FR-PR-10).
+pub fn has_forbidden(value: &str) -> bool {
+    value.chars().any(is_forbidden)
+}
+
+fn is_forbidden(character: char) -> bool {
+    character.is_control() || matches!(character, '\u{2028}' | '\u{2029}') || is_format(character)
+}
+
+fn is_format(character: char) -> bool {
+    matches!(
+        character,
+        '\u{00AD}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+    )
+}
+
+/// Returns true when restic can open the location without an external program
+/// (ADR-0021). The allowed forms are `s3:` with an optional HTTP endpoint,
+/// `rest:` with an HTTP URL, and an absolute local path.
+pub fn is_safe_repository_location(value: &str) -> bool {
+    if value.is_empty() || value.starts_with('-') || has_forbidden(value) {
+        return false;
+    }
+    if let Some(rest) = value.strip_prefix("s3:") {
+        return is_s3_location(rest);
+    }
+    if let Some(rest) = value.strip_prefix("rest:") {
+        return rest.starts_with("https://") || rest.starts_with("http://");
+    }
+    is_absolute_path(value)
+}
+
+fn is_s3_location(rest: &str) -> bool {
+    if rest.is_empty() || rest.starts_with('-') {
+        return false;
+    }
+    match rest.find("://") {
+        Some(_) => rest.starts_with("https://") || rest.starts_with("http://"),
+        None => true,
+    }
+}
+
+fn is_absolute_path(value: &str) -> bool {
+    if value.starts_with('/') {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
 
 /// A PEM private key has line breaks, so its field rejects a NUL only.
@@ -750,5 +842,120 @@ mod tests {
             validate_job(&job),
             Err(reject(&job, RejectReason::InvalidHookParameters))
         );
+    }
+
+    #[test]
+    fn ac_pr_08_rejects_empty_or_comma_tag() {
+        let bad_tags = ["", ",", "a,b", " daily", "daily ", "a\tb"];
+        for bad in bad_tags {
+            let jobs = [
+                job_with(vec![step(step::Kind::Backup(BackupStep {
+                    repository_id: string("repo-1"),
+                    paths: vec![string("/srv")],
+                    tags: vec![string(bad)],
+                    ..BackupStep::default()
+                }))]),
+                job_with(vec![step(step::Kind::Snapshots(SnapshotsStep {
+                    repository_id: string("repo-1"),
+                    tags: vec![string(bad)],
+                    ..SnapshotsStep::default()
+                }))]),
+                job_with(vec![step(step::Kind::Forget(ForgetStep {
+                    repository_id: string("repo-1"),
+                    keep_tags: vec![string(bad)],
+                    ..ForgetStep::default()
+                }))]),
+                job_with(vec![step(step::Kind::Forget(ForgetStep {
+                    repository_id: string("repo-1"),
+                    filter: Some(SnapshotsFilter {
+                        tags: vec![string(bad)],
+                        ..SnapshotsFilter::default()
+                    }),
+                    ..ForgetStep::default()
+                }))]),
+            ];
+            for job in &jobs {
+                assert!(malformed(job), "{bad:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn ac_pr_08_accepts_a_plain_tag() {
+        let job = job_with(vec![step(step::Kind::Backup(BackupStep {
+            repository_id: string("repo-1"),
+            paths: vec![string("/srv")],
+            tags: vec![string("daily"), string("-x"), string("env=prod")],
+            ..BackupStep::default()
+        }))]);
+        assert_eq!(validate_job(&job), Ok(()));
+    }
+
+    #[test]
+    fn ac_pr_08_rejects_program_running_location() {
+        let bad = [
+            "rclone:remote:path",
+            "sftp:host:/srv",
+            "-x",
+            "-o",
+            "local:/srv/repo",
+            "b2:bucket:path",
+            "azure:container:/",
+            "gs:bucket:/",
+            "ftp://host/repo",
+            "s3:ftp://host/bucket",
+            "rest:ftp://host/",
+            "relative/path",
+            "C:relative",
+        ];
+        for location in bad {
+            let mut job = job_with(vec![step(step::Kind::Unlock(UnlockStep {
+                repository_id: string("repo-1"),
+            }))]);
+            job.repositories[0].location = string(location);
+            assert!(malformed(&job), "{location}");
+        }
+    }
+
+    #[test]
+    fn ac_pr_08_accepts_a_native_location() {
+        let good = [
+            "s3:s3.example.com/bucket",
+            "s3:https://minio.example.com/bucket",
+            "s3:http://minio.local:9000/bucket",
+            "rest:https://rest.example.com/",
+            "rest:http://rest.local:8000/",
+            "/srv/backup",
+            "C:\\backup",
+            "c:/backup",
+        ];
+        for location in good {
+            let mut job = job_with(vec![step(step::Kind::Unlock(UnlockStep {
+                repository_id: string("repo-1"),
+            }))]);
+            job.repositories[0].location = string(location);
+            assert_eq!(validate_job(&job), Ok(()), "{location}");
+        }
+    }
+
+    #[test]
+    fn ac_pr_08_rejects_format_and_separator_characters() {
+        let bad = [
+            "value\u{202E}", // right-to-left override (Cf)
+            "value\u{200B}", // zero width space (Cf)
+            "value\u{2028}", // line separator (Zl)
+            "value\u{2029}", // paragraph separator (Zp)
+            "value\u{001B}", // ESC (Cc)
+            "value\u{007F}", // DEL (Cc)
+            "value\u{FEFF}", // byte order mark (Cf)
+        ];
+        for value in bad {
+            let job = job_with(vec![step(step::Kind::Backup(BackupStep {
+                repository_id: string("repo-1"),
+                paths: vec![string(value)],
+                ..BackupStep::default()
+            }))]);
+            assert!(malformed(&job), "{value:?}");
+        }
     }
 }
