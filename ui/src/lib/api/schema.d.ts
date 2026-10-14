@@ -526,6 +526,66 @@ export interface paths {
         patch: operations["set_membership_role"];
         trace?: never;
     };
+    "/api/v1/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the profiles of the tenant. */
+        get: operations["list_profiles"];
+        put?: never;
+        /**
+         * Creates a profile in the tenant.
+         * @description The control plane validates the settings before the write (FR-PF-05).
+         */
+        post: operations["create_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one profile of the tenant. */
+        get: operations["get_profile"];
+        put?: never;
+        post?: never;
+        /** Removes a profile. */
+        delete: operations["delete_profile"];
+        options?: never;
+        head?: never;
+        /** Updates a profile. The body replaces the settings; an absent name keeps the name. */
+        patch: operations["update_profile"];
+        trace?: never;
+    };
+    "/api/v1/profiles/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Previews a profile for one target agent.
+         * @description The steps and the command lines agree with the command that the agent runs. Secrets are masked (AC-PF-01).
+         */
+        post: operations["preview_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/repositories": {
         parameters: {
             query?: never;
@@ -852,6 +912,9 @@ export interface components {
          * @example repository_create
          * @example repository_update
          * @example repository_delete
+         * @example profile_create
+         * @example profile_update
+         * @example profile_delete
          * @example signing_key_rotate
          * @example signing_key_retire
          */
@@ -896,10 +959,32 @@ export interface components {
             kind: "local";
             path: string;
         };
+        /** @description The backup options of a profile (FR-PF-01). */
+        BackupOptions: {
+            exclude_caches?: boolean;
+            /**
+             * Format: int64
+             * @description Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
+             */
+            limit_download_kib?: number;
+            /**
+             * Format: int64
+             * @description Upload limit in kibibytes each second. Zero means no limit (FR-AG-15).
+             */
+            limit_upload_kib?: number;
+            one_file_system?: boolean;
+            /** @description Use a file system snapshot. VSS on Windows only (FR-PF-01). */
+            use_fs_snapshot?: boolean;
+        };
         ChangePasswordRequest: {
             current_password: string;
             /** @description At least 12 characters. */
             new_password: string;
+        };
+        /** @description The check options of a profile (FR-PF-01). */
+        CheckOptions: {
+            /** @description Portion to check, for example `10%` or `1/7`. */
+            read_data_subset?: string;
         };
         CreateAccountRequest: {
             display_name: string;
@@ -935,6 +1020,21 @@ export interface components {
             labels: string[];
             /** @description Returned only here. */
             token: string;
+        };
+        /** @description The body of a profile create (FR-PF-01). */
+        CreateProfileRequest: {
+            check?: components["schemas"]["CheckOptions"] | null;
+            exclude_files?: string[];
+            excludes?: string[];
+            hooks?: components["schemas"]["HookRef"][];
+            /** @description Holds 1 to 48 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
+            name: string;
+            options?: components["schemas"]["BackupOptions"];
+            paths?: components["schemas"]["ProfilePaths"];
+            /** @description The identifier of the repository that the profile uses. */
+            repository_id: string;
+            retention?: components["schemas"]["Retention"] | null;
+            tags?: string[];
         };
         /**
          * @description The write-only secret fields of a repository create.
@@ -1072,6 +1172,27 @@ export interface components {
         };
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken";
+        /**
+         * @description Grouping key of the retention rule.
+         * @enum {string}
+         */
+        GroupBy: "host" | "paths" | "tags";
+        /** @description One named hook parameter (FR-HK-03). */
+        HookParameter: {
+            name: string;
+            value: string;
+        };
+        /**
+         * @description Position of a hook in the job (FR-HK-05).
+         * @enum {string}
+         */
+        HookPhase: "before" | "after" | "on_success" | "on_error" | "finally";
+        /** @description A hook of the profile, by allow-list identifier (FR-HK-02). */
+        HookRef: {
+            hook_id: string;
+            parameters?: components["schemas"]["HookParameter"][];
+            phase: components["schemas"]["HookPhase"];
+        };
         /** @description The mode and the setup state of the installation. */
         InstanceResponse: {
             /** @description True while the installation has no administrator. */
@@ -1136,6 +1257,36 @@ export interface components {
             platform_admin: boolean;
             username: string;
         };
+        /** @description One environment variable of a previewed step. A secret value is masked (AC-PF-01). */
+        PreviewEnvView: {
+            name: string;
+            value: string;
+        };
+        /** @description The body of a preview request (FR-PF-04). */
+        PreviewRequest: {
+            /** @description The identifier of the registered agent that supplies the target facts. */
+            agent_id: string;
+        };
+        /** @description The preview of a profile for one target agent (FR-PF-04). */
+        PreviewResponse: {
+            profile_id: string;
+            repository_id: string;
+            steps: components["schemas"]["PreviewStepView"][];
+        };
+        /**
+         * @description One previewed step: the kind, the maintenance flag, the command line and the environment
+         *     (FR-PF-04, AC-PF-01).
+         */
+        PreviewStepView: {
+            /** @description The command line with masked secrets. */
+            command: string;
+            /** @description The process variables with masked secrets. */
+            environment: components["schemas"]["PreviewEnvView"][];
+            /** @description The step kind, for example `backup`, `forget`, `prune`, `check` or `hook`. */
+            kind: string;
+            /** @description True for `forget`, `prune` and `check` (FR-RP-08). */
+            maintenance: boolean;
+        };
         ProblemBody: {
             /** @description In snake_case. */
             code: components["schemas"]["ErrorCode"];
@@ -1148,6 +1299,41 @@ export interface components {
             status: number;
             title: string;
             type: string;
+        };
+        ProfileListResponse: {
+            items: components["schemas"]["ProfileView"][];
+        };
+        /**
+         * @description The paths of a profile (FR-PF-01).
+         *
+         *     `all` applies to every operating system. `windows`, `linux` and `macos` add the paths of one
+         *     operating system.
+         */
+        ProfilePaths: {
+            all?: string[];
+            linux?: string[];
+            macos?: string[];
+            windows?: string[];
+        };
+        /** @description One stored profile (FR-PF-01). It holds no secret. */
+        ProfileView: {
+            check?: components["schemas"]["CheckOptions"] | null;
+            /** @description In RFC 3339. */
+            created_at: string;
+            /** @description Null for an API token actor. */
+            created_by?: string | null;
+            exclude_files: string[];
+            excludes: string[];
+            hooks: components["schemas"]["HookRef"][];
+            id: string;
+            name: string;
+            options: components["schemas"]["BackupOptions"];
+            paths: components["schemas"]["ProfilePaths"];
+            repository_id: string;
+            retention?: components["schemas"]["Retention"] | null;
+            tags: string[];
+            /** @description In RFC 3339. */
+            updated_at: string;
         };
         RenameAgentRequest: {
             hostname: string;
@@ -1181,6 +1367,26 @@ export interface components {
         ResetPasswordRequest: {
             /** @description At least 12 characters. */
             new_password: string;
+        };
+        /** @description The retention policy of a profile (FR-PF-01). */
+        Retention: {
+            filter?: components["schemas"]["SnapshotFilter"];
+            group_by?: components["schemas"]["GroupBy"][];
+            /** Format: int32 */
+            keep_daily?: number;
+            /** Format: int32 */
+            keep_hourly?: number;
+            /** Format: int32 */
+            keep_last?: number;
+            /** Format: int32 */
+            keep_monthly?: number;
+            keep_tags?: string[];
+            /** Format: int32 */
+            keep_weekly?: number;
+            /** @description Keep the snapshots younger than a duration, for example `30d`. */
+            keep_within?: string;
+            /** Format: int32 */
+            keep_yearly?: number;
         };
         /**
          * @description The role of an actor in a tenant (requirements section 2).
@@ -1263,6 +1469,12 @@ export interface components {
             tenant?: components["schemas"]["TenantView"] | null;
             user: components["schemas"]["UserView"];
         };
+        /** @description Snapshot filter of the retention rule. */
+        SnapshotFilter: {
+            hosts?: string[];
+            paths?: string[];
+            tags?: string[];
+        };
         SwitchTenantRequest: {
             tenant_id: string;
         };
@@ -1308,6 +1520,19 @@ export interface components {
             password?: string | null;
             /** @description True when the account holds the installation-wide right (ADR-0029). */
             platform_admin?: boolean | null;
+        };
+        /** @description The body of a profile update. The body replaces the settings; an absent name keeps the name. */
+        UpdateProfileRequest: {
+            check?: components["schemas"]["CheckOptions"] | null;
+            exclude_files?: string[];
+            excludes?: string[];
+            hooks?: components["schemas"]["HookRef"][];
+            name?: string | null;
+            options?: components["schemas"]["BackupOptions"];
+            paths?: components["schemas"]["ProfilePaths"];
+            repository_id: string;
+            retention?: components["schemas"]["Retention"] | null;
+            tags?: string[];
         };
         /**
          * @description The write-only secret fields of a repository update.
@@ -3044,6 +3269,328 @@ export interface operations {
                 };
             };
             /** @description The membership is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_profiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profiles of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileListResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description The profile is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the profile. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The profile is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the profile. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The profile is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    update_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the profile. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The profile is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    preview_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the profile. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description The previewed steps. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewResponse"];
+                };
+            };
+            /** @description The profile or the agent is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The profile is not found. */
             404: {
                 headers: {
                     [name: string]: unknown;

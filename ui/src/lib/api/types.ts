@@ -112,6 +112,45 @@ export type CreateRepositoryRequest = components['schemas']['CreateRepositoryReq
 
 export type UpdateRepositoryRequest = components['schemas']['UpdateRepositoryRequest'];
 
+/** The paths of a profile for each operating system (FR-PF-01). */
+export type ProfilePaths = components['schemas']['ProfilePaths'];
+
+/** The backup options of a profile (FR-PF-01). */
+export type ProfileBackupOptions = components['schemas']['BackupOptions'];
+
+/** Position of a hook in the job (FR-HK-05). */
+export type HookPhase = components['schemas']['HookPhase'];
+
+export type HookParameter = components['schemas']['HookParameter'];
+
+export type HookRef = components['schemas']['HookRef'];
+
+export type GroupBy = components['schemas']['GroupBy'];
+
+export type SnapshotFilter = components['schemas']['SnapshotFilter'];
+
+export type Retention = components['schemas']['Retention'];
+
+export type CheckOptions = components['schemas']['CheckOptions'];
+
+/** One profile (FR-PF-01). It holds no secret. */
+export type Profile = components['schemas']['ProfileView'];
+
+export type ProfileListResponse = components['schemas']['ProfileListResponse'];
+
+export type CreateProfileRequest = components['schemas']['CreateProfileRequest'];
+
+export type UpdateProfileRequest = components['schemas']['UpdateProfileRequest'];
+
+/** One previewed step with masked secrets (FR-PF-04). */
+export type PreviewStep = components['schemas']['PreviewStepView'];
+
+export type PreviewResponse = components['schemas']['PreviewResponse'];
+
+export type PreviewRequest = components['schemas']['PreviewRequest'];
+
+export type PreviewEnvVar = components['schemas']['PreviewEnvView'];
+
 /**
  * One audit record. The generated `diff` type is an opaque object, so the UI
  * replaces it with the diff shape that the control plane writes.

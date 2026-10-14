@@ -15,6 +15,7 @@ import type {
 	CreateApiTokenRequest,
 	CreateEnrollmentTokenRequest,
 	CreatePlatformUserRequest,
+	CreateProfileRequest,
 	CreateRepositoryRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
@@ -24,6 +25,8 @@ import type {
 	Me,
 	MembershipInput,
 	PlatformUser,
+	PreviewResponse,
+	Profile,
 	Repository,
 	ResetPasswordRequest,
 	SetRoleRequest,
@@ -33,6 +36,7 @@ import type {
 	Tenant,
 	TenantAccess,
 	UpdateAccountRequest,
+	UpdateProfileRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
 	User
@@ -46,6 +50,9 @@ function iso(minutesAgo: number): string {
 
 // The mock starts without an agent. A review capture sets this storage key to see a filled list.
 const SAMPLE_AGENTS_KEY = 'restichub.mock.agents';
+
+// The mock starts without a profile. A review capture sets this storage key to see a filled list.
+const SAMPLE_PROFILES_KEY = 'restichub.mock.profiles';
 
 // A review capture or an e2e test sets this storage key to drive the mock as a Platform Admin
 // without a membership. The sign-in then survives a full page load, so a direct visit to an
@@ -95,6 +102,73 @@ function makeAgents(): Agent[] {
 		agent('4', 'nas-backup', 'linux', 'arm64', '0.4.2', 120),
 		agent('5', 'mac-build-01', 'darwin', 'arm64', '0.4.0', 60 * 48),
 		agent('6', 'srv-app-02', 'linux', 'amd64', '0.3.9', 180, 'revoked')
+	];
+}
+
+function makeProfiles(): Profile[] {
+	if (
+		typeof localStorage === 'undefined' ||
+		localStorage.getItem(SAMPLE_PROFILES_KEY) !== 'sample'
+	) {
+		return [];
+	}
+	const retention = {
+		keep_last: 0,
+		keep_hourly: 0,
+		keep_daily: 7,
+		keep_weekly: 0,
+		keep_monthly: 0,
+		keep_yearly: 0,
+		keep_within: '',
+		keep_tags: [],
+		group_by: [],
+		filter: { hosts: [], tags: [], paths: [] }
+	};
+	return [
+		{
+			id: 'p_1',
+			name: 'web-daily',
+			repository_id: 'r_1',
+			paths: { all: ['/srv'], windows: [], linux: ['/etc'], macos: [] },
+			excludes: ['*.tmp', 'node_modules'],
+			exclude_files: [],
+			tags: ['daily', 'web'],
+			options: {
+				use_fs_snapshot: false,
+				one_file_system: true,
+				exclude_caches: true,
+				limit_upload_kib: 0,
+				limit_download_kib: 0
+			},
+			hooks: [],
+			retention,
+			check: { read_data_subset: '10%' },
+			created_at: iso(60 * 24 * 10),
+			updated_at: iso(60),
+			created_by: 'u_01'
+		},
+		{
+			id: 'p_2',
+			name: 'win-files',
+			repository_id: 'r_1',
+			paths: { all: [], windows: ['C:\\Data'], linux: [], macos: [] },
+			excludes: [],
+			exclude_files: [],
+			tags: ['windows'],
+			options: {
+				use_fs_snapshot: true,
+				one_file_system: false,
+				exclude_caches: false,
+				limit_upload_kib: 2048,
+				limit_download_kib: 0
+			},
+			hooks: [],
+			retention: null,
+			check: null,
+			created_at: iso(60 * 24 * 5),
+			updated_at: iso(60 * 24),
+			created_by: 'u_01'
+		}
 	];
 }
 
@@ -325,6 +399,7 @@ export class MockApiService {
 	private agents: Agent[] = makeAgents();
 	private enrollmentTokens: EnrollmentToken[] = [];
 	private repositories: Repository[] = [];
+	private profiles: Profile[] = makeProfiles();
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
@@ -595,6 +670,95 @@ export class MockApiService {
 
 	async deleteRepository(id: string): Promise<void> {
 		this.repositories = this.repositories.filter((item) => item.id !== id);
+	}
+
+	async listProfiles(): Promise<Profile[]> {
+		return [...this.profiles];
+	}
+
+	async createProfile(request: CreateProfileRequest): Promise<Profile> {
+		const now = new Date().toISOString();
+		const profile: Profile = {
+			id: `p_${this.profiles.length + 1}`,
+			name: request.name,
+			repository_id: request.repository_id,
+			paths: request.paths ?? { all: [], windows: [], linux: [], macos: [] },
+			excludes: request.excludes ?? [],
+			exclude_files: request.exclude_files ?? [],
+			tags: request.tags ?? [],
+			options: request.options ?? {
+				use_fs_snapshot: false,
+				one_file_system: false,
+				exclude_caches: false,
+				limit_upload_kib: 0,
+				limit_download_kib: 0
+			},
+			hooks: request.hooks ?? [],
+			retention: request.retention ?? null,
+			check: request.check ?? null,
+			created_at: now,
+			updated_at: now,
+			created_by: this.users[0].id
+		};
+		this.profiles = [...this.profiles, profile];
+		return profile;
+	}
+
+	async updateProfile(id: string, request: UpdateProfileRequest): Promise<Profile> {
+		const current = this.profiles.find((item) => item.id === id);
+		if (!current) throw new Error('not found');
+		const updated: Profile = {
+			...current,
+			name: request.name ?? current.name,
+			repository_id: request.repository_id,
+			paths: request.paths ?? { all: [], windows: [], linux: [], macos: [] },
+			excludes: request.excludes ?? [],
+			exclude_files: request.exclude_files ?? [],
+			tags: request.tags ?? [],
+			options: request.options ?? current.options,
+			hooks: request.hooks ?? [],
+			retention: request.retention ?? null,
+			check: request.check ?? null,
+			updated_at: new Date().toISOString()
+		};
+		this.profiles = this.profiles.map((item) => (item.id === id ? updated : item));
+		return updated;
+	}
+
+	async deleteProfile(id: string): Promise<void> {
+		this.profiles = this.profiles.filter((item) => item.id !== id);
+	}
+
+	async previewProfile(id: string, agentId: string): Promise<PreviewResponse> {
+		void agentId;
+		const profile = this.profiles.find((item) => item.id === id);
+		if (!profile) throw new Error('not found');
+		return {
+			profile_id: id,
+			repository_id: profile.repository_id,
+			steps: [
+				{
+					kind: 'backup',
+					maintenance: false,
+					command: `restic backup --one-file-system --exclude=*.tmp --tag=daily -- ${(profile.paths.all ?? []).join(' ')}`,
+					environment: [
+						{ name: 'RESTIC_REPOSITORY', value: 's3:https://s3.example.net/backups-prod' },
+						{ name: 'RESTIC_PASSWORD', value: '***' },
+						{ name: 'AWS_ACCESS_KEY_ID', value: '***' },
+						{ name: 'AWS_SECRET_ACCESS_KEY', value: '***' }
+					]
+				},
+				{
+					kind: 'forget',
+					maintenance: true,
+					command: 'restic forget --keep-daily=7 --retry-lock',
+					environment: [
+						{ name: 'RESTIC_REPOSITORY', value: 's3:https://s3.example.net/backups-prod' },
+						{ name: 'RESTIC_PASSWORD', value: '***' }
+					]
+				}
+			]
+		};
 	}
 
 	async listTenants(): Promise<Tenant[]> {

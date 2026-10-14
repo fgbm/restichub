@@ -18,6 +18,7 @@ import type {
 	ChangePasswordRequest,
 	CreateApiTokenRequest,
 	CreateEnrollmentTokenRequest,
+	CreateProfileRequest,
 	CreateRepositoryRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
@@ -30,6 +31,10 @@ import type {
 	MembershipInput,
 	PlatformUser,
 	PlatformUserListResponse,
+	PreviewRequest,
+	PreviewResponse,
+	Profile,
+	ProfileListResponse,
 	RenameAgentRequest,
 	Repository,
 	RepositoryListResponse,
@@ -43,6 +48,7 @@ import type {
 	TenantAccessListResponse,
 	TenantListResponse,
 	UpdateAccountRequest,
+	UpdateProfileRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
 	User,
@@ -90,6 +96,14 @@ export interface ApiService {
 	createRepository(request: CreateRepositoryRequest): Promise<Repository>;
 	updateRepository(id: string, request: UpdateRepositoryRequest): Promise<Repository>;
 	deleteRepository(id: string): Promise<void>;
+
+	/** The profiles of the tenant (FR-PF-01). */
+	listProfiles(): Promise<Profile[]>;
+	createProfile(request: CreateProfileRequest): Promise<Profile>;
+	updateProfile(id: string, request: UpdateProfileRequest): Promise<Profile>;
+	deleteProfile(id: string): Promise<void>;
+	/** The compiled steps of a profile for one agent, with masked secrets (FR-PF-04). */
+	previewProfile(id: string, agentId: string): Promise<PreviewResponse>;
 
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
@@ -156,6 +170,16 @@ const httpService: ApiService = {
 	updateRepository: (id, request) =>
 		api.patch<Repository>(endpoints.repositories.byId(id), request),
 	deleteRepository: (id) => api.delete<void>(endpoints.repositories.byId(id)),
+
+	listProfiles: () =>
+		api.get<ProfileListResponse>(endpoints.profiles.list).then((response) => response.items),
+	createProfile: (request) => api.post<Profile>(endpoints.profiles.create, request),
+	updateProfile: (id, request) => api.patch<Profile>(endpoints.profiles.byId(id), request),
+	deleteProfile: (id) => api.delete<void>(endpoints.profiles.byId(id)),
+	previewProfile: (id, agentId) =>
+		api.post<PreviewResponse>(endpoints.profiles.preview(id), {
+			agent_id: agentId
+		} satisfies PreviewRequest),
 
 	listTenants: () =>
 		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),
