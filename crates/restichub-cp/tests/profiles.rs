@@ -646,3 +646,61 @@ async fn an_update_replaces_the_settings_and_a_delete_removes_the_row() {
 
     db.cleanup().await;
 }
+
+/// A repository that a profile uses cannot be removed until the profile is gone.
+#[tokio::test]
+async fn a_repository_in_use_by_a_profile_cannot_be_deleted() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let repository_id = repository_fixture(db.database(), tenant).await;
+
+    let profile = create_profile(
+        &app,
+        &cookie,
+        profile_body("in-use", &repository_id, json!(["/srv"])),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier");
+
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/repositories/{repository_id}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // After the profile is gone the repository can be removed.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/profiles/{profile_id}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/repositories/{repository_id}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    db.cleanup().await;
+}
