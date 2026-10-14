@@ -45,13 +45,17 @@ A suspended tenant creates no job. A plan whose agent is revoked creates no job.
 
 ## Delivery
 
-A scheduled job starts in the `queued` status. The queue delivers the job to the agent. The queue dispatcher arrives in a later part of epic #7 (issue #86). Until then, a scheduled job waits in the queue and the agent receives no job. A plan delete moves the queued jobs of the plan to the `cancelled` status.
+A scheduled job starts in the `queued` status. The queue sends the job to the online agent. The [Jobs](/restichub/concepts/jobs/) page describes the queue, the limits and the retries. A plan delete ends the queued jobs of the plan with the `cancelled` result.
+
+## Run now
+
+The action Run now queues one job for the plan at once. The job follows the same rules as a scheduled job. A disabled plan can run by hand. The control plane checks that the profile compiles for the agent before it queues the job.
 
 ## Roles
 
 | Role | Right |
 |---|---|
-| Admin, Operator | Create, change and delete a plan. |
+| Admin, Operator | Create, change, delete and run a plan. |
 | Viewer | Read a plan and preview a schedule. |
 
 ## API
@@ -63,6 +67,7 @@ A scheduled job starts in the `queued` status. The queue delivers the job to the
 | `GET /api/v1/plans/{id}` | Read one plan. |
 | `PATCH /api/v1/plans/{id}` | Change a plan. |
 | `DELETE /api/v1/plans/{id}` | Delete a plan. |
+| `POST /api/v1/plans/{id}/run` | Queue one job for the plan now. The response holds the job. |
 | `GET /api/v1/plans/{id}/next-runs?count=5` | The next fire times, in UTC. |
 | `POST /api/v1/plans/preview` | The next fire times of an unsaved schedule, in UTC. The body holds `cron`, `time_zone` and `count`. |
 
