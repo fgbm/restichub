@@ -3,13 +3,73 @@
  * summary shows (FR-MN-02). The values come from the restic summary and are never recomputed.
  */
 import { formatBytes, formatCount, formatSeconds } from '#lib/format.ts';
-import type { JobStatus, JobStep, StepOutput } from '#lib/api/index.ts';
+import type { JobDetail, JobStatus, JobStep, StepOutput } from '#lib/api/index.ts';
+import { getLocale, t } from '#lib/i18n/index.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
 import type { StatusTone } from '#lib/components/ui/index.ts';
 
 /** A job in one of these states can still change, so the screen polls. */
 export function isLive(status: JobStatus): boolean {
 	return status === 'queued' || status === 'sent' || status === 'running';
+}
+
+/** The count of files with the plural form of the current language, such as "128 402 файла". */
+export function formatFiles(count: number): string {
+	const rule = new Intl.PluralRules(getLocale()).select(count);
+	return t(`jobDetail.files.${rule}` as MessageKey, { count: formatCount(count) });
+}
+
+/** One step of the list: the result of a step, the running step or a step that did not start. */
+export interface StepRow {
+	id: string;
+	state: 'done' | 'running' | 'pending';
+	step: JobStep | null;
+}
+
+/**
+ * All steps of a job in run order. The control plane knows the list when it signs the job, so the
+ * steps that did not start show as well. A result for a step that the list lacks follows the list.
+ */
+export function stepRows(job: JobDetail): StepRow[] {
+	const results = new Map(job.steps.map((step) => [step.step_id, step]));
+	const ids = [...job.planned_steps];
+	for (const step of job.steps) if (!ids.includes(step.step_id)) ids.push(step.step_id);
+	const pending = ids.filter((id) => !results.has(id));
+	const progressId = job.progress?.step_id;
+	// The agent runs the steps in order, so without progress the next one in the list runs.
+	const runningId =
+		job.status === 'running'
+			? progressId && pending.includes(progressId)
+				? progressId
+				: (pending[0] ?? null)
+			: null;
+	return ids.map((id) => {
+		const step = results.get(id) ?? null;
+		if (step) return { id, state: 'done', step };
+		return { id, state: id === runningId ? 'running' : 'pending', step: null };
+	});
+}
+
+export interface StepProgressSummary {
+	complete: number;
+	total: number;
+	/** The step that runs or runs next, counted from 1. */
+	position: number;
+	/** From 0 to 1: the finished steps and the progress of the running step. */
+	fraction: number;
+}
+
+export function stepProgress(job: JobDetail, rows: StepRow[] = stepRows(job)): StepProgressSummary {
+	const total = rows.length;
+	const complete = rows.filter((row) => row.state === 'done').length;
+	const running = rows.find((row) => row.state === 'running');
+	const partial = running && job.progress?.step_id === running.id ? job.progress.percent_done : 0;
+	return {
+		complete,
+		total,
+		position: Math.min(total, complete + 1),
+		fraction: total === 0 ? 0 : Math.min(1, (complete + partial) / total)
+	};
 }
 
 export type StepMarker = 'success' | 'warning' | 'running' | 'failed' | 'idle';
@@ -69,7 +129,7 @@ export function statsOf(output: StepOutput | null | undefined): Stat[] {
 				{
 					label: 'jobDetail.stat.processed',
 					value: formatBytes(output.total_bytes_processed),
-					params: { files: formatCount(output.total_files_processed) }
+					params: { files: formatFiles(output.total_files_processed) }
 				},
 				{ label: 'jobDetail.stat.dataPacked', value: formatBytes(output.data_added_packed) }
 			];

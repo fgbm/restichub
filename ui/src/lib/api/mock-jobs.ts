@@ -19,6 +19,7 @@ const LINE_INTERVAL_MS = 4000;
 const RUNNING_FILES = 128_402;
 const RUNNING_BYTES = 1_400_000_000;
 const RUNNING_SECONDS = 180;
+const FORGET_SECONDS = 4;
 
 type Level = JobLogLine['level'];
 type Stream = JobLogLine['stream'];
@@ -165,9 +166,12 @@ function stepsOf(job: Job): JobStep[] {
 	if (job.status === 'failed' || job.status === 'dead_letter') {
 		return [failedStep(job, 'retry', 11, 'repository_locked')];
 	}
+	// Each step has its own time span: the backup takes the time of its summary, the forget a few
+	// seconds after it.
 	const started = job.started_at ?? job.created_at;
-	const finished = job.finished_at ?? job.updated_at;
-	const middle = new Date((Date.parse(started) + Date.parse(finished)) / 2).toISOString();
+	const backupEnd = Date.parse(started) + BACKUP_SUMMARY.total_duration_seconds * 1000;
+	const middle = new Date(backupEnd).toISOString();
+	const finished = new Date(backupEnd + FORGET_SECONDS * 1000).toISOString();
 	return [
 		{
 			step_id: 'backup',
@@ -194,12 +198,21 @@ function stepsOf(job: Job): JobStep[] {
 	];
 }
 
+/** The steps that the control plane signed into the job. A queued job has no list yet. */
+function plannedStepsOf(job: Job): string[] {
+	if (job.status === 'queued') return [];
+	if (job.status === 'running') return ['backup', 'forget', 'prune'];
+	return ['backup', 'forget'];
+}
+
 /** The detail of a job at the time `now`: steps, summary, progress and the state of the log. */
 export function detailOf(job: Job, now: number): JobDetail {
 	const steps = stepsOf(job);
 	const summary = steps.map((step) => step.output).find((output) => output.kind !== 'none') ?? null;
 	return {
 		...job,
+		trigger: 'schedule',
+		planned_steps: plannedStepsOf(job),
 		steps,
 		summary,
 		progress: progressOf(job, now),

@@ -14,12 +14,18 @@ const mocks = vi.hoisted(() => ({
 	getJob: vi.fn(),
 	getJobLogs: vi.fn(),
 	cancelJob: vi.fn(),
+	runPlan: vi.fn(),
+	goto: vi.fn(),
 	pushToast: vi.fn()
 }));
 
 const session = vi.hoisted(() => ({ role: 'operator' as string }));
 
-vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
+vi.mock('$app/paths', () => ({
+	resolve: (path: string, params?: Record<string, string>) =>
+		params ? path.replace('[id]', params.id) : path
+}));
+vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
 vi.mock('$app/state', () => ({ page: { params: { id: 'j_1' } } }));
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({ role: session.role })
@@ -33,7 +39,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			getJob: mocks.getJob,
 			getJobLogs: mocks.getJobLogs,
-			cancelJob: mocks.cancelJob
+			cancelJob: mocks.cancelJob,
+			runPlan: mocks.runPlan
 		}
 	};
 });
@@ -77,6 +84,8 @@ function job(overrides: Record<string, unknown> = {}) {
 		expires_at: null,
 		run_at: '2026-10-14T10:00:00Z',
 		attempt: 0,
+		trigger: 'schedule',
+		planned_steps: ['backup'],
 		steps: [
 			{
 				step_id: 'backup',
@@ -155,6 +164,7 @@ describe('the job detail screen', () => {
 				status: 'running',
 				result_code: null,
 				finished_at: null,
+				planned_steps: ['backup', 'forget', 'prune'],
 				steps: [],
 				summary: null,
 				progress: {
@@ -254,4 +264,174 @@ describe('the job detail screen', () => {
 
 		await waitFor(() => expect(mocks.cancelJob).toHaveBeenCalledWith('j_1'));
 	});
+
+	it('fr_mn_02_shows_the_header_line_and_all_steps_of_a_running_job', async () => {
+		mocks.getJob.mockResolvedValue(
+			job({
+				status: 'running',
+				result_code: null,
+				finished_at: null,
+				planned_steps: ['backup', 'forget', 'prune'],
+				steps: [],
+				summary: null,
+				progress: {
+					step_id: 'backup',
+					bytes_done: 1,
+					total_bytes: 2,
+					files_done: 1,
+					total_files: 2,
+					percent_done: 0.5,
+					seconds_elapsed: 90,
+					seconds_remaining: 90,
+					current_files: [],
+					updated_at: '2026-10-14T10:02:30Z'
+				}
+			})
+		);
+		render(JobDetailPage);
+
+		const subtitle = (await screen.findByText(/triggered by the schedule/)) as HTMLElement;
+		expect(subtitle.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+			'Plan nightly-web · host win-fs01 · triggered by the schedule · step 1 of 3'
+		);
+		expect(screen.getByRole('heading', { level: 1, name: 'j_1' })).toBeInTheDocument();
+		expect(screen.getByText('0 of 3 complete')).toBeInTheDocument();
+		// The steps that did not start show as queued.
+		expect(screen.getAllByText('queued')).toHaveLength(2);
+		expect(screen.getByText('Forget')).toBeInTheDocument();
+		expect(screen.getByText('Prune')).toBeInTheDocument();
+		expect(screen.getByRole('progressbar', { name: 'Steps' })).toHaveValue(0.5 / 3);
+	});
+
+	it('shows the own duration of each step and the trigger in the about panel', async () => {
+		mocks.getJob.mockResolvedValue(
+			job({
+				planned_steps: ['backup', 'forget'],
+				expires_at: '2026-10-14T12:00:00Z',
+				steps: [
+					{
+						step_id: 'backup',
+						status: 'success',
+						exit_code: 0,
+						started_at: '2026-10-14T10:01:00Z',
+						finished_at: '2026-10-14T10:04:12Z',
+						error_code: null,
+						error_params: {},
+						possible_stale_lock: false,
+						output: BACKUP
+					},
+					{
+						step_id: 'forget',
+						status: 'success',
+						exit_code: 0,
+						started_at: '2026-10-14T10:04:12Z',
+						finished_at: '2026-10-14T10:04:16Z',
+						error_code: null,
+						error_params: {},
+						possible_stale_lock: false,
+						output: { kind: 'forget', groups: 1, kept: 14, removed: 2, truncated: false }
+					}
+				]
+			})
+		);
+		render(JobDetailPage);
+
+		expect(await screen.findByText('2 of 2 complete')).toBeInTheDocument();
+		expect(screen.getByText(/Succeeded · 3m 12s · exit code 0/)).toBeInTheDocument();
+		expect(screen.getByText(/Succeeded · 4s · exit code 0/)).toBeInTheDocument();
+		const about = within(screen.getByText('About this job').closest('section') as HTMLElement);
+		expect(about.getByText('Trigger')).toBeInTheDocument();
+		expect(about.getByText('Schedule')).toBeInTheDocument();
+		expect(about.getByText('Expires')).toBeInTheDocument();
+	});
+
+	it('shows the steps that did not run of a failed job as not run', async () => {
+		mocks.getJob.mockResolvedValue(
+			job({
+				status: 'failed',
+				result_code: 'config_error',
+				summary: null,
+				planned_steps: ['backup', 'forget'],
+				steps: [
+					{
+						step_id: 'backup',
+						status: 'config_error',
+						exit_code: 12,
+						started_at: '2026-10-14T10:01:00Z',
+						finished_at: '2026-10-14T10:01:03Z',
+						error_code: 'step_config_error',
+						error_params: {},
+						possible_stale_lock: false,
+						output: { kind: 'none' }
+					}
+				]
+			})
+		);
+		render(JobDetailPage);
+
+		expect(await screen.findByText('1 of 2 complete')).toBeInTheDocument();
+		expect(screen.getByText('not run')).toBeInTheDocument();
+	});
+
+	it('offers Cancel job while the job is queued and not after it ends', async () => {
+		mocks.getJob.mockResolvedValue(
+			job({ status: 'queued', result_code: null, planned_steps: [], steps: [], summary: null })
+		);
+		const queued = render(JobDetailPage);
+		expect(await screen.findByRole('button', { name: 'Cancel job' })).toBeInTheDocument();
+		queued.unmount();
+
+		mocks.getJob.mockResolvedValue(job());
+		render(JobDetailPage);
+		await screen.findByText('Summary');
+		expect(screen.queryByRole('button', { name: 'Cancel job' })).not.toBeInTheDocument();
+	});
+
+	it('runs the plan again and opens the new job', async () => {
+		const user = userEvent.setup();
+		mocks.runPlan.mockResolvedValue(job({ id: 'j_2', status: 'queued' }));
+		render(JobDetailPage);
+
+		await user.click(await screen.findByRole('button', { name: 'Run again' }));
+
+		await waitFor(() => expect(mocks.runPlan).toHaveBeenCalledWith('pl_1'));
+		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(app)/jobs/j_2'));
+	});
+
+	it('disables Run again while the job runs and hides it without a plan or the right', async () => {
+		mocks.getJob.mockResolvedValue(job({ status: 'running', result_code: null }));
+		const running = render(JobDetailPage);
+		expect(await screen.findByRole('button', { name: 'Run again' })).toBeDisabled();
+		running.unmount();
+
+		mocks.getJob.mockResolvedValue(job({ plan_id: null, plan_name: null }));
+		const manual = render(JobDetailPage);
+		await screen.findByText('Summary');
+		expect(screen.queryByRole('button', { name: 'Run again' })).not.toBeInTheDocument();
+		manual.unmount();
+
+		session.role = 'viewer';
+		mocks.getJob.mockResolvedValue(job());
+		render(JobDetailPage);
+		await screen.findByText('Summary');
+		expect(screen.queryByRole('button', { name: 'Run again' })).not.toBeInTheDocument();
+	});
+
+	it('fr_lg_01_asks_for_no_line_once_the_viewer_is_full', async () => {
+		mocks.getJobLogs.mockImplementation(
+			async (_id: string, query: { after_seq: number; limit: number }) => ({
+				items: Array.from({ length: query.limit }, (_, index) =>
+					line(query.after_seq + index + 1, 'x')
+				),
+				has_more: true,
+				truncated: false,
+				purged: false
+			})
+		);
+		render(JobDetailPage);
+
+		await screen.findByText(/The viewer shows the first 10,000 lines/);
+		expect(mocks.getJobLogs).toHaveBeenCalledTimes(10);
+		for (const [, query] of mocks.getJobLogs.mock.calls) expect(query.limit).toBe(1000);
+	}, 60_000);
 });

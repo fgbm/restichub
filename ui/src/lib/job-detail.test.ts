@@ -2,9 +2,12 @@
  * The statistics of the job detail come from the restic summary and are never recomputed
  * (FR-MN-02, AC-MN-04).
  */
-import { describe, expect, it } from 'vitest';
-import type { StepOutput } from '#lib/api/index.ts';
-import { isLive, markerOf, statsOf } from './job-detail';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { JobDetail, StepOutput } from '#lib/api/index.ts';
+import { setLocale, t } from '#lib/i18n/index.ts';
+import { formatFiles, isLive, markerOf, statsOf, stepProgress, stepRows } from './job-detail';
+
+afterEach(() => setLocale('en'));
 
 const summary: StepOutput = {
 	kind: 'backup',
@@ -41,7 +44,7 @@ describe('statsOf', () => {
 		expect(stats['jobDetail.stat.dataPacked']).toBe('1,000 B');
 		const processed = statsOf(summary).find((stat) => stat.label === 'jobDetail.stat.processed');
 		expect(processed?.value).toBe('4 KiB');
-		expect(processed?.params).toEqual({ files: '115' });
+		expect(processed?.params).toEqual({ files: '115 files' });
 	});
 
 	it('shows a dash for the snapshot of a dry run', () => {
@@ -90,5 +93,78 @@ describe('the job state', () => {
 		expect(markerOf('config_error')).toBe('failed');
 		expect(markerOf('success')).toBe('success');
 		expect(markerOf('skipped')).toBe('idle');
+	});
+});
+
+describe('the Russian wording', () => {
+	it('shows the processed files with the plural form and no prefix', () => {
+		setLocale('ru');
+		const big = { ...(summary as object), total_files_processed: 128_402 } as StepOutput;
+		const processed = statsOf(big).find((stat) => stat.label === 'jobDetail.stat.processed');
+		const text = t('jobDetail.stat.processedValue', { ...processed?.params, size: '49,3 GiB' });
+		expect(text.replace(/\u00a0/g, ' ')).toBe('128 402 файла · 49,3 GiB');
+		expect(formatFiles(1)).toBe('1 файл');
+		expect(formatFiles(2)).toBe('2 файла');
+		expect(formatFiles(5)).toBe('5 файлов');
+		expect(formatFiles(11)).toBe('11 файлов');
+		expect(formatFiles(21)).toBe('21 файл');
+	});
+
+	it('names the forget step as removing snapshots', () => {
+		setLocale('ru');
+		expect(t('jobs.kind.forget')).toBe('Удаление снимков (forget)');
+	});
+});
+
+function detail(overrides: Partial<JobDetail>): JobDetail {
+	return {
+		status: 'running',
+		planned_steps: ['backup', 'forget', 'prune'],
+		steps: [],
+		progress: null,
+		...overrides
+	} as unknown as JobDetail;
+}
+
+const done = (step_id: string) =>
+	({
+		step_id,
+		status: 'success',
+		output: { kind: 'none' }
+	}) as unknown as JobDetail['steps'][number];
+
+describe('the step list', () => {
+	it('fr_mn_02_lists_the_planned_steps_that_did_not_start', () => {
+		const job = detail({
+			steps: [done('backup')],
+			progress: { step_id: 'forget', percent_done: 0.5 } as JobDetail['progress']
+		});
+		expect(stepRows(job).map((row) => [row.id, row.state])).toEqual([
+			['backup', 'done'],
+			['forget', 'running'],
+			['prune', 'pending']
+		]);
+		expect(stepProgress(job)).toEqual({
+			complete: 1,
+			total: 3,
+			position: 2,
+			fraction: 1.5 / 3
+		});
+	});
+
+	it('takes the next step as running without progress and keeps a result outside the list', () => {
+		const job = detail({ steps: [done('backup'), done('extra')] });
+		expect(stepRows(job).map((row) => [row.id, row.state])).toEqual([
+			['backup', 'done'],
+			['forget', 'running'],
+			['prune', 'pending'],
+			['extra', 'done']
+		]);
+	});
+
+	it('shows no running step in a job that ended', () => {
+		const job = detail({ status: 'failed', steps: [done('backup')] });
+		expect(stepRows(job).map((row) => row.state)).toEqual(['done', 'pending', 'pending']);
+		expect(stepProgress(job).complete).toBe(1);
 	});
 });

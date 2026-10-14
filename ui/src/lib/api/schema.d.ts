@@ -1542,10 +1542,16 @@ export interface components {
         /** @description One job with its steps, its summary and its progress (FR-MN-02). */
         JobDetailView: components["schemas"]["JobView"] & {
             log: components["schemas"]["LogInfo"];
+            /**
+             * @description The identifiers of all steps that the control plane signed into the job, in run order. Empty
+             *     before the control plane sent the job. A step that did not start has no entry in `steps`.
+             */
+            planned_steps: string[];
             progress?: components["schemas"]["ProgressView"] | null;
             /** @description Ordered by first arrival from the agent. */
             steps: components["schemas"]["StepView"][];
             summary?: components["schemas"]["StepOutput"] | null;
+            trigger: components["schemas"]["JobTrigger"];
         };
         /**
          * @description The kind of a job (FR-PR-02, the seed of the scheduler of epic #7).
@@ -1576,6 +1582,11 @@ export interface components {
          * @enum {string}
          */
         JobStatus: "queued" | "sent" | "running" | "succeeded" | "failed" | "expired" | "dead_letter";
+        /**
+         * @description What started a job.
+         * @enum {string}
+         */
+        JobTrigger: "schedule" | "manual" | "maintenance";
         /** @description One job with its lifecycle (FR-PR-01). */
         JobView: {
             /** @description Null in a response that joins no display names. */

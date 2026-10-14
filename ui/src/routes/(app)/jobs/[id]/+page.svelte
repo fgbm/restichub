@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
@@ -23,7 +24,8 @@
 		formatLocalTime,
 		formatSeconds
 	} from '#lib/format.ts';
-	import { isLive, markerOf, statsOf } from '#lib/job-detail.ts';
+	import { isLive, markerOf, statsOf, stepProgress, stepRows } from '#lib/job-detail.ts';
+	import type { StepRow } from '#lib/job-detail.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -57,6 +59,7 @@
 
 	let cancelOpen = $state(false);
 	let cancelling = $state(false);
+	let rerunning = $state(false);
 	let busy = false;
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
@@ -67,11 +70,11 @@
 	);
 	const stats = $derived(statsOf(job?.summary));
 	const capped = $derived(lines.length >= MAX_LINES);
-	// The running step has no stored result yet; the progress names it.
-	const runningStep = $derived(
-		job?.status === 'running' &&
-			job.progress &&
-			!job.steps.some((step) => step.step_id === job?.progress?.step_id)
+	const rows = $derived(job ? stepRows(job) : []);
+	const progress = $derived(job ? stepProgress(job, rows) : null);
+	const runningProgress = $derived(
+		job?.progress &&
+			rows.some((row) => row.state === 'running' && row.id === job?.progress?.step_id)
 			? job.progress
 			: null
 	);
@@ -123,7 +126,7 @@
 	}
 
 	function stepTitle(stepId: string): string {
-		const key = `jobs.kind.${stepId}` as MessageKey;
+		const key = `jobs.kind.${stepId.replaceAll('-', '_')}` as MessageKey;
 		const text = t(key);
 		return text === key ? stepId : text;
 	}
@@ -135,24 +138,29 @@
 		return text === key ? step.error_code : text;
 	}
 
+	// The duration is the own time of the step: its start and end come from the host.
 	function stepMeta(step: JobStep): string {
 		const parts = [t(`jobDetail.stepStatus.${step.status}` as MessageKey)];
-		if (step.started_at && step.finished_at) {
+		if (step.started_at && step.finished_at && step.status !== 'skipped') {
 			parts.push(formatDuration(step.started_at, step.finished_at));
 		}
 		if (step.exit_code >= 0) parts.push(t('jobDetail.exitCode', { code: String(step.exit_code) }));
 		return parts.join(' · ');
 	}
 
+	function rowMeta(row: StepRow): string {
+		if (row.step) return stepMeta(row.step);
+		if (row.state === 'running') {
+			const elapsed = runningProgress ? ` · ${formatSeconds(runningProgress.seconds_elapsed)}` : '';
+			return `${t('jobDetail.stepRunning')}${elapsed}`;
+		}
+		return t(live ? 'jobDetail.stepQueued' : 'jobDetail.stepNotRun');
+	}
+
 	function statValue(stat: ReturnType<typeof statsOf>[number]): string {
 		return stat.params
 			? t('jobDetail.stat.processedValue', { ...stat.params, size: stat.value })
 			: stat.value;
-	}
-
-	function durationOf(current: JobDetail): string {
-		if (!current.started_at) return '—';
-		return formatDuration(current.started_at, current.finished_at ?? new Date().toISOString());
 	}
 
 	async function loadJob(): Promise<void> {
@@ -169,9 +177,11 @@
 	// Reads the lines after the last held line until the log ends or the viewer is full.
 	async function loadLines(): Promise<void> {
 		try {
-			for (;;) {
+			// The viewer is full before the next request, so a full log asks for nothing.
+			while (lines.length < MAX_LINES) {
 				const after = lines.length > 0 ? lines[lines.length - 1].seq : 0;
-				const result = await service.getJobLogs(id, { after_seq: after, limit: LOG_PAGE });
+				const limit = Math.min(LOG_PAGE, MAX_LINES - lines.length);
+				const result = await service.getJobLogs(id, { after_seq: after, limit });
 				logTruncated = result.truncated;
 				logPurged = result.purged;
 				logError = false;
@@ -219,6 +229,20 @@
 		}
 	}
 
+	async function runAgain(): Promise<void> {
+		if (!job?.plan_id || rerunning) return;
+		rerunning = true;
+		try {
+			const started = await service.runPlan(job.plan_id);
+			pushToast('success', t('plans.runQueued'));
+			await goto(resolve('/(app)/jobs/[id]', { id: started.id }));
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			rerunning = false;
+		}
+	}
+
 	async function confirmCancel(): Promise<void> {
 		cancelling = true;
 		try {
@@ -241,8 +265,6 @@
 	<title>{title} · {t('jobs.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<a class="back" href={resolve('/(app)/jobs')}>← {t('jobDetail.back')}</a>
-
 {#if loading}
 	<Skeleton variant="row" />
 	<div class="gap"></div>
@@ -255,26 +277,36 @@
 	<header class="head">
 		<div class="head__text">
 			<div class="head__title-row">
-				<h1 class="head__title">{title}</h1>
+				<h1 class="head__title mono">{job.id}</h1>
 				<StatusPill {tone}>{statusLabel}</StatusPill>
 				{#if live}<span class="head__live">{t('jobDetail.live')}</span>{/if}
 			</div>
 			<p class="head__subtitle">
-				<span class="mono">{job.id}</span>
-				· {t('jobs.host')}
-				<strong>{job.agent_hostname ?? t('common.none')}</strong>
-				{#if job.repository_name}
-					· {t('jobs.repository')} <strong>{job.repository_name}</strong>
+				{#if job.plan_name}
+					{t('jobs.plan')}
+					<a href={resolve('/(app)/plans')}>{job.plan_name}</a>
+					·
+				{:else}
+					{t(`jobs.kind.${job.kind}` as MessageKey)}
+					·
 				{/if}
-				· {t('jobs.duration')}
-				{durationOf(job)}
+				{t('jobs.host').toLowerCase()}
+				<a href={resolve('/(app)/hosts')}>{job.agent_hostname ?? t('common.none')}</a>
+				· {t(`jobDetail.triggeredBy.${job.trigger}` as MessageKey)}
+				{#if progress && progress.total > 0 && live}
+					· {t('jobDetail.stepOf', { current: progress.position, total: progress.total })}
+				{/if}
 			</p>
 			{#if reasonOf(job)}
 				<p class="head__reason">{reasonOf(job)}</p>
 			{/if}
 		</div>
 		<div class="head__actions">
-			<Button icon="refresh" onclick={refresh}>{t('jobDetail.refresh')}</Button>
+			{#if canWrite && job.plan_id}
+				<Button disabled={live} loading={rerunning} onclick={runAgain}>
+					{t('jobDetail.runAgain')}
+				</Button>
+			{/if}
 			{#if canWrite && live}
 				<Button variant="danger" icon="stop" onclick={() => (cancelOpen = true)}>
 					{t('jobs.cancel')}
@@ -302,76 +334,83 @@
 		<div class="layout__main">
 			<Panel
 				title={t('jobDetail.steps')}
-				subtitle={t('jobDetail.stepsReported', { count: String(job.steps.length) })}
+				subtitle={progress && progress.total > 0
+					? t('jobDetail.stepsComplete', { done: progress.complete, total: progress.total })
+					: undefined}
 			>
-				{#if job.steps.length === 0 && !runningStep}
+				{#if rows.length === 0}
 					<p class="muted">{t('jobDetail.stepsEmpty')}</p>
 				{:else}
+					{#if progress}
+						<progress
+							class="progress progress--steps"
+							aria-label={t('jobDetail.steps')}
+							max="1"
+							value={progress.fraction}
+						></progress>
+					{/if}
 					<ol class="timeline">
-						{#each job.steps as step (step.step_id)}
+						{#each rows as row (row.id)}
 							<li class="timeline__item">
-								<span class="timeline__marker timeline__marker--{markerOf(step.status)}">
-									<Icon name={MARKER_ICONS[markerOf(step.status)]} size="xs" />
-								</span>
+								{#if row.state === 'running'}
+									<span class="timeline__marker timeline__marker--running"></span>
+								{:else}
+									{@const marker = row.step ? markerOf(row.step.status) : 'idle'}
+									<span class="timeline__marker timeline__marker--{marker}">
+										<Icon name={MARKER_ICONS[marker]} size="xs" />
+									</span>
+								{/if}
 								<div class="timeline__head">
-									<span class="timeline__title">{stepTitle(step.step_id)}</span>
-									<span class="timeline__meta">{stepMeta(step)}</span>
+									<span class="timeline__title">{stepTitle(row.id)}</span>
+									<span class="timeline__meta">{rowMeta(row)}</span>
 								</div>
-								{#if stepError(step)}
-									<p class="timeline__body">{stepError(step)}</p>
-								{/if}
-								{#if step.possible_stale_lock}
-									<p class="timeline__body">{t('jobDetail.staleLock')}</p>
-								{/if}
-								{#if statsOf(step.output).length > 0}
+								{#if row.step}
+									{#if stepError(row.step)}
+										<p class="timeline__body">{stepError(row.step)}</p>
+									{/if}
+									{#if row.step.possible_stale_lock}
+										<p class="timeline__body">{t('jobDetail.staleLock')}</p>
+									{/if}
+									{#if statsOf(row.step.output).length > 0}
+										<p class="timeline__body">
+											{#each statsOf(row.step.output).slice(0, 3) as stat, index (stat.label)}
+												{index > 0 ? ' · ' : ''}{t(stat.label)}: {statValue(stat)}
+											{/each}
+										</p>
+									{/if}
+								{:else if row.state === 'running' && runningProgress}
+									<progress
+										class="progress"
+										aria-label={t('jobDetail.progress')}
+										max="1"
+										value={runningProgress.percent_done}
+									></progress>
 									<p class="timeline__body">
-										{#each statsOf(step.output).slice(0, 3) as stat, index (stat.label)}
-											{index > 0 ? ' · ' : ''}{t(stat.label)}: {statValue(stat)}
-										{/each}
+										{#if runningProgress.total_files > 0}
+											{t('jobDetail.progressFiles', {
+												done: formatCount(runningProgress.files_done),
+												total: formatCount(runningProgress.total_files)
+											})}
+											·
+										{/if}
+										{t('jobDetail.progressBytes', {
+											done: formatBytes(runningProgress.bytes_done),
+											total: formatBytes(runningProgress.total_bytes)
+										})}
+										{#if runningProgress.seconds_remaining > 0}
+											· {t('jobDetail.progressRemaining', {
+												time: formatSeconds(runningProgress.seconds_remaining)
+											})}
+										{/if}
 									</p>
+									{#if runningProgress.current_files.length > 0}
+										<p class="timeline__body timeline__body--mono">
+											{t('jobDetail.progressCurrent', { file: runningProgress.current_files[0] })}
+										</p>
+									{/if}
 								{/if}
 							</li>
 						{/each}
-						{#if runningStep}
-							<li class="timeline__item">
-								<span class="timeline__marker timeline__marker--running"></span>
-								<div class="timeline__head">
-									<span class="timeline__title">{stepTitle(runningStep.step_id)}</span>
-									<span class="timeline__meta">
-										{t('jobDetail.stepRunning')} · {formatSeconds(runningStep.seconds_elapsed)}
-									</span>
-								</div>
-								<progress
-									class="progress"
-									aria-label={t('jobDetail.progress')}
-									max="1"
-									value={runningStep.percent_done}
-								></progress>
-								<p class="timeline__body">
-									{#if runningStep.total_files > 0}
-										{t('jobDetail.progressFiles', {
-											done: formatCount(runningStep.files_done),
-											total: formatCount(runningStep.total_files)
-										})}
-										·
-									{/if}
-									{t('jobDetail.progressBytes', {
-										done: formatBytes(runningStep.bytes_done),
-										total: formatBytes(runningStep.total_bytes)
-									})}
-									{#if runningStep.seconds_remaining > 0}
-										· {t('jobDetail.progressRemaining', {
-											time: formatSeconds(runningStep.seconds_remaining)
-										})}
-									{/if}
-								</p>
-								{#if runningStep.current_files.length > 0}
-									<p class="timeline__body timeline__body--mono">
-										{t('jobDetail.progressCurrent', { file: runningStep.current_files[0] })}
-									</p>
-								{/if}
-							</li>
-						{/if}
 					</ol>
 				{/if}
 			</Panel>
@@ -419,6 +458,8 @@
 						<dt>{t('jobs.repository')}</dt>
 						<dd><a href={resolve('/(app)/repositories')}>{job.repository_name}</a></dd>
 					{/if}
+					<dt>{t('jobDetail.trigger')}</dt>
+					<dd>{t(`jobDetail.trigger.${job.trigger}` as MessageKey)}</dd>
 					<dt>{t('jobDetail.queuedAt')}</dt>
 					<dd>{formatLocalTime(job.created_at)}</dd>
 					{#if job.started_at}
@@ -429,7 +470,7 @@
 						<dt>{t('jobDetail.finishedAt')}</dt>
 						<dd>{formatLocalTime(job.finished_at)}</dd>
 					{/if}
-					{#if job.expires_at && live}
+					{#if job.expires_at}
 						<dt>{t('jobDetail.expiresAt')}</dt>
 						<dd>{formatLocalTime(job.expires_at)}</dd>
 					{/if}
@@ -455,18 +496,6 @@
 />
 
 <style>
-	.back {
-		display: inline-block;
-		margin-bottom: var(--rh-space-4);
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-		text-decoration: none;
-	}
-
-	.back:hover {
-		color: var(--rh-color-text);
-	}
-
 	.gap {
 		height: var(--rh-space-4);
 	}
@@ -521,11 +550,6 @@
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 		overflow-wrap: anywhere;
-	}
-
-	.head__subtitle strong {
-		color: var(--rh-color-text);
-		font-weight: var(--rh-font-weight-medium);
 	}
 
 	.head__reason {
@@ -692,6 +716,10 @@
 		background-color: var(--rh-color-canvas-inset);
 		overflow: hidden;
 		appearance: none;
+	}
+
+	.progress--steps {
+		margin: 0 0 var(--rh-space-5);
 	}
 
 	.progress::-webkit-progress-bar {
