@@ -125,7 +125,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-SC-04 | FR-SC-04, FR-SC-05 | 7-day run: 20 agents, one repository, backup every 15 minutes, `forget` and `prune` every 2 hours, `check` every day. **Expected:** 0 jobs with status `failed` because of a lock. 0 errors from `restic check`. | L |
 | AC-SC-05 | FR-SC-05 | Fake restic returns code 11 five times. **Expected:** retries with increasing delay. After the limit, the job goes to the dead-letter state and an alert occurs. | A |
 | AC-SC-06 | FR-SC-06 | Kill restic with SIGKILL during a backup. **Expected:** when 30 minutes or more pass and the repository is idle, the CP runs `unlock`. The next backup succeeds without a person. Only an Admin can run the `unlock_all` step after a confirmation. The audit log contains the event. | A |
-| AC-SC-07 | FR-SC-07 | An agent is offline for 3 plan intervals. **Expected:** the policies "run all", "run latest" and "skip" create 3, 1 and 0 jobs. Expired jobs get the status `expired`. | A |
+| AC-SC-07 | FR-SC-07 | An agent is offline for 3 plan intervals. **Expected:** the policies "run all", "run latest" and "skip" create 3, 1 and 0 jobs. The count is the missed fire times. A fire time within the grace window of the pass is on time, and it is in addition to the count. Expired jobs get the status `expired`. | A |
 | AC-SC-08 | FR-SC-08 | Limit 1 job for each agent and 2 jobs for each repository. Start 10 jobs at the same time. **Expected:** the start log shows that no limit was exceeded. | A |
 | AC-SC-09 | FR-SC-09, NFR-PERF-02 | Manual run for an online agent. **Expected:** from the click to the restic start, 3 s or less (95th percentile of 100 runs). | L |
 

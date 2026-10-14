@@ -213,3 +213,176 @@ async fn ac_sc_07_a_revoked_agent_creates_no_jobs() {
 
     db.cleanup().await;
 }
+
+/// A fire time within the grace window of the pass is on time and always runs, whatever the missed
+/// run policy: the policy applies only to the older fire times (FR-SC-07). AC-SC-07 counts the jobs
+/// for the fire times that the pass missed, so the on-time run is in addition to that count.
+#[tokio::test]
+async fn ac_sc_07_an_on_time_run_creates_one_job_for_every_policy() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let database = db.database();
+    let tenant = create_tenant_with_key(database, "on-time").await;
+    let secret = seed_secret(database, tenant, "s").await;
+    let repository = seed_repository(database, tenant, "r", secret).await;
+    let profile = seed_profile(database, tenant, "p", repository).await;
+    let agent = seed_agent(database, tenant, "h").await;
+
+    let start = utc(2025, Month::January, 1, 0, 0);
+    let mut plan_list = Vec::new();
+    for (name, policy) in [
+        ("run-all", MissedRunPolicy::RunAll),
+        ("latest", MissedRunPolicy::LatestOnly),
+        ("skip", MissedRunPolicy::Skip),
+    ] {
+        plan_list.push(
+            seed_scheduled_plan(
+                database,
+                tenant,
+                name,
+                profile,
+                agent,
+                "0 * * * *",
+                "UTC",
+                policy,
+                Some(start),
+            )
+            .await,
+        );
+    }
+
+    // The pass runs five seconds after the fire time: within the grace window.
+    let clock = ManualClock::new(start);
+    clock.advance(5);
+    scheduler::run_once(database, &clock)
+        .await
+        .expect("the pass");
+
+    for plan in plan_list {
+        assert_eq!(
+            plan_fire_times(database, tenant, plan).await,
+            vec![start],
+            "an on-time run creates one job for every policy"
+        );
+    }
+
+    db.cleanup().await;
+}
+
+/// After a 72 hour downtime the run_all policy creates a job only for the fire times that a job
+/// still outlives (24 h lifetime): the latest ones, at most 100 (FR-SC-07).
+#[tokio::test]
+async fn ac_sc_07_run_all_keeps_the_latest_unexpired_fire_times() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let database = db.database();
+    let tenant = create_tenant_with_key(database, "downtime").await;
+    let secret = seed_secret(database, tenant, "s").await;
+    let repository = seed_repository(database, tenant, "r", secret).await;
+    let profile = seed_profile(database, tenant, "p", repository).await;
+    let agent = seed_agent(database, tenant, "h").await;
+
+    let start = utc(2025, Month::January, 1, 0, 0);
+    let plan = seed_scheduled_plan(
+        database,
+        tenant,
+        "hourly",
+        profile,
+        agent,
+        "0 * * * *",
+        "UTC",
+        MissedRunPolicy::RunAll,
+        Some(start),
+    )
+    .await;
+
+    let clock = ManualClock::new(start);
+    clock.advance(72 * 3600);
+    scheduler::run_once(database, &clock)
+        .await
+        .expect("the pass");
+
+    let jobs = plan_jobs(database, tenant, plan).await;
+    assert!(jobs.len() <= 100, "the cap bounds one pass");
+    let now = start + Duration::hours(72);
+    for job in &jobs {
+        let fire_time = job.fire_time.expect("a scheduled job holds a fire time");
+        assert!(
+            fire_time + Duration::hours(24) > now,
+            "no job is created for an expired fire time"
+        );
+    }
+    // The 24 hour lifetime keeps the latest unexpired hourly fire times: 49:00 through 72:00. The
+    // fire time at 48:00 is expired because its job would end exactly at now.
+    let fires = plan_fire_times(database, tenant, plan).await;
+    assert_eq!(fires.len(), 24);
+    assert_eq!(fires.first(), Some(&(start + Duration::hours(49))));
+    assert_eq!(fires.last(), Some(&now));
+
+    db.cleanup().await;
+}
+
+/// One failing plan does not roll back the whole tenant pass: each plan runs in its own savepoint,
+/// so the other due plans of the tenant still create their jobs (AC-SC-02).
+#[tokio::test]
+async fn ac_sc_02_a_failing_plan_does_not_roll_back_the_tenant_pass() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let database = db.database();
+    let tenant = create_tenant_with_key(database, "isolation").await;
+    let secret = seed_secret(database, tenant, "s").await;
+    let repository = seed_repository(database, tenant, "r", secret).await;
+    let profile = seed_profile(database, tenant, "p", repository).await;
+    let agent = seed_agent(database, tenant, "h").await;
+
+    let start = utc(2025, Month::January, 1, 0, 0);
+    // The first plan holds a cron that names no instant, so the scheduler fails on it. It must not
+    // stop the pass: the second plan still creates its job.
+    let impossible = seed_scheduled_plan(
+        database,
+        tenant,
+        "impossible",
+        profile,
+        agent,
+        "0 0 31 2 *",
+        "UTC",
+        MissedRunPolicy::RunAll,
+        Some(start),
+    )
+    .await;
+    let good = seed_scheduled_plan(
+        database,
+        tenant,
+        "good",
+        profile,
+        agent,
+        "0 * * * *",
+        "UTC",
+        MissedRunPolicy::RunAll,
+        Some(start),
+    )
+    .await;
+
+    let clock = ManualClock::new(start);
+    clock.advance(5);
+    scheduler::run_once(database, &clock)
+        .await
+        .expect("the pass");
+
+    assert_eq!(
+        plan_fire_times(database, tenant, good).await,
+        vec![start],
+        "the good plan creates its job"
+    );
+    assert!(
+        plan_fire_times(database, tenant, impossible)
+            .await
+            .is_empty(),
+        "the failing plan creates no job"
+    );
+
+    db.cleanup().await;
+}

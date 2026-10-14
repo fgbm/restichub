@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use common::{
     app_with_kek, create_tenant_with_key, request, seed_agent, seed_profile, seed_repository,
-    seed_secret, seed_session, send,
+    seed_scheduled_job, seed_secret, seed_session, send,
 };
 
 /// A repository, a profile and an agent of a tenant, for a plan.
@@ -183,6 +183,18 @@ async fn the_plan_create_validates_the_schedule_and_the_references() {
                 "profile_id": profile_id,
                 "agent_id": agent_id,
                 "cron": "* * * *",
+                "time_zone": "UTC",
+                "missed_run_policy": "run_all",
+            }),
+            "cron",
+        ),
+        (
+            "an impossible cron expression",
+            json!({
+                "name": "impossible-cron",
+                "profile_id": profile_id,
+                "agent_id": agent_id,
+                "cron": "0 0 31 2 *",
                 "time_zone": "UTC",
                 "missed_run_policy": "run_all",
             }),
@@ -439,6 +451,207 @@ async fn the_plan_role_matrix_and_the_platform_tenant() {
     let admin = seed_session(db.database(), PLATFORM_TENANT_ID, "root", "platform_admin").await;
     let (status, _, _) = send(&app, request("GET", "/api/v1/plans", Some(&admin), None)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+
+    db.cleanup().await;
+}
+
+/// A rename or a policy change keeps the pending fire time; a change of the cron, the time zone or
+/// the enabled flag recomputes it (FR-SC-01).
+#[tokio::test]
+async fn the_plan_update_recomputes_the_fire_time_only_when_the_schedule_changes() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "plan-recompute").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "operator", "operator").await;
+    let (_repository, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
+
+    let plan = create_plan(
+        &app,
+        &cookie,
+        plan_body("rename-me", &profile_id, &agent_id),
+    )
+    .await;
+    let plan_id = plan["id"]
+        .as_str()
+        .expect("the plan holds an id")
+        .to_owned();
+    let before = plan["next_run_at"]
+        .as_str()
+        .expect("the created plan holds a next run time")
+        .to_owned();
+
+    // Renaming the plan leaves the next fire time unchanged.
+    let (status, _, renamed) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/plans/{plan_id}"),
+            Some(&cookie),
+            Some(json!({
+                "name": "renamed",
+                "profile_id": profile_id,
+                "agent_id": agent_id,
+                "cron": "0 2 * * *",
+                "time_zone": "Europe/Berlin",
+                "missed_run_policy": "run_all",
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["plan"]["name"], "renamed");
+    assert_eq!(
+        renamed["plan"]["next_run_at"],
+        before.as_str(),
+        "a rename keeps the next run time"
+    );
+
+    // Disabling the plan recomputes the schedule and clears the fire time.
+    let (status, _, disabled) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/plans/{plan_id}"),
+            Some(&cookie),
+            Some(json!({
+                "profile_id": profile_id,
+                "agent_id": agent_id,
+                "cron": "0 2 * * *",
+                "time_zone": "Europe/Berlin",
+                "missed_run_policy": "run_all",
+                "enabled": false,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{disabled}");
+    assert!(disabled["plan"]["next_run_at"].is_null());
+
+    db.cleanup().await;
+}
+
+/// The preview endpoint returns the next fire times of an unsaved schedule. A Viewer may call it,
+/// because it needs the Plans read right only (FR-SC-01).
+#[tokio::test]
+async fn the_schedule_preview_returns_the_fire_times_before_a_save() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "plan-preview-free").await;
+    let app = app_with_kek(db.database());
+    let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
+
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/plans/preview",
+            Some(&viewer),
+            Some(json!({
+                "cron": "0 2 * * *",
+                "time_zone": "Europe/Berlin",
+                "count": 3,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["time_zone"], "Europe/Berlin");
+    assert_eq!(preview["runs"].as_array().map(Vec::len), Some(3));
+
+    // The count is bounded, and a wrong cron names the field.
+    for count in [0, 21] {
+        let (status, _, _) = send(
+            &app,
+            request(
+                "POST",
+                "/api/v1/plans/preview",
+                Some(&viewer),
+                Some(json!({"cron": "0 2 * * *", "time_zone": "UTC", "count": count})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "count={count}");
+    }
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/plans/preview",
+            Some(&viewer),
+            Some(json!({"cron": "* * * *", "time_zone": "UTC", "count": 3})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "cron");
+
+    db.cleanup().await;
+}
+
+/// Deleting a plan moves its queued jobs to the terminal `cancelled` status in the delete
+/// transaction (FR-SC-07).
+#[tokio::test]
+async fn deleting_a_plan_cancels_its_queued_jobs() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "plan-cancel").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "operator", "operator").await;
+    let (repository_id, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
+
+    let plan = create_plan(
+        &app,
+        &cookie,
+        plan_body("cancelled", &profile_id, &agent_id),
+    )
+    .await;
+    let plan_id = plan["id"]
+        .as_str()
+        .expect("the plan holds an id")
+        .to_owned();
+    let job = seed_scheduled_job(
+        db.database(),
+        tenant,
+        restichub_db::PlanId::from_uuid(uuid::Uuid::parse_str(&plan_id).expect("a plan id")),
+        restichub_db::AgentId::from_uuid(uuid::Uuid::parse_str(&agent_id).expect("an agent id")),
+        restichub_db::RepositoryId::from_uuid(
+            uuid::Uuid::parse_str(&repository_id).expect("a repository id"),
+        ),
+        time::OffsetDateTime::now_utc(),
+    )
+    .await;
+
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/plans/{plan_id}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .expect("a transaction");
+    let stored = restichub_db::jobs::get(&mut tx, job)
+        .await
+        .expect("cannot read the job")
+        .expect("the job exists");
+    tx.commit().await.expect("cannot commit");
+    assert_eq!(stored.status, restichub_db::JobStatus::Failed);
+    assert_eq!(
+        stored.result_code,
+        Some(restichub_db::JobResultCode::Cancelled)
+    );
 
     db.cleanup().await;
 }

@@ -171,6 +171,11 @@ pub fn write_body(
             "time_zone": "UTC",
             "missed_run_policy": "run_all",
         })),
+        ("POST", "/api/v1/plans/preview") => Some(json!({
+            "cron": "0 2 * * *",
+            "time_zone": "UTC",
+            "count": 3,
+        })),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
@@ -609,6 +614,44 @@ pub async fn seed_job(
     )
     .await
     .expect("cannot create the job");
+    tx.commit().await.expect("cannot commit the job");
+    id
+}
+
+/// Inserts a queued scheduled job of one plan and returns its identifier (FR-SC-02).
+///
+/// The scheduler creates the row in production; a test seeds it directly, so a route test can name
+/// the job of a plan without a scheduler pass.
+pub async fn seed_scheduled_job(
+    db: &Database,
+    tenant: TenantId,
+    plan: restichub_db::PlanId,
+    agent: restichub_db::AgentId,
+    repository: restichub_db::RepositoryId,
+    fire_time: OffsetDateTime,
+) -> restichub_db::JobId {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::JobId::new();
+    restichub_db::jobs::create_scheduled(
+        &mut tx,
+        &restichub_db::jobs::NewJob {
+            id,
+            kind: restichub_db::JobKind::Backup,
+            agent_id: agent,
+            repository_id: Some(repository),
+            plan_id: Some(plan),
+            fire_time: Some(fire_time),
+            expires_at: None,
+            location_fingerprint: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the scheduled job")
+    .expect("the scheduled job is created");
     tx.commit().await.expect("cannot commit the job");
     id
 }

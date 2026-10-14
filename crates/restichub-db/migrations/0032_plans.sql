@@ -83,12 +83,12 @@ ALTER TABLE jobs ADD CONSTRAINT jobs_plan_fk FOREIGN KEY (tenant_id, plan_id)
 
 ALTER TABLE jobs ADD CONSTRAINT jobs_plan_fire_unique UNIQUE (plan_id, fire_time);
 
--- One active job for each repository, for the maintenance kinds only. Several backup jobs may run
--- on one repository at the same time (FR-SC-04), so the partial index covers `init`, `test_access`,
--- `forget`, `prune` and `check` only. The barrier that serializes a maintenance kind against the
--- others is part of the queue (a later part of epic #7).
+-- One active job for each repository, for every kind except `backup`. Several backup jobs may run
+-- on one repository at the same time (FR-SC-04), so the partial index excludes `backup` only. The
+-- barrier that serializes a maintenance kind against the others is part of the queue (a later part
+-- of epic #7).
 DROP INDEX jobs_active_repository;
 CREATE UNIQUE INDEX jobs_active_repository ON jobs (repository_id)
     WHERE repository_id IS NOT NULL
-      AND kind IN ('init', 'test_access', 'forget', 'prune', 'check')
+      AND kind <> 'backup'
       AND status IN ('queued', 'sent', 'running');

@@ -95,6 +95,24 @@ pub enum DbError {
 }
 
 impl DbError {
+    /// A stable short code of the failure, for a log line. It never holds a value.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Connect(_) => "connect",
+            Self::InvalidUrl(_) => "invalid_url",
+            Self::Migrate(_) => "migrate",
+            Self::Query(_) => "query",
+            Self::InsecureRuntimeRole { .. } => "insecure_runtime_role",
+            Self::TenantNotCreated(_) => "tenant_not_created",
+            Self::EnrollmentTenantUnset => "enrollment_tenant_unset",
+            Self::UnknownWriteStatus(_) => "unknown_write_status",
+            Self::UnknownEnrollmentOutcome(_) => "unknown_enrollment_outcome",
+            Self::AccountCreateRefused => "account_create_refused",
+            Self::MigrationsBehind { .. } => "migrations_behind",
+            Self::MigrationsAhead { .. } => "migrations_ahead",
+        }
+    }
+
     /// True for a unique constraint violation (SQLSTATE 23505).
     pub fn is_unique_violation(&self) -> bool {
         self.sqlstate().as_deref() == Some("23505")

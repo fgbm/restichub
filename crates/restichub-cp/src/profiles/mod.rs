@@ -27,6 +27,7 @@ use restichub_compiler::{
 };
 use restichub_db::agents::{self as agents_repo, Agent};
 use restichub_db::audit::{AuditAction, diff};
+use restichub_db::plans as plans_repo;
 use restichub_db::profiles::{self as repo, ProfileCursor, ProfilePage};
 use restichub_db::repositories::{self as repositories_repo, Repository};
 use restichub_db::{AgentId, BackendKind, ProfileId};
@@ -45,7 +46,7 @@ use crate::validation::Reason;
 
 pub use settings::{
     BackupOptions, CheckOptions, CreateProfileRequest, GroupBy, HookParameter, HookPhase, HookRef,
-    MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS, PreviewEnvView,
+    MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS, PlanWarning, PreviewEnvView,
     PreviewRequest, PreviewResponse, PreviewStepView, ProfileListResponse, ProfilePaths,
     ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter, UpdateProfileRequest,
 };
@@ -195,6 +196,7 @@ pub async fn create_profile(
         Json(ProfileResponse {
             profile: ProfileView::try_from(&created)?,
             warnings,
+            plan_warnings: Vec::new(),
         }),
     ))
 }
@@ -221,6 +223,7 @@ pub async fn update_profile(
 ) -> Result<Json<ProfileResponse>, ApiError> {
     context.authorize(Operation::ProfilesWrite)?;
     let profile_id = parse_profile_id(&id)?;
+    let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     // The read locks the row: a concurrent delete cannot remove it between the read and the write.
     let Some(current) = repo::get_for_update(&mut tx, profile_id).await? else {
@@ -243,15 +246,20 @@ pub async fn update_profile(
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let updated = repo::get(&mut tx, profile_id).await?;
-    tx.commit().await?;
     let Some(updated) = updated else {
         return Err(ApiError::internal(
             "the updated profile is not found after the read",
         ));
     };
+    // The plans of the profile are revalidated against the facts of their agent. A plan that no
+    // longer compiles is a warning, not a refusal; it fails at dispatch time in a later part of
+    // epic #7.
+    let plan_warnings = plan_compile_warnings(&mut tx, &updated, now).await?;
+    tx.commit().await?;
     Ok(Json(ProfileResponse {
         profile: ProfileView::try_from(&updated)?,
         warnings,
+        plan_warnings,
     }))
 }
 
@@ -278,7 +286,14 @@ pub async fn delete_profile(
     let Some(current) = repo::get_for_update(&mut tx, profile_id).await? else {
         return Err(ApiError::not_found());
     };
-    repo::delete(&mut tx, profile_id).await?;
+    // A plan binds the profile. Remove or repoint the plans first, so the foreign key never blocks
+    // the delete with an internal error (FR-SC-11).
+    if restichub_db::plans::is_profile_used(&mut tx, profile_id).await? {
+        return Err(ApiError::conflict());
+    }
+    repo::delete(&mut tx, profile_id)
+        .await
+        .map_err(map_write_error)?;
     let mut event =
         context.audit_event(AuditAction::ProfileDelete, "profile", profile_id.as_uuid());
     event.diff = Some(diff(Some(&stored_value(&current)), None, &[]));
@@ -511,35 +526,62 @@ pub(crate) fn compile_for_agent(
     compile(&compiler_profile, &target).map_err(compile_error_to_api)
 }
 
+/// The plans of the profile that no longer compile for the facts of their agent (FR-SC-11).
+///
+/// The profile update reports them and does not refuse the change. Such a plan keeps its schedule
+/// and fails at dispatch time, when the queue recompiles the profile for the agent.
+async fn plan_compile_warnings(
+    tx: &mut restichub_db::TenantTx<'_>,
+    profile: &repo::Profile,
+    now: time::OffsetDateTime,
+) -> Result<Vec<PlanWarning>, ApiError> {
+    let compiler_profile = compiler_profile_from_row(profile)?;
+    let mut warnings = Vec::new();
+    for plan in plans_repo::list_by_profile(tx, profile.id).await? {
+        let Some(agent) = agents_repo::get(tx, plan.agent_id).await? else {
+            continue;
+        };
+        let Ok(target) = target_facts(&agent, now) else {
+            continue;
+        };
+        if let Err(error) = compile(&compiler_profile, &target) {
+            let (field, reason) = compile_error_parts(&error);
+            warnings.push(PlanWarning {
+                plan_id: plan.id.to_string(),
+                name: plan.name,
+                field,
+                reason: reason.as_str().to_owned(),
+            });
+        }
+    }
+    Ok(warnings)
+}
+
 /// Turns a compiler rejection into a field error (AC-PF-02).
 fn compile_error_to_api(error: CompileError) -> ApiError {
+    let (field, reason) = compile_error_parts(&error);
+    ApiError::invalid_field(field, reason)
+}
+
+/// The field and the stable reason of a compiler rejection (AC-PF-02).
+fn compile_error_parts(error: &CompileError) -> (String, Reason) {
     match error {
         CompileError::UnknownVariable { field, .. }
         | CompileError::MissingLabel { field, .. }
         | CompileError::InvalidDate { field, .. }
         | CompileError::UnterminatedTemplate { field }
-        | CompileError::InvalidValue { field } => {
-            ApiError::invalid_field(field.as_str(), Reason::InvalidFormat)
-        }
-        CompileError::InvalidCron { .. } => ApiError::invalid_field("cron", Reason::InvalidFormat),
-        CompileError::NoPaths { .. } => ApiError::invalid_field("paths", Reason::Empty),
+        | CompileError::InvalidValue { field } => (field.to_string(), Reason::InvalidFormat),
+        CompileError::InvalidCron { .. } => ("cron".to_owned(), Reason::InvalidFormat),
+        CompileError::NoPaths { .. } => ("paths".to_owned(), Reason::Empty),
         CompileError::UnknownHook { field, .. }
         | CompileError::UnknownHookParameter { field, .. }
         | CompileError::DuplicateHookParameter { field, .. } => {
-            ApiError::invalid_field(field.as_str(), Reason::Unknown)
+            (field.to_string(), Reason::Unknown)
         }
-        CompileError::UnsupportedOs { field, .. } => {
-            ApiError::invalid_field(field.as_str(), Reason::Unsupported)
-        }
-        CompileError::IncompatibleOption { field, .. } => {
-            ApiError::invalid_field(field.as_str(), Reason::Incompatible)
-        }
-        CompileError::UnsupportedRestic { .. } => {
-            ApiError::invalid_field("agent_id", Reason::Incompatible)
-        }
-        CompileError::StepsRejected { .. } => {
-            ApiError::invalid_field("steps", Reason::InvalidFormat)
-        }
+        CompileError::UnsupportedOs { field, .. } => (field.to_string(), Reason::Unsupported),
+        CompileError::IncompatibleOption { field, .. } => (field.to_string(), Reason::Incompatible),
+        CompileError::UnsupportedRestic { .. } => ("agent_id".to_owned(), Reason::Incompatible),
+        CompileError::StepsRejected { .. } => ("steps".to_owned(), Reason::InvalidFormat),
     }
 }
 

@@ -71,6 +71,52 @@ async fn db_a_plan_refuses_a_foreign_tenant_profile_or_agent() -> TestResult {
     Ok(())
 }
 
+/// The `jobs_active_repository` index covers every kind except `backup` (FR-SC-04).
+///
+/// A maintenance job already holds the seeded repository, so a second non-backup active job is
+/// refused. A backup job is not covered: several backup jobs may run on one repository.
+#[tokio::test]
+async fn db_the_active_repository_index_covers_every_kind_except_backup() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+    seed_tenant(db.database(), tenant_a).await?;
+
+    {
+        let mut tx = db.database().begin_tenant(tenant_a).await?;
+        let restore = sqlx::query(
+            "INSERT INTO jobs (id, tenant_id, kind, agent_id, repository_id, status) \
+             VALUES ($1, $2, 'restore', (SELECT id FROM agents WHERE tenant_id = $2), \
+                     (SELECT id FROM repositories WHERE tenant_id = $2), 'queued')",
+        )
+        .bind(crate::JobId::new())
+        .bind(tenant_a)
+        .execute(tx.as_conn())
+        .await;
+        assert_code(restore, "23505");
+    }
+
+    {
+        let mut tx = db.database().begin_tenant(tenant_a).await?;
+        for _ in 0..2 {
+            sqlx::query(
+                "INSERT INTO jobs (id, tenant_id, kind, agent_id, repository_id, status) \
+                 VALUES ($1, $2, 'backup', (SELECT id FROM agents WHERE tenant_id = $2), \
+                         (SELECT id FROM repositories WHERE tenant_id = $2), 'queued')",
+            )
+            .bind(crate::JobId::new())
+            .bind(tenant_a)
+            .execute(tx.as_conn())
+            .await?;
+        }
+        tx.commit().await?;
+    }
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// The name is unique for the tenant (FR-SC-01).
 #[tokio::test]
 async fn db_a_plan_name_is_unique_for_the_tenant() -> TestResult {

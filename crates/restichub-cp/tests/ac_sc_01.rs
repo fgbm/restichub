@@ -129,20 +129,21 @@ async fn ac_sc_01_the_spring_change_gives_one_run_right_after_the_clock_change()
     .await;
 
     let clock = ManualClock::new(start);
-    clock.advance(seconds_between(start, utc(2025, Month::April, 1, 12, 0)));
+    // The pass runs after the second daily run, so the change-day run is still within the job
+    // lifetime.
+    clock.advance(seconds_between(start, utc(2025, Month::March, 31, 0, 30)));
     scheduler::run_once(database, &clock)
         .await
         .expect("the pass");
 
     let fires = plan_fire_times(database, tenant, plan).await;
-    // One run for each day from 2025-03-30 to 2025-04-01. In the gap the run is at the first instant
-    // after the change, 03:00 local (01:00 UTC).
+    // One run for the change day and one for the next day. In the gap the run is at the first
+    // instant after the change, 03:00 local (01:00 UTC).
     assert_eq!(
         fires,
         vec![
             utc(2025, Month::March, 30, 1, 0),
-            utc(2025, Month::March, 31, 0, 30),
-            utc(2025, Month::April, 1, 0, 30),
+            utc(2025, Month::March, 31, 0, 30)
         ]
     );
     assert_eq!(
@@ -181,21 +182,15 @@ async fn ac_sc_01_the_autumn_change_gives_one_run_at_the_first_occurrence() {
     .await;
 
     let clock = ManualClock::new(start);
-    clock.advance(seconds_between(start, utc(2025, Month::October, 27, 12, 0)));
+    // The pass runs after the change-day run, within the job lifetime.
+    clock.advance(seconds_between(start, utc(2025, Month::October, 26, 2, 0)));
     scheduler::run_once(database, &clock)
         .await
         .expect("the pass");
 
     let fires = plan_fire_times(database, tenant, plan).await;
-    // On 2025-10-26 the run is at the first occurrence, 02:30 CEST (00:30 UTC). The next day is
-    // 2025-10-27, at 02:30 CET (01:30 UTC).
-    assert_eq!(
-        fires,
-        vec![
-            utc(2025, Month::October, 26, 0, 30),
-            utc(2025, Month::October, 27, 1, 30),
-        ]
-    );
+    // On 2025-10-26 the run is at the first occurrence, 02:30 CEST (00:30 UTC).
+    assert_eq!(fires, vec![utc(2025, Month::October, 26, 0, 30)]);
     assert_eq!(
         fires
             .iter()

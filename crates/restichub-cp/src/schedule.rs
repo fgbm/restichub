@@ -2,9 +2,10 @@
 //! (FR-SC-01, ADR-0010).
 //!
 //! The module computes the fire times of a plan with `croner` and the IANA time zone of the plan
-//! (ADR-0010). A fire time that falls in a daylight saving gap resolves to the first instant after
-//! the clock change, and a fire time that falls in an overlap resolves to its first occurrence,
-//! which is the rule of the accepted decision.
+//! (ADR-0010). A fixed-time expression that falls in a daylight saving gap resolves to the first
+//! instant after the clock change, and one that falls in an overlap resolves to its first
+//! occurrence, which is the rule of the accepted decision. An interval expression such as
+//! `0 * * * *` names no wall-clock time, so it fires in both halves of an overlap.
 
 use std::str::FromStr;
 
@@ -64,30 +65,44 @@ impl Schedule {
         Ok(runs)
     }
 
-    /// Every fire time in `[next_run_at, now]`, at most `cap` (FR-SC-07).
+    /// Every unexpired fire time in `[next_run_at, now]`, the latest `cap` (FR-SC-07).
     ///
-    /// `next_run_at` is itself a fire time of the plan, so the result starts with it. The next fire
-    /// times follow, each strictly after the one before, until `now` or the cap stops the walk. The
-    /// cap bounds the work after a long downtime, so a plan that missed thousands of fire times
-    /// creates no more than `cap` jobs in one pass; the fire times beyond the cap are dropped.
+    /// A fire time at or before `now - max_age` is expired: a job for it would outlive the deadline
+    /// at once, so the walk skips it and returns none of those. The result holds at most `cap` fire
+    /// times, the latest ones, so a plan that missed thousands of fire times creates no more than
+    /// `cap` jobs in one pass and the older fire times are dropped.
     pub fn fire_times_up_to(
         &self,
         next_run_at: OffsetDateTime,
         now: OffsetDateTime,
         cap: usize,
+        max_age: time::Duration,
     ) -> Result<Vec<OffsetDateTime>, ScheduleError> {
         let mut times = Vec::new();
         if next_run_at > now || cap == 0 {
             return Ok(times);
         }
-        times.push(next_run_at);
-        let mut cursor = next_run_at;
-        while times.len() < cap {
+        // The first fire time that a job still outlives. `next_run_at` is itself a fire time, so it
+        // is the start unless it is already expired.
+        let floor = now - max_age;
+        let mut cursor = if next_run_at > floor {
+            times.push(next_run_at);
+            next_run_at
+        } else {
+            floor
+        };
+        // Walk the unexpired fire times up to `now`, keeping only the latest `cap`. The walk is
+        // bounded by the fire times within `max_age`, so a long downtime is not walked from its
+        // start.
+        loop {
             let fire = self.next_from(cursor)?;
             if fire > now {
                 break;
             }
             times.push(fire);
+            if times.len() > cap {
+                times.remove(0);
+            }
             cursor = fire;
         }
         Ok(times)
@@ -167,6 +182,18 @@ mod tests {
 
     /// Europe/Moscow does not observe daylight saving time, so 02:00 local is 23:00 UTC of the day
     /// before (AC-SC-01).
+    /// A cron expression that names no instant, such as 31 February, is refused at save time
+    /// (FR-SC-01). The parser accepts the expression, so the search for the first fire time is the
+    /// check.
+    #[test]
+    fn an_impossible_cron_yields_no_fire_time() {
+        let schedule = Schedule::parse("0 0 31 2 *", "UTC").expect("the parser accepts the fields");
+        assert_eq!(
+            schedule.next_after(utc(2025, Month::January, 1, 0, 0)),
+            Err(ScheduleError::Search)
+        );
+    }
+
     #[test]
     fn ac_sc_01_moscow_runs_at_the_local_wall_clock() {
         let schedule = Schedule::parse("0 2 * * *", "Europe/Moscow").expect("the schedule parses");
@@ -179,27 +206,76 @@ mod tests {
     #[test]
     fn the_missed_fire_times_stop_at_now_and_at_the_cap() {
         let schedule = Schedule::parse("0 * * * *", "UTC").expect("the schedule parses");
+        let day = time::Duration::hours(24);
         // An inclusive start plus three further hours gives four fire times.
         let times = schedule
             .fire_times_up_to(
                 utc(2025, Month::January, 1, 0, 0),
                 utc(2025, Month::January, 1, 3, 0),
                 100,
+                day,
             )
             .expect("the fire times");
         assert_eq!(times.len(), 4);
         assert_eq!(times[0], utc(2025, Month::January, 1, 0, 0));
         assert_eq!(times[3], utc(2025, Month::January, 1, 3, 0));
 
-        // The cap keeps one pass short after a long downtime.
+        // The cap keeps the latest fire times of one pass.
         let capped = schedule
             .fire_times_up_to(
                 utc(2025, Month::January, 1, 0, 0),
                 utc(2025, Month::January, 2, 0, 0),
                 10,
+                day,
             )
             .expect("the fire times");
         assert_eq!(capped.len(), 10);
+        assert_eq!(capped[0], utc(2025, Month::January, 1, 15, 0));
+        assert_eq!(capped[9], utc(2025, Month::January, 2, 0, 0));
+
+        // A fire time that a job would outlive at once is expired and creates none. The next fire
+        // time is itself expired, so the walk starts after it.
+        let unexpired = schedule
+            .fire_times_up_to(
+                utc(2025, Month::January, 1, 0, 0),
+                utc(2025, Month::January, 2, 0, 0),
+                100,
+                time::Duration::hours(3),
+            )
+            .expect("the fire times");
+        assert_eq!(
+            unexpired.first(),
+            Some(&utc(2025, Month::January, 1, 22, 0))
+        );
+        assert_eq!(unexpired.last(), Some(&utc(2025, Month::January, 2, 0, 0)));
+        assert_eq!(unexpired.len(), 3);
+    }
+
+    /// The autumn change puts 02:00 to 03:00 on 2025-10-26 into an overlap. A fixed-time expression
+    /// runs once, at the first occurrence; an interval expression names no wall-clock time, so it
+    /// runs in both halves of the overlap (FR-SC-01). The two occurrences of 02:00 local are
+    /// 00:00 UTC (02:00 CEST) and 01:00 UTC (02:00 CET).
+    #[test]
+    fn ac_sc_01_an_interval_expression_runs_in_both_halves_of_the_overlap() {
+        let schedule = Schedule::parse("0 * * * *", "Europe/Berlin").expect("the schedule parses");
+        let runs = schedule
+            .next_runs(utc(2025, Month::October, 25, 22, 30), 5)
+            .expect("the runs");
+        assert_eq!(
+            runs,
+            vec![
+                utc(2025, Month::October, 25, 23, 0),
+                utc(2025, Month::October, 26, 0, 0),
+                utc(2025, Month::October, 26, 1, 0),
+                utc(2025, Month::October, 26, 2, 0),
+                utc(2025, Month::October, 26, 3, 0),
+            ]
+        );
+        assert!(
+            runs.contains(&utc(2025, Month::October, 26, 0, 0))
+                && runs.contains(&utc(2025, Month::October, 26, 1, 0)),
+            "both halves of the overlap run"
+        );
     }
 
     #[test]

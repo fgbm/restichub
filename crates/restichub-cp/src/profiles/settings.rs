@@ -272,6 +272,22 @@ pub struct ProfileWarning {
 pub struct ProfileResponse {
     pub profile: ProfileView,
     pub warnings: Vec<ProfileWarning>,
+    /// The plans of the profile that the updated settings no longer compile for (FR-SC-11).
+    pub plan_warnings: Vec<PlanWarning>,
+}
+
+/// A plan that the updated profile no longer compiles for (FR-SC-11).
+///
+/// The update does not refuse the change. The plan keeps its schedule and fails at dispatch time,
+/// when the queue recompiles the profile for the facts of the agent, in a later part of epic #7.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlanWarning {
+    pub plan_id: String,
+    pub name: String,
+    /// The compiler field that the profile fails on, for example `paths`.
+    pub field: String,
+    /// Stable snake_case code.
+    pub reason: String,
 }
 
 /// The outcome of one synthetic compile at save time (FR-PF-05, AC-PF-02).

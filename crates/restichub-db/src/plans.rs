@@ -194,6 +194,48 @@ pub async fn get(tx: &mut TenantTx<'_>, id: PlanId) -> Result<Option<Plan>, DbEr
     Ok(row.map(Plan::from))
 }
 
+/// True when a plan of the tenant binds the profile.
+///
+/// A profile that a plan uses cannot be removed until the plan is removed or repointed. The check
+/// runs before the delete, so the foreign key never blocks it with an internal error (FR-SC-11).
+pub async fn is_profile_used(
+    tx: &mut TenantTx<'_>,
+    profile_id: ProfileId,
+) -> Result<bool, DbError> {
+    let (bound,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM plans WHERE profile_id = $1)")
+            .bind(profile_id)
+            .fetch_one(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    Ok(bound)
+}
+
+/// Lists the plans of the tenant that bind the profile, oldest first (FR-SC-11).
+///
+/// An update of a profile revalidates each plan against the facts of its agent, so the query names
+/// the agent of the plan.
+pub async fn list_by_profile(
+    tx: &mut TenantTx<'_>,
+    profile_id: ProfileId,
+) -> Result<Vec<Plan>, DbError> {
+    let rows = sqlx::query_as::<_, PlanRow>(
+        "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
+                p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
+                p.updated_at, p.created_by, pr.name, pr.repository_id, a.hostname \
+         FROM plans p \
+         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
+         JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
+         WHERE p.profile_id = $1 \
+         ORDER BY p.created_at, p.id",
+    )
+    .bind(profile_id)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(Plan::from).collect())
+}
+
 /// Reads one plan and locks its row for the transaction.
 ///
 /// An update or a delete uses this function, so a concurrent change cannot remove the row between

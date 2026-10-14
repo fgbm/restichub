@@ -25,29 +25,34 @@ The control plane calculates each fire time from the cron expression and the tim
 
 The control plane applies the daylight saving rules of the accepted decision:
 
-- A fire time in a daylight saving gap runs once, right after the clock change.
-- A fire time in a daylight saving overlap runs once, at the first occurrence.
+- A fixed-time fire time in a daylight saving gap runs once, right after the clock change.
+- A fixed-time fire time in a daylight saving overlap runs once, at the first occurrence.
+- An interval fire time, such as `0 * * * *` or `*/15`, names no wall-clock time. It runs in both halves of an overlap.
 
 ## Missed runs
 
-A fire time is missed when the control plane does not run a job for it, for example after a downtime. The missed run policy of the plan decides the result:
+A fire time is missed when the control plane does not run a job for it, for example after a downtime. A fire time within a short grace window of the pass is on time, and it always runs. The missed run policy applies to the older fire times only. The policy of the plan decides the result:
 
 | Policy | Result |
 |---|---|
-| Run every missed run | One job for each missed fire time. One pass creates at most 100 jobs; the fire times beyond the limit are dropped. |
-| Run the latest missed run | One job, for the latest missed fire time. |
-| Skip the missed runs | No job. |
+| Run every missed run | One job for each older missed fire time. One pass keeps the latest 100 fire times. |
+| Run the latest missed run | One job, for the latest older missed fire time. |
+| Skip the missed runs | No job for an older missed fire time. |
 
-Every scheduled job has an expiry time, 24 hours after its fire time. The control plane moves an overdue job to the `expired` status.
+Every scheduled job has an expiry time, 24 hours after its fire time. The control plane creates no job for a fire time that the job would outlive at once, because such a job expires at once. The control plane moves an overdue job to the `expired` status.
 
 A suspended tenant creates no job. A plan whose agent is revoked creates no job.
+
+## Delivery
+
+A scheduled job starts in the `queued` status. The queue delivers the job to the agent. The queue dispatcher arrives in a later part of epic #7 (issue #86). Until then, a scheduled job waits in the queue and the agent receives no job. A plan delete moves the queued jobs of the plan to the `cancelled` status.
 
 ## Roles
 
 | Role | Right |
 |---|---|
 | Admin, Operator | Create, change and delete a plan. |
-| Viewer | Read a plan. |
+| Viewer | Read a plan and preview a schedule. |
 
 ## API
 
@@ -59,5 +64,6 @@ A suspended tenant creates no job. A plan whose agent is revoked creates no job.
 | `PATCH /api/v1/plans/{id}` | Change a plan. |
 | `DELETE /api/v1/plans/{id}` | Delete a plan. |
 | `GET /api/v1/plans/{id}/next-runs?count=5` | The next fire times, in UTC. |
+| `POST /api/v1/plans/preview` | The next fire times of an unsaved schedule, in UTC. The body holds `cron`, `time_zone` and `count`. |
 
 A plan of another tenant gives HTTP 404. The platform tenant refuses every plan operation with HTTP 403.

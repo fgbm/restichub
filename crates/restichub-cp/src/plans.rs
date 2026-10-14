@@ -339,6 +339,11 @@ pub async fn update_plan(
     )?;
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     check_references(&mut tx, input.profile_id, input.agent_id, now).await?;
+    // A rename or a policy change keeps the pending fire time. The schedule is recomputed only when
+    // the cron, the time zone or the enabled flag changes (FR-SC-01).
+    let schedule_changed = input.cron != current.cron
+        || input.time_zone != current.time_zone
+        || input.enabled != current.enabled;
     repo::update(
         &mut tx,
         plan_id,
@@ -354,13 +359,15 @@ pub async fn update_plan(
     )
     .await
     .map_err(map_write_error)?;
-    // The edited schedule starts from the next fire time after now.
-    repo::set_next_run_at(
-        &mut tx,
-        plan_id,
-        next_run_at(&schedule, input.enabled, now)?,
-    )
-    .await?;
+    if schedule_changed {
+        // The edited schedule starts from the next fire time after now.
+        repo::set_next_run_at(
+            &mut tx,
+            plan_id,
+            next_run_at(&schedule, input.enabled, now)?,
+        )
+        .await?;
+    }
 
     let mut event = context.audit_event(AuditAction::PlanUpdate, "plan", plan_id.as_uuid());
     event.diff = Some(diff(
@@ -401,10 +408,15 @@ pub async fn delete_plan(
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlansWrite)?;
     let plan_id = parse_plan_id(&id)?;
+    let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let Some(current) = repo::get_for_update(&mut tx, plan_id).await? else {
         return Err(ApiError::not_found());
     };
+    // Until the queue dispatcher of a later part of epic #7 exists, the queued jobs of the plan go
+    // to the terminal `cancelled` status in the delete transaction, so no job outlives its plan
+    // (FR-SC-07).
+    restichub_db::jobs::cancel_for_plan(&mut tx, plan_id, now).await?;
     repo::delete(&mut tx, plan_id).await?;
     let mut event = context.audit_event(AuditAction::PlanDelete, "plan", plan_id.as_uuid());
     event.diff = Some(diff(Some(&stored_value(&current)), None, &[]));
@@ -454,6 +466,69 @@ pub async fn next_runs(
     Ok(Json(NextRunsResponse {
         plan_id: plan.id.to_string(),
         time_zone: plan.time_zone.clone(),
+        runs: runs.into_iter().map(format_time).collect(),
+    }))
+}
+
+/// The request body of the schedule preview (FR-SC-01).
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewScheduleRequest {
+    pub cron: String,
+    pub time_zone: String,
+    #[serde(default = "default_preview_count")]
+    pub count: usize,
+}
+
+fn default_preview_count() -> usize {
+    DEFAULT_PREVIEW_RUNS
+}
+
+/// The next fire times of an unsaved schedule, in UTC (FR-SC-01).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SchedulePreviewResponse {
+    /// The time zone that the user interface renders each run in.
+    pub time_zone: String,
+    /// The fire times in UTC, formatted as RFC 3339.
+    pub runs: Vec<String>,
+}
+
+/// Previews the next fire times of an unsaved schedule (FR-SC-01).
+///
+/// The create dialog calls it before the save, so it needs the Plans read right only. The count is
+/// bounded by `MAX_PREVIEW_RUNS`.
+#[utoipa::path(
+    post,
+    path = "/api/v1/plans/preview",
+    summary = "Previews the next fire times of a schedule.",
+    description = "The fire times are in UTC; the user interface renders them in the given time zone.",
+    security(("cookie" = []), ("bearer" = [])),
+    request_body = PreviewScheduleRequest,
+    responses(
+        (status = 200, description = "The next fire times.", body = SchedulePreviewResponse),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+    )
+)]
+pub async fn preview_schedule(
+    State(state): State<AppState>,
+    context: RequestContext,
+    ApiJson(body): ApiJson<PreviewScheduleRequest>,
+) -> Result<Json<SchedulePreviewResponse>, ApiError> {
+    context.authorize(Operation::PlansRead)?;
+    if body.count == 0 || body.count > MAX_PREVIEW_RUNS {
+        return Err(ApiError::invalid_field("count", Reason::TooLong));
+    }
+    let cron = body.cron.trim().to_owned();
+    let time_zone = body.time_zone.trim().to_owned();
+    let schedule = Schedule::parse(&cron, &time_zone)
+        .map_err(|error| schedule_error_to_api(profile_field(error), error))?;
+    let now = state.auth().clock.now();
+    let runs = schedule
+        .next_runs(now, body.count)
+        .map_err(|error| schedule_error_to_api("cron", error))?;
+    Ok(Json(SchedulePreviewResponse {
+        time_zone,
         runs: runs.into_iter().map(format_time).collect(),
     }))
 }
@@ -516,7 +591,9 @@ fn schedule_error_to_api(field: &'static str, error: ScheduleError) -> ApiError 
     match error {
         ScheduleError::Cron => ApiError::invalid_field(field, Reason::InvalidFormat),
         ScheduleError::TimeZone => ApiError::invalid_field(field, Reason::Unknown),
-        ScheduleError::Search => ApiError::internal("the schedule search did not finish"),
+        // A cron expression that names no instant, such as `0 0 31 2 *`, fails the search for the
+        // first fire time. The save-time check refuses it with the cron field (FR-SC-01).
+        ScheduleError::Search => ApiError::invalid_field(field, Reason::InvalidFormat),
     }
 }
 

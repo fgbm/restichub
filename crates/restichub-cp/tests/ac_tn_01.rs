@@ -144,6 +144,9 @@ const FIXTURES: &[(&str, Fixture)] = &[
         "/api/v1/plans/{id}/next-runs",
         Fixture::Object(Object::Plan),
     ),
+    // The preview computes the fire times of a schedule in the request body. It names no tenant
+    // object.
+    ("/api/v1/plans/preview", Fixture::Exempt),
 ];
 
 fn fixture_for(method: &str, path: &str) -> Fixture {

@@ -15,7 +15,8 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use common::{
-    app_with_kek, create_tenant_with_key, request, seed_repository, seed_secret, seed_session, send,
+    app_with_kek, create_tenant_with_key, request, seed_agent, seed_plan, seed_repository,
+    seed_secret, seed_session, send,
 };
 
 /// Inserts an active agent row with explicit facts.
@@ -675,17 +676,135 @@ async fn an_update_replaces_the_settings_and_a_delete_removes_the_row() {
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+
+    db.cleanup().await;
+}
+
+/// A profile that a plan uses cannot be removed until the plan is gone (FR-SC-11).
+#[tokio::test]
+async fn a_profile_in_use_by_a_plan_cannot_be_deleted() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let repository_id = repository_fixture(db.database(), tenant).await;
+
+    let profile = create_profile(
+        &app,
+        &cookie,
+        profile_body("plan-bound", &repository_id, json!(["/srv"])),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
+    let agent = seed_agent(db.database(), tenant, "plan-host").await;
+    let plan = seed_plan(
+        db.database(),
+        tenant,
+        "plan",
+        restichub_db::ProfileId::from_uuid(
+            uuid::Uuid::parse_str(&profile_id).expect("a profile id"),
+        ),
+        agent,
+    )
+    .await;
+
+    // The plan binds the profile, so the delete is refused with a conflict.
     let (status, _, _) = send(
         &app,
         request(
-            "GET",
-            &format!("/api/v1/profiles/{id}"),
+            "DELETE",
+            &format!("/api/v1/profiles/{profile_id}"),
             Some(&cookie),
             None,
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // After the plan is gone the profile can be removed.
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/plans/{plan}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/profiles/{profile_id}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    db.cleanup().await;
+}
+
+/// A profile update revalidates the plans that use it against the facts of their agent and reports
+/// the failing ones as warnings; it does not refuse the change (FR-SC-11).
+#[tokio::test]
+async fn a_profile_update_reports_the_plans_that_no_longer_compile() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let repository_id = repository_fixture(db.database(), tenant).await;
+    let agent = seed_agent_full(db.database(), tenant, "linux-host", "linux", "0.19.0", &[]).await;
+
+    let profile = create_profile(
+        &app,
+        &cookie,
+        profile_body("linux-bound", &repository_id, json!(["/srv"])),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
+    seed_plan(
+        db.database(),
+        tenant,
+        "bound",
+        restichub_db::ProfileId::from_uuid(
+            uuid::Uuid::parse_str(&profile_id).expect("a profile id"),
+        ),
+        agent,
+    )
+    .await;
+
+    // The update makes the profile Windows-only, so it no longer compiles for the Linux agent.
+    // Updating the profile keeps the plan and reports it.
+    let (status, _, updated) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/profiles/{profile_id}"),
+            Some(&cookie),
+            Some(json!({
+                "name": "linux-bound",
+                "repository_id": repository_id,
+                "paths": {"windows": ["C:\\Data"]},
+                "tags": ["daily"],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let plan_warnings = updated["plan_warnings"]
+        .as_array()
+        .expect("the plan warnings");
+    assert_eq!(plan_warnings.len(), 1);
+    assert_eq!(plan_warnings[0]["name"], "bound");
+    assert_eq!(plan_warnings[0]["field"], "paths");
 
     db.cleanup().await;
 }

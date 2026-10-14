@@ -24,7 +24,7 @@ use restichub_db::{
 use time::OffsetDateTime;
 
 use crate::clock::Clock;
-use crate::schedule::Schedule;
+use crate::schedule::{Schedule, ScheduleError};
 
 /// How often the scheduler looks for a due plan (ADR-0010).
 pub const SCHEDULER_INTERVAL: Duration = Duration::from_secs(5);
@@ -36,14 +36,16 @@ const PLANS_PER_TENANT: i64 = 200;
 /// The largest number of jobs that one plan creates in one pass (FR-SC-07).
 ///
 /// After a long downtime a plan can miss a large number of fire times. The cap bounds the work: the
-/// pass writes a job for the first [`MAX_MISSED_RUNS`] fire times and advances the plan past `now`,
-/// so the fire times beyond the cap are dropped. The plan states the rule in the documentation.
+/// pass writes a job for the latest [`MAX_MISSED_RUNS`] fire times that a job still outlives and
+/// advances the plan past `now`, so the older fire times are dropped. The plan states the rule in
+/// the documentation.
 pub const MAX_MISSED_RUNS: usize = 100;
 
 /// The lifetime of a scheduled job, counted from its fire time (FR-SC-07).
 ///
-/// The expiry sweep of [`crate::maintenance`] moves a job that the agent did not run before this
-/// deadline to the terminal `expired` status.
+/// The scheduler creates no job whose fire time plus this lifetime is not after `now`, because such
+/// a job would expire at once. The expiry sweep of [`crate::maintenance`] moves a job that the agent
+/// did not run before this deadline to the terminal `expired` status.
 const SCHEDULED_JOB_LIFETIME: time::Duration = time::Duration::hours(24);
 
 /// Runs one scheduler pass over every active tenant (FR-SC-01).
@@ -70,6 +72,16 @@ pub async fn run_once(db: &Database, clock: &dyn Clock) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Marks the undo point of one plan inside the tenant pass.
+const PLAN_SAVEPOINT: &str = "scheduler_plan";
+
+/// The grace window around a fire time. A fire time within it is on time and always runs; the
+/// missed run policy applies only to the older fire times (FR-SC-07).
+///
+/// The window is a small multiple of the pass interval, so a plan whose fire time just passed runs
+/// even when the pass is a little late.
+pub const ON_TIME_GRACE: time::Duration = time::Duration::seconds(60);
+
 async fn process_tenant(
     db: &Database,
     tenant: TenantId,
@@ -78,61 +90,110 @@ async fn process_tenant(
     let mut tx = db.begin_tenant(tenant).await?;
     let due = plans::claim_due(&mut tx, now, PLANS_PER_TENANT).await?;
     for plan in &due {
-        let Ok(schedule) = Schedule::parse(&plan.cron, &plan.time_zone) else {
-            // The control plane validates a plan before it writes the row, so a row that does not
-            // parse is a schema the binary does not understand. Leave the fire time, so a fixed
-            // row is processed.
-            tracing::warn!(plan = %plan.id, "the scheduler skipped a plan with an unknown schedule");
-            continue;
-        };
-        let Ok(next_run_at) = schedule.next_after(now) else {
-            tracing::warn!(plan = %plan.id, "the scheduler could not advance a plan");
-            continue;
-        };
-
-        // A revoked agent creates no jobs; the plan still advances (AC-TN-03, FR-ID-04).
-        if plan.agent_status != AgentStatus::Active {
-            plans::advance(&mut tx, plan.id, next_run_at, plan.next_run_at).await?;
-            continue;
-        }
-
-        let missed = match schedule.fire_times_up_to(plan.next_run_at, now, MAX_MISSED_RUNS) {
-            Ok(missed) => missed,
+        // One plan runs in its own savepoint: a failure rolls back this plan only, and the pass
+        // continues with the next one.
+        tx.savepoint(PLAN_SAVEPOINT).await?;
+        match process_plan(&mut tx, plan, now).await {
+            Ok(()) => tx.release_savepoint(PLAN_SAVEPOINT).await?,
             Err(error) => {
-                // Leave the fire time, so a transient failure is retried on the next pass.
-                tracing::warn!(plan = %plan.id, %error, "the scheduler could not compute the missed fire times");
-                continue;
+                tx.rollback_to_savepoint(PLAN_SAVEPOINT).await?;
+                tracing::warn!(
+                    plan = %plan.id,
+                    code = error.code(),
+                    %error,
+                    "the scheduler skipped a plan"
+                );
             }
-        };
-        for fire_time in select_fires(plan.missed_run_policy, &missed) {
-            let job = jobs::NewJob {
-                id: JobId::new(),
-                kind: JobKind::Backup,
-                agent_id: plan.agent_id,
-                repository_id: Some(plan.repository_id),
-                plan_id: Some(plan.id),
-                fire_time: Some(fire_time),
-                expires_at: Some(fire_time + SCHEDULED_JOB_LIFETIME),
-                location_fingerprint: None,
-                created_by: None,
-            };
-            jobs::create_scheduled(&mut tx, &job).await?;
         }
-
-        let last_fire_time = missed.last().copied().unwrap_or(plan.next_run_at);
-        plans::advance(&mut tx, plan.id, next_run_at, last_fire_time).await?;
     }
     tx.commit().await?;
     Ok(())
 }
 
-/// The fire times that the missed run policy keeps (FR-SC-07).
-fn select_fires(policy: MissedRunPolicy, missed: &[OffsetDateTime]) -> Vec<OffsetDateTime> {
-    match policy {
-        MissedRunPolicy::RunAll => missed.to_vec(),
-        MissedRunPolicy::LatestOnly => missed.last().copied().into_iter().collect(),
-        MissedRunPolicy::Skip => Vec::new(),
+/// Creates the jobs of one due plan in the open transaction (FR-SC-02, FR-SC-07).
+async fn process_plan(
+    tx: &mut restichub_db::TenantTx<'_>,
+    plan: &restichub_db::plans::DuePlan,
+    now: OffsetDateTime,
+) -> Result<(), PlanError> {
+    let schedule = Schedule::parse(&plan.cron, &plan.time_zone)?;
+    let next_run_at = schedule.next_after(now)?;
+
+    // A revoked agent creates no jobs; the plan still advances (AC-TN-03, FR-ID-04).
+    if plan.agent_status != AgentStatus::Active {
+        plans::advance(tx, plan.id, next_run_at, plan.next_run_at).await?;
+        return Ok(());
     }
+
+    let missed = schedule.fire_times_up_to(
+        plan.next_run_at,
+        now,
+        MAX_MISSED_RUNS,
+        SCHEDULED_JOB_LIFETIME,
+    )?;
+    for fire_time in select_fires(plan.missed_run_policy, &missed, now) {
+        let job = jobs::NewJob {
+            id: JobId::new(),
+            kind: JobKind::Backup,
+            agent_id: plan.agent_id,
+            repository_id: Some(plan.repository_id),
+            plan_id: Some(plan.id),
+            fire_time: Some(fire_time),
+            expires_at: Some(fire_time + SCHEDULED_JOB_LIFETIME),
+            location_fingerprint: None,
+            created_by: None,
+        };
+        jobs::create_scheduled(tx, &job).await?;
+    }
+
+    let last_fire_time = missed.last().copied().unwrap_or(plan.next_run_at);
+    plans::advance(tx, plan.id, next_run_at, last_fire_time).await?;
+    Ok(())
+}
+
+/// The failure of one plan inside a tenant pass (FR-SC-02).
+///
+/// A schedule that the binary cannot compute and a database error are both per-plan failures: the
+/// savepoint of the plan rolls back its work and the pass logs the plan and the code.
+#[derive(Debug, thiserror::Error)]
+enum PlanError {
+    #[error("{0}")]
+    Db(#[from] DbError),
+    #[error("{0}")]
+    Schedule(#[from] ScheduleError),
+}
+
+impl PlanError {
+    /// Gives a stable short label for the log line.
+    fn code(&self) -> &'static str {
+        match self {
+            Self::Db(error) => error.code(),
+            Self::Schedule(_) => "schedule",
+        }
+    }
+}
+
+/// The fire times that the scheduler creates a job for (FR-SC-07).
+///
+/// A fire time within [`ON_TIME_GRACE`] of `now` is on time and always runs. The missed run policy
+/// applies only to the older fire times: `run_all` keeps them all, `latest_only` keeps the latest,
+/// and `skip` keeps none.
+fn select_fires(
+    policy: MissedRunPolicy,
+    missed: &[OffsetDateTime],
+    now: OffsetDateTime,
+) -> Vec<OffsetDateTime> {
+    let (on_time, older): (Vec<_>, Vec<_>) = missed
+        .iter()
+        .copied()
+        .partition(|fire_time| *fire_time + ON_TIME_GRACE > now);
+    let mut fires = on_time;
+    match policy {
+        MissedRunPolicy::RunAll => fires.extend(older),
+        MissedRunPolicy::LatestOnly => fires.extend(older.last().copied()),
+        MissedRunPolicy::Skip => {}
+    }
+    fires
 }
 
 /// Starts the periodic scheduler pass.

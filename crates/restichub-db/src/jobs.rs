@@ -262,20 +262,49 @@ pub async fn list_for_plan(tx: &mut TenantTx<'_>, plan_id: PlanId) -> Result<Vec
     Ok(rows.into_iter().map(Job::from).collect())
 }
 
-/// True when the repository holds a job that is queued, sent or running.
+/// True when the repository holds an active maintenance job, or a sent or running backup.
+///
+/// A queued backup does not lock the repository location: several backup jobs may run on one
+/// repository at the same time (FR-SC-04). A maintenance kind (init, test_access, forget, prune,
+/// check) locks it in every active status.
 pub async fn has_active_for_repository(
     tx: &mut TenantTx<'_>,
     repository_id: RepositoryId,
 ) -> Result<bool, DbError> {
     let (active,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 \
-         AND status IN ('queued', 'sent', 'running'))",
+         AND status IN ('queued', 'sent', 'running') \
+         AND (kind IN ('init', 'test_access', 'forget', 'prune', 'check') \
+              OR (kind = 'backup' AND status IN ('sent', 'running'))))",
     )
     .bind(repository_id)
     .fetch_one(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
     Ok(active)
+}
+
+/// Moves the queued jobs of a plan to the terminal `failed` status with the `cancelled` result.
+///
+/// A plan delete cancels the jobs that the scheduler created and the queue did not send yet, in the
+/// same transaction as the delete. A sent or running job keeps its lifecycle. The update is
+/// idempotent, so a second call changes nothing.
+pub async fn cancel_for_plan(
+    tx: &mut TenantTx<'_>,
+    plan_id: PlanId,
+    now: OffsetDateTime,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'failed', result_code = 'cancelled', finished_at = $2, \
+                updated_at = now() \
+         WHERE plan_id = $1 AND status = 'queued'",
+    )
+    .bind(plan_id)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
 }
 
 /// Moves one overdue job to the terminal `expired` status. `false` when it is terminal

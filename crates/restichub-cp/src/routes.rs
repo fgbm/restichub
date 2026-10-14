@@ -526,4 +526,13 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::PlansRead),
         handler: || routes!(crate::plans::next_runs),
     },
+    Route {
+        method: "post",
+        path: "/api/v1/plans/preview",
+        access: Access::Protected(Operation::PlansRead),
+        handler: || {
+            routes!(crate::plans::preview_schedule)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
 ];
