@@ -526,6 +526,7 @@ pub async fn seed_job(
             agent_id: agent,
             repository_id: Some(repository),
             expires_at: None,
+            location_fingerprint: None,
             created_by: None,
         },
     )
