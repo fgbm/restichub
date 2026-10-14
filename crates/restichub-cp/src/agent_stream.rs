@@ -5,13 +5,13 @@
 //! and the certificate serial, both checked against the registry row of the tenant (ADR-0026). A
 //! revoked or unknown agent is refused, and a revoke closes the open stream at once (FR-ID-04).
 //!
-//! The stream is registered before the registry check, so a revoke that lands in the window closes
-//! the stream. The registry check and the guarded `last_seen_at` write run after the registration.
-//! The stream sends the `ServerHello`, a fresh signing key set and a `Ping` each
-//! [`HEARTBEAT_INTERVAL`]; it closes when the agent does not answer for [`IDLE_CLOSE`]. A
-//! `KeyUpdateAck` feeds the retirement of the old key once every known online agent acknowledged the
-//! new set (ADR-0026). Job delivery is a typed channel stub for #7; the stream starts no job. A
-//! `JobAck` and a `JobResult` update the job row ([`crate::jobs`]).
+//! The `ServerHello` and the fresh signing key set are queued before the stream is registered, so a
+//! job that the registry delivers always follows them on the wire. The registry check and the
+//! guarded `last_seen_at` write run before the registration, so a revoke that lands in the window
+//! refuses the open. The stream sends a `Ping` each [`HEARTBEAT_INTERVAL`]; it closes when the
+//! agent does not answer for [`IDLE_CLOSE`]. A `KeyUpdateAck` feeds the retirement of the old key
+//! once every known online agent acknowledged the new set (ADR-0026). A `JobAck`, a `JobRejected`
+//! and a `JobResult` update the job row ([`crate::jobs`]).
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -51,7 +51,7 @@ pub const IDLE_CLOSE: Duration = Duration::from_secs(3 * HEARTBEAT_INTERVAL.as_s
 /// Control messages buffered for one agent.
 const OUTBOUND_CHANNEL: usize = 64;
 
-/// The largest accepted key identifier in a `KeyUpdateAck` (MEDIUM 3).
+/// The largest accepted key identifier in a `KeyUpdateAck`.
 const MAX_KEY_ID_LEN: usize = 64;
 
 const SAN_PREFIX: &str = "restichub://tenant/";
@@ -385,7 +385,7 @@ async fn check_registry(
     Ok(())
 }
 
-/// Writes the first `last_seen_at` under the registry guard (HIGH 1).
+/// Writes the first `last_seen_at` under the registry guard.
 ///
 /// The single statement re-checks the status, the serial and the expiry. `false` refuses the stream.
 async fn touch_connected(
@@ -460,31 +460,17 @@ impl AgentService for AgentStreamService {
             .ok_or_else(|| Status::unauthenticated("no client certificate"))?;
         let identity = peer_identity(leaf.as_ref())?;
 
-        // Subscribe before the fresh key set, so a rotation in between is not lost (LOW 6).
+        // Subscribe before the fresh key set, so a rotation in between is not lost.
         let rotation = self.state.job_signing().map(JobSigningService::subscribe);
 
         let now = self.state.auth().clock.now();
         // Check the registry before the registration: a refused connection must not touch the live
-        // stream of the same agent (MEDIUM 1).
+        // stream of the same agent (FR-ID-04).
         check_registry(self.state.db(), &identity, now).await?;
 
         let (tx, rx) = mpsc::channel::<ControlMessage>(OUTBOUND_CHANNEL);
-        let (close_tx, close_rx) = watch::channel(false);
-        let generation = self
-            .state
-            .agent_registry()
-            .open(identity.agent, close_tx, tx.clone());
-
-        // The guarded write re-checks the status, the serial and the expiry in one statement. A
-        // revoke in the window closes this stream and refuses the open (HIGH 1). The refusal removes
-        // the new stream only, by generation (MEDIUM 1).
-        if !touch_connected(self.state.db(), &identity, now).await {
-            self.state
-                .agent_registry()
-                .remove(identity.agent, generation);
-            return Err(Status::permission_denied("the agent is revoked or expired"));
-        }
-
+        // Queue the ServerHello and the fresh key set before the stream is registered, so a job
+        // that the registry delivers always follows them on the wire (FR-PR-09, ADR-0030).
         let hello = ControlMessage {
             payload: Some(control_message::Payload::ServerHello(ServerHello {
                 protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
@@ -493,13 +479,23 @@ impl AgentService for AgentStreamService {
             })),
         };
         let _ = tx.try_send(hello);
-
-        // A fresh key set on every connect, so an agent that was offline re-syncs (ADR-0030).
         if let Some(update) = self.fresh_key_update(now).await {
             let _ = tx.try_send(ControlMessage {
                 payload: Some(control_message::Payload::SigningKeyUpdate(update)),
             });
         }
+
+        // The guarded write re-checks the status, the serial and the expiry in one statement. A
+        // revoke or an expiry in the window refuses the open, so no stream is registered (FR-ID-04).
+        if !touch_connected(self.state.db(), &identity, now).await {
+            return Err(Status::permission_denied("the agent is revoked or expired"));
+        }
+
+        let (close_tx, close_rx) = watch::channel(false);
+        let generation = self
+            .state
+            .agent_registry()
+            .open(identity.agent, close_tx, tx.clone());
 
         let mut inbound = request.into_inner();
         let state = self.state.clone();
@@ -527,7 +523,7 @@ impl AgentService for AgentStreamService {
 /// Runs the message loop of one stream: the heartbeat, the `last_seen_at` batch, the inbound
 /// messages and the rotation delivery (FR-ID-07, ADR-0026).
 ///
-/// The stream closes when the agent sends nothing for [`IDLE_CLOSE`] (MEDIUM 3). `last_seen_at` is
+/// The stream closes when the agent sends nothing for [`IDLE_CLOSE`]. `last_seen_at` is
 /// buffered only for a stream that reported activity since the last tick.
 #[allow(clippy::too_many_arguments)]
 async fn run_stream(
@@ -640,7 +636,7 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
     let _ = state.agent_registry().send_to_agent(agent, message);
 }
 
-/// Handles one inbound message (FR-PR-08, ADR-0026, MEDIUM 3).
+/// Handles one inbound message (FR-PR-08, ADR-0026).
 ///
 /// The identity comes from the certificate, never from the message. An acknowledgement is accepted
 /// only for the current key identifier of the signing service and within the length bound, so a
@@ -665,17 +661,20 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
         Some(agent_message::Payload::JobAck(ack)) => {
             crate::jobs::handle_job_ack(state, identity.tenant, identity.agent, &ack).await;
         }
+        Some(agent_message::Payload::JobRejected(rejected)) => {
+            crate::jobs::handle_job_rejected(state, identity.tenant, identity.agent, &rejected)
+                .await;
+        }
         Some(agent_message::Payload::JobResult(result)) => {
             crate::jobs::handle_job_result(state, identity.tenant, identity.agent, &result).await;
         }
         Some(
-            agent_message::Payload::JobRejected(_)
-            | agent_message::Payload::StepProgress(_)
+            agent_message::Payload::StepProgress(_)
             | agent_message::Payload::LogChunk(_)
             | agent_message::Payload::StepResult(_)
             | agent_message::Payload::CertificateSigningRequest(_),
         ) => {
-            // Job rejection, progress, logs and certificate rotation belong to #7 and #51.
+            // Job progress, logs and certificate rotation belong to #7 and #51.
         }
         None => {}
     }
@@ -704,7 +703,7 @@ impl AgentStreamService {
     }
 }
 
-/// Flushes the buffered `last_seen_at` writes in one statement for each tenant (LOW 7).
+/// Flushes the buffered `last_seen_at` writes in one statement for each tenant.
 ///
 /// A row that the guarded statement did not update is revoked, expired or no longer the enrolled
 /// serial; the flush closes its stream.
@@ -735,7 +734,7 @@ pub async fn flush_last_seen(db: &Database, registry: &StreamRegistry, now: time
     }
 }
 
-/// Starts the periodic flush of the buffered `last_seen_at` writes (LOW 7).
+/// Starts the periodic flush of the buffered `last_seen_at` writes.
 pub fn spawn_last_seen_flush(
     db: Database,
     registry: Arc<StreamRegistry>,
@@ -820,7 +819,7 @@ mod tests {
         assert_eq!(registry.note_rotation(pending, "key-2"), Some(pending));
     }
 
-    /// MEDIUM 3: many acknowledgements keep at most one pending entry for each agent.
+    /// Many acknowledgements keep at most one pending entry for each agent.
     #[test]
     fn many_acknowledgements_keep_one_pending_entry_for_each_agent() {
         let registry = StreamRegistry::new();

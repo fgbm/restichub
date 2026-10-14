@@ -22,12 +22,12 @@
 //!
 //! The agent result updates the job row. A successful `init` or a successful `test_access` sets
 //! `repositories.initialized = true` (FR-RP-02), but only while the repository location still
-//! matches the fingerprint stored with the job (MEDIUM 4). A `not_initialized` result never clears
+//! matches the fingerprint stored with the job. A `not_initialized` result never clears
 //! the flag: on an initialized repository it is a location mismatch, so the job fails with the typed
-//! access error (HIGH 1).
+//! access error.
 //!
-//! One active job for each repository is enforced by a partial unique index (MEDIUM 3); a second job
-//! gives HTTP 409. An overdue job moves to `expired` on read and in a periodic sweep (MEDIUM 5).
+//! One active job for each repository is enforced by a partial unique index ; a second job
+//! gives HTTP 409. An overdue job moves to `expired` on read and in a periodic sweep.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -41,9 +41,10 @@ use restichub_db::{
     SecretId, TenantId, agents as agents_repo,
 };
 use restichub_proto::agent::v1::{
-    ControlMessage, InitStep, Job as ProtoJob, JobAck, JobResult, JobStatus as ProtoJobStatus,
-    LocalCredentials, RepositoryAccess, RestCredentials, S3Credentials, Step, TestAccessStep,
-    control_message, repository_access::BackendCredentials, step,
+    ControlMessage, InitStep, Job as ProtoJob, JobAck, JobRejected, JobResult,
+    JobStatus as ProtoJobStatus, LocalCredentials, RejectReason, RepositoryAccess, RestCredentials,
+    S3Credentials, Step, TestAccessStep, control_message, repository_access::BackendCredentials,
+    step,
 };
 use restichub_secrets::{KekProvider, SecretString};
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,7 @@ const JOB_TIMEOUT_SECONDS: u32 = 900;
 const MAX_RESULT_MESSAGE_LEN: usize = 64;
 
 /// The stable error code of a location mismatch: a `not_initialized` result on an initialized
-/// repository (HIGH 1). The user interface translates it (NFR-DOC-04).
+/// repository. The user interface translates it (NFR-DOC-04).
 const ACCESS_ERROR_CODE: &str = "repository_missing_here";
 
 /// The request body of an init or a test-access action.
@@ -224,8 +225,7 @@ pub async fn get_job(
     let now = state.auth().clock.now();
     let job = context
         .tenant_tx(&state, async |tx| {
-            // An overdue job moves to `expired` on read, so a poll sees a terminal status
-            // (MEDIUM 5).
+            // An overdue job moves to `expired` on read, so a poll sees a terminal status.
             job_repo::mark_expired(tx, job_id, now).await?;
             Ok(job_repo::get(tx, job_id).await?)
         })
@@ -255,11 +255,11 @@ async fn create_repository_job(
     let Some(repository) = repo::get_for_update(&mut tx, repository_id).await? else {
         return Err(ApiError::not_found());
     };
-    // An initialized repository is never re-initialized (HIGH 1).
+    // An initialized repository is never re-initialized.
     if kind == JobKind::Init && repository.initialized {
         return Err(ApiError::conflict());
     }
-    let agent_id = resolve_agent(&repository, explicit_agent)?;
+    let agent_id = resolve_agent(&repository, explicit_agent, kind)?;
     ensure_agent_active(&mut tx, agent_id).await?;
     // The MVP holds no queue for an on-demand job. The check comes before the secret read, so an
     // offline agent writes no delivery record.
@@ -267,8 +267,8 @@ async fn create_repository_job(
         return Err(ApiError::agent_offline());
     }
 
-    let fingerprint = location_fingerprint(&stored_location(&repository));
-    // One active job for each repository (MEDIUM 3). The partial unique index carries the
+    let fingerprint = repository_fingerprint(&repository);
+    // One active job for each repository. The partial unique index carries the
     // invariant, so a second job gives HTTP 409.
     job_repo::create(
         &mut tx,
@@ -326,7 +326,7 @@ async fn create_repository_job(
     let signed = match signing.sign_job(state.db(), validated.job()).await {
         Ok(signed) => signed,
         Err(error) => {
-            // A signing failure must not leave the job queued forever (MEDIUM 5).
+            // A signing failure must not leave the job queued forever.
             let mut tx = state.db().begin_tenant(context.tenant_id).await?;
             let _ = job_repo::mark_refused(&mut tx, job_id, "signing_failed", now).await;
             let _ = tx.commit().await;
@@ -394,11 +394,78 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
     }
 }
 
+/// Records a `JobRejected` from the stream: the job fails with the typed reason (FR-PR-03).
+///
+/// A rejection frees the repository, so the control plane can start the next job. The identity
+/// comes from the certificate, never from the message (FR-PR-08), so a rejection for another agent
+/// or tenant changes no row.
+pub async fn handle_job_rejected(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    rejected: &JobRejected,
+) {
+    let Some(job_id) = parse_job_id_value(&rejected.job_id) else {
+        return;
+    };
+    let now = state.auth().clock.now();
+    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+        tracing::warn!(job = %rejected.job_id, "the job rejection could not open a transaction");
+        return;
+    };
+    let job = match job_repo::get_for_update(&mut tx, job_id).await {
+        Ok(Some(job)) => job,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(job = %job_id, %error, "the rejection could not read the job");
+            return;
+        }
+    };
+    if job.agent_id != agent || job.status.is_terminal() {
+        return;
+    }
+    let reason = reject_reason_code(rejected.reason);
+    tracing::warn!(job = %job_id, reason, "the agent rejected the job");
+    let outcome = JobOutcome {
+        status: JobStatus::Failed,
+        result_code: JobResultCode::Failed,
+        result_message: Some(reason.to_owned()),
+    };
+    if let Err(error) = job_repo::finish(&mut tx, job_id, &outcome, now).await {
+        tracing::warn!(job = %job_id, %error, "the rejection could not update the job");
+        return;
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::warn!(job = %job_id, %error, "the rejection could not commit");
+    }
+}
+
+/// The stable code of a `RejectReason`. The user interface translates it (NFR-DOC-04).
+fn reject_reason_code(reason: i32) -> &'static str {
+    match RejectReason::try_from(reason) {
+        Ok(RejectReason::BadSignature) => "bad_signature",
+        Ok(RejectReason::UnknownKey) => "unknown_key",
+        Ok(RejectReason::WrongAgent) => "wrong_agent",
+        Ok(RejectReason::WrongTenant) => "wrong_tenant",
+        Ok(RejectReason::Expired) => "expired",
+        Ok(RejectReason::Replay) => "replay",
+        Ok(RejectReason::UnsupportedStep) => "unsupported_step",
+        Ok(RejectReason::UnsupportedResticVersion) => "unsupported_restic_version",
+        Ok(RejectReason::UnknownHook) => "unknown_hook",
+        Ok(RejectReason::InvalidHookParameters) => "invalid_hook_parameters",
+        Ok(RejectReason::AllowListInsecure) => "allow_list_insecure",
+        Ok(RejectReason::Malformed) => "malformed",
+        Ok(RejectReason::LifetimeTooLong) => "lifetime_too_long",
+        Ok(RejectReason::NotYetValid) => "not_yet_valid",
+        Ok(RejectReason::Unspecified) | Err(_) => "rejected",
+    }
+}
+
 /// Records a `JobResult` from the stream: it updates the job and the repository state (FR-RP-02).
 ///
 /// A successful `init` or a successful `test_access` sets `repositories.initialized = true`, but
-/// only while the repository location still matches the job (MEDIUM 4). A `not_initialized` result
-/// never clears the flag (HIGH 1): on an initialized repository it is a location mismatch, so the
+/// only while the repository location still matches the job. A `not_initialized` result
+/// never clears the flag : on an initialized repository it is a location mismatch, so the
 /// job fails with the typed access error. The identity comes from the certificate (FR-PR-08).
 pub async fn handle_job_result(
     state: &AppState,
@@ -430,7 +497,7 @@ pub async fn handle_job_result(
         return;
     };
     // A `not_initialized` result on an initialized repository is a location mismatch, not a normal
-    // result: the job fails with the typed access error and the flag stays (HIGH 1).
+    // result: the job fails with the typed access error and the flag stays.
     let outcome = match (outcome.result_code, job.repository_id) {
         (JobResultCode::NotInitialized, Some(repository_id)) => {
             match repo::get(&mut tx, repository_id).await {
@@ -468,7 +535,7 @@ pub async fn handle_job_result(
     }
 }
 
-/// Sets `repositories.initialized = true` while the location still matches the job (MEDIUM 4).
+/// Sets `repositories.initialized = true` while the location still matches the job.
 async fn apply_initialized(
     tx: &mut restichub_db::TenantTx<'_>,
     job_id: JobId,
@@ -483,7 +550,7 @@ async fn apply_initialized(
             return;
         }
     };
-    if Some(location_fingerprint(&stored_location(&repository)).as_str()) != fingerprint {
+    if Some(repository_fingerprint(&repository).as_str()) != fingerprint {
         // The location changed between the job and its result: the flag belongs to another
         // location, so the control plane does not set it.
         tracing::warn!(
@@ -497,13 +564,18 @@ async fn apply_initialized(
     }
 }
 
-/// Resolves the target agent: the explicit value, or the maintenance agent (FR-RP-08).
+/// Resolves the target agent (FR-RP-08).
 ///
-/// A local path lives on one host, so an init or a test-access job for a local backend runs only on
-/// the maintenance agent (HIGH 1). The repository must name one; a different explicit agent is
-/// refused.
-fn resolve_agent(repository: &Repository, explicit: Option<AgentId>) -> Result<AgentId, ApiError> {
-    if repository.backend == BackendKind::Local {
+/// An init and a local-path test-access run only on the maintenance agent: an init belongs to the
+/// host that owns the repository, and a local path lives on one host. A test-access of an S3 or
+/// rest repository defaults to the maintenance agent and accepts another explicit agent.
+fn resolve_agent(
+    repository: &Repository,
+    explicit: Option<AgentId>,
+    kind: JobKind,
+) -> Result<AgentId, ApiError> {
+    let maintenance_only = kind == JobKind::Init || repository.backend == BackendKind::Local;
+    if maintenance_only {
         let maintenance = repository
             .maintenance_agent_id
             .ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Empty))?;
@@ -517,7 +589,7 @@ fn resolve_agent(repository: &Repository, explicit: Option<AgentId>) -> Result<A
         .ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Empty))
 }
 
-/// A hex SHA-256 of the repository location. It holds no secret (MEDIUM 4).
+/// A hex SHA-256 of the repository location. It holds no secret.
 fn location_fingerprint(location: &str) -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;
@@ -528,6 +600,23 @@ fn location_fingerprint(location: &str) -> String {
         let _ = write!(text, "{byte:02x}");
     }
     text
+}
+
+/// The fingerprint of the repository location and, for a local backend, of its maintenance agent
+/// (ADR-0021, FR-RP-08).
+///
+/// A local path lives on one host, so the maintenance agent is part of the location. A change of
+/// either gives a different fingerprint, and the control plane then refuses to set `initialized`.
+fn repository_fingerprint(repository: &Repository) -> String {
+    let mut material = stored_location(repository);
+    if repository.backend == BackendKind::Local {
+        material.push('\u{1f}');
+        match repository.maintenance_agent_id {
+            Some(agent) => material.push_str(&agent.to_string()),
+            None => material.push_str("none"),
+        }
+    }
+    location_fingerprint(&material)
 }
 
 /// Refuses an agent that is absent, of another tenant, or revoked (FR-RP-08).
