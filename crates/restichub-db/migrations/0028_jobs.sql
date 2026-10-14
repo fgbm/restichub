@@ -12,9 +12,8 @@
 -- The job belongs to a tenant and names an agent and, for a repository job, a repository. The
 -- composite foreign keys keep the agent and the repository in the same tenant.
 
--- The composite key for the tenant-scoped repository foreign key below. The agent key comes from
--- migration 0026.
-ALTER TABLE repositories ADD CONSTRAINT repositories_tenant_id_unique UNIQUE (tenant_id, id);
+-- The composite keys for the tenant-scoped foreign keys below come from earlier migrations:
+-- `agents_tenant_id_unique` (0026) and `repositories_tenant_id_unique` (0027).
 
 CREATE TABLE jobs (
     id uuid NOT NULL PRIMARY KEY,

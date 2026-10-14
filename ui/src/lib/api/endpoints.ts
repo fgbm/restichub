@@ -50,6 +50,12 @@ export const endpoints = {
 	jobs: {
 		byId: (id: string) => `/jobs/${encodeURIComponent(id)}`
 	},
+	profiles: {
+		list: '/profiles',
+		create: '/profiles',
+		byId: (id: string) => `/profiles/${encodeURIComponent(id)}`,
+		preview: (id: string) => `/profiles/${encodeURIComponent(id)}/preview`
+	},
 	audit: {
 		list: '/audit'
 	},

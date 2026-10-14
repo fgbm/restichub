@@ -38,6 +38,12 @@ jobs:
       - name: Clippy
         if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # A broken doc link or an invalid doc comment fails the build, so it never reaches the site.
+      - name: Rustdoc
+        if: runner.os == 'Linux'
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
       # The database tests skip on Windows because RESTICHUB_TEST_DATABASE_URL is not set. The
       # `database` job runs them on Linux.
       - name: Test
@@ -102,6 +108,85 @@ jobs:
         run: >-
           cargo test -p restichub-cp --test pki_certs --
           --nocapture openssl_verifies_the_issued_chain
+
+  # The UI types come from the OpenAPI document that the control plane serves. The job generates
+  # the document from the current source and compares it with the committed `ui/src/lib/api/schema.d.ts`,
+  # so a route change without a regenerated schema fails the check. The database is the smallest
+  # one that starts the control plane; the job touches no data.
+  openapi:
+    name: OpenAPI drift (ubuntu-latest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: restichub
+          POSTGRES_PASSWORD: restichub
+          POSTGRES_DB: restichub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restichub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      # The action reads rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the control plane
+        run: cargo build -p restichub-cp
+      # The runner image already holds `psql` in most cases; the install is only a fallback.
+      - name: Install the PostgreSQL client
+        run: |
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          fi
+      - name: Prepare the database
+        env:
+          PGPASSWORD: restichub
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U restichub -d postgres -v ON_ERROR_STOP=1 \
+            -v app_role=restichub_app -v auth_role=restichub_auth \
+            -v owner_role=restichub_owner -v runtime_role=restichub_runtime \
+            -f crates/restichub-db/sql/bootstrap-roles.sql
+          psql -h 127.0.0.1 -U restichub -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER ROLE restichub_owner PASSWORD 'owner';
+          ALTER ROLE restichub_runtime PASSWORD 'runtime';
+          ALTER DATABASE restichub OWNER TO restichub_owner;
+          SQL
+          RESTICHUB_DATABASE_MIGRATION_URL=postgres://restichub_owner@127.0.0.1:5432/restichub \
+          RESTICHUB_DATABASE_MIGRATION_PASSWORD=owner \
+            ./target/debug/restichub-cp migrate
+      - name: Serve the control plane and write the OpenAPI document
+        run: |
+          set -euo pipefail
+          export RESTICHUB_LISTEN_ADDR=127.0.0.1:8080
+          export RESTICHUB_DATABASE_URL=postgres://restichub_runtime@127.0.0.1:5432/restichub
+          export RESTICHUB_DATABASE_PASSWORD=runtime
+          # This key is ephemeral: it encrypts nothing that outlives the job.
+          export RESTICHUB_KEK="$(head -c 32 /dev/urandom | base64)"
+          # The job reaches the control plane over plain HTTP on the loopback address only.
+          export RESTICHUB_SERVER_INSECURE_COOKIES=true
+          ./target/debug/restichub-cp serve >"$RUNNER_TEMP/cp.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/api/v1/openapi.json -o "$RUNNER_TEMP/openapi.json"
+      - name: Compare the committed UI types with the generated ones
+        working-directory: ui
+        run: |
+          set -euo pipefail
+          npm ci
+          OPENAPI_URL="$RUNNER_TEMP/openapi.json" npm run gen:api
+          git diff --exit-code -- src/lib/api/schema.d.ts
 
   cargo-deny:
     name: Dependencies

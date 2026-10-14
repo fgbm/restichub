@@ -52,6 +52,12 @@ pub enum Reason {
     InvalidCredentials,
     NotInFuture,
     TooFarInFuture,
+    /// The operating system does not support the setting (FR-PF-05).
+    Unsupported,
+    /// The installed restic version lacks the option (AC-AG-09).
+    Incompatible,
+    /// Not available yet (FR-HK-04).
+    Unavailable,
 }
 
 impl Reason {
@@ -69,6 +75,9 @@ impl Reason {
             Self::InvalidCredentials => "invalid_credentials",
             Self::NotInFuture => "not_in_future",
             Self::TooFarInFuture => "too_far_in_future",
+            Self::Unsupported => "unsupported",
+            Self::Incompatible => "incompatible",
+            Self::Unavailable => "unavailable",
         }
     }
 }

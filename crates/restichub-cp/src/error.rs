@@ -358,9 +358,11 @@ impl From<PasswordError> for ApiError {
     }
 }
 
-/// A duplicate value is a conflict. Every other error is internal, with the cause logged.
+/// A duplicate value is a conflict. A foreign key violation is a conflict too: the referenced row
+/// is absent, so the caller must correct the request. Every other error is internal, with the cause
+/// logged.
 pub fn map_write_error(error: DbError) -> ApiError {
-    if error.is_unique_violation() {
+    if error.is_unique_violation() || error.is_foreign_key_violation() {
         ApiError::conflict()
     } else {
         ApiError::from(error)
