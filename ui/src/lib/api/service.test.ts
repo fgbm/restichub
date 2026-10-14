@@ -106,3 +106,32 @@ describe('the HTTP service (issue #20 tenants)', () => {
 		expect(fetchFn.mock.calls[0][0]).toContain('/api/v1/users');
 	});
 });
+
+describe('the HTTP service (repository maintenance)', () => {
+	it('reads, replaces and runs the maintenance of a repository', async () => {
+		const view = { repository_id: 'r_1', maintenance_agent_id: 'a_1' };
+		const fetchFn = vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse(view))
+			.mockResolvedValueOnce(jsonResponse(view))
+			.mockResolvedValueOnce(jsonResponse({ id: 'j_1', kind: 'check' }, 202));
+		const service = await loadService(fetchFn);
+
+		await service.getMaintenance('r_1');
+		await service.updateMaintenance('r_1', {
+			time_zone: 'UTC',
+			retention: { cron: '0 3 * * 0', enabled: true },
+			check: { cron: '0 4 1 * *', enabled: false }
+		});
+		await service.runMaintenance('r_1', 'check');
+
+		expect(fetchFn.mock.calls[0][0]).toContain('/api/v1/repositories/r_1/maintenance');
+		const update = fetchFn.mock.calls[1][1] as RequestInit;
+		expect(update.method).toBe('PUT');
+		expect(JSON.parse(update.body as string).check.enabled).toBe(false);
+		expect(fetchFn.mock.calls[2][0]).toContain('/api/v1/repositories/r_1/maintenance/run');
+		expect(JSON.parse((fetchFn.mock.calls[2][1] as RequestInit).body as string)).toEqual({
+			task: 'check'
+		});
+	});
+});

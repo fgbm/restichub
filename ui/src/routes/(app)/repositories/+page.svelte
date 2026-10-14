@@ -8,6 +8,8 @@
 		Job,
 		JobResultCode,
 		JobStatus,
+		Maintenance,
+		MaintenanceTask,
 		Repository,
 		RepositoryBackendKind,
 		UpdateRepositoryRequest
@@ -15,6 +17,7 @@
 	import {
 		Alert,
 		Button,
+		Checkbox,
 		ConfirmDialog,
 		Dialog,
 		DropdownMenu,
@@ -28,6 +31,8 @@
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
+	import { formatTimeInZoneWithLocal } from '#lib/format.ts';
+	import { timeZoneNames } from '#lib/schedule.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -54,6 +59,27 @@
 	let s3SecretKey = $state('');
 	let restPassword = $state('');
 	let maintenanceAgentId = $state('');
+
+	// The maintenance schedules of the repository in the dialog (FR-RP-08).
+	const TIME_ZONES = timeZoneNames();
+	const TIME_ZONE_LIST_ID = 'maintenance-time-zones';
+	const PREVIEW_RUNS = 3;
+	const RETENTION_PRESETS: { label: MessageKey; cron: string }[] = [
+		{ label: 'repositories.maintenance.preset.daily', cron: '0 3 * * *' },
+		{ label: 'repositories.maintenance.preset.weekly', cron: '0 3 * * 0' }
+	];
+	const CHECK_PRESETS: { label: MessageKey; cron: string }[] = [
+		{ label: 'repositories.maintenance.preset.weekly', cron: '0 4 * * 0' },
+		{ label: 'repositories.maintenance.preset.monthly', cron: '0 4 1 * *' }
+	];
+	let maintenance = $state<Maintenance | null>(null);
+	let retentionCron = $state('');
+	let retentionEnabled = $state(true);
+	let checkCron = $state('');
+	let checkEnabled = $state(true);
+	let maintenanceTimeZone = $state('UTC');
+	let retentionRuns = $state<string[] | null>(null);
+	let checkRuns = $state<string[] | null>(null);
 
 	let deleteTarget = $state<Repository | null>(null);
 	let deleteOpen = $state(false);
@@ -113,6 +139,7 @@
 	const locationLocked = $derived(editing?.initialized === true);
 
 	const canWrite = $derived(getSession()?.role === 'admin');
+	const canRun = $derived(getSession()?.role === 'admin' || getSession()?.role === 'operator');
 	const agentNames = $derived(new Map(agents.map((agent) => [agent.id, agent.hostname])));
 
 	const backendLabels: Record<RepositoryBackendKind, MessageKey> = {
@@ -217,7 +244,59 @@
 		if (!formOpen) resetForm();
 	});
 
+	// The dialog previews the next fire times of each schedule from the form, so the user sees them
+	// before the save (FR-SC-01). The list follows the edit of the cron or the time zone.
+	$effect(() => {
+		if (!formOpen || !editing) return;
+		const zone = maintenanceTimeZone;
+		const retention = retentionCron;
+		const check = checkCron;
+		const handle = setTimeout(() => {
+			void loadRuns(retention, zone).then((runs) => (retentionRuns = runs));
+			void loadRuns(check, zone).then((runs) => (checkRuns = runs));
+		}, 200);
+		return () => clearTimeout(handle);
+	});
+
+	async function loadRuns(cron: string, zone: string): Promise<string[] | null> {
+		if (!cron.trim() || !zone.trim()) return null;
+		try {
+			const response = await service.previewSchedule({
+				cron,
+				time_zone: zone,
+				count: PREVIEW_RUNS
+			});
+			return response.runs;
+		} catch {
+			return null;
+		}
+	}
+
+	async function loadMaintenance(repository: Repository): Promise<void> {
+		try {
+			const loaded = await service.getMaintenance(repository.id);
+			// The dialog may have closed or moved to another repository while the call ran.
+			if (editing?.id !== repository.id) return;
+			maintenance = loaded;
+			retentionCron = loaded.retention.cron;
+			retentionEnabled = loaded.retention.enabled;
+			checkCron = loaded.check.cron;
+			checkEnabled = loaded.check.enabled;
+			maintenanceTimeZone = loaded.retention.time_zone;
+		} catch (problem) {
+			formError = messageOf(problem);
+		}
+	}
+
 	function resetForm(): void {
+		maintenance = null;
+		retentionCron = '';
+		retentionEnabled = true;
+		checkCron = '';
+		checkEnabled = true;
+		maintenanceTimeZone = 'UTC';
+		retentionRuns = null;
+		checkRuns = null;
 		name = '';
 		kind = 's3';
 		endpoint = '';
@@ -257,6 +336,7 @@
 		}
 		maintenanceAgentId = repository.maintenance_agent_id ?? '';
 		formOpen = true;
+		void loadMaintenance(repository);
 	}
 
 	function backendRequest(): BackendSettings {
@@ -293,6 +373,13 @@
 				}
 				if (kind === 'rest' && restPassword) request.rest_password = restPassword;
 				await service.updateRepository(editing.id, request);
+				if (maintenance) {
+					await service.updateMaintenance(editing.id, {
+						time_zone: maintenanceTimeZone,
+						retention: { cron: retentionCron, enabled: retentionEnabled },
+						check: { cron: checkCron, enabled: checkEnabled }
+					});
+				}
 				pushToast('success', t('repositories.updated'));
 			} else {
 				const request: CreateRepositoryRequest = {
@@ -317,6 +404,15 @@
 			formError = formProblem ? null : messageOf(problem);
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function runTask(repository: Repository, task: MaintenanceTask): Promise<void> {
+		try {
+			await service.runMaintenance(repository.id, task);
+			pushToast('success', t('repositories.maintenanceQueued'));
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
 		}
 	}
 
@@ -414,6 +510,17 @@
 		jobOpen = false;
 	}
 
+	function lastTone(entry: Job): StatusTone {
+		if (entry.status === 'succeeded') {
+			return entry.result_code === 'succeeded_with_warnings' ? 'warning' : 'success';
+		}
+		if (entry.status === 'failed' || entry.status === 'expired' || entry.status === 'dead_letter') {
+			return 'failed';
+		}
+		if (entry.status === 'running') return 'running';
+		return 'queued';
+	}
+
 	function jobTone(): StatusTone {
 		if (!job) return 'neutral';
 		if (job.status === 'succeeded') {
@@ -438,7 +545,36 @@
 {/snippet}
 
 {#snippet maintenanceCell(repository: Repository)}
-	<span>{maintenanceName(repository)}</span>
+	{#if repository.maintenance_agent_id}
+		<span>{maintenanceName(repository)}</span>
+	{:else}
+		<StatusPill tone="warning">{t('repositories.maintenanceMissing')}</StatusPill>
+	{/if}
+{/snippet}
+
+{#snippet lastRun(job: Job | null | undefined)}
+	{#if job}
+		<span class="last">
+			<StatusPill tone={lastTone(job)}>{t(jobStatusLabels[job.status])}</StatusPill>
+			<span class="last__time">
+				{formatTimeInZoneWithLocal(job.finished_at ?? job.created_at, maintenanceTimeZone)}
+			</span>
+		</span>
+	{:else}
+		<span class="last__time">{t('repositories.maintenance.lastNone')}</span>
+	{/if}
+{/snippet}
+
+{#snippet runsList(runs: string[] | null)}
+	{#if runs && runs.length > 0}
+		<ul class="runs">
+			{#each runs as run (run)}
+				<li>{formatTimeInZoneWithLocal(run, maintenanceTimeZone)}</li>
+			{/each}
+		</ul>
+	{:else}
+		<p class="hint">{t('repositories.maintenance.nextRunsEmpty')}</p>
+	{/if}
 {/snippet}
 
 {#snippet statusCell(repository: Repository)}
@@ -482,40 +618,58 @@
 		filterPlaceholder={t('repositories.searchPlaceholder')}
 	>
 		{#snippet rowActions(repository)}
-			{#if canWrite}
+			{#if canWrite || canRun}
 				<DropdownMenu
 					icon="more"
 					align="end"
 					label={t('repositories.moreActions', { name: repository.name })}
 					items={[
-						...(repository.initialized
-							? []
-							: [
+						...(canRun && repository.maintenance_agent_id && repository.initialized
+							? [
 									{
-										label: t('repositories.initialize'),
-										icon: 'plus' as const,
-										onSelect: () => openJob(repository, 'init')
+										label: t('repositories.runRetention'),
+										icon: 'refresh' as const,
+										onSelect: () => void runTask(repository, 'retention')
+									},
+									{
+										label: t('repositories.runCheck'),
+										icon: 'refresh' as const,
+										onSelect: () => void runTask(repository, 'check')
 									}
-								]),
-						{
-							label: t('repositories.testAccess'),
-							icon: 'eye',
-							onSelect: () => openJob(repository, 'test_access')
-						},
-						{
-							label: t('repositories.edit'),
-							icon: 'settings',
-							onSelect: () => openEdit(repository)
-						},
-						{
-							label: t('repositories.delete'),
-							icon: 'octagon',
-							tone: 'danger',
-							onSelect: () => {
-								deleteTarget = repository;
-								deleteOpen = true;
-							}
-						}
+								]
+							: []),
+						...(canWrite
+							? [
+									...(repository.initialized
+										? []
+										: [
+												{
+													label: t('repositories.initialize'),
+													icon: 'plus' as const,
+													onSelect: () => openJob(repository, 'init')
+												}
+											]),
+									{
+										label: t('repositories.testAccess'),
+										icon: 'eye' as const,
+										onSelect: () => openJob(repository, 'test_access')
+									},
+									{
+										label: t('repositories.edit'),
+										icon: 'settings' as const,
+										onSelect: () => openEdit(repository)
+									},
+									{
+										label: t('repositories.delete'),
+										icon: 'octagon' as const,
+										tone: 'danger' as const,
+										onSelect: () => {
+											deleteTarget = repository;
+											deleteOpen = true;
+										}
+									}
+								]
+							: [])
 					]}
 				/>
 			{/if}
@@ -666,6 +820,90 @@
 			error={fieldError(formProblem, 'maintenance_agent_id')}
 			bind:value={maintenanceAgentId}
 		/>
+
+		{#if editing && maintenance}
+			<section class="section" aria-labelledby="maintenance-title">
+				<h3 class="section__title" id="maintenance-title">{t('repositories.maintenance.title')}</h3>
+				<p class="hint">{t('repositories.maintenance.description')}</p>
+				{#if !maintenanceAgentId}
+					<Alert tone="attention" icon="alert" title={t('repositories.maintenance.noHostTitle')}>
+						{t('repositories.maintenance.noHostBody')}
+					</Alert>
+				{/if}
+				<TextField
+					id="maintenance-time-zone"
+					label={t('repositories.maintenance.timeZone')}
+					help={t('repositories.maintenance.timeZoneHint')}
+					error={fieldError(formProblem, 'time_zone')}
+					list={TIME_ZONE_LIST_ID}
+					bind:value={maintenanceTimeZone}
+					required
+				/>
+				<datalist id={TIME_ZONE_LIST_ID}>
+					{#each TIME_ZONES as zone (zone)}
+						<option value={zone}></option>
+					{/each}
+				</datalist>
+
+				<div class="task">
+					<h4 class="task__title">{t('repositories.maintenance.retention')}</h4>
+					<p class="hint">{t('repositories.maintenance.retentionHint')}</p>
+					<TextField
+						id="maintenance-retention-cron"
+						label={t('repositories.maintenance.cron')}
+						help={t('repositories.maintenance.cronHint')}
+						error={fieldError(formProblem, 'retention.cron')}
+						bind:value={retentionCron}
+						required
+					/>
+					<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
+						{#each RETENTION_PRESETS as preset (preset.cron)}
+							<Button type="button" size="sm" onclick={() => (retentionCron = preset.cron)}>
+								{t(preset.label)}
+							</Button>
+						{/each}
+					</div>
+					<Checkbox label={t('repositories.maintenance.enabled')} bind:checked={retentionEnabled} />
+					<div class="task__runs">
+						<span class="task__label">{t('repositories.maintenance.nextRuns')}</span>
+						{@render runsList(retentionEnabled ? retentionRuns : null)}
+					</div>
+					<div class="task__runs">
+						<span class="task__label">{t('repositories.maintenance.last')}</span>
+						{@render lastRun(maintenance.last_retention)}
+					</div>
+				</div>
+
+				<div class="task">
+					<h4 class="task__title">{t('repositories.maintenance.check')}</h4>
+					<p class="hint">{t('repositories.maintenance.checkHint')}</p>
+					<TextField
+						id="maintenance-check-cron"
+						label={t('repositories.maintenance.cron')}
+						help={t('repositories.maintenance.cronHint')}
+						error={fieldError(formProblem, 'check.cron')}
+						bind:value={checkCron}
+						required
+					/>
+					<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
+						{#each CHECK_PRESETS as preset (preset.cron)}
+							<Button type="button" size="sm" onclick={() => (checkCron = preset.cron)}>
+								{t(preset.label)}
+							</Button>
+						{/each}
+					</div>
+					<Checkbox label={t('repositories.maintenance.enabled')} bind:checked={checkEnabled} />
+					<div class="task__runs">
+						<span class="task__label">{t('repositories.maintenance.nextRuns')}</span>
+						{@render runsList(checkEnabled ? checkRuns : null)}
+					</div>
+					<div class="task__runs">
+						<span class="task__label">{t('repositories.maintenance.last')}</span>
+						{@render lastRun(maintenance.last_check)}
+					</div>
+				</div>
+			</section>
+		{/if}
 	</div>
 	{#snippet footer()}
 		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
@@ -767,6 +1005,76 @@
 
 	.note {
 		margin-top: var(--rh-space-4);
+	}
+
+	.section {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-3);
+	}
+
+	.section__title {
+		margin: 0;
+		padding-bottom: var(--rh-space-1);
+		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
+		font-size: var(--rh-font-size-sm);
+		font-weight: var(--rh-font-weight-semibold);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--rh-color-text-muted);
+	}
+
+	.task {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-2);
+		padding: var(--rh-space-3);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+	}
+
+	.task__title {
+		margin: 0;
+		font-size: var(--rh-font-size-md);
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.task__runs {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-1);
+	}
+
+	.task__label {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.presets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--rh-space-2);
+	}
+
+	.runs {
+		margin: 0;
+		padding-left: var(--rh-space-4);
+	}
+
+	.hint {
+		margin: 0;
+		color: var(--rh-color-text-muted);
+	}
+
+	.last {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.last__time {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.job {

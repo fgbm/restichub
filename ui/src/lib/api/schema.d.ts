@@ -803,6 +803,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/repositories/{id}/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reads the maintenance of a repository.
+         * @description The view holds the retention and check schedules and the latest job of each task. Without a maintenance agent the control plane creates no maintenance job.
+         */
+        get: operations["get_maintenance"];
+        /**
+         * Replaces the maintenance schedules of a repository.
+         * @description The body holds one time zone and the cron expression of each task. The control plane validates the expressions before the write.
+         */
+        put: operations["update_maintenance"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/repositories/{id}/maintenance/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Runs a maintenance task now.
+         * @description The job runs on the maintenance agent and follows the barriers of the queue. The retention task needs a profile with a retention that a plan runs. A repository with an active exclusive job gives HTTP 409.
+         */
+        post: operations["run_maintenance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/repositories/{id}/test-access": {
         parameters: {
             query?: never;
@@ -1506,6 +1550,43 @@ export interface components {
             /** @description In RFC 3339. */
             updated_at: string;
         };
+        MaintenanceScheduleInput: {
+            cron: string;
+            enabled: boolean;
+        };
+        /** @description One schedule of a repository. */
+        MaintenanceScheduleView: {
+            /** @description Five fields: minute, hour, day of month, month, day of week. */
+            cron: string;
+            enabled: boolean;
+            /** @description The last fire time that the scheduler processed, in RFC 3339. */
+            last_fire_time?: string | null;
+            /** @description In UTC, in RFC 3339. Null when the schedule is disabled or the scheduler has not set it yet. */
+            next_run_at?: string | null;
+            /** @description IANA name, for example `Europe/Berlin`. */
+            time_zone: string;
+        };
+        /**
+         * @description The maintenance task of a repository schedule (FR-RP-08, ADR-0034).
+         *
+         *     The string value of each variant is the stored value of the `task` column. It is stable: do not
+         *     change a string.
+         * @enum {string}
+         */
+        MaintenanceTask: "retention" | "check";
+        /** @description The maintenance state of a repository (FR-RP-08). */
+        MaintenanceView: {
+            check: components["schemas"]["MaintenanceScheduleView"];
+            last_check?: components["schemas"]["JobView"] | null;
+            last_retention?: components["schemas"]["JobView"] | null;
+            /**
+             * @description Null when the repository has no maintenance agent. The control plane then creates no
+             *     maintenance job.
+             */
+            maintenance_agent_id?: string | null;
+            repository_id: string;
+            retention: components["schemas"]["MaintenanceScheduleView"];
+        };
         MeResponse: {
             /** @description True when the account holds the installation-wide right (ADR-0029). */
             platform_admin: boolean;
@@ -1786,6 +1867,9 @@ export interface components {
          * @enum {string}
          */
         Role: "platform_admin" | "admin" | "operator" | "viewer";
+        RunMaintenanceRequest: {
+            task: components["schemas"]["MaintenanceTask"];
+        };
         /** @description The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
         SchedulePreviewResponse: {
             /** @description The fire times in UTC, formatted as RFC 3339. */
@@ -1927,6 +2011,13 @@ export interface components {
             password?: string | null;
             /** @description True when the account holds the installation-wide right (ADR-0029). */
             platform_admin?: boolean | null;
+        };
+        /** @description The body of a schedule update. It replaces both schedules. */
+        UpdateMaintenanceRequest: {
+            check: components["schemas"]["MaintenanceScheduleInput"];
+            retention: components["schemas"]["MaintenanceScheduleInput"];
+            /** @description An IANA name, such as `Europe/Berlin`, for both schedules. */
+            time_zone: string;
         };
         /** @description The request body of a plan update. An absent name keeps the name. */
         UpdatePlanRequest: {
@@ -4982,6 +5073,191 @@ export interface operations {
                 };
             };
             /** @description The agent is offline. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_maintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The maintenance of the repository. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    update_maintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMaintenanceRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated maintenance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    run_maintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunMaintenanceRequest"];
+            };
+        };
+        responses: {
+            /** @description The job is queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description The repository has no maintenance agent. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not initialized, has nothing to forget, or holds an active exclusive job. */
             409: {
                 headers: {
                     [name: string]: unknown;

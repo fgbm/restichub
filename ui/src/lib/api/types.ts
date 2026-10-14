@@ -112,6 +112,16 @@ export type CreateRepositoryRequest = components['schemas']['CreateRepositoryReq
 
 export type UpdateRepositoryRequest = components['schemas']['UpdateRepositoryRequest'];
 
+/** The maintenance task of a repository schedule (FR-RP-08). */
+export type MaintenanceTask = components['schemas']['MaintenanceTask'];
+
+/** The maintenance schedules and the latest maintenance jobs of a repository (FR-RP-08). */
+export type Maintenance = components['schemas']['MaintenanceView'];
+
+export type MaintenanceSchedule = components['schemas']['MaintenanceScheduleView'];
+
+export type UpdateMaintenanceRequest = components['schemas']['UpdateMaintenanceRequest'];
+
 /** The kind of a job (FR-PR-02). */
 export type JobKind = components['schemas']['JobKind'];
 

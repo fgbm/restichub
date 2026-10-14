@@ -30,6 +30,8 @@ import type {
 	Instance,
 	Job,
 	JobActionRequest,
+	Maintenance,
+	MaintenanceTask,
 	JobListResponse,
 	JobQuery,
 	Me,
@@ -62,6 +64,7 @@ import type {
 	UpdateAccountRequest,
 	UpdatePlanRequest,
 	UpdateProfileRequest,
+	UpdateMaintenanceRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
 	User,
@@ -114,6 +117,12 @@ export interface ApiService {
 	initRepository(id: string, request?: JobActionRequest): Promise<Job>;
 	/** Starts a test-access job on an agent (FR-RP-02). */
 	testAccessRepository(id: string, request?: JobActionRequest): Promise<Job>;
+	/** The maintenance schedules and the latest maintenance jobs of a repository (FR-RP-08). */
+	getMaintenance(id: string): Promise<Maintenance>;
+	/** Replaces the maintenance schedules of a repository (FR-RP-08). */
+	updateMaintenance(id: string, request: UpdateMaintenanceRequest): Promise<Maintenance>;
+	/** Queues a maintenance task of a repository now (FR-SC-09). */
+	runMaintenance(id: string, task: MaintenanceTask): Promise<Job>;
 	/** Polls one job (FR-PR-01). */
 	getJob(id: string): Promise<Job>;
 	/** One page of the jobs of the tenant, newest first (FR-SC-09). */
@@ -210,6 +219,10 @@ const httpService: ApiService = {
 	initRepository: (id, request) => api.post<Job>(endpoints.repositories.init(id), request ?? {}),
 	testAccessRepository: (id, request) =>
 		api.post<Job>(endpoints.repositories.testAccess(id), request ?? {}),
+	getMaintenance: (id) => api.get<Maintenance>(endpoints.repositories.maintenance(id)),
+	updateMaintenance: (id, request) =>
+		api.put<Maintenance>(endpoints.repositories.maintenance(id), request),
+	runMaintenance: (id, task) => api.post<Job>(endpoints.repositories.runMaintenance(id), { task }),
 	getJob: (id) => api.get<Job>(endpoints.jobs.byId(id)),
 	listJobs: (query) =>
 		api.get<JobListResponse>(endpoints.jobs.list, {

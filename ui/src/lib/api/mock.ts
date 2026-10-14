@@ -29,6 +29,8 @@ import type {
 	JobQuery,
 	JobKind,
 	JobStatus,
+	Maintenance,
+	MaintenanceTask,
 	Me,
 	MembershipInput,
 	NextRunsResponse,
@@ -50,6 +52,7 @@ import type {
 	TenantAccess,
 	UpdateAccountRequest,
 	UpdatePlanRequest,
+	UpdateMaintenanceRequest,
 	UpdateProfileRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
@@ -564,6 +567,14 @@ export class MockApiService {
 	private enrollmentTokens: EnrollmentToken[] = [];
 	private repositories: Repository[] = [];
 	private jobs: MockJob[] = makeJobs();
+	private maintenance = new Map<
+		string,
+		{
+			time_zone: string;
+			retention: { cron: string; enabled: boolean };
+			check: { cron: string; enabled: boolean };
+		}
+	>();
 	private profiles: Profile[] = makeProfiles();
 	private plans: Plan[] = makePlans();
 	private audit: AuditRecord[] = makeAudit();
@@ -844,6 +855,99 @@ export class MockApiService {
 
 	async testAccessRepository(id: string, request?: JobActionRequest): Promise<Job> {
 		return this.startJob(id, 'test_access', request);
+	}
+
+	async getMaintenance(id: string): Promise<Maintenance> {
+		const repository = this.repositories.find((item) => item.id === id);
+		if (!repository) throw new Error('not found');
+		return this.maintenanceView(repository);
+	}
+
+	async updateMaintenance(id: string, request: UpdateMaintenanceRequest): Promise<Maintenance> {
+		const repository = this.repositories.find((item) => item.id === id);
+		if (!repository) throw new Error('not found');
+		for (const [field, cron] of [
+			['retention.cron', request.retention.cron],
+			['check.cron', request.check.cron]
+		]) {
+			if (cron.trim().split(/\s+/).length !== 5) {
+				throw problemError('invalid_argument', field, 'invalid_format');
+			}
+		}
+		this.maintenance.set(id, {
+			time_zone: request.time_zone,
+			retention: { ...request.retention },
+			check: { ...request.check }
+		});
+		return this.maintenanceView(repository);
+	}
+
+	async runMaintenance(id: string, task: MaintenanceTask): Promise<Job> {
+		const repository = this.repositories.find((item) => item.id === id);
+		if (!repository) throw new Error('not found');
+		if (!repository.maintenance_agent_id) {
+			throw problemError('invalid_argument', 'maintenance_agent_id', 'empty');
+		}
+		if (!repository.initialized) throw problemError('conflict', 'id', 'conflict');
+		const now = new Date().toISOString();
+		const agentId = repository.maintenance_agent_id;
+		const job: Job = {
+			id: `j_${this.jobs.length + 1}`,
+			kind: task === 'retention' ? 'forget' : 'check',
+			repository_id: id,
+			agent_id: agentId,
+			status: 'queued',
+			result_code: null,
+			result_message: null,
+			created_at: now,
+			updated_at: now,
+			finished_at: null,
+			expires_at: null,
+			plan_id: null,
+			plan_name: null,
+			agent_hostname: this.agents.find((item) => item.id === agentId)?.hostname ?? null,
+			repository_name: repository.name,
+			started_at: null,
+			run_at: now,
+			attempt: 0
+		};
+		this.jobs = [
+			...this.jobs,
+			{ job, readyAt: Date.now() + 700, repositoryId: id, initializes: false }
+		];
+		return { ...job };
+	}
+
+	private maintenanceView(repository: Repository): Maintenance {
+		const stored = this.maintenance.get(repository.id) ?? {
+			time_zone: 'UTC',
+			retention: { cron: '0 3 * * 0', enabled: true },
+			check: { cron: '0 4 1 * *', enabled: true }
+		};
+		const schedule = (input: { cron: string; enabled: boolean }) => ({
+			cron: input.cron,
+			time_zone: stored.time_zone,
+			enabled: input.enabled,
+			next_run_at: input.enabled
+				? (nextRunsFromCron(input.cron, stored.time_zone, 1)[0] ?? null)
+				: null,
+			last_fire_time: null
+		});
+		const latest = (kind: JobKind): Job | null => {
+			const jobs = this.jobs.filter(
+				(entry) => entry.repositoryId === repository.id && entry.job.kind === kind
+			);
+			const last = jobs[jobs.length - 1];
+			return last ? { ...last.job } : null;
+		};
+		return {
+			repository_id: repository.id,
+			maintenance_agent_id: repository.maintenance_agent_id ?? null,
+			retention: schedule(stored.retention),
+			check: schedule(stored.check),
+			last_retention: latest('forget'),
+			last_check: latest('check')
+		};
 	}
 
 	async getJob(id: string): Promise<Job> {

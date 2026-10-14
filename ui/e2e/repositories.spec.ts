@@ -101,3 +101,62 @@ test('the repository init dialog picks a host and shows the job result', async (
 	await expect(page.getByRole('menuitem', { name: 'Initialize' })).toHaveCount(0);
 	await page.keyboard.press('Escape');
 });
+
+// The repository maintenance: the warning for a missing host, the schedules in the dialog and the
+// run-now action (FR-RP-08, FR-SC-09).
+async function addLocalRepository(page: Page, name: string, host: string | null): Promise<void> {
+	await page.getByRole('button', { name: 'Add repository' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Add a repository' });
+	await page.locator('#repo-name').fill(name);
+	await page.locator('#repo-kind').selectOption('local');
+	await page.locator('#repo-path').fill(`/srv/backup/${name}`);
+	await page.locator('#repo-password').fill('repo-password');
+	if (host) await page.locator('#repo-agent').selectOption({ label: host });
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText(name, { exact: true })).toBeVisible();
+}
+
+test('the repository maintenance shows the warning, edits the schedules and runs a task', async ({
+	page
+}) => {
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Repositories', exact: true })
+		.click();
+
+	await addLocalRepository(page, 'repo-m', 'nas-backup');
+	await addLocalRepository(page, 'repo-nohost', null);
+	// A repository without a maintenance host shows a warning in the list.
+	await expect(page.getByText('No maintenance host')).toBeVisible();
+
+	// Run now needs an initialized repository.
+	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
+	await expect(page.getByRole('menuitem', { name: 'Run retention now' })).toHaveCount(0);
+	await page.getByRole('menuitem', { name: 'Initialize' }).click();
+	const job = page.getByRole('dialog', { name: 'Initialize the repository?' });
+	await job.getByRole('button', { name: 'Start' }).click();
+	await expect(job.getByText('The repository is ready.')).toBeVisible({ timeout: 10_000 });
+	await page.keyboard.press('Escape');
+
+	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
+	await page.getByRole('menuitem', { name: 'Run retention now' }).click();
+	await expect(page.getByText('The maintenance job is queued.')).toBeVisible();
+
+	// Edit the schedules: a preset fills the cron, the preview lists the next runs.
+	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	const edit = page.getByRole('dialog', { name: 'Edit the repository' });
+	await expect(edit.getByRole('heading', { name: 'Maintenance' })).toBeVisible();
+	await expect(page.locator('#maintenance-retention-cron')).toHaveValue('0 3 * * 0');
+	await edit.getByRole('button', { name: 'Daily at 03:00' }).click();
+	await expect(page.locator('#maintenance-retention-cron')).toHaveValue('0 3 * * *');
+	await expect(edit.locator('.runs li').first()).toBeVisible();
+	await edit.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('The repository is updated.')).toBeVisible();
+
+	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await expect(page.locator('#maintenance-retention-cron')).toHaveValue('0 3 * * *');
+});
