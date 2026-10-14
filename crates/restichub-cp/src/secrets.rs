@@ -279,6 +279,11 @@ pub async fn replace_secret_value(
     let Some(metadata) = metadata else {
         return Err(ApiError::not_found());
     };
+    // The password of a repository cannot change until the rotation of FR-RP-06 (1.0): a new value
+    // would not open the existing repository.
+    if restichub_db::repositories::is_password_secret(&mut tx, secret_id).await? {
+        return Err(ApiError::conflict());
+    }
     let provider = state
         .kek()
         .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
