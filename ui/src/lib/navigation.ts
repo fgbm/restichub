@@ -16,6 +16,7 @@ export type NavHref =
 	| '/(app)/hosts'
 	| '/(app)/repositories'
 	| '/(app)/profiles'
+	| '/(app)/plans'
 	| '/(app)/audit'
 	| '/(app)/settings'
 	| SettingsHref
@@ -70,6 +71,12 @@ export const navigation: NavSection = {
 			href: '/(app)/profiles',
 			labelKey: 'nav.profiles',
 			icon: 'checklist',
+			roles: ['admin', 'operator', 'viewer']
+		},
+		{
+			href: '/(app)/plans',
+			labelKey: 'nav.plans',
+			icon: 'calendar',
 			roles: ['admin', 'operator', 'viewer']
 		},
 		{ href: '/(app)/audit', labelKey: 'nav.audit', icon: 'audit', roles: ALL_ROLES },

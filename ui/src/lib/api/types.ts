@@ -172,6 +172,24 @@ export type PreviewRequest = components['schemas']['PreviewRequest'];
 
 export type PreviewEnvVar = components['schemas']['PreviewEnvView'];
 
+/** The missed run policy of a plan (FR-SC-07). */
+export type MissedRunPolicy = components['schemas']['MissedRunPolicy'];
+
+/** One plan: a profile bound to an agent with a schedule (FR-SC-01). */
+export type Plan = components['schemas']['PlanView'];
+
+export type PlanListResponse = components['schemas']['PlanListResponse'];
+
+export type CreatePlanRequest = components['schemas']['CreatePlanRequest'];
+
+export type UpdatePlanRequest = components['schemas']['UpdatePlanRequest'];
+
+/** The result of a plan create or update: the plan. */
+export type PlanResponse = components['schemas']['PlanResponse'];
+
+/** The next fire times of a plan, in UTC (FR-SC-01). */
+export type NextRunsResponse = components['schemas']['NextRunsResponse'];
+
 /**
  * One audit record. The generated `diff` type is an opaque object, so the UI
  * replaces it with the diff shape that the control plane writes.

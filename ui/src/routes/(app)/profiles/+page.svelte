@@ -187,12 +187,18 @@
 		if (!profile.retention) return t('common.none');
 		const retention = profile.retention;
 		const parts: string[] = [];
-		if ((retention.keep_last ?? 0) > 0) parts.push(`last ${retention.keep_last}`);
-		if ((retention.keep_daily ?? 0) > 0) parts.push(`daily ${retention.keep_daily}`);
-		if ((retention.keep_weekly ?? 0) > 0) parts.push(`weekly ${retention.keep_weekly}`);
-		if ((retention.keep_monthly ?? 0) > 0) parts.push(`monthly ${retention.keep_monthly}`);
-		if ((retention.keep_yearly ?? 0) > 0) parts.push(`yearly ${retention.keep_yearly}`);
-		if (retention.keep_within) parts.push(`within ${retention.keep_within}`);
+		if ((retention.keep_last ?? 0) > 0)
+			parts.push(t('profiles.retention.summary.last', { count: retention.keep_last ?? 0 }));
+		if ((retention.keep_daily ?? 0) > 0)
+			parts.push(t('profiles.retention.summary.daily', { count: retention.keep_daily ?? 0 }));
+		if ((retention.keep_weekly ?? 0) > 0)
+			parts.push(t('profiles.retention.summary.weekly', { count: retention.keep_weekly ?? 0 }));
+		if ((retention.keep_monthly ?? 0) > 0)
+			parts.push(t('profiles.retention.summary.monthly', { count: retention.keep_monthly ?? 0 }));
+		if ((retention.keep_yearly ?? 0) > 0)
+			parts.push(t('profiles.retention.summary.yearly', { count: retention.keep_yearly ?? 0 }));
+		if (retention.keep_within)
+			parts.push(t('profiles.retention.summary.within', { value: retention.keep_within }));
 		return parts.length > 0 ? parts.join(', ') : t('common.none');
 	}
 
