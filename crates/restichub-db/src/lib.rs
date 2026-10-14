@@ -24,6 +24,7 @@ pub mod enums;
 pub mod ids;
 pub mod kek;
 pub mod memberships;
+pub mod profiles;
 pub mod repositories;
 pub mod secrets;
 pub mod sessions;
@@ -40,8 +41,8 @@ pub use enums::{
     ActorType, AdminState, AgentStatus, BackendKind, CaRole, Role, SigningKeyRole, TenantStatus,
 };
 pub use ids::{
-    AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, PLATFORM_TENANT_ID, RepositoryId, SecretId,
-    SessionId, SetupTokenId, TenantId, UserId,
+    AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, PLATFORM_TENANT_ID, ProfileId,
+    RepositoryId, SecretId, SessionId, SetupTokenId, TenantId, UserId,
 };
 pub use tx::{EnrollmentTx, PlatformTx, TenantTx};
 
