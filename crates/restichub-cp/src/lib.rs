@@ -25,6 +25,7 @@ pub mod maintenance;
 pub mod password;
 pub mod pki;
 pub mod platform_users;
+pub mod profiles;
 pub mod rate_limit;
 pub mod repositories;
 pub mod routes;
