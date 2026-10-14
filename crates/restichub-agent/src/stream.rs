@@ -203,7 +203,7 @@ pub async fn run(
         if *stop.borrow() {
             return Ok(());
         }
-        let refused = match connect_once(
+        let (refused, healthy) = match connect_once(
             identity,
             dir,
             keys,
@@ -218,16 +218,12 @@ pub async fn run(
                     agent_id = %identity.agent_id,
                     "the control plane refused the agent identity; check that the agent is enrolled and not revoked"
                 );
-                true
+                (true, false)
             }
-            Ok(Disconnect::Closed { healthy }) => {
-                attempt = next_attempt(attempt, healthy);
-                false
-            }
+            Ok(Disconnect::Closed { healthy }) => (false, healthy),
             Err(error) => {
                 tracing::warn!(agent_id = %identity.agent_id, %error, "the agent stream stopped");
-                attempt = next_attempt(attempt, false);
-                false
+                (false, false)
             }
         };
         if *stop.borrow() {
@@ -238,7 +234,11 @@ pub async fn run(
         } else {
             options.backoff.delay(attempt)
         };
-        attempt = attempt.saturating_add(1);
+        attempt = if refused {
+            attempt.saturating_add(1)
+        } else {
+            next_attempt(attempt, healthy)
+        };
         tokio::select! {
             () = tokio::time::sleep(delay) => {}
             result = stop.changed() => {
