@@ -384,6 +384,15 @@ impl Config {
         let log_retention_days = number(env, LOG_RETENTION_DAYS_ENV, file.log_retention_days)?
             .unwrap_or(crate::log_store::DEFAULT_RETENTION_DAYS)
             .max(1);
+        if log_retention_days > crate::log_store::MAX_RETENTION_DAYS {
+            return Err(ConfigError::Invalid {
+                name: LOG_RETENTION_DAYS_ENV,
+                reason: format!(
+                    "the value is above {} days",
+                    crate::log_store::MAX_RETENTION_DAYS
+                ),
+            });
+        }
 
         let database_url = env
             .get(DATABASE_URL_ENV)

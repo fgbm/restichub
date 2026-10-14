@@ -323,6 +323,13 @@ async fn create_repository_job(
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
+    let step_ids: Vec<String> = validated
+        .job()
+        .steps
+        .iter()
+        .map(|step| step.step_id.clone())
+        .collect();
+    restichub_db::job_steps::plan(&mut tx, job_id, &step_ids).await?;
     tx.commit().await?;
 
     let signing = state

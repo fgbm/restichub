@@ -368,3 +368,119 @@ async fn ac_au_02_the_metrics_endpoint_needs_a_credential() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     env.db.cleanup().await;
 }
+
+/// Gives each seeded job an end status and a duration in seconds.
+async fn seed_durations(
+    env: &Env,
+    agent: restichub_db::AgentId,
+    repository: uuid::Uuid,
+    secs: &[f64],
+) {
+    let repository = restichub_db::RepositoryId::from_uuid(repository);
+    for seconds in secs {
+        let job = common::seed_job(env.db.database(), env.tenant, agent, repository).await;
+        let mut tx = env.db.owner_pool().begin().await.expect("the transaction");
+        sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+            .bind(env.tenant.to_string())
+            .execute(&mut *tx)
+            .await
+            .expect("the tenant scope");
+        sqlx::query(
+            "UPDATE jobs SET status = 'succeeded', started_at = now() - interval '1 day', \
+             finished_at = now() - interval '1 day' + make_interval(secs => $2) WHERE id = $1",
+        )
+        .bind(job)
+        .bind(seconds)
+        .execute(&mut *tx)
+        .await
+        .expect("the update");
+        tx.commit().await.expect("the commit");
+    }
+}
+
+#[tokio::test]
+async fn ac_mn_03_the_histogram_buckets_count_each_job_once_for_every_bound() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let agent = env.connect_agent("histogram-agent").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let durations = [0.5, 1.0, 4.0, 15.0, 61.0, 299.0, 4000.0, 30.0, 0.0];
+    seed_durations(&env, agent.id, repository, &durations).await;
+
+    let (status, _, text) = scrape(&env, Some(&env.viewer)).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let exposition = parse(&text);
+    check_histograms(&exposition, "restichub_job_duration_seconds");
+    let bucket = |le: &str| -> f64 {
+        labelled(&exposition, "restichub_job_duration_seconds_bucket")
+            .find(|sample| sample.labels["kind"] == "test_access" && sample.labels["le"] == le)
+            .unwrap_or_else(|| panic!("the bucket {le}"))
+            .value
+    };
+    for bound in restichub_db::metrics::DURATION_BUCKETS {
+        let expected = durations.iter().filter(|secs| **secs <= bound).count() as f64;
+        assert_eq!(bucket(&bound.to_string()), expected, "le={bound}");
+    }
+    assert_eq!(bucket("+Inf"), durations.len() as f64);
+    let sum = labelled(&exposition, "restichub_job_duration_seconds_sum")
+        .find(|sample| sample.labels["kind"] == "test_access")
+        .expect("the sum");
+    assert!(
+        (sum.value - durations.iter().sum::<f64>()).abs() < 0.01,
+        "{}",
+        sum.value
+    );
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_mn_05_a_snapshot_is_reused_for_fifteen_seconds() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let agent = env.connect_agent("cache-agent").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+
+    let succeeded = |text: &str| -> f64 {
+        let exposition = parse(text);
+        labelled(&exposition, "restichub_jobs_total")
+            .find(|sample| sample.labels["status"] == "succeeded")
+            .expect("the succeeded count")
+            .value
+    };
+    let (_, _, first) = scrape(&env, Some(&env.viewer)).await;
+    assert_eq!(succeeded(&first), 0.0);
+    seed_durations(&env, agent.id, repository, &[2.0]).await;
+    env.clock.advance(14);
+    let (_, _, cached) = scrape(&env, Some(&env.viewer)).await;
+    assert_eq!(succeeded(&cached), 0.0, "the snapshot is reused");
+    env.clock.advance(2);
+    let (_, _, fresh) = scrape(&env, Some(&env.viewer)).await;
+    assert_eq!(
+        succeeded(&fresh),
+        1.0,
+        "the snapshot is refreshed after 15 seconds"
+    );
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_tn_01_a_platform_admin_session_gets_no_metrics() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let admin = common::create_platform_admin(env.db.database(), "metrics-platform", "phc").await;
+    let cookie =
+        common::session_cookie(env.db.database(), restichub_db::PLATFORM_TENANT_ID, admin).await;
+    let response = common::send_response(
+        &env.app,
+        common::request("GET", "/metrics", Some(&cookie), None),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    env.db.cleanup().await;
+}

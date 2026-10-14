@@ -317,7 +317,7 @@ async fn fr_ag_08_the_log_of_a_job_stops_at_the_bound_and_says_so() {
     eventually(|| async { env.job(job).await["log"]["truncated"] == true }).await;
     let detail = env.job(job).await;
     let lines = detail["log"]["lines"].as_i64().expect("the line count");
-    assert!(lines > 1000 && lines < 1100, "{lines}");
+    assert!(lines > 900 && lines < 1000, "{lines}");
     env.db.cleanup().await;
 }
 

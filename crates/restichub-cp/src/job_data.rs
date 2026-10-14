@@ -65,12 +65,13 @@ pub async fn handle_progress(
             .collect(),
         updated_at: now,
     };
+    let cutoff = write_cutoff(state);
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         tracing::warn!(job = %job_id, "the progress could not open a transaction");
         return;
     };
     let result = async {
-        let Some(job) = owned_job(&mut tx, job_id, agent).await? else {
+        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
             return Ok(());
         };
         // A job that is not running shows no progress.
@@ -96,12 +97,13 @@ pub async fn handle_step_result(
     let Some(step) = step_of(result) else {
         return;
     };
+    let cutoff = write_cutoff(state);
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         tracing::warn!(job = %job_id, "the step result could not open a transaction");
         return;
     };
     let outcome = async {
-        if owned_job(&mut tx, job_id, agent).await?.is_none() {
+        if owned_job(&mut tx, job_id, agent, cutoff).await?.is_none() {
             return Ok(());
         }
         job_steps::upsert(&mut tx, job_id, &step).await.map(|_| ())
@@ -179,22 +181,36 @@ pub async fn handle_job_result_data(
 }
 
 async fn job_is_owned(state: &AppState, tenant: TenantId, agent: AgentId, job: JobId) -> bool {
+    let cutoff = write_cutoff(state);
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         return false;
     };
-    let owned = matches!(owned_job(&mut tx, job, agent).await, Ok(Some(_)));
+    let owned = matches!(owned_job(&mut tx, job, agent, cutoff).await, Ok(Some(_)));
     let _ = tx.commit().await;
     owned
 }
 
-/// Reads the job when it belongs to the agent and has left the queue.
+/// The earliest end time of a finished job that still takes writes: the log retention window.
+///
+/// After the window the sweep removes the log text, so a late write would only bring back what the
+/// sweep deleted (FR-LG-02).
+fn write_cutoff(state: &AppState) -> OffsetDateTime {
+    state.auth().clock.now() - time::Duration::days(i64::from(state.log_retention_days()))
+}
+
+/// Reads the job when it belongs to the agent, has left the queue and takes writes.
 async fn owned_job(
     tx: &mut restichub_db::TenantTx<'_>,
     job: JobId,
     agent: AgentId,
+    cutoff: OffsetDateTime,
 ) -> Result<Option<Job>, restichub_db::DbError> {
     let found = job_repo::get(tx, job).await?;
-    Ok(found.filter(|row| row.agent_id == agent && row.status != JobStatus::Queued))
+    Ok(found.filter(|row| {
+        row.agent_id == agent
+            && row.status != JobStatus::Queued
+            && row.finished_at.is_none_or(|finished| finished >= cutoff)
+    }))
 }
 
 async fn finish(

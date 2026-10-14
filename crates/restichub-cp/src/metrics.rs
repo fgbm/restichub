@@ -8,19 +8,59 @@
 //! Each sample carries the label `tenant` with the tenant identifier. The identifier holds no
 //! personal data, unlike a tenant name.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use restichub_db::metrics::{self as metrics_repo, DURATION_BUCKETS, MetricsSnapshot};
 use restichub_db::{AgentId, TenantId};
+use time::OffsetDateTime;
 
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::server::AppState;
 
 const CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
+
+/// How long a snapshot of one tenant is reused. A scrape loop or a hostile client cannot make the
+/// aggregate queries run more often than this.
+pub const SNAPSHOT_TTL: time::Duration = time::Duration::seconds(15);
+
+/// The last snapshot of each tenant. The agent state is not part of it: `agent_up` is read live.
+#[derive(Debug)]
+pub struct SnapshotCache {
+    ttl: time::Duration,
+    entries: Mutex<HashMap<TenantId, (OffsetDateTime, Arc<MetricsSnapshot>)>>,
+}
+
+impl SnapshotCache {
+    pub fn new(ttl: time::Duration) -> Self {
+        Self {
+            ttl,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get(&self, tenant: TenantId, now: OffsetDateTime) -> Option<Arc<MetricsSnapshot>> {
+        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        let (taken, snapshot) = entries.get(&tenant)?;
+        (now >= *taken && now - *taken < self.ttl).then(|| Arc::clone(snapshot))
+    }
+
+    fn put(&self, tenant: TenantId, now: OffsetDateTime, snapshot: Arc<MetricsSnapshot>) {
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries.insert(tenant, (now, snapshot));
+    }
+}
+
+impl Default for SnapshotCache {
+    fn default() -> Self {
+        Self::new(SNAPSHOT_TTL)
+    }
+}
 
 /// Renders the metrics of the tenant of the credential in the Prometheus text format.
 #[utoipa::path(
@@ -38,10 +78,23 @@ pub async fn metrics(
     State(state): State<AppState>,
     context: RequestContext,
 ) -> Result<Response, ApiError> {
+    // The operation is tenant-only, so a Platform Admin session in the platform tenant gets 403.
     context.authorize(Operation::MetricsRead)?;
-    let snapshot = context
-        .tenant_tx(&state, async |tx| Ok(metrics_repo::snapshot(tx).await?))
-        .await?;
+    let now = state.auth().clock.now();
+    let snapshot = match state.metrics_cache().get(context.tenant_id, now) {
+        Some(snapshot) => snapshot,
+        None => {
+            let fresh = Arc::new(
+                context
+                    .tenant_tx(&state, async |tx| Ok(metrics_repo::snapshot(tx).await?))
+                    .await?,
+            );
+            state
+                .metrics_cache()
+                .put(context.tenant_id, now, Arc::clone(&fresh));
+            fresh
+        }
+    };
     let registry = state.agent_registry();
     let body = render(context.tenant_id, &snapshot, |agent| {
         registry.is_online(agent)

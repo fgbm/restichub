@@ -67,7 +67,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 18] = [
+const TENANT_TABLES: [&str; 19] = [
     "users",
     "memberships",
     "sessions",
@@ -86,6 +86,7 @@ const TENANT_TABLES: [&str; 18] = [
     "job_logs",
     "job_log_state",
     "job_progress",
+    "job_planned_steps",
 ];
 
 struct Seed {
@@ -269,8 +270,8 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     .execute(tx.as_conn())
     .await?;
     sqlx::query(
-        "INSERT INTO job_logs (tenant_id, job_id, seq, stream, level, ts, text) \
-         VALUES ($1, $2, 1, 'stdout', 'info', now(), 'line')",
+        "INSERT INTO job_logs (tenant_id, job_id, seq, stream, chunk, line_index, level, ts, text) \
+         VALUES ($1, $2, 1, 'stdout', 1, 0, 'info', now(), 'line')",
     )
     .bind(tenant)
     .bind(job_id)
@@ -281,6 +282,14 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
         .bind(job_id)
         .execute(tx.as_conn())
         .await?;
+    sqlx::query(
+        "INSERT INTO job_planned_steps (tenant_id, job_id, step_id, position) \
+         VALUES ($1, $2, 'backup', 0)",
+    )
+    .bind(tenant)
+    .bind(job_id)
+    .execute(tx.as_conn())
+    .await?;
     sqlx::query(
         "INSERT INTO job_progress (tenant_id, job_id, step_id, bytes_done, total_bytes, \
           files_done, total_files, percent_done, seconds_elapsed, seconds_remaining, updated_at) \

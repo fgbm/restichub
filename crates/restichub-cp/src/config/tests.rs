@@ -525,6 +525,14 @@ fn fr_lg_02_the_log_retention_defaults_to_thirty_days_and_never_drops_below_one(
     assert_eq!(load(None).ok(), Some(30));
     assert_eq!(load(Some("7")).ok(), Some(7));
     assert_eq!(load(Some("0")).ok(), Some(1));
+    assert_eq!(load(Some("36500")).ok(), Some(36_500));
+    assert!(matches!(
+        load(Some("36501")),
+        Err(ConfigError::Invalid {
+            name: "RESTICHUB_LOG_RETENTION_DAYS",
+            ..
+        })
+    ));
     assert!(matches!(
         load(Some("many")),
         Err(ConfigError::Invalid {

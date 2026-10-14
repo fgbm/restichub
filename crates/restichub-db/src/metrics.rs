@@ -58,41 +58,35 @@ pub async fn snapshot(tx: &mut TenantTx<'_>) -> Result<MetricsSnapshot, DbError>
     .await
     .map_err(DbError::Query)?;
 
-    let totals = sqlx::query_as::<_, (String, i64, f64)>(
-        "SELECT kind, count(*), COALESCE(sum(extract(epoch FROM finished_at - started_at)), 0)::float8 \
-         FROM jobs WHERE started_at IS NOT NULL AND finished_at IS NOT NULL \
-           AND finished_at >= started_at \
-         GROUP BY kind ORDER BY kind",
-    )
-    .fetch_all(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
+    // One pass over the jobs: the bounds come from `DURATION_BUCKETS`, one `FILTER` for each.
     let bounds: Vec<f64> = DURATION_BUCKETS.to_vec();
-    let bucket_rows = sqlx::query_as::<_, (String, f64, i64)>(
-        "SELECT j.kind, b.le, count(*) FROM jobs j CROSS JOIN unnest($1::float8[]) AS b(le) \
-         WHERE j.started_at IS NOT NULL AND j.finished_at IS NOT NULL \
-           AND extract(epoch FROM j.finished_at - j.started_at) <= b.le \
-           AND j.finished_at >= j.started_at \
-         GROUP BY j.kind, b.le",
-    )
-    .bind(&bounds)
-    .fetch_all(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
+    let mut filters = String::new();
+    for index in 1..=DURATION_BUCKETS.len() {
+        if index > 1 {
+            filters.push_str(", ");
+        }
+        filters.push_str(&format!(
+            "count(*) FILTER (WHERE secs <= ($1::float8[])[{index}])"
+        ));
+    }
+    let query = format!(
+        "WITH finished AS ( \
+             SELECT kind, extract(epoch FROM finished_at - started_at)::float8 AS secs FROM jobs \
+             WHERE started_at IS NOT NULL AND finished_at IS NOT NULL \
+               AND finished_at >= started_at) \
+         SELECT kind, count(*), COALESCE(sum(secs), 0)::float8, ARRAY[{filters}]::bigint[] \
+         FROM finished GROUP BY kind ORDER BY kind"
+    );
+    let totals = sqlx::query_as::<_, (String, i64, f64, Vec<i64>)>(sqlx::AssertSqlSafe(query))
+        .bind(&bounds)
+        .fetch_all(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
     let mut durations = BTreeMap::new();
-    for (kind, count, sum_seconds) in totals {
+    for (kind, count, sum_seconds, buckets) in totals {
         let Some(kind) = JobKind::parse(&kind) else {
             continue;
         };
-        let buckets = DURATION_BUCKETS
-            .iter()
-            .map(|bound| {
-                bucket_rows
-                    .iter()
-                    .find(|(row_kind, le, _)| row_kind == kind.as_str() && le == bound)
-                    .map_or(0, |(_, _, n)| *n)
-            })
-            .collect();
         durations.insert(
             kind.as_str(),
             DurationHistogram {

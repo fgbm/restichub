@@ -269,6 +269,12 @@ macro_rules! step_columns {
 /// A second write of a step keeps the first row. It only adds an output that the first row lacked.
 /// Returns `false` when the job already holds [`MAX_STEPS_PER_JOB`] other steps.
 pub async fn upsert(tx: &mut TenantTx<'_>, job: JobId, step: &JobStep) -> Result<bool, DbError> {
+    // The row lock makes the count and the insert one step, so parallel writes keep the cap.
+    sqlx::query("SELECT 1 FROM jobs WHERE id = $1 FOR UPDATE")
+        .bind(job)
+        .fetch_optional(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
     let known: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM job_steps WHERE job_id = $1 AND step_id = $2)",
     )
@@ -365,6 +371,35 @@ pub async fn list(tx: &mut TenantTx<'_>, job: JobId) -> Result<Vec<JobStep>, DbE
     .await
     .map_err(DbError::Query)?;
     rows.into_iter().map(StepRow::into_step).collect()
+}
+
+/// Stores the step list that the control plane signed into a job, in order.
+///
+/// A second call changes nothing. At most [`MAX_STEPS_PER_JOB`] steps are kept.
+pub async fn plan(tx: &mut TenantTx<'_>, job: JobId, step_ids: &[String]) -> Result<(), DbError> {
+    for (position, step_id) in step_ids.iter().take(MAX_STEPS_PER_JOB as usize).enumerate() {
+        sqlx::query(
+            "INSERT INTO job_planned_steps (tenant_id, job_id, step_id, position) \
+             VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+        )
+        .bind(tx.tenant())
+        .bind(job)
+        .bind(step_id)
+        .bind(i32::try_from(position).unwrap_or(i32::MAX))
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    }
+    Ok(())
+}
+
+/// Lists the step identifiers that the control plane signed into a job, in order.
+pub async fn list_planned(tx: &mut TenantTx<'_>, job: JobId) -> Result<Vec<String>, DbError> {
+    sqlx::query_scalar("SELECT step_id FROM job_planned_steps WHERE job_id = $1 ORDER BY position")
+        .bind(job)
+        .fetch_all(tx.as_conn())
+        .await
+        .map_err(DbError::Query)
 }
 
 /// Stores the last progress of a job. The write replaces the previous progress.

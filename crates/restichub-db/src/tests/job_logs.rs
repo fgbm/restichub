@@ -10,7 +10,13 @@ use time::{Duration, OffsetDateTime};
 async fn clean_job(db: &Database, tenant: TenantId) -> Result<JobId, Box<dyn std::error::Error>> {
     seed_tenant(db, tenant).await?;
     let mut tx = db.begin_tenant(tenant).await?;
-    for table in ["job_logs", "job_log_state", "job_steps", "job_progress"] {
+    for table in [
+        "job_logs",
+        "job_log_state",
+        "job_steps",
+        "job_progress",
+        "job_planned_steps",
+    ] {
         sqlx::query(AssertSqlSafe(format!("DELETE FROM {table}")))
             .execute(tx.as_conn())
             .await?;
@@ -127,6 +133,107 @@ async fn fr_ag_08_db_the_log_of_a_job_is_bounded() -> TestResult {
 }
 
 #[tokio::test]
+async fn fr_ag_08_db_empty_lines_count_against_the_bound() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, _other) = two_tenants(db.database()).await?;
+    let job = clean_job(db.database(), tenant).await?;
+    let now = OffsetDateTime::now_utc();
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let empty: Vec<&str> = vec![""; 2000];
+    for number in 1..=100 {
+        job_logs::append(&mut tx, job, &chunk(LogStream::Stdout, number, &empty), now).await?;
+    }
+    let state = job_logs::state(&mut tx, job)
+        .await?
+        .expect("the state exists");
+    assert!(state.truncated);
+    assert!(state.bytes <= job_logs::MAX_JOB_LOG_BYTES);
+    assert!(state.last_seq <= job_logs::MAX_JOB_LOG_LINES);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM job_logs WHERE job_id = $1")
+        .bind(job)
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(rows, state.last_seq);
+    assert!(rows > 0 && rows <= job_logs::MAX_JOB_LOG_LINES);
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn fr_ag_08_db_the_line_count_of_a_job_is_capped() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, _other) = two_tenants(db.database()).await?;
+    let job = clean_job(db.database(), tenant).await?;
+    let now = OffsetDateTime::now_utc();
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    // A long log of short lines: the byte count stays far below its bound.
+    sqlx::query(
+        "INSERT INTO job_log_state (tenant_id, job_id, last_seq, bytes) VALUES ($1, $2, $3, 0)",
+    )
+    .bind(tenant)
+    .bind(job)
+    .bind(job_logs::MAX_JOB_LOG_LINES - 1)
+    .execute(tx.as_conn())
+    .await?;
+    assert_eq!(
+        job_logs::append(&mut tx, job, &chunk(LogStream::Stdout, 1, &["a", "b"]), now).await?,
+        AppendOutcome::Stored(1)
+    );
+    let state = job_logs::state(&mut tx, job)
+        .await?
+        .expect("the state exists");
+    assert!(state.truncated);
+    assert_eq!(state.last_seq, job_logs::MAX_JOB_LOG_LINES);
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn ac_lg_01_db_chunks_are_deduplicated_by_their_own_number() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, _other) = two_tenants(db.database()).await?;
+    let job = clean_job(db.database(), tenant).await?;
+    let now = OffsetDateTime::now_utc();
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let one = chunk(LogStream::Stdout, 1, &["one"]);
+    let two = chunk(LogStream::Stdout, 2, &["two"]);
+    let three = chunk(LogStream::Stdout, 3, &["three"]);
+    assert_eq!(
+        job_logs::append(&mut tx, job, &one, now).await?,
+        AppendOutcome::Stored(1)
+    );
+    assert_eq!(
+        job_logs::append(&mut tx, job, &three, now).await?,
+        AppendOutcome::Stored(1)
+    );
+    // A lower number that arrives late is not a duplicate.
+    assert_eq!(
+        job_logs::append(&mut tx, job, &two, now).await?,
+        AppendOutcome::Stored(1)
+    );
+    for sent_again in [&one, &two, &three] {
+        assert_eq!(
+            job_logs::append(&mut tx, job, sent_again, now).await?,
+            AppendOutcome::Duplicate
+        );
+    }
+    let lines = job_logs::read(&mut tx, job, 0, 100).await?;
+    let texts: Vec<_> = lines.iter().map(|line| line.text.as_str()).collect();
+    assert_eq!(texts, ["one", "three", "two"]);
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn ac_lg_01_db_the_retention_deletes_old_lines_and_keeps_the_job() -> TestResult {
     let Some(db) = test_database().await else {
         return Ok(());
@@ -233,8 +340,8 @@ async fn ac_tn_01_db_a_log_row_refuses_a_job_of_another_tenant() -> TestResult {
     clean_job(db.database(), tenant_b).await?;
     let mut tx = db.database().begin_tenant(tenant_b).await?;
     let result = sqlx::query(
-        "INSERT INTO job_logs (tenant_id, job_id, seq, stream, level, ts, text) \
-         VALUES ($1, $2, 1, 'stdout', 'info', now(), 'x')",
+        "INSERT INTO job_logs (tenant_id, job_id, seq, stream, chunk, line_index, level, ts, text) \
+         VALUES ($1, $2, 1, 'stdout', 1, 0, 'info', now(), 'x')",
     )
     .bind(tenant_b)
     .bind(job_a)
@@ -262,6 +369,69 @@ async fn ac_mn_03_db_the_metrics_snapshot_reads_the_tenant_rows() -> TestResult 
     let mut tx = db.database().begin_tenant(tenant_b).await?;
     let empty = crate::metrics::snapshot(&mut tx).await?;
     assert!(empty.agents.is_empty() && empty.repo_lock_held.is_empty());
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+fn step_named(step_id: String) -> JobStep {
+    JobStep {
+        step_id,
+        status: StepStatus::Success,
+        exit_code: 0,
+        started_at: None,
+        finished_at: None,
+        error_code: None,
+        error_params: Default::default(),
+        possible_stale_lock: false,
+        output: StepOutput::None,
+    }
+}
+
+#[tokio::test]
+async fn fr_mn_01_db_parallel_step_writes_keep_the_cap() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, _other) = two_tenants(db.database()).await?;
+    let job = clean_job(db.database(), tenant).await?;
+    let write = |prefix: &'static str| {
+        let database = db.database().clone();
+        async move {
+            let mut tx = database.begin_tenant(tenant).await?;
+            for number in 0..40 {
+                job_steps::upsert(&mut tx, job, &step_named(format!("{prefix}-{number}"))).await?;
+            }
+            tx.commit().await?;
+            Ok::<(), crate::DbError>(())
+        }
+    };
+    let (first, second) = tokio::join!(write("a"), write("b"));
+    first?;
+    second?;
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let steps = job_steps::list(&mut tx, job).await?;
+    assert_eq!(steps.len() as i64, job_steps::MAX_STEPS_PER_JOB);
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn fr_mn_02_db_the_planned_steps_keep_their_order() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, _other) = two_tenants(db.database()).await?;
+    let job = clean_job(db.database(), tenant).await?;
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let ids: Vec<String> = ["init", "backup", "forget"]
+        .iter()
+        .map(|id| (*id).to_owned())
+        .collect();
+    job_steps::plan(&mut tx, job, &ids).await?;
+    job_steps::plan(&mut tx, job, &ids).await?;
+    assert_eq!(job_steps::list_planned(&mut tx, job).await?, ids);
     tx.commit().await?;
     db.cleanup().await;
     Ok(())

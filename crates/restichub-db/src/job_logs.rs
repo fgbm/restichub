@@ -1,10 +1,11 @@
 //! The log lines of a job in the `database` log backend (FR-LG-01, FR-LG-02, FR-LG-03, ADR-0015).
 //!
-//! The log of a job is append-only. The write path refuses a line past [`MAX_JOB_LOG_BYTES`] and
-//! marks the log as truncated. The agent numbers the chunks of each stream from 1. The agent sends
-//! its log tail again after a restart, so the write path ignores a chunk that is not above the
-//! highest stored chunk of its stream. The retention sweep deletes old lines and keeps the job
-//! row, the steps and the summaries (AC-LG-01).
+//! The log of a job is append-only. The write path refuses a line past [`MAX_JOB_LOG_BYTES`] or
+//! [`MAX_JOB_LOG_LINES`] and marks the log as truncated. Each line costs its text, one line break
+//! and [`LINE_OVERHEAD_BYTES`], so empty lines cannot grow the table without bound. The agent
+//! numbers the chunks of each stream from 1. The agent sends its log tail again after a restart, so
+//! the write path ignores a chunk that it stored before. The retention sweep deletes old lines and
+//! keeps the job row, the steps and the summaries (AC-LG-01).
 
 use time::OffsetDateTime;
 
@@ -17,6 +18,11 @@ use crate::tx::TenantTx;
 ///
 /// The agent stops at 1 MiB and adds one marker line (FR-AG-08). The margin keeps that marker.
 pub const MAX_JOB_LOG_BYTES: i64 = 1024 * 1024 + 4096;
+
+pub const MAX_JOB_LOG_LINES: i64 = 100_000;
+
+/// The fixed cost of a stored line, added to its text and one line break.
+pub const LINE_OVERHEAD_BYTES: i64 = 64;
 
 /// Largest page that a read returns. A larger request is cut to it.
 pub const MAX_READ_LIMIT: i64 = 2000;
@@ -59,6 +65,14 @@ pub struct LogLine {
     pub text: String,
 }
 
+#[derive(sqlx::FromRow)]
+struct Marks {
+    last_seq: i64,
+    bytes: i64,
+    truncated: bool,
+    purged_at: Option<OffsetDateTime>,
+}
+
 /// Write state of one log: the stored size, the cut marker and the deletion by the sweep.
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
 pub struct LogState {
@@ -68,28 +82,7 @@ pub struct LogState {
     pub purged_at: Option<OffsetDateTime>,
 }
 
-#[derive(sqlx::FromRow)]
-struct Marks {
-    last_seq: i64,
-    bytes: i64,
-    truncated: bool,
-    stdout_chunk: i64,
-    stderr_chunk: i64,
-    agent_chunk: i64,
-    purged_at: Option<OffsetDateTime>,
-}
-
-impl Marks {
-    fn chunk(&self, stream: LogStream) -> i64 {
-        match stream {
-            LogStream::Stdout => self.stdout_chunk,
-            LogStream::Stderr => self.stderr_chunk,
-            LogStream::Agent => self.agent_chunk,
-        }
-    }
-}
-
-/// Stores one chunk, or skips it when its number is not above the highest stored one.
+/// Stores one chunk, or skips it when the job holds lines of the same chunk number and stream.
 pub async fn append(
     tx: &mut TenantTx<'_>,
     job: JobId,
@@ -106,30 +99,43 @@ pub async fn append(
     .await
     .map_err(DbError::Query)?;
     let marks = sqlx::query_as::<_, Marks>(
-        "SELECT last_seq, bytes, truncated, stdout_chunk, stderr_chunk, agent_chunk, purged_at \
-         FROM job_log_state WHERE job_id = $1 FOR UPDATE",
+        "SELECT last_seq, bytes, truncated, purged_at FROM job_log_state \
+         WHERE job_id = $1 FOR UPDATE",
     )
     .bind(job)
     .fetch_one(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    if chunk.chunk <= marks.chunk(chunk.stream) {
+    let known: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM job_logs WHERE job_id = $1 AND stream = $2 AND chunk = $3)",
+    )
+    .bind(job)
+    .bind(chunk.stream)
+    .bind(chunk.chunk)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    if known {
         return Ok(AppendOutcome::Duplicate);
     }
 
     let mut bytes = marks.bytes;
+    let mut lines = marks.last_seq;
     let mut truncated = marks.truncated;
     let mut levels = Vec::with_capacity(chunk.lines.len());
     let mut texts = Vec::with_capacity(chunk.lines.len());
     // A purged log takes no new line: the sweep removed the lines of an old job.
     if marks.purged_at.is_none() {
         for line in &chunk.lines {
-            let size = i64::try_from(line.text.len()).unwrap_or(i64::MAX);
-            if bytes.saturating_add(size) > MAX_JOB_LOG_BYTES {
+            let cost = i64::try_from(line.text.len())
+                .unwrap_or(i64::MAX)
+                .saturating_add(1 + LINE_OVERHEAD_BYTES);
+            if bytes.saturating_add(cost) > MAX_JOB_LOG_BYTES || lines >= MAX_JOB_LOG_LINES {
                 truncated = true;
                 break;
             }
-            bytes += size;
+            bytes += cost;
+            lines += 1;
             levels.push(line.level.as_str());
             texts.push(line.text.as_str());
         }
@@ -137,15 +143,18 @@ pub async fn append(
     let stored = texts.len();
     if stored > 0 {
         sqlx::query(
-            "INSERT INTO job_logs (tenant_id, job_id, seq, step_id, stream, level, ts, text) \
-             SELECT $1, $2, $3 + u.n, $4, $5, u.level, $6, u.text \
-             FROM unnest($7::text[], $8::text[]) WITH ORDINALITY AS u(level, text, n)",
+            "INSERT INTO job_logs \
+                 (tenant_id, job_id, seq, step_id, stream, chunk, line_index, level, ts, text) \
+             SELECT $1, $2, $3 + u.n, $4, $5, $6, (u.n - 1)::integer, u.level, $7, u.text \
+             FROM unnest($8::text[], $9::text[]) WITH ORDINALITY AS u(level, text, n) \
+             ON CONFLICT DO NOTHING",
         )
         .bind(tx.tenant())
         .bind(job)
         .bind(marks.last_seq)
         .bind(&chunk.step_id)
         .bind(chunk.stream)
+        .bind(chunk.chunk)
         .bind(now)
         .bind(&levels)
         .bind(&texts)
@@ -153,30 +162,18 @@ pub async fn append(
         .await
         .map_err(DbError::Query)?;
     }
-    let update = match chunk.stream {
-        LogStream::Stdout => {
-            "UPDATE job_log_state SET last_seq = last_seq + $3, bytes = $4, truncated = $5, \
-             stdout_chunk = $6 WHERE job_id = $1 AND tenant_id = $2"
-        }
-        LogStream::Stderr => {
-            "UPDATE job_log_state SET last_seq = last_seq + $3, bytes = $4, truncated = $5, \
-             stderr_chunk = $6 WHERE job_id = $1 AND tenant_id = $2"
-        }
-        LogStream::Agent => {
-            "UPDATE job_log_state SET last_seq = last_seq + $3, bytes = $4, truncated = $5, \
-             agent_chunk = $6 WHERE job_id = $1 AND tenant_id = $2"
-        }
-    };
-    sqlx::query(update)
-        .bind(job)
-        .bind(tx.tenant())
-        .bind(i64::try_from(stored).unwrap_or(i64::MAX))
-        .bind(bytes)
-        .bind(truncated)
-        .bind(chunk.chunk)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+    sqlx::query(
+        "UPDATE job_log_state SET last_seq = $3, bytes = $4, truncated = $5 \
+         WHERE job_id = $1 AND tenant_id = $2",
+    )
+    .bind(job)
+    .bind(tx.tenant())
+    .bind(lines)
+    .bind(bytes)
+    .bind(truncated)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     Ok(AppendOutcome::Stored(stored))
 }
 

@@ -28,6 +28,7 @@ use crate::clock::{Clock, SystemClock};
 use crate::config::{AuthConfig, TenancyConfig};
 use crate::error::{ApiError, InternalCause, PROBLEM_CONTENT_TYPE};
 use crate::job_signing::JobSigningService;
+use crate::metrics::SnapshotCache;
 use crate::pki::CaStore;
 use crate::queue::QueueConfig;
 use crate::rate_limit::RateLimiter;
@@ -160,6 +161,8 @@ pub struct AppState {
     agent_registry: Arc<StreamRegistry>,
     queue: QueueConfig,
     dispatch_wake: Arc<Notify>,
+    log_retention_days: u32,
+    metrics_cache: Arc<SnapshotCache>,
 }
 
 impl AppState {
@@ -182,6 +185,8 @@ impl AppState {
             agent_registry: Arc::new(StreamRegistry::new()),
             queue: QueueConfig::default(),
             dispatch_wake: Arc::new(Notify::new()),
+            log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
+            metrics_cache: Arc::new(SnapshotCache::default()),
         }
     }
 
@@ -198,6 +203,8 @@ impl AppState {
             agent_registry: Arc::new(StreamRegistry::new()),
             queue: QueueConfig::default(),
             dispatch_wake: Arc::new(Notify::new()),
+            log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
+            metrics_cache: Arc::new(SnapshotCache::default()),
         }
     }
 
@@ -238,6 +245,27 @@ impl AppState {
     pub fn with_queue(mut self, queue: QueueConfig) -> Self {
         self.queue = queue;
         self
+    }
+
+    /// The server passes the days for which the control plane keeps the log text. A finished job
+    /// takes log and step writes for the same time (FR-LG-02).
+    pub fn with_log_retention_days(mut self, days: u32) -> Self {
+        self.log_retention_days = days;
+        self
+    }
+
+    /// Sets the time for which a metrics snapshot of a tenant is reused. A test sets zero.
+    pub fn with_metrics_ttl(mut self, ttl: time::Duration) -> Self {
+        self.metrics_cache = Arc::new(SnapshotCache::new(ttl));
+        self
+    }
+
+    pub fn log_retention_days(&self) -> u32 {
+        self.log_retention_days
+    }
+
+    pub fn metrics_cache(&self) -> &SnapshotCache {
+        &self.metrics_cache
     }
 
     pub fn db(&self) -> &Database {

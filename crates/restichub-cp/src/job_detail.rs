@@ -11,7 +11,7 @@ use axum::extract::{Path, Query, State};
 use restichub_db::job_logs;
 use restichub_db::job_steps::{self, JobProgress, JobStep, StepOutput};
 use restichub_db::jobs as job_repo;
-use restichub_db::{JobStatus, LogLevel, LogStream, StepStatus};
+use restichub_db::{JobKind, JobStatus, LogLevel, LogStream, StepStatus};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -105,11 +105,39 @@ pub struct LogInfo {
     pub purged: bool,
 }
 
+/// What started a job.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobTrigger {
+    Schedule,
+    Manual,
+    /// The control plane started a check, a forget or a prune with no fire time and no user.
+    Maintenance,
+}
+
+impl JobTrigger {
+    fn of(job: &restichub_db::jobs::Job) -> Self {
+        let maintenance_kind =
+            matches!(job.kind, JobKind::Check | JobKind::Forget | JobKind::Prune);
+        if job.fire_time.is_some() {
+            Self::Schedule
+        } else if maintenance_kind && job.created_by.is_none() && job.plan_id.is_none() {
+            Self::Maintenance
+        } else {
+            Self::Manual
+        }
+    }
+}
+
 /// One job with its steps, its summary and its progress (FR-MN-02).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct JobDetailView {
     #[serde(flatten)]
     pub job: JobView,
+    pub trigger: JobTrigger,
+    /// The identifiers of all steps that the control plane signed into the job, in run order. Empty
+    /// before the control plane sent the job. A step that did not start has no entry in `steps`.
+    pub planned_steps: Vec<String>,
     /// Ordered by first arrival from the agent.
     pub steps: Vec<StepView>,
     /// Taken from the first step that carries a typed output. Null when no step has one.
@@ -149,12 +177,13 @@ pub async fn get_job(
                 return Ok(None);
             };
             let steps = job_steps::list(tx, job_id).await?;
+            let planned = job_steps::list_planned(tx, job_id).await?;
             let progress = job_steps::get_progress(tx, job_id).await?;
             let log = job_logs::state(tx, job_id).await?;
-            Ok(Some((detail, steps, progress, log)))
+            Ok(Some((detail, steps, planned, progress, log)))
         })
         .await?;
-    let Some((detail, steps, progress, log)) = found else {
+    let Some((detail, steps, planned, progress, log)) = found else {
         return Err(ApiError::not_found());
     };
     let summary = steps
@@ -165,6 +194,8 @@ pub async fn get_job(
     let running = matches!(detail.job.status, JobStatus::Sent | JobStatus::Running);
     Ok(Json(JobDetailView {
         job: JobView::from(&detail),
+        trigger: JobTrigger::of(&detail.job),
+        planned_steps: planned,
         steps: steps.iter().map(StepView::from).collect(),
         summary,
         progress: progress

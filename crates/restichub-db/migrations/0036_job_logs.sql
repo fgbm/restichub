@@ -9,9 +9,13 @@
 -- a small jsonb value that the control plane parses into a typed struct.
 --
 -- `job_logs` holds one scrubbed line for each row, append-only. `seq` is the position of the line in
--- the log of the job, starting at 1. `job_log_state` counts the stored bytes, so a job cannot grow
--- past the bound, and keeps the highest agent chunk number of each stream, so a log tail that the
--- agent sends again stores no line twice.
+-- the log of the job, starting at 1. Each line also names the agent chunk (per stream) and its place
+-- in the chunk, and that triple is unique, so a log tail that the agent sends again stores no line
+-- twice, whatever the order of the chunks. `job_log_state` counts the stored bytes and lines, so a job
+-- cannot grow past the bound.
+--
+-- `job_planned_steps` holds the step list that the control plane signed into the job, so the user
+-- interface shows the steps that did not start yet.
 
 -- The composite foreign keys below need a key on (tenant_id, id). The primary key is the id alone.
 ALTER TABLE jobs ADD CONSTRAINT jobs_tenant_id_unique UNIQUE (tenant_id, id);
@@ -79,11 +83,15 @@ CREATE TABLE job_logs (
     seq bigint NOT NULL,
     step_id text NOT NULL DEFAULT '',
     stream text NOT NULL,
+    -- The agent chunk number of the stream, and the place of the line in the chunk.
+    chunk bigint NOT NULL,
+    line_index integer NOT NULL,
     level text NOT NULL,
     -- The time at which the control plane stored the line. The agent sends no line time.
     ts timestamptz NOT NULL,
     text text NOT NULL,
     PRIMARY KEY (tenant_id, job_id, seq),
+    CONSTRAINT job_logs_chunk_unique UNIQUE (tenant_id, job_id, stream, chunk, line_index),
     CONSTRAINT job_logs_job_fk FOREIGN KEY (tenant_id, job_id)
         REFERENCES jobs (tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT job_logs_stream_check CHECK (stream IN ('stdout', 'stderr', 'agent')),
@@ -100,14 +108,11 @@ CREATE TABLE job_log_state (
     job_id uuid NOT NULL,
     -- The number of the last stored line.
     last_seq bigint NOT NULL DEFAULT 0,
-    -- The stored bytes of text. The write path refuses lines beyond the bound.
+    -- The cost of the stored lines: the text, a line break and a fixed overhead for each line. The
+    -- write path refuses lines beyond the bound, so empty lines cannot grow the table either.
     bytes bigint NOT NULL DEFAULT 0,
     -- True after the write path refused a line.
     truncated boolean NOT NULL DEFAULT false,
-    -- The highest chunk number of each stream that the control plane stored.
-    stdout_chunk bigint NOT NULL DEFAULT 0,
-    stderr_chunk bigint NOT NULL DEFAULT 0,
-    agent_chunk bigint NOT NULL DEFAULT 0,
     -- Set when the retention sweep deleted the lines.
     purged_at timestamptz,
     PRIMARY KEY (tenant_id, job_id),
@@ -134,6 +139,27 @@ CREATE TABLE job_progress (
     CONSTRAINT job_progress_percent_check CHECK (percent_done >= 0 AND percent_done <= 1),
     CONSTRAINT job_progress_step_id_check CHECK (char_length(step_id) BETWEEN 1 AND 64)
 );
+
+CREATE TABLE job_planned_steps (
+    tenant_id uuid NOT NULL,
+    job_id uuid NOT NULL,
+    step_id text NOT NULL,
+    position integer NOT NULL,
+    PRIMARY KEY (tenant_id, job_id, step_id),
+    CONSTRAINT job_planned_steps_job_fk FOREIGN KEY (tenant_id, job_id)
+        REFERENCES jobs (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT job_planned_steps_step_id_check CHECK (char_length(step_id) BETWEEN 1 AND 64)
+);
+
+-- The metrics read the jobs of a tenant by kind and status.
+CREATE INDEX jobs_tenant_kind_status_idx ON jobs (tenant_id, kind, status);
+
+ALTER TABLE job_planned_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE job_planned_steps FORCE ROW LEVEL SECURITY;
+CREATE POLICY job_planned_steps_tenant ON job_planned_steps
+    FOR ALL
+    USING (tenant_id = NULLIF(current_setting('restichub.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('restichub.tenant_id', true), '')::uuid);
 
 ALTER TABLE job_steps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job_steps FORCE ROW LEVEL SECURITY;
@@ -167,3 +193,4 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON job_steps TO restichub_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON job_logs TO restichub_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON job_log_state TO restichub_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON job_progress TO restichub_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON job_planned_steps TO restichub_app;

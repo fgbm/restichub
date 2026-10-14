@@ -21,6 +21,9 @@ use crate::clock::Clock;
 /// The days for which the control plane keeps the log text.
 pub const DEFAULT_RETENTION_DAYS: u32 = 30;
 
+/// The configuration refuses a longer period: 100 years, far below the range of the date type.
+pub const MAX_RETENTION_DAYS: u32 = 36_500;
+
 /// How often the retention sweep runs.
 pub const RETENTION_INTERVAL: Duration = Duration::from_secs(3600);
 
@@ -152,12 +155,38 @@ pub fn lines_of(data: &[u8]) -> Vec<NewLine> {
         .collect()
 }
 
-/// Removes the control characters except the tab and cuts the line at the bound.
+/// Removes the control characters except the tab, and the Unicode format characters (category Cf),
+/// and cuts the line at the bound.
+///
+/// The format characters reorder or hide text in the viewer: the bidirectional overrides can make a
+/// line read differently from its bytes.
 fn clean_line(line: &str) -> String {
     line.chars()
-        .filter(|character| *character == '\t' || !character.is_control())
+        .filter(|character| {
+            *character == '\t' || !(character.is_control() || is_format_character(*character))
+        })
         .take(MAX_LINE_CHARS)
         .collect()
+}
+
+fn is_format_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{AD}'
+            | '\u{600}'..='\u{605}'
+            | '\u{61C}'
+            | '\u{6DD}'
+            | '\u{70F}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+    )
 }
 
 /// Derives the level of a line from its text. restic prints no level on a plain line.
@@ -242,6 +271,12 @@ mod tests {
         assert!(!lines[0].text.contains('\0'));
         assert!(!lines[0].text.contains('\u{1b}'));
         assert!(lines[0].text.contains('\t'));
+    }
+
+    #[test]
+    fn unicode_format_characters_never_reach_a_line() {
+        let lines = lines_of("a\u{200B}b\u{202E}c\u{2066}d\u{FEFF}e\tf\n".as_bytes());
+        assert_eq!(lines[0].text, "abcde\tf");
     }
 
     #[test]
