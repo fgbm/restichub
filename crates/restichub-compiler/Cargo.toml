@@ -10,3 +10,11 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+restichub-proto = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.7"
