@@ -132,6 +132,29 @@ fn spawn_verified(
     Ok(child)
 }
 
+/// Starts the verified restic child of one job with its standard streams detached (FR-AG-06,
+/// threat T9, threat T20).
+///
+/// A restic message can carry the repository location, so the agent reads the exit code only and
+/// never the output. The hash check and the start share one opening of the binary, as in
+/// [`spawn_verified`].
+///
+/// # Errors
+///
+/// Returns an error when the hash differs or the process cannot start.
+pub(crate) fn spawn_job_restic(
+    path: &Path,
+    expected_hex: &str,
+    line: &CommandLine,
+    cache: &Path,
+) -> Result<Child> {
+    let (file, mut command) = verified_command(path, expected_hex, line.args(), line.env(), cache)?;
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+    let child = command.spawn().context("cannot start restic")?;
+    drop(file);
+    Ok(child)
+}
+
 /// Opens the binary, checks the hash through the handle and builds the child command (threat T20).
 ///
 /// The returned file holds the checked descriptor; the caller keeps it open until the child starts.

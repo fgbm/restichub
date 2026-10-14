@@ -10,6 +10,8 @@ pub mod commands;
 pub mod enroll;
 pub mod exec;
 pub mod identity;
+pub mod jobs;
+pub mod journal;
 pub mod keys;
 pub mod paths;
 pub mod pem;

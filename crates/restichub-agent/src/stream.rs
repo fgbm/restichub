@@ -11,9 +11,9 @@
 //! and full jitter, base 1 s and maximum 60 s (ADR-0026). The attempt grows unless the stream lived
 //! at least one ping interval or answered a ping, so a server that closes at once is not hammered;
 //! a stream that was working and then failed, such as on a control plane restart, resets it too.
-//! An identity that the control plane refuses backs off at the maximum. The agent starts no job and
-//! holds no timer that starts one (ADR-0002); a job or a cancellation message is logged and ignored
-//! until epic #7.
+//! An identity that the control plane refuses backs off at the maximum. A `SignedJob` is verified
+//! and run off this task ([`crate::jobs`]), and a `CancelJob` stops the running job (FR-AG-10). The
+//! agent starts no job on its own and holds no timer that starts one (ADR-0002).
 
 use std::path::Path;
 use std::sync::mpsc::Receiver;
@@ -30,6 +30,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
 use crate::identity::StoredIdentity;
+use crate::jobs::Jobs;
 use crate::keys::{Applied, KeyState};
 
 /// The lower bound of the reconnect delay (ADR-0026).
@@ -151,6 +152,7 @@ pub async fn serve(
     dir: &Path,
     keys: &mut KeyState,
     restic_version: &str,
+    jobs: &Jobs,
     shutdown: Option<Receiver<()>>,
 ) -> Result<()> {
     let (stop_tx, mut stop_rx) = watch::channel(false);
@@ -160,6 +162,7 @@ pub async fn serve(
         dir,
         keys,
         restic_version,
+        jobs,
         StreamOptions::default(),
         &mut stop_rx,
     )
@@ -196,6 +199,7 @@ pub async fn run(
     dir: &Path,
     keys: &mut KeyState,
     restic_version: &str,
+    jobs: &Jobs,
     options: StreamOptions,
     stop: &mut watch::Receiver<bool>,
 ) -> Result<()> {
@@ -209,6 +213,7 @@ pub async fn run(
             dir,
             keys,
             restic_version,
+            jobs,
             options.timeouts,
             stop,
         )
@@ -275,6 +280,7 @@ pub async fn connect_once(
     dir: &Path,
     keys: &mut KeyState,
     restic_version: &str,
+    jobs: &Jobs,
     timeouts: Timeouts,
     stop: &mut watch::Receiver<bool>,
 ) -> Result<Disconnect> {
@@ -288,6 +294,8 @@ pub async fn connect_once(
     };
     let mut inbound = response.into_inner();
     send_hello(&tx, restic_version).await?;
+    // A result that a dropped stream lost reaches the control plane now (ADR-0020).
+    jobs.flush_pending(&tx).await;
     let started = tokio::time::Instant::now();
     let mut pinged = false;
     loop {
@@ -326,7 +334,7 @@ pub async fn connect_once(
         if matches!(message.payload, Some(control_message::Payload::Ping(_))) {
             pinged = true;
         }
-        if let Err(error) = handle_control(keys, dir, &tx, message).await {
+        if let Err(error) = handle_control(identity, keys, dir, jobs, &tx, message).await {
             tracing::warn!(%error, "the agent stream stopped");
             return Ok(Disconnect::Closed {
                 healthy: pinged || started.elapsed() >= timeouts.ping,
@@ -343,13 +351,15 @@ fn refused(code: tonic::Code) -> bool {
     )
 }
 
-/// Serves one control message from the control plane (FR-ID-07, FR-PR-11).
+/// Serves one control message from the control plane (FR-ID-07, FR-PR-03, FR-PR-11, FR-AG-10).
 ///
-/// The identity comes from the certificate, never from a message (FR-PR-08). Job delivery,
-/// cancellation and certificate rotation belong to later epics; the agent logs them and continues.
+/// The identity comes from the certificate, never from a message (FR-PR-08). A signed job is
+/// verified with the key ring and run off this task; a cancellation stops the running job.
 async fn handle_control(
+    identity: &StoredIdentity,
     keys: &mut KeyState,
     dir: &Path,
+    jobs: &Jobs,
     tx: &mpsc::Sender<AgentMessage>,
     message: ControlMessage,
 ) -> Result<()> {
@@ -363,6 +373,19 @@ async fn handle_control(
         }
         Some(control_message::Payload::Ping(ping)) => {
             let _ = tx.send(pong(&ping)).await;
+        }
+        Some(control_message::Payload::SignedJob(signed)) => {
+            jobs.handle(
+                signed,
+                keys.ring(),
+                &identity.agent_id,
+                &identity.tenant_id,
+                tx,
+            )
+            .await;
+        }
+        Some(control_message::Payload::CancelJob(cancel)) => {
+            jobs.cancel(&cancel.job_id);
         }
         Some(control_message::Payload::SigningKeyUpdate(update)) => match keys.apply(&update) {
             Ok(Applied::Changed) => {
@@ -395,12 +418,9 @@ async fn handle_control(
                 tracing::warn!(%error, "the signing key update was refused");
             }
         },
-        Some(
-            control_message::Payload::SignedJob(_)
-            | control_message::Payload::CancelJob(_)
-            | control_message::Payload::CertificateIssued(_),
-        ) => {
-            tracing::info!("a control message of a later epic arrived; the agent ignores it");
+        Some(control_message::Payload::CertificateIssued(_)) => {
+            // Certificate rotation needs the enrollment flow of another epic.
+            tracing::info!("a certificate rotation arrived; the agent ignores it");
         }
         None => {}
     }

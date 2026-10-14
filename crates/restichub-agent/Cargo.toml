@@ -27,6 +27,7 @@ http-body-util = { workspace = true }
 hyper = { version = "1.12", default-features = false, features = ["client", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 prost = "0.14"
+prost-types = "0.14"
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 restichub-compiler = { workspace = true }
 restichub-proto = { path = "../restichub-proto" }
