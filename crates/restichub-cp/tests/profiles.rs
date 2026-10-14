@@ -8,6 +8,7 @@
 mod common;
 
 use axum::http::StatusCode;
+use restichub_cp::profiles::{MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS};
 use restichub_db::agents::{self as agents_repo, NewAgent};
 use restichub_db::{AgentId, PLATFORM_TENANT_ID, TenantId};
 use serde_json::{Value, json};
@@ -75,7 +76,11 @@ async fn create_profile(app: &axum::Router, cookie: &str, body: Value) -> Value 
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{response}");
+    // The response holds the profile and the save-time warnings.
     response
+        .get("profile")
+        .cloned()
+        .unwrap_or_else(|| panic!("the response holds no profile: {response}"))
 }
 
 /// AC-PF-01: the preview shows the steps and the command line with masked secrets.
@@ -275,33 +280,70 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
     assert_eq!(problem["field"], "agent_id");
     assert_eq!(problem["reason"], "incompatible");
 
-    // An unknown template variable points to the path (FR-PF-03).
-    let template = create_profile(
-        &app,
-        &cookie,
-        json!({
-            "name": "template-profile",
-            "repository_id": repository_id,
-            "paths": {"all": ["/srv/{{nope}}"]},
-        }),
-    )
-    .await;
+    // An unknown template variable is refused at save time (FR-PF-03, FR-PF-05).
     let (status, _, problem) = send(
         &app,
         request(
             "POST",
-            &format!(
-                "/api/v1/profiles/{}/preview",
-                template["id"].as_str().expect("the identifier")
-            ),
+            "/api/v1/profiles",
             Some(&cookie),
-            Some(json!({"agent_id": linux_agent.to_string()})),
+            Some(json!({
+                "name": "template-profile",
+                "repository_id": repository_id,
+                "paths": {"all": ["/srv/{{nope}}"]},
+            })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "paths.all[0]");
     assert_eq!(problem["reason"], "invalid_format");
+
+    // An unclosed template is refused at save time.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie),
+            Some(json!({
+                "name": "unclosed-template",
+                "repository_id": repository_id,
+                "paths": {"all": ["/srv/{{hostname"]},
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "paths.all[0]");
+    assert_eq!(problem["reason"], "invalid_format");
+
+    // VSS for a Linux target is a warning at save time, not a refusal: the profile may target
+    // several operating systems (FR-PF-05).
+    let (status, _, created) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie),
+            Some(json!({
+                "name": "vss-warning",
+                "repository_id": repository_id,
+                "paths": {"all": ["/srv"]},
+                "options": {"use_fs_snapshot": true},
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let warnings = created["warnings"].as_array().expect("the warnings");
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning["field"] == "options.use_fs_snapshot"
+                && warning["reason"] == "unsupported"),
+        "{created}"
+    );
 
     db.cleanup().await;
 }
@@ -616,6 +658,7 @@ async fn an_update_replaces_the_settings_and_a_delete_removes_the_row() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{updated}");
+    let updated = &updated["profile"];
     assert_eq!(updated["name"], "edited");
     assert_eq!(updated["paths"]["linux"][0], "/etc");
     assert_eq!(updated["retention"]["keep_daily"], 7);
@@ -701,6 +744,275 @@ async fn a_repository_in_use_by_a_profile_cannot_be_deleted() {
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+
+    db.cleanup().await;
+}
+
+/// The item limits, the root paths and the trailing separator (FR-PF-05).
+#[tokio::test]
+async fn the_item_limits_and_the_root_paths_are_enforced() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let repository_id = repository_fixture(db.database(), tenant).await;
+
+    // Root paths are allowed.
+    let root = create_profile(
+        &app,
+        &cookie,
+        json!({
+            "name": "root-path",
+            "repository_id": repository_id,
+            "paths": {"all": ["/"], "windows": ["C:\\"]},
+        }),
+    )
+    .await;
+    assert_eq!(root["paths"]["all"][0], "/");
+    assert_eq!(root["paths"]["windows"][0], "C:\\");
+
+    // One trailing separator is dropped.
+    let trailing = create_profile(
+        &app,
+        &cookie,
+        json!({
+            "name": "trailing",
+            "repository_id": repository_id,
+            "paths": {"all": ["/srv/"], "windows": ["C:\\Data\\"]},
+        }),
+    )
+    .await;
+    assert_eq!(trailing["paths"]["all"][0], "/srv");
+    assert_eq!(trailing["paths"]["windows"][0], "C:\\Data");
+
+    // Too many paths, across every operating system.
+    let paths: Vec<String> = (0..=MAX_PATHS).map(|index| format!("/p{index}")).collect();
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie),
+            Some(json!({
+                "name": "many-paths",
+                "repository_id": repository_id,
+                "paths": {"all": paths},
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "paths");
+    assert_eq!(problem["reason"], "too_long");
+
+    // Too many excludes.
+    let excludes: Vec<String> = (0..=MAX_EXCLUDES)
+        .map(|index| format!("e{index}"))
+        .collect();
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie),
+            Some(json!({
+                "name": "many-excludes",
+                "repository_id": repository_id,
+                "paths": {"all": ["/srv"]},
+                "excludes": excludes,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "excludes");
+    assert_eq!(problem["reason"], "too_long");
+
+    // Too many tags.
+    let tags: Vec<String> = (0..=MAX_TAGS).map(|index| format!("t{index}")).collect();
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie),
+            Some(json!({
+                "name": "many-tags",
+                "repository_id": repository_id,
+                "paths": {"all": ["/srv"]},
+                "tags": tags,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "tags");
+    assert_eq!(problem["reason"], "too_long");
+
+    // Too many hooks.
+    let hooks: Vec<Value> = (0..=MAX_HOOKS)
+        .map(|index| json!({"hook_id": format!("h{index}"), "phase": "before"}))
+        .collect();
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie),
+            Some(json!({
+                "name": "many-hooks",
+                "repository_id": repository_id,
+                "paths": {"all": ["/srv"]},
+                "hooks": hooks,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "hooks");
+    assert_eq!(problem["reason"], "too_long");
+
+    db.cleanup().await;
+}
+
+/// A hook parameter is refused until the agent reports its allow-list (FR-HK-04).
+#[tokio::test]
+async fn a_hook_parameter_is_refused() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let repository_id = repository_fixture(db.database(), tenant).await;
+
+    // A parameter is refused with a clear reason.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie),
+            Some(json!({
+                "name": "hook-params",
+                "repository_id": repository_id,
+                "paths": {"all": ["/srv"]},
+                "hooks": [{
+                    "hook_id": "pg_dump",
+                    "phase": "before",
+                    "parameters": [{"name": "database", "value": "app"}],
+                }],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "hooks[0].parameters");
+    assert_eq!(problem["reason"], "unavailable");
+
+    // Hooks without parameters stay allowed.
+    let hook = create_profile(
+        &app,
+        &cookie,
+        json!({
+            "name": "hook-no-params",
+            "repository_id": repository_id,
+            "paths": {"all": ["/srv"]},
+            "hooks": [{"hook_id": "pg_dump", "phase": "before"}],
+        }),
+    )
+    .await;
+    assert_eq!(hook["hooks"][0]["hook_id"], "pg_dump");
+
+    db.cleanup().await;
+}
+
+/// A foreign tenant identifier is refused for the agent and for the repository (AC-TN-01).
+#[tokio::test]
+async fn a_foreign_tenant_agent_and_repository_are_refused() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant_a = create_tenant_with_key(db.database(), "acme").await;
+    let tenant_b = create_tenant_with_key(db.database(), "globex").await;
+    let app = app_with_kek(db.database());
+    let cookie_a = seed_session(db.database(), tenant_a, "admin-a", "admin").await;
+    let repository_a = repository_fixture(db.database(), tenant_a).await;
+    let repository_b = repository_fixture(db.database(), tenant_b).await;
+
+    // A profile that names the repository of tenant B is refused.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie_a),
+            Some(profile_body("foreign-repo", &repository_b, json!(["/srv"]))),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "repository_id");
+
+    // A preview with the agent of tenant B is refused.
+    let agent_b = seed_agent_full(db.database(), tenant_b, "b-host", "linux", "0.19.0", &[]).await;
+    let profile = create_profile(
+        &app,
+        &cookie_a,
+        profile_body("local", &repository_a, json!(["/srv"])),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier");
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/profiles/{profile_id}/preview"),
+            Some(&cookie_a),
+            Some(json!({"agent_id": agent_b.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "agent_id");
+
+    db.cleanup().await;
+}
+
+/// An agent that reports no parsable restic version cannot be checked (AC-AG-09).
+#[tokio::test]
+async fn an_unparsable_restic_version_is_refused() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let repository_id = repository_fixture(db.database(), tenant).await;
+    let agent = seed_agent_full(db.database(), tenant, "no-version", "linux", "", &[]).await;
+
+    let profile = create_profile(
+        &app,
+        &cookie,
+        profile_body("no-version", &repository_id, json!(["/srv"])),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier");
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/profiles/{profile_id}/preview"),
+            Some(&cookie),
+            Some(json!({"agent_id": agent.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "agent_id");
+    assert_eq!(problem["reason"], "incompatible");
 
     db.cleanup().await;
 }

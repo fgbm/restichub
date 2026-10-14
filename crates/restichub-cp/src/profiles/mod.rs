@@ -20,19 +20,21 @@ mod settings;
 use std::collections::BTreeMap;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use restichub_compiler::{
     Architecture, CompileError, OperatingSystem, ResticVersion, TargetFacts, compile, preview,
 };
 use restichub_db::agents::{self as agents_repo, Agent};
 use restichub_db::audit::{AuditAction, diff};
-use restichub_db::profiles::{self as repo};
+use restichub_db::profiles::{self as repo, ProfileCursor, ProfilePage};
 use restichub_db::repositories::{self as repositories_repo, Repository};
 use restichub_db::{AgentId, BackendKind, ProfileId};
 use restichub_proto::agent::v1::{
     RepositoryAccess, RestCredentials, S3Credentials, repository_access::BackendCredentials,
 };
+use serde::Deserialize;
+use utoipa::IntoParams;
 
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
@@ -43,37 +45,71 @@ use crate::validation::Reason;
 
 pub use settings::{
     BackupOptions, CheckOptions, CreateProfileRequest, GroupBy, HookParameter, HookPhase, HookRef,
-    PreviewEnvView, PreviewRequest, PreviewResponse, PreviewStepView, ProfileListResponse,
-    ProfilePaths, ProfileView, Retention, SnapshotFilter, UpdateProfileRequest,
+    MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS, PreviewEnvView,
+    PreviewRequest, PreviewResponse, PreviewStepView, ProfileListResponse, ProfilePaths,
+    ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter, UpdateProfileRequest,
 };
 use settings::{
-    compiler_profile_from_row, parse_profile_id, profile_value, stored_value, validate_create,
-    validate_update,
+    compiler_profile_from_row, parse_profile_id, profile_value, save_warnings, stored_value,
+    validate_create, validate_update,
 };
 
-/// Lists the profiles of the tenant.
+/// Query parameters of the list endpoint (FR-PF-01).
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileListQuery {
+    pub cursor: Option<String>,
+    pub limit: Option<i64>,
+}
+
+/// Lists the profiles of the tenant with keyset pagination.
 #[utoipa::path(
     get,
     path = "/api/v1/profiles",
     security(("cookie" = []), ("bearer" = [])),
+    params(ProfileListQuery),
     responses(
         (status = 200, description = "The profiles of the tenant.", body = ProfileListResponse),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
     )
 )]
 pub async fn list_profiles(
     State(state): State<AppState>,
     context: RequestContext,
+    Query(query): Query<ProfileListQuery>,
 ) -> Result<Json<ProfileListResponse>, ApiError> {
     context.authorize(Operation::ProfilesRead)?;
-    let list = context
-        .tenant_tx(&state, async |tx| Ok(repo::list(tx).await?))
+    let page = ProfilePage {
+        limit: query.limit.unwrap_or(repo::DEFAULT_PAGE_LIMIT),
+        after: query
+            .cursor
+            .as_deref()
+            .map(decode_cursor)
+            .transpose()
+            .map_err(|cause| {
+                ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
+            })?,
+    };
+    let result = context
+        .tenant_tx(&state, async |tx| Ok(repo::list(tx, &page).await?))
         .await?;
-    let items = list
+    let next_cursor = if result.has_more {
+        result.profiles.last().map(|profile| {
+            encode_cursor(ProfileCursor {
+                created_at: profile.created_at,
+                id: profile.id,
+            })
+        })
+    } else {
+        None
+    };
+    let items = result
+        .profiles
         .iter()
         .map(ProfileView::try_from)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Json(ProfileListResponse { items }))
+    Ok(Json(ProfileListResponse { items, next_cursor }))
 }
 
 /// Reads one profile of the tenant.
@@ -113,7 +149,7 @@ pub async fn get_profile(
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateProfileRequest,
     responses(
-        (status = 201, description = "The profile is created.", body = ProfileView),
+        (status = 201, description = "The profile is created.", body = ProfileResponse),
         (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
         (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
@@ -123,9 +159,10 @@ pub async fn create_profile(
     State(state): State<AppState>,
     context: RequestContext,
     ApiJson(body): ApiJson<CreateProfileRequest>,
-) -> Result<(StatusCode, Json<ProfileView>), ApiError> {
+) -> Result<(StatusCode, Json<ProfileResponse>), ApiError> {
     context.authorize(Operation::ProfilesWrite)?;
     let validated = validate_create(body)?;
+    let warnings = save_warnings(&validated)?;
     let profile_id = ProfileId::new();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     ensure_repository(&mut tx, validated.repository_id).await?;
@@ -148,7 +185,13 @@ pub async fn create_profile(
             "the created profile is not found after the read",
         ));
     };
-    Ok((StatusCode::CREATED, Json(ProfileView::try_from(&created)?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(ProfileResponse {
+            profile: ProfileView::try_from(&created)?,
+            warnings,
+        }),
+    ))
 }
 
 /// Updates a profile. The body replaces the settings; an absent name keeps the name.
@@ -159,7 +202,7 @@ pub async fn create_profile(
     params(("id" = String, Path, description = "The identifier of the profile.")),
     request_body = UpdateProfileRequest,
     responses(
-        (status = 200, description = "The updated profile.", body = ProfileView),
+        (status = 200, description = "The updated profile.", body = ProfileResponse),
         (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
         (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
@@ -170,7 +213,7 @@ pub async fn update_profile(
     context: RequestContext,
     Path(id): Path<String>,
     ApiJson(body): ApiJson<UpdateProfileRequest>,
-) -> Result<Json<ProfileView>, ApiError> {
+) -> Result<Json<ProfileResponse>, ApiError> {
     context.authorize(Operation::ProfilesWrite)?;
     let profile_id = parse_profile_id(&id)?;
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
@@ -179,6 +222,7 @@ pub async fn update_profile(
         return Err(ApiError::not_found());
     };
     let validated = validate_update(body, &current.name)?;
+    let warnings = save_warnings(&validated)?;
     ensure_repository(&mut tx, validated.repository_id).await?;
     repo::update(&mut tx, profile_id, &validated.update())
         .await
@@ -200,7 +244,10 @@ pub async fn update_profile(
             "the updated profile is not found after the read",
         ));
     };
-    Ok(Json(ProfileView::try_from(&updated)?))
+    Ok(Json(ProfileResponse {
+        profile: ProfileView::try_from(&updated)?,
+        warnings,
+    }))
 }
 
 /// Removes a profile.
@@ -326,6 +373,29 @@ fn parse_agent_id(value: &str) -> Result<AgentId, ApiError> {
         })
 }
 
+fn encode_cursor(cursor: ProfileCursor) -> String {
+    format!("{};{}", cursor.created_at.unix_timestamp_nanos(), cursor.id)
+}
+
+fn decode_cursor(value: &str) -> Result<ProfileCursor, String> {
+    let (time, id) = value
+        .split_once(';')
+        .ok_or_else(|| "the cursor holds no `;`".to_owned())?;
+    let nanos: i128 = time
+        .parse()
+        .map_err(|error: std::num::ParseIntError| error.to_string())?;
+    let created_at = time::OffsetDateTime::from_unix_timestamp_nanos(nanos)
+        .map_err(|error| error.to_string())?;
+    if !(1970..=9999).contains(&created_at.year()) {
+        return Err("the time of the cursor is outside the supported range".to_owned());
+    }
+    let id = id.parse().map_err(|error: uuid::Error| error.to_string())?;
+    Ok(ProfileCursor {
+        created_at,
+        id: ProfileId::from_uuid(id),
+    })
+}
+
 /// The compiler input facts of a registered agent (FR-PF-03).
 ///
 /// The hook allow-list is empty until the agent reports it (FR-HK-04). A profile with a hook
@@ -335,8 +405,9 @@ fn target_facts(agent: &Agent, now: time::OffsetDateTime) -> Result<TargetFacts,
     let os =
         parse_os(&agent.os).ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Unknown))?;
     let arch = parse_arch(&agent.arch);
-    let restic_version =
-        ResticVersion::parse(&agent.restic_version).unwrap_or(ResticVersion::MIN_SUPPORTED);
+    // An agent that reports no parsable version cannot be checked against the option matrix.
+    let restic_version = ResticVersion::parse(&agent.restic_version)
+        .ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Incompatible))?;
     Ok(TargetFacts {
         agent_id: agent.id.to_string(),
         agent_name: agent.hostname.clone(),

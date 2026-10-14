@@ -427,7 +427,7 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::ProfilesWrite),
         handler: || {
             routes!(crate::profiles::create_profile)
-                .layer(axum::extract::DefaultBodyLimit::max(SECRET_BODY_LIMIT))
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
         },
     },
     Route {
@@ -442,7 +442,7 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::ProfilesWrite),
         handler: || {
             routes!(crate::profiles::update_profile)
-                .layer(axum::extract::DefaultBodyLimit::max(SECRET_BODY_LIMIT))
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
         },
     },
     Route {

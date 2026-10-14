@@ -19,6 +19,10 @@ use crate::DbError;
 use crate::ids::{ProfileId, RepositoryId, UserId};
 use crate::tx::TenantTx;
 
+pub const DEFAULT_PAGE_LIMIT: i64 = 50;
+
+pub const MAX_PAGE_LIMIT: i64 = 200;
+
 /// One backup definition of a tenant (FR-PF-01).
 #[derive(Debug, Clone)]
 pub struct Profile {
@@ -43,6 +47,35 @@ pub struct Profile {
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub created_by: Option<UserId>,
+}
+
+/// The keyset cursor of the profile list. It orders by `(created_at, id)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProfileCursor {
+    pub created_at: OffsetDateTime,
+    pub id: ProfileId,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProfilePage {
+    /// Clamped to [`MAX_PAGE_LIMIT`].
+    pub limit: i64,
+    pub after: Option<ProfileCursor>,
+}
+
+impl Default for ProfilePage {
+    fn default() -> Self {
+        Self {
+            limit: DEFAULT_PAGE_LIMIT,
+            after: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProfilePageResult {
+    pub profiles: Vec<Profile>,
+    pub has_more: bool,
 }
 
 /// The fields of a new row in the `profiles` table.
@@ -128,18 +161,32 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
 }
 
 /// Lists the profiles of the tenant of the transaction, newest first.
-pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Profile>, DbError> {
+pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePageResult, DbError> {
+    let limit = page.limit.clamp(1, MAX_PAGE_LIMIT);
+    let (cursor_time, cursor_id) = match page.after {
+        Some(cursor) => (Some(cursor.created_at), Some(cursor.id.as_uuid())),
+        None => (None, None),
+    };
     let rows = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, retention, check_options, hooks, created_at, \
                 updated_at, created_by \
-         FROM profiles ORDER BY created_at DESC, id DESC",
+         FROM profiles \
+         WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
+         ORDER BY created_at DESC, id DESC \
+         LIMIT $3",
     )
+    .bind(cursor_time)
+    .bind(cursor_id)
+    .bind(limit + 1)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(rows.into_iter().map(Profile::from).collect())
+    let mut profiles: Vec<Profile> = rows.into_iter().map(Profile::from).collect();
+    let has_more = profiles.len() as i64 > limit;
+    profiles.truncate(limit as usize);
+    Ok(ProfilePageResult { profiles, has_more })
 }
 
 /// Reads one profile of the tenant of the transaction. A profile of another tenant is absent.
