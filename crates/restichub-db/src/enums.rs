@@ -275,6 +275,8 @@ pub enum JobKind {
     Restore,
     /// Removes stale locks.
     Unlock,
+    /// Removes every lock of a repository. Only an Admin action starts it (FR-SC-06).
+    UnlockAll,
     /// A job that does not fit any other kind of the closed set.
     Other,
 }
@@ -290,8 +292,20 @@ impl JobKind {
             Self::Prune => "prune",
             Self::Restore => "restore",
             Self::Unlock => "unlock",
+            Self::UnlockAll => "unlock_all",
             Self::Other => "other",
         }
+    }
+
+    /// True for a kind that runs alone on its repository (FR-SC-04).
+    ///
+    /// An exclusive kind starts only when no job runs on the repository, and no job starts while it
+    /// runs. The other kinds share the repository up to the limit of the queue.
+    pub fn is_exclusive(self) -> bool {
+        matches!(
+            self,
+            Self::Init | Self::Check | Self::Forget | Self::Prune | Self::Unlock | Self::UnlockAll
+        )
     }
 
     /// `None` on an unknown string.
@@ -305,6 +319,7 @@ impl JobKind {
             "prune" => Some(Self::Prune),
             "restore" => Some(Self::Restore),
             "unlock" => Some(Self::Unlock),
+            "unlock_all" => Some(Self::UnlockAll),
             "other" => Some(Self::Other),
             _ => None,
         }
@@ -313,9 +328,9 @@ impl JobKind {
 
 /// The lifecycle status of a job (FR-SC-03, FR-SC-07).
 ///
-/// The MVP sends an on-demand job at once, so `queued` is the state before the send and `sent` the
-/// state after it. The scheduler of epic #7 adds the queue. The string value of each variant is the
-/// stored value of the `status` column. It is stable: do not change a string.
+/// `queued` is the state before the send and `sent` the state after it, until the agent
+/// acknowledges the job. The string value of each variant is the stored value of the `status`
+/// column. It is stable: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -332,6 +347,8 @@ pub enum JobStatus {
     Failed,
     /// The job expired before the agent ran it, so the control plane discards it (FR-SC-07).
     Expired,
+    /// The repository stayed locked after the last retry, so the queue gave up (FR-SC-05).
+    DeadLetter,
 }
 
 impl JobStatus {
@@ -343,6 +360,7 @@ impl JobStatus {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::Expired => "expired",
+            Self::DeadLetter => "dead_letter",
         }
     }
 
@@ -355,13 +373,17 @@ impl JobStatus {
             "succeeded" => Some(Self::Succeeded),
             "failed" => Some(Self::Failed),
             "expired" => Some(Self::Expired),
+            "dead_letter" => Some(Self::DeadLetter),
             _ => None,
         }
     }
 
     /// True for a terminal status. A job in a terminal status never changes again.
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed | Self::Expired)
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::Expired | Self::DeadLetter
+        )
     }
 }
 
@@ -583,6 +605,7 @@ mod tests {
             JobKind::Prune,
             JobKind::Restore,
             JobKind::Unlock,
+            JobKind::UnlockAll,
             JobKind::Other,
         ] {
             assert_eq!(JobKind::parse(kind.as_str()), Some(kind));
@@ -599,6 +622,7 @@ mod tests {
             JobStatus::Succeeded,
             JobStatus::Failed,
             JobStatus::Expired,
+            JobStatus::DeadLetter,
         ] {
             assert_eq!(JobStatus::parse(status.as_str()), Some(status));
         }
@@ -606,6 +630,7 @@ mod tests {
         assert!(JobStatus::Succeeded.is_terminal());
         assert!(JobStatus::Failed.is_terminal());
         assert!(JobStatus::Expired.is_terminal());
+        assert!(JobStatus::DeadLetter.is_terminal());
         assert!(!JobStatus::Queued.is_terminal());
         assert!(!JobStatus::Sent.is_terminal());
         assert!(!JobStatus::Running.is_terminal());

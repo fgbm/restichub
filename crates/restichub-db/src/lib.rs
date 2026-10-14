@@ -27,6 +27,7 @@ pub mod kek;
 pub mod memberships;
 pub mod plans;
 pub mod profiles;
+pub mod queue;
 pub mod repositories;
 pub mod secrets;
 pub mod sessions;

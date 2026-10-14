@@ -4,8 +4,8 @@
 //! touches, the status and the typed result. The row never holds a secret: the repository password
 //! and the backend credentials go with the signed job only (FR-PR-05, ADR-0003).
 //!
-//! The MVP sends an on-demand job at once, so the row moves `queued` to `sent` to `running` to a
-//! terminal status. The scheduler of epic #7 adds the queue and the retries.
+//! The row moves `queued` to `sent` to `running` to a terminal status. The queue functions of
+//! [`crate::queue`] select, lease and retry the rows.
 //!
 //! The general tenant policy of the `jobs` table shows the rows of the tenant of the transaction
 //! only (ADR-0023, section Tenant isolation).
@@ -17,6 +17,63 @@ use crate::DbError;
 use crate::enums::{JobKind, JobResultCode, JobStatus};
 use crate::ids::{AgentId, JobId, PlanId, RepositoryId, UserId};
 use crate::tx::TenantTx;
+
+/// The columns of a [`Job`], in the order of the row type. A prefix such as `"j."` qualifies each
+/// column for a join.
+macro_rules! job_columns {
+    () => {
+        crate::jobs::job_columns!("")
+    };
+    ($p:literal) => {
+        concat!(
+            $p,
+            "id, ",
+            $p,
+            "kind, ",
+            $p,
+            "agent_id, ",
+            $p,
+            "repository_id, ",
+            $p,
+            "plan_id, ",
+            $p,
+            "fire_time, ",
+            $p,
+            "status, ",
+            $p,
+            "result_code, ",
+            $p,
+            "result_message, ",
+            $p,
+            "location_fingerprint, ",
+            $p,
+            "expires_at, ",
+            $p,
+            "sent_at, ",
+            $p,
+            "started_at, ",
+            $p,
+            "finished_at, ",
+            $p,
+            "created_at, ",
+            $p,
+            "updated_at, ",
+            $p,
+            "created_by, ",
+            $p,
+            "run_at, ",
+            $p,
+            "lease_until, ",
+            $p,
+            "attempt, ",
+            $p,
+            "deliveries, ",
+            $p,
+            "stale_lock_since"
+        )
+    };
+}
+pub(crate) use job_columns;
 
 /// One stored row with its lifecycle, kind, agent and result.
 #[derive(Debug, Clone)]
@@ -43,6 +100,16 @@ pub struct Job {
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub created_by: Option<UserId>,
+    /// The earliest time at which the dispatcher sends a job that a lock retry delayed.
+    pub run_at: OffsetDateTime,
+    /// The time after which a `sent` job without an acknowledgement is delivered again.
+    pub lease_until: Option<OffsetDateTime>,
+    /// The number of lock retries so far (FR-SC-05).
+    pub attempt: i32,
+    /// The number of times the control plane sent the job (FR-PR-06).
+    pub deliveries: i32,
+    /// Set while the repository lock of this job may be stale (FR-SC-06).
+    pub stale_lock_since: Option<OffsetDateTime>,
 }
 
 /// The values that the control plane writes for a new row in the `jobs` table.
@@ -130,12 +197,11 @@ pub async fn create_scheduled(
 
 /// Reads one job of the tenant of the transaction. A job of another tenant is absent.
 pub async fn get(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbError> {
-    let row = sqlx::query_as::<_, JobRow>(
-        "SELECT id, kind, agent_id, repository_id, plan_id, fire_time, status, result_code, \
-                result_message, location_fingerprint, expires_at, sent_at, started_at, finished_at, \
-                created_at, updated_at, created_by \
-         FROM jobs WHERE id = $1",
-    )
+    let row = sqlx::query_as::<_, JobRow>(concat!(
+        "SELECT ",
+        job_columns!(),
+        " FROM jobs WHERE id = $1"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await
@@ -148,12 +214,11 @@ pub async fn get(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbErro
 /// A result that arrives for a job of another tenant is absent, so the caller cannot change it
 /// (FR-PR-08).
 pub async fn get_for_update(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbError> {
-    let row = sqlx::query_as::<_, JobRow>(
-        "SELECT id, kind, agent_id, repository_id, plan_id, fire_time, status, result_code, \
-                result_message, location_fingerprint, expires_at, sent_at, started_at, finished_at, \
-                created_at, updated_at, created_by \
-         FROM jobs WHERE id = $1 FOR UPDATE",
-    )
+    let row = sqlx::query_as::<_, JobRow>(concat!(
+        "SELECT ",
+        job_columns!(),
+        " FROM jobs WHERE id = $1 FOR UPDATE"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await
@@ -186,7 +251,7 @@ pub async fn mark_running(
     now: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE jobs SET status = 'running', started_at = $2, updated_at = now() \
+        "UPDATE jobs SET status = 'running', started_at = $2, lease_until = NULL, updated_at = now() \
          WHERE id = $1 AND status = 'sent'",
     )
     .bind(id)
@@ -210,7 +275,7 @@ pub async fn finish(
     let result = sqlx::query(
         "UPDATE jobs SET status = $2, result_code = $3, result_message = $4, finished_at = $5, \
                 updated_at = now() \
-         WHERE id = $1 AND status NOT IN ('succeeded', 'failed', 'expired')",
+         WHERE id = $1 AND status NOT IN ('succeeded', 'failed', 'expired', 'dead_letter')",
     )
     .bind(id)
     .bind(outcome.status.as_str())
@@ -249,12 +314,11 @@ pub async fn mark_refused(
 
 /// Lists the scheduled jobs of one plan, oldest fire time first (FR-SC-02).
 pub async fn list_for_plan(tx: &mut TenantTx<'_>, plan_id: PlanId) -> Result<Vec<Job>, DbError> {
-    let rows = sqlx::query_as::<_, JobRow>(
-        "SELECT id, kind, agent_id, repository_id, plan_id, fire_time, status, result_code, \
-                result_message, location_fingerprint, expires_at, sent_at, started_at, finished_at, \
-                created_at, updated_at, created_by \
-         FROM jobs WHERE plan_id = $1 ORDER BY fire_time",
-    )
+    let rows = sqlx::query_as::<_, JobRow>(concat!(
+        "SELECT ",
+        job_columns!(),
+        " FROM jobs WHERE plan_id = $1 ORDER BY fire_time"
+    ))
     .bind(plan_id)
     .fetch_all(tx.as_conn())
     .await
@@ -316,7 +380,7 @@ pub async fn mark_expired(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE jobs SET status = 'expired', finished_at = $2, updated_at = now() \
-         WHERE id = $1 AND status NOT IN ('succeeded', 'failed', 'expired') \
+         WHERE id = $1 AND status NOT IN ('succeeded', 'failed', 'expired', 'dead_letter') \
            AND expires_at IS NOT NULL AND expires_at <= $2",
     )
     .bind(id)
@@ -334,7 +398,7 @@ pub async fn mark_expired(
 pub async fn expire_overdue(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<u64, DbError> {
     let result = sqlx::query(
         "UPDATE jobs SET status = 'expired', finished_at = $1, updated_at = now() \
-         WHERE status NOT IN ('succeeded', 'failed', 'expired') \
+         WHERE status NOT IN ('succeeded', 'failed', 'expired', 'dead_letter') \
            AND expires_at IS NOT NULL AND expires_at <= $1",
     )
     .bind(now)
@@ -345,7 +409,7 @@ pub async fn expire_overdue(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Resul
 }
 
 #[derive(sqlx::FromRow)]
-struct JobRow {
+pub(crate) struct JobRow {
     id: Uuid,
     kind: JobKind,
     agent_id: Uuid,
@@ -363,6 +427,11 @@ struct JobRow {
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
     created_by: Option<Uuid>,
+    run_at: OffsetDateTime,
+    lease_until: Option<OffsetDateTime>,
+    attempt: i32,
+    deliveries: i32,
+    stale_lock_since: Option<OffsetDateTime>,
 }
 
 impl From<JobRow> for Job {
@@ -385,6 +454,11 @@ impl From<JobRow> for Job {
             created_at: row.created_at,
             updated_at: row.updated_at,
             created_by: row.created_by.map(UserId::from_uuid),
+            run_at: row.run_at,
+            lease_until: row.lease_until,
+            attempt: row.attempt,
+            deliveries: row.deliveries,
+            stale_lock_since: row.stale_lock_since,
         }
     }
 }
