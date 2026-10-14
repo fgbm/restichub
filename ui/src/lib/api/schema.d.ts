@@ -1286,7 +1286,7 @@ export interface components {
             /** @description Portion to check, for example `10%` or `1/7`. */
             read_data_subset?: string;
         };
-        /** @description The result of a `restic check` step. */
+        /** @description What `restic check --json` reported. */
         CheckSummary: {
             /** Format: int64 */
             blobs_checked: number;
@@ -1493,7 +1493,7 @@ export interface components {
         };
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued";
-        /** @description The counts of a `restic forget` step. */
+        /** @description Counts that `restic forget` reported, summed over the groups. */
         ForgetSummary: {
             /** Format: int64 */
             groups: number;
@@ -1543,7 +1543,7 @@ export interface components {
         JobDetailView: components["schemas"]["JobView"] & {
             log: components["schemas"]["LogInfo"];
             progress?: components["schemas"]["ProgressView"] | null;
-            /** @description In the order in which the steps ran. */
+            /** @description Ordered by first arrival from the agent. */
             steps: components["schemas"]["StepView"][];
             summary?: components["schemas"]["StepOutput"] | null;
         };
@@ -1616,12 +1616,9 @@ export interface components {
             /** @description In RFC 3339. */
             updated_at: string;
         };
-        /** @description The state of the log of a job. */
+        /** @description Size and fate of the stored log text. */
         LogInfo: {
-            /**
-             * Format: int64
-             * @description The number of stored lines.
-             */
+            /** Format: int64 */
             lines: number;
             /** @description True when the retention sweep deleted the lines. */
             purged: boolean;
@@ -1638,7 +1635,7 @@ export interface components {
             level: components["schemas"]["LogLevel"];
             /**
              * Format: int64
-             * @description The position of the line in the log, from 1.
+             * @description Keyset for `after_seq`. Counts from 1.
              */
             seq: number;
             /** @description Empty for a line of the job itself. */
@@ -1656,7 +1653,7 @@ export interface components {
             truncated: boolean;
         };
         /**
-         * @description The source of a job log line (FR-AG-08).
+         * @description Where a log line came from: a restic stream or the agent itself (FR-AG-08).
          * @enum {string}
          */
         LogStream: "stdout" | "stderr" | "agent";
@@ -1882,7 +1879,7 @@ export interface components {
             /** @description Stable snake_case code. */
             reason: string;
         };
-        /** @description The last progress of a running job. */
+        /** @description Last progress of the running step. It holds no value once the job ends. */
         ProgressView: {
             /** Format: int64 */
             bytes_done: number;
@@ -2063,7 +2060,7 @@ export interface components {
             /** @description True when the agent dropped snapshots to fit the size limit of a result. */
             truncated: boolean;
         };
-        /** @description The result of a `restic stats` step. */
+        /** @description What `restic stats --json` reported. */
         StatsSummary: {
             /** Format: double */
             compression_ratio: number;
@@ -2100,13 +2097,13 @@ export interface components {
             kind: "ls";
         };
         /**
-         * @description The result of one step of a job (FR-AG-09).
+         * @description How one step of a job ended. The agent maps the restic exit code to it (FR-AG-09).
          * @enum {string}
          */
         StepStatus: "success" | "warning" | "retry" | "config_error" | "cancelled" | "failed" | "skipped";
         /** @description One step of a job with its typed result. */
         StepView: {
-            /** @description A machine-readable error code. The user interface translates it (NFR-DOC-04). */
+            /** @description Translated by the user interface (NFR-DOC-04). */
             error_code?: string | null;
             error_params: {
                 [key: string]: string;
