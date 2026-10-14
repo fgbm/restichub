@@ -47,7 +47,8 @@ export const endpoints = {
 		init: (id: string) => `/repositories/${encodeURIComponent(id)}/init`,
 		testAccess: (id: string) => `/repositories/${encodeURIComponent(id)}/test-access`,
 		maintenance: (id: string) => `/repositories/${encodeURIComponent(id)}/maintenance`,
-		runMaintenance: (id: string) => `/repositories/${encodeURIComponent(id)}/maintenance/run`
+		runMaintenance: (id: string) => `/repositories/${encodeURIComponent(id)}/maintenance/run`,
+		unlockAll: (id: string) => `/repositories/${encodeURIComponent(id)}/unlock-all`
 	},
 	jobs: {
 		list: '/jobs',

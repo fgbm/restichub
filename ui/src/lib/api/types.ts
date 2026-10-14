@@ -149,6 +149,7 @@ export interface JobQuery {
 
 /** The optional agent that runs a repository job. An absent value uses the maintenance agent. */
 export type JobActionRequest = components['schemas']['JobActionRequest'];
+export type UnlockAllRequest = components['schemas']['UnlockAllRequest'];
 
 /** The paths of a profile for each operating system (FR-PF-01). */
 export type ProfilePaths = components['schemas']['ProfilePaths'];

@@ -107,6 +107,20 @@ describe('the HTTP service (issue #20 tenants)', () => {
 	});
 });
 
+describe('the HTTP service (unlock all)', () => {
+	it('posts the repository name as the confirmation', async () => {
+		const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ id: 'j_1', kind: 'unlock_all' }, 202));
+		const service = await loadService(fetchFn);
+
+		await service.unlockAllRepository('r_1', 'repo-a');
+
+		expect(fetchFn.mock.calls[0][0]).toContain('/api/v1/repositories/r_1/unlock-all');
+		const request = fetchFn.mock.calls[0][1] as RequestInit;
+		expect(request.method).toBe('POST');
+		expect(JSON.parse(request.body as string)).toEqual({ confirm: 'repo-a' });
+	});
+});
+
 describe('the HTTP service (repository maintenance)', () => {
 	it('reads, replaces and runs the maintenance of a repository', async () => {
 		const view = { repository_id: 'r_1', maintenance_agent_id: 'a_1' };

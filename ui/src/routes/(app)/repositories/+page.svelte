@@ -32,7 +32,7 @@
 	import type { SelectOption, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { formatTimeInZoneWithLocal } from '#lib/format.ts';
-	import { timeZoneNames } from '#lib/schedule.ts';
+	import { browserTimeZone, timeZoneNames } from '#lib/schedule.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -64,6 +64,9 @@
 	const TIME_ZONES = timeZoneNames();
 	const TIME_ZONE_LIST_ID = 'maintenance-time-zones';
 	const PREVIEW_RUNS = 3;
+	// The defaults of the control plane for a new repository (FR-RP-08, ADR-0034).
+	const DEFAULT_RETENTION_CRON = '0 3 * * 0';
+	const DEFAULT_CHECK_CRON = '0 4 1 * *';
 	const RETENTION_PRESETS: { label: MessageKey; cron: string }[] = [
 		{ label: 'repositories.maintenance.preset.daily', cron: '0 3 * * *' },
 		{ label: 'repositories.maintenance.preset.weekly', cron: '0 3 * * 0' }
@@ -77,13 +80,19 @@
 	let retentionEnabled = $state(true);
 	let checkCron = $state('');
 	let checkEnabled = $state(true);
-	let maintenanceTimeZone = $state('UTC');
+	let maintenanceTimeZone = $state(browserTimeZone());
 	let retentionRuns = $state<string[] | null>(null);
 	let checkRuns = $state<string[] | null>(null);
 
 	let deleteTarget = $state<Repository | null>(null);
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
+
+	let unlockTarget = $state<Repository | null>(null);
+	let unlockOpen = $state(false);
+	let unlockConfirm = $state('');
+	let unlocking = $state(false);
+	let unlockError = $state<string | null>(null);
 
 	// The init and test-access dialog (FR-RP-02).
 	let jobOpen = $state(false);
@@ -247,7 +256,7 @@
 	// The dialog previews the next fire times of each schedule from the form, so the user sees them
 	// before the save (FR-SC-01). The list follows the edit of the cron or the time zone.
 	$effect(() => {
-		if (!formOpen || !editing) return;
+		if (!formOpen) return;
 		const zone = maintenanceTimeZone;
 		const retention = retentionCron;
 		const check = checkCron;
@@ -290,11 +299,11 @@
 
 	function resetForm(): void {
 		maintenance = null;
-		retentionCron = '';
+		retentionCron = DEFAULT_RETENTION_CRON;
 		retentionEnabled = true;
-		checkCron = '';
+		checkCron = DEFAULT_CHECK_CRON;
 		checkEnabled = true;
-		maintenanceTimeZone = 'UTC';
+		maintenanceTimeZone = browserTimeZone();
 		retentionRuns = null;
 		checkRuns = null;
 		name = '';
@@ -393,8 +402,17 @@
 					request.s3_secret_key = s3SecretKey;
 				}
 				if (kind === 'rest' && restPassword) request.rest_password = restPassword;
-				await service.createRepository(request);
+				const created = await service.createRepository(request);
 				pushToast('success', t('repositories.created'));
+				try {
+					await service.updateMaintenance(created.id, {
+						time_zone: maintenanceTimeZone,
+						retention: { cron: retentionCron, enabled: retentionEnabled },
+						check: { cron: checkCron, enabled: checkEnabled }
+					});
+				} catch (problem) {
+					pushToast('danger', messageOf(problem));
+				}
 			}
 			formOpen = false;
 			resetForm();
@@ -413,6 +431,28 @@
 			pushToast('success', t('repositories.maintenanceQueued'));
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
+		}
+	}
+
+	function openUnlockAll(repository: Repository): void {
+		unlockTarget = repository;
+		unlockConfirm = '';
+		unlockError = null;
+		unlockOpen = true;
+	}
+
+	async function submitUnlockAll(): Promise<void> {
+		if (!unlockTarget || unlockConfirm !== unlockTarget.name) return;
+		unlocking = true;
+		unlockError = null;
+		try {
+			await service.unlockAllRepository(unlockTarget.id, unlockConfirm);
+			pushToast('success', t('repositories.unlockAllQueued'));
+			unlockOpen = false;
+		} catch (problem) {
+			unlockError = messageOf(problem);
+		} finally {
+			unlocking = false;
 		}
 	}
 
@@ -654,6 +694,16 @@
 										icon: 'eye' as const,
 										onSelect: () => openJob(repository, 'test_access')
 									},
+									...(repository.initialized
+										? [
+												{
+													label: t('repositories.unlockAll'),
+													icon: 'lock' as const,
+													tone: 'danger' as const,
+													onSelect: () => openUnlockAll(repository)
+												}
+											]
+										: []),
 									{
 										label: t('repositories.edit'),
 										icon: 'settings' as const,
@@ -821,7 +871,7 @@
 			bind:value={maintenanceAgentId}
 		/>
 
-		{#if editing && maintenance}
+		{#if !editing || maintenance}
 			<section class="section" aria-labelledby="maintenance-title">
 				<h3 class="section__title" id="maintenance-title">{t('repositories.maintenance.title')}</h3>
 				<p class="hint">{t('repositories.maintenance.description')}</p>
@@ -868,10 +918,12 @@
 						<span class="task__label">{t('repositories.maintenance.nextRuns')}</span>
 						{@render runsList(retentionEnabled ? retentionRuns : null)}
 					</div>
-					<div class="task__runs">
-						<span class="task__label">{t('repositories.maintenance.last')}</span>
-						{@render lastRun(maintenance.last_retention)}
-					</div>
+					{#if maintenance}
+						<div class="task__runs">
+							<span class="task__label">{t('repositories.maintenance.last')}</span>
+							{@render lastRun(maintenance.last_retention)}
+						</div>
+					{/if}
 				</div>
 
 				<div class="task">
@@ -897,10 +949,12 @@
 						<span class="task__label">{t('repositories.maintenance.nextRuns')}</span>
 						{@render runsList(checkEnabled ? checkRuns : null)}
 					</div>
-					<div class="task__runs">
-						<span class="task__label">{t('repositories.maintenance.last')}</span>
-						{@render lastRun(maintenance.last_check)}
-					</div>
+					{#if maintenance}
+						<div class="task__runs">
+							<span class="task__label">{t('repositories.maintenance.last')}</span>
+							{@render lastRun(maintenance.last_check)}
+						</div>
+					{/if}
 				</div>
 			</section>
 		{/if}
@@ -909,6 +963,39 @@
 		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
 		<Button type="submit" variant="primary" loading={saving}>
 			{t('common.save')}
+		</Button>
+	{/snippet}
+</Dialog>
+
+<Dialog
+	bind:open={unlockOpen}
+	size="sm"
+	icon="octagon"
+	title={t('repositories.unlockAllTitle')}
+	onsubmit={submitUnlockAll}
+>
+	{#if unlockError}
+		<Alert tone="danger" title={unlockError} />
+	{/if}
+	<Alert tone="danger" icon="alert" title={t('repositories.unlockAllWarningTitle')}>
+		{t('repositories.unlockAllWarning', { name: unlockTarget?.name ?? '' })}
+	</Alert>
+	<TextField
+		id="unlock-all-confirm"
+		label={t('repositories.unlockAllConfirm')}
+		help={t('repositories.unlockAllConfirmHint', { name: unlockTarget?.name ?? '' })}
+		autocomplete="off"
+		bind:value={unlockConfirm}
+	/>
+	{#snippet footer()}
+		<Button onclick={() => (unlockOpen = false)}>{t('common.cancel')}</Button>
+		<Button
+			type="submit"
+			variant="danger"
+			loading={unlocking}
+			disabled={!unlockTarget || unlockConfirm !== unlockTarget.name}
+		>
+			{t('repositories.unlockAll')}
 		</Button>
 	{/snippet}
 </Dialog>

@@ -126,6 +126,15 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 		.getByRole('link', { name: 'Repositories', exact: true })
 		.click();
 
+	// A new repository starts with the maintenance section in the time zone of the browser.
+	await page.getByRole('button', { name: 'Add repository' }).click();
+	const zone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+	await expect(page.locator('#maintenance-time-zone')).toHaveValue(zone);
+	await page
+		.getByRole('dialog', { name: 'Add a repository' })
+		.getByRole('button', { name: 'Cancel' })
+		.click();
+
 	await addLocalRepository(page, 'repo-m', 'nas-backup');
 	await addLocalRepository(page, 'repo-nohost', null);
 	// A repository without a maintenance host shows a warning in the list.
@@ -143,6 +152,18 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
 	await page.getByRole('menuitem', { name: 'Run retention now' }).click();
 	await expect(page.getByText('The maintenance job is queued.')).toBeVisible();
+
+	// Unlock all asks for the repository name in a centered danger dialog.
+	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
+	await page.getByRole('menuitem', { name: 'Unlock all' }).click();
+	const unlock = page.getByRole('dialog', { name: 'Remove all locks?' });
+	await expect(unlock.getByText('This also removes the locks of running operations')).toBeVisible();
+	const unlockButton = unlock.getByRole('button', { name: 'Unlock all' });
+	await expect(unlockButton).toBeDisabled();
+	await unlock.getByLabel('Type the repository name to confirm').fill('repo-m');
+	await expect(unlockButton).toBeEnabled();
+	await unlockButton.click();
+	await expect(page.getByText('The unlock job is queued.')).toBeVisible();
 
 	// Edit the schedules: a preset fills the cron, the preview lists the next runs.
 	await page.getByRole('button', { name: 'More actions for repo-m' }).click();

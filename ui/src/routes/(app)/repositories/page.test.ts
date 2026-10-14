@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 	getMaintenance: vi.fn(),
 	updateMaintenance: vi.fn(),
 	runMaintenance: vi.fn(),
+	unlockAllRepository: vi.fn(),
 	previewSchedule: vi.fn(),
 	pushToast: vi.fn()
 }));
@@ -52,6 +53,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			getMaintenance: mocks.getMaintenance,
 			updateMaintenance: mocks.updateMaintenance,
 			runMaintenance: mocks.runMaintenance,
+			unlockAllRepository: mocks.unlockAllRepository,
 			previewSchedule: mocks.previewSchedule
 		}
 	};
@@ -183,6 +185,57 @@ describe('the Repositories screen maintenance', () => {
 		await waitFor(() =>
 			expect(mocks.pushToast).toHaveBeenCalledWith('success', expect.stringContaining('queued'))
 		);
+	});
+
+	it('fr_rp_08 defaults the maintenance time zone of a new repository to the browser zone', async () => {
+		const user = userEvent.setup();
+		render(Repositories);
+
+		await screen.findByText('repo-a');
+		await user.click(screen.getByRole('button', { name: 'Add repository' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Add a repository' });
+
+		const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+		expect(within(dialog).getByLabelText(/Time zone/)).toHaveValue(zone);
+		expect(within(dialog).getAllByLabelText(/Cron expression/)[0]).toHaveValue('0 3 * * 0');
+	});
+
+	it('fr_sc_06 asks an Admin to type the repository name before it removes all locks', async () => {
+		const user = userEvent.setup();
+		mocks.unlockAllRepository.mockResolvedValue({ id: 'j_1', status: 'queued' });
+		render(Repositories);
+
+		await screen.findByText('repo-a');
+		await user.click(screen.getByRole('button', { name: 'More actions for repo-a' }));
+		await user.click(await screen.findByText('Unlock all'));
+
+		const dialog = await screen.findByRole('dialog', { name: 'Remove all locks?' });
+		expect(within(dialog).getByText(/locks of running operations/)).toBeInTheDocument();
+		const confirm = within(dialog).getByRole('button', { name: 'Unlock all' });
+		expect(confirm).toBeDisabled();
+		const field = within(dialog).getByLabelText('Type the repository name to confirm');
+		await user.type(field, 'repo-b');
+		expect(confirm).toBeDisabled();
+		await user.clear(field);
+		await user.type(field, 'repo-a');
+		expect(confirm).toBeEnabled();
+		await user.click(confirm);
+
+		await waitFor(() => expect(mocks.unlockAllRepository).toHaveBeenCalledWith('r_1', 'repo-a'));
+		await waitFor(() =>
+			expect(mocks.pushToast).toHaveBeenCalledWith('success', expect.stringContaining('queued'))
+		);
+	});
+
+	it('fr_sc_06 offers no unlock-all action to an Operator', async () => {
+		const user = userEvent.setup();
+		session.role = 'operator';
+		render(Repositories);
+
+		await screen.findByText('repo-a');
+		await user.click(screen.getByRole('button', { name: 'More actions for repo-a' }));
+		await screen.findByText('Run retention now');
+		expect(screen.queryByText('Unlock all')).not.toBeInTheDocument();
 	});
 
 	it('fr_sc_09 hides every action from a Viewer', async () => {

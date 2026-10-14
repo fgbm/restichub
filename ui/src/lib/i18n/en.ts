@@ -437,6 +437,14 @@ export const en = {
 	'repositories.moreActions': 'More actions for {name}',
 	'repositories.edit': 'Edit',
 	'repositories.delete': 'Delete repository',
+	'repositories.unlockAll': 'Unlock all',
+	'repositories.unlockAllTitle': 'Remove all locks?',
+	'repositories.unlockAllWarningTitle': 'This also removes the locks of running operations',
+	'repositories.unlockAllWarning':
+		'Remove the locks of the repository "{name}" only when no backup, check or prune runs on any host. A lock that you remove while an operation runs can damage the repository.',
+	'repositories.unlockAllConfirm': 'Type the repository name to confirm',
+	'repositories.unlockAllConfirmHint': 'Type {name} exactly.',
+	'repositories.unlockAllQueued': 'The unlock job is queued.',
 	'repositories.deleteTitle': 'Delete the repository?',
 	'repositories.deleteBody':
 		'This action removes the repository "{name}" and its stored secrets. The data in the backend stays. Continue?',

@@ -19,6 +19,7 @@ type Labels = {
 	start: string;
 	moreActions: (name: string) => string;
 	hostName: string;
+	unlockAll: string;
 };
 
 const EN: Labels = {
@@ -30,7 +31,8 @@ const EN: Labels = {
 	initialize: 'Initialize',
 	start: 'Start',
 	moreActions: (name) => `More actions for ${name}`,
-	hostName: 'nas-backup'
+	hostName: 'nas-backup',
+	unlockAll: 'Unlock all'
 };
 
 const RU: Labels = {
@@ -42,7 +44,8 @@ const RU: Labels = {
 	initialize: 'Инициализировать',
 	start: 'Запустить',
 	moreActions: (name) => `Другие действия для ${name}`,
-	hostName: 'nas-backup'
+	hostName: 'nas-backup',
+	unlockAll: 'Снять все блокировки'
 };
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -82,6 +85,16 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 		.getByRole('link', { name: labels.repositories, exact: true })
 		.click();
 
+	await page.getByRole('button', { name: labels.addRepository, exact: true }).click();
+	await page.locator('#maintenance-title').waitFor();
+	await page.locator('.runs li').first().waitFor();
+	await page
+		.locator('#maintenance-title')
+		.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+	await page.waitForTimeout(150);
+	await shot(page, `new-repository-maintenance${suffix}`);
+	await page.keyboard.press('Escape');
+
 	await addLocal(page, labels, 'backups-prod', labels.hostName);
 	await addLocal(page, labels, 'scratch-local', null);
 	await page.getByRole('button', { name: labels.moreActions('backups-prod') }).click();
@@ -93,6 +106,12 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 		.waitFor({ timeout: 10_000 });
 	await page.keyboard.press('Escape');
 	await shot(page, `repositories-list${suffix}`);
+
+	await page.getByRole('button', { name: labels.moreActions('backups-prod') }).click();
+	await page.getByRole('menuitem', { name: labels.unlockAll }).click();
+	await page.locator('#unlock-all-confirm').waitFor();
+	await shot(page, `unlock-all${suffix}`);
+	await page.keyboard.press('Escape');
 
 	await page.getByRole('button', { name: labels.moreActions('backups-prod') }).click();
 	await page.getByRole('menuitem', { name: labels.edit }).click();

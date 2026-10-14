@@ -123,6 +123,8 @@ export interface ApiService {
 	updateMaintenance(id: string, request: UpdateMaintenanceRequest): Promise<Maintenance>;
 	/** Queues a maintenance task of a repository now (FR-SC-09). */
 	runMaintenance(id: string, task: MaintenanceTask): Promise<Job>;
+	/** Removes every lock of the repository. `confirm` is the repository name (FR-SC-06). */
+	unlockAllRepository(id: string, confirm: string): Promise<Job>;
 	/** Polls one job (FR-PR-01). */
 	getJob(id: string): Promise<Job>;
 	/** One page of the jobs of the tenant, newest first (FR-SC-09). */
@@ -223,6 +225,8 @@ const httpService: ApiService = {
 	updateMaintenance: (id, request) =>
 		api.put<Maintenance>(endpoints.repositories.maintenance(id), request),
 	runMaintenance: (id, task) => api.post<Job>(endpoints.repositories.runMaintenance(id), { task }),
+	unlockAllRepository: (id, confirm) =>
+		api.post<Job>(endpoints.repositories.unlockAll(id), { confirm }),
 	getJob: (id) => api.get<Job>(endpoints.jobs.byId(id)),
 	listJobs: (query) =>
 		api.get<JobListResponse>(endpoints.jobs.list, {

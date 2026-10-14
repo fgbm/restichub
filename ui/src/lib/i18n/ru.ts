@@ -440,6 +440,14 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.moreActions': 'Другие действия для {name}',
 	'repositories.edit': 'Изменить',
 	'repositories.delete': 'Удалить репозиторий',
+	'repositories.unlockAll': 'Снять все блокировки',
+	'repositories.unlockAllTitle': 'Снять все блокировки?',
+	'repositories.unlockAllWarningTitle': 'Действие снимает и блокировки работающих операций',
+	'repositories.unlockAllWarning':
+		'Снимайте блокировки репозитория «{name}», только если ни одна резервная копия, проверка или очистка не работает ни на одном хосте. Блокировка, снятая во время работы операции, может повредить репозиторий.',
+	'repositories.unlockAllConfirm': 'Введите имя репозитория для подтверждения',
+	'repositories.unlockAllConfirmHint': 'Введите {name} точно.',
+	'repositories.unlockAllQueued': 'Задание снятия блокировок поставлено в очередь.',
 	'repositories.deleteTitle': 'Удалить репозиторий?',
 	'repositories.deleteBody':
 		'Действие удаляет репозиторий «{name}» и его сохранённые секреты. Данные в хранилище остаются. Продолжить?',

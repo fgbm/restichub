@@ -918,6 +918,42 @@ export class MockApiService {
 		return { ...job };
 	}
 
+	async unlockAllRepository(id: string, confirm: string): Promise<Job> {
+		const repository = this.repositories.find((item) => item.id === id);
+		if (!repository) throw new Error('not found');
+		if (confirm !== repository.name) throw problemError('invalid_argument', 'confirm', 'mismatch');
+		if (!repository.maintenance_agent_id) {
+			throw problemError('invalid_argument', 'maintenance_agent_id', 'empty');
+		}
+		const now = new Date().toISOString();
+		const agentId = repository.maintenance_agent_id;
+		const job: Job = {
+			id: `j_${this.jobs.length + 1}`,
+			kind: 'unlock_all',
+			repository_id: id,
+			agent_id: agentId,
+			status: 'queued',
+			result_code: null,
+			result_message: null,
+			created_at: now,
+			updated_at: now,
+			finished_at: null,
+			expires_at: null,
+			plan_id: null,
+			plan_name: null,
+			agent_hostname: this.agents.find((item) => item.id === agentId)?.hostname ?? null,
+			repository_name: repository.name,
+			started_at: null,
+			run_at: now,
+			attempt: 0
+		};
+		this.jobs = [
+			...this.jobs,
+			{ job, readyAt: Date.now() + 700, repositoryId: id, initializes: false }
+		];
+		return { ...job };
+	}
+
 	private maintenanceView(repository: Repository): Maintenance {
 		const stored = this.maintenance.get(repository.id) ?? {
 			time_zone: 'UTC',
