@@ -215,6 +215,42 @@ impl SigningKeyRole {
     }
 }
 
+/// A closed set of repository backends (FR-RP-01).
+///
+/// The MVP backends are S3-compatible, rest-server and a local path (ADR-0022). The string value of
+/// each variant is the stored value of the `backend` column. It is stable: do not change a string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum BackendKind {
+    /// An S3-compatible object store such as MinIO or Ceph.
+    S3,
+    /// A rest-server reached over plain HTTP or over TLS.
+    Rest,
+    /// A path on the host of the agent that runs the job.
+    Local,
+}
+
+impl BackendKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::S3 => "s3",
+            Self::Rest => "rest",
+            Self::Local => "local",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "s3" => Some(Self::S3),
+            "rest" => Some(Self::Rest),
+            "local" => Some(Self::Local),
+            _ => None,
+        }
+    }
+}
+
 /// Audit actor type (ADR-0023, section Audit log).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -250,7 +286,9 @@ impl ActorType {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActorType, AdminState, AgentStatus, CaRole, Role, SigningKeyRole, TenantStatus};
+    use super::{
+        ActorType, AdminState, AgentStatus, BackendKind, CaRole, Role, SigningKeyRole, TenantStatus,
+    };
 
     #[test]
     fn the_role_strings_are_stable() {
@@ -322,5 +360,13 @@ mod tests {
             assert_eq!(ActorType::parse(actor_type.as_str()), Some(actor_type));
         }
         assert_eq!(ActorType::parse("nope"), None);
+    }
+
+    #[test]
+    fn the_backend_kind_strings_are_stable() {
+        for kind in [BackendKind::S3, BackendKind::Rest, BackendKind::Local] {
+            assert_eq!(BackendKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(BackendKind::parse("sftp"), None);
     }
 }

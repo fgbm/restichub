@@ -24,6 +24,16 @@ pub const MAX_EMAIL: usize = 254;
 pub const MAX_SECRET_NAME: usize = 64;
 /// Limit in bytes.
 pub const MAX_SECRET_VALUE: usize = 64 * 1024;
+/// Limit in characters. The derived secret names stay within [`MAX_SECRET_NAME`].
+pub const MAX_REPOSITORY_NAME: usize = 48;
+/// Limit in characters of a backend endpoint.
+pub const MAX_ENDPOINT: usize = 2048;
+/// Limit in characters of an S3 bucket name.
+pub const MAX_BUCKET: usize = 63;
+/// Limit in characters of an S3 key prefix.
+pub const MAX_S3_PREFIX: usize = 1024;
+/// Limit in characters of a local path.
+pub const MAX_PATH: usize = 4096;
 /// Limit in days.
 pub const MAX_EXPIRY_DAYS: i64 = 2 * 365;
 
@@ -259,6 +269,131 @@ pub fn validate_secret_value(field: &'static str, value: &str) -> Result<(), Val
     Ok(())
 }
 
+/// Validates a repository name and returns the trimmed value.
+///
+/// A name holds 1 to [`MAX_REPOSITORY_NAME`] characters from the set `a-z`, `0-9`, `.`, `_` and
+/// `-`. The control plane builds the names of the derived secrets from it, so the length keeps the
+/// derived name within [`MAX_SECRET_NAME`] (FR-RP-01). The unique index of the `repositories` table
+/// makes the name unique for the tenant, so a duplicate gives a conflict at the database.
+pub fn validate_repository_name(
+    field: &'static str,
+    value: &str,
+) -> Result<String, ValidationError> {
+    let value = value.trim();
+    let count = value.chars().count();
+    if count == 0 {
+        return Err(ValidationError::new(field, Reason::Empty));
+    }
+    if count > MAX_REPOSITORY_NAME {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    if !value.chars().all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || matches!(character, '.' | '_' | '-')
+    }) {
+        return Err(ValidationError::new(field, Reason::InvalidCharacter));
+    }
+    Ok(value.to_owned())
+}
+
+/// Validates a backend endpoint and returns it.
+///
+/// The endpoint is an absolute URL with the scheme `http` or `https` and a host (FR-RP-01). A
+/// rest-server URL and an S3-compatible endpoint use the same rule.
+pub fn validate_endpoint(field: &'static str, value: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ValidationError::new(field, Reason::Empty));
+    }
+    if value.chars().count() > MAX_ENDPOINT {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    let uri = value
+        .parse::<axum::http::Uri>()
+        .map_err(|_| ValidationError::new(field, Reason::InvalidFormat))?;
+    if !matches!(uri.scheme_str(), Some("http" | "https")) || uri.authority().is_none() {
+        return Err(ValidationError::new(field, Reason::InvalidFormat));
+    }
+    Ok(value.to_owned())
+}
+
+/// Validates an S3 bucket name and returns the trimmed value.
+///
+/// The rules follow the S3 naming rules: 3 to 63 characters from `a-z`, `0-9`, `.` and `-`, and the
+/// first and the last character is a letter or a digit (FR-RP-01).
+pub fn validate_bucket(field: &'static str, value: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    let count = value.chars().count();
+    if count == 0 {
+        return Err(ValidationError::new(field, Reason::Empty));
+    }
+    if count > MAX_BUCKET {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    if count < 3 {
+        return Err(ValidationError::new(field, Reason::TooShort));
+    }
+    let allowed = |character: char| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || matches!(character, '.' | '-')
+    };
+    if !value.chars().all(allowed) {
+        return Err(ValidationError::new(field, Reason::InvalidCharacter));
+    }
+    let starts_ok = value.starts_with(|character: char| character.is_ascii_alphanumeric());
+    let ends_ok = value.ends_with(|character: char| character.is_ascii_alphanumeric());
+    if !starts_ok || !ends_ok || value.contains("..") {
+        return Err(ValidationError::new(field, Reason::InvalidFormat));
+    }
+    Ok(value.to_owned())
+}
+
+/// Validates an S3 key prefix and returns the trimmed value, or `None` for an empty value.
+///
+/// A prefix holds no leading slash and no control character (FR-RP-01).
+pub fn validate_s3_prefix(
+    field: &'static str,
+    value: &str,
+) -> Result<Option<String>, ValidationError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().count() > MAX_S3_PREFIX {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    if value.starts_with('/') || value.chars().any(char::is_control) {
+        return Err(ValidationError::new(field, Reason::InvalidFormat));
+    }
+    Ok(Some(value.to_owned()))
+}
+
+/// Validates a local path and returns the trimmed value.
+///
+/// The path is absolute: it starts with `/`, a drive letter (`C:\`) or a UNC prefix (`\\`)
+/// (FR-RP-01). The path holds no control character.
+pub fn validate_local_path(field: &'static str, value: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ValidationError::new(field, Reason::Empty));
+    }
+    if value.chars().count() > MAX_PATH {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    let bytes = value.as_bytes();
+    let drive = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    let absolute = value.starts_with('/') || value.starts_with("\\\\") || drive;
+    if !absolute || value.chars().any(char::is_control) {
+        return Err(ValidationError::new(field, Reason::InvalidFormat));
+    }
+    Ok(value.to_owned())
+}
+
 pub fn validate_password(field: &'static str, value: &str) -> Result<(), ValidationError> {
     password::validate_password(value).map_err(|error| {
         let reason = match error {
@@ -275,9 +410,11 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        MAX_DISPLAY_NAME, MAX_EMAIL, MAX_SECRET_NAME, MAX_SECRET_VALUE, MAX_TENANT_NAME,
-        MAX_USERNAME, validate_display_name, validate_email, validate_expiry, validate_secret_name,
-        validate_secret_value, validate_tenant_name, validate_token_name, validate_username,
+        MAX_BUCKET, MAX_DISPLAY_NAME, MAX_EMAIL, MAX_REPOSITORY_NAME, MAX_SECRET_NAME,
+        MAX_SECRET_VALUE, MAX_TENANT_NAME, MAX_USERNAME, validate_bucket, validate_display_name,
+        validate_email, validate_endpoint, validate_expiry, validate_local_path,
+        validate_repository_name, validate_s3_prefix, validate_secret_name, validate_secret_value,
+        validate_tenant_name, validate_token_name, validate_username,
     };
 
     const FIELD: &str = "value";
@@ -377,6 +514,69 @@ mod tests {
         assert!(validate_secret_value(FIELD, &"x".repeat(MAX_SECRET_VALUE)).is_ok());
         assert!(validate_secret_value(FIELD, "").is_err());
         assert!(validate_secret_value(FIELD, &"x".repeat(MAX_SECRET_VALUE + 1)).is_err());
+    }
+
+    #[test]
+    fn a_repository_name_is_trimmed_and_checked() {
+        assert_eq!(
+            validate_repository_name(FIELD, "  s3-prod.main  ").as_deref(),
+            Ok("s3-prod.main")
+        );
+        assert!(validate_repository_name(FIELD, "").is_err());
+        assert!(validate_repository_name(FIELD, "Upper").is_err());
+        assert!(validate_repository_name(FIELD, "with space").is_err());
+        assert!(validate_repository_name(FIELD, &"a".repeat(MAX_REPOSITORY_NAME)).is_ok());
+        assert!(validate_repository_name(FIELD, &"a".repeat(MAX_REPOSITORY_NAME + 1)).is_err());
+    }
+
+    #[test]
+    fn an_endpoint_is_an_absolute_url() {
+        assert_eq!(
+            validate_endpoint(FIELD, "  https://s3.example.net:9000  ").as_deref(),
+            Ok("https://s3.example.net:9000")
+        );
+        assert!(validate_endpoint(FIELD, "http://rest.example.net/main").is_ok());
+        assert!(validate_endpoint(FIELD, "").is_err());
+        assert!(validate_endpoint(FIELD, "s3.example.net").is_err());
+        assert!(validate_endpoint(FIELD, "ftp://s3.example.net").is_err());
+        assert!(validate_endpoint(FIELD, "https://").is_err());
+    }
+
+    #[test]
+    fn a_bucket_follows_the_naming_rules() {
+        assert_eq!(
+            validate_bucket(FIELD, "  backups-prod  ").as_deref(),
+            Ok("backups-prod")
+        );
+        assert!(validate_bucket(FIELD, "backups.prod").is_ok());
+        assert!(validate_bucket(FIELD, "ab").is_err());
+        assert!(validate_bucket(FIELD, "-backups").is_err());
+        assert!(validate_bucket(FIELD, "backups-").is_err());
+        assert!(validate_bucket(FIELD, "Backups").is_err());
+        assert!(validate_bucket(FIELD, "back..ups").is_err());
+        assert!(validate_bucket(FIELD, &"a".repeat(MAX_BUCKET + 1)).is_err());
+    }
+
+    #[test]
+    fn a_s3_prefix_is_optional_and_has_no_leading_slash() {
+        assert_eq!(validate_s3_prefix(FIELD, "   ").ok().flatten(), None);
+        assert_eq!(
+            validate_s3_prefix(FIELD, " snapshots/prod ").ok().flatten(),
+            Some("snapshots/prod".to_owned())
+        );
+        assert!(validate_s3_prefix(FIELD, "/snapshots").is_err());
+    }
+
+    #[test]
+    fn a_local_path_is_absolute() {
+        assert_eq!(
+            validate_local_path(FIELD, "  /mnt/backup/restic  ").as_deref(),
+            Ok("/mnt/backup/restic")
+        );
+        assert!(validate_local_path(FIELD, "C:\\backup\\restic").is_ok());
+        assert!(validate_local_path(FIELD, "\\\\server\\share").is_ok());
+        assert!(validate_local_path(FIELD, "").is_err());
+        assert!(validate_local_path(FIELD, "relative/path").is_err());
     }
 
     #[test]

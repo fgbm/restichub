@@ -192,6 +192,7 @@ async fn ac_au_02_role_operation_matrix() {
         Operation::UsersWrite,
         Operation::ApiTokensWrite,
         Operation::SecretsWrite,
+        Operation::RepositoriesWrite,
     ] {
         assert_eq!(minimum_role(operation), Role::Admin);
         assert!(!Role::Viewer.allows(minimum_role(operation)));
@@ -204,6 +205,10 @@ async fn ac_au_02_role_operation_matrix() {
     assert!(!Role::Operator.allows(minimum_role(Operation::SecretsWrite)));
     assert!(Operation::SecretsRead.is_tenant_only());
     assert!(Operation::SecretsWrite.is_tenant_only());
+    assert_eq!(minimum_role(Operation::RepositoriesRead), Role::Viewer);
+    assert!(Role::Viewer.allows(minimum_role(Operation::RepositoriesRead)));
+    assert!(Operation::RepositoriesRead.is_tenant_only());
+    assert!(Operation::RepositoriesWrite.is_tenant_only());
     assert!(!Operation::UsersRead.is_tenant_only());
     // The account operations are the allow-list of the platform tenant.
     assert!(Operation::AuthMe.is_auth());

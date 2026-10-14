@@ -36,6 +36,7 @@ const ROLES: [Role; 3] = [Role::Viewer, Role::Operator, Role::Admin];
 /// The canary names of the tenant B objects. The response of a tenant A call must hold none.
 const CANARY_USER: &str = "canary-bob";
 const CANARY_SECRET: &str = "canary-secret";
+const CANARY_REPOSITORY: &str = "canary-repo";
 
 /// The kind of tenant B object whose identifier the isolation check puts into the path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +46,7 @@ enum Object {
     ApiToken,
     Agent,
     EnrollmentToken,
+    Repository,
 }
 
 /// The isolation fixture of one route path pattern from the route table (AC-TN-01).
@@ -110,6 +112,11 @@ const FIXTURES: &[(&str, Fixture)] = &[
     (
         "/api/v1/secrets/{id}/value",
         Fixture::Object(Object::Secret),
+    ),
+    ("/api/v1/repositories", Fixture::Collection),
+    (
+        "/api/v1/repositories/{id}",
+        Fixture::Object(Object::Repository),
     ),
 ];
 
@@ -214,6 +221,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     // The tenant B objects. Their identifiers go into the path of a tenant A call.
     let user_b = create_user(db.database(), tenant_b, CANARY_USER, "phc", "viewer").await;
     let secret_b = seed_secret(db.database(), tenant_b, CANARY_SECRET).await;
+    let repository_b =
+        common::seed_repository(db.database(), tenant_b, CANARY_REPOSITORY, secret_b).await;
     let agent_b = common::seed_agent(db.database(), tenant_b, "canary-host").await;
     let enrollment_token_b = common::seed_enrollment_token(db.database(), tenant_b, user_b).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
@@ -269,6 +278,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
         token_b.to_string(),
         agent_b.to_string(),
         enrollment_token_b.to_string(),
+        repository_b.to_string(),
     ];
     let before = snapshot_tenant(&db, tenant_b).await;
     let audit_before = count(db.database(), tenant_b, "audit_log").await;
@@ -315,6 +325,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     Object::ApiToken => token_b.to_string(),
                     Object::Agent => agent_b.to_string(),
                     Object::EnrollmentToken => enrollment_token_b.to_string(),
+                    Object::Repository => repository_b.to_string(),
                 };
                 let uri = path.replace("{id}", &id);
                 let Access::Protected(operation) = route.access else {
@@ -380,6 +391,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     enrollment_token_b.to_string(),
                     CANARY_USER.to_owned(),
                     CANARY_SECRET.to_owned(),
+                    CANARY_REPOSITORY.to_owned(),
                 ] {
                     assert!(
                         !text.contains(&needle),
@@ -415,7 +427,9 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
             );
         }
         assert!(
-            !diff.contains(CANARY_USER) && !diff.contains(CANARY_SECRET),
+            !diff.contains(CANARY_USER)
+                && !diff.contains(CANARY_SECRET)
+                && !diff.contains(CANARY_REPOSITORY),
             "the diff of an audit record of tenant A names a tenant B object"
         );
     }

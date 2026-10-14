@@ -72,6 +72,57 @@ struct Encrypted {
     ciphertext: Vec<u8>,
 }
 
+/// Creates an encrypted secret row and returns its identifier.
+///
+/// The repository create uses it to bind a credential without the audit record of the standalone
+/// secrets API: the repository audit record covers the whole change.
+pub(crate) async fn create_bound_secret(
+    tx: &mut restichub_db::TenantTx<'_>,
+    provider: &dyn KekProvider,
+    name: &str,
+    purpose: SecretPurpose,
+    plaintext: &SecretString,
+    created_by: Option<UserId>,
+) -> Result<SecretId, ApiError> {
+    let secret_id = SecretId::new();
+    let encrypted = encrypt_for_tenant(tx, provider, secret_id, purpose, plaintext).await?;
+    repo::create(
+        tx,
+        &NewSecret {
+            id: secret_id,
+            name,
+            purpose: purpose.as_str(),
+            key_version: encrypted.key_version,
+            nonce: encrypted.nonce.as_slice(),
+            ciphertext: &encrypted.ciphertext,
+            created_by,
+        },
+    )
+    .await
+    .map_err(map_write_error)?;
+    Ok(secret_id)
+}
+
+/// Replaces the value of a bound secret row. The caller keeps the same identifier.
+pub(crate) async fn replace_bound_secret(
+    tx: &mut restichub_db::TenantTx<'_>,
+    provider: &dyn KekProvider,
+    secret_id: SecretId,
+    purpose: SecretPurpose,
+    plaintext: &SecretString,
+) -> Result<(), ApiError> {
+    let encrypted = encrypt_for_tenant(tx, provider, secret_id, purpose, plaintext).await?;
+    repo::replace(
+        tx,
+        secret_id,
+        encrypted.key_version,
+        encrypted.nonce.as_slice(),
+        &encrypted.ciphertext,
+    )
+    .await?;
+    Ok(())
+}
+
 /// Lists the metadata of the secrets of the tenant.
 #[utoipa::path(
     get,
@@ -275,7 +326,14 @@ pub async fn delete_secret(
     let Some(metadata) = metadata else {
         return Err(ApiError::not_found());
     };
-    repo::delete(&mut tx, secret_id).await?;
+    repo::delete(&mut tx, secret_id).await.map_err(|error| {
+        // A repository binds the secret, so the row cannot go. The foreign key refuses the delete.
+        if error.is_foreign_key_violation() {
+            ApiError::conflict()
+        } else {
+            ApiError::from(error)
+        }
+    })?;
     let mut event = context.audit_event(AuditAction::SecretDelete, "secret", secret_id.as_uuid());
     // The diff holds the marker `<redacted>` for the value. It never holds the plaintext.
     event.diff = Some(diff(
@@ -340,7 +398,7 @@ fn wrapped_dek(key: &kek::TenantKey) -> Result<WrappedDek, ApiError> {
 }
 
 /// `None` for an API token actor.
-fn actor_user(actor: &Actor) -> Option<UserId> {
+pub(crate) fn actor_user(actor: &Actor) -> Option<UserId> {
     match actor {
         Actor::User(id) => Some(*id),
         _ => None,

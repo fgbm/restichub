@@ -24,6 +24,7 @@ pub mod enums;
 pub mod ids;
 pub mod kek;
 pub mod memberships;
+pub mod repositories;
 pub mod secrets;
 pub mod sessions;
 pub mod setup;
@@ -35,10 +36,12 @@ pub mod users;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 
-pub use enums::{ActorType, AdminState, AgentStatus, CaRole, Role, SigningKeyRole, TenantStatus};
+pub use enums::{
+    ActorType, AdminState, AgentStatus, BackendKind, CaRole, Role, SigningKeyRole, TenantStatus,
+};
 pub use ids::{
-    AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, PLATFORM_TENANT_ID, SecretId, SessionId,
-    SetupTokenId, TenantId, UserId,
+    AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, PLATFORM_TENANT_ID, RepositoryId, SecretId,
+    SessionId, SetupTokenId, TenantId, UserId,
 };
 pub use tx::{EnrollmentTx, PlatformTx, TenantTx};
 
@@ -110,6 +113,11 @@ impl DbError {
     /// True for a check constraint violation (SQLSTATE 23514).
     pub fn is_check_violation(&self) -> bool {
         self.sqlstate().as_deref() == Some("23514")
+    }
+
+    /// True for a foreign key violation (SQLSTATE 23503).
+    pub fn is_foreign_key_violation(&self) -> bool {
+        self.sqlstate().as_deref() == Some("23503")
     }
 
     pub(crate) fn sqlstate(&self) -> Option<String> {

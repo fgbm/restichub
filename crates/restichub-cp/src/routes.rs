@@ -379,4 +379,40 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::SecretsWrite),
         handler: || routes!(crate::secrets::delete_secret),
     },
+    Route {
+        method: "get",
+        path: "/api/v1/repositories",
+        access: Access::Protected(Operation::RepositoriesRead),
+        handler: || routes!(crate::repositories::list_repositories),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || {
+            routes!(crate::repositories::create_repository)
+                .layer(axum::extract::DefaultBodyLimit::max(SECRET_BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/repositories/{id}",
+        access: Access::Protected(Operation::RepositoriesRead),
+        handler: || routes!(crate::repositories::get_repository),
+    },
+    Route {
+        method: "patch",
+        path: "/api/v1/repositories/{id}",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || {
+            routes!(crate::repositories::update_repository)
+                .layer(axum::extract::DefaultBodyLimit::max(SECRET_BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "delete",
+        path: "/api/v1/repositories/{id}",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || routes!(crate::repositories::delete_repository),
+    },
 ];

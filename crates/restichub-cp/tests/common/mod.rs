@@ -133,6 +133,14 @@ pub fn write_body(
             "purpose": "repository_password",
             "value": "matrix-value",
         })),
+        ("POST", "/api/v1/repositories") => Some(json!({
+            "name": format!("matrix-repo-{index}"),
+            "backend": {"kind": "s3", "endpoint": "https://s3.example.net", "bucket": "matrix-bucket"},
+            "password": "matrix-value",
+            "s3_access_key": "matrix-access",
+            "s3_secret_key": "matrix-secret",
+        })),
+        ("PATCH", "/api/v1/repositories/{id}") => Some(json!({"name": "matrix-repo"})),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
@@ -404,6 +412,47 @@ pub async fn seed_secret(db: &Database, tenant: TenantId, name: &str) -> restich
     .await
     .expect("cannot create the secret");
     tx.commit().await.expect("cannot commit the secret");
+    id
+}
+
+/// Inserts a local repository row of a tenant and returns its identifier.
+///
+/// A test uses it only for a route fixture. The bound secret must already exist in the tenant.
+pub async fn seed_repository(
+    db: &Database,
+    tenant: TenantId,
+    name: &str,
+    password_secret: restichub_db::SecretId,
+) -> restichub_db::RepositoryId {
+    use restichub_db::repositories::{NewRepository, RepositorySecrets, RepositorySettings};
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::RepositoryId::new();
+    restichub_db::repositories::create(
+        &mut tx,
+        &NewRepository {
+            id,
+            name,
+            backend: restichub_db::BackendKind::Local,
+            settings: RepositorySettings {
+                local_path: Some("/mnt/backup/restic"),
+                ..RepositorySettings::default()
+            },
+            secrets: RepositorySecrets {
+                password: password_secret,
+                s3_access_key: None,
+                s3_secret_key: None,
+                rest_password: None,
+            },
+            maintenance_agent_id: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the repository");
+    tx.commit().await.expect("cannot commit the repository");
     id
 }
 

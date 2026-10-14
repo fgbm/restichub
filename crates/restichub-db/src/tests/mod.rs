@@ -10,6 +10,7 @@ mod audit;
 mod auth;
 mod enrollment_tokens;
 mod migrations;
+mod repositories;
 mod rls;
 mod roles;
 mod secrets;
@@ -63,7 +64,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 10] = [
+const TENANT_TABLES: [&str; 11] = [
     "users",
     "memberships",
     "sessions",
@@ -74,6 +75,7 @@ const TENANT_TABLES: [&str; 10] = [
     "setup_tokens",
     "agents",
     "enrollment_tokens",
+    "repositories",
 ];
 
 struct Seed {
@@ -219,6 +221,18 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     .bind(tenant)
     .bind(&token_hash)
     .bind(user)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO repositories \
+         (id, tenant_id, name, backend, local_path, password_secret_id, maintenance_agent_id) \
+         VALUES ($1, $2, 'repo', 'local', '/mnt/backup/restic', \
+                 (SELECT id FROM secrets WHERE tenant_id = $2), \
+                 (SELECT id FROM agents WHERE tenant_id = $2))",
+    )
+    .bind(crate::RepositoryId::new())
+    .bind(tenant)
     .execute(tx.as_conn())
     .await?;
 
