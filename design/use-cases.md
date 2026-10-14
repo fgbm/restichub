@@ -1,6 +1,6 @@
 # ResticHub acceptance use cases
 
-Status: for manual acceptance. Date: 2026-10-13.
+Status: for manual acceptance. Date: 2026-10-14.
 
 ## 1. Purpose
 
@@ -206,32 +206,52 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Admin creates the token. A person on the host runs the installation.
 - **Preconditions:** the person signs in as the Admin. A Windows or Linux host is ready.
 - **Main flow:**
-  1. Open the "Agents" screen and create an enrollment token with labels.
-  2. Copy the command. The screen shows the full registration command, with the token, one time.
-  3. On the host, unpack the agent package.
-  4. Run the command, for example `restichub-agent register --url <control-plane-url> --token <token>`. A script can use `--token-file` or the standard input.
-  5. The agent generates its key pair and sends the certificate signing request and the token to the control plane.
-  6. The control plane signs the certificate and returns it. The agent stores its identity in the protected configuration directory.
-  7. Run `restichub-agent install-service` to register the operating system service.
-- **Expected result:** the host appears in the "Agents" list with the status "Active". The certificate holds the agent ID and the tenant ID. The audit log holds `agent_enroll`.
+  1. Open the "Hosts" screen and click "Add host".
+  2. Enter the labels and click "Create token". The screen shows the install command with the token one time.
+  3. Copy the command. The token appears under "Pending registrations" until a host uses it.
+  4. On the host, unpack the agent package.
+  5. Run the command, for example `restichub-agent register --url <control-plane-url> --token <token>`. A script can use `--token-file` or `--token-stdin`.
+  6. The agent generates its key pair and sends the certificate signing request and the token to the control plane.
+  7. The control plane signs the certificate and returns it. The agent stores its identity in the protected configuration directory.
+  8. Run `restichub-agent install-service` to register the operating system service.
+- **Expected result:** the host appears in the "Hosts" list with the status "Active". The pending registration disappears. The certificate holds the agent ID and the tenant ID. The audit log holds `enrollment_token_create` and `agent_enroll`.
 - **Alternative flows:**
-  - A used or an expired token is refused with a clear error.
+  - A used, an expired or a revoked token is refused with a clear error. The Admin can click "Cancel" on a pending registration to revoke its token.
   - The 11th enrollment request from one address in one minute gives HTTP 429.
+  - The Admin can click "Rename" on a host to change its name.
 - **Requirements:** FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01, FR-IN-07, FR-IN-08.
 - **Acceptance criteria:** AC-ID-01, AC-ID-05, AC-IN-02, AC-IN-03.
-- **Status:** Blocked by #1. The child issues are #46 (enrollment tokens), #47 (agent registry) and #48 (enrollment exchange).
+- **Status:** Ready on the stage. The epic #1 stays open for the other protocol work.
 
 ### UC-AGT-02: Revoke an agent
 
 - **Actor:** the Admin of the organization.
 - **Preconditions:** the person signs in as the Admin. The host is enrolled.
 - **Main flow:**
-  1. Open the "Agents" screen.
-  2. Click "Revoke" on the host and confirm.
-- **Expected result:** the control plane closes the stream in 5 s or less. The next connection is refused. The audit log holds `agent_revoke`.
+  1. Open the "Hosts" screen.
+  2. Open the actions menu of the host, click "Revoke agent" and confirm.
+- **Expected result:** the status of the host changes to "Revoked". The control plane closes the stream in 5 s or less and sends a cancellation for a running job. The next connection is refused. The audit log holds `agent_revoke`.
 - **Requirements:** FR-ID-04.
 - **Acceptance criteria:** AC-ID-04.
-- **Status:** Blocked by #1. The child issues are #47 (agent registry) and #52 (stream close).
+- **Status:** Ready on the stage. The issue #52 stays open for the revocation check at each connect.
+
+### UC-AGT-03: Update the agent package in place
+
+- **Actor:** the host administrator.
+- **Preconditions:** the host is enrolled and the agent service runs. A newer agent package is available.
+- **Main flow:**
+  1. Unpack the new agent package in a separate directory.
+  2. Stop the agent service.
+  3. Replace the `restichub-agent` file and the `restic` file with the files from the new package.
+  4. Start the agent service. Do not run `register` again.
+- **Expected result:** the agent connects with its old identity. The "Hosts" screen shows the same host with the status "Active" and the new value in "Agent version". The host keeps its agent ID, its certificate and its allow-list file. The next job of the host runs with the new files.
+- **Alternative flows:**
+  - A `restic` file that does not match the pinned hash stops the agent at start. The host stays offline and the service log gives the cause.
+  - A job that the agent already ran does not run again after the start. The agent journal holds the job.
+- **Requirements:** FR-IN-07, FR-IN-08, FR-HK-01.
+- **Acceptance criteria:** AC-IN-01, AC-HK-02.
+- **Note:** the update is a manual step in the MVP. The automatic self-update (FR-AG-13) is planned for 1.0. No criterion covers the in-place update of the package as a whole. The listed criteria cover the package content and the allow-list checksum.
+- **Status:** Ready on the stage.
 
 ## 9. Repository and secret configuration
 
@@ -244,58 +264,89 @@ The sign-in screen asks for the username and the password only. The account is i
   2. List the secrets with `GET /api/v1/secrets`.
   3. Replace the value with `PUT /api/v1/secrets/{id}/value`.
 - **Expected result:** the list shows the metadata and the marker `set`. No endpoint returns the value. The audit log holds `secret_create` and `secret_replace`.
+- **Alternative flows:**
+  - The "Repositories" screen also writes the secrets of one repository: the repository password, the S3 keys and the REST server password. It shows a stored value never again.
 - **Requirements:** FR-RP-03, FR-RP-05.
 - **Acceptance criteria:** AC-RP-02.
-- **Note:** the web UI screen is not built yet (#26). The person uses the REST API.
+- **Note:** the web UI has no separate screen for the secrets. The person uses the REST API for the steps above, or the "Repositories" screen for the secrets of a repository.
 - **Status:** Ready on the stage.
 
 ### UC-RP-02: Add and initialize a repository
 
 - **Actor:** an Admin.
-- **Preconditions:** the person signs in. A backend is ready: S3, rest-server or a local path.
+- **Preconditions:** the person signs in. A backend is ready: S3, rest-server or a local path. A host is enrolled.
 - **Main flow:**
-  1. Open the "Repositories" screen and click "Create".
-  2. Enter the backend address and the credentials.
-  3. Select an agent and click "Test access".
-  4. Click "Initialize".
-- **Expected result:** the repository is ready for a profile. The test with a correct password succeeds.
+  1. Open the "Repositories" screen and click "Add repository".
+  2. Select the backend kind: "S3-compatible", "REST server" or "Local path". Enter the backend address, the repository password and the credentials.
+  3. For a local path, select the "Maintenance host". The path is valid on this host only.
+  4. Click "Save". The repository shows the status "Not initialized".
+  5. Open the actions menu of the repository and click "Test access". Select the host and click "Start".
+  6. Click "Initialize", read the warning about the password, select the host and click "Start".
+- **Expected result:** the dialog shows the job status and the result "The repository is ready.". The repository shows the status "Initialized". The test with a correct password succeeds. The audit log holds `repository_create`.
 - **Alternative flows:**
-  - A wrong password gives the status `config_error` (code 12) with a clear message.
+  - A wrong password or wrong credentials give the status `config_error` (code 12) and the message "The repository password or the credentials are not correct.".
+  - A repository that does not exist yet gives the result "The repository does not exist yet. Initialize it.".
+  - A local path on a host that does not hold the repository gives the result `access_error`.
+  - The location of an initialized repository cannot change.
 - **Requirements:** FR-RP-01, FR-RP-02.
 - **Acceptance criteria:** AC-RP-01.
-- **Status:** Blocked by #5.
+- **Note:** the issue #73 (maintenance agent assignment and barriers) is open. The maintenance host is a setting of the repository now, and the barriers are not in the code.
+- **Status:** Ready on the stage.
+
+### UC-RP-03: Remove all locks of a repository
+
+- **Actor:** an Admin.
+- **Preconditions:** the person signs in as the Admin. An initialized repository has a lock that no operation holds, for example after a killed restic. The Admin knows that no other operation runs on the repository.
+- **Main flow:**
+  1. Call `POST /api/v1/repositories/{id}/unlock-all` with the body `{"confirm": "<repository name>"}`. The field `agent_id` is optional. Without it the call uses the maintenance host of the repository.
+  2. Open the "Jobs" screen and find the job of the kind "Unlock all".
+- **Expected result:** the call queues one `unlock_all` job. The agent runs `restic unlock --remove-all`. The job gets the status "Succeeded". The audit log holds `repository_unlock_all` with the actor.
+- **Alternative flows:**
+  - A name that differs from the repository name is refused and no job starts.
+  - An Operator or a Viewer gets HTTP 403. Only an Admin runs the action, and only an Admin cancels the job.
+  - A repository of another organization gives HTTP 404.
+- **Requirements:** FR-SC-06, FR-PR-02.
+- **Acceptance criteria:** AC-SC-06.
+- **Note:** the web UI has no button for this action. The person uses the REST API. The automatic `unlock` of a stale lock waits for the issue #73.
+- **Status:** Ready on the stage.
 
 ## 10. Backup plan and profile
 
 ### UC-PF-01: Create a backup profile
 
 - **Actor:** an Admin or an Operator.
-- **Preconditions:** the person signs in. A repository exists.
+- **Preconditions:** the person signs in. An initialized repository exists.
 - **Main flow:**
-  1. Open the "Profiles" screen and click "Create".
-  2. Select the repository. Enter the paths for each operating system, the excludes and the tags.
-  3. Open the preview.
-  4. Click "Save".
-- **Expected result:** the preview shows the steps and the equivalent restic command line. The secrets are masked.
+  1. Open the "Profiles" screen and click "Add profile".
+  2. Select the repository. Enter the paths for each operating system, the excludes, the tags and the backup options.
+  3. Set the retention and the hooks when they are needed.
+  4. Click "Preview", select a host and read the steps.
+  5. Click "Save".
+- **Expected result:** the preview shows the steps and the equivalent restic command line for the host. The secrets are masked. The profile appears in the list with the status "Ready". The audit log holds `profile_create`.
 - **Alternative flows:**
-  - An incorrect cron, a missing hook or an option that the installed restic lacks stops the save. The error points to the field.
+  - An incorrect value or an option that the installed restic lacks stops the save. The error points to the field.
+  - A profile that fits the host with a warning is saved. The screen shows "The profile is saved with warnings.".
 - **Requirements:** FR-PF-01, FR-PF-04, FR-PF-05.
 - **Acceptance criteria:** AC-PF-01, AC-PF-02.
-- **Status:** Blocked by #6.
+- **Status:** Ready on the stage.
 
 ### UC-PL-01: Assign a plan with a schedule
 
 - **Actor:** an Admin or an Operator.
 - **Preconditions:** the person signs in. A profile exists. An agent is enrolled.
 - **Main flow:**
-  1. Open the "Plans" screen and click "Create".
-  2. Select the profile and the agents.
-  3. Enter the cron schedule and the time zone.
-  4. Click "Save".
-- **Expected result:** the plan appears in the list. The control plane creates a job at each fire time.
+  1. Open the "Plans" screen and click "Add plan".
+  2. Select the profile and the host.
+  3. Enter the cron expression, or select a preset. Enter the time zone, for example `Europe/Berlin`.
+  4. Select the policy for "Missed runs": "Run every missed run", "Run the latest missed run" or "Skip the missed runs".
+  5. Read the "Next 5 runs" and click "Save".
+- **Expected result:** the plan appears in the list with the column "Next run". The control plane creates a job at each fire time. The audit log holds `plan_create`.
+- **Alternative flows:**
+  - An incorrect cron expression or time zone stops the save. The error points to the field.
+  - A plan that is disabled creates no job.
 - **Requirements:** FR-SC-01, FR-SC-11.
 - **Acceptance criteria:** AC-SC-01.
-- **Status:** Blocked by #7.
+- **Status:** Ready on the stage.
 
 ## 11. Scheduled and manual backup job
 
@@ -305,25 +356,65 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Preconditions:** a plan with a schedule. An online agent.
 - **Main flow:**
   1. Wait for the fire time of the plan.
-  2. Open the "Jobs" screen.
-  3. Open the job and read the log.
-- **Expected result:** the job history shows the status `success` and the restic summary. The dashboard shows the time of the last successful backup.
+  2. Open the "Jobs" screen. The newest job is first.
+  3. Read the status, the host, the plan, the start time and the duration of the job.
+- **Expected result:** the job shows the status "Succeeded". The "Next run" of the plan moves to the next fire time.
+- **Alternative flows:**
+  - A job that ends with exit code 3 shows "Succeeded with warnings" (UC-JOB-05).
+  - A job that fails shows "Failed" with the reason.
+  - A job that the host does not confirm before its expiry shows "Expired".
 - **Requirements:** FR-SC-01, FR-SC-02, FR-AG-05.
 - **Acceptance criteria:** AC-SC-01, AC-SC-02.
-- **Status:** Blocked by #7.
+- **Note:** the live log and the restic summary on the job screen are not on `main`. The epic #9 delivers them. The check of the log and the summary is blocked by #9. The dashboard time of the last successful backup is part of #9 too.
+- **Status:** Ready on the stage for the scheduled start and the job status. Blocked by #9 for the log, the restic summary and the dashboard.
 
 ### UC-JOB-02: Run a manual backup and cancel it
 
 - **Actor:** an Operator.
 - **Preconditions:** the person signs in. An online agent and a plan are ready.
 - **Main flow:**
-  1. Open the plan or the agent and click "Run".
-  2. Watch the live log.
-  3. Click "Cancel".
-- **Expected result:** restic starts in 3 s or less. The cancel stops restic before the grace period ends. The status is `cancelled`. No lock stays on the repository.
+  1. Open the "Plans" screen, open the actions menu of the plan and click "Run now".
+  2. Open the "Jobs" screen. The new job shows "Waiting", then "Sent to the host", then "Running".
+  3. Open the actions menu of the job, click "Cancel job" and confirm.
+- **Expected result:** restic starts in 3 s or less. The cancel stops restic before the grace period ends. The status is "Cancelled". No lock stays on the repository. The audit log holds `job_run` and `job_cancel`.
+- **Alternative flows:**
+  - A second "Run now" for a plan that already has a manual run in the queue gives `already_queued`.
+  - An offline host gives `agent_offline`. The control plane holds no job queue for an offline host, so it refuses the job.
 - **Requirements:** FR-SC-09, FR-AG-10.
 - **Acceptance criteria:** AC-SC-09, AC-AG-06.
-- **Status:** Blocked by #7.
+- **Note:** the live log is not on `main`. The epic #9 delivers it. The step "watch the live log" stays blocked by #9.
+- **Status:** Ready on the stage for the run, the queue and the cancel. Blocked by #9 for the live log.
+
+### UC-JOB-04: A locked repository retries and gives up
+
+- **Actor:** the operator watches. The control plane does the work.
+- **Preconditions:** a plan and an online agent. Another process holds a lock on the repository, for example a `restic` command on another computer. A test setup can use a fake restic that exits with code 11.
+- **Main flow:**
+  1. Run the plan with "Run now".
+  2. Open the "Jobs" screen.
+  3. Watch the jobs of the plan while the lock stays.
+- **Expected result:** restic ends with exit code 11. The job shows the reason "The repository was locked. A new attempt is queued.". The control plane queues a new job. The new job has a new identifier and a longer delay than the one before. When the retry limit is reached, the last job gets the status "Gave up" (`dead_letter`) with the reason "The repository stayed locked after every retry.". The audit log holds `job_dead_letter`.
+- **Alternative flows:**
+  - If the lock goes away between two attempts, the new job runs and gets the status "Succeeded".
+  - The Admin can remove a stale lock by hand (UC-RP-03).
+- **Requirements:** FR-SC-05, FR-AG-09.
+- **Acceptance criteria:** AC-SC-05, AC-AG-05.
+- **Note:** the alert for the dead-letter job is part of the epic #9. The audit record is on `main` now.
+- **Status:** Ready on the stage.
+
+### UC-JOB-05: A partial backup ends with warnings
+
+- **Actor:** the operator watches. The control plane does the work.
+- **Preconditions:** a plan and an online agent. One file in the backup path cannot be read, for example a file that another process locks. A test setup can use a fake restic that exits with code 3.
+- **Main flow:**
+  1. Run the plan with "Run now", or wait for its fire time.
+  2. Open the "Jobs" screen.
+- **Expected result:** restic ends with exit code 3. The job gets the status "Succeeded with warnings" (`succeeded_with_warnings`). The snapshot exists with the files that restic could read. The job does not retry.
+- **Alternative flows:**
+  - If no file can be read, restic gives another exit code and the job gets the status "Failed".
+- **Requirements:** FR-AG-09.
+- **Acceptance criteria:** AC-AG-05.
+- **Status:** Ready on the stage.
 
 ## 12. Job monitoring and cancel
 
@@ -372,7 +463,8 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Expected result:** only the maintenance agent runs `forget`, `prune` and `check`. No backup runs at the same time on the repository. After a stale lock, the control plane runs `unlock` when the repository is idle.
 - **Requirements:** FR-RP-08, FR-SC-04, FR-SC-06.
 - **Acceptance criteria:** AC-RP-04, AC-SC-03, AC-SC-06.
-- **Status:** Blocked by #5.
+- **Note:** the issue #73 (maintenance agent assignment and barriers) delivers the rule that only the maintenance agent runs these steps.
+- **Status:** Blocked by #73.
 
 ## 15. Hooks from the allow-list
 
@@ -457,10 +549,10 @@ The sign-in screen asks for the username and the password only. The account is i
   1. Stop the agent service. Keep the agent offline for 3 plan intervals.
   2. Start the agent again.
   3. Open the "Jobs" screen.
-- **Expected result:** the missed-run policy applies. The policy "run all" creates 3 jobs, "run latest" creates 1 job and "skip" creates 0 jobs. An expired job gets the status `expired`.
+- **Expected result:** the missed-run policy of the plan applies. The policy `run_all` ("Run every missed run") creates 3 jobs. The policy `latest_only` ("Run the latest missed run") creates 1 job. The policy `skip` ("Skip the missed runs") creates 0 jobs. A fire time within the grace window of the pass is on time. That run always runs, and it is in addition to the count. A job that the host does not take before its expiry gets the status "Expired".
 - **Requirements:** FR-SC-07.
 - **Acceptance criteria:** AC-SC-07.
-- **Status:** Blocked by #7.
+- **Status:** Ready on the stage.
 
 ### UC-FAIL-02: Repository unavailable
 
@@ -473,19 +565,38 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Expected result:** the job fails with a clear error. An alert arrives with the tenant, the agent, the plan and the error text.
 - **Requirements:** FR-MN-03.
 - **Acceptance criteria:** AC-MN-02.
-- **Status:** Blocked by #5.
+- **Note:** the job and its status are on `main`. The alerts are not. The epic #9 delivers them.
+- **Status:** Blocked by #9.
 
 ### UC-FAIL-03: Wrong secret
 
 - **Actor:** an Admin.
 - **Preconditions:** a repository. A wrong repository password.
 - **Main flow:**
-  1. Save a wrong repository password in the secret.
-  2. Test the access from an agent.
-- **Expected result:** the test gives the status `config_error` (code 12) with a clear message. No secret value appears in a log.
+  1. Create a repository with a wrong repository password. The password cannot change after the creation.
+  2. Open the actions menu of the repository and click "Test access". Select a host and click "Start".
+- **Expected result:** the test gives the status `config_error` (code 12) and the message "The repository password or the credentials are not correct.". No secret value appears in a log.
+- **Alternative flows:**
+  - A wrong S3 key or a wrong REST server password gives the same result. The Admin replaces these secrets in the form "Edit the repository" and runs the test again.
 - **Requirements:** FR-RP-02, FR-RP-05.
 - **Acceptance criteria:** AC-RP-01.
-- **Status:** Blocked by #5.
+- **Status:** Ready on the stage.
+
+### UC-TN-01: Tenant isolation
+
+- **Actor:** an Admin of the organization A. The organization B exists.
+- **Preconditions:** the person holds a membership in the organization A only. An object of the organization B exists, for example a repository, a plan or a job. The person knows its ID.
+- **Main flow:**
+  1. Sign in and select the organization A.
+  2. Call `GET /api/v1/repositories/{id}` with the ID of the object of the organization B.
+  3. Repeat the call for a plan, a profile, a job and a host. Try also a change, for example `PATCH` or `DELETE`, and the action `POST /api/v1/plans/{id}/run`.
+- **Expected result:** each call gives HTTP 404, as if the object does not exist. No object of the organization B changes. The lists of the organization A show no object of the organization B.
+- **Alternative flows:**
+  - An API token of the organization A gives the same result.
+  - After the person switches to the organization B (with a membership), the same IDs give the objects.
+- **Requirements:** FR-TN-01.
+- **Acceptance criteria:** AC-TN-01.
+- **Status:** Ready on the stage.
 
 ## 19. Traceability
 
@@ -501,22 +612,27 @@ The sign-in screen asks for the username and the password only. The account is i
 | UC-USR-01 | FR-TN-02, FR-AU-03 | AC-AU-02 | Ready on the stage |
 | UC-USR-02 | FR-TN-02 | AC-AU-02 | Ready on the stage |
 | UC-USR-03 | FR-TN-02, FR-AU-04 | AC-AU-08, AC-AU-09 | Ready on the stage |
-| UC-AGT-01 | FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01, FR-IN-07, FR-IN-08 | AC-ID-01, AC-ID-05, AC-IN-02, AC-IN-03 | Blocked by #1 |
-| UC-AGT-02 | FR-ID-04 | AC-ID-04 | Blocked by #1 |
+| UC-AGT-01 | FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01, FR-IN-07, FR-IN-08 | AC-ID-01, AC-ID-05, AC-IN-02, AC-IN-03 | Ready on the stage |
+| UC-AGT-02 | FR-ID-04 | AC-ID-04 | Ready on the stage |
+| UC-AGT-03 | FR-IN-07, FR-IN-08, FR-HK-01 | AC-IN-01, AC-HK-02 | Ready on the stage |
 | UC-RP-01 | FR-RP-03, FR-RP-05 | AC-RP-02 | Ready on the stage |
-| UC-RP-02 | FR-RP-01, FR-RP-02 | AC-RP-01 | Blocked by #5 |
-| UC-PF-01 | FR-PF-01, FR-PF-04, FR-PF-05 | AC-PF-01, AC-PF-02 | Blocked by #6 |
-| UC-PL-01 | FR-SC-01, FR-SC-11 | AC-SC-01 | Blocked by #7 |
-| UC-JOB-01 | FR-SC-01, FR-SC-02, FR-AG-05 | AC-SC-01, AC-SC-02 | Blocked by #7 |
-| UC-JOB-02 | FR-SC-09, FR-AG-10 | AC-SC-09, AC-AG-06 | Blocked by #7 |
+| UC-RP-02 | FR-RP-01, FR-RP-02 | AC-RP-01 | Ready on the stage |
+| UC-RP-03 | FR-SC-06, FR-PR-02 | AC-SC-06 | Ready on the stage |
+| UC-PF-01 | FR-PF-01, FR-PF-04, FR-PF-05 | AC-PF-01, AC-PF-02 | Ready on the stage |
+| UC-PL-01 | FR-SC-01, FR-SC-11 | AC-SC-01 | Ready on the stage |
+| UC-JOB-01 | FR-SC-01, FR-SC-02, FR-AG-05 | AC-SC-01, AC-SC-02 | Ready on the stage; blocked by #9 for the log, the summary and the dashboard |
+| UC-JOB-02 | FR-SC-09, FR-AG-10 | AC-SC-09, AC-AG-06 | Ready on the stage; blocked by #9 for the live log |
+| UC-JOB-04 | FR-SC-05, FR-AG-09 | AC-SC-05, AC-AG-05 | Ready on the stage |
+| UC-JOB-05 | FR-AG-09 | AC-AG-05 | Ready on the stage |
 | UC-JOB-03 | FR-MN-01, FR-MN-02 | AC-MN-04, AC-UI-02 | Blocked by #9 |
 | UC-RS-01 | FR-RS-01, FR-RS-03, FR-RS-04 | AC-RS-01, AC-RS-03, AC-RS-04 | Blocked by #8 |
-| UC-MNT-01 | FR-RP-08, FR-SC-04, FR-SC-06 | AC-RP-04, AC-SC-03, AC-SC-06 | Blocked by #5 |
+| UC-MNT-01 | FR-RP-08, FR-SC-04, FR-SC-06 | AC-RP-04, AC-SC-03, AC-SC-06 | Blocked by #73 |
 | UC-HK-01 | FR-HK-01, FR-HK-03, FR-HK-05 | AC-HK-01, AC-HK-03, AC-HK-06 | Blocked by #3 |
 | UC-AUD-01 | FR-AU-01 | AC-AU-01 | Ready on the stage |
 | UC-AUD-02 | FR-AU-01, FR-TN-02 | AC-AU-01 | Ready on the stage |
 | UC-TOK-01 | FR-API-01, FR-TN-05 | AC-TN-04 | Ready on the stage |
 | UC-TOK-02 | FR-API-01 | AC-TN-04 | Ready on the stage |
-| UC-FAIL-01 | FR-SC-07 | AC-SC-07 | Blocked by #7 |
-| UC-FAIL-02 | FR-MN-03 | AC-MN-02 | Blocked by #5 |
-| UC-FAIL-03 | FR-RP-02, FR-RP-05 | AC-RP-01 | Blocked by #5 |
+| UC-FAIL-01 | FR-SC-07 | AC-SC-07 | Ready on the stage |
+| UC-FAIL-02 | FR-MN-03 | AC-MN-02 | Blocked by #9 |
+| UC-FAIL-03 | FR-RP-02, FR-RP-05 | AC-RP-01 | Ready on the stage |
+| UC-TN-01 | FR-TN-01 | AC-TN-01 | Ready on the stage |
