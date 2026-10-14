@@ -1,36 +1,72 @@
-//! Hardening of the restic child process (FR-AG-06, ADR-0021, ADR-0031).
+//! Hardening of the restic child process (FR-AG-06, FR-AG-11, ADR-0021, ADR-0031).
 //!
-//! The agent starts the bundled restic with a cleared environment and only the variables of the step
-//! `CommandLine` (FR-AG-06). A secret reaches the child process only through the environment, never
-//! through an argument (threat T9).
+//! The agent starts the bundled restic with a cleared environment, the variables of the step
+//! `CommandLine` and the proxy variables of the host (FR-AG-06). A secret reaches the child process
+//! only through the environment, never through an argument (threat T9).
 //!
 //! The hash of the binary is computed through the opened file, and the child starts from that same
-//! handle: on Linux the descriptor is kept open and the program is `/proc/self/fd/<fd>`, on Windows
-//! the file is opened without `FILE_SHARE_WRITE` and `FILE_SHARE_DELETE` and the handle stays open
-//! until the child starts. A binary that an attacker replaces between the check and the spawn is
-//! therefore refused (threat T20).
+//! handle: on Linux the descriptor keeps its close-on-exec flag and the program is
+//! `/proc/self/fd/<fd>`, which the kernel resolves to the checked file before it closes the
+//! descriptor; on Windows the file is opened without `FILE_SHARE_WRITE` and `FILE_SHARE_DELETE` and
+//! the handle stays open until the child starts. A binary that an attacker replaces between the
+//! check and the spawn is therefore refused (threat T20).
 
-use std::path::Path;
-use std::process::{Child, Command};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Output, Stdio};
 
 use anyhow::{Context, Result};
 use restichub_compiler::arg::CommandLine;
 
 use crate::restic::{EXPECTED_SHA256, ResticBinary};
 
+/// The proxy variables that a restic child inherits from the agent environment (FR-AG-06).
+///
+/// A repository behind a proxy uses them. They come from the agent environment only, never from a
+/// step, so a job cannot redirect the traffic of a repository. Windows holds the environment names
+/// case-insensitively, so the upper-case names cover the lower-case forms there.
+#[cfg(windows)]
+const PROXY_ENV: [&str; 3] = ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"];
+
+/// The proxy variables that a restic child inherits from the agent environment (FR-AG-06).
+#[cfg(not(windows))]
+const PROXY_ENV: [&str; 6] = [
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "NO_PROXY",
+    "no_proxy",
+];
+
 /// Builds the restic invocation with a cleared environment and only the step values (FR-AG-06).
 ///
-/// The child process inherits no variable of the agent, so an ambient secret never reaches restic.
-/// It holds the restic cache directory and, on Windows, the minimal variables that a child process
-/// needs to load the system libraries and to write a temporary file.
+/// The child process inherits no variable of the agent except the proxy variables of the host, so
+/// an ambient secret never reaches restic. It holds the restic cache directory, the host proxy
+/// settings and, on Windows, the minimal variables that a child process needs to load the system
+/// libraries and to write a temporary file.
 #[must_use]
 pub fn restic_command(program: &Path, line: &CommandLine, cache_dir: &Path) -> Command {
+    restic_command_with(program, line.args(), line.env(), cache_dir)
+}
+
+/// Builds the restic invocation for a bare argument list (FR-AG-11).
+fn restic_command_with(
+    program: &Path,
+    args: &[String],
+    env: &[(String, String)],
+    cache_dir: &Path,
+) -> Command {
     let mut command = Command::new(program);
     command.env_clear();
-    for (name, value) in line.env() {
+    for (name, value) in env {
         command.env(name, value);
     }
     command.env("RESTIC_CACHE_DIR", cache_dir);
+    for name in PROXY_ENV {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
     #[cfg(windows)]
     {
         // A child process needs `SystemRoot` to load the system libraries.
@@ -41,7 +77,7 @@ pub fn restic_command(program: &Path, line: &CommandLine, cache_dir: &Path) -> C
         command.env("TEMP", cache_dir);
         command.env("TMP", cache_dir);
     }
-    command.args(line.args());
+    command.args(args);
     command
 }
 
@@ -59,6 +95,29 @@ pub fn spawn_restic(restic: &ResticBinary, line: &CommandLine) -> Result<Child> 
     )
 }
 
+/// Runs the pinned restic with `version` and collects its output (FR-AG-11, threat T20).
+///
+/// The child runs the checked inode with the environment of a job (FR-AG-06), so the check and the
+/// run share one reading of the binary.
+///
+/// # Errors
+///
+/// Returns an error when the hash differs or the process cannot start.
+pub fn version_output(restic: &ResticBinary) -> Result<Output> {
+    let (file, mut command) = verified_command(
+        restic.path(),
+        EXPECTED_SHA256,
+        &["version".to_owned()],
+        &[],
+        &crate::paths::cache_dir(),
+    )?;
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let output = command.output().context("cannot run restic")?;
+    drop(file);
+    Ok(output)
+}
+
 /// Opens the binary, checks the hash through the handle and starts the child from it (threat T20).
 fn spawn_verified(
     path: &Path,
@@ -66,16 +125,31 @@ fn spawn_verified(
     line: &CommandLine,
     cache: &Path,
 ) -> Result<Child> {
+    let (file, mut command) = verified_command(path, expected_hex, line.args(), line.env(), cache)?;
+    let child = command.spawn().context("cannot start restic")?;
+    // The handle stays open until the child has started, so the checked inode is the one that runs.
+    drop(file);
+    Ok(child)
+}
+
+/// Opens the binary, checks the hash through the handle and builds the child command (threat T20).
+///
+/// The returned file holds the checked descriptor; the caller keeps it open until the child starts.
+/// The cache directory is created after the check, so an unverified binary never creates one.
+fn verified_command(
+    path: &Path,
+    expected_hex: &str,
+    args: &[String],
+    env: &[(String, String)],
+    cache: &Path,
+) -> Result<(std::fs::File, Command)> {
     let file = open_for_exec(path)?;
     let digest = digest_of(&file)?;
     crate::restic::verify_digest(&digest, expected_hex)
         .with_context(|| format!("the bundled restic at {}", path.display()))?;
-    // The cache directory is created after the check, so an unverified binary never creates one.
     crate::paths::create_protected_dir(cache)?;
-    let child = start(&file, path, line, cache)?;
-    // The handle stays open until the child has started, so the checked inode is the one that runs.
-    drop(file);
-    Ok(child)
+    let command = restic_command_with(&pinned_program(&file, path), args, env, cache);
+    Ok((file, command))
 }
 
 /// Reads the whole file through the handle and returns its SHA-256.
@@ -94,24 +168,6 @@ fn digest_of(file: &std::fs::File) -> Result<Vec<u8>> {
 #[cfg(target_os = "linux")]
 fn open_for_exec(path: &Path) -> Result<std::fs::File> {
     std::fs::File::open(path).with_context(|| format!("cannot open {}", path.display()))
-}
-
-/// Keeps the checked descriptor open across the exec, so the child runs the checked inode.
-#[cfg(target_os = "linux")]
-#[allow(unsafe_code)]
-fn start(file: &std::fs::File, _path: &Path, line: &CommandLine, cache: &Path) -> Result<Child> {
-    use std::os::fd::AsRawFd as _;
-    let fd = file.as_raw_fd();
-    // `File::open` sets the close-on-exec flag. Clear it, so the descriptor survives the exec and
-    // the child resolves `/proc/self/fd/<fd>` to the checked file (threat T20).
-    // SAFETY: `fd` is an open descriptor that this function owns.
-    if unsafe { libc::fcntl(fd, libc::F_SETFD, 0) } == -1 {
-        return Err(std::io::Error::last_os_error()).context("cannot keep the restic handle open");
-    }
-    let program = std::path::PathBuf::from(format!("/proc/self/fd/{fd}"));
-    restic_command(&program, line, cache)
-        .spawn()
-        .context("cannot start restic")
 }
 
 /// Opens the binary without `FILE_SHARE_WRITE` and `FILE_SHARE_DELETE` (threat T20).
@@ -147,26 +203,27 @@ fn open_for_exec(path: &Path) -> Result<std::fs::File> {
     Ok(unsafe { std::fs::File::from_raw_handle(handle) })
 }
 
-/// Runs the child from the path while the pinned handle stays open (threat T20).
-#[cfg(windows)]
-fn start(_file: &std::fs::File, path: &Path, line: &CommandLine, cache: &Path) -> Result<Child> {
-    restic_command(path, line, cache)
-        .spawn()
-        .context("cannot start restic")
-}
-
 /// Opens the binary for the hash check. macOS and other systems have no handle pin.
 #[cfg(not(any(target_os = "linux", windows)))]
 fn open_for_exec(path: &Path) -> Result<std::fs::File> {
     std::fs::File::open(path).with_context(|| format!("cannot open {}", path.display()))
 }
 
-/// Runs the child from the path on a system without a handle pin.
-#[cfg(not(any(target_os = "linux", windows)))]
-fn start(_file: &std::fs::File, path: &Path, line: &CommandLine, cache: &Path) -> Result<Child> {
-    restic_command(path, line, cache)
-        .spawn()
-        .context("cannot start restic")
+/// The program that runs the checked file (threat T20).
+///
+/// The descriptor keeps its close-on-exec flag: the kernel resolves `/proc/self/fd/<fd>` to the
+/// checked file before it closes the descriptor at the exec, so the child runs the checked inode
+/// and holds no extra descriptor.
+#[cfg(target_os = "linux")]
+fn pinned_program(file: &std::fs::File, _path: &Path) -> PathBuf {
+    use std::os::fd::AsRawFd as _;
+    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
+}
+
+/// The program that runs the checked file on a system without a descriptor pin (threat T20).
+#[cfg(not(target_os = "linux"))]
+fn pinned_program(_file: &std::fs::File, path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
 #[cfg(test)]
@@ -180,9 +237,7 @@ mod tests {
     use restichub_compiler::arg::build_command;
     use restichub_proto::agent::v1::{Job, RepositoryAccess, Step, UnlockStep, step};
 
-    use super::restic_command;
-    #[cfg(unix)]
-    use super::spawn_verified;
+    use super::{restic_command, spawn_verified};
 
     fn command_line() -> restichub_compiler::CommandLine {
         let job = Job {
@@ -209,7 +264,6 @@ mod tests {
         build_command(&validated, &step).expect("the command must build")
     }
 
-    #[cfg(unix)]
     fn temp_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "restichub-agent-exec-{name}-{}",
@@ -217,7 +271,22 @@ mod tests {
         ))
     }
 
-    /// FR-AG-06: the child process holds only the step environment and no argument carries a secret.
+    /// Writes a fake restic that exits at once: a copy of `true` on Unix and of the test executable
+    /// on Windows, because Windows runs no script directly (threat T20).
+    #[cfg(unix)]
+    fn write_fake_binary(path: &Path) {
+        std::fs::copy("/bin/true", path).expect("cannot copy the fake binary");
+    }
+
+    /// Writes a fake `restic.exe`: the test executable exits at once for an unknown test filter.
+    #[cfg(windows)]
+    fn write_fake_binary(path: &Path) {
+        let exe = std::env::current_exe().expect("cannot find the test executable");
+        std::fs::copy(exe, path).expect("cannot copy the fake binary");
+    }
+
+    /// FR-AG-06: the child process holds only the step environment, the host proxy settings and no
+    /// argument carries a secret.
     #[test]
     fn fr_ag_06_the_child_environment_is_cleared() {
         let line = command_line();
@@ -246,6 +315,11 @@ mod tests {
             OsString::from("RESTIC_CACHE_DIR"),
             Some(OsString::from("/var/cache/restichub-agent")),
         ));
+        for name in super::PROXY_ENV {
+            if let Some(value) = std::env::var_os(name) {
+                expected.push((OsString::from(name), Some(value)));
+            }
+        }
         #[cfg(windows)]
         {
             expected.push((
@@ -279,54 +353,48 @@ mod tests {
     }
 
     /// Runs the child from the inode whose hash the agent checked.
-    #[cfg(unix)]
     #[test]
     fn l2_the_child_starts_from_the_checked_handle() {
         use sha2::Digest as _;
-        use std::io::Write as _;
-        use std::os::unix::fs::PermissionsExt as _;
 
-        let script = temp_path("script");
-        let mut file = std::fs::File::create(&script).expect("cannot create the script");
-        file.write_all(b"#!/bin/sh\nexit 0\n")
-            .expect("cannot write the script");
-        drop(file);
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
-            .expect("cannot make the script executable");
+        let dir = temp_path("pinned");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("cannot create the directory");
+        let program = dir.join(crate::restic::RESTIC_FILE_NAME);
+        write_fake_binary(&program);
 
-        let bytes = std::fs::read(&script).expect("cannot read the script");
+        let bytes = std::fs::read(&program).expect("cannot read the fake binary");
         let expected = hex(&sha2::Sha256::digest(&bytes));
 
-        let cache = temp_path("cache");
+        let cache = temp_path("pinned-cache");
         std::fs::create_dir_all(&cache).expect("cannot create the cache");
         let line = command_line();
-        let mut child = spawn_verified(&script, &expected, &line, &cache).expect("cannot start");
+        let mut child = spawn_verified(&program, &expected, &line, &cache).expect("cannot start");
         let status = child.wait().expect("cannot wait");
         assert!(status.success(), "the child must run the checked file");
-        let _ = std::fs::remove_file(&script);
+        let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&cache);
     }
 
     /// A wrong hash refuses the start, so the child never runs (threat T20).
-    #[cfg(unix)]
     #[test]
     fn l2_a_wrong_hash_refuses_the_start() {
         use std::io::Write as _;
-        let script = temp_path("wrong");
-        let mut file = std::fs::File::create(&script).expect("cannot create the script");
+        let path = temp_path("wrong");
+        let mut file = std::fs::File::create(&path).expect("cannot create the file");
         file.write_all(b"not a restic binary")
             .expect("cannot write");
         drop(file);
         let cache = temp_path("wrong-cache");
         std::fs::create_dir_all(&cache).expect("cannot create the cache");
         let line = command_line();
-        let error = spawn_verified(&script, &"0".repeat(64), &line, &cache)
+        let error = spawn_verified(&path, &"0".repeat(64), &line, &cache)
             .expect_err("a wrong hash must refuse the start");
         assert!(
             format!("{error:#}").contains("does not match the pinned SHA-256"),
             "{error:#}"
         );
-        let _ = std::fs::remove_file(&script);
+        let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir_all(&cache);
     }
 
@@ -341,7 +409,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     fn hex(bytes: &[u8]) -> String {
         use std::fmt::Write as _;
         let mut text = String::with_capacity(bytes.len() * 2);

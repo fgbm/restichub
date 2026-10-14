@@ -9,7 +9,8 @@
 //! The agent answers each `Ping` with `Pong`, verifies each `SigningKeyUpdate` against the key ring
 //! (ADR-0030) and answers with `KeyUpdateAck`. A dropped stream reconnects with exponential backoff
 //! and full jitter, base 1 s and maximum 60 s (ADR-0026). The attempt grows unless the stream lived
-//! at least one ping interval or answered a ping, so a server that closes at once is not hammered.
+//! at least one ping interval or answered a ping, so a server that closes at once is not hammered;
+//! a stream that was working and then failed, such as on a control plane restart, resets it too.
 //! An identity that the control plane refuses backs off at the maximum. The agent starts no job and
 //! holds no timer that starts one (ADR-0002); a job or a cancellation message is logged and ignored
 //! until epic #7.
@@ -262,10 +263,13 @@ fn next_attempt(attempt: u32, healthy: bool) -> u32 {
 
 /// Opens one stream and serves the control messages until it ends (FR-ID-07, FR-PR-11).
 ///
+/// A transport failure after the stream opened ends the attempt with [`Disconnect::Closed`], so a
+/// healthy stream that a control plane restart dropped resets the reconnect attempt (FR-ID-08).
+///
 /// # Errors
 ///
-/// Returns an error when the channel cannot be built or a message cannot be sent. A refusal of the
-/// identity is `Ok(Disconnect::Refused)`, not an error.
+/// Returns an error only when the channel cannot be built or the first message cannot be sent. A
+/// refusal of the identity is `Ok(Disconnect::Refused)`, not an error.
 pub async fn connect_once(
     identity: &StoredIdentity,
     dir: &Path,
@@ -297,7 +301,16 @@ pub async fn connect_once(
             }
         };
         let message = match received {
-            Ok(message) => message.context("the stream failed")?,
+            Ok(Ok(message)) => message,
+            // An error after the stream opened is the transport failure of a stream that was
+            // working: a control plane restart or a deploy. A stream that lived one ping interval or
+            // answered a ping is healthy, so the reconnect attempt resets (FR-ID-08).
+            Ok(Err(status)) => {
+                tracing::warn!(%status, "the agent stream failed");
+                return Ok(Disconnect::Closed {
+                    healthy: pinged || started.elapsed() >= timeouts.ping,
+                });
+            }
             // No message for three ping intervals: the control plane is silent, so reconnect
             // (FR-ID-07).
             Err(_) => {
@@ -313,7 +326,12 @@ pub async fn connect_once(
         if matches!(message.payload, Some(control_message::Payload::Ping(_))) {
             pinged = true;
         }
-        handle_control(keys, dir, &tx, message).await?;
+        if let Err(error) = handle_control(keys, dir, &tx, message).await {
+            tracing::warn!(%error, "the agent stream stopped");
+            return Ok(Disconnect::Closed {
+                healthy: pinged || started.elapsed() >= timeouts.ping,
+            });
+        }
     }
 }
 
@@ -349,11 +367,19 @@ async fn handle_control(
         Some(control_message::Payload::SigningKeyUpdate(update)) => match keys.apply(&update) {
             Ok(Applied::Changed) => {
                 // The chain is durable before the acknowledgement (ADR-0030). A write error keeps
-                // the stream: the in-memory ring stays authoritative (ADR-0030).
-                if let Err(error) = keys.persist(dir) {
-                    tracing::warn!(%error, "cannot write the job signing key chain");
+                // the stream and the in-memory ring, but the agent does not acknowledge the update,
+                // so the control plane keeps the old key until a later attempt persists the chain.
+                match keys.persist(dir) {
+                    Ok(()) => {
+                        let _ = tx.send(ack(&update)).await;
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            "cannot write the job signing key chain; the agent does not acknowledge the update"
+                        );
+                    }
                 }
-                let _ = tx.send(ack(&update)).await;
             }
             Ok(Applied::Unchanged) => {
                 // The ring already holds the key and the revocations; the chain file is unchanged.
@@ -363,12 +389,6 @@ async fn handle_control(
                 tracing::debug!(
                     signer = %update.signer_key_id,
                     "a key update step of an earlier rotation arrived; the agent already applied it"
-                );
-            }
-            Ok(Applied::Stale) => {
-                tracing::warn!(
-                    signer = %update.signer_key_id,
-                    "an old key update arrived; the agent refuses it"
                 );
             }
             Err(error) => {

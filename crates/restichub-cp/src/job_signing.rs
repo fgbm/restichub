@@ -19,6 +19,7 @@
 use std::sync::{Arc, Mutex};
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use prost::Message as _;
 use prost_types::Timestamp;
 use restichub_db::audit::{self, AuditAction, AuditEvent};
 use restichub_db::signing::{self, NewSigningKey, SigningKeyRow, Version};
@@ -36,6 +37,25 @@ use zeroize::Zeroizing;
 
 /// The old current key retires at most this long after the rotation starts (ADR-0026).
 pub const ROTATION_OVERLAP: Duration = Duration::days(7);
+
+/// The largest number of chain steps that a connecting agent receives (ADR-0030).
+///
+/// The newest steps carry the current key, so the bound never hides it from a lagging agent.
+pub const MAX_CHAIN_STEPS: usize = 64;
+
+/// The `retired_reason` of a key that the control plane retired for a compromise (ADR-0030).
+const RETIRED_COMPROMISE: &str = "compromise";
+
+/// The identifiers of the keys that the agents must revoke.
+///
+/// Only a retired row is named: a key that is still in its rotation overlap stays trusted, so it is
+/// not revoked (ADR-0026).
+fn revoked_key_ids(rows: &[SigningKeyRow]) -> Vec<String> {
+    rows.iter()
+        .filter(|row| row.retired_at.is_some())
+        .map(|row| row.id.to_string())
+        .collect()
+}
 
 /// Ed25519 keys use a 32-byte seed.
 const KEY_LEN: usize = 32;
@@ -242,9 +262,11 @@ impl JobSigningService {
         tx.lock(SIGNING_KEY_LOCK).await?;
         let rows = signing::list(&mut tx).await?;
         if rows.is_empty() {
-            self.generate_and_insert(&mut tx, SigningKeyRole::Current)
+            let now = OffsetDateTime::now_utc();
+            let current = self
+                .generate_and_insert(&mut tx, SigningKeyRole::Current, None, &[], now)
                 .await?;
-            self.generate_and_insert(&mut tx, SigningKeyRole::Next)
+            self.generate_and_insert(&mut tx, SigningKeyRole::Next, Some(&current), &[], now)
                 .await?;
         } else if rows.iter().all(|row| row.retired_at.is_some()) {
             return Err(JobSigningError::AllRetired);
@@ -285,31 +307,66 @@ impl JobSigningService {
         Ok(self.current_set(db).await?.key_update(now))
     }
 
-    /// Builds the chain of the signed key updates from the first key to the current one (ADR-0030).
+    /// The stored step that introduces the current next key (ADR-0030).
     ///
-    /// One step for each rotation: the key that was current signs the key that followed it. An agent
-    /// that missed several rotations applies the steps in order and reaches the current key. Each
-    /// step names the keys older than its signer, so the agent revokes them.
-    pub async fn key_chain(
-        &self,
-        db: &Database,
-        now: OffsetDateTime,
-    ) -> Result<Vec<SigningKeyUpdate>, JobSigningError> {
+    /// The stream delivers this step after a rotation, so the message equals the last step of a
+    /// later re-sync.
+    pub async fn current_step(&self, db: &Database) -> Result<SigningKeyUpdate, JobSigningError> {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
         let rows = signing::list(&mut tx).await?;
         tx.commit().await?;
+        let next = active_row(&rows, SigningKeyRole::Next)?;
+        let bytes = next
+            .step_update
+            .as_deref()
+            .ok_or(JobSigningError::Missing)?;
+        SigningKeyUpdate::decode(bytes).map_err(|_| JobSigningError::Missing)
+    }
+
+    /// Builds the chain of the signed key updates from the first key to the current one (ADR-0030).
+    ///
+    /// The control plane signs each step once, when the rotation creates the key, and stores the
+    /// envelope in the row of the introduced key. The delivery reads the stored bytes, so a retired
+    /// private key is never needed and a row whose step does not decode is skipped without blocking
+    /// the current step. A key retired for a compromise is never part of the chain (ADR-0030).
+    pub async fn key_chain(&self, db: &Database) -> Result<Vec<SigningKeyUpdate>, JobSigningError> {
+        let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
+        let rows = signing::list(&mut tx).await?;
+        tx.commit().await?;
+        let compromised: std::collections::HashSet<String> = rows
+            .iter()
+            .filter(|row| row.retired_reason.as_deref() == Some(RETIRED_COMPROMISE))
+            .map(|row| row.id.to_string())
+            .collect();
         let mut chain = Vec::new();
-        for (index, pair) in rows.windows(2).enumerate() {
-            let signer = self.unwrap_row(&pair[0])?;
-            let revoked: Vec<String> = rows[..index].iter().map(|row| row.id.to_string()).collect();
-            let update = KeyUpdate {
-                key_id: pair[1].id.to_string(),
-                public_key: pair[1].public_key.clone(),
-                signer_key_id: signer.id().to_owned(),
-                issued_at: Some(timestamp(now)),
-                revoked_key_ids: revoked,
+        for row in &rows {
+            let Some(bytes) = &row.step_update else {
+                continue;
             };
-            chain.push(sign_key_update(&update, &signer.key));
+            let update = match SigningKeyUpdate::decode(bytes.as_slice()) {
+                Ok(update) => update,
+                Err(error) => {
+                    tracing::warn!(
+                        key_id = %row.id,
+                        %error,
+                        "a stored key-update step does not decode; the step is skipped"
+                    );
+                    continue;
+                }
+            };
+            // A key retired for a compromise is never part of the chain: neither the step that
+            // introduces it nor a step that it signed (ADR-0030).
+            if compromised.contains(&row.id.to_string())
+                || compromised.contains(&update.signer_key_id)
+            {
+                continue;
+            }
+            chain.push(update);
+        }
+        // The chain is bounded, so a long history never floods a connecting agent. The newest steps
+        // carry the current key, so the oldest steps are the ones that drop.
+        if chain.len() > MAX_CHAIN_STEPS {
+            chain.drain(..chain.len() - MAX_CHAIN_STEPS);
         }
         Ok(chain)
     }
@@ -409,9 +466,16 @@ impl JobSigningService {
         )
         .await?;
         let new_next = self
-            .generate_and_insert(&mut tx, SigningKeyRole::Next)
+            .generate_and_insert(
+                &mut tx,
+                SigningKeyRole::Next,
+                Some(&material),
+                &revoked_key_ids(&rows),
+                now,
+            )
             .await?;
-        audit_rotation(&mut tx, next, current, new_next).await?;
+        let new_next_id = Uuid::parse_str(new_next.id()).map_err(|_| JobSigningError::Missing)?;
+        audit_rotation(&mut tx, next, current, new_next_id).await?;
         tx.commit().await?;
 
         // Announce the rotation, so each open stream delivers the fresh key set (ADR-0026).
@@ -524,7 +588,10 @@ impl JobSigningService {
         &self,
         tx: &mut restichub_db::TenantTx<'_>,
         role: SigningKeyRole,
-    ) -> Result<Uuid, JobSigningError> {
+        signer: Option<&SigningKeyPair>,
+        revoked: &[String],
+        now: OffsetDateTime,
+    ) -> Result<SigningKeyPair, JobSigningError> {
         let id = Uuid::now_v7();
         let mut seed = Zeroizing::new([0_u8; KEY_LEN]);
         getrandom::fill(seed.as_mut_slice()).map_err(JobSigningError::Random)?;
@@ -537,6 +604,19 @@ impl JobSigningService {
             role.as_str(),
             key.as_bytes().as_slice(),
         )?;
+        // The key that is current when the key arrives signs the step that introduces it. The
+        // control plane stores the envelope once, so the delivery of the chain never unwraps a
+        // retired private key (ADR-0030).
+        let step = signer.map(|signer| {
+            let update = KeyUpdate {
+                key_id: id.to_string(),
+                public_key: public_key.to_vec(),
+                signer_key_id: signer.id().to_owned(),
+                issued_at: Some(timestamp(now)),
+                revoked_key_ids: revoked.to_vec(),
+            };
+            sign_key_update(&update, &signer.key).encode_to_vec()
+        });
         signing::insert(
             tx,
             &NewSigningKey {
@@ -546,10 +626,11 @@ impl JobSigningService {
                 nonce: &wrapped.nonce,
                 wrapped_key: &wrapped.ciphertext,
                 public_key: public_key.as_slice(),
+                step_update: step.as_deref(),
             },
         )
         .await?;
-        Ok(id)
+        SigningKeyPair::from_stored(id, key.as_bytes())
     }
 }
 

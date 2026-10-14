@@ -99,6 +99,9 @@ pub fn create_protected_file(path: &Path, contents: &[u8]) -> Result<()> {
 /// Returns an error when the temporary file cannot be written or the rename fails.
 pub fn replace_file(path: &Path, contents: &[u8]) -> Result<()> {
     let temporary = path.with_extension("tmp");
+    // A crash between the write and the rename leaves a stale temporary file. Remove it first, so a
+    // create that refuses an existing file cannot fail the replacement.
+    let _ = std::fs::remove_file(&temporary);
     create_protected_file(&temporary, contents)?;
     std::fs::rename(&temporary, path)
         .with_context(|| format!("cannot replace {}", path.display()))?;
@@ -118,19 +121,16 @@ fn restrict(dir: &Path) -> Result<()> {
 #[cfg(unix)]
 fn write_owner_only(path: &Path, contents: &[u8]) -> Result<()> {
     use std::io::Write as _;
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    use std::os::unix::fs::OpenOptionsExt as _;
+    // `create_new` never follows an existing file, so a pre-created path cannot redirect the write.
     let mut file = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(path)
         .with_context(|| format!("cannot create {}", path.display()))?;
     file.write_all(contents)
         .with_context(|| format!("cannot write {}", path.display()))?;
-    // The mode above applies at creation only; an overwritten file keeps its old mode.
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("cannot set the mode of {}", path.display()))?;
     // The identity must survive a power loss, so the data and the metadata are flushed.
     file.sync_all()
         .with_context(|| format!("cannot flush {}", path.display()))

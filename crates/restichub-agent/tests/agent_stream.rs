@@ -358,6 +358,42 @@ async fn m2_a_server_that_closes_at_once_grows_the_delay() {
     fixture.db.cleanup().await;
 }
 
+/// FR-ID-08: a stream that answered a ping and then failed (a control plane restart) resets the
+/// reconnect attempt, unlike a stream that closed at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_id_08_a_healthy_stream_that_fails_resets_the_attempt() {
+    let Some(fixture) = common::stream_fixture("agent-healthy-fail").await else {
+        return;
+    };
+    let dir = common::temp_config_dir("agent-healthy-fail");
+    let mut identity = register(&fixture, &dir).await;
+    let server =
+        common::SilentServer::start_ping_then_error(fixture.server.ca(), fixture.server.root_der())
+            .await;
+    identity.grpc_endpoint = Some(server.endpoint());
+
+    let mut keys = KeyState::load(&identity, &dir).expect("the key state must load");
+    let (_stop_tx, mut stop_rx) = watch::channel(false);
+    let outcome = stream::connect_once(
+        &identity,
+        &dir,
+        &mut keys,
+        "0.19.1",
+        short_timeouts(),
+        &mut stop_rx,
+    )
+    .await
+    .expect("the transport must not fail");
+    assert_eq!(
+        outcome,
+        Disconnect::Closed { healthy: true },
+        "a stream that answered a ping is healthy, so the attempt resets"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture.db.cleanup().await;
+}
+
 /// a server that stops answering makes the agent reconnect after three ping intervals.
 #[tokio::test(flavor = "multi_thread")]
 async fn m5_a_silent_server_makes_the_agent_reconnect() {

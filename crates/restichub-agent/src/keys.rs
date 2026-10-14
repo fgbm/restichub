@@ -6,14 +6,14 @@
 //! agent that was offline keeps its trust set without a re-enrollment (ADR-0030).
 //!
 //! Only the chain file changes on an update: the agent never rewrites the private key for a key
-//! update (ADR-0030). The revoked set is a union that never shrinks, and an update older than the stored
-//! one for its signer is refused, so a replayed update cannot undo a revocation (FR-PR-11).
+//! update (ADR-0030). The revoked set is a union that never shrinks, and the agent applies it to
+//! the ring at load, so a replayed update cannot undo a revocation (FR-PR-11).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use base64::Engine as _;
+use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use prost::Message as _;
 use restichub_proto::agent::v1::{KeyUpdate, SigningKeyUpdate};
@@ -44,8 +44,6 @@ pub enum Applied {
     /// The update is a chain step that the agent already applied, or a step that it cannot verify
     /// yet. It carries no new key.
     Skipped,
-    /// The update is older than the stored one for its signer, so the agent refuses it (FR-PR-11).
-    Stale,
 }
 
 /// The live key ring with the persisted chain that produced it.
@@ -53,8 +51,6 @@ pub struct KeyState {
     ring: KeyRing,
     updates: Vec<String>,
     revoked: BTreeSet<String>,
-    /// The newest `issued_at` in unix nanoseconds for each signer key identifier (FR-PR-11).
-    newest: BTreeMap<String, i128>,
 }
 
 impl KeyState {
@@ -72,7 +68,6 @@ impl KeyState {
         )?;
         let stored = read_chain(&dir)?;
         let mut updates = Vec::with_capacity(stored.updates.len());
-        let mut newest = BTreeMap::new();
         for entry in &stored.updates {
             let bytes = STANDARD
                 .decode(entry)
@@ -81,19 +76,18 @@ impl KeyState {
                 .context("a stored key update does not decode")?;
             ring.apply_key_update(&update)
                 .map_err(|error| anyhow::anyhow!("a stored key update is not valid: {error:?}"))?;
-            let inner = inner_update(&update)?;
-            let time = issued_nanos(&inner);
-            newest
-                .entry(update.signer_key_id.clone())
-                .and_modify(|stored: &mut i128| *stored = (*stored).max(time))
-                .or_insert(time);
             updates.push(entry.clone());
+        }
+        let revoked: BTreeSet<String> = stored.revoked.into_iter().collect();
+        // The stored union is applied last, so a key that the control plane retired stays revoked
+        // after a restart, even when the stored chain no longer carries the revocation (FR-PR-11).
+        for key_id in &revoked {
+            ring.revoke(key_id);
         }
         Ok(Self {
             ring,
             updates,
-            revoked: stored.revoked.into_iter().collect(),
-            newest,
+            revoked,
         })
     }
 
@@ -107,16 +101,9 @@ impl KeyState {
     ///
     /// # Errors
     ///
-    /// Returns an error when the update does not decode, when it is older than the stored update for
-    /// its signer, or when its signature does not verify.
+    /// Returns an error when the update does not decode or when its signature does not verify.
     pub fn apply(&mut self, update: &SigningKeyUpdate) -> Result<Applied> {
         let inner = inner_update(update)?;
-        let time = issued_nanos(&inner);
-        if let Some(previous) = self.newest.get(&update.signer_key_id)
-            && time < *previous
-        {
-            return Ok(Applied::Stale);
-        }
         let new_key = self.ring.get(&inner.key_id).is_none();
         match self.ring.apply_key_update(update) {
             Ok(()) => {}
@@ -144,7 +131,6 @@ impl KeyState {
             None => self.updates.push(encoded),
         }
         self.revoked.extend(inner.revoked_key_ids.iter().cloned());
-        self.newest.insert(update.signer_key_id.clone(), time);
         Ok(Applied::Changed)
     }
 
@@ -204,13 +190,6 @@ fn introduced_key_id(entry: &str) -> Option<String> {
     Some(inner_update(&update).ok()?.key_id)
 }
 
-/// The `issued_at` in unix nanoseconds. A missing time is zero, so it is the oldest (FR-PR-11).
-fn issued_nanos(inner: &KeyUpdate) -> i128 {
-    inner.issued_at.as_ref().map_or(0, |time| {
-        i128::from(time.seconds) * 1_000_000_000 + i128::from(time.nanos)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -219,7 +198,7 @@ mod tests {
     use restichub_proto::agent::v1::KeyUpdate;
     use restichub_proto::signing::{KeyRing, sign_key_update};
 
-    use super::{Applied, KeyState, StoredKeyUpdates};
+    use super::{Applied, Engine, KeyState, STANDARD, StoredKeyUpdates};
 
     fn signing_key(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])
@@ -250,7 +229,6 @@ mod tests {
             ring,
             updates: Vec::new(),
             revoked: Default::default(),
-            newest: Default::default(),
         }
     }
 
@@ -262,9 +240,10 @@ mod tests {
         let rotation = update_at("k2", &k1, "k1", &["k1"], 2);
         assert_eq!(state.apply(&rotation).expect("apply"), Applied::Changed);
         assert!(state.is_revoked("k1"));
-        // A stale copy of the same rotation at t=1 is refused, so k1 stays revoked.
-        let stale = update_at("k2", &k1, "k1", &[], 1);
-        assert_eq!(state.apply(&stale).expect("apply"), Applied::Stale);
+        // A replay of the same rotation names a revoked signer, so the agent skips it and k1 stays
+        // revoked (FR-PR-11).
+        let replay = update_at("k2", &k1, "k1", &[], 1);
+        assert_eq!(state.apply(&replay).expect("apply"), Applied::Skipped);
         assert!(state.is_revoked("k1"));
     }
 
@@ -295,6 +274,64 @@ mod tests {
             error.to_string().contains("register the host again"),
             "{error}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The stored revoked union is applied to the ring at load, so a retired key stays revoked
+    /// across a restart (FR-PR-11).
+    #[test]
+    fn l1_the_stored_revoked_union_survives_a_restart() {
+        use prost::Message as _;
+        use restichub_proto::signing::{EnrollmentKey, sign_enrollment_keys};
+
+        let k1 = signing_key(1);
+        let dir =
+            std::env::temp_dir().join(format!("restichub-keys-revoked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+
+        let keys = vec![EnrollmentKey {
+            role: "current".to_owned(),
+            key_id: "k1".to_owned(),
+            public_key: k1.verifying_key().to_bytes().to_vec(),
+        }];
+        let signature = sign_enrollment_keys(&keys, &k1);
+        let identity = crate::identity::StoredIdentity {
+            agent_id: "agent-1".to_owned(),
+            tenant_id: "tenant-1".to_owned(),
+            cp_url: "https://cp.example".to_owned(),
+            grpc_endpoint: None,
+            key_pem: String::new(),
+            certificate_der: Vec::new(),
+            ca_chain_der: Vec::new(),
+            signing_keys: crate::identity::StoredSigningKeys {
+                keys: vec![crate::enroll::EnrollmentKeyBody {
+                    role: "current".to_owned(),
+                    key_id: "k1".to_owned(),
+                    public_key: STANDARD.encode(k1.verifying_key().to_bytes()),
+                }],
+                signature: STANDARD.encode(signature),
+            },
+        };
+
+        // The stored chain introduced k2 and revoked k1.
+        let rotation = update_at("k2", &k1, "k1", &["k1"], 2);
+        let stored = StoredKeyUpdates {
+            updates: vec![STANDARD.encode(rotation.encode_to_vec())],
+            revoked: vec!["k1".to_owned()],
+        };
+        std::fs::write(
+            dir.join(super::KEY_UPDATES_FILE),
+            serde_json::to_vec(&stored).expect("json"),
+        )
+        .expect("write");
+
+        let state = KeyState::load(&identity, &dir).expect("the chain must load");
+        assert!(
+            state.ring().get("k1").is_none(),
+            "a revoked key stays revoked"
+        );
+        assert!(state.ring().get("k2").is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

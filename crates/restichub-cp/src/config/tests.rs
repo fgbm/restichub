@@ -475,3 +475,17 @@ fn an_https_agent_endpoint_is_accepted() {
         Some("https://agents.example:8443")
     );
 }
+
+/// an endpoint with a userinfo is refused, because the agent refuses it too (ADR-0033).
+#[test]
+fn an_agent_endpoint_with_a_userinfo_is_refused() {
+    let env = MapEnv::new(&[
+        ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+        (
+            "RESTICHUB_AGENT_ENDPOINT",
+            "https://user:pass@agents.example:8443",
+        ),
+    ]);
+    let error = Config::load_with(&Cli::default(), &env).expect_err("a userinfo must be refused");
+    assert!(error.to_string().contains("userinfo"), "{error}");
+}

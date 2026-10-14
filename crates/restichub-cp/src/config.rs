@@ -283,10 +283,18 @@ fn agent_endpoint(value: &str) -> Result<String, ConfigError> {
             reason: format!("`{value}` must use the `https` scheme"),
         });
     }
-    if uri.authority().is_none() {
+    let Some(authority) = uri.authority() else {
         return Err(ConfigError::Invalid {
             name: "agent_endpoint",
             reason: format!("`{value}` holds no host"),
+        });
+    };
+    // The agent refuses a userinfo in the endpoint (ADR-0033), so the control plane never reports
+    // one to an agent.
+    if authority.as_str().contains('@') {
+        return Err(ConfigError::Invalid {
+            name: "agent_endpoint",
+            reason: format!("`{value}` must not hold a userinfo"),
         });
     }
     Ok(value.to_owned())

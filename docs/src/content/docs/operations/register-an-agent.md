@@ -91,6 +91,12 @@ The unit sets `CacheDirectory=restichub-agent` and `RESTIC_CACHE_DIR=/var/cache/
 
 The agent package holds `restic` next to `restichub-agent`. The build embeds the expected SHA-256 of the restic binary. At the start of `register` and `run` the agent checks the hash and refuses a different binary (ADR-0031). The control plane cannot set the restic path.
 
+## Proxy settings
+
+A repository behind a proxy uses the proxy of the host. The agent passes `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` from its own environment to the restic child process, and the lower-case forms on Linux and macOS. Set these variables in the environment of the agent service, never in a job.
+
+The restic child holds no other variable of the agent, so a job cannot redirect the traffic of a repository (FR-AG-06).
+
 ## Related
 
 - [ADR-0032](https://github.com/fgbm/restichub/blob/main/design/adr/0032-manual-agent-registration-and-service-install.md)

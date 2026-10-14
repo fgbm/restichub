@@ -1,7 +1,6 @@
 //! The bundled restic binary and its embedded SHA-256 (ADR-0031, FR-AG-11).
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
@@ -29,11 +28,12 @@ pub trait Restic {
 
     /// Asks restic for its build identifier (FR-AG-11).
     ///
-    /// Call the hash check before this call.
+    /// The child runs the checked inode, so the caller needs no earlier hash check.
     ///
     /// # Errors
     ///
-    /// Returns an error when restic does not run or prints no version.
+    /// Returns an error when the hash differs, when restic does not run, or when it prints no
+    /// version.
     fn version(&self) -> Result<String>;
 }
 
@@ -73,12 +73,9 @@ impl Restic for ResticBinary {
     }
 
     fn version(&self) -> Result<String> {
-        let output = Command::new(&self.path)
-            .arg("version")
-            // A restic child never inherits the agent environment (FR-AG-06, ADR-0021).
-            .env_clear()
-            .output()
-            .with_context(|| format!("cannot run {}", self.path.display()))?;
+        // The query runs the checked inode through the same handle pin and environment as a job
+        // (FR-AG-06, threat T20).
+        let output = crate::exec::version_output(self)?;
         if !output.status.success() {
             bail!("`restic version` failed with {}", output.status);
         }

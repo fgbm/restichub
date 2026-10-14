@@ -28,8 +28,9 @@ use restichub_cp::server::{AppState, AuthState, router};
 use restichub_db::test_util::{TestDatabase, test_database};
 use restichub_db::{Database, Role, TenantId, enrollment_tokens, signing, tenants, users};
 use restichub_proto::agent::v1::{
-    AgentMessage, ControlMessage,
+    AgentMessage, ControlMessage, Ping,
     agent_service_server::{AgentService, AgentServiceServer},
+    control_message,
 };
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use time::{Duration, OffsetDateTime};
@@ -568,18 +569,34 @@ pub struct SilentServer {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// How the silent server ends a stream (FR-ID-07, FR-ID-08).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SilentMode {
+    /// The stream stays open and sends nothing.
+    Silent,
+    /// The stream ends at once, without a message.
+    Closing,
+    /// The stream sends one ping and then fails, as a control plane restart does.
+    PingThenError,
+}
+
 impl SilentServer {
     /// Serves a silent agent stream on a loopback port (FR-ID-07).
     pub async fn start(ca: &CaStore, root_der: &[u8]) -> Self {
-        Self::start_mode(ca, root_der, true).await
+        Self::start_mode(ca, root_der, SilentMode::Silent).await
     }
 
     /// Serves a stream that ends at once, for the reconnect-backoff test (FR-ID-08).
     pub async fn start_closing(ca: &CaStore, root_der: &[u8]) -> Self {
-        Self::start_mode(ca, root_der, false).await
+        Self::start_mode(ca, root_der, SilentMode::Closing).await
     }
 
-    async fn start_mode(ca: &CaStore, root_der: &[u8], silent: bool) -> Self {
+    /// Serves a stream that answers one ping and then fails, for the healthy-stream test (FR-ID-08).
+    pub async fn start_ping_then_error(ca: &CaStore, root_der: &[u8]) -> Self {
+        Self::start_mode(ca, root_der, SilentMode::PingThenError).await
+    }
+
+    async fn start_mode(ca: &CaStore, root_der: &[u8], mode: SilentMode) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("cannot bind the silent server");
@@ -602,7 +619,7 @@ impl SilentServer {
         let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let service = SilentService {
             connections: Arc::clone(&connections),
-            silent,
+            mode,
         };
         let (shutdown, rx) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
@@ -646,11 +663,12 @@ impl Drop for SilentServer {
     }
 }
 
-/// The gRPC service of the silent server. It sends no control message (FR-ID-07) or closes at once (FR-ID-08).
+/// The gRPC service of the silent server. It sends no control message (FR-ID-07), closes at once
+/// (FR-ID-08), or answers one ping and then fails (FR-ID-08).
 #[derive(Clone)]
 struct SilentService {
     connections: Arc<std::sync::atomic::AtomicUsize>,
-    silent: bool,
+    mode: SilentMode,
 }
 
 #[tonic::async_trait]
@@ -666,10 +684,23 @@ impl AgentService for SilentService {
         let mut inbound = request.into_inner();
         tokio::spawn(async move { while let Ok(Some(_)) = inbound.message().await {} });
         let (tx, rx) = tokio::sync::mpsc::channel::<ControlMessage>(1);
-        if self.silent {
-            // The sender is leaked, so the outbound stream stays open and sends nothing.
-            std::mem::forget(tx);
+        match self.mode {
+            SilentMode::Silent => {
+                // The sender is leaked, so the outbound stream stays open and sends nothing.
+                std::mem::forget(tx);
+                Ok(Response::new(Box::pin(ReceiverStream::new(rx).map(Ok))))
+            }
+            SilentMode::Closing => Ok(Response::new(Box::pin(ReceiverStream::new(rx).map(Ok)))),
+            SilentMode::PingThenError => {
+                let ping = ControlMessage {
+                    payload: Some(control_message::Payload::Ping(Ping { nonce: 1 })),
+                };
+                let stream = tokio_stream::iter(vec![
+                    Ok(ping),
+                    Err(Status::unavailable("the control plane restarted")),
+                ]);
+                Ok(Response::new(Box::pin(stream)))
+            }
         }
-        Ok(Response::new(Box::pin(ReceiverStream::new(rx).map(Ok))))
     }
 }
