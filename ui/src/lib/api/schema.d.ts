@@ -3989,6 +3989,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
+            /** @description An active job or a profile holds the repository. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
         };
     };
     update_repository: {
