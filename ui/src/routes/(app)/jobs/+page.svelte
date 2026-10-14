@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Job, JobStatus } from '#lib/api/index.ts';
 	import {
@@ -223,7 +224,11 @@
 
 {#snippet planCell(job: Job)}
 	<span class="job">
-		<span class="job__name">{planLabel(job)}</span>
+		<a
+			class="job__name"
+			href={resolve('/(app)/jobs/[id]', { id: job.id })}
+			aria-label={t('jobDetail.openJob', { name: planLabel(job) })}>{planLabel(job)}</a
+		>
 		{#if job.plan_name}
 			<span class="job__meta">{t(`jobs.kind.${job.kind}` as MessageKey)}</span>
 		{/if}
@@ -322,8 +327,15 @@
 	}
 
 	.job__name {
+		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
+		text-decoration: none;
 		white-space: nowrap;
+	}
+
+	.job__name:hover {
+		color: var(--rh-color-link-hover);
+		text-decoration: underline;
 	}
 
 	.job__host {

@@ -77,3 +77,37 @@ export function relativeTime(value: string): string {
 	}
 	return formatTime(value);
 }
+
+const byteUnits = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+
+/** A size in binary units, such as "1.4 GiB". Under 1 KiB it shows whole bytes. */
+export function formatBytes(value: number): string {
+	let amount = Math.max(0, value);
+	let unit = 0;
+	while (amount >= 1024 && unit < byteUnits.length - 1) {
+		amount /= 1024;
+		unit += 1;
+	}
+	const format = new Intl.NumberFormat(getLocale(), {
+		maximumFractionDigits: unit === 0 ? 0 : amount < 10 ? 2 : 1
+	});
+	return `${format.format(amount)} ${byteUnits[unit]}`;
+}
+
+/** An integer with the digit grouping of the locale. */
+export function formatCount(value: number): string {
+	return new Intl.NumberFormat(getLocale()).format(value);
+}
+
+/** A time of day with seconds, in the time zone of the browser, such as "21:11:02". */
+export function formatClock(value: string): string {
+	return new Intl.DateTimeFormat(getLocale(), { timeStyle: 'medium', hour12: false }).format(
+		new Date(value)
+	);
+}
+
+/** Seconds as hours, minutes and seconds, such as "2 min 41 s". */
+export function formatSeconds(seconds: number): string {
+	const base = new Date(0).toISOString();
+	return formatDuration(base, new Date(Math.max(0, Math.round(seconds)) * 1000).toISOString());
+}

@@ -106,3 +106,18 @@ describe('the HTTP service (issue #20 tenants)', () => {
 		expect(fetchFn.mock.calls[0][0]).toContain('/api/v1/users');
 	});
 });
+
+describe('the HTTP service (job logs)', () => {
+	it('reads a page of the job log after a line number', async () => {
+		const page = { items: [], has_more: false, truncated: false, purged: false };
+		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(page));
+		const service = await loadService(fetchFn);
+
+		const result = await service.getJobLogs('j 1', { after_seq: 40, limit: 100 });
+		expect(result).toEqual(page);
+		const url = String(fetchFn.mock.calls[0][0]);
+		expect(url).toContain('/api/v1/jobs/j%201/logs');
+		expect(url).toContain('after_seq=40');
+		expect(url).toContain('limit=100');
+	});
+});

@@ -345,7 +345,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Reads one job of the tenant for polling. */
+        /**
+         * Reads one job with its steps, summary and progress.
+         * @description A running job holds the last progress of its step. A finished job holds the typed result of each step and the summary of the run.
+         */
         get: operations["get_job"];
         put?: never;
         post?: never;
@@ -369,6 +372,26 @@ export interface paths {
          * @description A queued job is cancelled at once. For a sent or running job the control plane sends the cancel message to the agent, and an offline agent gives HTTP 409 `agent_offline`.
          */
         post: operations["cancel_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{id}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reads a page of the log of a job.
+         * @description The lines are in log order. Pass the `seq` of the last line as `after_seq` to read the next page or to follow a running job. The control plane deletes the lines after the retention period; the job and its summary stay.
+         */
+        get: operations["get_job_logs"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1020,6 +1043,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Prometheus metrics of the tenant.
+         * @description The text format of Prometheus. The credential needs the Viewer role; use an API token with the Viewer role for the scraper. Each sample has the label `tenant`.
+         */
+        get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/readyz": {
         parameters: {
             query?: never;
@@ -1195,6 +1238,44 @@ export interface components {
             /** @description Use a file system snapshot. VSS on Windows only (FR-PF-01). */
             use_fs_snapshot?: boolean;
         };
+        /** @description The summary of a `restic backup` run (FR-MN-02). The counts are never negative. */
+        BackupSummary: {
+            /**
+             * Format: int64
+             * @description Bytes added to the repository.
+             */
+            data_added: number;
+            /**
+             * Format: int64
+             * @description Bytes added to the repository, packed.
+             */
+            data_added_packed: number;
+            /** Format: int64 */
+            data_blobs: number;
+            /** Format: int64 */
+            dirs_changed: number;
+            /** Format: int64 */
+            dirs_new: number;
+            /** Format: int64 */
+            dirs_unmodified: number;
+            dry_run: boolean;
+            /** Format: int64 */
+            files_changed: number;
+            /** Format: int64 */
+            files_new: number;
+            /** Format: int64 */
+            files_unmodified: number;
+            /** @description Empty for a dry run. */
+            snapshot_id: string;
+            /** Format: int64 */
+            total_bytes_processed: number;
+            /** Format: double */
+            total_duration_seconds: number;
+            /** Format: int64 */
+            total_files_processed: number;
+            /** Format: int64 */
+            tree_blobs: number;
+        };
         ChangePasswordRequest: {
             current_password: string;
             /** @description At least 12 characters. */
@@ -1204,6 +1285,16 @@ export interface components {
         CheckOptions: {
             /** @description Portion to check, for example `10%` or `1/7`. */
             read_data_subset?: string;
+        };
+        /** @description The result of a `restic check` step. */
+        CheckSummary: {
+            /** Format: int64 */
+            blobs_checked: number;
+            /** Format: int64 */
+            num_errors: number;
+            /** Format: int64 */
+            packs_checked: number;
+            repair_suggested: boolean;
         };
         CreateAccountRequest: {
             display_name: string;
@@ -1402,6 +1493,17 @@ export interface components {
         };
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued";
+        /** @description The counts of a `restic forget` step. */
+        ForgetSummary: {
+            /** Format: int64 */
+            groups: number;
+            /** Format: int64 */
+            kept: number;
+            /** Format: int64 */
+            removed: number;
+            /** @description True when the agent dropped groups to fit the size limit of a result. */
+            truncated: boolean;
+        };
         /**
          * @description Grouping key of the retention rule.
          * @enum {string}
@@ -1436,6 +1538,14 @@ export interface components {
              *     (FR-RP-08). A local-path repository needs an explicit or a maintenance agent.
              */
             agent_id?: string | null;
+        };
+        /** @description One job with its steps, its summary and its progress (FR-MN-02). */
+        JobDetailView: components["schemas"]["JobView"] & {
+            log: components["schemas"]["LogInfo"];
+            progress?: components["schemas"]["ProgressView"] | null;
+            /** @description In the order in which the steps ran. */
+            steps: components["schemas"]["StepView"][];
+            summary?: components["schemas"]["StepOutput"] | null;
         };
         /**
          * @description The kind of a job (FR-PR-02, the seed of the scheduler of epic #7).
@@ -1506,6 +1616,50 @@ export interface components {
             /** @description In RFC 3339. */
             updated_at: string;
         };
+        /** @description The state of the log of a job. */
+        LogInfo: {
+            /**
+             * Format: int64
+             * @description The number of stored lines.
+             */
+            lines: number;
+            /** @description True when the retention sweep deleted the lines. */
+            purged: boolean;
+            /** @description True when the control plane refused lines because the log reached its bound. */
+            truncated: boolean;
+        };
+        /**
+         * @description The level that the control plane derives for a job log line.
+         * @enum {string}
+         */
+        LogLevel: "info" | "warn" | "error";
+        /** @description One line of a job log. */
+        LogLineView: {
+            level: components["schemas"]["LogLevel"];
+            /**
+             * Format: int64
+             * @description The position of the line in the log, from 1.
+             */
+            seq: number;
+            /** @description Empty for a line of the job itself. */
+            step_id: string;
+            stream: components["schemas"]["LogStream"];
+            text: string;
+            /** @description The time at which the control plane stored the line, in RFC 3339. */
+            ts: string;
+        };
+        LogPageView: {
+            /** @description True when the page holds `limit` lines, so a next page can follow. */
+            has_more: boolean;
+            items: components["schemas"]["LogLineView"][];
+            purged: boolean;
+            truncated: boolean;
+        };
+        /**
+         * @description The source of a job log line (FR-AG-08).
+         * @enum {string}
+         */
+        LogStream: "stdout" | "stderr" | "agent";
         MeResponse: {
             /** @description True when the account holds the installation-wide right (ADR-0029). */
             platform_admin: boolean;
@@ -1728,6 +1882,33 @@ export interface components {
             /** @description Stable snake_case code. */
             reason: string;
         };
+        /** @description The last progress of a running job. */
+        ProgressView: {
+            /** Format: int64 */
+            bytes_done: number;
+            current_files: string[];
+            /** Format: int64 */
+            files_done: number;
+            /**
+             * Format: double
+             * @description From 0 to 1.
+             */
+            percent_done: number;
+            /** Format: double */
+            seconds_elapsed: number;
+            /**
+             * Format: int64
+             * @description An estimate. Zero when restic gives none.
+             */
+            seconds_remaining: number;
+            step_id: string;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            total_files: number;
+            /** @description In RFC 3339. */
+            updated_at: string;
+        };
         RenameAgentRequest: {
             hostname: string;
         };
@@ -1874,6 +2055,76 @@ export interface components {
             hosts?: string[];
             paths?: string[];
             tags?: string[];
+        };
+        /** @description The snapshot count of a `restic snapshots` step. */
+        SnapshotsSummary: {
+            /** Format: int64 */
+            count: number;
+            /** @description True when the agent dropped snapshots to fit the size limit of a result. */
+            truncated: boolean;
+        };
+        /** @description The result of a `restic stats` step. */
+        StatsSummary: {
+            /** Format: double */
+            compression_ratio: number;
+            /** Format: int64 */
+            snapshots_count: number;
+            /** Format: int64 */
+            total_file_count: number;
+            /** Format: int64 */
+            total_size: number;
+            /** Format: int64 */
+            total_uncompressed_size: number;
+        };
+        /** @description The typed output of a step. A listing of files carries no stored summary. */
+        StepOutput: {
+            /** @enum {string} */
+            kind: "none";
+        } | (components["schemas"]["BackupSummary"] & {
+            /** @enum {string} */
+            kind: "backup";
+        }) | (components["schemas"]["SnapshotsSummary"] & {
+            /** @enum {string} */
+            kind: "snapshots";
+        }) | (components["schemas"]["ForgetSummary"] & {
+            /** @enum {string} */
+            kind: "forget";
+        }) | (components["schemas"]["CheckSummary"] & {
+            /** @enum {string} */
+            kind: "check";
+        }) | (components["schemas"]["StatsSummary"] & {
+            /** @enum {string} */
+            kind: "stats";
+        }) | {
+            /** @enum {string} */
+            kind: "ls";
+        };
+        /**
+         * @description The result of one step of a job (FR-AG-09).
+         * @enum {string}
+         */
+        StepStatus: "success" | "warning" | "retry" | "config_error" | "cancelled" | "failed" | "skipped";
+        /** @description One step of a job with its typed result. */
+        StepView: {
+            /** @description A machine-readable error code. The user interface translates it (NFR-DOC-04). */
+            error_code?: string | null;
+            error_params: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description The exit code of restic, or -1 when no process ran.
+             */
+            exit_code: number;
+            /** @description In RFC 3339. */
+            finished_at?: string | null;
+            output: components["schemas"]["StepOutput"];
+            /** @description True after a hard kill that can leave a stale lock. */
+            possible_stale_lock: boolean;
+            /** @description In RFC 3339. */
+            started_at?: string | null;
+            status: components["schemas"]["StepStatus"];
+            step_id: string;
         };
         SwitchTenantRequest: {
             tenant_id: string;
@@ -2986,7 +3237,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JobView"];
+                    "application/json": components["schemas"]["JobDetailView"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -3077,6 +3328,72 @@ export interface operations {
             };
             /** @description The job finished, or the agent is offline. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_job_logs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the job. */
+                id: string;
+                /**
+                 * @description The number of the last line that the client holds. The page starts after it. The default
+                 *     is 0, the start of the log.
+                 */
+                after_seq: number | null;
+                /** @description The most lines in the page, from 1 to 2000. The default is 500. */
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of log lines. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogPageView"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The job is not found. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5862,6 +6179,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The metrics. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
             };
         };
     };

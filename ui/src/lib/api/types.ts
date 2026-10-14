@@ -124,6 +124,30 @@ export type JobResultCode = components['schemas']['JobResultCode'];
 /** One job with its lifecycle (FR-PR-01). */
 export type Job = components['schemas']['JobView'];
 
+/** One job with its steps, summary and progress (FR-MN-02). */
+export type JobDetail = components['schemas']['JobDetailView'];
+
+/** One step of a job with its typed result (FR-AG-09). */
+export type JobStep = components['schemas']['StepView'];
+
+/** The output of a step: the typed summary that restic reported (FR-MN-02). */
+export type StepOutput = components['schemas']['StepOutput'];
+
+/** The last progress of a running job (FR-AG-08). */
+export type JobProgress = components['schemas']['ProgressView'];
+
+/** One stored line of a job log (FR-LG-01). */
+export type JobLogLine = components['schemas']['LogLineView'];
+
+/** One page of log lines (FR-LG-01). */
+export type JobLogPage = components['schemas']['LogPageView'];
+
+/** The position and the size of a log page request. */
+export interface JobLogQuery {
+	after_seq?: number;
+	limit?: number;
+}
+
 /** One page of the job list, newest first (FR-SC-09). */
 export type JobListResponse = components['schemas']['JobListResponse'];
 

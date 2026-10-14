@@ -50,7 +50,8 @@ export const endpoints = {
 	jobs: {
 		list: '/jobs',
 		byId: (id: string) => `/jobs/${encodeURIComponent(id)}`,
-		cancel: (id: string) => `/jobs/${encodeURIComponent(id)}/cancel`
+		cancel: (id: string) => `/jobs/${encodeURIComponent(id)}/cancel`,
+		logs: (id: string) => `/jobs/${encodeURIComponent(id)}/logs`
 	},
 	profiles: {
 		list: '/profiles',
