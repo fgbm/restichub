@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 
 use crate::cli::RegisterOptions;
 use crate::enroll::{Client, Facts};
-use crate::identity::{StoredIdentity, generate_key_and_csr};
+use crate::identity::{StoredIdentity, StoredSigningKeys, generate_key_and_csr};
 use crate::restic::{Restic, ResticBinary};
 
 /// Enrolls this host on a private runtime (FR-IN-07).
@@ -74,7 +74,10 @@ pub async fn register_async(
         key_pem: generated.key_pem,
         certificate_der: enrolled.certificate_der,
         ca_chain_der: enrolled.ca_chain_der,
-        signing_key_update: enrolled.signing_key_update,
+        signing_keys: StoredSigningKeys {
+            keys: enrolled.signing_keys,
+            signature: enrolled.signing_keys_signature,
+        },
     };
     identity.save(dir)?;
     println!("the agent is registered");
@@ -102,9 +105,18 @@ pub fn status(dir: &Path) -> Result<()> {
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let identity = StoredIdentity::load(dir)
         .with_context(|| format!("no agent identity in {}", dir.display()))?;
+    // Rebuild the key ring, so a job that the current key signed verifies (ADR-0026).
+    crate::verify::verify_key_set(
+        &identity.signing_keys.keys,
+        &identity.signing_keys.signature,
+    )?;
     let restic = ResticBinary::locate()?;
     restic.verify()?;
-    tracing::info!(agent_id = %identity.agent_id, "the agent identity is loaded");
+    tracing::info!(
+        agent_id = %identity.agent_id,
+        keys = identity.signing_keys.keys.len(),
+        "the agent identity is loaded"
+    );
     tracing::info!("the stream is not available yet (#50)");
     wait_for_shutdown(shutdown)
 }

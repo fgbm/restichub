@@ -24,7 +24,7 @@ use restichub_db::audit::{self, AuditAction, AuditEvent};
 use restichub_db::signing::{self, NewSigningKey, SigningKeyRow, Version};
 use restichub_db::{Database, DbError, PLATFORM_TENANT_ID, SigningKeyRole};
 use restichub_proto::agent::v1::{Job, KeyUpdate, SignedJob, SigningKeyUpdate};
-use restichub_proto::signing::{sign_job, sign_key_update};
+use restichub_proto::signing::{EnrollmentKey, sign_enrollment_keys, sign_job, sign_key_update};
 use restichub_secrets::{
     CryptoError, KekError, KekId, KekProvider, WrappedSigningKey, unwrap_signing_key,
     wrap_signing_key,
@@ -165,6 +165,27 @@ impl KeySet {
         };
         sign_key_update(&update, &self.current.key)
     }
+
+    /// The public job signing set that the response delivers (ADR-0026).
+    ///
+    /// The set holds the current key and the next key, so an agent verifies a job that the current
+    /// key signed at once. The current key signs the set (ADR-0026).
+    pub fn enrollment_keys(&self) -> (Vec<EnrollmentKey>, Vec<u8>) {
+        let keys = vec![
+            EnrollmentKey {
+                role: "current".to_owned(),
+                key_id: self.current.id().to_owned(),
+                public_key: self.current.verifying_key().to_bytes().to_vec(),
+            },
+            EnrollmentKey {
+                role: "next".to_owned(),
+                key_id: self.next.id().to_owned(),
+                public_key: self.next.verifying_key().to_bytes().to_vec(),
+            },
+        ];
+        let signature = sign_enrollment_keys(&keys, &self.current.key);
+        (keys, signature)
+    }
 }
 
 /// The loaded key set with the table version it was read at, for the freshness check before a
@@ -242,6 +263,17 @@ impl JobSigningService {
         now: OffsetDateTime,
     ) -> Result<SigningKeyUpdate, JobSigningError> {
         Ok(self.current_set(db).await?.key_update(now))
+    }
+
+    /// Builds the public job signing set that the response delivers (ADR-0026).
+    ///
+    /// The version check reloads a set that another control plane rotated, so the response names
+    /// the current key and the next key.
+    pub async fn enrollment_keys(
+        &self,
+        db: &Database,
+    ) -> Result<(Vec<EnrollmentKey>, Vec<u8>), JobSigningError> {
+        Ok(self.current_set(db).await?.enrollment_keys())
     }
 
     async fn current_set(&self, db: &Database) -> Result<Arc<KeySet>, JobSigningError> {

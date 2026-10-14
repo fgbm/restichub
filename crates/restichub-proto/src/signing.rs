@@ -210,6 +210,86 @@ pub fn sign_key_update(update: &KeyUpdate, key: &SigningKey) -> SigningKeyUpdate
     }
 }
 
+/// The domain prefix of the signature over the enrollment key set (ADR-0026).
+pub const ENROLLMENT_KEYS_SIGNING_CONTEXT: &[u8] = b"restichub-enroll-keys-v1\0";
+
+/// One public job signing key that the enrollment response delivers (ADR-0026).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnrollmentKey {
+    /// `current` or `next` (ADR-0026).
+    pub role: String,
+    pub key_id: String,
+    /// 32 bytes of an Ed25519 value.
+    pub public_key: Vec<u8>,
+}
+
+/// Why an enrollment key set did not verify (ADR-0026).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrollmentKeyError {
+    BadSignature,
+    Malformed,
+}
+
+/// The exact bytes that the signature over an enrollment key set covers (ADR-0026).
+///
+/// The order is significant: the count, then for each key the length and the bytes of the role, of
+/// the key identifier and of the public key. The length prefixes make the encoding unambiguous.
+#[must_use]
+pub fn enrollment_keys_input(keys: &[EnrollmentKey]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&length_prefix(keys.len()).to_be_bytes());
+    for key in keys {
+        push_field(&mut payload, key.role.as_bytes());
+        push_field(&mut payload, key.key_id.as_bytes());
+        push_field(&mut payload, &key.public_key);
+    }
+    signing_input(ENROLLMENT_KEYS_SIGNING_CONTEXT, &payload)
+}
+
+fn push_field(payload: &mut Vec<u8>, field: &[u8]) {
+    payload.extend_from_slice(&length_prefix(field.len()).to_be_bytes());
+    payload.extend_from_slice(field);
+}
+
+fn length_prefix(length: usize) -> u32 {
+    u32::try_from(length).unwrap_or(u32::MAX)
+}
+
+/// Signs the delivered public set with the current key (ADR-0026).
+#[must_use]
+pub fn sign_enrollment_keys(keys: &[EnrollmentKey], key: &SigningKey) -> Vec<u8> {
+    key.sign(&enrollment_keys_input(keys)).to_bytes().to_vec()
+}
+
+/// Verifies the signature over an enrollment key set (ADR-0026).
+///
+/// The caller gives the current public key from the same set, so the check proves that the set is
+/// self-consistent and detects a partial tamper of the transport. The authenticity itself comes
+/// from the enrollment channel: the verified TLS connection and the one-time token (threat T13).
+///
+/// # Errors
+///
+/// Returns [`EnrollmentKeyError::Malformed`] for an empty set or a bad key length, and
+/// [`EnrollmentKeyError::BadSignature`] for a bad signature.
+pub fn verify_enrollment_keys(
+    keys: &[EnrollmentKey],
+    signature: &[u8],
+    current: &VerifyingKey,
+) -> Result<(), EnrollmentKeyError> {
+    if keys.is_empty() {
+        return Err(EnrollmentKeyError::Malformed);
+    }
+    for key in keys {
+        if public_key_from_bytes(&key.public_key).is_none() {
+            return Err(EnrollmentKeyError::Malformed);
+        }
+    }
+    let signature = signature_from_bytes(signature).ok_or(EnrollmentKeyError::BadSignature)?;
+    current
+        .verify_strict(&enrollment_keys_input(keys), &signature)
+        .map_err(|_| EnrollmentKeyError::BadSignature)
+}
+
 /// Verifies a signed job and returns the decoded [`Job`].
 ///
 /// The function verifies the signature over the raw bytes before it decodes the

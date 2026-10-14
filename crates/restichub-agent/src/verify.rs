@@ -5,14 +5,16 @@
 //! signing key set is valid. A failed check leaves the configuration directory untouched.
 
 use anyhow::{Context, Result, bail};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use ed25519_dalek::VerifyingKey;
 use prost::Message as _;
 use restichub_proto::agent::v1::{KeyUpdate, SigningKeyUpdate};
-use restichub_proto::signing::{KeyRing, KeyUpdateError};
+use restichub_proto::signing::{EnrollmentKey, KeyRing, KeyUpdateError, verify_enrollment_keys};
 use time::OffsetDateTime;
 use x509_parser::prelude::{FromDer as _, GeneralName, X509Certificate};
 
-use crate::enroll::Enrolled;
+use crate::enroll::{Enrolled, EnrollmentKeyBody};
 
 /// The SAN URI that binds the certificate to one agent and one tenant (ADR-0026).
 #[must_use]
@@ -39,9 +41,51 @@ pub fn check_enrollment(
         &enrolled.ca_chain_der,
         now,
     )?;
+    verify_key_set(&enrolled.signing_keys, &enrolled.signing_keys_signature)
+}
+
+/// Verifies the delivered key set and returns a ring with the current and the next key (ADR-0026).
+///
+/// The current key signs the set, so the check proves that the set is self-consistent and detects a
+/// partial tamper of the transport. The authenticity comes from the enrollment channel (threat
+/// T13). The ring verifies a job that the current key signed at once.
+///
+/// # Errors
+///
+/// Returns an error when a key is not base64 or not a valid Ed25519 key, when the set holds no
+/// current key, or when the signature does not verify.
+pub fn verify_key_set(keys: &[EnrollmentKeyBody], signature: &str) -> Result<KeyRing> {
+    let keys = decode_keys(keys)?;
+    let signature = STANDARD
+        .decode(signature)
+        .context("the key set signature is not base64")?;
+    let current = keys
+        .iter()
+        .find(|key| key.role == "current")
+        .context("the key set holds no current key")?;
+    let current_key = verifying_key(&current.public_key)?;
+    verify_enrollment_keys(&keys, &signature, &current_key)
+        .map_err(|error| anyhow::anyhow!("the key set signature is not valid: {error:?}"))?;
     let mut ring = KeyRing::new();
-    adopt_key_update(&mut ring, &enrolled.signing_key_update)?;
+    for key in &keys {
+        ring.insert(key.key_id.clone(), verifying_key(&key.public_key)?)
+            .map_err(|error| anyhow::anyhow!("the key set is not valid: {error:?}"))?;
+    }
     Ok(ring)
+}
+
+fn decode_keys(keys: &[EnrollmentKeyBody]) -> Result<Vec<EnrollmentKey>> {
+    keys.iter()
+        .map(|key| {
+            Ok(EnrollmentKey {
+                role: key.role.clone(),
+                key_id: key.key_id.clone(),
+                public_key: STANDARD
+                    .decode(&key.public_key)
+                    .context("a key is not base64")?,
+            })
+        })
+        .collect()
 }
 
 /// Checks the leaf key, the leaf SAN and the chain to the root (ADR-0026).
@@ -97,6 +141,33 @@ fn check_chain(
         let (_, certificate) = X509Certificate::from_der(der)
             .map_err(|error| anyhow::anyhow!("a CA chain certificate does not parse: {error}"))?;
         chain.push(certificate);
+    }
+
+    // The leaf is an end entity, so it must not be a certificate authority (RFC 5280, ADR-0026).
+    if let Some(constraints) = leaf
+        .basic_constraints()
+        .map_err(|error| anyhow::anyhow!("a basic constraint is not readable: {error}"))?
+        && constraints.value.ca
+    {
+        bail!("the issued certificate is a certificate authority");
+    }
+    for (index, certificate) in chain.iter().enumerate() {
+        let constraints = certificate
+            .basic_constraints()
+            .map_err(|error| anyhow::anyhow!("a basic constraint is not readable: {error}"))?
+            .context("a chain certificate holds no basic constraints")?;
+        if !constraints.value.ca {
+            bail!("a chain certificate is not a certificate authority");
+        }
+        // The issuing CA signs the leaf only, so its path length is 0. The root CA signs the
+        // issuing CA, so its path length is at least 1 (ADR-0026).
+        let limit = constraints.value.path_len_constraint;
+        if index == 0 && limit.is_some_and(|limit| limit != 0) {
+            bail!("the issuing CA has a path length other than 0");
+        }
+        if index + 1 == chain.len() && limit.is_some_and(|limit| limit < 1) {
+            bail!("the root CA cannot sign the issuing CA");
+        }
     }
 
     valid_at(leaf, now)?;

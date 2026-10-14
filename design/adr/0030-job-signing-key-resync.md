@@ -15,6 +15,7 @@ ADR-0026 fixes the job signing key rotation. The control plane sends the key set
 - A rotation refuses while an earlier rotation still holds its overlap. One overlap row exists at a time, so the chain stays short.
 - A key that the control plane retired for a compromise is never part of the chain. The chain carries the keys of a normal rotation only. An agent that needs a compromised key re-enrolls instead.
 - The delivery of the chain and the acknowledgement are issue #50.
+- The enrollment delivers the current key and the next key (2026-10-14). An agent that enrolls holds the current key at once, so it verifies a job before the first rotation.
 
 ## Consequences
 

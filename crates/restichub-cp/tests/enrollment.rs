@@ -11,10 +11,12 @@ use axum::Router;
 use axum::http::StatusCode;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use ed25519_dalek::VerifyingKey;
 use prost::Message as _;
 use rcgen::{CertificateParams, DnType, KeyPair, PKCS_ECDSA_P256_SHA256, PKCS_ECDSA_P384_SHA384};
 use restichub_db::enrollment_tokens;
 use restichub_proto::agent::v1::{KeyUpdate, SigningKeyUpdate};
+use restichub_proto::signing::{EnrollmentKey, verify_enrollment_keys};
 use serde_json::{Value, json};
 use time::{Duration, OffsetDateTime};
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
@@ -225,6 +227,65 @@ async fn ac_id_01_a_valid_token_enrolls_an_agent_in_its_tenant() {
     let inner = KeyUpdate::decode(signed.key_update.as_slice()).expect("the inner update decodes");
     assert_eq!(inner.public_key.len(), 32);
     assert_eq!(inner.signer_key_id, signed.signer_key_id);
+
+    // The response carries the full public key set, signed by the current key (ADR-0026).
+    let keys = response["signing_keys"]
+        .as_array()
+        .expect("the key set must be an array");
+    assert_eq!(keys.len(), 2, "{keys:?}");
+    let current = keys
+        .iter()
+        .find(|key| key["role"].as_str() == Some("current"))
+        .expect("the key set holds the current key");
+    let next = keys
+        .iter()
+        .find(|key| key["role"].as_str() == Some("next"))
+        .expect("the key set holds the next key");
+    assert_eq!(
+        current["key_id"].as_str().expect("a current key id"),
+        signed.signer_key_id
+    );
+    assert_eq!(
+        next["key_id"].as_str().expect("a next key id"),
+        inner.key_id
+    );
+    assert_eq!(
+        STANDARD
+            .decode(current["public_key"].as_str().expect("a public key"))
+            .expect("the public key is base64")
+            .len(),
+        32
+    );
+    let delivered = keys
+        .iter()
+        .map(|key| EnrollmentKey {
+            role: key["role"].as_str().expect("a role").to_owned(),
+            key_id: key["key_id"].as_str().expect("a key id").to_owned(),
+            public_key: STANDARD
+                .decode(key["public_key"].as_str().expect("a public key"))
+                .expect("the public key is base64"),
+        })
+        .collect::<Vec<_>>();
+    let current_key = VerifyingKey::from_bytes(
+        delivered[0]
+            .public_key
+            .as_slice()
+            .try_into()
+            .expect("a 32-byte key"),
+    )
+    .expect("a valid key");
+    verify_enrollment_keys(
+        &delivered,
+        &STANDARD
+            .decode(
+                response["signing_keys_signature"]
+                    .as_str()
+                    .expect("the signature"),
+            )
+            .expect("the signature is base64"),
+        &current_key,
+    )
+    .expect("the current key must sign the key set");
 
     // The agent shows in tenant A with the recorded facts and labels, and not in tenant B.
     let reader_a = seed_session(db.database(), tenant_a, "reader-a", "viewer").await;

@@ -70,8 +70,24 @@ pub struct EnrollResponse {
     /// The signed job signing key set, the serialized `SigningKeyUpdate` message in base64. The
     /// agent verifies the update before it uses the next key (FR-PR-04, FR-PR-11).
     pub signing_key_update: String,
+    /// The public job signing key set: the current key and the next key (ADR-0026). The agent
+    /// verifies a job that the current key signed with this set at once.
+    pub signing_keys: Vec<EnrollmentKeyBody>,
+    /// Ed25519 signature over the key set, base64 (standard alphabet). The current key signs it
+    /// (ADR-0026).
+    pub signing_keys_signature: String,
     /// The gRPC endpoint of the agent listener, when the installation sets it.
     pub grpc_endpoint: Option<String>,
+}
+
+/// One public job signing key of the enrollment response (ADR-0026).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EnrollmentKeyBody {
+    /// `current` or `next`.
+    pub role: String,
+    pub key_id: String,
+    /// Base64 of the 32 Ed25519 bytes (standard alphabet).
+    pub public_key: String,
 }
 
 /// Enrolls an agent with a one-time token and a certificate signing request (FR-ID-01, FR-ID-02).
@@ -117,6 +133,16 @@ pub async fn enroll(
     update
         .encode(&mut key_update_bytes)
         .map_err(|error| ApiError::internal(error.to_string()))?;
+    // The full public key set, so the agent verifies a job of the current key at once (ADR-0026).
+    let (signing_keys, signing_keys_signature) = job_signing.enrollment_keys(state.db()).await?;
+    let signing_keys = signing_keys
+        .into_iter()
+        .map(|key| EnrollmentKeyBody {
+            role: key.role,
+            key_id: key.key_id,
+            public_key: STANDARD.encode(&key.public_key),
+        })
+        .collect();
 
     let token_hash = crate::token::hash_token(&body.token);
     let mut tx = state.db().begin_enrollment().await?;
@@ -200,6 +226,8 @@ pub async fn enroll(
                         .collect(),
                     certificate_expires_at: format_time(issued.not_after),
                     signing_key_update: STANDARD.encode(&key_update_bytes),
+                    signing_keys,
+                    signing_keys_signature: STANDARD.encode(&signing_keys_signature),
                     grpc_endpoint: state.agent_endpoint().map(str::to_owned),
                 }),
             ))
