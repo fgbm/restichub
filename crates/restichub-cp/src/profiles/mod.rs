@@ -23,7 +23,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use restichub_compiler::{
-    Architecture, CompileError, OperatingSystem, ResticVersion, TargetFacts, compile, preview,
+    Architecture, CompileError, OperatingSystem, Plan, ResticVersion, TargetFacts, compile, preview,
 };
 use restichub_db::agents::{self as agents_repo, Agent};
 use restichub_db::audit::{AuditAction, diff};
@@ -53,6 +53,11 @@ use settings::{
     compiler_profile_from_row, parse_profile_id, profile_value, save_warnings, stored_value,
     validate_create, validate_update,
 };
+
+/// Validates a name with the rule of a profile name (FR-SC-01). The caller stores the trimmed value.
+pub(crate) fn validate_name(value: &str) -> Result<String, ApiError> {
+    settings::validate_profile_name("name", value)
+}
 
 /// Query parameters of the list endpoint (FR-PF-01).
 #[derive(Debug, Default, Deserialize, IntoParams)]
@@ -488,6 +493,22 @@ fn repository_location(repository: &Repository) -> String {
         ),
         BackendKind::Local => repository.local_path.clone().unwrap_or_default(),
     }
+}
+
+/// Compiles a stored profile for one agent and returns a rejection as a field error (FR-PF-05).
+///
+/// A plan binds a profile to an agent. The control plane compiles the stored profile with the facts
+/// of that agent before a write, so a plan never points at a profile that the compiler rejects for
+/// the target operating system (AC-SC-01). The compile refuses a missing path for the operating
+/// system of the agent.
+pub(crate) fn compile_for_agent(
+    profile: &repo::Profile,
+    agent: &restichub_db::agents::Agent,
+    now: time::OffsetDateTime,
+) -> Result<Plan, ApiError> {
+    let target = target_facts(agent, now)?;
+    let compiler_profile = compiler_profile_from_row(profile)?;
+    compile(&compiler_profile, &target).map_err(compile_error_to_api)
 }
 
 /// Turns a compiler rejection into a field error (AC-PF-02).

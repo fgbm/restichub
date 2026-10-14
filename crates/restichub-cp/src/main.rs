@@ -118,6 +118,14 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         restichub_cp::maintenance::JOB_EXPIRY_INTERVAL,
     );
 
+    // The scheduler turns a due plan into one job for each fire time (FR-SC-01, FR-SC-02, ADR-0010).
+    // It runs in the control plane; the agent holds no schedule (ADR-0002).
+    restichub_cp::scheduler::spawn(
+        database.clone(),
+        Arc::new(restichub_cp::clock::SystemClock),
+        restichub_cp::scheduler::SCHEDULER_INTERVAL,
+    );
+
     let auth = restichub_cp::server::AuthState::new(config.auth.clone());
     restichub_cp::maintenance::spawn_limiter_sweep(
         auth.user_limiter.clone(),

@@ -48,6 +48,11 @@ utoipa-axum = { workspace = true }
 uuid = { workspace = true }
 x509-parser = { workspace = true }
 zeroize = { workspace = true }
+# Cron computation of the scheduler (ADR-0010). `chrono-tz` gives the IANA time zone names and the
+# daylight saving rules (D8).
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = "0.10"
+croner = { version = "4.0", default-features = false, features = ["chrono"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
