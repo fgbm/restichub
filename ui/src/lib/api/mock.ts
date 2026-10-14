@@ -15,6 +15,7 @@ import type {
 	CreateApiTokenRequest,
 	CreateEnrollmentTokenRequest,
 	CreatePlatformUserRequest,
+	CreateRepositoryRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
 	EnrollmentToken,
@@ -23,6 +24,7 @@ import type {
 	Me,
 	MembershipInput,
 	PlatformUser,
+	Repository,
 	ResetPasswordRequest,
 	SetRoleRequest,
 	SetupRequest,
@@ -31,6 +33,7 @@ import type {
 	Tenant,
 	TenantAccess,
 	UpdateAccountRequest,
+	UpdateRepositoryRequest,
 	UpdateUserRequest,
 	User
 } from './types';
@@ -76,6 +79,8 @@ function makeAgents(): Agent[] {
 		os,
 		arch,
 		agent_version: version,
+		restic_version: '0.19.0',
+		labels: [],
 		status,
 		last_seen_at: iso(seen),
 		created_at: iso(60 * 24 * 30),
@@ -319,6 +324,7 @@ export class MockApiService {
 	private tokens: ApiToken[] = makeTokens();
 	private agents: Agent[] = makeAgents();
 	private enrollmentTokens: EnrollmentToken[] = [];
+	private repositories: Repository[] = [];
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
@@ -537,10 +543,63 @@ export class MockApiService {
 		token.revoked_by_user_id = this.users[0].id;
 	}
 
+	async listRepositories(): Promise<Repository[]> {
+		return [...this.repositories];
+	}
+
+	async createRepository(request: CreateRepositoryRequest): Promise<Repository> {
+		const now = new Date().toISOString();
+		const repository: Repository = {
+			id: `r_${this.repositories.length + 1}`,
+			name: request.name,
+			backend: request.backend,
+			credentials: {
+				password: true,
+				s3_access_key: request.backend.kind === 's3',
+				s3_secret_key: request.backend.kind === 's3',
+				rest_password: request.backend.kind === 'rest' && !!request.rest_password
+			},
+			initialized: false,
+			maintenance_agent_id: request.maintenance_agent_id ?? null,
+			created_at: now,
+			updated_at: now,
+			created_by: this.users[0].id
+		};
+		this.repositories = [...this.repositories, repository];
+		return repository;
+	}
+
+	async updateRepository(id: string, request: UpdateRepositoryRequest): Promise<Repository> {
+		const current = this.repositories.find((item) => item.id === id);
+		if (!current) throw new Error('not found');
+		const kind = request.backend?.kind ?? current.backend.kind;
+		const updated: Repository = {
+			...current,
+			name: request.name ?? current.name,
+			backend: request.backend ?? current.backend,
+			credentials: {
+				password: true,
+				s3_access_key: kind === 's3' ? true : current.credentials.s3_access_key,
+				s3_secret_key: kind === 's3' ? true : current.credentials.s3_secret_key,
+				rest_password: !!request.rest_password || current.credentials.rest_password
+			},
+			maintenance_agent_id:
+				request.maintenance_agent_id === undefined
+					? current.maintenance_agent_id
+					: request.maintenance_agent_id || null,
+			updated_at: new Date().toISOString()
+		};
+		this.repositories = this.repositories.map((item) => (item.id === id ? updated : item));
+		return updated;
+	}
+
+	async deleteRepository(id: string): Promise<void> {
+		this.repositories = this.repositories.filter((item) => item.id !== id);
+	}
+
 	async listTenants(): Promise<Tenant[]> {
 		return [...this.tenants];
 	}
-
 	async createTenant(request: CreateTenantRequest): Promise<Tenant> {
 		const tenant: Tenant = {
 			id: `t_${this.tenants.length + 1}`,

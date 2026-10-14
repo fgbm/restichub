@@ -19,6 +19,7 @@ describe('navigation', () => {
 		expect(hrefs('organization', 'admin', false)).toEqual([
 			'/(app)',
 			'/(app)/hosts',
+			'/(app)/repositories',
 			'/(app)/audit',
 			'/(app)/settings'
 		]);
@@ -28,11 +29,13 @@ describe('navigation', () => {
 		expect(hrefs('organization', 'operator', false)).toEqual([
 			'/(app)',
 			'/(app)/hosts',
+			'/(app)/repositories',
 			'/(app)/audit'
 		]);
 		expect(hrefs('organization', 'viewer', false)).toEqual([
 			'/(app)',
 			'/(app)/hosts',
+			'/(app)/repositories',
 			'/(app)/audit'
 		]);
 	});
@@ -41,6 +44,7 @@ describe('navigation', () => {
 		expect(hrefs('organization', 'admin', true)).toEqual([
 			'/(app)',
 			'/(app)/hosts',
+			'/(app)/repositories',
 			'/(app)/audit',
 			'/(app)/settings'
 		]);

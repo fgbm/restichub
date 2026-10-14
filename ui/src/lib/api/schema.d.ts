@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/agent/v1/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enrolls an agent with a one-time token and a certificate signing request. */
+        post: operations["enroll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents": {
         parameters: {
             query?: never;
@@ -504,6 +521,46 @@ export interface paths {
         patch: operations["set_membership_role"];
         trace?: never;
     };
+    "/api/v1/repositories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the repositories of the tenant. */
+        get: operations["list_repositories"];
+        put?: never;
+        /**
+         * Creates a repository in the tenant.
+         * @description The control plane encrypts the secret values and never returns them (AC-RP-02).
+         */
+        post: operations["create_repository"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/repositories/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one repository of the tenant. */
+        get: operations["get_repository"];
+        put?: never;
+        post?: never;
+        /** Removes a repository and its bound secrets. */
+        delete: operations["delete_repository"];
+        options?: never;
+        head?: never;
+        /** Updates a repository and replaces the secret values that it carries. */
+        patch: operations["update_repository"];
+        trace?: never;
+    };
     "/api/v1/secrets": {
         parameters: {
             query?: never;
@@ -734,8 +791,10 @@ export interface components {
             created_at: string;
             hostname: string;
             id: string;
+            labels: string[];
             last_seen_at?: string | null;
             os: string;
+            restic_version: string;
             revoked_at?: string | null;
             revoked_by_user_id?: string | null;
             status: components["schemas"]["AgentStatus"];
@@ -780,9 +839,14 @@ export interface components {
          * @example api_token_revoke
          * @example enrollment_token_create
          * @example enrollment_token_revoke
+         * @example enrollment_token_use
+         * @example enrollment_token_refuse
          * @example secret_create
          * @example secret_replace
          * @example secret_delete
+         * @example repository_create
+         * @example repository_update
+         * @example repository_delete
          * @example signing_key_rotate
          * @example signing_key_retire
          */
@@ -804,6 +868,28 @@ export interface components {
             items: components["schemas"]["AuditItem"][];
             /** @description Null when the table holds no later record. */
             next_cursor?: string | null;
+        };
+        /**
+         * @description The backend settings of a repository (FR-RP-01).
+         *
+         *     The type is internally tagged on `kind`. Each variant carries the typed settings of its backend
+         *     only, so a client cannot send a setting of another backend.
+         */
+        BackendSettings: {
+            bucket: string;
+            endpoint: string;
+            /** @enum {string} */
+            kind: "s3";
+            prefix?: string | null;
+            region?: string | null;
+        } | {
+            endpoint: string;
+            /** @enum {string} */
+            kind: "rest";
+        } | {
+            /** @enum {string} */
+            kind: "local";
+            path: string;
         };
         ChangePasswordRequest: {
             current_password: string;
@@ -846,6 +932,27 @@ export interface components {
             token: string;
         };
         /**
+         * @description The write-only secret fields of a repository create.
+         *
+         *     The type does not derive `Debug`, so a log line cannot print a value by accident. Each value is
+         *     a [`SecretString`], so the buffer is zeroized on drop.
+         */
+        CreateRepositoryRequest: {
+            backend: components["schemas"]["BackendSettings"];
+            /** @description The identifier of the maintenance agent (FR-RP-08). Optional. */
+            maintenance_agent_id?: string | null;
+            /** @description Holds 1 to 48 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
+            name: string;
+            /** @description Value that opens the repository. Holds 1 to 64 KiB bytes. */
+            password: string;
+            /** @description Credential of the rest-server account. Optional for the rest backend. */
+            rest_password?: string | null;
+            /** @description Credential that names the S3 account. Mandatory for the S3 backend. */
+            s3_access_key?: string | null;
+            /** @description Credential that signs the S3 request. Mandatory for the S3 backend. */
+            s3_secret_key?: string | null;
+        };
+        /**
          * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
          *     a [`SecretString`], so the buffer is zeroized on drop.
          */
@@ -885,6 +992,42 @@ export interface components {
             role: components["schemas"]["Role"];
             /** @description Unique in the installation; ignores the letter case. */
             username: string;
+        };
+        /** @description The presence of the bound secrets. The view never holds a value (AC-RP-02). */
+        CredentialsView: {
+            /** @description True when the value is set. A repository always holds one. */
+            password: boolean;
+            rest_password: boolean;
+            s3_access_key: boolean;
+            s3_secret_key: boolean;
+        };
+        EnrollRequest: {
+            agent_version: string;
+            arch: string;
+            /** @description The PKCS#10 certificate signing request in DER, base64 (standard alphabet). */
+            csr: string;
+            hostname: string;
+            os: string;
+            restic_version: string;
+            /** @description The one-time secret that the Web UI shows, `re_...`. */
+            token: string;
+        };
+        EnrollResponse: {
+            agent_id: string;
+            /** @description The issuing CA and the root CA, in DER, base64, in that order. */
+            ca_chain: string[];
+            /** @description The issued leaf in DER, base64 (standard alphabet). */
+            certificate: string;
+            /** @description In RFC 3339. */
+            certificate_expires_at: string;
+            /** @description The gRPC endpoint of the agent listener, when the installation sets it. */
+            grpc_endpoint?: string | null;
+            /**
+             * @description The signed job signing key set, the serialized `SigningKeyUpdate` message in base64. The
+             *     agent verifies the update before it uses the next key (FR-PR-04, FR-PR-11).
+             */
+            signing_key_update: string;
+            tenant_id: string;
         };
         EnrollmentTokenListResponse: {
             items: components["schemas"]["EnrollmentTokenView"][];
@@ -993,6 +1136,24 @@ export interface components {
         ReplaceSecretRequest: {
             /** @description Holds 1 to 64 KiB bytes. */
             value: string;
+        };
+        RepositoryListResponse: {
+            items: components["schemas"]["RepositoryView"][];
+        };
+        RepositoryView: {
+            backend: components["schemas"]["BackendSettings"];
+            /** @description In RFC 3339. */
+            created_at: string;
+            /** @description Null for an API token actor. */
+            created_by?: string | null;
+            credentials: components["schemas"]["CredentialsView"];
+            id: string;
+            /** @description False until an agent runs the init step. The MVP control plane never sets it true. */
+            initialized: boolean;
+            maintenance_agent_id?: string | null;
+            name: string;
+            /** @description In RFC 3339. */
+            updated_at: string;
         };
         ResetPasswordRequest: {
             /** @description At least 12 characters. */
@@ -1118,12 +1279,29 @@ export interface components {
             /** @description Written by the update; the MVP treats it as unverified. */
             email?: string | null;
             /**
-             * @description The new password of a grant. It is required when `platform_admin` is true and it is not
-             *     used otherwise.
+             * @description The new secret of a grant. It is required when `platform_admin` is true and it is not used
+             *     otherwise.
              */
             password?: string | null;
             /** @description True when the account holds the installation-wide right (ADR-0029). */
             platform_admin?: boolean | null;
+        };
+        /**
+         * @description The write-only secret fields of a repository update.
+         *
+         *     An absent field keeps the current value. A present value replaces it. The type does not derive
+         *     `Debug`, so a log line cannot print a value by accident.
+         */
+        UpdateRepositoryRequest: {
+            backend?: components["schemas"]["BackendSettings"] | null;
+            /** @description The maintenance agent. An empty string clears the assignment. */
+            maintenance_agent_id?: string | null;
+            name?: string | null;
+            /** @description Replaces the stored value when the field is present. */
+            password?: string | null;
+            rest_password?: string | null;
+            s3_access_key?: string | null;
+            s3_secret_key?: string | null;
         };
         /** @description Absent fields leave the value unchanged. */
         UpdateUserRequest: {
@@ -1153,6 +1331,48 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    enroll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollRequest"];
+            };
+        };
+        responses: {
+            /** @description The agent is enrolled. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollResponse"];
+                };
+            };
+            /** @description The request or the certificate signing request is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The rate limit is reached. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     list_agents: {
         parameters: {
             query?: never;
@@ -2792,6 +3012,265 @@ export interface operations {
                 };
             };
             /** @description The membership is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_repositories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The repositories of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryListResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_repository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRepositoryRequest"];
+            };
+        };
+        responses: {
+            /** @description The repository is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_repository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The repository. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_repository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The repository is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    update_repository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRepositoryRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated repository. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
             404: {
                 headers: {
                     [name: string]: unknown;
