@@ -42,5 +42,6 @@ ed25519-dalek = "3.0"
 prost-types = "0.14"
 rcgen = { version = "0.14", features = ["crypto", "pem", "ring"] }
 tokio-stream = { version = "0.1", features = ["net"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging"] }
 tonic = { version = "0.14", features = ["tls-ring"] }
 x509-parser = "0.18"
