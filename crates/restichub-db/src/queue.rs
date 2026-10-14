@@ -175,6 +175,19 @@ pub async fn mark_dispatched(
     Ok(result.rows_affected() == 1)
 }
 
+/// Ends the lease of a sent job, so the queue never sends it again after a cancel request.
+pub async fn stop_redelivery(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET lease_until = NULL, updated_at = now() \
+         WHERE id = $1 AND status = 'sent'",
+    )
+    .bind(id)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
 /// Returns a sent job to the queue because the control plane could not send it.
 pub async fn revert_dispatch(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
     let result = sqlx::query(

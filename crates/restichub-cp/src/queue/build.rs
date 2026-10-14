@@ -4,7 +4,7 @@
 //! The row stores no command. The builder recompiles the stored profile of the plan against the
 //! facts of the agent at send time, so a profile or an agent that changed since the schedule fires
 //! gives a typed refusal and never a stale command. The job carries the secrets of its own
-//! repository only (AC-PR-03). [`SecretReader`] writes the `secret_delivered` audit record in the
+//! repository only (AC-PR-03). [`crate::delivery::SecretReader`] writes the `secret_delivered` audit record in the
 //! transaction of the caller (AC-RP-03); the dispatcher commits before it sends.
 
 use restichub_compiler::{ValidatedJob, compile};

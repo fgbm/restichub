@@ -36,7 +36,7 @@ pub fn is_retryable(kind: JobKind) -> bool {
 }
 
 /// The delay before retry number `attempt` (1 is the first retry): the base delay doubles for each
-/// attempt up to [`MAX_RETRY_DELAY`].
+/// attempt up to one hour.
 pub fn retry_delay(base: time::Duration, attempt: i32) -> time::Duration {
     let exponent = u32::try_from(attempt.saturating_sub(1))
         .unwrap_or(0)

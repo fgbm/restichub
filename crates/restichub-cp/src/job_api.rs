@@ -174,6 +174,8 @@ pub async fn cancel_job(
             if !state.agent_registry().send_to_agent(job.agent_id, message) {
                 return Err(ApiError::agent_offline());
             }
+            // A job that the agent never acknowledged must not go out again after the cancel.
+            queue_repo::stop_redelivery(&mut tx, job_id).await?;
             StatusCode::ACCEPTED
         }
         JobStatus::Succeeded | JobStatus::Failed | JobStatus::Expired | JobStatus::DeadLetter => {

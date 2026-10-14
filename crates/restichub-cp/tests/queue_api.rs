@@ -138,6 +138,39 @@ async fn fr_sc_09_the_cancel_of_a_running_job_sends_the_cancel_message() {
 }
 
 #[tokio::test]
+async fn fr_sc_09_a_cancelled_sent_job_is_not_delivered_again() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let mut w = world(db).await;
+    let env = &w.env;
+    let job = env.run_plan(w.plan).await;
+    env.pass().await;
+    w.agent.job().await;
+
+    let (status, body) = env
+        .call(
+            &env.operator,
+            "POST",
+            &format!("/api/v1/jobs/{job}/cancel"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(
+        w.agent.try_cancel(Duration::from_secs(5)).await,
+        Some(job.to_string())
+    );
+    env.clock.advance(120);
+    env.pass().await;
+    assert!(
+        w.agent.try_job(Duration::from_millis(300)).await.is_none(),
+        "the lease ended with the cancel"
+    );
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
 async fn fr_sc_09_the_cancel_of_a_job_on_an_offline_agent_gives_agent_offline() {
     let Some(db) = common::test_db().await else {
         return;
