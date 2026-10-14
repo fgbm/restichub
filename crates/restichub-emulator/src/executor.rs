@@ -158,6 +158,11 @@ pub fn restic_arguments(step: &Step) -> Option<Vec<String>> {
             arguments.push("unlock".to_owned());
             arguments.push("--remove-all".to_owned());
         }
+        step::Kind::Init(_) => arguments.push("init".to_owned()),
+        step::Kind::TestAccess(_) => {
+            arguments.push("cat".to_owned());
+            arguments.push("config".to_owned());
+        }
         step::Kind::Forget(_) => {
             arguments.push("forget".to_owned());
             arguments.push("--json".to_owned());

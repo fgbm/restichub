@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, JobAck, JobRejected, JobResult, Pong, RejectReason, SignedJob,
-    StepProgress, StepResult, StepStatus, agent_message, agent_service_client::AgentServiceClient,
-    control_message,
+    AgentHello, AgentMessage, ErrorDetail, JobAck, JobRejected, JobResult, JobStatus, Pong,
+    RejectReason, SignedJob, StepProgress, StepResult, StepStatus, agent_message,
+    agent_service_client::AgentServiceClient, control_message, step,
 };
 use restichub_proto::signing::{
     Admission, Expected, InMemoryJournal, JobJournal, KeyRing, admit, verify_job,
@@ -454,8 +454,29 @@ async fn run_job(
     let mut succeeded = 0u32;
     let mut failed = 0u32;
     let mut cancelled = false;
+    let mut failure_code: Option<i32> = None;
+    // Set when a test_access step found an existing repository, so a following init step is
+    // skipped (FR-RP-02). The control plane never re-initializes an existing repository.
+    let mut config_present = false;
 
     for step in &job.steps {
+        let is_test_access = matches!(step.kind, Some(step::Kind::TestAccess(_)));
+        if matches!(step.kind, Some(step::Kind::Init(_))) && config_present {
+            let now = now_timestamp();
+            send_step_result(
+                &session.tx,
+                &job_id,
+                &step.step_id,
+                StepOutcome {
+                    status: StepStatus::Skipped,
+                    exit_code: -1,
+                },
+                now,
+                now,
+            )
+            .await;
+            continue;
+        }
         let started_at = now_timestamp();
         let sink = ProgressSink {
             tx: session.tx.clone(),
@@ -483,12 +504,27 @@ async fn run_job(
         )
         .await;
         match outcome.status {
-            StepStatus::Success => succeeded += 1,
+            StepStatus::Success => {
+                succeeded += 1;
+                if is_test_access {
+                    config_present = true;
+                }
+            }
             StepStatus::Cancelled => {
                 cancelled = true;
                 break;
             }
-            _ => failed += 1,
+            _ => {
+                failed += 1;
+                if failure_code.is_none() {
+                    failure_code = Some(outcome.exit_code);
+                }
+                // A wrong password on an existing repository stops the job: no init runs
+                // (FR-RP-02, AC-RP-01).
+                if is_test_access && outcome.exit_code == 12 {
+                    break;
+                }
+            }
         }
     }
 
@@ -499,12 +535,15 @@ async fn run_job(
     } else {
         StepStatus::Success
     };
+    let outcome = job_outcome(cancelled, failed, failure_code);
     let result = JobResult {
         job_id: job_id.clone(),
         status: status as i32,
         steps_total,
         steps_succeeded: succeeded,
         steps_failed: failed,
+        outcome: outcome as i32,
+        error: job_error(outcome),
     };
     crate::lock(&session.journal).record_completed(&job_id, result.clone());
     let _ = session.tx.send(job_result_message(result)).await;
@@ -570,5 +609,64 @@ async fn send_step_result(
 fn job_result_message(result: JobResult) -> AgentMessage {
     AgentMessage {
         payload: Some(agent_message::Payload::JobResult(result)),
+    }
+}
+
+/// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
+///
+/// restic exit code 10 means the repository does not exist; a test_access step
+/// reports that as `NOT_INITIALIZED`, not as an error. Exit code 12 means the
+/// password or the backend credentials are wrong.
+fn job_outcome(cancelled: bool, failed: u32, failure_code: Option<i32>) -> JobStatus {
+    if cancelled {
+        return JobStatus::Cancelled;
+    }
+    if failed == 0 {
+        return JobStatus::Succeeded;
+    }
+    match failure_code {
+        Some(10) => JobStatus::NotInitialized,
+        Some(12) => JobStatus::ConfigError,
+        _ => JobStatus::Failed,
+    }
+}
+
+/// The stable code that explains a failed or cancelled outcome (NFR-DOC-04). It holds no secret.
+fn job_error(outcome: JobStatus) -> Option<ErrorDetail> {
+    let code = match outcome {
+        JobStatus::ConfigError => "wrong_password",
+        JobStatus::NotInitialized => "repository_missing",
+        JobStatus::Failed => "step_failed",
+        JobStatus::Cancelled => "cancelled",
+        JobStatus::Succeeded | JobStatus::Unspecified => return None,
+    };
+    Some(ErrorDetail {
+        code: code.to_owned(),
+        params: Vec::new(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{job_error, job_outcome};
+    use restichub_proto::agent::v1::JobStatus;
+
+    /// AC-RP-01: restic exit code 10 is a missing repository and 12 is a wrong password.
+    #[test]
+    fn ac_rp_01_maps_the_failing_exit_code_to_a_job_outcome() {
+        assert_eq!(job_outcome(false, 0, None), JobStatus::Succeeded);
+        assert_eq!(job_outcome(true, 0, None), JobStatus::Cancelled);
+        assert_eq!(job_outcome(false, 1, Some(12)), JobStatus::ConfigError);
+        assert_eq!(job_outcome(false, 1, Some(10)), JobStatus::NotInitialized);
+        assert_eq!(job_outcome(false, 1, Some(1)), JobStatus::Failed);
+        assert_eq!(job_error(JobStatus::Succeeded), None);
+        assert_eq!(
+            job_error(JobStatus::ConfigError).map(|error| error.code),
+            Some("wrong_password".to_owned())
+        );
+        assert_eq!(
+            job_error(JobStatus::NotInitialized).map(|error| error.code),
+            Some("repository_missing".to_owned())
+        );
     }
 }
