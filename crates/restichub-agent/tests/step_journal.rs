@@ -63,11 +63,18 @@ async fn ac_pr_07_a_result_that_finished_offline_arrives_after_the_reconnect() {
         let (tx, mut rx) = mpsc::channel(64);
         jobs.attach(&tx);
         jobs.send_stored_results().await;
-        if let Ok(message) = rx.try_recv() {
-            let mut messages = vec![message];
-            while let Ok(message) = rx.try_recv() {
-                messages.push(message);
-            }
+        let mut messages = Vec::new();
+        while let Ok(message) = rx.try_recv() {
+            messages.push(message);
+        }
+        // The job that runs at this moment also sends its step results to the new stream, so
+        // only a batch with the job result is the stored copy.
+        if messages.iter().any(|message| {
+            matches!(
+                message.payload,
+                Some(restichub_proto::agent::v1::agent_message::Payload::JobResult(_))
+            )
+        }) {
             collected = Some(messages);
             break;
         }
