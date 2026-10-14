@@ -21,7 +21,7 @@ The stack has four long-running parts and two one-shot jobs.
 | `postgres` | Keeps the data in the named volume `pgdata`. The service is not published |
 | `db-bootstrap` | Creates the cluster roles and sets the installation passwords. It runs once |
 | `migrate` | Applies the database migrations. It runs once |
-| `cp` | Serves the control plane and the web UI. The service is not published |
+| `cp` | Serves the control plane, the web UI and the agent listener. Port 8080 is not published; the agent listener is |
 | `caddy` | Publishes port 80 and port 443. It gets the certificate for the domain |
 
 The control plane trusts the `X-Forwarded-For` header from the Caddy network alone. The network is `172.28.0.0/24`. No other peer can set the client address.
@@ -29,7 +29,7 @@ The control plane trusts the `X-Forwarded-For` header from the Caddy network alo
 ## Prepare the server
 
 1. Install Docker Engine and the Compose plugin. The server uses the official Docker repository.
-2. Allow port 80 and port 443 in `ufw`. Keep port 22 open.
+2. Allow port 80, port 443 and the agent listener port (8443 by default) in `ufw`. Keep port 22 open.
 3. Add a DNS record for the domain. Use the type `A` and the address `203.0.113.10`:
 
    ```text
@@ -90,4 +90,12 @@ Add the option `-v` to remove the data volumes. The command deletes the PostgreS
 
 ## The agent listener
 
-The agent listener (gRPC with mTLS) is not part of this deployment yet. Its port stays closed until epic #1 lands. The port is a comment in `compose.yaml`.
+The control plane serves the agent listener on its own port (ADR-0026). It is the gRPC stream with mTLS and the enrollment endpoint `POST /agent/v1/enroll` on one port. The listener terminates TLS itself, so the port is published directly on the `cp` service and Caddy does not proxy it: a proxy would terminate the mTLS of the agents.
+
+Set the public address in `.env` so that an enrolled agent learns where to dial:
+
+```sh
+RESTICHUB_AGENT_ENDPOINT=https://agents.example.com:8443
+```
+
+The host is the placeholder `agents.example.com` by default. Set the real host and the published port. `RESTICHUB_AGENT_PORT` changes the published port (the default is `8443`). The control plane issues the listener certificate from the installation CA with the endpoint host and the listen address as the subject alternative names.
