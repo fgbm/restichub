@@ -278,6 +278,33 @@ pub fn script_exit_codes(path: &Path, test_access: i32, init: i32) {
     .expect("cannot write the control file");
 }
 
+/// Sets the exit code of one fake restic command, such as `backup`, and wins over the scripted codes.
+pub fn script_code(path: &Path, command: &str, code: i32) {
+    std::fs::write(
+        format!("{}.restichub-code-{command}", path.display()),
+        code.to_string(),
+    )
+    .expect("cannot write the code file");
+}
+
+/// Scripts the standard output of one fake restic command.
+pub fn script_stdout(path: &Path, command: &str, text: &str) {
+    std::fs::write(format!("{}.restichub-out-{command}", path.display()), text)
+        .expect("cannot write the output file");
+}
+
+/// Scripts the standard error of one fake restic command.
+pub fn script_stderr(path: &Path, command: &str, text: &str) {
+    std::fs::write(format!("{}.restichub-err-{command}", path.display()), text)
+        .expect("cannot write the error file");
+}
+
+/// The priority lines that the fake restic recorded, one run on each line.
+#[must_use]
+pub fn recorded_priority(path: &Path) -> String {
+    std::fs::read_to_string(format!("{}.restichub-state", path.display())).unwrap_or_default()
+}
+
 /// Makes the next fake-restic runs wait this long before they exit.
 pub fn script_sleep(path: &Path, millis: u64) {
     std::fs::write(

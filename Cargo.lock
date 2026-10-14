@@ -2022,6 +2022,7 @@ dependencies = [
  "prost",
  "prost-types",
  "rcgen",
+ "restichub-canary-scan",
  "restichub-compiler",
  "restichub-cp",
  "restichub-db",
@@ -2046,6 +2047,7 @@ dependencies = [
  "windows-service",
  "windows-sys 0.61.2",
  "x509-parser",
+ "zeroize",
 ]
 
 [[package]]
@@ -2067,6 +2069,7 @@ dependencies = [
  "restichub-proto",
  "thiserror",
  "time",
+ "zeroize",
 ]
 
 [[package]]

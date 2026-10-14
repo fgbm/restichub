@@ -365,6 +365,7 @@ async fn send_result(
             steps_failed: u32::from(outcome != JobStatus::Succeeded),
             outcome: outcome as i32,
             error,
+            ..JobResult::default()
         })),
     })
     .await

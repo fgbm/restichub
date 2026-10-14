@@ -53,6 +53,15 @@ message Step {
   }
 }
 
+// ProcessPriority is the scheduling priority of the restic process (FR-AG-15).
+enum ProcessPriority {
+  // The agent keeps the priority of the operating system default.
+  PROCESS_PRIORITY_UNSPECIFIED = 0;
+  // Lower process and I/O priority: nice 10 and best-effort I/O class 7 on
+  // Linux, BELOW_NORMAL_PRIORITY_CLASS on Windows.
+  PROCESS_PRIORITY_LOW = 1;
+}
+
 // BackupStep creates one snapshot.
 message BackupStep {
   // Identifier of the repository of this job.
@@ -77,6 +86,8 @@ message BackupStep {
   uint64 limit_download_kib = 10;
   // Retry when a lock is present (FR-SC-05).
   bool retry_lock = 11;
+  // Process and I/O priority of the restic process (FR-AG-15).
+  ProcessPriority priority = 12;
 }
 
 // CheckStep tests the repository structure.
@@ -87,6 +98,8 @@ message CheckStep {
   string read_data_subset = 2;
   // Retry when a lock is present (FR-SC-05).
   bool retry_lock = 3;
+  // Process and I/O priority of the restic process (FR-AG-15).
+  ProcessPriority priority = 4;
 }
 
 // SnapshotsStep lists snapshots. Date filters for snapshots are applied by the
@@ -224,6 +237,8 @@ message ForgetStep {
   bool retry_lock = 11;
   // Identifier of the repository of this job.
   string repository_id = 12;
+  // Process and I/O priority of the restic process (FR-AG-15).
+  ProcessPriority priority = 13;
 }
 
 // ForgetGroupBy is the grouping key of the retention rule.
@@ -244,6 +259,8 @@ message PruneStep {
   bool retry_lock = 3;
   // Identifier of the repository of this job.
   string repository_id = 4;
+  // Process and I/O priority of the restic process (FR-AG-15).
+  ProcessPriority priority = 5;
 }
 
 // StatsStep reports the repository size (FR-MN-07).
