@@ -393,6 +393,8 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.passwordHint':
 		'ResticHub больше никогда не показывает это значение после сохранения. Его можно только заменить.',
 	'repositories.passwordKeepHint': 'Оставьте поле пустым, чтобы сохранить текущее значение.',
+	'repositories.passwordLocked':
+		'Пароль репозитория нельзя заменить в этой версии. Ротация появится в следующем выпуске.',
 	'repositories.s3AccessKey': 'Ключ доступа S3',
 	'repositories.s3SecretKey': 'Секретный ключ S3',
 	'repositories.restPassword': 'Пароль REST-сервера',
