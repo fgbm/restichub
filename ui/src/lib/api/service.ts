@@ -26,6 +26,8 @@ import type {
 	EnrollmentTokenCreated,
 	EnrollmentTokenListResponse,
 	Instance,
+	Job,
+	JobActionRequest,
 	Me,
 	MembershipInput,
 	PlatformUser,
@@ -90,6 +92,13 @@ export interface ApiService {
 	createRepository(request: CreateRepositoryRequest): Promise<Repository>;
 	updateRepository(id: string, request: UpdateRepositoryRequest): Promise<Repository>;
 	deleteRepository(id: string): Promise<void>;
+
+	/** Starts an init job on an agent (FR-RP-02). */
+	initRepository(id: string, request?: JobActionRequest): Promise<Job>;
+	/** Starts a test-access job on an agent (FR-RP-02). */
+	testAccessRepository(id: string, request?: JobActionRequest): Promise<Job>;
+	/** Polls one job (FR-PR-01). */
+	getJob(id: string): Promise<Job>;
 
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
@@ -156,6 +165,11 @@ const httpService: ApiService = {
 	updateRepository: (id, request) =>
 		api.patch<Repository>(endpoints.repositories.byId(id), request),
 	deleteRepository: (id) => api.delete<void>(endpoints.repositories.byId(id)),
+
+	initRepository: (id, request) => api.post<Job>(endpoints.repositories.init(id), request ?? {}),
+	testAccessRepository: (id, request) =>
+		api.post<Job>(endpoints.repositories.testAccess(id), request ?? {}),
+	getJob: (id) => api.get<Job>(endpoints.jobs.byId(id)),
 
 	listTenants: () =>
 		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),

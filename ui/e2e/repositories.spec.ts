@@ -58,3 +58,40 @@ test('the repositories screen creates, edits and deletes a repository', async ({
 	await expect(page.getByText('The repository is deleted.')).toBeVisible();
 	await expect(page.getByText('No repositories yet')).toBeVisible();
 });
+
+test('the repository init dialog picks a host and shows the job result', async ({ page }) => {
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Repositories', exact: true })
+		.click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Repositories' })).toBeVisible();
+
+	// Create a repository with a maintenance host.
+	await page.getByRole('button', { name: 'Add repository' }).click();
+	await page.locator('#repo-name').fill('repo-a');
+	await page.locator('#repo-endpoint').fill('https://s3.example.net');
+	await page.locator('#repo-bucket').fill('backups-prod');
+	await page.locator('#repo-password').fill('repo-password');
+	await page.locator('#repo-s3-access-key').fill('access-key');
+	await page.locator('#repo-s3-secret-key').fill('secret-key');
+	await page.locator('#repo-agent').selectOption({ label: 'nas-backup' });
+	await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('Not initialized')).toBeVisible();
+
+	// Initialize: the dialog warns about the password copy and shows the job result (FR-RP-02).
+	await page.getByRole('button', { name: 'More actions for repo-a' }).click();
+	await page.getByRole('menuitem', { name: 'Initialize' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Initialize the repository?' });
+	await expect(dialog).toBeVisible();
+	await expect(
+		dialog.getByText('Keep a copy of the repository password outside ResticHub.')
+	).toBeVisible();
+	await expect(page.locator('#job-host')).not.toHaveValue('');
+	await dialog.getByRole('button', { name: 'Start' }).click();
+	await expect(dialog.getByText('The repository is ready.')).toBeVisible({ timeout: 10_000 });
+	await page.keyboard.press('Escape');
+	// The status badge updates after the job (FR-RP-02).
+	await expect(page.getByText('Initialized', { exact: true })).toBeVisible();
+});

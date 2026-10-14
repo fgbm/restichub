@@ -21,6 +21,10 @@ import type {
 	EnrollmentToken,
 	EnrollmentTokenCreated,
 	Instance,
+	Job,
+	JobActionRequest,
+	JobKind,
+	JobStatus,
 	Me,
 	MembershipInput,
 	PlatformUser,
@@ -317,6 +321,18 @@ function makeAudit(): AuditRecord[] {
 	];
 }
 
+/** A mock job with the time when it finishes, so the polling dialog shows progress then a result. */
+interface MockJob {
+	job: Job;
+	readyAt: number;
+	repositoryId: string;
+	initializes: boolean;
+}
+
+function isTerminal(status: JobStatus): boolean {
+	return status === 'succeeded' || status === 'failed' || status === 'expired';
+}
+
 export class MockApiService {
 	private users: User[] = makeUsers();
 	private tenants: Tenant[] = makeTenants();
@@ -325,6 +341,7 @@ export class MockApiService {
 	private agents: Agent[] = makeAgents();
 	private enrollmentTokens: EnrollmentToken[] = [];
 	private repositories: Repository[] = [];
+	private jobs: MockJob[] = [];
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
@@ -595,6 +612,61 @@ export class MockApiService {
 
 	async deleteRepository(id: string): Promise<void> {
 		this.repositories = this.repositories.filter((item) => item.id !== id);
+	}
+
+	async initRepository(id: string, request?: JobActionRequest): Promise<Job> {
+		return this.startJob(id, 'init', request);
+	}
+
+	async testAccessRepository(id: string, request?: JobActionRequest): Promise<Job> {
+		return this.startJob(id, 'test_access', request);
+	}
+
+	async getJob(id: string): Promise<Job> {
+		const entry = this.jobs.find((item) => item.job.id === id);
+		if (!entry) throw new Error('not found');
+		// The mock reaches a terminal state after a short delay, so the dialog shows progress then a
+		// result, the way the real job does.
+		if (Date.now() >= entry.readyAt && !isTerminal(entry.job.status)) {
+			const now = new Date().toISOString();
+			entry.job.status = 'succeeded';
+			entry.job.result_code = 'succeeded';
+			entry.job.finished_at = now;
+			entry.job.updated_at = now;
+			if (entry.initializes) {
+				this.repositories = this.repositories.map((repository) =>
+					repository.id === entry.repositoryId ? { ...repository, initialized: true } : repository
+				);
+			}
+		}
+		return { ...entry.job };
+	}
+
+	private startJob(id: string, kind: JobKind, request?: JobActionRequest): Job {
+		const repository = this.repositories.find((item) => item.id === id);
+		if (!repository) throw new Error('not found');
+		const agentId =
+			request?.agent_id || repository.maintenance_agent_id || this.agents[0]?.id || '';
+		if (!agentId) throw new Error('agent_offline');
+		const now = new Date().toISOString();
+		const job: Job = {
+			id: `j_${this.jobs.length + 1}`,
+			kind,
+			repository_id: id,
+			agent_id: agentId,
+			status: 'sent',
+			result_code: null,
+			result_message: null,
+			created_at: now,
+			updated_at: now,
+			finished_at: null,
+			expires_at: null
+		};
+		this.jobs = [
+			...this.jobs,
+			{ job, readyAt: Date.now() + 700, repositoryId: id, initializes: true }
+		];
+		return { ...job };
 	}
 
 	async listTenants(): Promise<Tenant[]> {

@@ -13,7 +13,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Enrolls an agent with a one-time token and a certificate signing request. */
+        /**
+         * Enrolls an agent with a one-time token and a certificate signing request.
+         * @description The control plane serves the route on the agent listener and on the public web origin, so an
+         *     agent reaches it with a publicly trusted certificate and pins the returned installation root CA
+         *     for the stream (ADR-0033).
+         */
         post: operations["enroll"];
         delete?: never;
         options?: never;
@@ -313,6 +318,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one job of the tenant for polling. */
+        get: operations["get_job"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -559,6 +581,46 @@ export interface paths {
         head?: never;
         /** Updates a repository and replaces the secret values that it carries. */
         patch: operations["update_repository"];
+        trace?: never;
+    };
+    "/api/v1/repositories/{id}/init": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initializes a repository from an agent.
+         * @description The control plane sends the repository password and the backend credentials with the signed job only (ADR-0003). An offline agent gives HTTP 409 `agent_offline`.
+         */
+        post: operations["init_repository"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/repositories/{id}/test-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tests the access to a repository from an agent.
+         * @description The job runs `restic cat config`. A missing repository gives the typed result `not_initialized`. An offline agent gives HTTP 409 `agent_offline`.
+         */
+        post: operations["test_access_repository"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/secrets": {
@@ -1027,7 +1089,25 @@ export interface components {
              *     agent verifies the update before it uses the next key (FR-PR-04, FR-PR-11).
              */
             signing_key_update: string;
+            /**
+             * @description The public job signing key set: the current key and the next key (ADR-0026). The agent
+             *     verifies a job that the current key signed with this set at once.
+             */
+            signing_keys: components["schemas"]["EnrollmentKeyBody"][];
+            /**
+             * @description Ed25519 signature over the key set, base64 (standard alphabet). The current key signs it
+             *     (ADR-0026).
+             */
+            signing_keys_signature: string;
             tenant_id: string;
+        };
+        /** @description One public job signing key of the enrollment response (ADR-0026). */
+        EnrollmentKeyBody: {
+            key_id: string;
+            /** @description Base64 of the 32 Ed25519 bytes (standard alphabet). */
+            public_key: string;
+            /** @description `current` or `next`. */
+            role: string;
         };
         EnrollmentTokenListResponse: {
             items: components["schemas"]["EnrollmentTokenView"][];
@@ -1048,12 +1128,68 @@ export interface components {
             used_at?: string | null;
         };
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline";
         /** @description The mode and the setup state of the installation. */
         InstanceResponse: {
             /** @description True while the installation has no administrator. */
             setup_required: boolean;
             tenancy_mode: components["schemas"]["TenancyMode"];
+        };
+        /** @description The request body of an init or a test-access action. */
+        JobActionRequest: {
+            /**
+             * @description The agent that runs the job. An absent value uses the maintenance agent of the repository
+             *     (FR-RP-08). A local-path repository needs an explicit or a maintenance agent.
+             */
+            agent_id?: string | null;
+        };
+        /**
+         * @description The kind of a job (FR-PR-02, the seed of the scheduler of epic #7).
+         *
+         *     The kind is general, not init-specific. The string value of each variant is the stored value of
+         *     the `kind` column. It is stable: do not change a string.
+         * @enum {string}
+         */
+        JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "other";
+        /**
+         * @description The typed result of a finished job (FR-AG-09, AC-RP-01).
+         *
+         *     The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the
+         *     `result_code` column holds one of these strings. It is stable: do not change a string.
+         * @enum {string}
+         */
+        JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "cancelled";
+        /**
+         * @description The lifecycle status of a job (FR-SC-03, FR-SC-07).
+         *
+         *     The MVP sends an on-demand job at once, so `queued` is the state before the send and `sent` the
+         *     state after it. The scheduler of epic #7 adds the queue. The string value of each variant is the
+         *     stored value of the `status` column. It is stable: do not change a string.
+         * @enum {string}
+         */
+        JobStatus: "queued" | "sent" | "running" | "succeeded" | "failed" | "expired";
+        /** @description One job with its lifecycle (FR-PR-01). */
+        JobView: {
+            agent_id: string;
+            /** @description In RFC 3339. */
+            created_at: string;
+            /** @description In RFC 3339. Null when the job holds no expiry. */
+            expires_at?: string | null;
+            /** @description In RFC 3339. Null until the job finishes. */
+            finished_at?: string | null;
+            id: string;
+            kind: components["schemas"]["JobKind"];
+            /** @description Null for a job that touches no repository. */
+            repository_id?: string | null;
+            result_code?: components["schemas"]["JobResultCode"] | null;
+            /**
+             * @description A machine-readable error code from the agent. The user interface translates it (NFR-DOC-04).
+             *     It never holds a secret.
+             */
+            result_message?: string | null;
+            status: components["schemas"]["JobStatus"];
+            /** @description In RFC 3339. */
+            updated_at: string;
         };
         MeResponse: {
             /** @description True when the account holds the installation-wide right (ADR-0029). */
@@ -1355,6 +1491,15 @@ export interface operations {
             };
             /** @description The request or the certificate signing request is not valid. */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request body is larger than the limit. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2236,6 +2381,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstanceResponse"];
+                };
+            };
+        };
+    };
+    get_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the job. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The job is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -3272,6 +3467,150 @@ export interface operations {
             };
             /** @description The repository is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    init_repository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobActionRequest"];
+            };
+        };
+        responses: {
+            /** @description The job is sent to the agent. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is offline. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    test_access_repository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobActionRequest"];
+            };
+        };
+        responses: {
+            /** @description The job is sent to the agent. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is offline. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

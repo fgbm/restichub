@@ -43,7 +43,12 @@ export const endpoints = {
 	repositories: {
 		list: '/repositories',
 		create: '/repositories',
-		byId: (id: string) => `/repositories/${encodeURIComponent(id)}`
+		byId: (id: string) => `/repositories/${encodeURIComponent(id)}`,
+		init: (id: string) => `/repositories/${encodeURIComponent(id)}/init`,
+		testAccess: (id: string) => `/repositories/${encodeURIComponent(id)}/test-access`
+	},
+	jobs: {
+		byId: (id: string) => `/jobs/${encodeURIComponent(id)}`
 	},
 	audit: {
 		list: '/audit'

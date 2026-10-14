@@ -412,6 +412,33 @@ export const ru: Record<MessageKey, string> = {
 		'Действие удаляет репозиторий «{name}» и его сохранённые секреты. Данные в хранилище остаются. Продолжить?',
 	'repositories.valueNote':
 		'Агент хранит пароль репозитория только на время одного задания. ResticHub больше никогда не показывает значение секрета после сохранения. Пароль репозитория задаётся при создании, и в этой версии его нельзя изменить. Ключи S3 и учётные данные REST-сервера можно заменить.',
+	'repositories.initialize': 'Инициализировать',
+	'repositories.testAccess': 'Проверить доступ',
+	'repositories.initializeTitle': 'Инициализировать репозиторий?',
+	'repositories.initializeBody':
+		'Сервер управления передаст пароль репозитория выбранному хосту, и хост выполнит restic init. Сохраните копию пароля репозитория вне ResticHub. Если сервер управления будет потерян, без пароля открыть снимки не удастся.',
+	'repositories.testAccessTitle': 'Проверить доступ',
+	'repositories.testAccessBody':
+		'Выбранный хост откроет репозиторий и прочитает его конфигурацию. Проверка только читает данные.',
+	'repositories.jobHost': 'Хост',
+	'repositories.jobHostHint': 'Хост, который выполнит задание. По умолчанию — хост обслуживания.',
+	'repositories.jobHostRequired': 'Выберите хост.',
+	'repositories.jobStart': 'Запустить',
+	'repositories.jobRunning': 'Задание выполняется на хосте. В этом окне появится результат.',
+	'repositories.jobDone': 'Задание завершено.',
+	'repositories.jobStatus': 'Состояние',
+	'repositories.jobResult': 'Результат',
+	'repositories.job.queued': 'В очереди',
+	'repositories.job.sent': 'Отправлено хосту',
+	'repositories.job.running': 'Выполняется',
+	'repositories.job.succeeded': 'Успешно',
+	'repositories.job.failed': 'Ошибка',
+	'repositories.job.expired': 'Срок истёк',
+	'repositories.result.succeeded': 'Репозиторий готов.',
+	'repositories.result.not_initialized': 'Репозитория пока нет. Инициализируйте его.',
+	'repositories.result.config_error': 'Пароль репозитория или учётные данные неверны.',
+	'repositories.result.failed': 'Задание завершилось ошибкой.',
+	'repositories.result.cancelled': 'Задание отменено.',
 
 	// Audit log
 	'audit.title': 'Журнал аудита',
@@ -517,6 +544,8 @@ export const ru: Record<MessageKey, string> = {
 		'Учётная запись принадлежит другим организациям. Пароль может сбросить пользователь или администратор платформы.',
 	'error.username_taken': 'Это имя пользователя занято.',
 	'error.email_taken': 'Этот адрес электронной почты занят.',
+	'error.agent_offline':
+		'Хост не в сети. Очереди заданий нет, поэтому сервер управления отклонил задание. Подключите хост и повторите.',
 	'error.internal_error': 'В сервере управления внутренняя проблема.',
 	'error.network': 'Сервер управления не ответил.',
 	'error.field': 'Исправьте это поле.',

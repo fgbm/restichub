@@ -112,6 +112,21 @@ export type CreateRepositoryRequest = components['schemas']['CreateRepositoryReq
 
 export type UpdateRepositoryRequest = components['schemas']['UpdateRepositoryRequest'];
 
+/** The kind of a job (FR-PR-02). */
+export type JobKind = components['schemas']['JobKind'];
+
+/** The lifecycle status of a job (FR-SC-03). */
+export type JobStatus = components['schemas']['JobStatus'];
+
+/** The typed result of a finished job (FR-AG-09). */
+export type JobResultCode = components['schemas']['JobResultCode'];
+
+/** One job with its lifecycle (FR-PR-01). */
+export type Job = components['schemas']['JobView'];
+
+/** The optional agent that runs a repository job. An absent value uses the maintenance agent. */
+export type JobActionRequest = components['schemas']['JobActionRequest'];
+
 /**
  * One audit record. The generated `diff` type is an opaque object, so the UI
  * replaces it with the diff shape that the control plane writes.

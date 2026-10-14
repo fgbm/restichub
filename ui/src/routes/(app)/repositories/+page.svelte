@@ -5,6 +5,9 @@
 		ApiProblem,
 		BackendSettings,
 		CreateRepositoryRequest,
+		Job,
+		JobResultCode,
+		JobStatus,
 		Repository,
 		RepositoryBackendKind,
 		UpdateRepositoryRequest
@@ -23,7 +26,7 @@
 		Table,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import type { SelectOption, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -55,6 +58,44 @@
 	let deleteTarget = $state<Repository | null>(null);
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
+
+	// The init and test-access dialog (FR-RP-02).
+	let jobOpen = $state(false);
+	let jobRepository = $state<Repository | null>(null);
+	let jobKind = $state<'init' | 'test_access'>('init');
+	let jobHost = $state('');
+	let job = $state<Job | null>(null);
+	let jobError = $state<string | null>(null);
+	let jobStarting = $state(false);
+	let jobTimer: ReturnType<typeof setInterval> | null = null;
+
+	const jobStatusLabels: Record<JobStatus, MessageKey> = {
+		queued: 'repositories.job.queued',
+		sent: 'repositories.job.sent',
+		running: 'repositories.job.running',
+		succeeded: 'repositories.job.succeeded',
+		failed: 'repositories.job.failed',
+		expired: 'repositories.job.expired'
+	};
+
+	const jobResultLabels: Record<JobResultCode, MessageKey> = {
+		succeeded: 'repositories.result.succeeded',
+		failed: 'repositories.result.failed',
+		config_error: 'repositories.result.config_error',
+		not_initialized: 'repositories.result.not_initialized',
+		cancelled: 'repositories.result.cancelled'
+	};
+
+	const jobDone = $derived(
+		job !== null &&
+			(job.status === 'succeeded' || job.status === 'failed' || job.status === 'expired')
+	);
+
+	const jobAgentOptions = $derived<SelectOption[]>(
+		agents
+			.filter((agent) => agent.status === 'active')
+			.map((agent) => ({ value: agent.id, label: agent.hostname }))
+	);
 
 	const canWrite = $derived(getSession()?.role === 'admin');
 	const agentNames = $derived(new Map(agents.map((agent) => [agent.id, agent.hostname])));
@@ -279,6 +320,91 @@
 			deleting = false;
 		}
 	}
+
+	// A closed dialog stops the polling timer.
+	$effect(() => {
+		if (!jobOpen) stopJobTimer();
+	});
+
+	function jobMessage(problem: unknown): string {
+		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		// The mock throws a bare error whose message is a problem code.
+		if (problem instanceof Error) {
+			const known = tErrorCode(problem.message);
+			if (known) return known;
+		}
+		return t('table.error');
+	}
+
+	function openJob(repository: Repository, kind: 'init' | 'test_access'): void {
+		jobRepository = repository;
+		jobKind = kind;
+		// The default host is the maintenance host of the repository (FR-RP-08).
+		jobHost =
+			repository.maintenance_agent_id ??
+			agents.find((agent) => agent.status === 'active')?.id ??
+			'';
+		job = null;
+		jobError = null;
+		jobStarting = false;
+		jobOpen = true;
+	}
+
+	async function startJob(): Promise<void> {
+		if (!jobRepository || !jobHost) return;
+		jobStarting = true;
+		jobError = null;
+		try {
+			const request = { agent_id: jobHost };
+			job =
+				jobKind === 'init'
+					? await service.initRepository(jobRepository.id, request)
+					: await service.testAccessRepository(jobRepository.id, request);
+			pollJob();
+		} catch (problem) {
+			jobError = jobMessage(problem);
+		} finally {
+			jobStarting = false;
+		}
+	}
+
+	function pollJob(): void {
+		stopJobTimer();
+		jobTimer = setInterval(async () => {
+			if (!job) return;
+			try {
+				job = await service.getJob(job.id);
+				if (jobDone) {
+					stopJobTimer();
+					await load();
+				}
+			} catch (problem) {
+				stopJobTimer();
+				jobError = jobMessage(problem);
+			}
+		}, 500);
+	}
+
+	function stopJobTimer(): void {
+		if (jobTimer) {
+			clearInterval(jobTimer);
+			jobTimer = null;
+		}
+	}
+
+	function closeJob(): void {
+		stopJobTimer();
+		jobOpen = false;
+	}
+
+	function jobTone(): StatusTone {
+		if (!job) return 'neutral';
+		if (job.status === 'succeeded') return 'success';
+		if (job.status === 'failed' || job.status === 'expired') return 'failed';
+		if (job.status === 'running') return 'running';
+		if (job.status === 'sent' || job.status === 'queued') return 'queued';
+		return 'neutral';
+	}
 </script>
 
 {#snippet nameCell(repository: Repository)}
@@ -343,6 +469,20 @@
 					align="end"
 					label={t('repositories.moreActions', { name: repository.name })}
 					items={[
+						...(repository.initialized
+							? []
+							: [
+									{
+										label: t('repositories.initialize'),
+										icon: 'plus' as const,
+										onSelect: () => openJob(repository, 'init')
+									}
+								]),
+						{
+							label: t('repositories.testAccess'),
+							icon: 'eye',
+							onSelect: () => openJob(repository, 'test_access')
+						},
 						{
 							label: t('repositories.edit'),
 							icon: 'settings',
@@ -517,6 +657,55 @@
 	onConfirm={confirmDelete}
 />
 
+<Dialog
+	bind:open={jobOpen}
+	size="md"
+	title={jobKind === 'init' ? t('repositories.initializeTitle') : t('repositories.testAccessTitle')}
+	onsubmit={startJob}
+>
+	{#if jobError}
+		<Alert tone="danger" title={jobError} />
+	{/if}
+	{#if jobKind === 'init'}
+		<Alert tone="attention" icon="lock" title={t('repositories.initialize')}>
+			{t('repositories.initializeBody')}
+		</Alert>
+	{:else}
+		<Alert tone="info" icon="eye" title={t('repositories.testAccess')}>
+			{t('repositories.testAccessBody')}
+		</Alert>
+	{/if}
+	{#if job}
+		<div class="job">
+			<div class="job__row">
+				<span class="job__label">{t('repositories.jobStatus')}</span>
+				<StatusPill tone={jobTone()}>{t(jobStatusLabels[job.status])}</StatusPill>
+			</div>
+			<p class="job__result">
+				{jobDone && job.result_code
+					? t(jobResultLabels[job.result_code])
+					: t('repositories.jobRunning')}
+			</p>
+		</div>
+	{:else}
+		<Select
+			id="job-host"
+			label={t('repositories.jobHost')}
+			help={t('repositories.jobHostHint')}
+			options={jobAgentOptions}
+			bind:value={jobHost}
+		/>
+	{/if}
+	{#snippet footer()}
+		<Button onclick={closeJob}>{t('common.close')}</Button>
+		{#if !job}
+			<Button type="submit" variant="primary" loading={jobStarting} disabled={!jobHost}>
+				{t('repositories.jobStart')}
+			</Button>
+		{/if}
+	{/snippet}
+</Dialog>
+
 <style>
 	.repo {
 		display: flex;
@@ -546,5 +735,27 @@
 
 	.note {
 		margin-top: var(--rh-space-4);
+	}
+
+	.job {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-2);
+	}
+
+	.job__row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--rh-space-3);
+	}
+
+	.job__label {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.job__result {
+		margin: 0;
 	}
 </style>

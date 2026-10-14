@@ -408,6 +408,33 @@ export const en = {
 		'This action removes the repository "{name}" and its stored secrets. The data in the backend stays. Continue?',
 	'repositories.valueNote':
 		'An agent holds the repository password only for the duration of one job. ResticHub shows a secret value never again after you save it. The repository password is set at creation and cannot be changed in this version. You can replace the S3 keys and the REST server credentials.',
+	'repositories.initialize': 'Initialize',
+	'repositories.testAccess': 'Test access',
+	'repositories.initializeTitle': 'Initialize the repository?',
+	'repositories.initializeBody':
+		'The control plane sends the repository password to the selected host, which runs restic init. Keep a copy of the repository password outside ResticHub. If the control plane is lost, you cannot open the snapshots without the password.',
+	'repositories.testAccessTitle': 'Test the access',
+	'repositories.testAccessBody':
+		'The selected host opens the repository and reads its configuration. The test is read-only.',
+	'repositories.jobHost': 'Host',
+	'repositories.jobHostHint': 'The host that runs the job. The default is the maintenance host.',
+	'repositories.jobHostRequired': 'Select a host.',
+	'repositories.jobStart': 'Start',
+	'repositories.jobRunning': 'The job runs on the host. This dialog shows the result.',
+	'repositories.jobDone': 'The job finished.',
+	'repositories.jobStatus': 'Status',
+	'repositories.jobResult': 'Result',
+	'repositories.job.queued': 'Waiting',
+	'repositories.job.sent': 'Sent to the host',
+	'repositories.job.running': 'Running',
+	'repositories.job.succeeded': 'Succeeded',
+	'repositories.job.failed': 'Failed',
+	'repositories.job.expired': 'Expired',
+	'repositories.result.succeeded': 'The repository is ready.',
+	'repositories.result.not_initialized': 'The repository does not exist yet. Initialize it.',
+	'repositories.result.config_error': 'The repository password or the credentials are not correct.',
+	'repositories.result.failed': 'The job failed.',
+	'repositories.result.cancelled': 'The job was cancelled.',
 
 	// Audit log
 	'audit.title': 'Audit log',
@@ -513,6 +540,8 @@ export const en = {
 		'This account belongs to other organizations. The user or a Platform Admin can reset the password.',
 	'error.username_taken': 'This user name is taken.',
 	'error.email_taken': 'This email is taken.',
+	'error.agent_offline':
+		'The host is offline. The control plane holds no job queue, so it refused the job. Connect the host and try again.',
 	'error.internal_error': 'The control plane has an internal problem.',
 	'error.network': 'The control plane did not answer.',
 	'error.field': 'Correct this field.',
