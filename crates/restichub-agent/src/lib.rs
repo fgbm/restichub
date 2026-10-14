@@ -4,6 +4,7 @@
 //! configuration directory (FR-AG-04) and runs as an operating system service (FR-AG-01). The
 //! protocol stream arrives with #50; [`commands::run`] is a stub until then.
 
+pub mod acl;
 pub mod cli;
 pub mod commands;
 pub mod enroll;

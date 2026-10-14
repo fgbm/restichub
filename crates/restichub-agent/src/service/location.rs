@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 
 /// Refuses an agent binary that an account other than root or Administrators can change (T20).
 ///
-/// The check covers the executable, the restic binary next to it, and every parent directory up to
-/// the file system root.
+/// The check covers the executable, the restic binary next to it, the directory that holds them and
+/// every parent directory up to the file system root.
 ///
 /// # Errors
 ///
@@ -15,18 +15,31 @@ use anyhow::{Context, Result};
 pub fn check(exe: &Path) -> Result<()> {
     let restic = exe.with_file_name(crate::restic::RESTIC_FILE_NAME);
     for path in [exe, restic.as_path()] {
-        check_path(path)?;
+        check_target(path)?;
     }
-    let mut current = exe.parent();
-    while let Some(dir) = current {
-        check_path(dir)?;
-        current = dir.parent();
+    if let Some(dir) = exe.parent() {
+        check_target(dir)?;
+        let mut current = dir.parent();
+        while let Some(parent) = current {
+            check_parent_dir(parent)?;
+            current = parent.parent();
+        }
     }
     Ok(())
 }
 
 #[cfg(unix)]
-fn check_path(path: &Path) -> Result<()> {
+fn check_target(path: &Path) -> Result<()> {
+    check_unix(path)
+}
+
+#[cfg(unix)]
+fn check_parent_dir(path: &Path) -> Result<()> {
+    check_unix(path)
+}
+
+#[cfg(unix)]
+fn check_unix(path: &Path) -> Result<()> {
     use std::os::unix::fs::MetadataExt as _;
     let metadata =
         std::fs::metadata(path).with_context(|| format!("cannot read {}", path.display()))?;
@@ -37,18 +50,38 @@ fn check_path(path: &Path) -> Result<()> {
             path.display()
         );
     }
+    // An extended POSIX ACL can grant a write that the mode does not show.
+    if crate::acl::has_extended_acl(path)? {
+        anyhow::bail!(
+            "{} holds an extended access control list; install the agent under /opt/restichub-agent and keep it root-owned",
+            path.display()
+        );
+    }
     Ok(())
 }
 
 #[cfg(windows)]
-fn check_path(path: &Path) -> Result<()> {
-    crate::winsec::check_admin_only(path).with_context(|| {
-        "install the agent under %ProgramFiles%\\ResticHub\\Agent and keep it owned by SYSTEM and Administrators".to_owned()
-    })
+fn check_target(path: &Path) -> Result<()> {
+    crate::winsec::check_admin_only(path).with_context(|| install_hint())
+}
+
+#[cfg(windows)]
+fn check_parent_dir(path: &Path) -> Result<()> {
+    crate::winsec::check_parent(path).with_context(|| install_hint())
+}
+
+#[cfg(windows)]
+fn install_hint() -> String {
+    "install the agent under %ProgramFiles%\\ResticHub\\Agent and keep it owned by SYSTEM and Administrators".to_owned()
 }
 
 #[cfg(not(any(unix, windows)))]
-fn check_path(_path: &Path) -> Result<()> {
+fn check_target(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn check_parent_dir(_path: &Path) -> Result<()> {
     Ok(())
 }
 
