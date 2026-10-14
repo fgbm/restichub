@@ -180,7 +180,9 @@ mod tests {
     use restichub_compiler::arg::build_command;
     use restichub_proto::agent::v1::{Job, RepositoryAccess, Step, UnlockStep, step};
 
-    use super::{restic_command, spawn_verified};
+    use super::restic_command;
+    #[cfg(unix)]
+    use super::spawn_verified;
 
     fn command_line() -> restichub_compiler::CommandLine {
         let job = Job {
@@ -207,6 +209,7 @@ mod tests {
         build_command(&validated, &step).expect("the command must build")
     }
 
+    #[cfg(unix)]
     fn temp_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "restichub-agent-exec-{name}-{}",
