@@ -643,6 +643,9 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.repository_missing': 'Репозиторий удалён.',
 	'jobs.reason.repository_changed': 'Профиль теперь использует другой репозиторий.',
 	'jobs.reason.agent_facts_invalid': 'Сведения о хосте непригодны.',
+	'jobs.reason.forget_selected_nothing': 'forget не выбрал ни одного снимка',
+	'jobs.reason.agent_capability_missing':
+		'Агент слишком старый для этой политики хранения. Обновите агент.',
 	'jobs.reason.step_missing': 'В профиле больше нет этого шага.',
 	'jobs.reason.job_invalid': 'Задание не прошло проверку.',
 	'jobs.reason.unsupported_kind': 'Очередь не выполняет задания этого вида.',

@@ -10,8 +10,8 @@ use ed25519_dalek::SigningKey;
 use restichub_agent::jobs::Jobs;
 use restichub_proto::agent::v1::{
     AgentMessage, BackupStep, CheckStep, ForgetStep, InitStep, Job, JobResult, LocalCredentials,
-    LogChunk, PruneStep, RepositoryAccess, SignedJob, SnapshotsStep, StatsStep, Step, StepProgress,
-    StepResult, TestAccessStep, UnlockAllStep, UnlockStep, agent_message,
+    LogChunk, PruneStep, RepositoryAccess, SignedJob, SnapshotsFilter, SnapshotsStep, StatsStep,
+    Step, StepProgress, StepResult, TestAccessStep, UnlockAllStep, UnlockStep, agent_message,
     repository_access::BackendCredentials, step,
 };
 use restichub_proto::signing::{KeyRing, sign_job};
@@ -75,6 +75,9 @@ pub fn init(repository: &str) -> Step {
     )
 }
 
+/// The tag that the backups of these tests carry and that the forget step filters on.
+pub const PROFILE_TAG: &str = "restichub-profile-test";
+
 pub fn backup(repository: &str, paths: &[&str]) -> BackupStep {
     BackupStep {
         repository_id: repository.to_owned(),
@@ -113,6 +116,10 @@ pub fn forget_step(repository: &str, keep_last: u32) -> Step {
         step::Kind::Forget(ForgetStep {
             repository_id: repository.to_owned(),
             keep_last,
+            filter: Some(SnapshotsFilter {
+                tags: vec![PROFILE_TAG.to_owned()],
+                ..SnapshotsFilter::default()
+            }),
             ..ForgetStep::default()
         }),
     )

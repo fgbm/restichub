@@ -408,7 +408,8 @@ fn overwrite_value(mode: OverwriteMode) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use restichub_proto::agent::v1::{
-        BackupStep, HookStep, Job, RepositoryAccess, Step, UnlockStep, step,
+        BackupStep, ForgetStep, HookStep, Job, RepositoryAccess, SnapshotsFilter, Step, UnlockStep,
+        step,
     };
 
     use super::{ArgError, MASK, build_command, is_safe_env, mask_secrets};
@@ -619,6 +620,42 @@ mod tests {
         assert_eq!(
             build_command(&validated, &step),
             Err(ArgError::UnknownRepository)
+        );
+    }
+
+    #[test]
+    fn fr_rp_08_all_tags_form_one_and_list_and_tags_stay_separate() {
+        let forget = |filter: SnapshotsFilter| Step {
+            step_id: "forget".to_owned(),
+            kind: Some(step::Kind::Forget(ForgetStep {
+                repository_id: "repo-1".to_owned(),
+                keep_last: 1,
+                filter: Some(filter),
+                ..ForgetStep::default()
+            })),
+            ..Step::default()
+        };
+        let and_list = line(&forget(SnapshotsFilter {
+            all_tags: vec!["restichub-profile-a".to_owned(), "daily".to_owned()],
+            ..SnapshotsFilter::default()
+        }));
+        assert!(
+            and_list
+                .args()
+                .contains(&"--tag=restichub-profile-a,daily".to_owned()),
+            "{:?}",
+            and_list.args()
+        );
+        let single = line(&forget(SnapshotsFilter {
+            tags: vec!["restichub-profile-a".to_owned()],
+            ..SnapshotsFilter::default()
+        }));
+        assert!(
+            single
+                .args()
+                .contains(&"--tag=restichub-profile-a".to_owned()),
+            "{:?}",
+            single.args()
         );
     }
 }

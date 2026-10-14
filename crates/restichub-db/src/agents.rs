@@ -29,6 +29,8 @@ pub struct Agent {
     pub agent_version: String,
     pub restic_version: String,
     pub labels: Vec<String>,
+    /// The capabilities that the agent announced in its last `AgentHello` (FR-PR-09).
+    pub capabilities: Vec<String>,
     pub certificate_serial: Vec<u8>,
     pub certificate_expires_at: OffsetDateTime,
     pub status: AgentStatus,
@@ -123,7 +125,7 @@ pub async fn list(
     };
     let mut agents: Vec<Agent> = sqlx::query_as::<_, AgentRow>(
         "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
-                certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
+                capabilities, certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
                 revoked_at, revoked_by_user_id \
          FROM agents \
          WHERE ($1::text IS NULL OR status = $1) \
@@ -150,7 +152,7 @@ pub async fn list(
 pub async fn get(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option<Agent>, DbError> {
     let row = sqlx::query_as::<_, AgentRow>(
         "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
-                certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
+                capabilities, certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
                 revoked_at, revoked_by_user_id \
          FROM agents WHERE id = $1",
     )
@@ -215,6 +217,21 @@ pub async fn touch_last_seen_batch(
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
+/// Stores the capabilities that the agent announced in its `AgentHello` (FR-PR-09).
+pub async fn set_capabilities(
+    tx: &mut TenantTx<'_>,
+    id: AgentId,
+    capabilities: &[String],
+) -> Result<(), DbError> {
+    sqlx::query("UPDATE agents SET capabilities = $2 WHERE id = $1 AND capabilities <> $2")
+        .bind(id)
+        .bind(capabilities)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(())
+}
+
 /// Renames an agent of the tenant.
 ///
 /// `true` when the row changed. A missing agent or an unchanged name returns `false`.
@@ -260,6 +277,7 @@ type AgentRow = (
     String,
     String,
     Vec<String>,
+    Vec<String>,
     Vec<u8>,
     OffsetDateTime,
     AgentStatus,
@@ -279,6 +297,7 @@ impl From<AgentRow> for Agent {
             agent_version,
             restic_version,
             labels,
+            capabilities,
             certificate_serial,
             certificate_expires_at,
             status,
@@ -295,6 +314,7 @@ impl From<AgentRow> for Agent {
             agent_version,
             restic_version,
             labels,
+            capabilities,
             certificate_serial,
             certificate_expires_at,
             status,

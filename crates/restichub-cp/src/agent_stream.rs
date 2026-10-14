@@ -669,7 +669,11 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
                 retire(state, pending);
             }
         }
-        Some(agent_message::Payload::AgentHello(_) | agent_message::Payload::Pong(_)) => {}
+        Some(agent_message::Payload::AgentHello(hello)) => {
+            crate::agents::record_capabilities(state, identity.tenant, identity.agent, &hello)
+                .await;
+        }
+        Some(agent_message::Payload::Pong(_)) => {}
         Some(agent_message::Payload::JobAck(ack)) => {
             crate::jobs::handle_job_ack(state, identity.tenant, identity.agent, &ack).await;
         }

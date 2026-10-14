@@ -228,6 +228,15 @@ impl Env {
 
     /// Enrolls an agent, opens its stream and drains the hello messages.
     pub async fn connect_agent(&self, hostname: &str) -> FakeAgent {
+        let capabilities = restichub_proto::AgentCapability::ALL
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect();
+        self.connect_agent_with(hostname, capabilities).await
+    }
+
+    /// Like [`Env::connect_agent`], for an agent that announces `capabilities` only.
+    pub async fn connect_agent_with(&self, hostname: &str, capabilities: Vec<String>) -> FakeAgent {
         let identity = self.enroll_agent(hostname).await;
         let client_tls = ClientTlsConfig::new()
             .ca_certificate(Certificate::from_pem(der_to_pem(
@@ -252,7 +261,9 @@ impl Env {
             .connect(ReceiverStream::new(rx))
             .await
             .expect("the stream must open");
-        tx.send(hello()).await.expect("cannot send the hello");
+        tx.send(hello(capabilities.clone()))
+            .await
+            .expect("cannot send the hello");
         let mut inbound = response.into_inner();
         let (mut hello_seen, mut update_seen) = (false, false);
         for _ in 0..8 {
@@ -268,12 +279,25 @@ impl Env {
         }
         assert!(hello_seen && update_seen, "the stream hello must arrive");
         let agent_id = AgentId::from_uuid(Uuid::parse_str(&identity.agent_id).expect("agent id"));
+        if !capabilities.is_empty() {
+            eventually(|| async { self.stored_capabilities(agent_id).await == capabilities }).await;
+        }
         FakeAgent {
             id: agent_id,
             identity,
             tx,
             inbound,
         }
+    }
+
+    /// The capabilities that the registry holds for the agent.
+    pub async fn stored_capabilities(&self, agent: AgentId) -> Vec<String> {
+        let mut tx = self.scoped().await;
+        sqlx::query_scalar("SELECT capabilities FROM agents WHERE id = $1")
+            .bind(agent)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("cannot read the capabilities")
     }
 
     /// Creates a local repository whose maintenance agent is `agent` and returns its identifier.
@@ -484,12 +508,13 @@ pub fn id_of(value: &Value) -> Uuid {
     Uuid::parse_str(value["id"].as_str().expect("the object id")).expect("the id is a UUID")
 }
 
-fn hello() -> AgentMessage {
+fn hello(capabilities: Vec<String>) -> AgentMessage {
     AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
             protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
             agent_version: "0.1.0".to_owned(),
+            capabilities,
             ..AgentHello::default()
         })),
     }

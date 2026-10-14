@@ -60,3 +60,8 @@ ALTER TABLE jobs ADD CONSTRAINT jobs_maintenance_schedule_fk
 
 ALTER TABLE jobs ADD CONSTRAINT jobs_maintenance_fire_attempt_unique
     UNIQUE (maintenance_schedule_id, fire_time, attempt);
+
+-- The capabilities that an agent announces in its `AgentHello` (FR-PR-09). The job builder reads
+-- them to decide whether a step may use a field that an older agent does not know. An agent that
+-- announced nothing has an empty list.
+ALTER TABLE agents ADD COLUMN capabilities text[] NOT NULL DEFAULT '{}';

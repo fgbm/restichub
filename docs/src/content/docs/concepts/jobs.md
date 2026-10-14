@@ -98,6 +98,7 @@ If the control plane cannot build a job, the job fails with a reason code:
 |---|---|
 | `compile_failed` | The profile no longer compiles for the agent. |
 | `agent_facts_invalid` | The facts of the agent are not usable. |
+| `agent_capability_missing` | The agent is too old for the step. It does not know a field that the step needs. |
 | `step_missing` | The profile no longer holds the step of the job. |
 | `agent_revoked` | The agent is revoked. |
 | `plan_missing`, `plan_changed` | The plan is deleted, or it moved to another agent. |

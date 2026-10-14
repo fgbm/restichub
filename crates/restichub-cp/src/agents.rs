@@ -25,6 +25,25 @@ use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::validation::Reason;
 
+/// Stores the capabilities that an agent announced in its `AgentHello` (FR-PR-09). The job builder
+/// reads them. A failure leaves the old list, which only makes the builder more careful.
+pub async fn record_capabilities(
+    state: &AppState,
+    tenant: restichub_db::TenantId,
+    agent: AgentId,
+    hello: &restichub_proto::agent::v1::AgentHello,
+) {
+    let result = async {
+        let mut tx = state.db().begin_tenant(tenant).await?;
+        repo::set_capabilities(&mut tx, agent, &hello.capabilities).await?;
+        tx.commit().await
+    }
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(agent = %agent, cause = ?error, "the agent capabilities were not stored");
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AgentView {
     pub id: String,

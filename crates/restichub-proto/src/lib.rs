@@ -27,6 +27,9 @@ pub mod agent {
 
 pub mod signing;
 
+mod capability;
+pub use capability::AgentCapability;
+
 /// Argument validation of a job before signing and before execution (FR-PR-10).
 pub mod validate;
 

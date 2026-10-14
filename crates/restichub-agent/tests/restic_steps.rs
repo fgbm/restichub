@@ -41,7 +41,13 @@ async fn ac_ag_05_the_real_restic_runs_the_backup_and_maintenance_steps() {
         vec![
             test_access("repo-1"),
             init("repo-1"),
-            backup_step("repo-1", &[&data_path]),
+            make_step(
+                "backup",
+                step::Kind::Backup(BackupStep {
+                    tags: vec![PROFILE_TAG.to_owned()],
+                    ..backup("repo-1", &[&data_path])
+                }),
+            ),
         ],
     );
     let result = run(&jobs, &first).await;
@@ -66,6 +72,7 @@ async fn ac_ag_05_the_real_restic_runs_the_backup_and_maintenance_steps() {
             limit_download_kib: 100_000,
             retry_lock: true,
             priority: ProcessPriority::Low as i32,
+            tags: vec![PROFILE_TAG.to_owned()],
             ..backup("repo-1", &[&data_path])
         }),
     );

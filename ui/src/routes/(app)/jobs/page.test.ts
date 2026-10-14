@@ -137,6 +137,7 @@ describe('the Jobs screen', () => {
 					id: 'j_4',
 					status: 'succeeded',
 					result_code: 'succeeded_with_warnings',
+					result_message: 'forget_selected_nothing',
 					finished_at: '2026-10-14T10:03:00Z'
 				}),
 				job({
@@ -153,6 +154,7 @@ describe('the Jobs screen', () => {
 		const table = within(await screen.findByRole('table'));
 		expect(await table.findByText('Succeeded with warnings')).toBeInTheDocument();
 		expect(screen.getByText('The repository is locked by another process.')).toBeInTheDocument();
+		expect(screen.getByText('Forget selected no snapshots')).toBeInTheDocument();
 	});
 
 	it('shows the empty state when no job exists', async () => {

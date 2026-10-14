@@ -14,6 +14,9 @@ use crate::profile::{CheckOptions, GroupBy, HookPhase, Profile, Retention};
 use crate::target::{OperatingSystem, ResticVersion, TargetFacts};
 use crate::template::{self, TemplateError};
 
+/// The prefix of the tags that only the control plane sets (FR-RP-08).
+const RESERVED_TAG_PREFIX: &str = "restichub-";
+
 /// The steps of one target agent, in execution order (FR-PF-04).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
@@ -281,6 +284,7 @@ fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileE
     for (index, tag) in profile.tags.iter().enumerate() {
         tags.push(expand_tag(tag, target, &format!("tags[{index}]"))?);
     }
+    tags.extend(profile.profile_tag.iter().cloned());
 
     let options = &profile.options;
     Ok(Step {
@@ -327,8 +331,10 @@ fn forget_step(
             &format!("retention.filter.hosts[{index}]"),
         )?);
     }
+    // The snapshot needs the profile tag and every tag of the filter (FR-RP-08, ADR-0034).
+    filter.all_tags.extend(profile.profile_tag.iter().cloned());
     for (index, tag) in retention.filter.tags.iter().enumerate() {
-        filter.tags.push(expand_tag(
+        filter.all_tags.push(expand_tag(
             tag,
             target,
             &format!("retention.filter.tags[{index}]"),
@@ -457,10 +463,17 @@ fn expand_field(value: &str, target: &TargetFacts, field: &str) -> Result<String
 }
 
 /// Expands a tag and rejects the forms that restic reads differently: an empty
-/// tag, a comma and surrounding space (AC-PR-08).
+/// tag, a comma and surrounding space (AC-PR-08). A template may expand to the
+/// reserved prefix, so the check runs after the expansion (FR-RP-08).
 fn expand_tag(value: &str, target: &TargetFacts, field: &str) -> Result<String, CompileError> {
     let expanded = expand_field(value, target, field)?;
-    if expanded.is_empty() || expanded.contains(',') || expanded.trim() != expanded {
+    if expanded.is_empty()
+        || expanded.contains(',')
+        || expanded.trim() != expanded
+        || expanded
+            .to_ascii_lowercase()
+            .starts_with(RESERVED_TAG_PREFIX)
+    {
         return Err(CompileError::InvalidValue {
             field: FieldPath::new(field),
         });

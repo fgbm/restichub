@@ -603,6 +603,9 @@ impl ValidatedProfile {
             excludes: self.excludes.clone(),
             exclude_files: self.exclude_files.clone(),
             tags: self.tags.clone(),
+            // The profile has no identifier before the first save, so this tag only satisfies the
+            // compile check. The stored profile gets its own tag in `compiler_profile_from_row`.
+            profile_tag: Some(format!("{RESERVED_TAG_PREFIX}profile-validation")),
             options: CompilerBackupOptions {
                 use_fs_snapshot: self.options.use_fs_snapshot,
                 one_file_system: self.options.one_file_system,
@@ -633,15 +636,13 @@ pub const RESERVED_TAG_PREFIX: &str = "restichub-";
 
 /// The stored profile as the compiler input (FR-PF-04).
 pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, ApiError> {
-    let mut tags = profile.tags.clone();
-    tags.push(profile_tag(profile.id));
     let validated = ValidatedProfile {
         name: profile.name.clone(),
         repository_id: profile.repository_id,
         paths: paths_from_row(profile),
         excludes: profile.excludes.clone(),
         exclude_files: profile.exclude_files.clone(),
-        tags,
+        tags: profile.tags.clone(),
         options: BackupOptions {
             use_fs_snapshot: profile.use_fs_snapshot,
             one_file_system: profile.one_file_system,
@@ -653,7 +654,9 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
         retention: retention_from_row(profile)?,
         check: check_from_row(profile)?,
     };
-    Ok(validated.to_compiler_profile())
+    let mut compiler_profile = validated.to_compiler_profile();
+    compiler_profile.profile_tag = Some(profile_tag(profile.id));
+    Ok(compiler_profile)
 }
 
 fn compiler_hook(hook: &HookRef) -> CompilerHookRef {
@@ -959,6 +962,14 @@ fn validate_retention(retention: Retention) -> Result<Retention, ApiError> {
     }
     let keep_tags = validate_tags("retention.keep_tags", retention.keep_tags)?;
     ensure_count("retention.keep_tags", keep_tags.len(), MAX_RETENTION_LIST)?;
+    // The maintenance step of a profile covers every agent of its plans, so a host name that
+    // depends on one agent has no single meaning (ADR-0034).
+    if retention.filter.hosts.iter().any(|host| host.contains('{')) {
+        return Err(ApiError::invalid_field(
+            "retention.filter.hosts",
+            Reason::InvalidFormat,
+        ));
+    }
     let filter = SnapshotFilter {
         hosts: validate_patterns("retention.filter.hosts", retention.filter.hosts)?,
         tags: validate_tags("retention.filter.tags", retention.filter.tags)?,

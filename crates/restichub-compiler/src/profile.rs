@@ -14,6 +14,9 @@ pub struct Profile {
     pub excludes: Vec<String>,
     pub exclude_files: Vec<String>,
     pub tags: Vec<String>,
+    /// Marks the snapshots of this profile (FR-RP-08). The compiler adds it to the backup and to
+    /// the filter of the `forget` step. A user tag may not use its reserved prefix.
+    pub profile_tag: Option<String>,
     pub options: BackupOptions,
     pub hooks: Vec<HookRef>,
     /// Policy that produces the `forget` and `prune` steps.

@@ -40,6 +40,7 @@ pub enum Refusal {
     RepositoryMissing,
     RepositoryChanged,
     NotMaintenanceAgent,
+    AgentCapabilityMissing,
     AgentFactsInvalid,
     CompileFailed,
     StepMissing,
@@ -58,6 +59,7 @@ impl Refusal {
             Self::RepositoryMissing => "repository_missing",
             Self::RepositoryChanged => "repository_changed",
             Self::NotMaintenanceAgent => "not_maintenance_agent",
+            Self::AgentCapabilityMissing => "agent_capability_missing",
             Self::AgentFactsInvalid => "agent_facts_invalid",
             Self::CompileFailed => "compile_failed",
             Self::StepMissing => "step_missing",
@@ -71,6 +73,7 @@ impl Refusal {
     pub fn result_code(self) -> JobResultCode {
         match self {
             Self::AgentFactsInvalid
+            | Self::AgentCapabilityMissing
             | Self::CompileFailed
             | Self::StepMissing
             | Self::SecretUnavailable => JobResultCode::ConfigError,
@@ -121,7 +124,7 @@ pub async fn build(
         return Err(BuildError::Refused(Refusal::RepositoryMissing));
     };
 
-    let steps = match job.kind {
+    let mut steps = match job.kind {
         JobKind::Backup => plan_steps(tx, job, &agent, repository_id, now).await?,
         // Only the maintenance agent of the repository receives these steps (FR-RP-08, AC-RP-04).
         JobKind::Forget | JobKind::Prune | JobKind::Check => {
@@ -146,6 +149,8 @@ pub async fn build(
             return Err(BuildError::Refused(Refusal::UnsupportedKind));
         }
     };
+
+    super::compat::fit_steps(&mut steps, &agent.capabilities).map_err(BuildError::Refused)?;
 
     let provider = state
         .kek()

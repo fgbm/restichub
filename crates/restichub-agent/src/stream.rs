@@ -529,6 +529,10 @@ async fn send_hello(tx: &mpsc::Sender<AgentMessage>, restic_version: &str) -> Re
             restic_version: restic_version.to_owned(),
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
+            capabilities: restichub_proto::AgentCapability::ALL
+                .iter()
+                .map(|capability| capability.as_str().to_owned())
+                .collect(),
             ..AgentHello::default()
         })),
     };
@@ -540,7 +544,7 @@ async fn send_hello(tx: &mpsc::Sender<AgentMessage>, restic_version: &str) -> Re
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use super::{Backoff, endpoint_host, next_attempt, pong, refused};
+    use super::{Backoff, endpoint_host, next_attempt, pong, refused, send_hello};
     use restichub_proto::agent::v1::{Ping, agent_message};
 
     #[test]
@@ -593,5 +597,16 @@ mod tests {
         assert!(refused(tonic::Code::PermissionDenied));
         assert!(!refused(tonic::Code::Internal));
         assert!(!refused(tonic::Code::Unavailable));
+    }
+
+    #[tokio::test]
+    async fn fr_pr_09_the_hello_announces_the_forget_all_tags_capability() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        send_hello(&tx, "0.19.0").await.expect("the hello is sent");
+        let message = rx.recv().await.expect("a message");
+        let Some(agent_message::Payload::AgentHello(hello)) = message.payload else {
+            panic!("the first message must be an AgentHello");
+        };
+        assert!(restichub_proto::AgentCapability::ForgetAllTags.is_listed(&hello.capabilities));
     }
 }

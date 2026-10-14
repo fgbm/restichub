@@ -6,14 +6,14 @@
 //!
 //! The retention of a profile may remove only the snapshots of that profile. Each profile therefore
 //! gives one `forget` step. It filters on the profile tag, joined with the filter of the profile,
-//! and it groups by the grouping of the profile.
+//! and it groups by the grouping of the profile, with the host always added (ADR-0034).
 
 use std::collections::HashSet;
 
 use restichub_compiler::compile;
 use restichub_db::jobs::Job;
 use restichub_db::{
-    AgentId, AgentStatus, JobKind, ProfileId, RepositoryId, TenantTx, agents as agents_repo,
+    AgentId, AgentStatus, JobKind, RepositoryId, TenantTx, agents as agents_repo,
     plans as plans_repo, profiles as profiles_repo,
 };
 use restichub_proto::agent::v1::{
@@ -22,7 +22,7 @@ use restichub_proto::agent::v1::{
 use time::OffsetDateTime;
 
 use super::build::{BuildError, Refusal, force_retry_lock, simple_step};
-use crate::profiles::{compiler_profile_from_row, profile_tag, target_facts};
+use crate::profiles::{compiler_profile_from_row, target_facts};
 
 /// Builds the steps of a `forget`, `prune` or `check` job for the repository.
 ///
@@ -113,14 +113,10 @@ async fn forget_steps(
             else {
                 continue;
             };
-            let profile_filter = forget.filter.take().unwrap_or_default();
-            if !host_allowed(&profile_filter, &agent.hostname) {
+            if !host_allowed(forget.filter.as_ref(), &agent.hostname) {
                 continue;
             }
-            forget.filter = Some(isolation_filter(profile.id, profile_filter));
-            if forget.group_by.is_empty() {
-                forget.group_by = vec![ForgetGroupBy::Host as i32, ForgetGroupBy::Paths as i32];
-            }
+            ensure_host_group(&mut forget.group_by);
             steps.push(simple_step(
                 &format!("forget-{}", steps.len() + 1),
                 step::Kind::Forget(forget),
@@ -132,24 +128,20 @@ async fn forget_steps(
 }
 
 /// True when the host list of the profile filter is empty or names the host.
-fn host_allowed(filter: &SnapshotsFilter, hostname: &str) -> bool {
-    filter.hosts.is_empty() || filter.hosts.iter().any(|host| host == hostname)
+fn host_allowed(filter: Option<&SnapshotsFilter>, hostname: &str) -> bool {
+    filter.is_none_or(|filter| {
+        filter.hosts.is_empty() || filter.hosts.iter().any(|host| host == hostname)
+    })
 }
 
-/// The filter of a `forget` step: the profile filter narrowed to the snapshots of one profile.
-///
-/// The profile tag is the exact key (FR-RP-08). The tags of the profile filter join it, so a
-/// snapshot needs the profile tag and every tag of the filter. The step has no host filter of its
-/// own, because the host name of an agent is editable. Each host and path set keeps its own policy
-/// through the grouping.
-pub(super) fn isolation_filter(profile: ProfileId, filter: SnapshotsFilter) -> SnapshotsFilter {
-    let mut all_tags = vec![profile_tag(profile)];
-    all_tags.extend(filter.tags);
-    SnapshotsFilter {
-        hosts: filter.hosts,
-        tags: Vec::new(),
-        paths: filter.paths,
-        all_tags,
+/// Groups the snapshots by host. The profile may run on several agents, and the retention of one
+/// agent never counts the snapshots of another agent (ADR-0034). A grouping that holds no host gets
+/// one; an empty grouping gets the restic default.
+fn ensure_host_group(group_by: &mut Vec<i32>) {
+    if group_by.is_empty() {
+        *group_by = vec![ForgetGroupBy::Host as i32, ForgetGroupBy::Paths as i32];
+    } else if !group_by.contains(&(ForgetGroupBy::Host as i32)) {
+        group_by.insert(0, ForgetGroupBy::Host as i32);
     }
 }
 
@@ -224,20 +216,18 @@ mod tests {
     }
 
     #[test]
-    fn fr_rp_08_the_filter_joins_the_profile_tag_with_the_profile_filter() {
-        let profile = ProfileId::new();
-        let filter = isolation_filter(
-            profile,
-            SnapshotsFilter {
-                hosts: vec!["host-a".to_owned()],
-                tags: vec!["daily".to_owned()],
-                paths: vec!["/srv".to_owned()],
-                all_tags: Vec::new(),
-            },
-        );
-        assert_eq!(filter.hosts, ["host-a"]);
-        assert_eq!(filter.paths, ["/srv"]);
-        assert!(filter.tags.is_empty());
-        assert_eq!(filter.all_tags, [profile_tag(profile), "daily".to_owned()]);
+    fn fr_rp_08_the_grouping_always_holds_the_host() {
+        let host = ForgetGroupBy::Host as i32;
+        let paths = ForgetGroupBy::Paths as i32;
+        let tags = ForgetGroupBy::Tags as i32;
+        let mut empty = Vec::new();
+        ensure_host_group(&mut empty);
+        assert_eq!(empty, [host, paths]);
+        let mut without_host = vec![paths];
+        ensure_host_group(&mut without_host);
+        assert_eq!(without_host, [host, paths]);
+        let mut with_host = vec![tags, host];
+        ensure_host_group(&mut with_host);
+        assert_eq!(with_host, [tags, host]);
     }
 }

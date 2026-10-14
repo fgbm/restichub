@@ -3,8 +3,8 @@
 use ed25519_dalek::SigningKey;
 use restichub_proto::agent::v1::{
     BackupStep, CheckStep, ForgetStep, HookStep, InitStep, Job, LsStep, PruneStep,
-    RepositoryAccess, RestoreStep, SnapshotsStep, StatsStep, Step, TestAccessStep, UnlockAllStep,
-    UnlockStep, step,
+    RepositoryAccess, RestoreStep, SnapshotsFilter, SnapshotsStep, StatsStep, Step, TestAccessStep,
+    UnlockAllStep, UnlockStep, step,
 };
 use restichub_proto::signing::{Expected, KeyRing, sign_job};
 
@@ -309,6 +309,10 @@ fn fr_pr_02_accepts_the_step_kinds_of_the_agent_core() {
         step::Kind::Forget(ForgetStep {
             repository_id: "repo-1".to_owned(),
             keep_last: 1,
+            filter: Some(SnapshotsFilter {
+                tags: vec!["restichub-profile-a".to_owned()],
+                ..SnapshotsFilter::default()
+            }),
             ..ForgetStep::default()
         }),
         step::Kind::Prune(PruneStep {
@@ -486,5 +490,40 @@ fn a_repository_step_is_needed_for_the_chain() {
     match decision {
         Intake::New(validated) => assert_eq!(validated.job().steps.len(), 2),
         _ => panic!("the init chain must be accepted"),
+    }
+}
+
+#[test]
+fn fr_rp_08_the_agent_rejects_a_forget_without_a_tag_filter() {
+    let filters = [
+        None,
+        Some(SnapshotsFilter::default()),
+        Some(SnapshotsFilter {
+            hosts: vec!["host-a".to_owned()],
+            ..SnapshotsFilter::default()
+        }),
+    ];
+    for filter in filters {
+        let step = Step {
+            step_id: "forget".to_owned(),
+            kind: Some(step::Kind::Forget(ForgetStep {
+                repository_id: "repo-1".to_owned(),
+                keep_last: 1,
+                filter,
+                ..ForgetStep::default()
+            })),
+            ..Step::default()
+        };
+        let signed = sign_job(
+            &job("agent-1", "tenant-1", 900, 2_000, vec![step]),
+            KEY_ID,
+            &signing_key(),
+        );
+        let mut journal = temp_journal("forget-no-tag");
+        let decision = intake(&signed, &ring(), &expected(), &mut journal);
+        assert!(matches!(
+            decision,
+            Intake::Rejected(RejectReason::Malformed)
+        ));
     }
 }

@@ -20,6 +20,7 @@ use crate::target::{
 
 const BAD_OPTION: &str = "--password-command=cmd /c calc";
 const BAD_SHORT: &str = "-x";
+const PROFILE_TAG: &str = "restichub-profile-test";
 
 fn date(year: i32, month: u8, day: u8) -> OffsetDateTime {
     let month = Month::try_from(month).unwrap_or(Month::January);
@@ -76,6 +77,7 @@ fn profile() -> Profile {
             by_os: BTreeMap::new(),
         },
         tags: vec!["daily".to_owned()],
+        profile_tag: Some(PROFILE_TAG.to_owned()),
         ..Profile::default()
     }
 }
@@ -181,6 +183,116 @@ fn retention_and_check_add_maintenance_steps() {
             other => panic!("unexpected step {other:?}"),
         }
     }
+}
+
+fn forget_filter(plan: &Plan) -> restichub_proto::agent::v1::SnapshotsFilter {
+    plan.steps
+        .iter()
+        .find_map(|planned| match &planned.step.kind {
+            Some(step::Kind::Forget(forget)) => forget.filter.clone(),
+            _ => None,
+        })
+        .expect("a forget step with a filter")
+}
+
+#[test]
+fn fr_rp_08_the_forget_carries_the_profile_tag_and_the_filter_tags_as_one_and_list() {
+    let mut profile = profile();
+    profile.retention = Some(Retention {
+        keep_last: 1,
+        filter: SnapshotFilter {
+            tags: vec!["daily".to_owned()],
+            ..SnapshotFilter::default()
+        },
+        ..Retention::default()
+    });
+    let plan = plan(&profile, &target());
+    let filter = forget_filter(&plan);
+    assert_eq!(filter.all_tags, [PROFILE_TAG, "daily"]);
+    assert!(filter.tags.is_empty());
+
+    let preview = preview(&plan, &repository(), &allow_list()).expect("the preview");
+    let forget = preview
+        .iter()
+        .find(|step| matches!(step.step.kind, Some(step::Kind::Forget(_))))
+        .expect("a forget step");
+    assert!(
+        forget
+            .command
+            .contains(&format!("--tag={PROFILE_TAG},daily")),
+        "{}",
+        forget.command
+    );
+}
+
+#[test]
+fn fr_rp_08_the_forget_without_filter_tags_filters_on_the_profile_tag() {
+    let mut profile = profile();
+    profile.retention = Some(Retention {
+        keep_last: 1,
+        ..Retention::default()
+    });
+    assert_eq!(
+        forget_filter(&plan(&profile, &target())).all_tags,
+        [PROFILE_TAG]
+    );
+
+    profile.profile_tag = None;
+    assert!(
+        matches!(
+            error(&profile, &target()),
+            CompileError::StepsRejected { .. }
+        ),
+        "a forget without any tag is not a valid step"
+    );
+}
+
+#[test]
+fn fr_rp_08_a_tag_that_expands_to_the_reserved_prefix_fails_to_compile() {
+    let mut facts = target();
+    facts.agent_name = "ResticHub-profile-other".to_owned();
+    let template = "{{agent.name}}";
+
+    let mut tagged = profile();
+    tagged.tags = vec![template.to_owned()];
+    assert!(matches!(
+        error(&tagged, &facts),
+        CompileError::InvalidValue { .. }
+    ));
+
+    let mut filtered = profile();
+    filtered.retention = Some(Retention {
+        keep_last: 1,
+        filter: SnapshotFilter {
+            tags: vec![template.to_owned()],
+            ..SnapshotFilter::default()
+        },
+        ..Retention::default()
+    });
+    assert!(matches!(
+        error(&filtered, &facts),
+        CompileError::InvalidValue { .. }
+    ));
+
+    let mut keep = profile();
+    keep.retention = Some(Retention {
+        keep_last: 1,
+        keep_tags: vec![template.to_owned()],
+        ..Retention::default()
+    });
+    assert!(matches!(
+        error(&keep, &facts),
+        CompileError::InvalidValue { .. }
+    ));
+}
+
+#[test]
+fn fr_rp_08_the_backup_carries_the_profile_tag() {
+    let plan = plan(&profile(), &target());
+    let Some(step::Kind::Backup(backup)) = &plan.steps[0].step.kind else {
+        panic!("a backup step");
+    };
+    assert_eq!(backup.tags, ["daily", PROFILE_TAG]);
 }
 
 #[test]
@@ -511,6 +623,7 @@ proptest! {
             excludes: values.clone(),
             exclude_files: values.clone(),
             tags: values.clone(),
+            profile_tag: Some(PROFILE_TAG.to_owned()),
             retention: Some(Retention {
                 keep_last: 1,
                 keep_tags: values.clone(),
@@ -564,7 +677,7 @@ proptest! {
                         prop_assert!(!tag.is_empty() && !tag.contains(',') && tag.trim() == tag);
                     }
                     if let Some(filter) = &forget.filter {
-                        for tag in &filter.tags {
+                        for tag in filter.tags.iter().chain(&filter.all_tags) {
                             prop_assert!(!tag.is_empty() && !tag.contains(',') && tag.trim() == tag);
                         }
                     }

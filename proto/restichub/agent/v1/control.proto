@@ -158,6 +158,10 @@ message AgentHello {
   // protection uses the job journal now (ADR-0020).
   reserved 9;
   reserved "last_accepted_sequence";
+  // Optional features that the agent understands, for example
+  // "forget-all-tags". The control plane sends a field that an older agent
+  // does not know only to an agent that lists the matching capability.
+  repeated string capabilities = 10;
 }
 
 // HookMetadata is the public part of one allow-list hook (FR-HK-04).

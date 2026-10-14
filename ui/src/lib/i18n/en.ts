@@ -638,6 +638,9 @@ export const en = {
 	'jobs.reason.repository_missing': 'The repository is deleted.',
 	'jobs.reason.repository_changed': 'The profile now uses another repository.',
 	'jobs.reason.agent_facts_invalid': 'The facts of the host are not usable.',
+	'jobs.reason.forget_selected_nothing': 'Forget selected no snapshots',
+	'jobs.reason.agent_capability_missing':
+		'The agent is too old for this retention. Update the agent.',
 	'jobs.reason.step_missing': 'The profile no longer holds this step.',
 	'jobs.reason.job_invalid': 'The job did not pass the validation.',
 	'jobs.reason.unsupported_kind': 'The queue does not run this kind of job.',

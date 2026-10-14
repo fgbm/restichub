@@ -123,9 +123,13 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
             check_repository_id(job, repository_ids, &forget.repository_id)?;
             check_format(job, &forget.keep_within, is_keep_within)?;
             check_tags(job, forget.keep_tags.iter())?;
-            if let Some(filter) = &forget.filter {
-                check_filter(job, filter)?;
-            }
+            // A forget without a tag filter reaches every profile of the repository (FR-RP-08).
+            let filter = forget
+                .filter
+                .as_ref()
+                .filter(|filter| !filter.tags.is_empty() || !filter.all_tags.is_empty())
+                .ok_or_else(|| reject(job, RejectReason::Malformed))?;
+            check_filter(job, filter)?;
         }
         step::Kind::Prune(prune) => {
             check_repository_id(job, repository_ids, &prune.repository_id)?;
@@ -522,6 +526,13 @@ mod tests {
         value.to_owned()
     }
 
+    fn tagged() -> SnapshotsFilter {
+        SnapshotsFilter {
+            tags: vec![string("restichub-profile-a")],
+            ..SnapshotsFilter::default()
+        }
+    }
+
     fn malformed(job: &Job) -> bool {
         validate_job(job) == Err(reject(job, RejectReason::Malformed))
     }
@@ -562,6 +573,7 @@ mod tests {
             })),
             step(step::Kind::Forget(ForgetStep {
                 repository_id: string("repo-1"),
+                filter: Some(tagged()),
                 keep_within: string("30d"),
                 ..ForgetStep::default()
             })),
@@ -587,6 +599,41 @@ mod tests {
         ];
 
         assert_eq!(validate_job(&job_with(steps)), Ok(()));
+    }
+
+    #[test]
+    fn fr_rp_08_rejects_a_forget_without_a_tag_filter() {
+        let filters = [
+            None,
+            Some(SnapshotsFilter::default()),
+            Some(SnapshotsFilter {
+                hosts: vec![string("host-a")],
+                paths: vec![string("/srv")],
+                ..SnapshotsFilter::default()
+            }),
+        ];
+        for filter in filters {
+            let job = job_with(vec![step(step::Kind::Forget(ForgetStep {
+                repository_id: string("repo-1"),
+                filter,
+                ..ForgetStep::default()
+            }))]);
+            assert!(malformed(&job), "{:?}", job.steps);
+        }
+        for filter in [
+            tagged(),
+            SnapshotsFilter {
+                all_tags: vec![string("restichub-profile-a"), string("daily")],
+                ..SnapshotsFilter::default()
+            },
+        ] {
+            let job = job_with(vec![step(step::Kind::Forget(ForgetStep {
+                repository_id: string("repo-1"),
+                filter: Some(filter),
+                ..ForgetStep::default()
+            }))]);
+            assert_eq!(validate_job(&job), Ok(()));
+        }
     }
 
     #[test]
@@ -620,6 +667,7 @@ mod tests {
             }))]),
             job_with(vec![step(step::Kind::Forget(ForgetStep {
                 repository_id: string("repo-1"),
+                filter: Some(tagged()),
                 keep_within: string(BAD_OPTION),
                 ..ForgetStep::default()
             }))]),
@@ -655,6 +703,7 @@ mod tests {
             }))]),
             job_with(vec![step(step::Kind::Forget(ForgetStep {
                 repository_id: string("repo-1"),
+                filter: Some(tagged()),
                 keep_within: string(BAD_SHORT),
                 ..ForgetStep::default()
             }))]),
@@ -785,6 +834,7 @@ mod tests {
             })),
             step(step::Kind::Forget(ForgetStep {
                 repository_id: string("repo-1"),
+                filter: Some(tagged()),
                 keep_within: String::new(),
                 ..ForgetStep::default()
             })),
@@ -893,6 +943,7 @@ mod tests {
                 }))]),
                 job_with(vec![step(step::Kind::Forget(ForgetStep {
                     repository_id: string("repo-1"),
+                    filter: Some(tagged()),
                     keep_tags: vec![string(bad)],
                     ..ForgetStep::default()
                 }))]),
