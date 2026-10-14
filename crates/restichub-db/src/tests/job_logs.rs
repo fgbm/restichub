@@ -245,3 +245,24 @@ async fn ac_tn_01_db_a_log_row_refuses_a_job_of_another_tenant() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn ac_mn_03_db_the_metrics_snapshot_reads_the_tenant_rows() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
+    clean_job(db.database(), tenant_a).await?;
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let snapshot = crate::metrics::snapshot(&mut tx).await?;
+    assert_eq!(snapshot.agents.len(), 1);
+    assert_eq!(snapshot.repo_lock_held.len(), 1);
+    assert_eq!(snapshot.jobs_total.len(), 4);
+    tx.commit().await?;
+    let mut tx = db.database().begin_tenant(tenant_b).await?;
+    let empty = crate::metrics::snapshot(&mut tx).await?;
+    assert!(empty.agents.is_empty() && empty.repo_lock_held.is_empty());
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
