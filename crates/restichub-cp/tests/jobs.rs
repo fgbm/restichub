@@ -28,8 +28,9 @@ use restichub_emulator::executor::{Executor, Scripted};
 use restichub_emulator::identity::AgentIdentity;
 use restichub_emulator::metrics::Metrics;
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, ControlMessage, ErrorDetail, JobAck, JobResult, JobStatus, SignedJob,
-    agent_message, agent_service_client::AgentServiceClient, control_message,
+    AgentHello, AgentMessage, ControlMessage, ErrorDetail, JobAck, JobRejected, JobResult,
+    JobStatus, RejectReason, SignedJob, agent_message, agent_service_client::AgentServiceClient,
+    control_message,
 };
 use restichub_proto::signing::{Expected, KeyRing, verify_job};
 use serde_json::{Value, json};
@@ -719,8 +720,6 @@ async fn audit_dump(db: &TestDatabase, tenant: TenantId) -> String {
     audit
 }
 
-// --- The security review fixes (HIGH 1, HIGH 2, MEDIUM 3, MEDIUM 4, MEDIUM 5). ---
-
 /// Starts an init or a test-access job and returns its identifier.
 async fn start_action(app: &Router, setup: &Setup, repository_id: Uuid, action: &str) -> String {
     let (status, _, job) = send(
@@ -762,9 +761,9 @@ async fn initialize(
     );
 }
 
-/// HIGH 1: a not_initialized result on an initialized repository fails with the typed access error.
+/// A not_initialized result on an initialized repository fails with the typed access error.
 #[tokio::test]
-async fn high_1_a_not_initialized_result_on_an_initialized_repository_gives_access_error() {
+async fn a_not_initialized_result_on_an_initialized_repository_gives_the_access_error() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -812,9 +811,9 @@ async fn high_1_a_not_initialized_result_on_an_initialized_repository_gives_acce
     db.cleanup().await;
 }
 
-/// HIGH 1: an initialized repository is never re-initialized.
+/// An initialized repository is never re-initialized.
 #[tokio::test]
-async fn high_1_an_initialized_repository_is_not_re_initialized() {
+async fn an_initialized_repository_is_not_re_initialized() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -845,9 +844,9 @@ async fn high_1_an_initialized_repository_is_not_re_initialized() {
     db.cleanup().await;
 }
 
-/// HIGH 1: a local-path repository needs a maintenance agent.
+/// A local-path repository needs a maintenance agent.
 #[tokio::test]
-async fn high_1_a_local_repository_needs_a_maintenance_agent() {
+async fn a_local_repository_needs_a_maintenance_agent() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -951,8 +950,6 @@ async fn run_job_with_emulator(
     let mut job_id = None;
     for _ in 0..200 {
         if setup.listener.state.agent_registry().is_online(agent) {
-            // Give the stream a moment to settle after the handshake, then start the job.
-            tokio::time::sleep(Duration::from_millis(150)).await;
             let (status, _, job) = send(
                 app,
                 request(
@@ -1012,9 +1009,9 @@ async fn run_job_with_emulator(
     )
 }
 
-/// HIGH 2: test_access exit 1 runs no init and the job fails.
+/// Test_access exit 1 runs no init and the job fails.
 #[tokio::test]
-async fn high_2_a_test_access_failure_runs_no_init() {
+async fn a_test_access_failure_runs_no_init() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1037,9 +1034,9 @@ async fn high_2_a_test_access_failure_runs_no_init() {
     db.cleanup().await;
 }
 
-/// HIGH 2: test_access exit 12 gives config_error and runs no init.
+/// Test_access exit 12 gives config_error and runs no init.
 #[tokio::test]
-async fn high_2_a_wrong_password_gives_config_error() {
+async fn ac_rp_01_the_init_chain_gives_config_error_on_a_wrong_password() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1062,9 +1059,9 @@ async fn high_2_a_wrong_password_gives_config_error() {
     db.cleanup().await;
 }
 
-/// HIGH 2: test_access exit 10 then init exit 0 succeeds and initializes the repository.
+/// Test_access exit 10 then init exit 0 succeeds and initializes the repository.
 #[tokio::test]
-async fn high_2_an_init_after_a_missing_repository_succeeds() {
+async fn an_init_after_a_missing_repository_succeeds() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1090,9 +1087,9 @@ async fn high_2_an_init_after_a_missing_repository_succeeds() {
     db.cleanup().await;
 }
 
-/// MEDIUM 3: one active job for each repository.
+/// One active job for each repository.
 #[tokio::test]
-async fn medium_3_one_active_job_per_repository() {
+async fn one_active_job_per_repository() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1129,9 +1126,9 @@ async fn medium_3_one_active_job_per_repository() {
     db.cleanup().await;
 }
 
-/// MEDIUM 4: a location change is refused while a job is active or when initialized.
+/// A location change is refused while a job is active or when initialized.
 #[tokio::test]
-async fn medium_4_a_location_change_is_refused() {
+async fn a_location_change_is_refused_while_a_job_is_active_or_initialized() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1176,9 +1173,9 @@ async fn medium_4_a_location_change_is_refused() {
     db.cleanup().await;
 }
 
-/// MEDIUM 4: the initialized flag needs the same location as the job.
+/// The control plane sets the initialized flag only for the same location.
 #[tokio::test]
-async fn medium_4_the_initialized_flag_needs_the_same_location() {
+async fn the_initialized_flag_needs_the_same_location() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1212,9 +1209,9 @@ async fn medium_4_the_initialized_flag_needs_the_same_location() {
     db.cleanup().await;
 }
 
-/// MEDIUM 5: a job past its expiry reads as expired.
+/// A job past its expiry reads as expired on the next poll.
 #[tokio::test]
-async fn medium_5_an_overdue_job_reads_as_expired() {
+async fn an_overdue_job_reads_as_expired() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1240,9 +1237,9 @@ async fn medium_5_an_overdue_job_reads_as_expired() {
     db.cleanup().await;
 }
 
-/// MEDIUM 5: the periodic sweep marks the overdue jobs.
+/// The periodic sweep marks the overdue jobs of every tenant.
 #[tokio::test]
-async fn medium_5_the_expiry_sweep_marks_overdue_jobs() {
+async fn the_expiry_sweep_marks_overdue_jobs() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1308,4 +1305,224 @@ async fn set_repository_path(db: &TestDatabase, tenant: TenantId, repository: Uu
         .await
         .expect("cannot set the path");
     tx.commit().await.expect("cannot commit");
+}
+
+/// Creates an S3 repository with the maintenance agent and returns its identifier.
+async fn create_s3_repository(app: &Router, cookie: &str, agent_id: Uuid, password: &str) -> Uuid {
+    let body = json!({
+        "name": format!("repo-{}", Uuid::now_v7()),
+        "backend": {
+            "kind": "s3",
+            "endpoint": "https://s3.example.net",
+            "bucket": "backups-prod"
+        },
+        "password": password,
+        "s3_access_key": "access-key",
+        "s3_secret_key": "secret-key",
+        "maintenance_agent_id": agent_id.to_string(),
+    });
+    let (status, _, repository) = send(
+        app,
+        request("POST", "/api/v1/repositories", Some(cookie), Some(body)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{repository}");
+    Uuid::parse_str(
+        repository
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("the repository id"),
+    )
+    .expect("the repository id is a UUID")
+}
+
+/// A repository delete keeps the job history and refuses a repository with an active job.
+#[tokio::test]
+async fn a_repository_delete_keeps_the_job_history_and_refuses_an_active_job() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let setup = setup(&db).await;
+    let app = api_router(setup.listener.state.clone());
+    let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
+    let mut client = setup.listener.channel(&setup.identity).await;
+    let (tx, mut inbound) = open_stream(&mut client).await;
+
+    // An active job holds the repository, so the delete is refused.
+    let job_id = start_action(&app, &setup, repository_id, "test-access").await;
+    let _ = read_signed_job(&mut inbound).await;
+    let uri = format!("/api/v1/repositories/{repository_id}");
+    let (status, _, problem) = send(&app, request("DELETE", &uri, Some(&setup.admin), None)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+
+    // A finished job lets the delete through, and the job row keeps its history with a null link.
+    send_result(&tx, &job_id, JobStatus::Succeeded, None).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let (status, _, problem) = send(&app, request("DELETE", &uri, Some(&setup.admin), None)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{problem}");
+    let job = get_job(&app, &setup.admin, &job_id).await;
+    assert_eq!(
+        job.get("repository_id").map(Value::is_null),
+        Some(true),
+        "the job keeps its history with a null repository link"
+    );
+    assert_eq!(
+        job.get("result_code").and_then(Value::as_str),
+        Some("succeeded")
+    );
+
+    db.cleanup().await;
+}
+
+/// A rejection fails the job with the typed reason and frees the repository.
+#[tokio::test]
+async fn a_rejection_fails_the_job_and_frees_the_repository() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let setup = setup(&db).await;
+    let app = api_router(setup.listener.state.clone());
+    let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
+    let mut client = setup.listener.channel(&setup.identity).await;
+    let (tx, mut inbound) = open_stream(&mut client).await;
+
+    let job_id = start_action(&app, &setup, repository_id, "test-access").await;
+    let _ = read_signed_job(&mut inbound).await;
+    tx.send(AgentMessage {
+        payload: Some(agent_message::Payload::JobRejected(JobRejected {
+            job_id: job_id.clone(),
+            reason: RejectReason::Replay as i32,
+        })),
+    })
+    .await
+    .expect("cannot send the rejection");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let job = get_job(&app, &setup.admin, &job_id).await;
+    assert_eq!(job.get("status").and_then(Value::as_str), Some("failed"));
+    assert_eq!(
+        job.get("result_code").and_then(Value::as_str),
+        Some("failed")
+    );
+    assert_eq!(
+        job.get("result_message").and_then(Value::as_str),
+        Some("replay")
+    );
+
+    // The rejection freed the repository, so the next job starts.
+    let second = start_action(&app, &setup, repository_id, "test-access").await;
+    assert!(!second.is_empty());
+
+    db.cleanup().await;
+}
+
+/// The location of a local repository includes its maintenance agent.
+#[tokio::test]
+async fn a_local_repository_binds_the_maintenance_agent() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let setup = setup(&db).await;
+    let app = api_router(setup.listener.state.clone());
+    let second_agent = common::seed_agent(db.database(), setup.tenant, "second-host").await;
+    let mut client = setup.listener.channel(&setup.identity).await;
+    let (tx, mut inbound) = open_stream(&mut client).await;
+
+    // An initialized local repository refuses a maintenance agent change.
+    let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
+    initialize(&app, &setup, &mut inbound, &tx, repository_id).await;
+    let uri = format!("/api/v1/repositories/{repository_id}");
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "PATCH",
+            &uri,
+            Some(&setup.admin),
+            Some(json!({"maintenance_agent_id": second_agent.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+
+    // A local repository with an active job refuses the change too.
+    let active = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
+    let job_id = start_action(&app, &setup, active, "test-access").await;
+    let _ = read_signed_job(&mut inbound).await;
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/repositories/{active}"),
+            Some(&setup.admin),
+            Some(json!({"maintenance_agent_id": second_agent.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    send_result(&tx, &job_id, JobStatus::Succeeded, None).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    db.cleanup().await;
+}
+
+/// An init runs on the maintenance agent; a test-access accepts another explicit agent.
+#[tokio::test]
+async fn an_init_runs_on_the_maintenance_agent_and_a_test_access_accepts_another() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let setup = setup(&db).await;
+    let app = api_router(setup.listener.state.clone());
+    let creator = create_user(db.database(), setup.tenant, "job-admin-2", "phc", "admin").await;
+    let (token, _) = seed_enrollment_token_value(
+        db.database(),
+        setup.tenant,
+        creator,
+        &[],
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+    )
+    .await;
+    let second = setup.listener.enroll(&token).await;
+    let second_id = Uuid::parse_str(&second.agent_id).expect("the second agent id");
+    // The second agent holds an open stream, so an accepted job reaches it.
+    let mut second_client = setup.listener.channel(&second).await;
+    let (_second_tx, mut _second_inbound) = open_stream(&mut second_client).await;
+
+    let repository_id = create_s3_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
+
+    // An init refuses another explicit agent of the tenant.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/repositories/{repository_id}/init"),
+            Some(&setup.admin),
+            Some(json!({"agent_id": second_id.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(
+        problem.get("field").and_then(Value::as_str),
+        Some("agent_id")
+    );
+
+    // A test-access accepts the other agent that the request names.
+    let (status, _, job) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/repositories/{repository_id}/test-access"),
+            Some(&setup.admin),
+            Some(json!({"agent_id": second_id.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{job}");
+    assert_eq!(
+        job.get("agent_id").and_then(Value::as_str),
+        Some(second.agent_id.as_str())
+    );
+
+    db.cleanup().await;
 }
