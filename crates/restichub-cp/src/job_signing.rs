@@ -285,6 +285,35 @@ impl JobSigningService {
         Ok(self.current_set(db).await?.key_update(now))
     }
 
+    /// Builds the chain of the signed key updates from the first key to the current one (ADR-0030).
+    ///
+    /// One step for each rotation: the key that was current signs the key that followed it. An agent
+    /// that missed several rotations applies the steps in order and reaches the current key. Each
+    /// step names the keys older than its signer, so the agent revokes them.
+    pub async fn key_chain(
+        &self,
+        db: &Database,
+        now: OffsetDateTime,
+    ) -> Result<Vec<SigningKeyUpdate>, JobSigningError> {
+        let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
+        let rows = signing::list(&mut tx).await?;
+        tx.commit().await?;
+        let mut chain = Vec::new();
+        for (index, pair) in rows.windows(2).enumerate() {
+            let signer = self.unwrap_row(&pair[0])?;
+            let revoked: Vec<String> = rows[..index].iter().map(|row| row.id.to_string()).collect();
+            let update = KeyUpdate {
+                key_id: pair[1].id.to_string(),
+                public_key: pair[1].public_key.clone(),
+                signer_key_id: signer.id().to_owned(),
+                issued_at: Some(timestamp(now)),
+                revoked_key_ids: revoked,
+            };
+            chain.push(sign_key_update(&update, &signer.key));
+        }
+        Ok(chain)
+    }
+
     /// Builds the public job signing set that the response delivers (ADR-0026).
     ///
     /// The version check reloads a set that another control plane rotated, so the response names

@@ -485,8 +485,9 @@ impl AgentService for AgentStreamService {
         };
         let _ = tx.try_send(hello);
 
-        // A fresh key set on every connect, so an agent that was offline re-syncs (ADR-0030).
-        if let Some(update) = self.fresh_key_update(now).await {
+        // The whole key chain on every connect, so an agent that missed several rotations re-syncs
+        // (ADR-0030). The agent applies the steps in order.
+        for update in self.fresh_key_updates(now).await {
             let _ = tx.try_send(ControlMessage {
                 payload: Some(control_message::Payload::SigningKeyUpdate(update)),
             });
@@ -684,10 +685,21 @@ fn retire(state: &AppState, pending: Uuid) {
 }
 
 impl AgentStreamService {
-    /// Builds the fresh signed key set for a connecting agent (FR-PR-11).
-    async fn fresh_key_update(&self, now: time::OffsetDateTime) -> Option<SigningKeyUpdate> {
-        let signing = self.state.job_signing()?;
-        signing.key_update(self.state.db(), now).await.ok()
+    /// Builds the key chain for a connecting agent (ADR-0030, FR-PR-11).
+    ///
+    /// The chain starts at the first key, so an agent that missed several rotations catches up. An
+    /// agent that already holds the earlier keys skips those steps.
+    async fn fresh_key_updates(&self, now: time::OffsetDateTime) -> Vec<SigningKeyUpdate> {
+        let Some(signing) = self.state.job_signing() else {
+            return Vec::new();
+        };
+        match signing.key_chain(self.state.db(), now).await {
+            Ok(chain) => chain,
+            Err(error) => {
+                tracing::warn!(%error, "cannot build the job signing key chain");
+                Vec::new()
+            }
+        }
     }
 }
 
