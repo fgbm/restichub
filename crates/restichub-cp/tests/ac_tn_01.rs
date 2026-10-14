@@ -37,6 +37,7 @@ const ROLES: [Role; 3] = [Role::Viewer, Role::Operator, Role::Admin];
 const CANARY_USER: &str = "canary-bob";
 const CANARY_SECRET: &str = "canary-secret";
 const CANARY_REPOSITORY: &str = "canary-repo";
+const CANARY_PROFILE: &str = "canary-profile";
 
 /// The kind of tenant B object whose identifier the isolation check puts into the path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,7 @@ enum Object {
     Agent,
     EnrollmentToken,
     Repository,
+    Profile,
 }
 
 /// The isolation fixture of one route path pattern from the route table (AC-TN-01).
@@ -117,6 +119,12 @@ const FIXTURES: &[(&str, Fixture)] = &[
     (
         "/api/v1/repositories/{id}",
         Fixture::Object(Object::Repository),
+    ),
+    ("/api/v1/profiles", Fixture::Collection),
+    ("/api/v1/profiles/{id}", Fixture::Object(Object::Profile)),
+    (
+        "/api/v1/profiles/{id}/preview",
+        Fixture::Object(Object::Profile),
     ),
 ];
 
@@ -223,6 +231,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     let secret_b = seed_secret(db.database(), tenant_b, CANARY_SECRET).await;
     let repository_b =
         common::seed_repository(db.database(), tenant_b, CANARY_REPOSITORY, secret_b).await;
+    let profile_b =
+        common::seed_profile(db.database(), tenant_b, CANARY_PROFILE, repository_b).await;
     let agent_b = common::seed_agent(db.database(), tenant_b, "canary-host").await;
     let enrollment_token_b = common::seed_enrollment_token(db.database(), tenant_b, user_b).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
@@ -267,6 +277,12 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
 
     let app = app_with_kek(db.database());
 
+    // A repository of tenant A, so the profile collection create succeeds. The profile references
+    // it and the composite foreign key is satisfied.
+    let secret_a = seed_secret(db.database(), tenant_a, "cross-a-secret").await;
+    let repository_a =
+        common::seed_repository(db.database(), tenant_a, "cross-a-repo", secret_a).await;
+
     let (status, _, document) =
         call(&app, request("GET", "/api/v1/openapi.json", None, None)).await;
     assert_eq!(status, StatusCode::OK);
@@ -279,6 +295,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
         agent_b.to_string(),
         enrollment_token_b.to_string(),
         repository_b.to_string(),
+        profile_b.to_string(),
     ];
     let before = snapshot_tenant(&db, tenant_b).await;
     let audit_before = count(db.database(), tenant_b, "audit_log").await;
@@ -293,7 +310,14 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                 panic!("the OpenAPI operation {method} {path} is not in the route table")
             });
         let http_method = method.to_ascii_uppercase();
-        let body = common::write_body(&http_method, &path, index, false, &tenant_b.to_string());
+        let body = common::write_body(
+            &http_method,
+            &path,
+            index,
+            false,
+            &tenant_b.to_string(),
+            &repository_a.to_string(),
+        );
         match fixture_for(&method, &path) {
             Fixture::Exempt => {}
             Fixture::Platform => {
@@ -326,6 +350,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     Object::Agent => agent_b.to_string(),
                     Object::EnrollmentToken => enrollment_token_b.to_string(),
                     Object::Repository => repository_b.to_string(),
+                    Object::Profile => profile_b.to_string(),
                 };
                 let uri = path.replace("{id}", &id);
                 let Access::Protected(operation) = route.access else {
@@ -392,6 +417,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     CANARY_USER.to_owned(),
                     CANARY_SECRET.to_owned(),
                     CANARY_REPOSITORY.to_owned(),
+                    CANARY_PROFILE.to_owned(),
                 ] {
                     assert!(
                         !text.contains(&needle),

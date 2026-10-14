@@ -1,0 +1,464 @@
+//! The profile endpoints (FR-PF-01, FR-PF-03, FR-PF-04, FR-PF-05, ADR-0006).
+//!
+//! An Admin and an Operator create, update and delete the profiles of the tenant (requirements
+//! section 2). A Viewer reads and previews. A profile of another tenant gives HTTP 404 (AC-TN-01).
+//! The platform tenant refuses every profile operation with HTTP 403.
+//!
+//! The settings are a typed closed set: the paths, the excludes, the tags, the options, the hooks,
+//! the retention and the check options. There is no free-form map (FR-PR-01).
+//!
+//! The control plane validates the settings before a write (FR-PF-05). The compiler checks that
+//! need a concrete target (the VSS flag on Windows only, the hook allow-list and the restic option
+//! and version matrix) run in the preview endpoint, because they depend on the facts of a
+//! registered agent (FR-PF-04, AC-PF-02). The preview masks the repository password and the
+//! backend credentials (AC-PF-01).
+//!
+//! The schedule is not a profile field: it belongs to the plan (FR-SC-01).
+
+mod settings;
+
+use std::collections::BTreeMap;
+
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use restichub_compiler::{
+    Architecture, CompileError, OperatingSystem, ResticVersion, TargetFacts, compile, preview,
+};
+use restichub_db::agents::{self as agents_repo, Agent};
+use restichub_db::audit::{AuditAction, diff};
+use restichub_db::profiles::{self as repo};
+use restichub_db::repositories::{self as repositories_repo, Repository};
+use restichub_db::{AgentId, BackendKind, ProfileId};
+use restichub_proto::agent::v1::{
+    RepositoryAccess, RestCredentials, S3Credentials, repository_access::BackendCredentials,
+};
+
+use crate::context::{Operation, RequestContext};
+use crate::error::{ApiError, map_write_error};
+use crate::json::ApiJson;
+use crate::secrets::actor_user;
+use crate::server::AppState;
+use crate::validation::Reason;
+
+pub use settings::{
+    BackupOptions, CheckOptions, CreateProfileRequest, GroupBy, HookParameter, HookPhase, HookRef,
+    PreviewEnvView, PreviewRequest, PreviewResponse, PreviewStepView, ProfileListResponse,
+    ProfilePaths, ProfileView, Retention, SnapshotFilter, UpdateProfileRequest,
+};
+use settings::{
+    compiler_profile_from_row, parse_profile_id, profile_value, stored_value, validate_create,
+    validate_update,
+};
+
+/// Lists the profiles of the tenant.
+#[utoipa::path(
+    get,
+    path = "/api/v1/profiles",
+    security(("cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, description = "The profiles of the tenant.", body = ProfileListResponse),
+        crate::error::ProtectedResponses,
+    )
+)]
+pub async fn list_profiles(
+    State(state): State<AppState>,
+    context: RequestContext,
+) -> Result<Json<ProfileListResponse>, ApiError> {
+    context.authorize(Operation::ProfilesRead)?;
+    let list = context
+        .tenant_tx(&state, async |tx| Ok(repo::list(tx).await?))
+        .await?;
+    let items = list
+        .iter()
+        .map(ProfileView::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Json(ProfileListResponse { items }))
+}
+
+/// Reads one profile of the tenant.
+#[utoipa::path(
+    get,
+    path = "/api/v1/profiles/{id}",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the profile.")),
+    responses(
+        (status = 200, description = "The profile.", body = ProfileView),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn get_profile(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+) -> Result<Json<ProfileView>, ApiError> {
+    context.authorize(Operation::ProfilesRead)?;
+    let profile_id = parse_profile_id(&id)?;
+    let profile = context
+        .tenant_tx(&state, async |tx| Ok(repo::get(tx, profile_id).await?))
+        .await?;
+    match profile {
+        Some(profile) => Ok(Json(ProfileView::try_from(&profile)?)),
+        None => Err(ApiError::not_found()),
+    }
+}
+
+/// Creates a profile and validates its settings (FR-PF-01).
+#[utoipa::path(
+    post,
+    path = "/api/v1/profiles",
+    summary = "Creates a profile in the tenant.",
+    description = "The control plane validates the settings before the write (FR-PF-05).",
+    security(("cookie" = []), ("bearer" = [])),
+    request_body = CreateProfileRequest,
+    responses(
+        (status = 201, description = "The profile is created.", body = ProfileView),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn create_profile(
+    State(state): State<AppState>,
+    context: RequestContext,
+    ApiJson(body): ApiJson<CreateProfileRequest>,
+) -> Result<(StatusCode, Json<ProfileView>), ApiError> {
+    context.authorize(Operation::ProfilesWrite)?;
+    let validated = validate_create(body)?;
+    let profile_id = ProfileId::new();
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    ensure_repository(&mut tx, validated.repository_id).await?;
+    repo::create(
+        &mut tx,
+        &validated.new_profile(profile_id, actor_user(&context.actor)),
+    )
+    .await
+    .map_err(map_write_error)?;
+
+    let mut event =
+        context.audit_event(AuditAction::ProfileCreate, "profile", profile_id.as_uuid());
+    event.diff = Some(diff(None, Some(&profile_value(&validated)), &[]));
+    restichub_db::audit::insert(&mut tx, &event).await?;
+
+    let created = repo::get(&mut tx, profile_id).await?;
+    tx.commit().await?;
+    let Some(created) = created else {
+        return Err(ApiError::internal(
+            "the created profile is not found after the read",
+        ));
+    };
+    Ok((StatusCode::CREATED, Json(ProfileView::try_from(&created)?)))
+}
+
+/// Updates a profile. The body replaces the settings; an absent name keeps the name.
+#[utoipa::path(
+    patch,
+    path = "/api/v1/profiles/{id}",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the profile.")),
+    request_body = UpdateProfileRequest,
+    responses(
+        (status = 200, description = "The updated profile.", body = ProfileView),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn update_profile(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<UpdateProfileRequest>,
+) -> Result<Json<ProfileView>, ApiError> {
+    context.authorize(Operation::ProfilesWrite)?;
+    let profile_id = parse_profile_id(&id)?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    // The read locks the row: a concurrent delete cannot remove it between the read and the write.
+    let Some(current) = repo::get_for_update(&mut tx, profile_id).await? else {
+        return Err(ApiError::not_found());
+    };
+    let validated = validate_update(body, &current.name)?;
+    ensure_repository(&mut tx, validated.repository_id).await?;
+    repo::update(&mut tx, profile_id, &validated.update())
+        .await
+        .map_err(map_write_error)?;
+
+    let mut event =
+        context.audit_event(AuditAction::ProfileUpdate, "profile", profile_id.as_uuid());
+    event.diff = Some(diff(
+        Some(&stored_value(&current)),
+        Some(&profile_value(&validated)),
+        &[],
+    ));
+    restichub_db::audit::insert(&mut tx, &event).await?;
+
+    let updated = repo::get(&mut tx, profile_id).await?;
+    tx.commit().await?;
+    let Some(updated) = updated else {
+        return Err(ApiError::internal(
+            "the updated profile is not found after the read",
+        ));
+    };
+    Ok(Json(ProfileView::try_from(&updated)?))
+}
+
+/// Removes a profile.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/profiles/{id}",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the profile.")),
+    responses(
+        (status = 204, description = "The profile is removed."),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn delete_profile(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    context.authorize(Operation::ProfilesWrite)?;
+    let profile_id = parse_profile_id(&id)?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    let Some(current) = repo::get_for_update(&mut tx, profile_id).await? else {
+        return Err(ApiError::not_found());
+    };
+    repo::delete(&mut tx, profile_id).await?;
+    let mut event =
+        context.audit_event(AuditAction::ProfileDelete, "profile", profile_id.as_uuid());
+    event.diff = Some(diff(Some(&stored_value(&current)), None, &[]));
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Previews a profile for one target agent (FR-PF-04, AC-PF-01).
+///
+/// The endpoint compiles the profile with the facts of the registered agent and renders the steps
+/// and the command lines with masked secrets. A compile error points to the profile field
+/// (AC-PF-02).
+#[utoipa::path(
+    post,
+    path = "/api/v1/profiles/{id}/preview",
+    summary = "Previews a profile for one target agent.",
+    description = "The steps and the command lines agree with the command that the agent runs. Secrets are masked (AC-PF-01).",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the profile.")),
+    request_body = PreviewRequest,
+    responses(
+        (status = 200, description = "The previewed steps.", body = PreviewResponse),
+        (status = 400, description = "The profile or the agent is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn preview_profile(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<PreviewRequest>,
+) -> Result<Json<PreviewResponse>, ApiError> {
+    context.authorize(Operation::ProfilesRead)?;
+    let profile_id = parse_profile_id(&id)?;
+    let agent_id = parse_agent_id(&body.agent_id)?;
+
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    let Some(profile) = repo::get(&mut tx, profile_id).await? else {
+        return Err(ApiError::not_found());
+    };
+    let Some(agent) = agents_repo::get(&mut tx, agent_id).await? else {
+        return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
+    };
+    let Some(repository) = repositories_repo::get(&mut tx, profile.repository_id).await? else {
+        return Err(ApiError::internal(
+            "the repository of the profile is not found in the tenant",
+        ));
+    };
+    tx.commit().await?;
+
+    let target = target_facts(&agent, state.auth().clock.now())?;
+    let compiler_profile = compiler_profile_from_row(&profile)?;
+    let plan = compile(&compiler_profile, &target).map_err(compile_error_to_api)?;
+    let access = repository_access(&repository);
+    let steps = preview(&plan, &access, &BTreeMap::new()).map_err(preview_error_to_api)?;
+
+    Ok(Json(PreviewResponse {
+        profile_id: profile_id.to_string(),
+        repository_id: profile.repository_id.to_string(),
+        steps: steps
+            .iter()
+            .map(|step| PreviewStepView {
+                kind: step.step.step_id.clone(),
+                maintenance: step.maintenance,
+                command: step.command.clone(),
+                environment: step
+                    .environment
+                    .iter()
+                    .map(|(name, value)| PreviewEnvView {
+                        name: name.clone(),
+                        value: value.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }))
+}
+
+/// Refuses a repository that is not in the tenant (FR-TN-01).
+async fn ensure_repository(
+    tx: &mut restichub_db::TenantTx<'_>,
+    repository: restichub_db::RepositoryId,
+) -> Result<(), ApiError> {
+    if repositories_repo::get(tx, repository).await?.is_none() {
+        return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
+    }
+    Ok(())
+}
+
+fn parse_agent_id(value: &str) -> Result<AgentId, ApiError> {
+    uuid::Uuid::parse_str(value)
+        .map(AgentId::from_uuid)
+        .map_err(|error| {
+            ApiError::invalid_field_cause("agent_id", Reason::InvalidFormat, error.to_string())
+        })
+}
+
+/// The compiler input facts of a registered agent (FR-PF-03).
+///
+/// The hook allow-list is empty until the agent reports it (FR-HK-04). A profile with a hook
+/// therefore gives `unknown hook` in the preview, which is the FR-HK-04 behavior while no agent
+/// reports its allow-list.
+fn target_facts(agent: &Agent, now: time::OffsetDateTime) -> Result<TargetFacts, ApiError> {
+    let os =
+        parse_os(&agent.os).ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Unknown))?;
+    let arch = parse_arch(&agent.arch);
+    let restic_version =
+        ResticVersion::parse(&agent.restic_version).unwrap_or(ResticVersion::MIN_SUPPORTED);
+    Ok(TargetFacts {
+        agent_id: agent.id.to_string(),
+        agent_name: agent.hostname.clone(),
+        hostname: agent.hostname.clone(),
+        os,
+        arch,
+        labels: parse_labels(&agent.labels),
+        restic_version,
+        now,
+        allow_list: BTreeMap::new(),
+    })
+}
+
+fn parse_os(value: &str) -> Option<OperatingSystem> {
+    match value.to_ascii_lowercase().as_str() {
+        "windows" => Some(OperatingSystem::Windows),
+        "linux" => Some(OperatingSystem::Linux),
+        "macos" | "darwin" | "mac" => Some(OperatingSystem::Macos),
+        _ => None,
+    }
+}
+
+fn parse_arch(value: &str) -> Architecture {
+    match value.to_ascii_lowercase().as_str() {
+        "arm64" | "aarch64" => Architecture::Aarch64,
+        _ => Architecture::X86_64,
+    }
+}
+
+/// The labels of the agent as the `{{agent.label.<key>}}` variables. A label without `=` is skipped.
+fn parse_labels(labels: &[String]) -> BTreeMap<String, String> {
+    labels
+        .iter()
+        .filter_map(|label| label.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect()
+}
+
+/// The connection details that the preview renders. The secret values are placeholders: the
+/// preview masks them (AC-PF-01).
+fn repository_access(repository: &Repository) -> RepositoryAccess {
+    let location = repository_location(repository);
+    let backend_credentials = match repository.backend {
+        BackendKind::S3 => Some(BackendCredentials::S3(S3Credentials {
+            access_key_id: "secret".to_owned(),
+            secret_access_key: "secret".to_owned(),
+            session_token: String::new(),
+            region: repository.s3_region.clone().unwrap_or_default(),
+        })),
+        BackendKind::Rest => Some(BackendCredentials::Rest(RestCredentials {
+            username: "secret".to_owned(),
+            password: "secret".to_owned(),
+        })),
+        BackendKind::Local => None,
+    };
+    RepositoryAccess {
+        repository_id: repository.id.to_string(),
+        location,
+        password: "secret".to_owned(),
+        backend_credentials,
+    }
+}
+
+/// The restic address of a stored backend (ADR-0021).
+fn repository_location(repository: &Repository) -> String {
+    match repository.backend {
+        BackendKind::S3 => {
+            let endpoint = repository.s3_endpoint.clone().unwrap_or_default();
+            let bucket = repository.s3_bucket.clone().unwrap_or_default();
+            match repository.s3_prefix.as_deref() {
+                Some(prefix) => format!("s3:{endpoint}/{bucket}/{prefix}"),
+                None => format!("s3:{endpoint}/{bucket}"),
+            }
+        }
+        BackendKind::Rest => format!(
+            "rest:{}",
+            repository.rest_endpoint.clone().unwrap_or_default()
+        ),
+        BackendKind::Local => repository.local_path.clone().unwrap_or_default(),
+    }
+}
+
+/// Turns a compiler rejection into a field error (AC-PF-02).
+fn compile_error_to_api(error: CompileError) -> ApiError {
+    match error {
+        CompileError::UnknownVariable { field, .. }
+        | CompileError::MissingLabel { field, .. }
+        | CompileError::InvalidDate { field, .. }
+        | CompileError::UnterminatedTemplate { field }
+        | CompileError::InvalidValue { field } => {
+            ApiError::invalid_field(field.as_str(), Reason::InvalidFormat)
+        }
+        CompileError::InvalidCron { .. } => ApiError::invalid_field("cron", Reason::InvalidFormat),
+        CompileError::NoPaths { .. } => ApiError::invalid_field("paths", Reason::Empty),
+        CompileError::UnknownHook { field, .. }
+        | CompileError::UnknownHookParameter { field, .. }
+        | CompileError::DuplicateHookParameter { field, .. } => {
+            ApiError::invalid_field(field.as_str(), Reason::Unknown)
+        }
+        CompileError::UnsupportedOs { field, .. } => {
+            ApiError::invalid_field(field.as_str(), Reason::Unsupported)
+        }
+        CompileError::IncompatibleOption { field, .. } => {
+            ApiError::invalid_field(field.as_str(), Reason::Incompatible)
+        }
+        CompileError::UnsupportedRestic { .. } => {
+            ApiError::invalid_field("agent_id", Reason::Incompatible)
+        }
+        CompileError::StepsRejected { .. } => {
+            ApiError::invalid_field("steps", Reason::InvalidFormat)
+        }
+    }
+}
+
+/// Turns a rendering failure into a field error.
+fn preview_error_to_api(error: restichub_compiler::PreviewError) -> ApiError {
+    match error {
+        restichub_compiler::PreviewError::Rejected(rejection) => {
+            ApiError::invalid_field_cause("steps", Reason::InvalidFormat, format!("{rejection:?}"))
+        }
+        restichub_compiler::PreviewError::Arg(error) => {
+            ApiError::invalid_field_cause("steps", Reason::InvalidFormat, error.to_string())
+        }
+    }
+}
