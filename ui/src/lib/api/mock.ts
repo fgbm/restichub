@@ -25,7 +25,10 @@ import type {
 	Instance,
 	Job,
 	JobActionRequest,
+	JobDetail,
 	JobListResponse,
+	JobLogPage,
+	JobLogQuery,
 	JobQuery,
 	JobKind,
 	JobStatus,
@@ -60,6 +63,7 @@ import type {
 } from './types';
 
 import { nextRunsFromCron } from '#lib/schedule.ts';
+import { detailOf, logPageOf } from './mock-jobs';
 
 const REDACTED = '<redacted>';
 
@@ -986,7 +990,7 @@ export class MockApiService {
 		};
 	}
 
-	async getJob(id: string): Promise<Job> {
+	async getJob(id: string): Promise<JobDetail> {
 		const entry = this.jobs.find((item) => item.job.id === id);
 		if (!entry) throw new Error('not found');
 		// The mock reaches a terminal state after a short delay, so the dialog shows progress then a
@@ -1003,7 +1007,13 @@ export class MockApiService {
 				);
 			}
 		}
-		return { ...entry.job };
+		return detailOf(entry.job, Date.now());
+	}
+
+	async getJobLogs(id: string, query?: JobLogQuery): Promise<JobLogPage> {
+		const entry = this.jobs.find((item) => item.job.id === id);
+		if (!entry) throw new Error('not found');
+		return logPageOf(entry.job, query, Date.now());
 	}
 
 	private startJob(id: string, kind: JobKind, request?: JobActionRequest): Job {

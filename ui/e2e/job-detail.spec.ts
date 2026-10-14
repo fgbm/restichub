@@ -1,0 +1,91 @@
+import { expect, test, type Page } from '@playwright/test';
+
+// The job detail screen shows the progress, the steps, the summary and the log of one job
+// (FR-MN-02, FR-LG-01).
+async function signIn(page: Page): Promise<void> {
+	await page.goto('/sign-in');
+	await page.locator('#signin-username').fill('admin');
+	await page.locator('#signin-password').fill('secret');
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+	await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
+}
+
+async function openJobs(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		localStorage.setItem('restichub.mock.agents', 'sample');
+		localStorage.setItem('restichub.mock.profiles', 'sample');
+		localStorage.setItem('restichub.mock.plans', 'sample');
+	});
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Jobs', exact: true })
+		.click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Jobs' })).toBeVisible();
+}
+
+test('a finished job shows its summary, its steps and its log', async ({ page }) => {
+	await openJobs(page);
+	// The sample holds a succeeded job and a job with warnings; the first row of a status is enough.
+	await page.locator('#jobs-status').selectOption({ label: 'Succeeded' });
+	await page
+		.getByRole('link', { name: /Open the job nightly-web/ })
+		.first()
+		.click();
+
+	// The top bar shows the way: "Jobs / <job id>".
+	const crumbs = page.getByRole('navigation', { name: 'Breadcrumb' });
+	await expect(crumbs.getByRole('link', { name: 'Jobs' })).toBeVisible();
+	await expect(crumbs.locator('[aria-current="page"]')).toHaveText(/^j_/);
+	await expect(page.getByRole('heading', { level: 1, name: /^j_/ })).toBeVisible();
+	await expect(
+		page.getByText(/Plan nightly-web · host .* · triggered by the schedule/)
+	).toBeVisible();
+	const summary = page.locator('section').filter({ hasText: 'Statistics from the restic summary' });
+	await expect(summary.getByText('1.4 GiB', { exact: true })).toBeVisible();
+	await expect(summary.getByText('a1b2c3d4')).toBeVisible();
+	await expect(page.getByText('3m 12s').first()).toBeVisible();
+
+	await expect(page.getByText('2 of 2 complete')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Run again' })).toBeEnabled();
+	await expect(page.getByRole('button', { name: 'Cancel job' })).toHaveCount(0);
+	const log = page.getByRole('log', { name: 'Job log' });
+	await expect(log.getByText('snapshot a1b2c3d4 saved')).toBeVisible();
+	await expect(log.getByText('INFO').first()).toBeVisible();
+});
+
+test('a running job shows its progress and the log follows the new lines', async ({ page }) => {
+	await openJobs(page);
+	await page.locator('#jobs-status').selectOption({ label: 'Running' });
+	await page.getByRole('link', { name: /Open the job nightly-web/ }).click();
+
+	await expect(page.getByRole('progressbar', { name: 'Progress' })).toBeVisible();
+	// The steps that did not start show with the count of the complete ones.
+	await expect(page.getByText('0 of 3 complete')).toBeVisible();
+	await expect(page.getByText('queued', { exact: true })).toHaveCount(2);
+	await expect(page.getByText(/step 1 of 3/)).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Run again' })).toBeDisabled();
+
+	// The cancel action asks in a dialog in the middle of the screen.
+	await page.getByRole('button', { name: 'Cancel job' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Cancel the job?' });
+	await expect(dialog).toBeVisible();
+	const box = await dialog.boundingBox();
+	const viewport = page.viewportSize();
+	expect(Math.abs((box?.x ?? 0) + (box?.width ?? 0) / 2 - (viewport?.width ?? 0) / 2)).toBeLessThan(
+		2
+	);
+	await dialog.getByRole('button', { name: 'Keep the job' }).click();
+	await expect(dialog).toBeHidden();
+
+	await expect(page.getByText('Live log')).toBeVisible();
+	await expect(page.getByText('following')).toBeVisible();
+	const lines = page.getByRole('log', { name: 'Job log' }).locator('.log__line');
+	const before = await lines.count();
+	// The mock adds a line every four seconds, and the screen polls every two seconds.
+	await expect.poll(async () => lines.count(), { timeout: 12_000 }).toBeGreaterThan(before);
+
+	// A person who scrolls up stops the following.
+	await page.getByRole('button', { name: 'Pause' }).click();
+	await expect(page.getByRole('button', { name: 'Follow' })).toBeVisible();
+});

@@ -558,11 +558,113 @@ impl ActorType {
     }
 }
 
+/// How one step of a job ended. The agent maps the restic exit code to it (FR-AG-09).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum StepStatus {
+    Success,
+    Warning,
+    Retry,
+    ConfigError,
+    Cancelled,
+    Failed,
+    Skipped,
+}
+
+impl StepStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Warning => "warning",
+            Self::Retry => "retry",
+            Self::ConfigError => "config_error",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "success" => Some(Self::Success),
+            "warning" => Some(Self::Warning),
+            "retry" => Some(Self::Retry),
+            "config_error" => Some(Self::ConfigError),
+            "cancelled" => Some(Self::Cancelled),
+            "failed" => Some(Self::Failed),
+            "skipped" => Some(Self::Skipped),
+            _ => None,
+        }
+    }
+}
+
+/// Where a log line came from: a restic stream or the agent itself (FR-AG-08).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum LogStream {
+    Stdout,
+    Stderr,
+    Agent,
+}
+
+impl LogStream {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+            Self::Agent => "agent",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "stdout" => Some(Self::Stdout),
+            "stderr" => Some(Self::Stderr),
+            "agent" => Some(Self::Agent),
+            _ => None,
+        }
+    }
+}
+
+/// The level that the control plane derives for a job log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum LogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "info" => Some(Self::Info),
+            "warn" => Some(Self::Warn),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ActorType, AdminState, AgentStatus, BackendKind, CaRole, JobKind, JobResultCode, JobStatus,
-        Role, SigningKeyRole, TenantStatus,
+        LogLevel, LogStream, Role, SigningKeyRole, StepStatus, TenantStatus,
     };
 
     #[test]
@@ -702,5 +804,27 @@ mod tests {
             assert_eq!(JobResultCode::parse(code.as_str()), Some(code));
         }
         assert_eq!(JobResultCode::parse("nope"), None);
+    }
+
+    #[test]
+    fn the_log_and_step_strings_are_stable() {
+        for status in [
+            StepStatus::Success,
+            StepStatus::Warning,
+            StepStatus::Retry,
+            StepStatus::ConfigError,
+            StepStatus::Cancelled,
+            StepStatus::Failed,
+            StepStatus::Skipped,
+        ] {
+            assert_eq!(StepStatus::parse(status.as_str()), Some(status));
+        }
+        for stream in [LogStream::Stdout, LogStream::Stderr, LogStream::Agent] {
+            assert_eq!(LogStream::parse(stream.as_str()), Some(stream));
+        }
+        for level in [LogLevel::Info, LogLevel::Warn, LogLevel::Error] {
+            assert_eq!(LogLevel::parse(level.as_str()), Some(level));
+        }
+        assert_eq!(StepStatus::parse("nope"), None);
     }
 }

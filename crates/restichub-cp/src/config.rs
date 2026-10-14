@@ -73,6 +73,8 @@ const MIN_QUEUE_LEASE: Duration = Duration::from_secs(15);
 pub const QUEUE_LOCK_RETRY_LIMIT_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_LIMIT";
 /// The seconds before the first lock retry. The delay doubles for each retry (FR-SC-05).
 pub const QUEUE_LOCK_RETRY_BASE_SECS_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_BASE_SECS";
+/// The days for which the control plane keeps the text of a job log (FR-LG-02).
+pub const LOG_RETENTION_DAYS_ENV: &str = "RESTICHUB_LOG_RETENTION_DAYS";
 /// The tenancy mode: `single` or `multi` (ADR-0024).
 pub const TENANCY_MODE_ENV: &str = "RESTICHUB_TENANCY_MODE";
 /// The tenant that single mode uses and that the switch from multi mode expects.
@@ -274,6 +276,8 @@ pub struct Config {
     pub agent_max_connections: usize,
     /// The limits and the retry settings of the job queue (FR-SC-08).
     pub queue: QueueConfig,
+    /// The days for which the control plane keeps the text of a job log. At least one.
+    pub log_retention_days: u32,
 }
 
 /// Secret handling configuration (ADR-0023, section Secrets).
@@ -377,6 +381,18 @@ impl Config {
                 .max(1);
 
         let queue = queue_config(env, file.queue.as_ref())?;
+        let log_retention_days = number(env, LOG_RETENTION_DAYS_ENV, file.log_retention_days)?
+            .unwrap_or(crate::log_store::DEFAULT_RETENTION_DAYS)
+            .max(1);
+        if log_retention_days > crate::log_store::MAX_RETENTION_DAYS {
+            return Err(ConfigError::Invalid {
+                name: LOG_RETENTION_DAYS_ENV,
+                reason: format!(
+                    "the value is above {} days",
+                    crate::log_store::MAX_RETENTION_DAYS
+                ),
+            });
+        }
 
         let database_url = env
             .get(DATABASE_URL_ENV)
@@ -441,6 +457,7 @@ impl Config {
             agent_tls_key_file,
             agent_max_connections,
             queue,
+            log_retention_days,
         })
     }
 }
@@ -505,6 +522,7 @@ struct FileConfig {
     agent_tls_key_file: Option<PathBuf>,
     agent_max_connections: Option<usize>,
     queue: Option<QueueSection>,
+    log_retention_days: Option<u32>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]

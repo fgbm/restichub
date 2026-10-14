@@ -85,7 +85,12 @@
 			];
 		}
 		const item = tabs.find((tab) => isActive(tab.href));
-		return item ? [{ label: t(item.labelKey) }] : [];
+		if (!item) return [];
+		// The job detail shows the job identifier after its list: "Jobs / j_4821".
+		if (page.route.id === '/(app)/jobs/[id]' && page.params.id) {
+			return [{ label: t(item.labelKey), href: item.href }, { label: page.params.id }];
+		}
+		return [{ label: t(item.labelKey) }];
 	});
 
 	let prefersDark = $state(false);

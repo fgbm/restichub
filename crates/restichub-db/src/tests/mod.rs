@@ -9,6 +9,7 @@
 mod audit;
 mod auth;
 mod enrollment_tokens;
+mod job_logs;
 mod migrations;
 mod plans;
 mod profiles;
@@ -66,7 +67,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 15] = [
+const TENANT_TABLES: [&str; 20] = [
     "users",
     "memberships",
     "sessions",
@@ -82,6 +83,11 @@ const TENANT_TABLES: [&str; 15] = [
     "profiles",
     "plans",
     "maintenance_schedules",
+    "job_steps",
+    "job_logs",
+    "job_log_state",
+    "job_progress",
+    "job_planned_steps",
 ];
 
 struct Seed {
@@ -243,15 +249,55 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     .execute(tx.as_conn())
     .await?;
 
+    let job_id = crate::JobId::new();
     sqlx::query(
         "INSERT INTO jobs \
          (id, tenant_id, kind, agent_id, repository_id, status, created_by) \
          VALUES ($1, $2, 'test_access', (SELECT id FROM agents WHERE tenant_id = $2), \
                  (SELECT id FROM repositories WHERE tenant_id = $2), 'queued', $3)",
     )
-    .bind(crate::JobId::new())
+    .bind(job_id)
     .bind(tenant)
     .bind(user)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO job_steps (tenant_id, job_id, step_id, status, exit_code) \
+         VALUES ($1, $2, 'backup', 'success', 0)",
+    )
+    .bind(tenant)
+    .bind(job_id)
+    .execute(tx.as_conn())
+    .await?;
+    sqlx::query(
+        "INSERT INTO job_logs (tenant_id, job_id, seq, stream, chunk, line_index, level, ts, text) \
+         VALUES ($1, $2, 1, 'stdout', 1, 0, 'info', now(), 'line')",
+    )
+    .bind(tenant)
+    .bind(job_id)
+    .execute(tx.as_conn())
+    .await?;
+    sqlx::query("INSERT INTO job_log_state (tenant_id, job_id, last_seq) VALUES ($1, $2, 1)")
+        .bind(tenant)
+        .bind(job_id)
+        .execute(tx.as_conn())
+        .await?;
+    sqlx::query(
+        "INSERT INTO job_planned_steps (tenant_id, job_id, step_id, position) \
+         VALUES ($1, $2, 'backup', 0)",
+    )
+    .bind(tenant)
+    .bind(job_id)
+    .execute(tx.as_conn())
+    .await?;
+    sqlx::query(
+        "INSERT INTO job_progress (tenant_id, job_id, step_id, bytes_done, total_bytes, \
+          files_done, total_files, percent_done, seconds_elapsed, seconds_remaining, updated_at) \
+         VALUES ($1, $2, 'backup', 1, 2, 1, 2, 0.5, 1, 1, now())",
+    )
+    .bind(tenant)
+    .bind(job_id)
     .execute(tx.as_conn())
     .await?;
 

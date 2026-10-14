@@ -242,39 +242,6 @@ pub async fn test_access_repository(
     Ok((StatusCode::ACCEPTED, Json(job)))
 }
 
-/// Reads one job of the tenant for polling.
-#[utoipa::path(
-    get,
-    path = "/api/v1/jobs/{id}",
-    security(("cookie" = []), ("bearer" = [])),
-    params(("id" = String, Path, description = "The identifier of the job.")),
-    responses(
-        (status = 200, description = "The job.", body = JobView),
-        crate::error::ProtectedResponses,
-        (status = 404, description = "The job is not found.", body = crate::error::ProblemBody)
-    )
-)]
-pub async fn get_job(
-    State(state): State<AppState>,
-    context: RequestContext,
-    Path(id): Path<String>,
-) -> Result<Json<JobView>, ApiError> {
-    context.authorize(Operation::JobsRead)?;
-    let job_id = parse_job_id(&id)?;
-    let now = state.auth().clock.now();
-    let job = context
-        .tenant_tx(&state, async |tx| {
-            // An overdue job moves to `expired` on read, so a poll sees a terminal status.
-            job_repo::mark_expired(tx, job_id, now).await?;
-            Ok(restichub_db::queue::get_detail(tx, job_id).await?)
-        })
-        .await?;
-    match job {
-        Some(job) => Ok(Json(JobView::from(&job))),
-        None => Err(ApiError::not_found()),
-    }
-}
-
 /// Builds, signs and sends one repository job (FR-PR-03, FR-PR-05).
 async fn create_repository_job(
     state: &AppState,
@@ -359,6 +326,13 @@ async fn create_repository_job(
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
+    let step_ids: Vec<String> = validated
+        .job()
+        .steps
+        .iter()
+        .map(|step| step.step_id.clone())
+        .collect();
+    restichub_db::job_steps::plan(&mut tx, job_id, &step_ids).await?;
     tx.commit().await?;
 
     let signing = state

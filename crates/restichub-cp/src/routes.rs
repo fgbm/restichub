@@ -52,6 +52,12 @@ pub const ROUTES: &[Route] = &[
         handler: || routes!(crate::server::readyz),
     },
     Route {
+        method: "get",
+        path: "/metrics",
+        access: Access::Protected(Operation::MetricsRead),
+        handler: || routes!(crate::metrics::metrics),
+    },
+    Route {
         method: "post",
         path: "/agent/v1/enroll",
         access: Access::Public,
@@ -476,7 +482,13 @@ pub const ROUTES: &[Route] = &[
         method: "get",
         path: "/api/v1/jobs/{id}",
         access: Access::Protected(Operation::JobsRead),
-        handler: || routes!(crate::jobs::get_job),
+        handler: || routes!(crate::job_detail::get_job),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/jobs/{id}/logs",
+        access: Access::Protected(Operation::JobsRead),
+        handler: || routes!(crate::job_detail::get_job_logs),
     },
     Route {
         method: "post",

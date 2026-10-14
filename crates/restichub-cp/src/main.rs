@@ -126,6 +126,14 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         restichub_cp::scheduler::SCHEDULER_INTERVAL,
     );
 
+    // The retention sweep deletes the old log text and keeps the job rows (FR-LG-02, AC-LG-01).
+    restichub_cp::log_store::spawn_retention(
+        database.clone(),
+        Arc::new(restichub_cp::clock::SystemClock),
+        config.log_retention_days,
+        restichub_cp::log_store::RETENTION_INTERVAL,
+    );
+
     let auth = restichub_cp::server::AuthState::new(config.auth.clone());
     restichub_cp::maintenance::spawn_limiter_sweep(
         auth.user_limiter.clone(),
@@ -139,6 +147,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .with_kek(kek)
         .with_tenancy(config.tenancy.clone())
         .with_queue(config.queue.clone())
+        .with_log_retention_days(config.log_retention_days)
         .with_pki(
             ca_store.clone(),
             job_signing.clone(),

@@ -107,13 +107,43 @@ If the control plane cannot build a job, the job fails with a reason code:
 | `secret_unavailable` | A secret of the repository cannot be read. |
 | `signing_failed` | The control plane could not sign the job. |
 
+## Steps, summary and progress
+
+The agent reports each step of a job as a typed result (FR-AG-09). The control plane stores one row for each step: the status, the exit code, the times and the error code. The agent can send a result twice, so a second write never changes a stored row.
+
+A backup step also carries the restic summary. It holds the new, changed and unchanged files, and the data added to the repository. It also holds the processed files and bytes, the duration and the snapshot identifier. The control plane stores these values as they are. The web UI shows them without a change (FR-MN-02, AC-MN-04). A `check`, `forget`, `snapshots` and `stats` step carries its own typed summary.
+
+While a step runs, the agent sends the progress of the step: files, bytes, percent and the file in work. The control plane keeps only the last progress of each job. The job detail shows it for a job that is `sent` or `running`, and removes it when the job ends. The web UI reads the job again every two seconds while the job can still change.
+
+## Job log
+
+The agent sends the log of a job in chunks. It removes every secret before it sends a chunk (FR-AG-06), and a job log holds at most 1 MiB. The control plane stores one row for each line (FR-LG-01). Each line has a number, the step, the source (`stdout`, `stderr` or `agent`) and a level. The control plane derives the level from the text of the line: `error`, `warn` or `info`. The agent sends no line time, so the stored time is the time when the control plane stored the line.
+
+The agent sends the tail of the log again after a restart (AC-PR-07). The agent numbers its chunks for each source. The control plane keeps the number of the chunk with each line. It ignores a chunk that it stored before, in any order of arrival, so a repeated tail never stores a line twice.
+
+Each line counts as its text, one line break and 64 bytes of overhead. The control plane stops at 1 MiB of this count or at 100 000 lines for each job, so empty lines cannot fill the database. After that it keeps no new line and marks the log as truncated. The web UI shows the note. The control plane removes control characters from each line, except the tab. It also removes the Unicode format characters (category Cf, for example U+202E). It cuts a line at 8192 characters.
+
+A finished job takes step and log writes from the agent only during the log retention period after its end.
+
+The log storage is a separate component with a `LogStore` interface (FR-LG-01, ADR-0015). The `database` backend is the default. An `s3` backend is planned for the 1.0 release.
+
+### Log retention
+
+The control plane deletes log lines that are older than the retention period (FR-LG-02, AC-LG-01). A sweep runs each hour. The job, its steps and its summary stay: only the log text goes away (FR-LG-03). The job detail then shows that the log is deleted.
+
+| Setting | Default | Variable |
+|---|---|---|
+| Days that the control plane keeps the log text | 30 | `RESTICHUB_LOG_RETENTION_DAYS` |
+
+The configuration file holds the same value as `log_retention_days`. The value is the same for every tenant. A value below 1 is raised to 1. A value above 36500 stops the start.
+
 ## Roles
 
 | Role | Right |
 |---|---|
 | Admin, Operator | Run a plan and cancel a job. A plan holds one waiting manual run: a second run gives HTTP 409 `already_queued`. |
 | Admin | Run `unlock_all`. |
-| Viewer | Read the jobs. |
+| Viewer | Read the jobs, their steps and their logs. |
 
 A suspended tenant sends no job. Its agents stay connected (AC-TN-03).
 
@@ -122,7 +152,8 @@ A suspended tenant sends no job. Its agents stay connected (AC-TN-03).
 | Method and path | Function |
 |---|---|
 | `GET /api/v1/jobs` | List the jobs, newest first. The parameters `plan_id`, `repository_id`, `agent_id` and `status` filter the list. The parameters `cursor` and `limit` page the list. |
-| `GET /api/v1/jobs/{id}` | Read one job. |
+| `GET /api/v1/jobs/{id}` | Read one job with its steps, its summary and, for a running job, its progress. |
+| `GET /api/v1/jobs/{id}/logs` | Read a page of the log. The parameter `after_seq` is the number of the last line that you hold, and `limit` is the page size (1 to 2000, default 500). Use the `seq` of the last line as the next `after_seq`. |
 | `POST /api/v1/jobs/{id}/cancel` | Cancel a job. |
 | `POST /api/v1/plans/{id}/run` | Run a plan now. |
 | `POST /api/v1/repositories/{id}/unlock-all` | Remove every lock of a repository. The body holds `confirm` with the repository name. |

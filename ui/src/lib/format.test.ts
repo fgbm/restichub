@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatTimeInZoneWithLocal } from './format';
+import { formatBytes, formatDuration, formatSeconds, formatTimeInZoneWithLocal } from './format';
 
 describe('formatTimeInZoneWithLocal', () => {
 	it('shows the local time in the style of the zone time, without seconds', () => {
@@ -26,5 +26,22 @@ describe('formatDuration', () => {
 
 	it('shows zero seconds for an empty span', () => {
 		expect(formatDuration('2026-10-14T10:00:00Z', '2026-10-14T10:00:00Z')).toBe('0s');
+	});
+});
+
+describe('formatBytes', () => {
+	it('uses binary units and keeps whole bytes below 1 KiB', () => {
+		expect(formatBytes(0)).toBe('0 B');
+		expect(formatBytes(1023)).toBe('1,023 B');
+		expect(formatBytes(1024)).toBe('1 KiB');
+		expect(formatBytes(1_503_238_553)).toBe('1.4 GiB');
+		expect(formatBytes(5 * 1024 ** 4)).toBe('5 TiB');
+	});
+});
+
+describe('formatSeconds', () => {
+	it('rounds to whole seconds and shows two units', () => {
+		expect(formatSeconds(192.4)).toBe('3m 12s');
+		expect(formatSeconds(0.2)).toBe('0s');
 	});
 });
