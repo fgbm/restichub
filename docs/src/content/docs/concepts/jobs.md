@@ -117,9 +117,11 @@ While a step runs, the agent sends the progress of the step: files, bytes, perce
 
 The agent sends the log of a job in chunks. It removes every secret before it sends a chunk (FR-AG-06), and a job log holds at most 1 MiB. The control plane stores one row for each line (FR-LG-01). Each line has a number, the step, the source (`stdout`, `stderr` or `agent`) and a level. The control plane derives the level from the text of the line: `error`, `warn` or `info`. The agent sends no line time, so the stored time is the time when the control plane stored the line.
 
-The agent sends the tail of the log again after a restart (AC-PR-07). The agent numbers its chunks for each source. The control plane ignores a chunk that is not above the highest stored chunk of its source. A repeated tail therefore never stores a line twice.
+The agent sends the tail of the log again after a restart (AC-PR-07). The agent numbers its chunks for each source. The control plane keeps the number of the chunk with each line. It ignores a chunk that it stored before, in any order of arrival, so a repeated tail never stores a line twice.
 
-The control plane stops at 1 MiB of text for each job. After that it keeps no new line and marks the log as truncated. The web UI shows the note. The control plane removes control characters from each line and cuts a line at 8192 characters.
+Each line counts as its text, one line break and 64 bytes of overhead. The control plane stops at 1 MiB of this count or at 100 000 lines for each job, so empty lines cannot fill the database. After that it keeps no new line and marks the log as truncated. The web UI shows the note. The control plane removes control characters from each line, except the tab. It also removes the Unicode format characters (category Cf, for example U+202E). It cuts a line at 8192 characters.
+
+A finished job takes step and log writes from the agent only during the log retention period after its end.
 
 The log storage is a separate component with a `LogStore` interface (FR-LG-01, ADR-0015). The `database` backend is the default. An `s3` backend is planned for the 1.0 release.
 
@@ -131,7 +133,7 @@ The control plane deletes log lines that are older than the retention period (FR
 |---|---|---|
 | Days that the control plane keeps the log text | 30 | `RESTICHUB_LOG_RETENTION_DAYS` |
 
-The configuration file holds the same value as `log_retention_days`. The value is the same for every tenant. A value below 1 is raised to 1.
+The configuration file holds the same value as `log_retention_days`. The value is the same for every tenant. A value below 1 is raised to 1. A value above 36500 stops the start.
 
 ## Roles
 
