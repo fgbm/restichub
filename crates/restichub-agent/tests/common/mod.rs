@@ -8,6 +8,7 @@
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::Router;
@@ -19,15 +20,24 @@ use rcgen::{
     KeyPair, PKCS_ECDSA_P256_SHA256,
 };
 use restichub_cp::agent_listener::{
-    ListenerLimits, serve_listener, server_cert_sans, tls_config_from_issued,
+    ListenerLimits, der_to_pem, serve_listener, server_cert_sans, tls_config_from_issued,
 };
 use restichub_cp::config::{AuthConfig, TenancyConfig};
 use restichub_cp::pki::{CaService, CaStore};
 use restichub_cp::server::{AppState, AuthState, router};
 use restichub_db::test_util::{TestDatabase, test_database};
 use restichub_db::{Database, Role, TenantId, enrollment_tokens, signing, tenants, users};
+use restichub_proto::agent::v1::{
+    AgentMessage, ControlMessage,
+    agent_service_server::{AgentService, AgentServiceServer},
+};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use time::{Duration, OffsetDateTime};
+use tokio_stream::Stream;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
+use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
 
 /// The gRPC endpoint that the enrollment tests report to an agent.
@@ -359,6 +369,7 @@ pub struct StreamServer {
     pub state: AppState,
     pub addr: SocketAddr,
     pub endpoint: String,
+    ca: Arc<CaStore>,
     root_der: Vec<u8>,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<()>,
@@ -398,10 +409,23 @@ impl StreamServer {
             state,
             addr,
             endpoint,
+            ca,
             root_der,
             shutdown: Some(shutdown),
             task,
         }
+    }
+
+    /// The installation certificate authority, for a test that issues another server certificate.
+    #[must_use]
+    pub fn ca(&self) -> &Arc<CaStore> {
+        &self.ca
+    }
+
+    /// Pinned installation CA, in DER.
+    #[must_use]
+    pub fn root_der(&self) -> &[u8] {
+        &self.root_der
     }
 
     /// The pinned installation root CA in PEM, as `register --ca-file` reads it.
@@ -512,4 +536,140 @@ pub async fn retired_keys(db: &Database) -> usize {
     let rows = signing::list(&mut tx).await.expect("cannot list the keys");
     tx.commit().await.expect("cannot commit the read");
     rows.iter().filter(|row| row.retired_at.is_some()).count()
+}
+
+/// The identifier of the current active job signing key (ADR-0026).
+pub async fn current_key_id(db: &Database) -> String {
+    let mut tx = db
+        .begin_tenant(restichub_db::PLATFORM_TENANT_ID)
+        .await
+        .expect("cannot begin the transaction");
+    let rows = signing::list(&mut tx).await.expect("cannot list the keys");
+    tx.commit().await.expect("cannot commit the read");
+    rows.into_iter()
+        .find(|row| {
+            row.role == restichub_db::SigningKeyRole::Current
+                && row.retired_at.is_none()
+                && row.retire_after.is_none()
+        })
+        .expect("the current key is present")
+        .id
+        .to_string()
+}
+
+/// A gRPC listener that accepts the agent stream and never sends a message (FR-ID-07).
+///
+/// The listener presents a certificate from the installation CA and verifies the agent against the
+/// installation root, so the agent reaches it over mTLS. It counts the accepted streams.
+pub struct SilentServer {
+    addr: SocketAddr,
+    connections: Arc<std::sync::atomic::AtomicUsize>,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl SilentServer {
+    /// Serves a silent agent stream on a loopback port (FR-ID-07).
+    pub async fn start(ca: &CaStore, root_der: &[u8]) -> Self {
+        Self::start_mode(ca, root_der, true).await
+    }
+
+    /// Serves a stream that ends at once, for the reconnect-backoff test (FR-ID-08).
+    pub async fn start_closing(ca: &CaStore, root_der: &[u8]) -> Self {
+        Self::start_mode(ca, root_der, false).await
+    }
+
+    async fn start_mode(ca: &CaStore, root_der: &[u8], silent: bool) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("cannot bind the silent server");
+        let addr = listener.local_addr().expect("the silent server address");
+        let endpoint = format!("https://localhost:{}", addr.port());
+        let sans = server_cert_sans(Some(&endpoint), addr);
+        let issued = CaService::new(test_kek())
+            .issue_server_certificate(ca, &sans)
+            .expect("cannot issue the server certificate");
+        let mut chain = der_to_pem("CERTIFICATE", &issued.cert_der);
+        for der in &issued.chain_der {
+            chain.push_str(&der_to_pem("CERTIFICATE", der));
+        }
+        let tls = ServerTlsConfig::new()
+            .identity(Identity::from_pem(
+                chain,
+                der_to_pem("PRIVATE KEY", issued.key_der.as_slice()),
+            ))
+            .client_ca_root(Certificate::from_pem(der_to_pem("CERTIFICATE", root_der)));
+        let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let service = SilentService {
+            connections: Arc::clone(&connections),
+            silent,
+        };
+        let (shutdown, rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let incoming = TcpListenerStream::new(listener);
+            let _ = Server::builder()
+                .tls_config(tls)
+                .expect("cannot build the silent TLS config")
+                .add_service(AgentServiceServer::new(service))
+                .serve_with_incoming_shutdown(incoming, async move {
+                    let _ = rx.await;
+                })
+                .await;
+        });
+        Self {
+            addr,
+            connections,
+            shutdown: Some(shutdown),
+            task,
+        }
+    }
+
+    /// Address that the agent dials.
+    #[must_use]
+    pub fn endpoint(&self) -> String {
+        format!("https://localhost:{}", self.addr.port())
+    }
+
+    /// Count of the accepted agent streams.
+    #[must_use]
+    pub fn connections(&self) -> usize {
+        self.connections.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Drop for SilentServer {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        self.task.abort();
+    }
+}
+
+/// The gRPC service of the silent server. It sends no control message (FR-ID-07) or closes at once (FR-ID-08).
+#[derive(Clone)]
+struct SilentService {
+    connections: Arc<std::sync::atomic::AtomicUsize>,
+    silent: bool,
+}
+
+#[tonic::async_trait]
+impl AgentService for SilentService {
+    type ConnectStream = Pin<Box<dyn Stream<Item = Result<ControlMessage, Status>> + Send>>;
+
+    async fn connect(
+        &self,
+        request: Request<Streaming<AgentMessage>>,
+    ) -> Result<Response<Self::ConnectStream>, Status> {
+        self.connections
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut inbound = request.into_inner();
+        tokio::spawn(async move { while let Ok(Some(_)) = inbound.message().await {} });
+        let (tx, rx) = tokio::sync::mpsc::channel::<ControlMessage>(1);
+        if self.silent {
+            // The sender is leaked, so the outbound stream stays open and sends nothing.
+            std::mem::forget(tx);
+        }
+        Ok(Response::new(Box::pin(ReceiverStream::new(rx).map(Ok))))
+    }
 }

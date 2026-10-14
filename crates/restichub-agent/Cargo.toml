@@ -66,6 +66,7 @@ bytes = "1.12"
 http-body-util = { workspace = true }
 hyper = { version = "1.12", default-features = false, features = ["server", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+prost-types = "0.14"
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 restichub-cp = { path = "../restichub-cp" }
 restichub-db = { workspace = true, features = ["test-util"] }

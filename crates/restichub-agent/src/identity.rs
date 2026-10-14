@@ -15,8 +15,6 @@ pub const CERT_FILE: &str = "agent-cert.pem";
 pub const CA_CHAIN_FILE: &str = "ca-chain.pem";
 pub const METADATA_FILE: &str = "identity.json";
 pub const SIGNING_KEYS_FILE: &str = "signing-keys.json";
-/// The chain of the accepted signed job signing key updates (ADR-0030).
-pub const KEY_UPDATES_FILE: &str = "signing-key-updates.json";
 
 /// The public job signing key set that the identity keeps (ADR-0026).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,9 +36,6 @@ pub struct StoredIdentity {
     pub certificate_der: Vec<u8>,
     pub ca_chain_der: Vec<Vec<u8>>,
     pub signing_keys: StoredSigningKeys,
-    /// Base64 of each accepted `SigningKeyUpdate`, in acceptance order (ADR-0030). The chain lets a
-    /// later start rebuild the key ring without a re-enrollment.
-    pub key_updates: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,9 +83,6 @@ impl StoredIdentity {
         let keys =
             serde_json::to_vec(&self.signing_keys).context("cannot serialize the key set")?;
         paths::create_protected_file(&staging.join(SIGNING_KEYS_FILE), &keys)?;
-        let updates =
-            serde_json::to_vec(&self.key_updates).context("cannot serialize the key updates")?;
-        paths::create_protected_file(&staging.join(KEY_UPDATES_FILE), &updates)?;
         let metadata = Metadata {
             agent_id: self.agent_id.clone(),
             tenant_id: self.tenant_id.clone(),
@@ -121,11 +113,6 @@ impl StoredIdentity {
         )?;
         let signing_keys = serde_json::from_slice(&read(dir.join(SIGNING_KEYS_FILE))?)
             .context("bad signing-keys.json")?;
-        let key_updates = match std::fs::read(dir.join(KEY_UPDATES_FILE)) {
-            Ok(bytes) => serde_json::from_slice(&bytes).context("bad signing-key-updates.json")?,
-            // An identity written before the stream epic holds no chain (ADR-0030).
-            Err(_) => Vec::new(),
-        };
         Ok(Self {
             agent_id: metadata.agent_id,
             tenant_id: metadata.tenant_id,
@@ -135,7 +122,6 @@ impl StoredIdentity {
             certificate_der,
             ca_chain_der,
             signing_keys,
-            key_updates,
         })
     }
 
@@ -199,7 +185,7 @@ fn sibling(dir: &Path, suffix: &str) -> std::path::PathBuf {
 ///
 /// A swap that a crash interrupted leaves the old identity in the backup and no identity in the
 /// main directory. The function moves the backup back, so the agent keeps its identity.
-fn recover(dir: &Path) -> std::path::PathBuf {
+pub(crate) fn recover(dir: &Path) -> std::path::PathBuf {
     if dir.join(METADATA_FILE).exists() {
         return dir.to_path_buf();
     }
@@ -275,7 +261,6 @@ mod tests {
                 }],
                 signature: "AAAA".to_owned(),
             },
-            key_updates: vec!["AAAA".to_owned()],
         }
     }
 
@@ -317,17 +302,6 @@ mod tests {
         assert_eq!(loaded.certificate_der, identity.certificate_der);
         assert_eq!(loaded.ca_chain_der, identity.ca_chain_der);
         assert_eq!(loaded.signing_keys, identity.signing_keys);
-        assert_eq!(loaded.key_updates, identity.key_updates);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn an_identity_without_a_key_update_chain_loads() {
-        let dir = temp_dir("no-chain");
-        sample().save(&dir).expect("cannot save the identity");
-        std::fs::remove_file(dir.join(KEY_UPDATES_FILE)).expect("cannot remove the chain");
-        let loaded = StoredIdentity::load(&dir).expect("cannot load the identity");
-        assert!(loaded.key_updates.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

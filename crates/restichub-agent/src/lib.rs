@@ -10,6 +10,7 @@ pub mod commands;
 pub mod enroll;
 pub mod exec;
 pub mod identity;
+pub mod keys;
 pub mod paths;
 pub mod pem;
 pub mod restic;

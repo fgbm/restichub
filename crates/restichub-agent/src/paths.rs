@@ -22,6 +22,22 @@ pub fn config_dir() -> PathBuf {
     }
 }
 
+/// The cache directory of the agent. The restic child writes its cache there (FR-AG-06).
+///
+/// Linux uses `/var/cache/restichub-agent`, which the systemd unit creates. Windows uses a
+/// subdirectory of the configuration directory.
+#[must_use]
+pub fn cache_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        config_dir().join("cache")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/var/cache/restichub-agent")
+    }
+}
+
 /// Makes the directory and restricts it to the service account (FR-AG-04).
 ///
 /// # Errors

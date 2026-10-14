@@ -167,6 +167,5 @@ fn sample_identity() -> StoredIdentity {
             }],
             signature: "AAAA".to_owned(),
         },
-        key_updates: Vec::new(),
     }
 }

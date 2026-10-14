@@ -78,7 +78,6 @@ pub async fn register_async(
             keys: enrolled.signing_keys,
             signature: enrolled.signing_keys_signature,
         },
-        key_updates: Vec::new(),
     };
     identity.save(dir)?;
     println!("the agent is registered");
@@ -105,10 +104,10 @@ pub fn status(dir: &Path) -> Result<()> {
 /// Returns an error when the identity is absent, restic is not the pinned binary, or the runtime
 /// cannot start.
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
-    let mut identity = StoredIdentity::load(dir)
+    let identity = StoredIdentity::load(dir)
         .with_context(|| format!("no agent identity in {}", dir.display()))?;
     // Rebuild the key ring, so a job that the current key signed verifies (ADR-0026, ADR-0030).
-    let mut ring = crate::stream::key_ring(&identity)?;
+    let mut keys = crate::keys::KeyState::load(&identity, dir)?;
     let restic = ResticBinary::locate()?;
     restic.verify()?;
     let restic_version = restic.version().unwrap_or_default();
@@ -122,9 +121,9 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
         .build()
         .context("cannot start the runtime")?;
     runtime.block_on(crate::stream::serve(
-        &mut identity,
+        &identity,
         dir,
-        &mut ring,
+        &mut keys,
         &restic_version,
         shutdown,
     ))

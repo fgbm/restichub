@@ -8,9 +8,7 @@ use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use ed25519_dalek::VerifyingKey;
-use prost::Message as _;
-use restichub_proto::agent::v1::{KeyUpdate, SigningKeyUpdate};
-use restichub_proto::signing::{EnrollmentKey, KeyRing, KeyUpdateError, verify_enrollment_keys};
+use restichub_proto::signing::{EnrollmentKey, KeyRing, verify_enrollment_keys};
 use time::OffsetDateTime;
 use x509_parser::prelude::{FromDer as _, GeneralName, X509Certificate};
 
@@ -204,60 +202,6 @@ fn valid_at(certificate: &X509Certificate<'_>, now: OffsetDateTime) -> Result<()
     Ok(())
 }
 
-/// The identifiers of one adopted key update (FR-PR-11).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AcceptedKeyUpdate {
-    /// The key that signed the update, that is the current key that the agent acknowledges.
-    pub signer_key_id: String,
-    /// The key that the update introduced, that is the next key.
-    pub key_id: String,
-}
-
-/// Adopts one signed job signing key update into the ring (FR-PR-11, ADR-0026).
-///
-/// The signature is verified whenever the agent can check it: it holds the signer in the ring, or
-/// the update introduces the signer itself. At the first enrollment the agent holds no job signing
-/// key, and the update is signed by the current key while it introduces the next key. The trust then
-/// comes from the enrollment channel only: an HTTPS connection verified to the control plane with a
-/// single-use token (ADR-0026, threat T13, trust on first use). Every later update is verified
-/// against the ring. The function refuses a signature that the agent can check.
-///
-/// # Errors
-///
-/// Returns an error when the update does not decode, names two different signers, names no key, or
-/// carries a public key or a signature that does not verify.
-pub fn adopt_key_update(
-    ring: &mut KeyRing,
-    envelope: &SigningKeyUpdate,
-) -> Result<AcceptedKeyUpdate> {
-    let inner = KeyUpdate::decode(envelope.key_update.as_slice())
-        .context("the inner key update does not decode")?;
-    if inner.signer_key_id != envelope.signer_key_id {
-        bail!("the key update names two different signers");
-    }
-    if inner.key_id.is_empty() {
-        bail!("the key update names no key");
-    }
-    let key = verifying_key(&inner.public_key)?;
-    // The probe ring holds the introduced key, so a self-signed update is verified. An update signed
-    // by a key from an earlier key set gives `UnknownSigner`, which the first use accepts.
-    let mut probe = ring.clone();
-    probe
-        .insert(inner.key_id.clone(), key)
-        .map_err(|error| anyhow::anyhow!("the key update is not valid: {error:?}"))?;
-    match probe.apply_key_update(envelope) {
-        Ok(()) | Err(KeyUpdateError::UnknownSigner) => {}
-        Err(error) => bail!("the key update is not valid: {error:?}"),
-    }
-    let accepted = AcceptedKeyUpdate {
-        signer_key_id: envelope.signer_key_id.clone(),
-        key_id: inner.key_id,
-    };
-    ring.insert(accepted.key_id.clone(), key)
-        .map_err(|error| anyhow::anyhow!("the key update is not valid: {error:?}"))?;
-    Ok(accepted)
-}
-
 fn verifying_key(bytes: &[u8]) -> Result<VerifyingKey> {
     let array: [u8; 32] = bytes
         .try_into()
@@ -274,8 +218,6 @@ mod tests {
         BasicConstraints, CertificateParams, CertifiedIssuer, DnType, IsCa, KeyPair,
         PKCS_ECDSA_P256_SHA256, SanType,
     };
-    use restichub_proto::agent::v1::KeyUpdate;
-    use restichub_proto::signing::sign_key_update;
 
     use super::*;
 
@@ -367,46 +309,5 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn a_first_use_key_update_is_adopted() {
-        // The real control plane signs the update with the current key and introduces the next key.
-        let current = signing_key(1);
-        let update = KeyUpdate {
-            key_id: "next".to_owned(),
-            public_key: signing_key(2).verifying_key().to_bytes().to_vec(),
-            signer_key_id: "current".to_owned(),
-            issued_at: None,
-            revoked_key_ids: Vec::new(),
-        };
-        let envelope = sign_key_update(&update, &current);
-        let mut ring = KeyRing::new();
-        adopt_key_update(&mut ring, &envelope).expect("first use must be accepted");
-        assert!(ring.get("next").is_some());
-    }
-
-    #[test]
-    fn a_bad_key_update_signature_is_refused() {
-        // A self-signed update, so the agent holds the signing key and must verify the signature.
-        let signer = signing_key(3);
-        let update = KeyUpdate {
-            key_id: "key".to_owned(),
-            public_key: signer.verifying_key().to_bytes().to_vec(),
-            signer_key_id: "key".to_owned(),
-            issued_at: None,
-            revoked_key_ids: Vec::new(),
-        };
-        let mut envelope = sign_key_update(&update, &signer);
-        envelope.signature[0] ^= 0xff;
-        let mut ring = KeyRing::new();
-        let error =
-            adopt_key_update(&mut ring, &envelope).expect_err("a bad signature must be refused");
-        assert!(error.to_string().contains("not valid"), "{error}");
-        assert!(ring.get("key").is_none());
-    }
-
-    fn signing_key(seed: u8) -> ed25519_dalek::SigningKey {
-        ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
     }
 }
