@@ -384,13 +384,14 @@ export const en = {
 	'repositories.status': 'Status',
 	'repositories.status.initialized': 'Initialized',
 	'repositories.status.notInitialized': 'Not initialized',
-	'repositories.secrets': 'Secrets',
 	'repositories.password': 'Repository password',
 	'repositories.passwordHint':
-		'ResticHub shows this value never again after you save it. You can only replace it.',
+		'Keep a copy of this password outside ResticHub. If the control plane is lost, you cannot open the snapshots without the password.',
 	'repositories.passwordKeepHint': 'Leave the field empty to keep the current value.',
 	'repositories.passwordLocked':
 		'The repository password cannot be replaced in this version. Rotation arrives in a later release.',
+	'repositories.secretHint':
+		'ResticHub shows this value never again after you save it. You can only replace it.',
 	'repositories.s3AccessKey': 'S3 access key',
 	'repositories.s3SecretKey': 'S3 secret key',
 	'repositories.restPassword': 'REST server password',
@@ -406,7 +407,7 @@ export const en = {
 	'repositories.deleteBody':
 		'This action removes the repository "{name}" and its stored secrets. The data in the backend stays. Continue?',
 	'repositories.valueNote':
-		'An agent holds the repository password only for the duration of one job. ResticHub shows the value never again after you save it. Replace it to rotate.',
+		'An agent holds the repository password only for the duration of one job. ResticHub shows a secret value never again after you save it. The repository password is set at creation and cannot be changed in this version. You can replace the S3 keys and the REST server credentials.',
 
 	// Audit log
 	'audit.title': 'Audit log',

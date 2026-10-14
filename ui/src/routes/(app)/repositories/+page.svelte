@@ -284,7 +284,7 @@
 {#snippet nameCell(repository: Repository)}
 	<span class="repo">
 		<span class="repo__name">{repository.name}</span>
-		<span class="repo__meta mono">{backendAddress(repository)}</span>
+		<span class="repo__meta">{backendAddress(repository)}</span>
 	</span>
 {/snippet}
 
@@ -364,9 +364,9 @@
 	</Table>
 {/if}
 
-<Alert tone="info" icon="lock" title={t('repositories.secrets')}>
-	{t('repositories.valueNote')}
-</Alert>
+<div class="note">
+	<Alert variant="inline" icon="lock" title={t('repositories.valueNote')} />
+</div>
 
 <Dialog
 	bind:open={formOpen}
@@ -464,6 +464,7 @@
 			<PasswordField
 				id="repo-s3-access-key"
 				label={t('repositories.s3AccessKey')}
+				help={t('repositories.secretHint')}
 				error={fieldError(formProblem, 's3_access_key')}
 				autocomplete="new-password"
 				bind:value={s3AccessKey}
@@ -472,6 +473,7 @@
 			<PasswordField
 				id="repo-s3-secret-key"
 				label={t('repositories.s3SecretKey')}
+				help={t('repositories.secretHint')}
 				error={fieldError(formProblem, 's3_secret_key')}
 				autocomplete="new-password"
 				bind:value={s3SecretKey}
@@ -528,6 +530,7 @@
 
 	.repo__meta {
 		color: var(--rh-color-text-muted);
+		font-family: var(--rh-font-mono);
 		font-size: var(--rh-font-size-sm);
 	}
 
@@ -539,5 +542,9 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-4);
+	}
+
+	.note {
+		margin-top: var(--rh-space-4);
 	}
 </style>

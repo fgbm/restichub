@@ -388,13 +388,14 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.status': 'Состояние',
 	'repositories.status.initialized': 'Инициализирован',
 	'repositories.status.notInitialized': 'Не инициализирован',
-	'repositories.secrets': 'Секреты',
 	'repositories.password': 'Пароль репозитория',
 	'repositories.passwordHint':
-		'ResticHub больше никогда не показывает это значение после сохранения. Его можно только заменить.',
+		'Сохраните копию этого пароля вне ResticHub. Если сервер управления потерян, без пароля снимки открыть нельзя.',
 	'repositories.passwordKeepHint': 'Оставьте поле пустым, чтобы сохранить текущее значение.',
 	'repositories.passwordLocked':
 		'Пароль репозитория нельзя заменить в этой версии. Ротация появится в следующем выпуске.',
+	'repositories.secretHint':
+		'ResticHub больше никогда не показывает это значение после сохранения. Его можно только заменить.',
 	'repositories.s3AccessKey': 'Ключ доступа S3',
 	'repositories.s3SecretKey': 'Секретный ключ S3',
 	'repositories.restPassword': 'Пароль REST-сервера',
@@ -410,7 +411,7 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.deleteBody':
 		'Действие удаляет репозиторий «{name}» и его сохранённые секреты. Данные в хранилище остаются. Продолжить?',
 	'repositories.valueNote':
-		'Агент хранит пароль репозитория только на время одного задания. ResticHub больше никогда не показывает значение после сохранения. Замените его для ротации.',
+		'Агент хранит пароль репозитория только на время одного задания. ResticHub больше никогда не показывает значение секрета после сохранения. Пароль репозитория задаётся при создании, и в этой версии его нельзя изменить. Ключи S3 и учётные данные REST-сервера можно заменить.',
 
 	// Audit log
 	'audit.title': 'Журнал аудита',
