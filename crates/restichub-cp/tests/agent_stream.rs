@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use prost::Message as _;
 use restichub_cp::agent_listener::{
-    der_to_pem, serve_listener, server_cert_sans, tls_config_from_issued,
+    ListenerLimits, der_to_pem, serve_listener, server_cert_sans, tls_config_from_issued,
 };
 use restichub_cp::pki::{CaService, CaStore};
 use restichub_cp::server::AppState;
@@ -28,13 +28,17 @@ use restichub_proto::agent::v1::{
     SigningKeyUpdate, agent_message, agent_service_client::AgentServiceClient, control_message,
 };
 use restichub_proto::signing::KeyRing;
+use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Streaming;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 use uuid::Uuid;
 
-use common::{create_tenant, create_user, pki_state, seed_enrollment_token_value};
+use common::{
+    api_router, create_tenant, create_user, pki_state, request, seed_enrollment_token_value,
+    seed_session, send,
+};
 
 /// One running server with its trust material.
 struct Listener {
@@ -48,6 +52,10 @@ struct Listener {
 
 impl Listener {
     async fn start(state: AppState, ca: Arc<CaStore>) -> Self {
+        Self::start_with(state, ca, ListenerLimits::default()).await
+    }
+
+    async fn start_with(state: AppState, ca: Arc<CaStore>, limits: ListenerLimits) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("cannot bind the listener");
@@ -61,7 +69,7 @@ impl Listener {
         let (shutdown, rx) = oneshot::channel();
         let serve_state = state.clone();
         let task = tokio::spawn(async move {
-            let _ = serve_listener(listener, serve_state, tls, async move {
+            let _ = serve_listener(listener, serve_state, tls, limits, async move {
                 let _ = rx.await;
             })
             .await;
@@ -208,12 +216,17 @@ async fn next_message(inbound: &mut Streaming<ControlMessage>) -> ControlMessage
         .expect("the stream must not end")
 }
 
-/// True when the inbound side closes within the timeout.
+/// True when the inbound side closes within the timeout, after draining buffered messages.
 async fn stream_ends(inbound: &mut Streaming<ControlMessage>) -> bool {
-    matches!(
-        tokio::time::timeout(Duration::from_secs(10), inbound.message()).await,
-        Ok(Ok(None)) | Ok(Err(_))
-    )
+    for _ in 0..64 {
+        match tokio::time::timeout(Duration::from_secs(10), inbound.message()).await {
+            Ok(Ok(None)) | Ok(Err(_)) => return true,
+            // Skip a buffered message (a Ping of the heartbeat).
+            Ok(Ok(Some(_))) => continue,
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 /// Reads the active current job signing key from the platform tenant.
@@ -543,4 +556,309 @@ async fn expire(db: &TestDatabase, tenant: TenantId, agent: Uuid) {
     .await
     .expect("cannot expire the agent");
     tx.commit().await.expect("cannot commit the expiry");
+}
+
+/// FR-ID-04: a revoke through the API closes the open stream at once.
+#[tokio::test]
+async fn ac_id_04_a_revoke_closes_an_open_stream() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (listener, tenant, token) = setup(&db).await;
+    let identity = listener.enroll(&token).await;
+    let agent = Uuid::parse_str(&identity.agent_id).expect("the agent id");
+
+    let mut client = listener.channel(&identity).await;
+    let (_tx, mut inbound) = open_stream(&mut client)
+        .await
+        .expect("the stream must open");
+    read_handshake(&mut inbound).await;
+
+    // The revoke endpoint shares the registry of the listener, so it closes the open stream.
+    let admin = seed_session(db.database(), tenant, "revoker", "admin").await;
+    let app = api_router(listener.state.clone());
+    let (status, _, _) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/agents/{agent}/revoke"),
+            Some(&admin),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NO_CONTENT);
+
+    assert!(
+        stream_ends(&mut inbound).await,
+        "the revoke must close the open stream"
+    );
+
+    db.cleanup().await;
+}
+
+/// HIGH 1: a revoke around a new open leaves no live stream.
+///
+/// The stream registers before the registry check, so the new open closes the old stream and the
+/// check refuses the new one.
+#[tokio::test]
+async fn a_revoke_between_two_opens_leaves_no_live_stream() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (listener, tenant, token) = setup(&db).await;
+    let identity = listener.enroll(&token).await;
+    let agent = Uuid::parse_str(&identity.agent_id).expect("the agent id");
+
+    let mut first = listener.channel(&identity).await;
+    let (_tx, mut inbound_a) = open_stream(&mut first).await.expect("the first stream");
+    read_handshake(&mut inbound_a).await;
+
+    let actor = create_user(db.database(), tenant, "stream-revoker", "phc", "admin").await;
+    revoke(db.database(), tenant, agent, actor).await;
+
+    let mut second = listener.channel(&identity).await;
+    let error = open_stream(&mut second)
+        .await
+        .expect_err("the revoked agent must be refused");
+    assert_eq!(error.code(), tonic::Code::PermissionDenied, "{error}");
+    assert!(
+        stream_ends(&mut inbound_a).await,
+        "no stream may stay open after the revoke"
+    );
+
+    db.cleanup().await;
+}
+
+/// HIGH 2: a silent socket is closed by the handshake timeout.
+#[tokio::test]
+async fn a_silent_socket_is_closed_by_the_handshake_timeout() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let listener = listener_with_limits(
+        &db,
+        ListenerLimits {
+            handshake_timeout: Duration::from_millis(500),
+            ..ListenerLimits::default()
+        },
+    )
+    .await;
+
+    let mut socket = tokio::net::TcpStream::connect(listener.addr)
+        .await
+        .expect("cannot connect");
+    // Send nothing: the handshake never finishes and the listener closes the socket.
+    let mut buffer = [0_u8; 1];
+    let result = tokio::time::timeout(Duration::from_secs(5), socket.read(&mut buffer))
+        .await
+        .expect("the socket must close");
+    assert!(
+        matches!(result, Ok(0) | Err(_)),
+        "the silent socket must be closed"
+    );
+
+    db.cleanup().await;
+}
+
+/// HIGH 2: an anonymous connection that sends no request is closed by the idle timeout.
+#[tokio::test]
+async fn an_anonymous_idle_connection_is_closed() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let listener = listener_with_limits(
+        &db,
+        ListenerLimits {
+            anonymous_idle_timeout: Duration::from_millis(500),
+            ..ListenerLimits::default()
+        },
+    )
+    .await;
+
+    let mut stream = anonymous_tls(listener.addr, &listener.root_der).await;
+    let mut buffer = [0_u8; 1];
+    let result = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buffer))
+        .await
+        .expect("the connection must close");
+    assert!(
+        matches!(result, Ok(0) | Err(_)),
+        "the anonymous idle connection must be closed"
+    );
+
+    db.cleanup().await;
+}
+
+/// FR-ID-07 / MEDIUM 3: a stream without an answer closes after three ping intervals.
+#[tokio::test]
+async fn ac_id_07_an_idle_stream_closes_after_three_ping_intervals() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (listener, _tenant, token) = setup(&db).await;
+    let identity = listener.enroll(&token).await;
+
+    let mut client = listener.channel(&identity).await;
+    let (_tx, mut inbound) = open_stream(&mut client)
+        .await
+        .expect("the stream must open");
+    read_handshake(&mut inbound).await;
+    // Let the stream task process the hello before the clock is frozen.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Freeze time after the setup, so the database calls above use the real clock.
+    tokio::time::pause();
+    // The agent answers nothing, so the stream closes after three ping intervals.
+    tokio::time::advance(restichub_cp::agent_stream::IDLE_CLOSE + Duration::from_secs(1)).await;
+    assert!(
+        stream_ends(&mut inbound).await,
+        "the idle stream must close"
+    );
+
+    tokio::time::resume();
+    db.cleanup().await;
+}
+
+/// LOW 7: the batch flush closes a stream whose row is no longer valid.
+#[tokio::test]
+async fn the_last_seen_batch_closes_a_revoked_stream() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (listener, tenant, token) = setup(&db).await;
+    let identity = listener.enroll(&token).await;
+    let agent = Uuid::parse_str(&identity.agent_id).expect("the agent id");
+
+    let mut client = listener.channel(&identity).await;
+    let (_tx, mut inbound) = open_stream(&mut client)
+        .await
+        .expect("the stream must open");
+    read_handshake(&mut inbound).await;
+
+    let registry = listener.state.agent_registry();
+    registry.mark_last_seen(
+        tenant,
+        restichub_db::AgentId::from_uuid(agent),
+        certificate_serial_hex(&identity.certificate_der),
+    );
+    let actor = create_user(db.database(), tenant, "stream-revoker", "phc", "admin").await;
+    revoke(db.database(), tenant, agent, actor).await;
+    restichub_cp::agent_stream::flush_last_seen(
+        db.database(),
+        registry,
+        time::OffsetDateTime::now_utc(),
+    )
+    .await;
+
+    assert!(
+        stream_ends(&mut inbound).await,
+        "the batch must close the revoked stream"
+    );
+
+    db.cleanup().await;
+}
+
+/// LOW 7: the batch flush updates `last_seen_at` in one statement per tenant.
+#[tokio::test]
+async fn the_last_seen_batch_updates_a_live_stream() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (listener, tenant, token) = setup(&db).await;
+    let identity = listener.enroll(&token).await;
+    let agent = Uuid::parse_str(&identity.agent_id).expect("the agent id");
+    let old = time::OffsetDateTime::now_utc() - time::Duration::hours(1);
+    set_last_seen(&db, tenant, agent, old).await;
+
+    let registry = listener.state.agent_registry();
+    registry.mark_last_seen(
+        tenant,
+        restichub_db::AgentId::from_uuid(agent),
+        certificate_serial_hex(&identity.certificate_der),
+    );
+    restichub_cp::agent_stream::flush_last_seen(
+        db.database(),
+        registry,
+        time::OffsetDateTime::now_utc(),
+    )
+    .await;
+
+    let seen = last_seen(db.database(), tenant, agent)
+        .await
+        .expect("the agent holds a last_seen_at");
+    assert!(seen > old, "the batch must update last_seen_at");
+
+    db.cleanup().await;
+}
+
+/// Builds the test server with the given load bounds.
+async fn listener_with_limits(db: &TestDatabase, limits: ListenerLimits) -> Listener {
+    let (state, ca) = pki_state(db.database()).await;
+    Listener::start_with(state, ca, limits).await
+}
+
+/// Connects with the installation root CA and no client certificate.
+async fn anonymous_tls(
+    addr: SocketAddr,
+    root_der: &[u8],
+) -> tokio_rustls::client::TlsStream<tokio::net::TcpStream> {
+    use tokio_rustls::TlsConnector;
+    use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
+    use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+
+    let mut roots = RootCertStore::empty();
+    roots.add_parsable_certificates([CertificateDer::from(root_der.to_vec())]);
+    let provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
+    let config = ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&tokio_rustls::rustls::version::TLS13])
+        .expect("the protocol versions")
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(config));
+    let stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("cannot connect");
+    let server_name = ServerName::try_from("localhost").expect("the server name");
+    connector
+        .connect(server_name, stream)
+        .await
+        .expect("the TLS handshake")
+}
+
+/// The lower-case hexadecimal of the certificate serial, as the registry guard compares it.
+fn certificate_serial_hex(der: &[u8]) -> String {
+    use x509_parser::prelude::FromDer;
+    let (_, cert) =
+        x509_parser::prelude::X509Certificate::from_der(der).expect("the certificate must parse");
+    let serial = cert.raw_serial();
+    let start = serial
+        .iter()
+        .position(|byte| *byte != 0)
+        .unwrap_or(serial.len());
+    serial[start..]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Sets the `last_seen_at` of an agent through the owner connection.
+async fn set_last_seen(
+    db: &TestDatabase,
+    tenant: TenantId,
+    agent: Uuid,
+    value: time::OffsetDateTime,
+) {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query("UPDATE agents SET last_seen_at = $2 WHERE id = $1")
+        .bind(agent)
+        .bind(value)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set last_seen_at");
+    tx.commit().await.expect("cannot commit last_seen_at");
 }

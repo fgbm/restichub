@@ -5,15 +5,18 @@
 //! and the certificate serial, both checked against the registry row of the tenant (ADR-0026). A
 //! revoked or unknown agent is refused, and a revoke closes the open stream at once (FR-ID-04).
 //!
+//! The stream is registered before the registry check, so a revoke that lands in the window closes
+//! the stream. The registry check and the guarded `last_seen_at` write run after the registration.
 //! The stream sends the `ServerHello`, a fresh signing key set and a `Ping` each
-//! [`HEARTBEAT_INTERVAL`]. It writes `last_seen_at` in a batch. A `KeyUpdateAck` feeds the retirement
-//! of the old key once every known online agent acknowledged the new set (ADR-0026). Job delivery is
-//! a typed channel stub for #7; the stream starts no job.
+//! [`HEARTBEAT_INTERVAL`]; it closes when the agent does not answer for [`IDLE_CLOSE`]. A
+//! `KeyUpdateAck` feeds the retirement of the old key once every known online agent acknowledged the
+//! new set (ADR-0026). Job delivery is a typed channel stub for #7; the stream starts no job.
 
 use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use restichub_db::agents as agent_repo;
@@ -23,6 +26,7 @@ use restichub_proto::agent::v1::{
     agent_service_server::{AgentService, AgentServiceServer},
     control_message,
 };
+use rustls_pki_types::CertificateDer;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
@@ -40,19 +44,38 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 /// Batch period of the `last_seen_at` write. The stream writes at most once for each period.
 pub const LAST_SEEN_INTERVAL: Duration = Duration::from_secs(30);
 
+/// The stream closes when the agent does not answer for three ping intervals (FR-ID-07).
+pub const IDLE_CLOSE: Duration = Duration::from_secs(3 * HEARTBEAT_INTERVAL.as_secs());
+
 /// Control messages buffered for one agent.
 const OUTBOUND_CHANNEL: usize = 64;
 
 const SAN_PREFIX: &str = "restichub://tenant/";
 const SAN_MIDDLE: &str = "/agent/";
 
+/// The connection information of one stream: the socket peer and the client certificate chain.
+///
+/// The listener builds it from the TLS session and inserts it as a request extension, so the handler
+/// reads the peer address and the certificates without tonic's own TLS path.
+#[derive(Debug, Clone)]
+pub struct PeerInfo {
+    pub remote: Option<SocketAddr>,
+    pub certs: Option<Arc<Vec<CertificateDer<'static>>>>,
+}
+
 /// The identity of a connected agent, taken from the client certificate.
 #[derive(Debug, Clone)]
 struct PeerIdentity {
     tenant: TenantId,
     agent: AgentId,
-    /// Raw bytes of the certificate serial as the registry stores them.
+    /// The certificate serial without a leading zero, as the registry guard compares it.
     serial: Vec<u8>,
+}
+
+impl PeerIdentity {
+    fn serial_hex(&self) -> String {
+        hex(&self.serial)
+    }
 }
 
 /// One open stream. The generation separates an older stream of the same agent from the new one, so
@@ -66,8 +89,8 @@ struct StreamEntry {
 /// The in-process registry of the live streams (ADR-0026, section Revocation; FR-ID-04).
 ///
 /// A revoke closes the stream of an agent at once. A second stream for one agent closes the first.
-/// The registry also carries the acknowledgement run of a signing key rotation, so the control plane
-/// retires the old key only after every known online agent answered (ADR-0026).
+/// The registry carries the acknowledgement run of a signing key rotation and the batch buffer of the
+/// `last_seen_at` writes.
 pub struct StreamRegistry {
     inner: Mutex<Inner>,
     next_generation: AtomicU64,
@@ -77,6 +100,10 @@ pub struct StreamRegistry {
 struct Inner {
     streams: HashMap<AgentId, StreamEntry>,
     ack: Option<AckRun>,
+    /// Acknowledgements that arrived before the rotation was recorded, keyed by the current key id.
+    pending_acks: HashMap<String, HashSet<AgentId>>,
+    /// The agents that reported activity since the last flush, with the serial to guard.
+    last_seen: HashMap<TenantId, HashMap<AgentId, String>>,
 }
 
 /// One signing key rotation that waits for the acknowledgements.
@@ -160,6 +187,17 @@ impl StreamRegistry {
             .unwrap_or(false)
     }
 
+    /// Closes the open streams of the given agents. The batch flush calls it for a revoked or an
+    /// expired row (FR-ID-04, FR-ID-07).
+    fn close_many(&self, agents: &[AgentId]) {
+        let inner = self.lock();
+        for agent in agents {
+            if let Some(entry) = inner.streams.get(agent) {
+                let _ = entry.close.send(true);
+            }
+        }
+    }
+
     /// Sends a control message to the open stream of an agent. False when the agent is offline.
     ///
     /// The job dispatcher of #7 delivers `SignedJob` messages through this call.
@@ -176,41 +214,77 @@ impl StreamRegistry {
         self.lock().streams.keys().copied().collect()
     }
 
+    /// Buffers one `last_seen_at` write. The flush task writes the buffer in one statement per tenant.
+    pub fn mark_last_seen(&self, tenant: TenantId, agent: AgentId, serial_hex: String) {
+        self.lock()
+            .last_seen
+            .entry(tenant)
+            .or_default()
+            .insert(agent, serial_hex);
+    }
+
+    /// Takes the buffered `last_seen_at` writes, grouped by tenant.
+    fn take_last_seen(&self) -> Vec<(TenantId, Vec<(AgentId, String)>)> {
+        let mut inner = self.lock();
+        std::mem::take(&mut inner.last_seen)
+            .into_iter()
+            .map(|(tenant, agents)| (tenant, agents.into_iter().collect()))
+            .collect()
+    }
+
     /// Records a signing key rotation and the agents that must acknowledge it (ADR-0026).
     ///
     /// The first stream that sees the rotation sets the expected set; a later stream of the same
-    /// rotation changes nothing.
-    fn note_rotation(&self, pending_id: Uuid, current_key_id: &str) {
+    /// rotation changes nothing. An acknowledgement that arrived first is applied now. Returns the
+    /// pending key id when the acknowledgements are already complete.
+    fn note_rotation(&self, pending_id: Uuid, current_key_id: &str) -> Option<Uuid> {
         let mut inner = self.lock();
         if inner
             .ack
             .as_ref()
             .is_some_and(|ack| ack.pending_id == pending_id)
         {
-            return;
+            return None;
         }
-        let expected = inner.streams.keys().copied().collect();
+        let expected: HashSet<AgentId> = inner.streams.keys().copied().collect();
+        let acked = inner
+            .pending_acks
+            .remove(current_key_id)
+            .unwrap_or_default();
+        if expected.is_subset(&acked) {
+            inner.ack = None;
+            return Some(pending_id);
+        }
         inner.ack = Some(AckRun {
             pending_id,
             current_key_id: current_key_id.to_owned(),
             expected,
-            acked: HashSet::new(),
+            acked,
         });
+        None
     }
 
     /// Records one acknowledgement. Returns the pending key id when every expected agent acked.
+    ///
+    /// An acknowledgement that arrives before the rotation is recorded is kept for the rotation.
     fn ack(&self, agent: AgentId, current_key_id: &str) -> Option<Uuid> {
         let mut inner = self.lock();
-        let ack = inner.ack.as_mut()?;
-        if ack.current_key_id != current_key_id {
+        if let Some(run) = inner.ack.as_mut()
+            && run.current_key_id == current_key_id
+        {
+            run.acked.insert(agent);
+            if run.expected.is_subset(&run.acked) {
+                let pending = run.pending_id;
+                inner.ack = None;
+                return Some(pending);
+            }
             return None;
         }
-        ack.acked.insert(agent);
-        if ack.expected.is_subset(&ack.acked) {
-            let pending = ack.pending_id;
-            inner.ack = None;
-            return Some(pending);
-        }
+        inner
+            .pending_acks
+            .entry(current_key_id.to_owned())
+            .or_default()
+            .insert(agent);
         None
     }
 }
@@ -242,7 +316,7 @@ fn peer_identity(der: &[u8]) -> Result<PeerIdentity, Status> {
     Ok(PeerIdentity {
         tenant,
         agent,
-        serial: cert.raw_serial().to_vec(),
+        serial: normalise_serial(cert.raw_serial()).to_vec(),
     })
 }
 
@@ -280,7 +354,7 @@ async fn check_registry(
     if agent.status != AgentStatus::Active {
         return Err(Status::permission_denied("the agent is revoked"));
     }
-    if normalise_serial(&agent.certificate_serial) != normalise_serial(&identity.serial) {
+    if normalise_serial(&agent.certificate_serial) != identity.serial.as_slice() {
         return Err(Status::permission_denied(
             "the certificate serial is not the enrolled one",
         ));
@@ -293,6 +367,28 @@ async fn check_registry(
     Ok(())
 }
 
+/// Writes the first `last_seen_at` under the registry guard (HIGH 1).
+///
+/// The single statement re-checks the status, the serial and the expiry. `false` refuses the stream.
+async fn touch_connected(
+    db: &Database,
+    identity: &PeerIdentity,
+    now: time::OffsetDateTime,
+) -> bool {
+    let Ok(mut tx) = db.begin_tenant(identity.tenant).await else {
+        return false;
+    };
+    match agent_repo::touch_last_seen_guarded(&mut tx, identity.agent, &identity.serial_hex(), now)
+        .await
+    {
+        Ok(true) => {
+            let _ = tx.commit().await;
+            true
+        }
+        Ok(false) | Err(_) => false,
+    }
+}
+
 /// Removes the leading zero bytes of a DER integer, so the stored serial and the certificate serial
 /// compare equal.
 fn normalise_serial(serial: &[u8]) -> &[u8] {
@@ -301,6 +397,16 @@ fn normalise_serial(serial: &[u8]) -> &[u8] {
         .position(|byte| *byte != 0)
         .unwrap_or(serial.len());
     &serial[start..]
+}
+
+/// Lower-case hexadecimal, as the registry guard compares the serial.
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(text, "{byte:02x}");
+    }
+    text
 }
 
 /// The gRPC service of the agent stream (ADR-0008).
@@ -323,18 +429,46 @@ impl AgentService for AgentStreamService {
         &self,
         request: Request<Streaming<AgentMessage>>,
     ) -> Result<Response<Self::ConnectStream>, Status> {
-        let certs = request
-            .peer_certs()
+        let info = request
+            .extensions()
+            .get::<PeerInfo>()
+            .cloned()
+            .ok_or_else(|| Status::unauthenticated("the connection holds no client identity"))?;
+        let certs = info
+            .certs
             .ok_or_else(|| Status::unauthenticated("no client certificate"))?;
         let leaf = certs
             .first()
             .ok_or_else(|| Status::unauthenticated("no client certificate"))?;
         let identity = peer_identity(leaf.as_ref())?;
-        let now = self.state.auth().clock.now();
-        check_registry(self.state.db(), &identity, now).await?;
+
+        // Subscribe before the fresh key set, so a rotation in between is not lost (LOW 6).
+        let rotation = self.state.job_signing().map(JobSigningService::subscribe);
 
         let (tx, rx) = mpsc::channel::<ControlMessage>(OUTBOUND_CHANNEL);
         let (close_tx, close_rx) = watch::channel(false);
+        // Register before the registry check: a revoke that lands in the window closes this stream
+        // and the check refuses the open (HIGH 1).
+        let generation = self
+            .state
+            .agent_registry()
+            .open(identity.agent, close_tx, tx.clone());
+
+        let now = self.state.auth().clock.now();
+        if let Err(status) = check_registry(self.state.db(), &identity, now).await {
+            self.state
+                .agent_registry()
+                .remove(identity.agent, generation);
+            return Err(status);
+        }
+        // The guarded write re-checks the status, the serial and the expiry in one statement. A
+        // revoke or an expiry in the window refuses the stream (HIGH 1).
+        if !touch_connected(self.state.db(), &identity, now).await {
+            self.state
+                .agent_registry()
+                .remove(identity.agent, generation);
+            return Err(Status::permission_denied("the agent is revoked or expired"));
+        }
 
         let hello = ControlMessage {
             payload: Some(control_message::Payload::ServerHello(ServerHello {
@@ -351,12 +485,6 @@ impl AgentService for AgentStreamService {
                 payload: Some(control_message::Payload::SigningKeyUpdate(update)),
             });
         }
-
-        let generation = self
-            .state
-            .agent_registry()
-            .open(identity.agent, close_tx, tx.clone());
-        let rotation = self.state.job_signing().map(JobSigningService::subscribe);
 
         let mut inbound = request.into_inner();
         let state = self.state.clone();
@@ -383,6 +511,9 @@ impl AgentService for AgentStreamService {
 
 /// Runs the message loop of one stream: the heartbeat, the `last_seen_at` batch, the inbound
 /// messages and the rotation delivery (FR-ID-07, ADR-0026).
+///
+/// The stream closes when the agent sends nothing for [`IDLE_CLOSE`] (MEDIUM 3). `last_seen_at` is
+/// buffered only for a stream that reported activity since the last tick.
 #[allow(clippy::too_many_arguments)]
 async fn run_stream(
     state: AppState,
@@ -398,18 +529,26 @@ async fn run_stream(
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_seen = tokio::time::interval(LAST_SEEN_INTERVAL);
     last_seen.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // The first tick of `interval` fires at once. Skip it, so the connect write is the only one.
+    // The first tick of `interval` fires at once. Skip it.
     heartbeat.tick().await;
     last_seen.tick().await;
-    write_last_seen(&state, identity.tenant, agent).await;
+    let mut last_activity = tokio::time::Instant::now();
+    let mut active = false;
 
     loop {
         tokio::select! {
             message = inbound.message() => match message {
-                Ok(Some(message)) => handle_message(&state, &identity, message),
+                Ok(Some(message)) => {
+                    last_activity = tokio::time::Instant::now();
+                    active = true;
+                    handle_message(&state, &identity, message);
+                }
                 Ok(None) | Err(_) => break,
             },
             _ = heartbeat.tick() => {
+                if last_activity.elapsed() >= IDLE_CLOSE {
+                    break;
+                }
                 let nonce = now_nonce();
                 let ping = ControlMessage {
                     payload: Some(control_message::Payload::Ping(Ping { nonce })),
@@ -418,7 +557,16 @@ async fn run_stream(
                     break;
                 }
             }
-            _ = last_seen.tick() => write_last_seen(&state, identity.tenant, agent).await,
+            _ = last_seen.tick() => {
+                if active {
+                    state.agent_registry().mark_last_seen(
+                        identity.tenant,
+                        agent,
+                        identity.serial_hex(),
+                    );
+                    active = false;
+                }
+            }
             event = recv_rotation(&mut rotation) => {
                 if let Some(event) = event {
                     deliver_rotation(&state, agent, event).await;
@@ -464,9 +612,12 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
     let Ok(update) = signing.key_update(state.db(), now).await else {
         return;
     };
-    state
+    if let Some(pending) = state
         .agent_registry()
-        .note_rotation(event.pending_key_id, &event.current_key_id);
+        .note_rotation(event.pending_key_id, &event.current_key_id)
+    {
+        retire(state, pending);
+    }
     let message = ControlMessage {
         payload: Some(control_message::Payload::SigningKeyUpdate(update)),
     };
@@ -524,18 +675,53 @@ impl AgentStreamService {
     }
 }
 
-/// Writes `last_seen_at` in its own transaction (FR-ID-07). A failure is logged, not fatal.
-async fn write_last_seen(state: &AppState, tenant: TenantId, agent: AgentId) {
-    let now = state.auth().clock.now();
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        return;
-    };
-    if agent_repo::touch_last_seen(&mut tx, agent, now)
-        .await
-        .is_ok()
-    {
-        let _ = tx.commit().await;
+/// Flushes the buffered `last_seen_at` writes in one statement for each tenant (LOW 7).
+///
+/// A row that the guarded statement did not update is revoked, expired or no longer the enrolled
+/// serial; the flush closes its stream.
+pub async fn flush_last_seen(db: &Database, registry: &StreamRegistry, now: time::OffsetDateTime) {
+    for (tenant, entries) in registry.take_last_seen() {
+        let ids: Vec<Uuid> = entries.iter().map(|(agent, _)| agent.as_uuid()).collect();
+        let serials: Vec<String> = entries.iter().map(|(_, serial)| serial.clone()).collect();
+        let Ok(mut tx) = db.begin_tenant(tenant).await else {
+            continue;
+        };
+        match agent_repo::touch_last_seen_batch(&mut tx, &ids, &serials, now).await {
+            Ok(updated) => {
+                let _ = tx.commit().await;
+                let updated: HashSet<Uuid> = updated.into_iter().collect();
+                let stale: Vec<AgentId> = entries
+                    .iter()
+                    .map(|(agent, _)| *agent)
+                    .filter(|agent| !updated.contains(&agent.as_uuid()))
+                    .collect();
+                if !stale.is_empty() {
+                    registry.close_many(&stale);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the last_seen batch failed");
+            }
+        }
     }
+}
+
+/// Starts the periodic flush of the buffered `last_seen_at` writes (LOW 7).
+pub fn spawn_last_seen_flush(
+    db: Database,
+    registry: Arc<StreamRegistry>,
+    clock: Arc<dyn crate::clock::Clock>,
+    interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        // The first tick of `interval` fires immediately. Skip it.
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            flush_last_seen(&db, &registry, clock.now()).await;
+        }
+    })
 }
 
 /// A nonce for the heartbeat. The value is not secret.
@@ -554,7 +740,7 @@ pub fn agent_service(state: AppState) -> AgentServiceServer<AgentStreamService> 
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamRegistry, normalise_serial, parse_identity_uri};
+    use super::{StreamRegistry, hex, normalise_serial, parse_identity_uri};
     use restichub_db::AgentId;
     use uuid::Uuid;
 
@@ -574,6 +760,7 @@ mod tests {
         assert_eq!(normalise_serial(&[0, 1, 2, 3]), &[1, 2, 3]);
         assert_eq!(normalise_serial(&[1, 2, 3]), &[1, 2, 3]);
         assert!(normalise_serial(&[]).is_empty());
+        assert_eq!(hex(&[0x0a, 0xff]), "0aff");
     }
 
     #[test]
@@ -589,5 +776,18 @@ mod tests {
         assert!(*a.borrow_and_update(), "the first stream must close");
         assert_eq!(registry.online_agents(), vec![agent]);
         assert!(registry.close_by_agent(agent));
+    }
+
+    #[test]
+    fn an_acknowledgement_before_the_rotation_is_applied() {
+        let registry = StreamRegistry::new();
+        let agent = AgentId::new();
+        let (close, _rx) = tokio::sync::watch::channel(false);
+        let (tx, _out) = tokio::sync::mpsc::channel(1);
+        registry.open(agent, close, tx);
+        // The acknowledgement arrives before the rotation is recorded.
+        assert!(registry.ack(agent, "key-2").is_none());
+        let pending = Uuid::now_v7();
+        assert_eq!(registry.note_rotation(pending, "key-2"), Some(pending));
     }
 }

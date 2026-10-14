@@ -731,3 +731,117 @@ fn rsa_csr() -> Option<Vec<u8>> {
     std::fs::remove_dir_all(&dir).ok();
     der
 }
+
+/// ADR-0033: the web origin and the agent listener both serve the enrollment.
+#[tokio::test]
+async fn ac_id_01_both_origins_serve_the_enrollment() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-origins").await;
+    let creator = create_user(db.database(), tenant, "enroll-admin", "phc", "admin").await;
+    let (web_token, _) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &[],
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    )
+    .await;
+    let (listener_token, _) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &[],
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    )
+    .await;
+    let (app, agent) = routers(db.database()).await;
+
+    let (status, _) = enroll(&app, &web_token, &p256_csr()).await;
+    assert_eq!(status, StatusCode::CREATED, "the web origin must enroll");
+    let (status, _) = enroll(&agent, &listener_token, &p256_csr()).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the agent listener must enroll"
+    );
+
+    db.cleanup().await;
+}
+
+/// MEDIUM 4: the agent listener ignores `X-Forwarded-For`, even with a trusted proxy list.
+#[tokio::test]
+async fn an_x_forwarded_for_header_does_not_change_the_source_ip() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-xff").await;
+    let creator = create_user(db.database(), tenant, "enroll-admin", "phc", "admin").await;
+    let (token, _) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &[],
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    )
+    .await;
+    // The state trusts the peer address, so the web origin would read the header.
+    let (state, _ca) = pki_state(db.database()).await;
+    let state = state.with_trusted_proxies(
+        restichub_cp::client_ip::TrustedProxies::parse(["203.0.113.7"]).expect("a network"),
+    );
+    let agent = agent_router(state.clone());
+    let app = api_router(state);
+
+    let mut request = request(
+        "POST",
+        "/agent/v1/enroll",
+        None,
+        Some(body(&token, &p256_csr())),
+    );
+    request.headers_mut().insert(
+        "x-forwarded-for",
+        axum::http::HeaderValue::from_static("198.51.100.9"),
+    );
+    let (status, _, _) = send(&agent, request).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let reader = seed_session(db.database(), tenant, "reader", "viewer").await;
+    let items = audit_items(&app, &reader, "agent_enroll").await;
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(
+        items[0].get("source_ip").and_then(Value::as_str),
+        Some("203.0.113.7"),
+        "the listener must use the socket address only"
+    );
+
+    db.cleanup().await;
+}
+
+/// LOW 5: the enrollment route keeps the 16 KiB body limit.
+#[tokio::test]
+async fn a_body_over_the_limit_is_refused_with_413() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (_app, agent) = routers(db.database()).await;
+    let big = "a".repeat(17 * 1024);
+    let body = json!({
+        "token": "re_unknown-token-value",
+        "csr": big,
+        "hostname": "host-a",
+        "os": "linux",
+        "arch": "amd64",
+        "agent_version": "0.1.0",
+        "restic_version": "0.19.0",
+    });
+    let (status, _, _) = send(
+        &agent,
+        request("POST", "/agent/v1/enroll", None, Some(body)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+    db.cleanup().await;
+}

@@ -6,31 +6,74 @@
 //! certificate and the `Connect` handler enforces mTLS. The listener speaks TLS 1.3 with rustls and
 //! offers the ALPN protocols `h2` (the stream) and `http/1.1` (the enrollment).
 //!
-//! The control plane terminates TLS before the gRPC server, so the peer certificates reach the
-//! handler through the connection info of the stream (`request.peer_certs()`). The client chain is
-//! verified against the installation root CA at the handshake; the handler then applies the
-//! per-agent registry check (FR-PR-08).
+//! The control plane terminates TLS before the gRPC server, so the peer address and the client
+//! certificates reach the handler through a request extension. The client chain is verified against
+//! the installation root CA at the handshake; the handler then applies the per-agent registry check
+//! (FR-PR-08).
+//!
+//! The listener bounds the unauthenticated load (HIGH 2): a TLS handshake timeout, a semaphore for
+//! the concurrent handshakes, a cap on the established connections, an idle timeout for a connection
+//! without a client certificate and the HTTP/2 limits of the gRPC server.
 
 use std::future::Future;
+use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
+use std::time::Duration;
 
 use axum::Router;
-use axum::extract::ConnectInfo;
+use axum::extract::{ConnectInfo, DefaultBodyLimit};
 use axum::middleware::{self, Next};
 use axum::routing::post;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio_rustls::rustls::server::WebPkiClientVerifier;
 use tokio_rustls::rustls::{self, RootCertStore, ServerConfig};
 use tokio_rustls::server::TlsStream;
-use tonic::transport::server::{TcpConnectInfo, TlsConnectInfo};
+use tonic::transport::server::Connected;
 
+use crate::agent_stream::PeerInfo;
+use crate::client_ip::IgnoreForwarded;
 use crate::config::Config;
 use crate::pki::IssuedServerCertificate;
-use crate::server::AppState;
+use crate::server::{AppState, BODY_LIMIT};
+
+/// The TLS handshake of one connection must finish within this time (HIGH 2).
+pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A connection without a client certificate must send its request within this time (HIGH 2).
+pub const ANONYMOUS_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The largest number of concurrent TLS handshakes (HIGH 2).
+const HANDSHAKE_CONCURRENCY: usize = 256;
+
+/// The default cap on the established connections. It covers 2000 agents and a margin (HIGH 2).
+pub const DEFAULT_MAX_CONNECTIONS: usize = 2200;
+
+/// Load bounds of the listener (HIGH 2).
+#[derive(Debug, Clone, Copy)]
+pub struct ListenerLimits {
+    pub max_connections: usize,
+    pub handshake_timeout: Duration,
+    pub anonymous_idle_timeout: Duration,
+}
+
+impl Default for ListenerLimits {
+    fn default() -> Self {
+        Self {
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+            handshake_timeout: TLS_HANDSHAKE_TIMEOUT,
+            anonymous_idle_timeout: ANONYMOUS_IDLE_TIMEOUT,
+        }
+    }
+}
 
 /// Errors of the agent listener (ADR-0026).
 #[derive(Debug, thiserror::Error)]
@@ -58,11 +101,14 @@ pub enum ListenerError {
 /// Builds the routes of the agent listener: the gRPC service and the enrollment route (ADR-0026).
 ///
 /// The tonic `Routes` wraps an axum router, so the gRPC service and the enrollment endpoint share
-/// one listener.
+/// one listener. The enrollment route keeps the 16 KiB body limit (LOW 5).
 pub fn agent_routes(state: AppState) -> tonic::service::Routes {
     let mut routes = tonic::service::Routes::new(crate::agent_stream::agent_service(state.clone()));
     let enrollment = Router::new()
-        .route("/agent/v1/enroll", post(crate::enrollment::enroll))
+        .route(
+            "/agent/v1/enroll",
+            post(crate::enrollment::enroll).layer(DefaultBodyLimit::max(BODY_LIMIT)),
+        )
         .with_state(state);
     let router = routes.axum_router_mut();
     *router = std::mem::take(router)
@@ -76,17 +122,19 @@ pub fn agent_router(state: AppState) -> Router {
     agent_routes(state).into_axum_router()
 }
 
-/// Maps the TLS connection info of the gRPC server to the `ConnectInfo` of the web extractors.
+/// Maps the connection information of the gRPC server to the extractors of the routes.
 ///
-/// The enrollment handler reads the client address through [`crate::client_ip::ClientIp`], which
-/// expects `ConnectInfo<SocketAddr>`. The gRPC server inserts the TLS connection info instead.
+/// The enrollment handler reads the client address through [`crate::client_ip::ClientIp`]. The
+/// listener has no proxy in front, so the middleware marks the request to ignore
+/// `X-Forwarded-For` (MEDIUM 4).
 async fn inject_peer(mut request: axum::extract::Request, next: Next) -> axum::response::Response {
+    request.extensions_mut().insert(IgnoreForwarded);
     if request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .is_none()
-        && let Some(info) = request.extensions().get::<TlsConnectInfo<TcpConnectInfo>>()
-        && let Some(addr) = info.get_ref().remote_addr()
+        && let Some(info) = request.extensions().get::<PeerInfo>()
+        && let Some(addr) = info.remote
     {
         request.extensions_mut().insert(ConnectInfo(addr));
     }
@@ -96,15 +144,19 @@ async fn inject_peer(mut request: axum::extract::Request, next: Next) -> axum::r
 /// The subject alternative names of the server certificate (ADR-0026).
 ///
 /// The host of the public endpoint comes first, so an agent verifies the name it dials. The listen
-/// address covers a direct connection.
+/// address covers a direct connection. An unspecified address (`0.0.0.0`, `::`) is not a name and is
+/// left out (LOW 8).
 pub fn server_cert_sans(endpoint: Option<&str>, listen: SocketAddr) -> Vec<String> {
     let mut sans = Vec::new();
     if let Some(host) = endpoint.and_then(endpoint_host) {
         sans.push(host);
     }
-    sans.push(listen.ip().to_string());
-    if listen.ip().is_loopback() {
-        sans.push("localhost".to_owned());
+    let ip = listen.ip();
+    if !ip.is_unspecified() {
+        sans.push(ip.to_string());
+        if ip.is_loopback() {
+            sans.push("localhost".to_owned());
+        }
     }
     sans.sort();
     sans.dedup();
@@ -245,6 +297,84 @@ pub fn der_to_pem(label: &str, der: &[u8]) -> String {
     text
 }
 
+/// One accepted connection with its peer information and its load guards (HIGH 2).
+///
+/// The type counts the established connection and closes an anonymous connection that sends no
+/// request within the idle timeout.
+struct AgentConnection {
+    inner: TlsStream<TcpStream>,
+    peer: PeerInfo,
+    connections: Arc<AtomicUsize>,
+    /// The deadline for the first read of an anonymous connection; `None` once a byte arrives.
+    first_byte: Option<Pin<Box<tokio::time::Sleep>>>,
+}
+
+impl AsyncRead for AgentConnection {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if let Some(deadline) = this.first_byte.as_mut()
+            && deadline.as_mut().poll(cx).is_ready()
+        {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the connection sent no request",
+            )));
+        }
+        let before = buf.filled().len();
+        let result = Pin::new(&mut this.inner).poll_read(cx, buf);
+        if matches!(result, Poll::Ready(Ok(()))) && buf.filled().len() > before {
+            this.first_byte = None;
+        }
+        result
+    }
+}
+
+impl AsyncWrite for AgentConnection {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
+impl Connected for AgentConnection {
+    type ConnectInfo = PeerInfo;
+
+    fn connect_info(&self) -> PeerInfo {
+        self.peer.clone()
+    }
+}
+
+impl Drop for AgentConnection {
+    fn drop(&mut self) {
+        self.connections.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Applies TCP keepalive to an accepted socket, because the gRPC server ignores its own setting on
+/// a pre-terminated stream (HIGH 2).
+fn set_keepalive(stream: &TcpStream) {
+    let socket = socket2::SockRef::from(stream);
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(60))
+        .with_interval(Duration::from_secs(20));
+    let _ = socket.set_tcp_keepalive(&keepalive);
+}
+
 /// Serves the agent listener on a bound listener until the shutdown future resolves (ADR-0026).
 ///
 /// The control plane terminates TLS on its own, so the gRPC server receives the already-decrypted
@@ -254,33 +384,80 @@ pub async fn serve_listener(
     listener: TcpListener,
     state: AppState,
     tls: Arc<ServerConfig>,
+    limits: ListenerLimits,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ListenerError> {
     let acceptor = TlsAcceptor::from(tls);
-    let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<TlsStream<TcpStream>>>(64);
+    let handshakes = Arc::new(Semaphore::new(HANDSHAKE_CONCURRENCY));
+    let connections = Arc::new(AtomicUsize::new(0));
+    let (tx, rx) = tokio::sync::mpsc::channel::<io::Result<AgentConnection>>(64);
     tokio::spawn(async move {
         loop {
-            let (stream, _peer) = match listener.accept().await {
+            let (stream, peer) = match listener.accept().await {
                 Ok(accepted) => accepted,
                 Err(_) => {
                     // A transient accept error must not stop the listener.
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                     continue;
                 }
             };
+            set_keepalive(&stream);
+            // A handshake over the limit drops the connection, so a flood cannot exhaust memory.
+            let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+                drop(stream);
+                continue;
+            };
             let acceptor = acceptor.clone();
             let tx = tx.clone();
+            let connections = Arc::clone(&connections);
             tokio::spawn(async move {
-                // A failed handshake (a bad certificate, a probing client) drops the connection.
-                if let Ok(tls) = acceptor.accept(stream).await {
-                    let _ = tx.send(Ok(tls)).await;
+                let _permit = permit;
+                let tls =
+                    match tokio::time::timeout(limits.handshake_timeout, acceptor.accept(stream))
+                        .await
+                    {
+                        Ok(Ok(tls)) => tls,
+                        // A failed or a slow handshake drops the connection.
+                        _ => return,
+                    };
+                if connections.fetch_add(1, Ordering::AcqRel) >= limits.max_connections {
+                    connections.fetch_sub(1, Ordering::AcqRel);
+                    return;
                 }
+                let certs = tls
+                    .get_ref()
+                    .1
+                    .peer_certificates()
+                    .map(|certs| Arc::new(certs.to_vec()));
+                // A connection without a client certificate may only enroll, so it must send its
+                // request promptly (HIGH 2).
+                let first_byte = certs
+                    .is_none()
+                    .then(|| Box::pin(tokio::time::sleep(limits.anonymous_idle_timeout)));
+                let connection = AgentConnection {
+                    inner: tls,
+                    peer: PeerInfo {
+                        remote: Some(peer),
+                        certs,
+                    },
+                    connections,
+                    first_byte,
+                };
+                let _ = tx.send(Ok(connection)).await;
             });
         }
     });
 
     let mut builder = tonic::transport::Server::builder();
-    builder = builder.accept_http1(true);
+    builder = builder
+        .accept_http1(true)
+        .http2_keepalive_interval(Some(Duration::from_secs(30)))
+        .http2_keepalive_timeout(Some(Duration::from_secs(10)))
+        .max_concurrent_streams(Some(16))
+        .max_frame_size(Some(1 << 20))
+        .http2_max_header_list_size(Some(64 * 1024))
+        .concurrency_limit_per_connection(8)
+        .load_shed(true);
     let router = builder.add_routes(agent_routes(state));
     router
         .serve_with_incoming_shutdown(tokio_stream::wrappers::ReceiverStream::new(rx), shutdown)
@@ -293,10 +470,11 @@ pub async fn serve(
     state: AppState,
     addr: SocketAddr,
     tls: Arc<ServerConfig>,
+    limits: ListenerLimits,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ListenerError> {
     let listener = TcpListener::bind(addr).await.map_err(ListenerError::Bind)?;
-    serve_listener(listener, state, tls, shutdown).await
+    serve_listener(listener, state, tls, limits, shutdown).await
 }
 
 #[cfg(test)]
@@ -323,10 +501,18 @@ mod tests {
 
     #[test]
     fn the_sans_hold_the_endpoint_host_and_the_listen_address() {
-        let listen: SocketAddr = "0.0.0.0:8443".parse().expect("a socket address");
+        let listen: SocketAddr = "127.0.0.1:8443".parse().expect("a socket address");
         let sans = server_cert_sans(Some("https://agents.example:8443"), listen);
         assert!(sans.contains(&"agents.example".to_owned()));
-        assert!(sans.contains(&"0.0.0.0".to_owned()));
+        assert!(sans.contains(&"127.0.0.1".to_owned()));
+    }
+
+    #[test]
+    fn an_unspecified_listen_address_is_not_a_name() {
+        let listen: SocketAddr = "0.0.0.0:8443".parse().expect("a socket address");
+        let sans = server_cert_sans(None, listen);
+        assert!(!sans.contains(&"0.0.0.0".to_owned()));
+        assert!(sans.is_empty());
     }
 
     #[test]

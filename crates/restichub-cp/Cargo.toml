@@ -31,6 +31,7 @@ rustls-pki-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+socket2 = { version = "0.6", features = ["all"] }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
@@ -54,4 +55,5 @@ restichub-db = { workspace = true, features = ["test-util"] }
 restichub-emulator = { path = "../restichub-emulator" }
 rustls-webpki = { workspace = true }
 sqlx = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 tower = { workspace = true, features = ["util"] }

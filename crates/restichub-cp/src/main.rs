@@ -132,6 +132,14 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .await
         .context("cannot bind the listen address")?;
 
+    // The batch flush writes the `last_seen_at` buffer of the agent streams (LOW 7).
+    restichub_cp::agent_stream::spawn_last_seen_flush(
+        state.db().clone(),
+        state.agent_registry_shared(),
+        state.auth().clock.clone(),
+        restichub_cp::agent_stream::LAST_SEEN_INTERVAL,
+    );
+
     // One shutdown signal stops the web server and the agent listener.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
     tokio::spawn(async move {
@@ -155,6 +163,10 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
                 restichub_cp::agent_listener::tls_config_from_issued(&issued, &root)?
             }
         };
+        let limits = restichub_cp::agent_listener::ListenerLimits {
+            max_connections: config.agent_max_connections,
+            ..Default::default()
+        };
         let agent_state = state.clone();
         let mut agent_shutdown = shutdown_rx.clone();
         tokio::spawn(async move {
@@ -162,7 +174,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
                 let _ = agent_shutdown.changed().await;
             };
             if let Err(error) =
-                restichub_cp::agent_listener::serve(agent_state, addr, tls, stop).await
+                restichub_cp::agent_listener::serve(agent_state, addr, tls, limits, stop).await
             {
                 tracing::error!(%error, "the agent listener stopped");
             }

@@ -51,6 +51,10 @@ pub const AGENT_LISTEN_ENV: &str = "RESTICHUB_AGENT_LISTEN";
 pub const AGENT_TLS_CERT_FILE_ENV: &str = "RESTICHUB_AGENT_TLS_CERT_FILE";
 /// The private key file of [`AGENT_TLS_CERT_FILE_ENV`].
 pub const AGENT_TLS_KEY_FILE_ENV: &str = "RESTICHUB_AGENT_TLS_KEY_FILE";
+/// The largest number of established connections on the agent listener (ADR-0026).
+///
+/// Covers 2000 agents and a margin.
+pub const AGENT_MAX_CONNECTIONS_ENV: &str = "RESTICHUB_AGENT_MAX_CONNECTIONS";
 /// The tenancy mode: `single` or `multi` (ADR-0024).
 pub const TENANCY_MODE_ENV: &str = "RESTICHUB_TENANCY_MODE";
 /// The tenant that single mode uses and that the switch from multi mode expects.
@@ -65,6 +69,8 @@ const DEFAULT_SESSION_ABSOLUTE: Duration = Duration::from_secs(12 * 60 * 60);
 const DEFAULT_SIGN_IN_USER_RATE: u32 = 10;
 const DEFAULT_SIGN_IN_IP_RATE: u32 = 30;
 const DEFAULT_TENANT_NAME: &str = "default";
+/// Covers 2000 agents and a margin (ADR-0026).
+const DEFAULT_AGENT_MAX_CONNECTIONS: usize = 2200;
 
 /// The tenancy mode of the installation (ADR-0024).
 ///
@@ -246,6 +252,8 @@ pub struct Config {
     pub agent_tls_cert_file: Option<PathBuf>,
     /// The configured server key file of the agent listener.
     pub agent_tls_key_file: Option<PathBuf>,
+    /// The largest number of established connections on the agent listener (ADR-0026).
+    pub agent_max_connections: usize,
 }
 
 /// Secret handling configuration (ADR-0023, section Secrets).
@@ -309,6 +317,10 @@ impl Config {
             .get(AGENT_TLS_KEY_FILE_ENV)
             .map(PathBuf::from)
             .or(file.agent_tls_key_file);
+        let agent_max_connections =
+            number(env, AGENT_MAX_CONNECTIONS_ENV, file.agent_max_connections)?
+                .unwrap_or(DEFAULT_AGENT_MAX_CONNECTIONS)
+                .max(1);
 
         let database_url = env
             .get(DATABASE_URL_ENV)
@@ -371,6 +383,7 @@ impl Config {
             agent_listen_addr,
             agent_tls_cert_file,
             agent_tls_key_file,
+            agent_max_connections,
         })
     }
 }
@@ -433,6 +446,7 @@ struct FileConfig {
     agent_listen: Option<String>,
     agent_tls_cert_file: Option<PathBuf>,
     agent_tls_key_file: Option<PathBuf>,
+    agent_max_connections: Option<usize>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
