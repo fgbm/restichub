@@ -161,6 +161,24 @@ pub async fn get(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option<Agent>, Db
     Ok(row.map(Agent::from))
 }
 
+/// Records the last activity of an agent (FR-ID-07, FR-ID-08).
+///
+/// The stream layer calls the function in a batch, not for each message. A missing agent changes
+/// nothing.
+pub async fn touch_last_seen(
+    tx: &mut TenantTx<'_>,
+    id: AgentId,
+    now: OffsetDateTime,
+) -> Result<(), DbError> {
+    sqlx::query("UPDATE agents SET last_seen_at = $2 WHERE id = $1")
+        .bind(id)
+        .bind(now)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(())
+}
+
 /// Renames an agent of the tenant.
 ///
 /// `true` when the row changed. A missing agent or an unchanged name returns `false`.
