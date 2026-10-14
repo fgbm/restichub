@@ -56,6 +56,7 @@ pub enum Operation {
     RepositoriesWrite,
     JobsRead,
     JobsWrite,
+    MetricsRead,
     ProfilesRead,
     ProfilesWrite,
     PlansRead,
@@ -92,6 +93,7 @@ impl Operation {
                 | Self::RepositoriesWrite
                 | Self::JobsRead
                 | Self::JobsWrite
+                | Self::MetricsRead
                 | Self::ProfilesRead
                 | Self::ProfilesWrite
                 | Self::PlansRead
@@ -116,7 +118,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 29] = [
+    pub const ALL: [Operation; 30] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -142,6 +144,7 @@ impl Operation {
         Operation::RepositoriesWrite,
         Operation::JobsRead,
         Operation::JobsWrite,
+        Operation::MetricsRead,
         Operation::ProfilesRead,
         Operation::ProfilesWrite,
         Operation::PlansRead,
@@ -177,6 +180,7 @@ impl Operation {
             | Operation::RepositoriesWrite
             | Operation::JobsRead
             | Operation::JobsWrite
+            | Operation::MetricsRead
             | Operation::ProfilesRead
             | Operation::ProfilesWrite
             | Operation::PlansRead
@@ -225,6 +229,8 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::JobsRead => Role::Viewer,
         // An Operator runs and cancels jobs (requirements section 2).
         Operation::JobsWrite => Role::Operator,
+        // The scraper uses an API token with the Viewer role (FR-MN-05).
+        Operation::MetricsRead => Role::Viewer,
         Operation::ProfilesRead => Role::Viewer,
         // An Operator manages the profiles and the plans (requirements section 2).
         Operation::ProfilesWrite => Role::Operator,

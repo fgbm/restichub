@@ -11,7 +11,8 @@
 //! refuses the open. The stream sends a `Ping` each [`HEARTBEAT_INTERVAL`]; it closes when the
 //! agent does not answer for [`IDLE_CLOSE`]. A `KeyUpdateAck` feeds the retirement of the old key
 //! once every known online agent acknowledged the new set (ADR-0026). A `JobAck`, a `JobRejected`
-//! and a `JobResult` update the job row ([`crate::jobs`]).
+//! and a `JobResult` update the job row ([`crate::jobs`]). A `StepProgress`, a `StepResult` and a
+//! `LogChunk` feed the job detail and the job log ([`crate::job_data`]).
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -678,9 +679,18 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
                 .await;
         }
         Some(agent_message::Payload::JobResult(result)) => {
+            crate::job_data::handle_job_result_data(
+                state,
+                identity.tenant,
+                identity.agent,
+                &result,
+            )
+            .await;
             crate::jobs::handle_job_result(state, identity.tenant, identity.agent, &result).await;
         }
         Some(agent_message::Payload::StepResult(result)) => {
+            crate::job_data::handle_step_result(state, identity.tenant, identity.agent, &result)
+                .await;
             crate::queue::stale::handle_step_result(
                 state,
                 identity.tenant,
@@ -689,12 +699,15 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
             )
             .await;
         }
-        Some(
-            agent_message::Payload::StepProgress(_)
-            | agent_message::Payload::LogChunk(_)
-            | agent_message::Payload::CertificateSigningRequest(_),
-        ) => {
-            // Job progress, logs and certificate rotation belong to other parts of the plan.
+        Some(agent_message::Payload::StepProgress(progress)) => {
+            crate::job_data::handle_progress(state, identity.tenant, identity.agent, &progress)
+                .await;
+        }
+        Some(agent_message::Payload::LogChunk(chunk)) => {
+            crate::job_data::handle_log_chunk(state, identity.tenant, identity.agent, &chunk).await;
+        }
+        Some(agent_message::Payload::CertificateSigningRequest(_)) => {
+            // Certificate rotation belongs to another part of the plan.
         }
         None => {}
     }

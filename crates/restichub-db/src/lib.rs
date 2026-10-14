@@ -22,9 +22,12 @@ pub mod delivery;
 pub mod enrollment_tokens;
 pub mod enums;
 pub mod ids;
+pub mod job_logs;
+pub mod job_steps;
 pub mod jobs;
 pub mod kek;
 pub mod memberships;
+pub mod metrics;
 pub mod plans;
 pub mod profiles;
 pub mod queue;
@@ -42,7 +45,7 @@ pub mod test_util;
 
 pub use enums::{
     ActorType, AdminState, AgentStatus, BackendKind, CaRole, JobKind, JobResultCode, JobStatus,
-    MissedRunPolicy, Role, SigningKeyRole, TenantStatus,
+    LogLevel, LogStream, MissedRunPolicy, Role, SigningKeyRole, StepStatus, TenantStatus,
 };
 pub use ids::{
     AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, JobId, PLATFORM_TENANT_ID, PlanId,
