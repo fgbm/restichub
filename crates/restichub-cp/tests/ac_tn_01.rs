@@ -47,6 +47,7 @@ enum Object {
     Agent,
     EnrollmentToken,
     Repository,
+    Job,
 }
 
 /// The isolation fixture of one route path pattern from the route table (AC-TN-01).
@@ -118,6 +119,15 @@ const FIXTURES: &[(&str, Fixture)] = &[
         "/api/v1/repositories/{id}",
         Fixture::Object(Object::Repository),
     ),
+    (
+        "/api/v1/repositories/{id}/init",
+        Fixture::Object(Object::Repository),
+    ),
+    (
+        "/api/v1/repositories/{id}/test-access",
+        Fixture::Object(Object::Repository),
+    ),
+    ("/api/v1/jobs/{id}", Fixture::Object(Object::Job)),
 ];
 
 fn fixture_for(method: &str, path: &str) -> Fixture {
@@ -225,6 +235,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
         common::seed_repository(db.database(), tenant_b, CANARY_REPOSITORY, secret_b).await;
     let agent_b = common::seed_agent(db.database(), tenant_b, "canary-host").await;
     let enrollment_token_b = common::seed_enrollment_token(db.database(), tenant_b, user_b).await;
+    let job_b = common::seed_job(db.database(), tenant_b, agent_b, repository_b).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
     let token_b = list_tokens(db.database(), tenant_b)
         .await
@@ -279,6 +290,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
         agent_b.to_string(),
         enrollment_token_b.to_string(),
         repository_b.to_string(),
+        job_b.to_string(),
     ];
     let before = snapshot_tenant(&db, tenant_b).await;
     let audit_before = count(db.database(), tenant_b, "audit_log").await;
@@ -326,6 +338,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     Object::Agent => agent_b.to_string(),
                     Object::EnrollmentToken => enrollment_token_b.to_string(),
                     Object::Repository => repository_b.to_string(),
+                    Object::Job => job_b.to_string(),
                 };
                 let uri = path.replace("{id}", &id);
                 let Access::Protected(operation) = route.access else {

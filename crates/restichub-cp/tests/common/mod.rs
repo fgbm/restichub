@@ -504,6 +504,37 @@ pub async fn seed_agent(db: &Database, tenant: TenantId, hostname: &str) -> rest
     id
 }
 
+/// Inserts a job row of a tenant and returns its identifier.
+///
+/// The control plane creates the row in production; a test seeds it directly for a route fixture.
+pub async fn seed_job(
+    db: &Database,
+    tenant: TenantId,
+    agent: restichub_db::AgentId,
+    repository: restichub_db::RepositoryId,
+) -> restichub_db::JobId {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::JobId::new();
+    restichub_db::jobs::create(
+        &mut tx,
+        &restichub_db::jobs::NewJob {
+            id,
+            kind: restichub_db::JobKind::TestAccess,
+            agent_id: agent,
+            repository_id: Some(repository),
+            expires_at: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the job");
+    tx.commit().await.expect("cannot commit the job");
+    id
+}
+
 /// Inserts an unused enrollment token row of a tenant and returns its identifier.
 pub async fn seed_enrollment_token(
     db: &Database,
