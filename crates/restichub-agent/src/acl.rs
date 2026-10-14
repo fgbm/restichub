@@ -7,7 +7,9 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+#[cfg(target_os = "linux")]
+use anyhow::Context as _;
+use anyhow::Result;
 
 /// Reports whether the path holds an extended POSIX access control list (threat T20).
 ///

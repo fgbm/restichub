@@ -20,15 +20,16 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HLOCAL, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
-    GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    ConvertStringSidToSidW, GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
+    SetNamedSecurityInfoW,
 };
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
     DACL_SECURITY_INFORMATION, EqualSid, GENERIC_MAPPING, GetAce, GetAclInformation,
     GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, INHERIT_ONLY_ACE, MapGenericMask,
-    OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SECURITY_ATTRIBUTES,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateDirectoryW, DELETE, FILE_ALL_ACCESS, FILE_APPEND_DATA, FILE_DELETE_CHILD,
@@ -54,10 +55,13 @@ const FILE_SDDL: &str = "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)";
 
 /// The security identifiers that may own or change the agent: SYSTEM, BUILTIN\Administrators and
 /// the TrustedInstaller service account that the Windows installer uses.
-const TRUSTED_SIDS: [&str; 3] = [
+const TRUSTED_SIDS: [&str; 4] = [
     "S-1-5-18",
     "S-1-5-32-544",
+    // The TrustedInstaller service account of the Windows installer. The second value is the
+    // well-known form of the same account.
     "S-1-5-80-956008885-3444109722-1543130093-1000125183-2085213244",
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
 ];
 
 /// The rights that another account must not hold on the agent, on restic or on the identity
@@ -171,9 +175,9 @@ pub fn check_parent(path: &Path) -> Result<()> {
 fn check(path: &Path, rights: u32) -> Result<()> {
     let security = open_security(path)?;
     check_owner(path, security.owner)?;
-    if let Some(mask) = first_foreign_grant(security.dacl, rights)? {
+    if let Some((mask, account)) = first_foreign_grant(security.dacl, rights)? {
         bail!(
-            "{} grants the access mask {mask:#010x} to an account other than SYSTEM or Administrators; an administrator deletes it and registers again",
+            "{} grants the access mask {mask:#010x} to {account}, which is not SYSTEM or Administrators; an administrator deletes it and registers again",
             path.display()
         );
     }
@@ -226,8 +230,9 @@ fn open_security(path: &Path) -> Result<Security> {
 fn check_owner(path: &Path, owner: PSID) -> Result<()> {
     if owner.is_null() || !is_trusted_sid(owner) {
         bail!(
-            "{} is not owned by SYSTEM or Administrators; an administrator deletes it and registers again",
-            path.display()
+            "{} is owned by {}, not by SYSTEM or Administrators; an administrator deletes it and registers again",
+            path.display(),
+            sid_to_string(owner)
         );
     }
     Ok(())
@@ -237,9 +242,9 @@ fn check_owner(path: &Path, owner: PSID) -> Result<()> {
 ///
 /// A missing DACL grants everyone full access, so it gives [`u32::MAX`]. An allow entry of a type
 /// this module does not parse also gives [`u32::MAX`], because it may hold any right.
-fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<u32>> {
+fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<(u32, String)>> {
     if dacl.is_null() {
-        return Ok(Some(u32::MAX));
+        return Ok(Some((u32::MAX, "every account".to_owned())));
     }
     let mut size = ACL_SIZE_INFORMATION::default();
     // SAFETY: the DACL is a valid ACL and the out parameter is a local.
@@ -286,13 +291,18 @@ fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<u32>> {
                 // SAFETY: SidStart is the first byte of the security identifier of the entry.
                 let sid = std::ptr::addr_of!(allowed.SidStart).cast::<core::ffi::c_void>() as PSID;
                 if granted != 0 && !is_trusted_sid(sid) {
-                    return Ok(Some(granted));
+                    return Ok(Some((granted, sid_to_string(sid))));
                 }
             }
             // An allow entry of a type this module does not parse may hold any right.
             ACCESS_ALLOWED_OBJECT_ACE_TYPE
             | ACCESS_ALLOWED_CALLBACK_ACE_TYPE
-            | ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE => return Ok(Some(u32::MAX)),
+            | ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE => {
+                return Ok(Some((
+                    u32::MAX,
+                    "an unparsed access control entry".to_owned(),
+                )));
+            }
             ACCESS_DENIED_ACE_TYPE
             | ACCESS_DENIED_OBJECT_ACE_TYPE
             | ACCESS_DENIED_CALLBACK_ACE_TYPE
@@ -305,10 +315,45 @@ fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<u32>> {
             | SYSTEM_RESOURCE_ATTRIBUTE_ACE_TYPE
             | SYSTEM_SCOPED_POLICY_ID_ACE_TYPE => {}
             // Unknown types fail closed.
-            _ => return Ok(Some(u32::MAX)),
+            _ => {
+                return Ok(Some((
+                    u32::MAX,
+                    "an unparsed access control entry".to_owned(),
+                )));
+            }
         }
     }
     Ok(None)
+}
+
+/// The text form of a security identifier, for a message.
+fn sid_to_string(sid: PSID) -> String {
+    if sid.is_null() {
+        return "an unknown account".to_owned();
+    }
+    let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
+    // SAFETY: the SID is valid and the out parameter is a local.
+    let ok = unsafe { ConvertSidToStringSidW(sid, &mut text) };
+    if ok == 0 || text.is_null() {
+        return "an unknown account".to_owned();
+    }
+    // SAFETY: the call returned a null-terminated UTF-16 string.
+    let value = unsafe { utf16_string(text) };
+    // SAFETY: the string came from the conversion function and needs LocalFree.
+    unsafe { LocalFree(text as HLOCAL) };
+    value
+}
+
+/// Reads a null-terminated UTF-16 value.
+unsafe fn utf16_string(pointer: *const u16) -> String {
+    let mut length = 0;
+    // SAFETY: the caller gives a null-terminated string.
+    while unsafe { *pointer.add(length) } != 0 {
+        length += 1;
+    }
+    // SAFETY: the length counts the units before the terminator.
+    let slice = unsafe { std::slice::from_raw_parts(pointer, length) };
+    String::from_utf16_lossy(slice)
 }
 
 fn is_trusted_sid(sid: PSID) -> bool {
