@@ -109,6 +109,12 @@ pub fn program_jobs(dir: &Path) -> Jobs {
     Jobs::open(program, expected, dir.join("cache"), dir).expect("the job journal must open")
 }
 
+/// A job runner with a short grace period, so a test reaches the forced kill quickly (FR-AG-10).
+#[must_use]
+pub fn program_jobs_with_grace(dir: &Path, grace: Duration) -> Jobs {
+    program_jobs(dir).with_stop_grace(grace)
+}
+
 /// A job runner that never runs a job: the stream tests deliver no job.
 ///
 /// The binary path does not exist, so a job that arrived would fail to start rather than run.
@@ -219,6 +225,17 @@ pub async fn start_action(
         .to_owned()
 }
 
+/// Waits until the fake restic has recorded a run whose arguments hold `needle`.
+pub async fn wait_for_run(path: &Path, needle: &str) -> bool {
+    for _ in 0..400 {
+        if recorded_arguments(path).contains(needle) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    false
+}
+
 /// Waits for the job to reach a terminal state and returns its view.
 pub async fn wait_job(app: &axum::Router, cookie: &str, job_id: &str) -> Value {
     for _ in 0..400 {
@@ -259,6 +276,35 @@ pub fn script_exit_codes(path: &Path, test_access: i32, init: i32) {
         format!("{test_access} {init}"),
     )
     .expect("cannot write the control file");
+}
+
+/// Makes the next fake-restic runs wait this long before they exit.
+pub fn script_sleep(path: &Path, millis: u64) {
+    std::fs::write(
+        format!("{}.restichub-sleep", path.display()),
+        millis.to_string(),
+    )
+    .expect("cannot write the sleep file");
+}
+
+/// Makes the fake restic ignore `SIGINT`, so a cancel covers the forced kill (FR-AG-10).
+pub fn script_ignore_interrupt(path: &Path) {
+    std::fs::write(format!("{}.restichub-ignore", path.display()), "1")
+        .expect("cannot write the ignore file");
+}
+
+/// Sends a `CancelJob` to the open stream of an agent, as the control plane does (FR-AG-10).
+pub fn cancel_job(fixture: &StreamFixture, agent: Uuid, job_id: &str) -> bool {
+    use restichub_proto::agent::v1::{CancelJob, ControlMessage, control_message};
+    fixture.server.state.agent_registry().send_to_agent(
+        restichub_db::AgentId::from_uuid(agent),
+        ControlMessage {
+            payload: Some(control_message::Payload::CancelJob(CancelJob {
+                job_id: job_id.to_owned(),
+                grace_period_seconds: 0,
+            })),
+        },
+    )
 }
 
 /// The arguments recorded by the fake restic, one run on each line.

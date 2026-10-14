@@ -12,7 +12,7 @@
 //! check and the spawn is therefore refused (threat T20).
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 
 use anyhow::{Context, Result};
 use restichub_compiler::arg::CommandLine;
@@ -78,7 +78,26 @@ fn restic_command_with(
         command.env("TMP", cache_dir);
     }
     command.args(args);
+    apply_process_group(&mut command);
     command
+}
+
+/// Puts a restic child in its own process group, so a stop reaches its whole tree (FR-AG-10).
+///
+/// On Unix the child becomes the leader of a new group; the agent signals the group with a negative
+/// pid. On Windows the child becomes a new process group and the agent sends it `CTRL_BREAK`.
+fn apply_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        use windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
 }
 
 /// Re-checks the pinned hash and starts the child process (FR-AG-11, threat T20).
@@ -137,7 +156,8 @@ fn spawn_verified(
 ///
 /// A restic message can carry the repository location, so the agent reads the exit code only and
 /// never the output. The hash check and the start share one opening of the binary, as in
-/// [`spawn_verified`].
+/// [`spawn_verified`]. The child runs in its own process group, so the agent stops its whole tree
+/// (FR-AG-10).
 ///
 /// # Errors
 ///
@@ -147,12 +167,160 @@ pub(crate) fn spawn_job_restic(
     expected_hex: &str,
     line: &CommandLine,
     cache: &Path,
-) -> Result<Child> {
+) -> Result<JobChild> {
     let (file, mut command) = verified_command(path, expected_hex, line.args(), line.env(), cache)?;
     command.stdout(Stdio::null()).stderr(Stdio::null());
     let child = command.spawn().context("cannot start restic")?;
     drop(file);
-    Ok(child)
+    JobChild::new(child)
+}
+
+/// The restic child of one job and the handle that stops its whole tree (FR-AG-10).
+pub(crate) struct JobChild {
+    child: Child,
+    /// Holds the tree on Windows, so closing it kills the tree (FR-AG-10).
+    #[cfg(windows)]
+    job: Option<windows_job::JobObject>,
+}
+
+impl JobChild {
+    /// Wraps a spawned child and, on Windows, holds its tree in a job object (FR-AG-10).
+    fn new(child: Child) -> Result<Self> {
+        #[cfg(windows)]
+        let job = windows_job::create(&child);
+        Ok(Self {
+            child,
+            #[cfg(windows)]
+            job,
+        })
+    }
+
+    /// Reports the exit of the child, or `None` while it runs.
+    pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        self.child.try_wait()
+    }
+
+    /// Sends the graceful stop signal to the whole process group (FR-AG-10).
+    ///
+    /// It is `SIGINT` on Unix and `CTRL_BREAK` on Windows. A child that ignores it keeps running
+    /// until [`Self::kill_tree`].
+    #[allow(unsafe_code)]
+    pub(crate) fn interrupt(&self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            let group = i32::try_from(self.child.id()).unwrap_or(i32::MAX);
+            // SAFETY: a negative pid sends the signal to the process group that the child leads.
+            if unsafe { libc::kill(-group, libc::SIGINT) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
+            // SAFETY: the child runs in the new process group whose id is its pid.
+            if unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.child.id()) } == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        }
+    }
+
+    /// Stops the whole process tree of the child, even after it ignored the graceful signal
+    /// (FR-AG-10).
+    #[allow(unsafe_code)]
+    pub(crate) fn kill_tree(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            let group = i32::try_from(self.child.id()).unwrap_or(i32::MAX);
+            // SAFETY: a negative pid sends the signal to the process group that the child leads.
+            if unsafe { libc::kill(-group, libc::SIGKILL) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        }
+        #[cfg(windows)]
+        {
+            // The job object kills the whole tree; a missing job object falls back to the child.
+            if let Some(job) = &self.job
+                && job.terminate()
+            {
+                return Ok(());
+            }
+            self.child.kill()
+        }
+    }
+}
+
+/// The Windows job object that holds the restic tree of one job (FR-AG-10).
+///
+/// The object carries `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so the whole tree dies when the agent
+/// closes the handle, even after an unexpected stop of the agent (AC-AG-07).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod windows_job {
+    use std::os::windows::io::AsRawHandle as _;
+    use std::process::Child;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject,
+    };
+
+    /// Owns the job object and closes it on drop, which kills the tree (FR-AG-10).
+    pub(super) struct JobObject(HANDLE);
+
+    impl Drop for JobObject {
+        fn drop(&mut self) {
+            // SAFETY: the handle comes from `CreateJobObjectW` and is closed once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    impl JobObject {
+        /// Kills every process of the tree (FR-AG-10). False when the call fails.
+        pub(super) fn terminate(&self) -> bool {
+            // SAFETY: the handle is a valid job object and 1 is the exit code.
+            unsafe { TerminateJobObject(self.0, 1) != 0 }
+        }
+    }
+
+    /// Creates a job object for `child` with `KILL_ON_JOB_CLOSE` (FR-AG-10).
+    ///
+    /// A failure gives `None`, so the stop falls back to the direct child only.
+    pub(super) fn create(child: &Child) -> Option<JobObject> {
+        // SAFETY: the two pointers are null, so Windows uses the default attributes and no name.
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return None;
+        }
+        let job = JobObject(handle);
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let length =
+            u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).ok()?;
+        // SAFETY: the job object is valid and the information pointer is a local of the right size.
+        let ok = unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(info).cast(),
+                length,
+            )
+        };
+        if ok == 0 {
+            return None;
+        }
+        // The process handle from `Child` is valid while the child lives.
+        let process = child.as_raw_handle() as HANDLE;
+        // SAFETY: both handles are valid; the child joins the job and cannot leave it.
+        if unsafe { AssignProcessToJobObject(job.0, process) } == 0 {
+            return None;
+        }
+        Some(job)
+    }
 }
 
 /// Opens the binary, checks the hash through the handle and builds the child command (threat T20).
@@ -439,5 +607,71 @@ mod tests {
             let _ = write!(text, "{byte:02x}");
         }
         text
+    }
+
+    /// Reports whether a process is alive (Linux only; the signal needs `libc`).
+    #[cfg(target_os = "linux")]
+    #[allow(unsafe_code)]
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 only tests the process for existence.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    /// FR-AG-10, AC-AG-07: a child that ignores the graceful signal still dies with its whole tree
+    /// after the forced kill. The fake child is a shell that ignores `SIGINT` and spawns a subshell
+    /// that ignores it too, so only a group kill stops the tree.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fr_ag_10_the_forced_kill_stops_the_whole_tree() {
+        use std::process::Command as StdCommand;
+        use std::time::Duration;
+
+        let dir = temp_path("tree");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("cannot create the directory");
+        let marker = dir.join("child.pid");
+        let script =
+            "trap '' INT; ( trap '' INT; echo $$ > \"$1\"; while :; do sleep 1; done ) & wait";
+
+        let mut command = StdCommand::new("sh");
+        command.arg("-c").arg(script).arg("sh").arg(&marker);
+        super::apply_process_group(&mut command);
+        let child = command.spawn().expect("cannot start the fake tree");
+        let mut job = super::JobChild::new(child).expect("cannot wrap the child");
+
+        let child_pid = wait_for_pid(&marker);
+        // The graceful signal does not stop a tree that ignores it.
+        job.interrupt().expect("cannot interrupt");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            alive(child_pid),
+            "the tree ignored SIGINT and must still run"
+        );
+
+        // The forced kill stops the whole tree, not only the direct child.
+        job.kill_tree().expect("cannot kill the tree");
+        for _ in 0..200 {
+            if job.try_wait().expect("cannot wait").is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!alive(child_pid), "the child of the tree must be killed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reads the child pid that the fake tree writes, or panics after two seconds.
+    #[cfg(target_os = "linux")]
+    fn wait_for_pid(marker: &Path) -> i32 {
+        use std::time::Duration;
+        for _ in 0..200 {
+            if let Ok(text) = std::fs::read_to_string(marker)
+                && let Ok(pid) = text.trim().parse()
+            {
+                return pid;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the fake tree wrote no child pid");
     }
 }

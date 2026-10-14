@@ -6,10 +6,12 @@
 //! in the journal and is re-sent at the next connection.
 //!
 //! The journal is a protected file in the agent configuration directory. It is replaced atomically,
-//! so a reader sees the old or the new content (FR-AG-04), and it is bounded: the entries past their
-//! expiry are pruned at load and at every completion, and the journal holds at most
-//! `MAX_ENTRIES` jobs. An entry past its expiry is safe to drop, because the agent rejects an
-//! expired job before it consults the journal (ADR-0020).
+//! so a reader sees the old or the new content (FR-AG-04). Every entry carries an expiry: the
+//! control plane always sets `expires_at`, and the agent refuses a job without one before it reaches
+//! the journal. The agent prunes the entries past their expiry at load and at every completion
+//! (ADR-0020). The journal holds at most `MAX_ENTRIES` jobs. When it is full, [`FileJournal::make_room`]
+//! drops the expired entries first and the delivered entries second, so a live unexpired result is
+//! never lost to a new job: when only live entries remain, the caller refuses the new job instead.
 
 use std::path::PathBuf;
 
@@ -34,8 +36,8 @@ const MAX_ENTRIES: usize = 4096;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Entry {
     job_id: String,
-    /// Expiry of the job in Unix seconds, or `None` when the job carried none.
-    expires_at: Option<i64>,
+    /// Expiry of the job in Unix seconds. The control plane always sets it (ADR-0020).
+    expires_at: i64,
     /// Base64 of the serialized [`JobResult`], or `None` while the job runs.
     result: Option<String>,
     /// True once the agent has sent the stored result to the control plane.
@@ -109,21 +111,36 @@ impl FileJournal {
         }
     }
 
-    /// Drops the entries past their expiry and keeps the journal within `MAX_ENTRIES`.
+    /// Removes the entry of `job_id` (ADR-0020).
+    ///
+    /// The caller rolls back an acceptance whose persistence failed, so the journal never claims a
+    /// job that the agent did not record on disk.
+    pub fn forget(&mut self, job_id: &str) {
+        self.entries.retain(|entry| entry.job_id != job_id);
+    }
+
+    /// Drops the entries past their expiry (ADR-0020).
     ///
     /// The caller passes the current time, so the pruning is independent of the wall clock inside
     /// this method.
     pub fn prune(&mut self, now: Timestamp) {
         let now = i128::from(now.seconds) + i128::from(now.nanos) / 1_000_000_000;
         let retain = i128::from(CLOCK_SKEW.as_secs());
-        self.entries.retain(|entry| match entry.expires_at {
-            Some(expires_at) => i128::from(expires_at) + retain > now,
-            None => true,
-        });
-        if self.entries.len() > MAX_ENTRIES {
-            let excess = self.entries.len() - MAX_ENTRIES;
-            self.entries.drain(..excess);
+        self.entries
+            .retain(|entry| i128::from(entry.expires_at) + retain > now);
+    }
+
+    /// Makes room for a new entry and reports whether the journal can hold it (ADR-0020).
+    ///
+    /// The method drops the expired entries and then the delivered entries. A full journal of live
+    /// unexpired entries gives `false`, so the caller refuses the new job instead of dropping a
+    /// stored result that the control plane has not seen.
+    pub fn make_room(&mut self, now: Timestamp) -> bool {
+        self.prune(now);
+        if self.entries.len() >= MAX_ENTRIES {
+            self.entries.retain(|entry| !entry.delivered);
         }
+        self.entries.len() < MAX_ENTRIES
     }
 }
 
@@ -144,7 +161,7 @@ impl JobJournal for FileJournal {
         }
         self.entries.push(Entry {
             job_id: job_id.to_owned(),
-            expires_at: Some(expires_at.seconds),
+            expires_at: expires_at.seconds,
             result: None,
             delivered: false,
         });
@@ -152,17 +169,11 @@ impl JobJournal for FileJournal {
 
     fn record_completed(&mut self, job_id: &str, result: JobResult) {
         let encoded = STANDARD.encode(result.encode_to_vec());
-        match self.entries.iter_mut().find(|entry| entry.job_id == job_id) {
-            Some(entry) => {
-                entry.result = Some(encoded);
-                entry.delivered = false;
-            }
-            None => self.entries.push(Entry {
-                job_id: job_id.to_owned(),
-                expires_at: None,
-                result: Some(encoded),
-                delivered: false,
-            }),
+        // The agent records the acceptance before it runs the job, so the entry exists here. A
+        // missing entry would have no expiry and could never be pruned, so it is not stored.
+        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.job_id == job_id) {
+            entry.result = Some(encoded);
+            entry.delivered = false;
         }
     }
 
@@ -246,8 +257,37 @@ mod tests {
     }
 
     #[test]
+    fn adr_0020_a_full_journal_of_delivered_entries_makes_room() {
+        let mut journal = FileJournal::load(temp_path("room")).expect("cannot load");
+        for index in 0..super::MAX_ENTRIES {
+            let job_id = format!("job-{index}");
+            journal.record_accepted(&job_id, at(2_000));
+            journal.record_completed(&job_id, result(&job_id));
+            journal.mark_delivered(&job_id);
+        }
+        assert!(journal.make_room(at(1_000)), "a delivered entry makes room");
+        assert!(journal.entries.len() < super::MAX_ENTRIES);
+    }
+
+    #[test]
+    fn adr_0020_a_full_journal_of_live_entries_refuses_a_new_job() {
+        let mut journal = FileJournal::load(temp_path("full")).expect("cannot load");
+        for index in 0..super::MAX_ENTRIES {
+            let job_id = format!("job-{index}");
+            journal.record_accepted(&job_id, at(2_000));
+            journal.record_completed(&job_id, result(&job_id));
+        }
+        // The entries are live and unexpired, so a new job does not replace one.
+        assert!(
+            !journal.make_room(at(1_000)),
+            "live entries must not be dropped"
+        );
+        assert_eq!(journal.entries.len(), super::MAX_ENTRIES);
+    }
+
+    #[test]
     fn an_entry_past_its_expiry_is_pruned() {
-        let mut journal = FileJournal::load(temp_path("prune")).expect("cannot load");
+        let mut journal = FileJournal::load(temp_path("prune-expired")).expect("cannot load");
         // The lifetime is one hour, so the entry is pruned after it plus the clock skew.
         journal.record_accepted("job-1", at(0));
         journal.record_completed("job-1", result("job-1"));
@@ -258,21 +298,6 @@ mod tests {
         );
         journal.prune(at(60 * 60 + 60 * 5));
         assert_eq!(journal.lookup("job-1"), JournalState::Unknown);
-    }
-
-    #[test]
-    fn the_journal_is_bounded() {
-        let mut journal = FileJournal::load(temp_path("bounded")).expect("cannot load");
-        for index in 0..(super::MAX_ENTRIES + 10) {
-            // No expiry: the cap is the only bound.
-            journal.record_completed(&format!("job-{index}"), result(&format!("job-{index}")));
-        }
-        journal.prune(at(1_000));
-        assert_eq!(journal.entries.len(), super::MAX_ENTRIES);
-        // Pruning drops the oldest entries first.
-        assert_eq!(journal.lookup("job-0"), JournalState::Unknown);
-        assert_eq!(journal.lookup("job-9"), JournalState::Unknown);
-        assert_ne!(journal.lookup("job-10"), JournalState::Unknown);
     }
 
     #[test]

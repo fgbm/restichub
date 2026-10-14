@@ -294,8 +294,10 @@ pub async fn connect_once(
     };
     let mut inbound = response.into_inner();
     send_hello(&tx, restic_version).await?;
-    // A result that a dropped stream lost reaches the control plane now (ADR-0020).
-    jobs.flush_pending(&tx).await;
+    // The results go through this stream now, and a result that a dropped stream lost reaches the
+    // control plane (ADR-0020).
+    jobs.attach(&tx);
+    jobs.flush_pending().await;
     let started = tokio::time::Instant::now();
     let mut pinged = false;
     loop {
@@ -375,14 +377,8 @@ async fn handle_control(
             let _ = tx.send(pong(&ping)).await;
         }
         Some(control_message::Payload::SignedJob(signed)) => {
-            jobs.handle(
-                signed,
-                keys.ring(),
-                &identity.agent_id,
-                &identity.tenant_id,
-                tx,
-            )
-            .await;
+            jobs.handle(signed, keys.ring(), &identity.agent_id, &identity.tenant_id)
+                .await;
         }
         Some(control_message::Payload::CancelJob(cancel)) => {
             jobs.cancel(&cancel.job_id);

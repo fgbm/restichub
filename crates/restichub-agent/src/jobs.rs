@@ -1,11 +1,16 @@
 //! The agent-side execution of the repository init and test-access jobs (FR-PR-03, FR-PR-06,
-//! FR-RP-02, ADR-0020, ADR-0026).
+//! FR-RP-02, FR-AG-09, FR-AG-10, ADR-0020, ADR-0026).
 //!
 //! The control plane delivers a signed job on the stream. The agent verifies the signature with the
 //! key ring and checks the addressee, the tenant and the time rules ([`verify_job`]), validates the
 //! steps ([`ValidatedJob`], FR-PR-01) and consults the job journal (ADR-0020). It then acknowledges
 //! the job (FR-PR-06) and runs it off the stream task, so the heartbeat and the key updates keep
 //! flowing. A job that the journal already completed is not run again; the stored result is re-sent.
+//!
+//! The agent sends every result through the stream that is open at that moment, not through the
+//! stream that delivered the job: a job outlives one connection. The result is durable in the
+//! journal before the send, and it counts as delivered only after the send on a live connection, so
+//! a dropped stream re-sends it at the next connection (ADR-0020, FR-AG-12).
 //!
 //! This step of the epic runs `test_access` and `init` only. Any other step kind is refused with
 //! [`RejectReason::UnsupportedStep`]. The agent starts no job on its own and holds no timer that
@@ -14,12 +19,12 @@
 //! The restic command line comes from the typed step through the compiler builders (ADR-0021), so no
 //! value of a job becomes an option. The repository secrets reach restic only through the child
 //! environment (FR-AG-06); they never reach an argument, a log, the journal or an error. The agent
-//! runs `init` only after `test_access` exited with restic code 10 (the repository does not exist);
-//! any other result of `test_access` stops the job with its typed outcome (AC-RP-01).
+//! runs `init` only after a `test_access` of the same repository exited with restic code 10 (the
+//! repository does not exist); any other result of `test_access` stops the job with its typed
+//! outcome (AC-RP-01). A cancel or a timeout stops the step in two stages (FR-AG-10).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -32,13 +37,26 @@ use restichub_proto::agent::v1::{
     AgentMessage, ErrorDetail, JobAck, JobRejected, JobResult, JobStatus, RejectReason, SignedJob,
     Step, StepResult, StepStatus, agent_message, step,
 };
-use restichub_proto::signing::{Admission, Expected, JobJournal as _, KeyRing, admit, verify_job};
+use restichub_proto::signing::{
+    Admission, Expected, JobJournal as _, KeyRing, Rejection, admit, verify_job,
+};
 use tokio::sync::mpsc;
 
+use crate::exec::JobChild;
 use crate::journal::{FileJournal, JOURNAL_FILE};
 
 /// How often the agent checks the restic child for its exit.
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+/// The grace period between the graceful stop signal and the forced kill of the process tree
+/// (FR-AG-10, AC-AG-06).
+pub const STOP_GRACE: Duration = Duration::from_secs(30);
+
+/// The timeout of a step that gives none and whose job gives none either (FR-AG-05).
+const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+/// The largest number of jobs that the agent runs at the same time (ADR-0020).
+const MAX_CONCURRENT_JOBS: usize = 4;
 
 /// The decision of one signed job after the checks (FR-PR-03, ADR-0020).
 pub enum Intake {
@@ -49,8 +67,17 @@ pub enum Intake {
     },
     /// The journal holds the result of the job; the agent re-sends it and does not run the job.
     Completed(Box<JobResult>),
-    /// The job is new, or an earlier run did not finish; the agent may run it.
-    Accepted(Box<ValidatedJob>),
+    /// The job is new; the caller persists the journal entry before it runs the job (ADR-0020).
+    New(Box<ValidatedJob>),
+    /// An earlier run did not finish, in this process or in a previous one; the agent may run it.
+    InProgress(Box<ValidatedJob>),
+}
+
+/// The action that [`Jobs::handle`] takes after it consults the journal (ADR-0020).
+enum Dispatch {
+    Rejected(RejectReason),
+    Completed(JobResult),
+    Run,
 }
 
 /// The running jobs of one agent and the journal that records them (ADR-0020).
@@ -61,6 +88,11 @@ pub struct Jobs {
     cache: PathBuf,
     journal: Arc<Mutex<FileJournal>>,
     running: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    /// The stream that is open at this moment, or `None` between two connections (ADR-0020). A
+    /// result goes through the current stream, not through the one that delivered the job.
+    connection: Arc<Mutex<Option<mpsc::Sender<AgentMessage>>>>,
+    /// The grace period between the graceful stop and the forced kill (FR-AG-10).
+    stop_grace: Duration,
 }
 
 impl Jobs {
@@ -84,72 +116,115 @@ impl Jobs {
             cache,
             journal: Arc::new(Mutex::new(journal)),
             running: Arc::new(Mutex::new(HashMap::new())),
+            connection: Arc::new(Mutex::new(None)),
+            stop_grace: STOP_GRACE,
         })
+    }
+
+    /// Sets the grace period between the graceful stop and the forced kill (FR-AG-10).
+    #[must_use]
+    pub fn with_stop_grace(mut self, grace: Duration) -> Self {
+        self.stop_grace = grace;
+        self
+    }
+
+    /// Sets the stream that carries the results (ADR-0020).
+    ///
+    /// The connect loop calls it after the stream opens, before it flushes the pending results.
+    pub fn attach(&self, tx: &mpsc::Sender<AgentMessage>) {
+        *lock(&self.connection) = Some(tx.clone());
     }
 
     /// Verifies, admits and dispatches one signed job (FR-PR-03, FR-PR-06, ADR-0020).
     ///
     /// A refusal and a replayed job are answered at once. An accepted job is acknowledged and runs
-    /// off the stream task, so this call returns without waiting for it.
-    pub async fn handle(
-        &self,
-        signed: SignedJob,
-        ring: &KeyRing,
-        agent_id: &str,
-        tenant_id: &str,
-        tx: &mpsc::Sender<AgentMessage>,
-    ) {
+    /// off the stream task, so this call returns without waiting for it. A job that already runs in
+    /// this process is acknowledged again and is not started a second time (ADR-0020).
+    pub async fn handle(&self, signed: SignedJob, ring: &KeyRing, agent_id: &str, tenant_id: &str) {
         let expected = Expected {
             agent_id: agent_id.to_owned(),
             tenant_id: tenant_id.to_owned(),
             now: now_timestamp(),
         };
-        let decision = {
-            let mut journal = lock(&self.journal);
-            let decision = intake(&signed, ring, &expected, &mut journal);
-            if let Err(error) = journal.persist() {
-                tracing::warn!(%error, "cannot write the job journal");
+        let validated = match verify_and_validate(&signed, ring, &expected) {
+            Ok(validated) => validated,
+            Err(rejection) => {
+                let job_id = rejection.job_id.unwrap_or_default();
+                let _ = self.send(rejected(job_id, rejection.reason)).await;
+                return;
             }
-            decision
         };
-        match decision {
-            Intake::Rejected { job_id, reason } => {
-                let _ = tx.send(rejected(job_id, reason)).await;
-            }
-            Intake::Completed(result) => {
-                let job_id = result.job_id.clone();
-                if tx.send(job_result_message(*result)).await.is_ok() {
-                    let mut journal = lock(&self.journal);
-                    journal.mark_delivered(&job_id);
-                    if let Err(error) = journal.persist() {
-                        tracing::warn!(%error, "cannot write the job journal");
+        let job_id = validated.job().job_id.clone();
+        // A job that runs in this process is not started again: the agent only acknowledges it, so a
+        // redelivery of a running job does not fork a second restic (ADR-0020).
+        if lock(&self.running).contains_key(&job_id) {
+            let _ = self.send(ack(job_id)).await;
+            return;
+        }
+        // The agent refuses a new job beyond the cap, so the host never runs an unbounded number of
+        // restic processes (ADR-0020).
+        if lock(&self.running).len() >= MAX_CONCURRENT_JOBS {
+            let _ = self.send(rejected(job_id, RejectReason::Busy)).await;
+            return;
+        }
+        let now = expected.now;
+        // The journal guard is dropped before the agent sends anything, so the future stays `Send`.
+        let dispatch = {
+            let mut journal = lock(&self.journal);
+            // The journal drops the expired and the delivered entries before a new one; a full
+            // journal of live entries refuses the job rather than drop a stored result.
+            if journal.make_room(now) {
+                let expires_at = validated.job().expires_at.unwrap_or(now);
+                match admit(validated.job(), &mut *journal, expires_at) {
+                    Admission::AlreadyCompleted(result) => Dispatch::Completed(result),
+                    admission => {
+                        // The journal changes only for a new admission; a rejected message leaves it
+                        // untouched (ADR-0020).
+                        if matches!(admission, Admission::New)
+                            && let Err(error) = journal.persist()
+                        {
+                            tracing::warn!(%error, "cannot write the job journal");
+                            // Fail closed: the agent cannot record the accepted job, so it does not
+                            // run it.
+                            journal.forget(&job_id);
+                            let _ = journal.persist();
+                            Dispatch::Rejected(RejectReason::Internal)
+                        } else {
+                            Dispatch::Run
+                        }
                     }
                 }
+            } else {
+                Dispatch::Rejected(RejectReason::Busy)
             }
-            Intake::Accepted(validated) => {
-                let job_id = validated.job().job_id.clone();
-                let ack = AgentMessage {
-                    payload: Some(agent_message::Payload::JobAck(JobAck {
-                        job_id: job_id.clone(),
-                    })),
-                };
-                if tx.send(ack).await.is_err() {
+        };
+        match dispatch {
+            Dispatch::Rejected(reason) => {
+                let _ = self.send(rejected(job_id, reason)).await;
+            }
+            Dispatch::Completed(result) => {
+                let _ = self.send(job_result_message(result)).await;
+            }
+            Dispatch::Run => {
+                if self.send(ack(job_id.clone())).await {
+                    let cancel = CancelHandle::new();
+                    lock(&self.running).insert(job_id, cancel.clone());
+                    let jobs = self.clone();
+                    tokio::spawn(async move {
+                        jobs.execute(validated, cancel).await;
+                    });
+                } else {
                     // The stream dropped after the admission; the control plane delivers the job
                     // again and the journal answers that replay (ADR-0020).
-                    return;
+                    lock(&self.running).remove(&job_id);
                 }
-                let cancel = CancelHandle::new();
-                lock(&self.running).insert(job_id, cancel.clone());
-                let jobs = self.clone();
-                let tx = tx.clone();
-                tokio::spawn(async move {
-                    jobs.execute(*validated, tx, cancel).await;
-                });
             }
         }
     }
 
     /// Stops the restic child of the running job (FR-AG-10).
+    ///
+    /// It sets the flag; the step loop sends the signal and, after the grace period, kills the tree.
     pub fn cancel(&self, job_id: &str) {
         if let Some(handle) = lock(&self.running).get(job_id) {
             handle.cancel();
@@ -159,11 +234,11 @@ impl Jobs {
     /// Re-sends every stored result that the agent has not sent yet (ADR-0020).
     ///
     /// The agent calls it at every connection, so a result that a dropped stream lost reaches the
-    /// control plane.
-    pub async fn flush_pending(&self, tx: &mpsc::Sender<AgentMessage>) {
+    /// control plane. A result counts as delivered only after this send on the live connection.
+    pub async fn flush_pending(&self) {
         let pending = lock(&self.journal).pending_results();
         for result in pending {
-            if tx.send(job_result_message(result.clone())).await.is_err() {
+            if !self.send(job_result_message(result.clone())).await {
                 return;
             }
             let mut journal = lock(&self.journal);
@@ -174,13 +249,19 @@ impl Jobs {
         }
     }
 
+    /// Sends one message through the stream that is open at this moment (ADR-0020).
+    ///
+    /// False when no stream is open or the send fails.
+    async fn send(&self, message: AgentMessage) -> bool {
+        let tx = lock(&self.connection).clone();
+        match tx {
+            Some(tx) => tx.send(message).await.is_ok(),
+            None => false,
+        }
+    }
+
     /// Runs the steps of one job and reports the typed result (FR-AG-09, AC-RP-01).
-    async fn execute(
-        &self,
-        validated: ValidatedJob,
-        tx: mpsc::Sender<AgentMessage>,
-        cancel: CancelHandle,
-    ) {
+    async fn execute(&self, validated: ValidatedJob, cancel: CancelHandle) {
         let job = validated.job();
         let job_id = job.job_id.clone();
         let steps_total = u32::try_from(job.steps.len()).unwrap_or(u32::MAX);
@@ -188,48 +269,69 @@ impl Jobs {
             .steps
             .iter()
             .any(|step| matches!(step.kind, Some(step::Kind::Init(_))));
+        let job_deadline = (job.timeout_seconds > 0).then(|| {
+            tokio::time::Instant::now() + Duration::from_secs(u64::from(job.timeout_seconds))
+        });
         let mut succeeded = 0_u32;
         let mut failed = 0_u32;
         let mut cancelled = false;
         // The exit code of a step that stopped the job outside the missing-repository probe.
         let mut stopped_code: Option<i32> = None;
-        // Set when a test_access step reported that the repository does not exist (restic exit code
-        // 10). Only then does the init step run (FR-RP-02, AC-RP-01).
+        // The repository of the test_access step and its probe result. The init step runs only when
+        // its own repository matches (FR-RP-02, AC-RP-01).
+        let mut probe_repository: Option<String> = None;
         let mut probe_missing = false;
+        let mut init_ran = false;
         let mut init_succeeded = false;
+        let mut init_invalid = false;
 
         for step in &job.steps {
+            // A cancel that arrived between two steps stops the job before the next step starts
+            // (FR-AG-10).
+            if cancel.is_cancelled() {
+                cancelled = true;
+                break;
+            }
             let is_test_access = matches!(step.kind, Some(step::Kind::TestAccess(_)));
             let is_init = matches!(step.kind, Some(step::Kind::Init(_)));
-            // The agent runs init only after test_access reported a missing repository. Any other
-            // result of test_access skips it, so an existing repository is never re-initialized.
-            if is_init && !probe_missing {
-                let now = now_timestamp();
-                send_step_result(
-                    &tx,
-                    &job_id,
-                    &step.step_id,
-                    StepStatus::Skipped,
-                    -1,
-                    now,
-                    now,
-                )
-                .await;
-                continue;
+            if is_init {
+                let bound = probe_repository
+                    .as_deref()
+                    .is_some_and(|probed| Some(probed) == repository_id(step).as_deref());
+                if !bound {
+                    // The job holds an init without a preceding test_access of the same repository,
+                    // so the sequence is invalid and the job fails (FR-RP-02, AC-RP-01).
+                    init_invalid = true;
+                    failed += 1;
+                    let now = now_timestamp();
+                    self.send_step_result(&job_id, step, StepOutcome::failed(), now, now)
+                        .await;
+                    break;
+                }
+                if !probe_missing {
+                    // The repository exists, so init is skipped and never re-initializes it.
+                    let now = now_timestamp();
+                    self.send_step_result(&job_id, step, StepOutcome::skipped(), now, now)
+                        .await;
+                    continue;
+                }
             }
             let started_at = now_timestamp();
-            let outcome = self.run_step(&validated, step, &cancel).await;
+            let mut limit = step_timeout(step.timeout_seconds, job.timeout_seconds);
+            if let Some(deadline) = job_deadline {
+                limit = limit.min(deadline.saturating_duration_since(tokio::time::Instant::now()));
+            }
+            if is_init {
+                init_ran = true;
+            }
+            let outcome = self.run_step(&validated, step, &cancel, limit).await;
             let finished_at = now_timestamp();
-            send_step_result(
-                &tx,
-                &job_id,
-                &step.step_id,
-                outcome.status,
-                outcome.exit_code,
-                started_at,
-                finished_at,
-            )
-            .await;
+            self.send_step_result(&job_id, step, outcome, started_at, finished_at)
+                .await;
+            if is_test_access {
+                probe_repository = repository_id(step);
+                probe_missing = outcome.exit_code == 10;
+            }
             match outcome.status {
                 StepStatus::Success => {
                     succeeded += 1;
@@ -245,7 +347,6 @@ impl Jobs {
                     failed += 1;
                     if is_test_access && outcome.exit_code == 10 {
                         // The repository does not exist: the init step may run.
-                        probe_missing = true;
                     } else {
                         // Every other failure stops the job with its own outcome: no init runs
                         // (FR-RP-02, AC-RP-01).
@@ -262,7 +363,9 @@ impl Jobs {
             stopped_code,
             probe_missing,
             had_init,
+            init_ran,
             init_succeeded,
+            init_invalid,
         );
         let status = match outcome {
             JobStatus::Succeeded => StepStatus::Success,
@@ -286,26 +389,31 @@ impl Jobs {
         {
             let mut journal = lock(&self.journal);
             journal.record_completed(&job_id, result.clone());
+            journal.prune(now_timestamp());
             if let Err(error) = journal.persist() {
                 tracing::warn!(%error, "cannot write the job journal");
             }
         }
-        if tx.send(job_result_message(result)).await.is_ok() {
-            let mut journal = lock(&self.journal);
-            journal.mark_delivered(&job_id);
-            if let Err(error) = journal.persist() {
-                tracing::warn!(%error, "cannot write the job journal");
-            }
-        }
+        // The send goes through the stream that is open now; the result stays pending in the journal
+        // until a connection confirms it, so a dropped stream re-sends it (ADR-0020, FR-AG-12).
+        let _ = self.send(job_result_message(result)).await;
     }
 
-    /// Runs one step with the bundled restic and waits for it (FR-AG-05, FR-AG-06, FR-AG-09).
+    /// Runs one step with the bundled restic and stops it in two stages (FR-AG-05, FR-AG-06,
+    /// FR-AG-09, FR-AG-10).
+    ///
+    /// `limit` is the timeout of the step, or zero for no timeout.
     async fn run_step(
         &self,
         validated: &ValidatedJob,
         step: &Step,
         cancel: &CancelHandle,
+        limit: Duration,
     ) -> StepOutcome {
+        // A cancel that arrived before the spawn starts no process (FR-AG-10).
+        if cancel.is_cancelled() {
+            return StepOutcome::cancelled(false);
+        }
         let line = match build_command(validated, step) {
             Ok(line) => line,
             Err(error) => {
@@ -329,9 +437,12 @@ impl Jobs {
             }
         };
         *lock(&cancel.child) = Some(child);
-        let deadline = Duration::from_secs(u64::from(step.timeout_seconds));
         let started = tokio::time::Instant::now();
         let mut timed_out = false;
+        // The stop is two stages: the graceful signal first, then the forced kill of the tree after
+        // the grace period (FR-AG-10, AC-AG-07).
+        let mut stopped_at: Option<tokio::time::Instant> = None;
+        let mut hard_killed = false;
         loop {
             let reaped = {
                 let mut slot = lock(&cancel.child);
@@ -353,71 +464,127 @@ impl Jobs {
                 }
             };
             if let Some(code) = reaped {
-                if cancel.cancelled.load(Ordering::SeqCst) {
-                    return StepOutcome::cancelled();
+                if cancel.is_cancelled() {
+                    return StepOutcome::cancelled(hard_killed);
                 }
                 if timed_out {
                     return StepOutcome::failed();
                 }
-                return StepOutcome {
-                    status: status_for_exit(code),
-                    exit_code: code,
-                };
+                return StepOutcome::from_exit(code);
             }
-            if !timed_out && !deadline.is_zero() && started.elapsed() >= deadline {
-                timed_out = true;
-                if let Some(child) = lock(&cancel.child).as_mut() {
-                    let _ = child.kill();
+            if stopped_at.is_none() {
+                if cancel.is_cancelled() {
+                    interrupt(&cancel.child);
+                    stopped_at = Some(tokio::time::Instant::now());
+                } else if !limit.is_zero() && started.elapsed() >= limit {
+                    timed_out = true;
+                    interrupt(&cancel.child);
+                    stopped_at = Some(tokio::time::Instant::now());
                 }
+            } else if !hard_killed
+                && stopped_at.is_some_and(|since| since.elapsed() >= self.stop_grace)
+            {
+                kill_tree(&cancel.child);
+                hard_killed = true;
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     }
+
+    /// Sends the result of one step through the current stream (FR-AG-09).
+    async fn send_step_result(
+        &self,
+        job_id: &str,
+        step: &Step,
+        outcome: StepOutcome,
+        started_at: Timestamp,
+        finished_at: Timestamp,
+    ) {
+        let result = StepResult {
+            job_id: job_id.to_owned(),
+            step_id: step.step_id.clone(),
+            status: outcome.status as i32,
+            exit_code: outcome.exit_code,
+            started_at: Some(started_at),
+            finished_at: Some(finished_at),
+            possible_stale_lock: outcome.possible_stale_lock,
+            ..StepResult::default()
+        };
+        let _ = self
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::StepResult(result)),
+            })
+            .await;
+    }
 }
 
-/// Verifies, validates and admits one signed job (FR-PR-03, FR-PR-01, ADR-0020).
+/// Sends the graceful stop signal to the child of a step (FR-AG-10).
+fn interrupt(child: &Mutex<Option<JobChild>>) {
+    if let Some(child) = lock(child).as_ref()
+        && let Err(error) = child.interrupt()
+    {
+        tracing::warn!(%error, "cannot stop the restic child");
+    }
+}
+
+/// Kills the whole process tree of the child of a step (FR-AG-10).
+fn kill_tree(child: &Mutex<Option<JobChild>>) {
+    if let Some(child) = lock(child).as_mut()
+        && let Err(error) = child.kill_tree()
+    {
+        tracing::warn!(%error, "cannot kill the restic child");
+    }
+}
+
+/// Verifies the signature and the job rules, then validates the steps (FR-PR-03, FR-PR-01).
 ///
 /// The function is separate from [`Jobs::handle`] so a test can drive the checks without a restic
 /// child.
-pub fn intake(
+fn verify_and_validate(
     signed: &SignedJob,
     ring: &KeyRing,
     expected: &Expected,
-    journal: &mut FileJournal,
-) -> Intake {
-    let job = match verify_job(signed, ring, expected) {
-        Ok(job) => job,
-        Err(rejection) => {
-            return Intake::Rejected {
-                job_id: rejection.job_id.unwrap_or_default(),
-                reason: rejection.reason,
-            };
-        }
-    };
+) -> Result<ValidatedJob, Rejection> {
+    let job = verify_job(signed, ring, expected)?;
     let job_id = job.job_id.clone();
-    let validated = match ValidatedJob::new(job) {
-        Ok(validated) => validated,
-        Err(rejection) => {
-            return Intake::Rejected {
-                job_id,
-                reason: rejection.reason,
-            };
-        }
-    };
+    let validated = ValidatedJob::new(job).map_err(|rejection| Rejection {
+        job_id: rejection.job_id.or_else(|| Some(job_id.clone())),
+        reason: rejection.reason,
+    })?;
     if validated
         .job()
         .steps
         .iter()
         .any(|step| !step.kind.as_ref().is_some_and(is_supported))
     {
-        return Intake::Rejected {
-            job_id,
+        return Err(Rejection {
+            job_id: Some(job_id),
             reason: RejectReason::UnsupportedStep,
-        };
+        });
     }
-    match admit(validated.job(), journal, expected.now) {
-        Admission::AlreadyCompleted(result) => Intake::Completed(Box::new(result)),
-        Admission::New | Admission::InProgress => Intake::Accepted(Box::new(validated)),
+    Ok(validated)
+}
+
+/// Verifies, validates and admits one signed job (FR-PR-03, FR-PR-01, ADR-0020).
+///
+/// The function is separate from [`Jobs::handle`] so a test can drive the checks without a restic
+/// child. It records the acceptance of a new job in the journal; the caller persists it.
+pub fn intake(
+    signed: &SignedJob,
+    ring: &KeyRing,
+    expected: &Expected,
+    journal: &mut FileJournal,
+) -> Intake {
+    match verify_and_validate(signed, ring, expected) {
+        Ok(validated) => match admit(validated.job(), journal, expected.now) {
+            Admission::AlreadyCompleted(result) => Intake::Completed(Box::new(result)),
+            Admission::New => Intake::New(Box::new(validated)),
+            Admission::InProgress => Intake::InProgress(Box::new(validated)),
+        },
+        Err(rejection) => Intake::Rejected {
+            job_id: rejection.job_id.unwrap_or_default(),
+            reason: rejection.reason,
+        },
     }
 }
 
@@ -426,11 +593,35 @@ fn is_supported(kind: &step::Kind) -> bool {
     matches!(kind, step::Kind::Init(_) | step::Kind::TestAccess(_))
 }
 
+/// The repository that a step acts on (FR-RP-02).
+fn repository_id(step: &Step) -> Option<String> {
+    match step.kind.as_ref()? {
+        step::Kind::Init(init) => Some(init.repository_id.clone()),
+        step::Kind::TestAccess(test_access) => Some(test_access.repository_id.clone()),
+        _ => None,
+    }
+}
+
+/// The timeout of one step: its own value, the job value when the step gives none, or the default
+/// (FR-AG-05).
+#[must_use]
+fn step_timeout(step_seconds: u32, job_seconds: u32) -> Duration {
+    if step_seconds > 0 {
+        Duration::from_secs(u64::from(step_seconds))
+    } else if job_seconds > 0 {
+        Duration::from_secs(u64::from(job_seconds))
+    } else {
+        DEFAULT_STEP_TIMEOUT
+    }
+}
+
 /// Exit status and code of one step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StepOutcome {
     status: StepStatus,
     exit_code: i32,
+    /// Set after a forced kill of the tree: restic may have left a lock (FR-AG-10, AC-AG-07).
+    possible_stale_lock: bool,
 }
 
 impl StepOutcome {
@@ -438,13 +629,31 @@ impl StepOutcome {
         Self {
             status: StepStatus::Failed,
             exit_code: -1,
+            possible_stale_lock: false,
         }
     }
 
-    fn cancelled() -> Self {
+    fn skipped() -> Self {
+        Self {
+            status: StepStatus::Skipped,
+            exit_code: -1,
+            possible_stale_lock: false,
+        }
+    }
+
+    fn cancelled(possible_stale_lock: bool) -> Self {
         Self {
             status: StepStatus::Cancelled,
             exit_code: -1,
+            possible_stale_lock,
+        }
+    }
+
+    fn from_exit(code: i32) -> Self {
+        Self {
+            status: status_for_exit(code),
+            exit_code: code,
+            possible_stale_lock: false,
         }
     }
 }
@@ -452,7 +661,7 @@ impl StepOutcome {
 /// The handle that stops the restic child of a running job (FR-AG-10).
 #[derive(Clone)]
 struct CancelHandle {
-    child: Arc<Mutex<Option<Child>>>,
+    child: Arc<Mutex<Option<JobChild>>>,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -466,9 +675,10 @@ impl CancelHandle {
 
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
-        if let Some(child) = lock(&self.child).as_mut() {
-            let _ = child.kill();
-        }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
     }
 }
 
@@ -487,16 +697,20 @@ fn status_for_exit(code: i32) -> StepStatus {
 
 /// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
 ///
-/// The init chain: the agent runs init only after test_access exited with code 10 (a missing
-/// repository). A successful init after that probe is a successful job. A test_access that failed
-/// with any other code (1, 11, 12, a timeout, access denied) stops the job, and a standalone
-/// test_access with exit code 10 is the normal `NOT_INITIALIZED` result.
+/// The init chain: the agent runs init only after a `test_access` of the same repository exited with
+/// code 10 (a missing repository). A successful init after that probe is a successful job. A
+/// test_access that failed with any other code (1, 11, 12, a timeout, access denied) stops the job,
+/// and a standalone test_access with exit code 10 is the normal `NOT_INITIALIZED` result. An init
+/// without a matching test_access is an invalid sequence and fails the job.
+#[allow(clippy::fn_params_excessive_bools)]
 fn job_outcome(
     cancelled: bool,
     stopped_code: Option<i32>,
     probe_missing: bool,
     had_init: bool,
+    init_ran: bool,
     init_succeeded: bool,
+    init_invalid: bool,
 ) -> JobStatus {
     if cancelled {
         return JobStatus::Cancelled;
@@ -509,14 +723,17 @@ fn job_outcome(
             JobStatus::Failed
         };
     }
-    if probe_missing {
-        if had_init {
-            return if init_succeeded {
-                JobStatus::Succeeded
-            } else {
-                JobStatus::Failed
-            };
-        }
+    if init_invalid {
+        return JobStatus::Failed;
+    }
+    if had_init && init_ran {
+        return if init_succeeded {
+            JobStatus::Succeeded
+        } else {
+            JobStatus::Failed
+        };
+    }
+    if !had_init && probe_missing {
         return JobStatus::NotInitialized;
     }
     JobStatus::Succeeded
@@ -561,30 +778,10 @@ fn job_result_message(result: JobResult) -> AgentMessage {
     }
 }
 
-async fn send_step_result(
-    tx: &mpsc::Sender<AgentMessage>,
-    job_id: &str,
-    step_id: &str,
-    status: StepStatus,
-    exit_code: i32,
-    started_at: Timestamp,
-    finished_at: Timestamp,
-) {
-    let result = StepResult {
-        job_id: job_id.to_owned(),
-        step_id: step_id.to_owned(),
-        status: status as i32,
-        exit_code,
-        started_at: Some(started_at),
-        finished_at: Some(finished_at),
-        possible_stale_lock: status == StepStatus::Cancelled,
-        ..StepResult::default()
-    };
-    let _ = tx
-        .send(AgentMessage {
-            payload: Some(agent_message::Payload::StepResult(result)),
-        })
-        .await;
+fn ack(job_id: String) -> AgentMessage {
+    AgentMessage {
+        payload: Some(agent_message::Payload::JobAck(JobAck { job_id })),
+    }
 }
 
 /// Locks a mutex, ignoring a panic that poisoned it: the journal stays usable.
@@ -607,6 +804,7 @@ mod tests {
     use super::{Intake, intake, job_error, job_outcome, status_for_exit};
     use crate::journal::FileJournal;
     use restichub_proto::agent::v1::{JobStatus, RejectReason, StepStatus};
+    use std::time::Duration;
 
     const KEY_ID: &str = "job-key-1";
 
@@ -800,7 +998,7 @@ mod tests {
         );
         let mut journal = temp_journal("replay");
         let first = intake(&signed, &ring(), &expected(), &mut journal);
-        assert!(matches!(first, Intake::Accepted(_)));
+        assert!(matches!(first, Intake::New(_)));
         // Completion stores the result in the journal.
         use restichub_proto::signing::JobJournal as _;
         journal.record_completed(
@@ -858,36 +1056,46 @@ mod tests {
     fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
         // A repository that exists: test_access exit 0, init skipped.
         assert_eq!(
-            job_outcome(false, None, false, true, false),
+            job_outcome(false, None, false, true, false, false, false),
             JobStatus::Succeeded
         );
         // A missing repository with a successful init.
         assert_eq!(
-            job_outcome(false, None, true, true, true),
+            job_outcome(false, None, true, true, true, true, false),
             JobStatus::Succeeded
+        );
+        // Init failure gives a failed job.
+        assert_eq!(
+            job_outcome(false, None, true, true, true, false, false),
+            JobStatus::Failed
         );
         // A standalone test_access on a missing repository.
         assert_eq!(
-            job_outcome(false, None, true, false, false),
+            job_outcome(false, None, true, false, false, false, false),
             JobStatus::NotInitialized
+        );
+        // An init step without a matching test_access is an invalid sequence.
+        assert_eq!(
+            job_outcome(false, None, false, true, false, false, true),
+            JobStatus::Failed
         );
         // A wrong password on an existing repository (exit code 12).
         assert_eq!(
-            job_outcome(false, Some(12), false, true, false),
+            job_outcome(false, Some(12), false, true, false, false, false),
             JobStatus::ConfigError
         );
         // Any other failure (exit codes 1, 11, a timeout).
         assert_eq!(
-            job_outcome(false, Some(1), false, true, false),
+            job_outcome(false, Some(1), false, true, false, false, false),
             JobStatus::Failed
         );
         assert_eq!(
-            job_outcome(false, Some(11), false, true, false),
+            job_outcome(false, Some(11), false, true, false, false, false),
             JobStatus::Failed
         );
         // The control plane cancelled the job before any step finished.
         assert_eq!(
-            job_outcome(true, None, false, true, false),
+            job_outcome(true, None, false, true, false, false, false),
             JobStatus::Cancelled
         );
         assert_eq!(
@@ -898,6 +1106,16 @@ mod tests {
             job_error(JobStatus::NotInitialized).map(|error| error.code),
             Some("repository_missing".to_owned())
         );
+    }
+
+    #[test]
+    fn fr_ag_05_a_step_without_a_timeout_uses_the_job_timeout_or_the_default() {
+        // Step value wins over the job value.
+        assert_eq!(super::step_timeout(600, 900), Duration::from_secs(600));
+        // No step value: the job value stands in.
+        assert_eq!(super::step_timeout(0, 900), Duration::from_secs(900));
+        // Neither: the default.
+        assert_eq!(super::step_timeout(0, 0), super::DEFAULT_STEP_TIMEOUT);
     }
 
     #[test]
@@ -912,7 +1130,7 @@ mod tests {
         let mut journal = temp_journal("chain");
         let decision = intake(&signed, &ring(), &expected(), &mut journal);
         match decision {
-            Intake::Accepted(validated) => assert_eq!(validated.job().steps.len(), 2),
+            Intake::New(validated) => assert_eq!(validated.job().steps.len(), 2),
             _ => panic!("the init chain must be accepted"),
         }
     }

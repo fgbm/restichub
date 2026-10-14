@@ -457,6 +457,8 @@ fn reject_reason_code(reason: i32) -> &'static str {
         Ok(RejectReason::Malformed) => "malformed",
         Ok(RejectReason::LifetimeTooLong) => "lifetime_too_long",
         Ok(RejectReason::NotYetValid) => "not_yet_valid",
+        Ok(RejectReason::Busy) => "busy",
+        Ok(RejectReason::Internal) => "internal_error",
         Ok(RejectReason::Unspecified) | Err(_) => "rejected",
     }
 }
