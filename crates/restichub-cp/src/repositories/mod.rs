@@ -364,6 +364,11 @@ pub async fn delete_repository(
     let Some(current) = repo::get_for_update(&mut tx, repository_id).await? else {
         return Err(ApiError::not_found());
     };
+    // A profile binds the repository. Remove or repoint the profiles first, so the foreign key
+    // never blocks the delete with an internal error.
+    if restichub_db::profiles::is_repository_used(&mut tx, repository_id).await? {
+        return Err(ApiError::conflict());
+    }
     repo::delete(&mut tx, repository_id).await?;
     // The bound secrets belong to the repository. Remove them in the same transaction, so the
     // secrets screen does not keep an orphan and the foreign key never blocks the delete.
