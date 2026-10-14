@@ -118,23 +118,72 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         auth.create_user_tenant_limiter.clone(),
         restichub_cp::maintenance::LIMITER_SWEEP_INTERVAL,
     );
-    let app = server::router(
-        AppState::with_auth(database, auth)
-            .with_trusted_proxies(config.trusted_proxies.clone())
-            .with_kek(kek)
-            .with_tenancy(config.tenancy.clone())
-            .with_pki(ca_store, job_signing.clone(), config.agent_endpoint.clone()),
-    );
+    let state = AppState::with_auth(database, auth)
+        .with_trusted_proxies(config.trusted_proxies.clone())
+        .with_kek(kek)
+        .with_tenancy(config.tenancy.clone())
+        .with_pki(
+            ca_store.clone(),
+            job_signing.clone(),
+            config.agent_endpoint.clone(),
+        );
+    let app = server::router(state.clone());
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await
         .context("cannot bind the listen address")?;
+
+    // One shutdown signal stops the web server and the agent listener.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_tx.send(());
+    });
+
+    // The agent listener serves the gRPC stream and the enrollment endpoint over TLS (ADR-0026).
+    if let Some(addr) = config.agent_listen_addr {
+        let root = ca_store.root().cert_der.clone();
+        let tls = match restichub_cp::agent_listener::configured_tls_config(&config, &root)? {
+            Some(tls) => tls,
+            None => {
+                let sans = restichub_cp::agent_listener::server_cert_sans(
+                    config.agent_endpoint.as_deref(),
+                    addr,
+                );
+                let issued = ca
+                    .issue_server_certificate(&ca_store, &sans)
+                    .context("cannot issue the agent listener certificate")?;
+                restichub_cp::agent_listener::tls_config_from_issued(&issued, &root)?
+            }
+        };
+        let agent_state = state.clone();
+        let mut agent_shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let stop = async move {
+                let _ = agent_shutdown.changed().await;
+            };
+            if let Err(error) =
+                restichub_cp::agent_listener::serve(agent_state, addr, tls, stop).await
+            {
+                tracing::error!(%error, "the agent listener stopped");
+            }
+        });
+        tracing::info!(%addr, "the agent listener is ready");
+    } else {
+        tracing::warn!(
+            "RESTICHUB_AGENT_LISTEN is not set: the agent listener and the enrollment endpoint are off"
+        );
+    }
+
     tracing::info!("the control plane is ready");
 
+    let mut web_shutdown = shutdown_rx;
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        let _ = web_shutdown.changed().await;
+    })
     .await
     .context("the server stopped with an error")
 }

@@ -41,6 +41,16 @@ pub const INSECURE_COOKIES_ENV: &str = "RESTICHUB_SERVER_INSECURE_COOKIES";
 pub const MAX_CONCURRENT_HASHES_ENV: &str = "RESTICHUB_AUTH_MAX_CONCURRENT_HASHES";
 /// The gRPC endpoint of the agent listener, reported to an agent at enrollment (ADR-0026).
 pub const AGENT_ENDPOINT_ENV: &str = "RESTICHUB_AGENT_ENDPOINT";
+/// The listen address of the agent listener (ADR-0026).
+///
+/// The listener serves the gRPC agent stream and the enrollment endpoint over TLS. The listener
+/// does not start without the value.
+pub const AGENT_LISTEN_ENV: &str = "RESTICHUB_AGENT_LISTEN";
+/// An optional server certificate file for the agent listener (ADR-0026). Without it the listener
+/// issues the certificate from the installation CA.
+pub const AGENT_TLS_CERT_FILE_ENV: &str = "RESTICHUB_AGENT_TLS_CERT_FILE";
+/// The private key file of [`AGENT_TLS_CERT_FILE_ENV`].
+pub const AGENT_TLS_KEY_FILE_ENV: &str = "RESTICHUB_AGENT_TLS_KEY_FILE";
 /// The tenancy mode: `single` or `multi` (ADR-0024).
 pub const TENANCY_MODE_ENV: &str = "RESTICHUB_TENANCY_MODE";
 /// The tenant that single mode uses and that the switch from multi mode expects.
@@ -230,6 +240,12 @@ pub struct Config {
     pub tenancy: TenancyConfig,
     /// Reported to an agent at enrollment; the address of the agent listener (ADR-0026).
     pub agent_endpoint: Option<String>,
+    /// The listen address of the agent listener (ADR-0026). The listener is absent without it.
+    pub agent_listen_addr: Option<SocketAddr>,
+    /// The configured server certificate file of the agent listener. Absent uses the CA.
+    pub agent_tls_cert_file: Option<PathBuf>,
+    /// The configured server key file of the agent listener.
+    pub agent_tls_key_file: Option<PathBuf>,
 }
 
 /// Secret handling configuration (ADR-0023, section Secrets).
@@ -278,6 +294,21 @@ impl Config {
         let secrets = secrets_config(env, file.secrets.as_ref());
         let tenancy = tenancy_config(env, file.tenancy.as_ref())?;
         let agent_endpoint = env.get(AGENT_ENDPOINT_ENV).or(file.agent_endpoint);
+        let agent_listen_addr = match env.get(AGENT_LISTEN_ENV).or(file.agent_listen) {
+            Some(value) => Some(value.parse().map_err(|_| ConfigError::Invalid {
+                name: "agent_listen",
+                reason: format!("`{value}` is not a socket address"),
+            })?),
+            None => None,
+        };
+        let agent_tls_cert_file = env
+            .get(AGENT_TLS_CERT_FILE_ENV)
+            .map(PathBuf::from)
+            .or(file.agent_tls_cert_file);
+        let agent_tls_key_file = env
+            .get(AGENT_TLS_KEY_FILE_ENV)
+            .map(PathBuf::from)
+            .or(file.agent_tls_key_file);
 
         let database_url = env
             .get(DATABASE_URL_ENV)
@@ -337,6 +368,9 @@ impl Config {
             secrets,
             tenancy,
             agent_endpoint,
+            agent_listen_addr,
+            agent_tls_cert_file,
+            agent_tls_key_file,
         })
     }
 }
@@ -396,6 +430,9 @@ struct FileConfig {
     secrets: Option<SecretsSection>,
     tenancy: Option<TenancySection>,
     agent_endpoint: Option<String>,
+    agent_listen: Option<String>,
+    agent_tls_cert_file: Option<PathBuf>,
+    agent_tls_key_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]

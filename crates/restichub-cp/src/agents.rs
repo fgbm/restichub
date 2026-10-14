@@ -259,6 +259,8 @@ pub async fn revoke_agent(
         restichub_db::audit::insert(&mut tx, &event).await?;
     }
     tx.commit().await?;
+    // A revoke closes an open stream at once (FR-ID-04, AC-ID-04).
+    state.agent_registry().close_by_agent(agent_id);
     Ok(StatusCode::NO_CONTENT)
 }
 

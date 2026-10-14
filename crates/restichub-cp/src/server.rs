@@ -22,6 +22,7 @@ use utoipa::openapi::security::{ApiKey, ApiKeyValue, Http, HttpAuthScheme, Secur
 use utoipa_axum::router::OpenApiRouter;
 use uuid::Uuid;
 
+use crate::agent_stream::StreamRegistry;
 use crate::client_ip::TrustedProxies;
 use crate::clock::{Clock, SystemClock};
 use crate::config::{AuthConfig, TenancyConfig};
@@ -155,6 +156,7 @@ pub struct AppState {
     ca: Option<Arc<CaStore>>,
     job_signing: Option<JobSigningService>,
     agent_endpoint: Option<String>,
+    agent_registry: Arc<StreamRegistry>,
 }
 
 impl AppState {
@@ -174,6 +176,7 @@ impl AppState {
             ca: None,
             job_signing: None,
             agent_endpoint: None,
+            agent_registry: Arc::new(StreamRegistry::new()),
         }
     }
 
@@ -187,6 +190,7 @@ impl AppState {
             ca: None,
             job_signing: None,
             agent_endpoint: None,
+            agent_registry: Arc::new(StreamRegistry::new()),
         }
     }
 
@@ -257,6 +261,11 @@ impl AppState {
     /// The gRPC endpoint that the enrollment response reports to the agent.
     pub fn agent_endpoint(&self) -> Option<&str> {
         self.agent_endpoint.as_deref()
+    }
+
+    /// The in-process map of the live streams (ADR-0026).
+    pub fn agent_registry(&self) -> &StreamRegistry {
+        &self.agent_registry
     }
 }
 
