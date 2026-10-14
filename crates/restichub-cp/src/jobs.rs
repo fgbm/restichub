@@ -14,14 +14,20 @@
 //! The MVP holds no queue for an on-demand job: an offline agent gives HTTP 409 `agent_offline` at
 //! once (the scheduler of epic #7 adds the queue).
 //!
-//! The safety rule of an init: the job always holds a `test_access` step before the `init` step, so
-//! the agent runs `init` only when the repository does not exist. A wrong password on an existing
-//! repository gives `config_error` and no init (AC-RP-01). The agent applies the rule; the control
-//! plane never sends a bare init.
+//! The safety rule of an init: the job always holds a `test_access` step before the `init` step, and
+//! the agent runs `init` only when `test_access` exited with restic code 10 (the repository does not
+//! exist). Any other failure stops the job; a wrong password gives `config_error` and no init
+//! (AC-RP-01). An initialized repository is never re-initialized: the control plane refuses the
+//! action with HTTP 409.
 //!
 //! The agent result updates the job row. A successful `init` or a successful `test_access` sets
-//! `repositories.initialized = true` (FR-RP-02). A `test_access` that finds no repository gives the
-//! typed result `not_initialized`, which is not an error.
+//! `repositories.initialized = true` (FR-RP-02), but only while the repository location still
+//! matches the fingerprint stored with the job (MEDIUM 4). A `not_initialized` result never clears
+//! the flag: on an initialized repository it is a location mismatch, so the job fails with the typed
+//! access error (HIGH 1).
+//!
+//! One active job for each repository is enforced by a partial unique index (MEDIUM 3); a second job
+//! gives HTTP 409. An overdue job moves to `expired` on read and in a periodic sweep (MEDIUM 5).
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -48,7 +54,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
 use crate::delivery::SecretReader;
-use crate::error::ApiError;
+use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
 use crate::repositories::stored_location;
 use crate::server::AppState;
@@ -65,6 +71,10 @@ const JOB_TIMEOUT_SECONDS: u32 = 900;
 
 /// The largest accepted error code from an agent (FR-PR-08).
 const MAX_RESULT_MESSAGE_LEN: usize = 64;
+
+/// The stable error code of a location mismatch: a `not_initialized` result on an initialized
+/// repository (HIGH 1). The user interface translates it (NFR-DOC-04).
+const ACCESS_ERROR_CODE: &str = "repository_missing_here";
 
 /// The request body of an init or a test-access action.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -211,8 +221,14 @@ pub async fn get_job(
 ) -> Result<Json<JobView>, ApiError> {
     context.authorize(Operation::JobsRead)?;
     let job_id = parse_job_id(&id)?;
+    let now = state.auth().clock.now();
     let job = context
-        .tenant_tx(&state, async |tx| Ok(job_repo::get(tx, job_id).await?))
+        .tenant_tx(&state, async |tx| {
+            // An overdue job moves to `expired` on read, so a poll sees a terminal status
+            // (MEDIUM 5).
+            job_repo::mark_expired(tx, job_id, now).await?;
+            Ok(job_repo::get(tx, job_id).await?)
+        })
         .await?;
     match job {
         Some(job) => Ok(Json(JobView::from(&job))),
@@ -239,6 +255,10 @@ async fn create_repository_job(
     let Some(repository) = repo::get_for_update(&mut tx, repository_id).await? else {
         return Err(ApiError::not_found());
     };
+    // An initialized repository is never re-initialized (HIGH 1).
+    if kind == JobKind::Init && repository.initialized {
+        return Err(ApiError::conflict());
+    }
     let agent_id = resolve_agent(&repository, explicit_agent)?;
     ensure_agent_active(&mut tx, agent_id).await?;
     // The MVP holds no queue for an on-demand job. The check comes before the secret read, so an
@@ -247,6 +267,9 @@ async fn create_repository_job(
         return Err(ApiError::agent_offline());
     }
 
+    let fingerprint = location_fingerprint(&stored_location(&repository));
+    // One active job for each repository (MEDIUM 3). The partial unique index carries the
+    // invariant, so a second job gives HTTP 409.
     job_repo::create(
         &mut tx,
         &NewJob {
@@ -255,10 +278,12 @@ async fn create_repository_job(
             agent_id,
             repository_id: Some(repository_id),
             expires_at: Some(expires_at),
+            location_fingerprint: Some(fingerprint),
             created_by,
         },
     )
-    .await?;
+    .await
+    .map_err(map_write_error)?;
 
     let provider = state
         .kek()
@@ -298,7 +323,16 @@ async fn create_repository_job(
     let signing = state
         .job_signing()
         .ok_or_else(|| ApiError::internal("the server holds no job signing key set"))?;
-    let signed = signing.sign_job(state.db(), validated.job()).await?;
+    let signed = match signing.sign_job(state.db(), validated.job()).await {
+        Ok(signed) => signed,
+        Err(error) => {
+            // A signing failure must not leave the job queued forever (MEDIUM 5).
+            let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+            let _ = job_repo::mark_refused(&mut tx, job_id, "signing_failed", now).await;
+            let _ = tx.commit().await;
+            return Err(ApiError::from(error));
+        }
+    };
 
     let sent = state.agent_registry().send_to_agent(
         agent_id,
@@ -335,24 +369,37 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
     };
     let now = state.auth().clock.now();
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+        tracing::warn!(job = %ack.job_id, "the job acknowledgement could not open a transaction");
         return;
     };
-    let Ok(Some(job)) = job_repo::get_for_update(&mut tx, job_id).await else {
-        return;
+    let job = match job_repo::get_for_update(&mut tx, job_id).await {
+        Ok(Some(job)) => job,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(job = %job_id, %error, "the acknowledgement could not read the job");
+            return;
+        }
     };
     if job.agent_id != agent {
         return;
     }
-    if job.status == JobStatus::Sent {
-        let _ = job_repo::mark_running(&mut tx, job_id, now).await;
+    if job.status == JobStatus::Sent
+        && let Err(error) = job_repo::mark_running(&mut tx, job_id, now).await
+    {
+        tracing::warn!(job = %job_id, %error, "the acknowledgement could not update the job");
+        return;
     }
-    let _ = tx.commit().await;
+    if let Err(error) = tx.commit().await {
+        tracing::warn!(job = %job_id, %error, "the acknowledgement could not commit");
+    }
 }
 
 /// Records a `JobResult` from the stream: it updates the job and the repository state (FR-RP-02).
 ///
-/// A successful `init` or a successful `test_access` sets `repositories.initialized = true`. A
-/// `not_initialized` result clears it. The identity comes from the certificate (FR-PR-08).
+/// A successful `init` or a successful `test_access` sets `repositories.initialized = true`, but
+/// only while the repository location still matches the job (MEDIUM 4). A `not_initialized` result
+/// never clears the flag (HIGH 1): on an initialized repository it is a location mismatch, so the
+/// job fails with the typed access error. The identity comes from the certificate (FR-PR-08).
 pub async fn handle_job_result(
     state: &AppState,
     tenant: TenantId,
@@ -364,37 +411,123 @@ pub async fn handle_job_result(
     };
     let now = state.auth().clock.now();
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+        tracing::warn!(job = %result.job_id, "the job result could not open a transaction");
         return;
     };
-    let Ok(Some(job)) = job_repo::get_for_update(&mut tx, job_id).await else {
-        return;
+    let job = match job_repo::get_for_update(&mut tx, job_id).await {
+        Ok(Some(job)) => job,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(job = %job_id, %error, "the job result could not read the job");
+            return;
+        }
     };
     if job.agent_id != agent || job.status.is_terminal() {
         return;
     }
     let Some(outcome) = outcome_of(result) else {
+        tracing::warn!(job = %job_id, "the job result holds an unknown outcome");
         return;
     };
-    let _ = job_repo::finish(&mut tx, job_id, &outcome, now).await;
-    if let Some(repository_id) = job.repository_id {
-        match outcome.result_code {
-            JobResultCode::Succeeded => {
-                let _ = repo::set_initialized(&mut tx, repository_id, true).await;
+    // A `not_initialized` result on an initialized repository is a location mismatch, not a normal
+    // result: the job fails with the typed access error and the flag stays (HIGH 1).
+    let outcome = match (outcome.result_code, job.repository_id) {
+        (JobResultCode::NotInitialized, Some(repository_id)) => {
+            match repo::get(&mut tx, repository_id).await {
+                Ok(Some(repository)) if repository.initialized => JobOutcome {
+                    status: JobStatus::Failed,
+                    result_code: JobResultCode::AccessError,
+                    result_message: Some(ACCESS_ERROR_CODE.to_owned()),
+                },
+                Ok(_) => outcome,
+                Err(error) => {
+                    tracing::warn!(job = %job_id, %error, "the job result could not read the repository");
+                    return;
+                }
             }
-            JobResultCode::NotInitialized => {
-                let _ = repo::set_initialized(&mut tx, repository_id, false).await;
-            }
-            JobResultCode::Failed | JobResultCode::ConfigError | JobResultCode::Cancelled => {}
         }
+        _ => outcome,
+    };
+    if let Err(error) = job_repo::finish(&mut tx, job_id, &outcome, now).await {
+        tracing::warn!(job = %job_id, %error, "the job result could not update the job");
+        return;
     }
-    let _ = tx.commit().await;
+    if outcome.result_code == JobResultCode::Succeeded
+        && let Some(repository_id) = job.repository_id
+    {
+        apply_initialized(
+            &mut tx,
+            job_id,
+            repository_id,
+            job.location_fingerprint.as_deref(),
+        )
+        .await;
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::warn!(job = %job_id, %error, "the job result could not commit");
+    }
+}
+
+/// Sets `repositories.initialized = true` while the location still matches the job (MEDIUM 4).
+async fn apply_initialized(
+    tx: &mut restichub_db::TenantTx<'_>,
+    job_id: JobId,
+    repository_id: RepositoryId,
+    fingerprint: Option<&str>,
+) {
+    let repository = match repo::get(tx, repository_id).await {
+        Ok(Some(repository)) => repository,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(job = %job_id, %error, "the initialized flag could not read the repository");
+            return;
+        }
+    };
+    if Some(location_fingerprint(&stored_location(&repository)).as_str()) != fingerprint {
+        // The location changed between the job and its result: the flag belongs to another
+        // location, so the control plane does not set it.
+        tracing::warn!(
+            job = %job_id,
+            "the repository location changed since the job started; the initialized flag stays"
+        );
+        return;
+    }
+    if let Err(error) = repo::set_initialized(tx, repository_id, true).await {
+        tracing::warn!(job = %job_id, %error, "the initialized flag could not be set");
+    }
 }
 
 /// Resolves the target agent: the explicit value, or the maintenance agent (FR-RP-08).
+///
+/// A local path lives on one host, so an init or a test-access job for a local backend runs only on
+/// the maintenance agent (HIGH 1). The repository must name one; a different explicit agent is
+/// refused.
 fn resolve_agent(repository: &Repository, explicit: Option<AgentId>) -> Result<AgentId, ApiError> {
+    if repository.backend == BackendKind::Local {
+        let maintenance = repository
+            .maintenance_agent_id
+            .ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Empty))?;
+        if explicit.is_some_and(|agent| agent != maintenance) {
+            return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
+        }
+        return Ok(maintenance);
+    }
     explicit
         .or(repository.maintenance_agent_id)
         .ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Empty))
+}
+
+/// A hex SHA-256 of the repository location. It holds no secret (MEDIUM 4).
+fn location_fingerprint(location: &str) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+
+    let digest = Sha256::digest(location.as_bytes());
+    let mut text = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(text, "{byte:02x}");
+    }
+    text
 }
 
 /// Refuses an agent that is absent, of another tenant, or revoked (FR-RP-08).
@@ -553,6 +686,7 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         JobResultCode::Failed
         | JobResultCode::ConfigError
         | JobResultCode::NotInitialized
+        | JobResultCode::AccessError
         | JobResultCode::Cancelled => JobStatus::Failed,
     };
     let result_message = result

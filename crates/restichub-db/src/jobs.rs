@@ -29,6 +29,9 @@ pub struct Job {
     pub result_code: Option<JobResultCode>,
     /// A machine-readable error code from the agent. Never a secret and never prose (NFR-DOC-04).
     pub result_message: Option<String>,
+    /// A hash of the repository location at create time. The control plane applies the
+    /// `initialized` flag only while it still matches (MEDIUM 4).
+    pub location_fingerprint: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
     pub sent_at: Option<OffsetDateTime>,
     pub started_at: Option<OffsetDateTime>,
@@ -46,6 +49,8 @@ pub struct NewJob {
     pub agent_id: AgentId,
     pub repository_id: Option<RepositoryId>,
     pub expires_at: Option<OffsetDateTime>,
+    /// A hash of the repository location at create time. It holds no secret (MEDIUM 4).
+    pub location_fingerprint: Option<String>,
     /// Absent for an API token actor.
     pub created_by: Option<UserId>,
 }
@@ -62,8 +67,9 @@ pub struct JobOutcome {
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewJob) -> Result<JobId, DbError> {
     sqlx::query(
         "INSERT INTO jobs \
-         (id, tenant_id, kind, agent_id, repository_id, status, expires_at, created_by) \
-         VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7)",
+         (id, tenant_id, kind, agent_id, repository_id, status, expires_at, location_fingerprint, \
+          created_by) \
+         VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $8)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -71,6 +77,7 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewJob) -> Result<JobId, DbErro
     .bind(new.agent_id)
     .bind(new.repository_id)
     .bind(new.expires_at)
+    .bind(new.location_fingerprint.as_deref())
     .bind(new.created_by)
     .execute(tx.as_conn())
     .await
@@ -82,7 +89,8 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewJob) -> Result<JobId, DbErro
 pub async fn get(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbError> {
     let row = sqlx::query_as::<_, JobRow>(
         "SELECT id, kind, agent_id, repository_id, status, result_code, result_message, \
-                expires_at, sent_at, started_at, finished_at, created_at, updated_at, created_by \
+                location_fingerprint, expires_at, sent_at, started_at, finished_at, created_at, \
+                updated_at, created_by \
          FROM jobs WHERE id = $1",
     )
     .bind(id)
@@ -99,7 +107,8 @@ pub async fn get(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbErro
 pub async fn get_for_update(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbError> {
     let row = sqlx::query_as::<_, JobRow>(
         "SELECT id, kind, agent_id, repository_id, status, result_code, result_message, \
-                expires_at, sent_at, started_at, finished_at, created_at, updated_at, created_by \
+                location_fingerprint, expires_at, sent_at, started_at, finished_at, created_at, \
+                updated_at, created_by \
          FROM jobs WHERE id = $1 FOR UPDATE",
     )
     .bind(id)
@@ -195,6 +204,59 @@ pub async fn mark_refused(
     Ok(result.rows_affected() == 1)
 }
 
+/// True when the repository holds a job that is queued, sent or running (MEDIUM 3).
+pub async fn has_active_for_repository(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+) -> Result<bool, DbError> {
+    let (active,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 \
+         AND status IN ('queued', 'sent', 'running'))",
+    )
+    .bind(repository_id)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(active)
+}
+
+/// Moves one overdue job to the terminal `expired` status (MEDIUM 5). `false` when it is terminal
+/// or not overdue.
+pub async fn mark_expired(
+    tx: &mut TenantTx<'_>,
+    id: JobId,
+    now: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'expired', finished_at = $2, updated_at = now() \
+         WHERE id = $1 AND status NOT IN ('succeeded', 'failed', 'expired') \
+           AND expires_at IS NOT NULL AND expires_at <= $2",
+    )
+    .bind(id)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Marks every overdue non-terminal job of the tenant `expired` (MEDIUM 5).
+///
+/// The periodic sweep calls it. The update is idempotent, so two control plane instances both run
+/// it without a conflict.
+pub async fn expire_overdue(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'expired', finished_at = $1, updated_at = now() \
+         WHERE status NOT IN ('succeeded', 'failed', 'expired') \
+           AND expires_at IS NOT NULL AND expires_at <= $1",
+    )
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
+}
+
 type JobRow = (
     Uuid,
     JobKind,
@@ -202,6 +264,7 @@ type JobRow = (
     Option<Uuid>,
     JobStatus,
     Option<JobResultCode>,
+    Option<String>,
     Option<String>,
     Option<OffsetDateTime>,
     Option<OffsetDateTime>,
@@ -222,6 +285,7 @@ impl From<JobRow> for Job {
             status,
             result_code,
             result_message,
+            location_fingerprint,
             expires_at,
             sent_at,
             started_at,
@@ -238,6 +302,7 @@ impl From<JobRow> for Job {
             status,
             result_code,
             result_message,
+            location_fingerprint,
             expires_at,
             sent_at,
             started_at,

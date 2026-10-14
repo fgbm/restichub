@@ -260,7 +260,18 @@ pub async fn update_repository(
             validated_from_row(&current, kind)
         }
     };
-    repository_location(&backend)?;
+    let new_location = repository_location(&backend)?;
+    if new_location != stored_location(&current) {
+        // The location of an initialized repository cannot change in the MVP (MEDIUM 4): the
+        // `initialized` flag and the stored snapshots belong to that location. A location change
+        // while a job runs is also refused.
+        if current.initialized {
+            return Err(ApiError::conflict());
+        }
+        if restichub_db::jobs::has_active_for_repository(&mut tx, repository_id).await? {
+            return Err(ApiError::conflict());
+        }
+    }
     let agent_set = match maintenance_agent_id {
         Some(value) => Some(parse_optional_agent_id(Some(&value))?),
         None => None,

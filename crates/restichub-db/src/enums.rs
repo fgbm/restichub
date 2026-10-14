@@ -381,6 +381,9 @@ pub enum JobResultCode {
     ConfigError,
     /// The repository does not exist. A test_access job reports it (FR-RP-02).
     NotInitialized,
+    /// The repository is not at the stored location on this host. A `not_initialized` result on an
+    /// initialized repository gives this code: the path, the mount or the host changed.
+    AccessError,
     /// The control plane cancelled the job (FR-AG-10).
     Cancelled,
 }
@@ -392,6 +395,7 @@ impl JobResultCode {
             Self::Failed => "failed",
             Self::ConfigError => "config_error",
             Self::NotInitialized => "not_initialized",
+            Self::AccessError => "access_error",
             Self::Cancelled => "cancelled",
         }
     }
@@ -403,6 +407,7 @@ impl JobResultCode {
             "failed" => Some(Self::Failed),
             "config_error" => Some(Self::ConfigError),
             "not_initialized" => Some(Self::NotInitialized),
+            "access_error" => Some(Self::AccessError),
             "cancelled" => Some(Self::Cancelled),
             _ => None,
         }
@@ -575,6 +580,7 @@ mod tests {
             JobResultCode::Failed,
             JobResultCode::ConfigError,
             JobResultCode::NotInitialized,
+            JobResultCode::AccessError,
             JobResultCode::Cancelled,
         ] {
             assert_eq!(JobResultCode::parse(code.as_str()), Some(code));

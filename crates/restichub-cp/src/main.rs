@@ -110,6 +110,14 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         restichub_cp::maintenance::SIGNING_KEY_RETIRE_INTERVAL,
     );
 
+    // The periodic sweep moves an overdue job to `expired`, so a poll sees a terminal status
+    // (MEDIUM 5). It is a maintenance task of the control plane, not job scheduling (ADR-0002).
+    restichub_cp::maintenance::spawn_job_expiry(
+        database.clone(),
+        Arc::new(restichub_cp::clock::SystemClock),
+        restichub_cp::maintenance::JOB_EXPIRY_INTERVAL,
+    );
+
     let auth = restichub_cp::server::AuthState::new(config.auth.clone());
     restichub_cp::maintenance::spawn_limiter_sweep(
         auth.user_limiter.clone(),
