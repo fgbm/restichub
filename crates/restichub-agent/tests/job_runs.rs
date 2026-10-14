@@ -15,8 +15,8 @@ use std::time::Duration;
 use ed25519_dalek::SigningKey;
 use restichub_proto::agent::v1::{
     AgentMessage, InitStep, Job, JobResult, JobStatus, LocalCredentials, RejectReason,
-    RepositoryAccess, Step, TestAccessStep, agent_message, repository_access::BackendCredentials,
-    step,
+    RepositoryAccess, Step, StepResult, StepStatus, TestAccessStep, agent_message,
+    repository_access::BackendCredentials, step,
 };
 use restichub_proto::signing::{KeyRing, sign_job};
 use tokio::sync::mpsc;
@@ -337,7 +337,6 @@ async fn adr_0020_a_journal_write_failure_refuses_a_new_job() {
 
 /// FR-AG-10, AC-AG-07: a step that ignores the graceful signal is killed as a tree, and the step
 /// reports a possible stale lock.
-#[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread")]
 async fn ac_ag_07_a_step_that_ignores_the_signal_is_killed_after_the_grace_period() {
     let dir = config_dir("job-runs-ignore");
@@ -381,4 +380,260 @@ async fn ac_ag_07_a_step_that_ignores_the_signal_is_killed_after_the_grace_perio
     assert!(stale, "a forced kill reports a possible stale lock");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&path);
+}
+
+/// Reads the messages until the job result arrives and returns the step results before it.
+async fn collect_job(rx: &mut mpsc::Receiver<AgentMessage>) -> (Vec<StepResult>, JobResult) {
+    let mut steps = Vec::new();
+    loop {
+        match next_message(rx).await.payload {
+            Some(agent_message::Payload::StepResult(step)) => steps.push(step),
+            Some(agent_message::Payload::JobResult(result)) => return (steps, result),
+            _ => {}
+        }
+    }
+}
+
+/// Waits until the fake restic of `path` has started a run.
+#[cfg(windows)]
+async fn wait_for_start(path: &Path) {
+    for _ in 0..400 {
+        if runs(path) > 0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the fake restic must start");
+}
+
+/// FR-AG-05: a job whose deadline passes stops the job, and no later step starts.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_ag_05_a_job_deadline_prevents_the_next_step() {
+    let dir = config_dir("job-runs-deadline");
+    let path_a = repository("job-runs-deadline-a");
+    let path_b = repository("job-runs-deadline-b");
+    common::script_exit_codes(&path_a, 0, 0);
+    common::script_sleep(&path_a, 4_000);
+    common::script_exit_codes(&path_b, 0, 0);
+
+    let jobs = common::program_jobs(&dir);
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    let mut job = job(
+        "job-deadline",
+        vec![access("repo-a", &path_a), access("repo-b", &path_b)],
+        vec![test_access_step("repo-a"), test_access_step("repo-b")],
+    );
+    job.timeout_seconds = 1;
+    job.steps[0].timeout_seconds = 0;
+    job.steps[1].timeout_seconds = 0;
+
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    let (steps, result) = collect_job(&mut rx).await;
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(steps.len(), 1, "the second step must not report a run");
+    assert_eq!(steps[0].status, StepStatus::Failed as i32);
+    assert_eq!(runs(&path_b), 0, "the second step must not start");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path_a);
+    let _ = std::fs::remove_dir_all(&path_b);
+}
+
+/// FR-AG-10: a timeout that needs the forced kill reports a possible stale lock.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_ag_10_a_timeout_with_a_forced_kill_reports_a_possible_stale_lock() {
+    let dir = config_dir("job-runs-timeout-kill");
+    let path = repository("job-runs-timeout-kill-repo");
+    common::script_exit_codes(&path, 0, 0);
+    common::script_sleep(&path, 20_000);
+    common::script_ignore_interrupt(&path);
+
+    let jobs = common::program_jobs_with_grace(&dir, Duration::from_millis(300));
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    let mut job = job(
+        "job-timeout-kill",
+        vec![access("repo-1", &path)],
+        vec![test_access_step("repo-1")],
+    );
+    job.steps[0].timeout_seconds = 1;
+
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    let (steps, result) = collect_job(&mut rx).await;
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(steps.len(), 1);
+    assert!(
+        steps[0].possible_stale_lock,
+        "a forced kill on a timeout may leave a lock"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+/// ADR-0020: a redelivery of a completed job returns the stored result, even at the cap.
+#[tokio::test(flavor = "multi_thread")]
+async fn adr_0020_a_completed_job_is_answered_before_the_cap() {
+    let dir = config_dir("job-runs-completed-cap");
+    let fast = repository("job-runs-completed-cap-fast");
+    let slow = repository("job-runs-completed-cap-slow");
+    common::script_exit_codes(&fast, 0, 0);
+    common::script_exit_codes(&slow, 0, 0);
+    common::script_sleep(&slow, 5_000);
+
+    let jobs = common::program_jobs(&dir);
+    let (tx, mut rx) = mpsc::channel(64);
+    jobs.attach(&tx);
+    let done = signed(&job(
+        "job-done",
+        vec![access("repo-fast", &fast)],
+        vec![test_access_step("repo-fast")],
+    ));
+    jobs.handle(done.clone(), &ring(), AGENT, TENANT).await;
+    assert_eq!(wait_result(&mut rx).await.job_id, "job-done");
+
+    let mut ids = Vec::new();
+    for index in 0..4 {
+        let job_id = format!("job-slow-{index}");
+        ids.push(job_id.clone());
+        let slow_job = job(
+            &job_id,
+            vec![access("repo-slow", &slow)],
+            vec![test_access_step("repo-slow")],
+        );
+        jobs.handle(signed(&slow_job), &ring(), AGENT, TENANT).await;
+    }
+    jobs.handle(done, &ring(), AGENT, TENANT).await;
+
+    let answer = loop {
+        match next_message(&mut rx).await.payload {
+            Some(payload @ agent_message::Payload::JobResult(_)) => break payload,
+            Some(payload @ agent_message::Payload::JobRejected(_)) => break payload,
+            _ => {}
+        }
+    };
+    match answer {
+        agent_message::Payload::JobResult(result) => assert_eq!(result.job_id, "job-done"),
+        other => panic!("the stored result must answer, got {other:?}"),
+    }
+    assert_eq!(runs(&fast), 1, "the completed job must not run again");
+
+    for job_id in ids {
+        jobs.cancel(&job_id);
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&fast);
+    let _ = std::fs::remove_dir_all(&slow);
+}
+
+/// ADR-0020, FR-AG-12: a stored result goes out at every connection until its entry expires.
+#[tokio::test(flavor = "multi_thread")]
+async fn adr_0020_a_stored_result_is_sent_at_every_connection() {
+    let dir = config_dir("job-runs-resend");
+    let path = repository("job-runs-resend-repo");
+    common::script_exit_codes(&path, 0, 0);
+
+    let jobs = common::program_jobs(&dir);
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    let job = job(
+        "job-resend",
+        vec![access("repo-1", &path)],
+        vec![test_access_step("repo-1")],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    assert_eq!(wait_result(&mut rx).await.job_id, "job-resend");
+
+    for _ in 0..2 {
+        let (next_tx, mut next_rx) = mpsc::channel(32);
+        jobs.attach(&next_tx);
+        jobs.send_stored_results().await;
+        assert_eq!(wait_result(&mut next_rx).await.job_id, "job-resend");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+/// Cancels a long step and checks that the graceful `CTRL_BREAK` stops it without a forced kill.
+#[cfg(windows)]
+async fn cancel_with_ctrl_break(name: &str) {
+    let dir = config_dir(name);
+    let path = repository(&format!("{name}-repo"));
+    common::script_exit_codes(&path, 0, 0);
+    common::script_sleep(&path, 20_000);
+
+    restichub_agent::exec::allocate_hidden_console().expect("cannot allocate the console");
+    // The grace period is long, so only the graceful stop can end the step in time.
+    let jobs = common::program_jobs_with_grace(&dir, Duration::from_secs(15));
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    let job = job(
+        name,
+        vec![access("repo-1", &path)],
+        vec![test_access_step("repo-1")],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    wait_for_start(&path).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let cancelled_at = std::time::Instant::now();
+    jobs.cancel(name);
+    let (steps, result) = collect_job(&mut rx).await;
+    assert!(
+        cancelled_at.elapsed() < Duration::from_secs(10),
+        "CTRL_BREAK must stop the step before the grace period ends"
+    );
+    assert_eq!(result.outcome, JobStatus::Cancelled as i32);
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].status, StepStatus::Cancelled as i32);
+    assert!(
+        !steps[0].possible_stale_lock,
+        "a graceful stop leaves no stale lock"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+/// AC-AG-06: a `CTRL_BREAK` cancels the step of the agent.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_06_ctrl_break_cancels_a_step() {
+    cancel_with_ctrl_break("job-runs-ctrl-break").await;
+}
+
+/// The body of the test below. It runs in a process that has no console, as a service does.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_06_cancel_without_console_inner() {
+    use windows_sys::Win32::System::Console::GetConsoleProcessList;
+    if std::env::var_os("RESTICHUB_TEST_DETACHED").is_none() {
+        return;
+    }
+    let mut process = 0_u32;
+    // SAFETY: the buffer holds one element, as the size argument says.
+    let attached = unsafe { GetConsoleProcessList(&mut process, 1) };
+    assert_eq!(attached, 0, "the test process must start without a console");
+    cancel_with_ctrl_break("job-runs-ctrl-break-detached").await;
+}
+
+/// AC-AG-06: the agent cancels a step with `CTRL_BREAK` in a process without a console, as in a
+/// service.
+#[cfg(windows)]
+#[test]
+fn ac_ag_06_ctrl_break_cancels_a_step_without_a_console() {
+    use std::os::windows::process::CommandExt as _;
+    use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
+    let exe = std::env::current_exe().expect("cannot find the test executable");
+    let status = std::process::Command::new(exe)
+        .args([
+            "--exact",
+            "ac_ag_06_cancel_without_console_inner",
+            "--nocapture",
+        ])
+        .env("RESTICHUB_TEST_DETACHED", "1")
+        .creation_flags(DETACHED_PROCESS)
+        .status()
+        .expect("cannot start the detached test");
+    assert!(status.success(), "the detached run failed: {status}");
 }

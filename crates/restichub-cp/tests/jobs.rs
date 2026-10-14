@@ -1416,6 +1416,36 @@ async fn a_rejection_fails_the_job_and_frees_the_repository() {
     db.cleanup().await;
 }
 
+/// ADR-0020: a busy rejection defers the job; it does not fail it.
+#[tokio::test]
+async fn adr_0020_a_busy_rejection_keeps_the_job() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let setup = setup(&db).await;
+    let app = api_router(setup.listener.state.clone());
+    let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
+    let mut client = setup.listener.channel(&setup.identity).await;
+    let (tx, mut inbound) = open_stream(&mut client).await;
+
+    let job_id = start_action(&app, &setup, repository_id, "test-access").await;
+    let _ = read_signed_job(&mut inbound).await;
+    tx.send(AgentMessage {
+        payload: Some(agent_message::Payload::JobRejected(JobRejected {
+            job_id: job_id.clone(),
+            reason: RejectReason::Busy as i32,
+        })),
+    })
+    .await
+    .expect("cannot send the rejection");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let job = get_job(&app, &setup.admin, &job_id).await;
+    assert_eq!(job.get("status").and_then(Value::as_str), Some("sent"));
+
+    db.cleanup().await;
+}
+
 /// The location of a local repository includes its maintenance agent.
 #[tokio::test]
 async fn a_local_repository_binds_the_maintenance_agent() {

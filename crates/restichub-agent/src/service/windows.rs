@@ -38,6 +38,10 @@ fn service_main(_arguments: Vec<OsString>) {
 }
 
 fn run_service() -> Result<()> {
+    // A service has no console, and `CTRL_BREAK` reaches a child only through one (FR-AG-10).
+    if let Err(error) = crate::exec::allocate_hidden_console() {
+        tracing::warn!(%error, "cannot allocate the console; a cancel falls back to the forced kill");
+    }
     let (sender, receiver) = std::sync::mpsc::channel();
     let handler = move |event| match event {
         ServiceControl::Stop => {

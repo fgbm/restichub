@@ -9,8 +9,9 @@
 //!
 //! - `<location>.restichub-sleep` holds a duration in milliseconds; the double waits it before it
 //!   exits, so a test can drop the stream or cancel the job while the step runs.
-//! - `<location>.restichub-ignore` makes the double ignore `SIGINT` on Linux, so a test covers the
-//!   forced kill of the process tree (FR-AG-10, AC-AG-07).
+//! - `<location>.restichub-ignore` makes the double ignore `SIGINT` on Linux and `CTRL_BREAK` on
+//!   Windows, so a test covers the forced kill of the process tree (FR-AG-10, AC-AG-07). Without
+//!   it the double exits with code 130 on `CTRL_BREAK`.
 //!
 //! The binary is a plain example, so both the Linux and the Windows runner build it and the agent's
 //! hash check accepts it, as in production (ADR-0031).
@@ -42,17 +43,41 @@ fn main() {
     std::process::exit(code);
 }
 
-/// Ignores `SIGINT` when the marker file asks for it, so only the forced kill stops the double.
+/// Ignores the interrupt when the marker file asks for it, so only the forced kill stops the double.
+///
+/// On Windows the double handles `CTRL_BREAK`: it exits with code 130 as restic does, or ignores the
+/// event when the marker asks for it.
 #[allow(unsafe_code)]
 fn ignore_interrupt(path: &str) {
-    if !std::fs::read_to_string(path).is_ok_and(|value| !value.trim().is_empty()) {
-        return;
+    let ignore = std::fs::read_to_string(path).is_ok_and(|value| !value.trim().is_empty());
+    #[cfg(windows)]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, SetConsoleCtrlHandler};
+
+        static IGNORE: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "system" fn handler(kind: u32) -> i32 {
+            if kind != CTRL_BREAK_EVENT {
+                return 0;
+            }
+            if IGNORE.load(Ordering::SeqCst) {
+                return 1;
+            }
+            std::process::exit(130)
+        }
+
+        IGNORE.store(ignore, Ordering::SeqCst);
+        // SAFETY: the handler is a plain function that lives for the whole process.
+        unsafe { SetConsoleCtrlHandler(Some(handler), 1) };
     }
     #[cfg(target_os = "linux")]
-    {
+    if ignore {
         // SAFETY: `signal` installs the standard ignore handler for SIGINT.
         unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
     }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let _ = ignore;
 }
 
 /// Waits the duration in the control file, for a test that needs the step to run.

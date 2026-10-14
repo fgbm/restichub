@@ -424,6 +424,12 @@ pub async fn handle_job_rejected(
     if job.agent_id != agent || job.status.is_terminal() {
         return;
     }
+    // A busy agent only defers the job: it stays `sent` and the control plane delivers it again
+    // while it is valid (ADR-0020).
+    if rejected.reason == RejectReason::Busy as i32 {
+        tracing::info!(job = %job_id, "the agent is busy and defers the job");
+        return;
+    }
     let reason = reject_reason_code(rejected.reason);
     tracing::warn!(job = %job_id, reason, "the agent rejected the job");
     let outcome = JobOutcome {

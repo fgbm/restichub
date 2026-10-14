@@ -2,18 +2,21 @@
 //!
 //! The agent records every accepted job and the result of every completed job, so a job that the
 //! control plane delivers again does not run a second time; the agent re-sends the stored result
-//! (ADR-0020, AC-PR-01). A result that the agent could not send, because the stream was down, stays
-//! in the journal and is re-sent at the next connection.
+//! (ADR-0020, AC-PR-01). The journal holds no delivery mark: a send into the stream buffer does not
+//! prove that the control plane got the result. The agent sends every stored result at each
+//! connection until the entry expires, and the control plane ignores a result for a job that is
+//! already terminal. The entry lifetime therefore bounds the re-sends.
 //!
 //! The journal is a protected file in the agent configuration directory. It is replaced atomically,
 //! so a reader sees the old or the new content (FR-AG-04). Every entry carries an expiry: the
 //! control plane always sets `expires_at`, and the agent refuses a job without one before it reaches
 //! the journal. The agent prunes the entries past their expiry at load and at every completion
-//! (ADR-0020). The journal holds at most `MAX_ENTRIES` jobs. When it is full, [`FileJournal::make_room`]
-//! drops the expired entries first and the delivered entries second, so a live unexpired result is
-//! never lost to a new job: when only live entries remain, the caller refuses the new job instead.
+//! (ADR-0020). The journal holds at most `MAX_ENTRIES` jobs. When it is full,
+//! [`FileJournal::make_room`] drops the expired entries only, so an unexpired result is never lost
+//! to a new job: when only unexpired entries remain, the caller refuses the new job instead.
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -40,8 +43,6 @@ struct Entry {
     expires_at: i64,
     /// Base64 of the serialized [`JobResult`], or `None` while the job runs.
     result: Option<String>,
-    /// True once the agent has sent the stored result to the control plane.
-    delivered: bool,
 }
 
 /// The serialized journal, in the order of acceptance.
@@ -54,6 +55,37 @@ struct StoredJournal {
 pub struct FileJournal {
     path: PathBuf,
     entries: Vec<Entry>,
+    /// Counts the snapshots, so a late write never replaces a newer one.
+    sequence: u64,
+}
+
+/// The serialized journal at one moment, written outside the lock of the journal (ADR-0020).
+pub struct JournalSnapshot {
+    path: PathBuf,
+    bytes: Vec<u8>,
+    sequence: u64,
+}
+
+impl JournalSnapshot {
+    /// Writes the snapshot unless a newer one is already on disk (FR-AG-04).
+    ///
+    /// `written` holds the sequence of the newest write and serializes the writers: the replace uses
+    /// one temporary file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file cannot be replaced.
+    pub fn write(&self, written: &Mutex<u64>) -> Result<()> {
+        let mut newest = written
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.sequence <= *newest {
+            return Ok(());
+        }
+        replace_file(&self.path, &self.bytes)?;
+        *newest = self.sequence;
+        Ok(())
+    }
 }
 
 impl FileJournal {
@@ -77,7 +109,11 @@ impl FileJournal {
                 return Err(error).with_context(|| format!("cannot read {}", path.display()));
             }
         };
-        Ok(Self { path, entries })
+        Ok(Self {
+            path,
+            entries,
+            sequence: 0,
+        })
     }
 
     /// Writes the journal to its file with an atomic replace (FR-AG-04).
@@ -86,29 +122,40 @@ impl FileJournal {
     ///
     /// Returns an error when the journal cannot be serialized or the file cannot be replaced.
     pub fn persist(&self) -> Result<()> {
-        let stored = StoredJournal {
-            entries: self.entries.clone(),
-        };
-        let bytes = serde_json::to_vec(&stored).context("cannot serialize the job journal")?;
+        let bytes = self.serialize()?;
         replace_file(&self.path, &bytes)
     }
 
-    /// The completed results that the agent has not sent yet (ADR-0020).
+    /// Serializes the journal for a write outside the lock of the journal (ADR-0020).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the journal cannot be serialized.
+    pub fn snapshot(&mut self) -> Result<JournalSnapshot> {
+        let bytes = self.serialize()?;
+        self.sequence += 1;
+        Ok(JournalSnapshot {
+            path: self.path.clone(),
+            bytes,
+            sequence: self.sequence,
+        })
+    }
+
+    fn serialize(&self) -> Result<Vec<u8>> {
+        let stored = StoredJournal {
+            entries: self.entries.clone(),
+        };
+        serde_json::to_vec(&stored).context("cannot serialize the job journal")
+    }
+
+    /// The stored results of the completed jobs that have not expired (ADR-0020).
     #[must_use]
-    pub fn pending_results(&self) -> Vec<JobResult> {
+    pub fn stored_results(&self) -> Vec<JobResult> {
         self.entries
             .iter()
-            .filter(|entry| !entry.delivered)
             .filter_map(|entry| entry.result.as_deref())
             .filter_map(decode_result)
             .collect()
-    }
-
-    /// Marks the stored result of `job_id` as sent to the control plane.
-    pub fn mark_delivered(&mut self, job_id: &str) {
-        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.job_id == job_id) {
-            entry.delivered = true;
-        }
     }
 
     /// Removes the entry of `job_id` (ADR-0020).
@@ -132,14 +179,11 @@ impl FileJournal {
 
     /// Makes room for a new entry and reports whether the journal can hold it (ADR-0020).
     ///
-    /// The method drops the expired entries and then the delivered entries. A full journal of live
-    /// unexpired entries gives `false`, so the caller refuses the new job instead of dropping a
-    /// stored result that the control plane has not seen.
+    /// The method drops the expired entries only. A full journal of unexpired entries gives
+    /// `false`, so the caller refuses the new job instead of dropping a result that the control
+    /// plane may not have seen.
     pub fn make_room(&mut self, now: Timestamp) -> bool {
         self.prune(now);
-        if self.entries.len() >= MAX_ENTRIES {
-            self.entries.retain(|entry| !entry.delivered);
-        }
         self.entries.len() < MAX_ENTRIES
     }
 }
@@ -163,7 +207,6 @@ impl JobJournal for FileJournal {
             job_id: job_id.to_owned(),
             expires_at: expires_at.seconds,
             result: None,
-            delivered: false,
         });
     }
 
@@ -173,7 +216,6 @@ impl JobJournal for FileJournal {
         // missing entry would have no expiry and could never be pruned, so it is not stored.
         if let Some(entry) = self.entries.iter_mut().find(|entry| entry.job_id == job_id) {
             entry.result = Some(encoded);
-            entry.delivered = false;
         }
     }
 
@@ -247,26 +289,47 @@ mod tests {
     }
 
     #[test]
-    fn an_undelivered_result_is_pending_until_it_is_marked() {
-        let mut journal = FileJournal::load(temp_path("pending")).expect("cannot load");
+    fn adr_0020_a_stored_result_stays_until_the_entry_expires() {
+        let mut journal = FileJournal::load(temp_path("stored-results")).expect("cannot load");
         journal.record_accepted("job-1", at(2_000));
+        journal.record_accepted("job-2", at(2_000));
         journal.record_completed("job-1", result("job-1"));
-        assert_eq!(journal.pending_results(), vec![result("job-1")]);
-        journal.mark_delivered("job-1");
-        assert!(journal.pending_results().is_empty());
+        // A job that still runs has no result to send.
+        assert_eq!(journal.stored_results(), vec![result("job-1")]);
+        assert_eq!(journal.stored_results(), vec![result("job-1")]);
+        journal.prune(at(2_000 + 60 * 5));
+        assert!(journal.stored_results().is_empty());
     }
 
     #[test]
-    fn adr_0020_a_full_journal_of_delivered_entries_makes_room() {
+    fn adr_0020_a_full_journal_of_expired_entries_makes_room() {
         let mut journal = FileJournal::load(temp_path("room")).expect("cannot load");
         for index in 0..super::MAX_ENTRIES {
             let job_id = format!("job-{index}");
             journal.record_accepted(&job_id, at(2_000));
             journal.record_completed(&job_id, result(&job_id));
-            journal.mark_delivered(&job_id);
         }
-        assert!(journal.make_room(at(1_000)), "a delivered entry makes room");
+        assert!(
+            journal.make_room(at(2_000 + 60 * 5)),
+            "an expired entry makes room"
+        );
         assert!(journal.entries.len() < super::MAX_ENTRIES);
+    }
+
+    #[test]
+    fn adr_0020_a_late_snapshot_does_not_replace_a_newer_one() {
+        let path = temp_path("snapshots");
+        let mut journal = FileJournal::load(path.clone()).expect("cannot load");
+        let written = std::sync::Mutex::new(0);
+        journal.record_accepted("job-1", at(2_000));
+        let older = journal.snapshot().expect("cannot snapshot");
+        journal.record_accepted("job-2", at(2_000));
+        let newer = journal.snapshot().expect("cannot snapshot");
+        newer.write(&written).expect("cannot write");
+        older.write(&written).expect("cannot write");
+
+        let reloaded = FileJournal::load(path).expect("cannot load");
+        assert_eq!(reloaded.lookup("job-2"), JournalState::InProgress);
     }
 
     #[test]

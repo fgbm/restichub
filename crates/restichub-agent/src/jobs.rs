@@ -9,8 +9,9 @@
 //!
 //! The agent sends every result through the stream that is open at that moment, not through the
 //! stream that delivered the job: a job outlives one connection. The result is durable in the
-//! journal before the send, and it counts as delivered only after the send on a live connection, so
-//! a dropped stream re-sends it at the next connection (ADR-0020, FR-AG-12).
+//! journal before the send. A send into the stream buffer does not prove that the control plane got
+//! the result, so the agent sends every stored result at each connection until the journal entry
+//! expires (ADR-0020, FR-AG-12). The control plane ignores a result for a terminal job.
 //!
 //! This step of the epic runs `test_access` and `init` only. Any other step kind is refused with
 //! [`RejectReason::UnsupportedStep`]. The agent starts no job on its own and holds no timer that
@@ -29,7 +30,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_compiler::arg::build_command;
@@ -38,12 +39,12 @@ use restichub_proto::agent::v1::{
     Step, StepResult, StepStatus, agent_message, step,
 };
 use restichub_proto::signing::{
-    Admission, Expected, JobJournal as _, KeyRing, Rejection, admit, verify_job,
+    Admission, Expected, JobJournal as _, JournalState, KeyRing, Rejection, admit, verify_job,
 };
 use tokio::sync::mpsc;
 
 use crate::exec::JobChild;
-use crate::journal::{FileJournal, JOURNAL_FILE};
+use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
 
 /// How often the agent checks the restic child for its exit.
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -58,26 +59,17 @@ const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// The largest number of jobs that the agent runs at the same time (ADR-0020).
 const MAX_CONCURRENT_JOBS: usize = 4;
 
-/// The decision of one signed job after the checks (FR-PR-03, ADR-0020).
-pub enum Intake {
-    /// Refused with a typed reason; no process starts.
-    Rejected {
-        job_id: String,
-        reason: RejectReason,
-    },
-    /// The journal holds the result of the job; the agent re-sends it and does not run the job.
-    Completed(Box<JobResult>),
-    /// The job is new; the caller persists the journal entry before it runs the job (ADR-0020).
-    New(Box<ValidatedJob>),
-    /// An earlier run did not finish, in this process or in a previous one; the agent may run it.
-    InProgress(Box<ValidatedJob>),
-}
-
 /// The action that [`Jobs::handle`] takes after it consults the journal (ADR-0020).
 enum Dispatch {
     Rejected(RejectReason),
     Completed(JobResult),
-    Run,
+    Running,
+    /// The job is reserved in `running`. A snapshot is present for a new journal entry, which the
+    /// caller writes before it runs the job.
+    Run {
+        cancel: CancelHandle,
+        snapshot: Option<Result<JournalSnapshot>>,
+    },
 }
 
 /// The running jobs of one agent and the journal that records them (ADR-0020).
@@ -91,6 +83,8 @@ pub struct Jobs {
     /// The stream that is open at this moment, or `None` between two connections (ADR-0020). A
     /// result goes through the current stream, not through the one that delivered the job.
     connection: Arc<Mutex<Option<mpsc::Sender<AgentMessage>>>>,
+    /// The sequence of the newest journal write on disk, which also serializes the writers.
+    written: Arc<Mutex<u64>>,
     /// The grace period between the graceful stop and the forced kill (FR-AG-10).
     stop_grace: Duration,
 }
@@ -117,6 +111,7 @@ impl Jobs {
             journal: Arc::new(Mutex::new(journal)),
             running: Arc::new(Mutex::new(HashMap::new())),
             connection: Arc::new(Mutex::new(None)),
+            written: Arc::new(Mutex::new(0)),
             stop_grace: STOP_GRACE,
         })
     }
@@ -130,7 +125,7 @@ impl Jobs {
 
     /// Sets the stream that carries the results (ADR-0020).
     ///
-    /// The connect loop calls it after the stream opens, before it flushes the pending results.
+    /// The connect loop calls it after the stream opens, before it sends the stored results.
     pub fn attach(&self, tx: &mpsc::Sender<AgentMessage>) {
         *lock(&self.connection) = Some(tx.clone());
     }
@@ -155,60 +150,28 @@ impl Jobs {
             }
         };
         let job_id = validated.job().job_id.clone();
-        // A job that runs in this process is not started again: the agent only acknowledges it, so a
-        // redelivery of a running job does not fork a second restic (ADR-0020).
-        if lock(&self.running).contains_key(&job_id) {
-            let _ = self.send(ack(job_id)).await;
-            return;
-        }
-        // The agent refuses a new job beyond the cap, so the host never runs an unbounded number of
-        // restic processes (ADR-0020).
-        if lock(&self.running).len() >= MAX_CONCURRENT_JOBS {
-            let _ = self.send(rejected(job_id, RejectReason::Busy)).await;
-            return;
-        }
-        let now = expected.now;
-        // The journal guard is dropped before the agent sends anything, so the future stays `Send`.
-        let dispatch = {
-            let mut journal = lock(&self.journal);
-            // The journal drops the expired and the delivered entries before a new one; a full
-            // journal of live entries refuses the job rather than drop a stored result.
-            if journal.make_room(now) {
-                let expires_at = validated.job().expires_at.unwrap_or(now);
-                match admit(validated.job(), &mut *journal, expires_at) {
-                    Admission::AlreadyCompleted(result) => Dispatch::Completed(result),
-                    admission => {
-                        // The journal changes only for a new admission; a rejected message leaves it
-                        // untouched (ADR-0020).
-                        if matches!(admission, Admission::New)
-                            && let Err(error) = journal.persist()
-                        {
-                            tracing::warn!(%error, "cannot write the job journal");
-                            // Fail closed: the agent cannot record the accepted job, so it does not
-                            // run it.
-                            journal.forget(&job_id);
-                            let _ = journal.persist();
-                            Dispatch::Rejected(RejectReason::Internal)
-                        } else {
-                            Dispatch::Run
-                        }
-                    }
-                }
-            } else {
-                Dispatch::Rejected(RejectReason::Busy)
-            }
-        };
-        match dispatch {
+        match self.dispatch(&validated, expected.now) {
             Dispatch::Rejected(reason) => {
                 let _ = self.send(rejected(job_id, reason)).await;
             }
             Dispatch::Completed(result) => {
                 let _ = self.send(job_result_message(result)).await;
             }
-            Dispatch::Run => {
+            // A redelivery of a running job does not fork a second restic (ADR-0020).
+            Dispatch::Running => {
+                let _ = self.send(ack(job_id)).await;
+            }
+            Dispatch::Run { cancel, snapshot } => {
+                if let Some(snapshot) = snapshot
+                    && let Err(error) = self.write_journal(snapshot).await
+                {
+                    tracing::warn!(%error, "cannot write the job journal");
+                    // Fail closed: the agent cannot record the accepted job, so it does not run it.
+                    self.abandon(&job_id).await;
+                    let _ = self.send(rejected(job_id, RejectReason::Internal)).await;
+                    return;
+                }
                 if self.send(ack(job_id.clone())).await {
-                    let cancel = CancelHandle::new();
-                    lock(&self.running).insert(job_id, cancel.clone());
                     let jobs = self.clone();
                     tokio::spawn(async move {
                         jobs.execute(validated, cancel).await;
@@ -222,6 +185,57 @@ impl Jobs {
         }
     }
 
+    /// Decides what to do with a verified job: the stored result first, then a running job, then
+    /// the concurrency cap and the journal room (ADR-0020).
+    fn dispatch(&self, validated: &ValidatedJob, now: Timestamp) -> Dispatch {
+        let job = validated.job();
+        // The journal lock comes before the `running` lock everywhere, so the two never deadlock.
+        let mut journal = lock(&self.journal);
+        let mut running = lock(&self.running);
+        if let JournalState::Completed(result) = journal.lookup(&job.job_id) {
+            return Dispatch::Completed(result);
+        }
+        if running.contains_key(&job.job_id) {
+            return Dispatch::Running;
+        }
+        // The agent refuses a new job beyond the cap, so the host never runs an unbounded number of
+        // restic processes.
+        if running.len() >= MAX_CONCURRENT_JOBS || !journal.make_room(now) {
+            return Dispatch::Rejected(RejectReason::Busy);
+        }
+        let expires_at = job.expires_at.unwrap_or(now);
+        let snapshot = match admit(job, &mut *journal, expires_at) {
+            // The journal changes only for a new admission (ADR-0020).
+            Admission::New => Some(journal.snapshot()),
+            Admission::InProgress | Admission::AlreadyCompleted(_) => None,
+        };
+        let cancel = CancelHandle::new();
+        running.insert(job.job_id.clone(), cancel.clone());
+        Dispatch::Run { cancel, snapshot }
+    }
+
+    /// Writes a journal snapshot off the async workers: the write waits for the disk (FR-AG-04).
+    async fn write_journal(&self, snapshot: Result<JournalSnapshot>) -> Result<()> {
+        let snapshot = snapshot?;
+        let written = Arc::clone(&self.written);
+        tokio::task::spawn_blocking(move || snapshot.write(&written))
+            .await
+            .context("the journal write stopped")?
+    }
+
+    /// Drops the entry of a job that the agent cannot run and releases its slot.
+    async fn abandon(&self, job_id: &str) {
+        let snapshot = {
+            let mut journal = lock(&self.journal);
+            journal.forget(job_id);
+            lock(&self.running).remove(job_id);
+            journal.snapshot()
+        };
+        if let Err(error) = self.write_journal(snapshot).await {
+            tracing::warn!(%error, "cannot write the job journal");
+        }
+    }
+
     /// Stops the restic child of the running job (FR-AG-10).
     ///
     /// It sets the flag; the step loop sends the signal and, after the grace period, kills the tree.
@@ -231,20 +245,15 @@ impl Jobs {
         }
     }
 
-    /// Re-sends every stored result that the agent has not sent yet (ADR-0020).
+    /// Re-sends the results that the control plane may have missed (ADR-0020).
     ///
     /// The agent calls it at every connection, so a result that a dropped stream lost reaches the
-    /// control plane. A result counts as delivered only after this send on the live connection.
-    pub async fn flush_pending(&self) {
-        let pending = lock(&self.journal).pending_results();
-        for result in pending {
-            if !self.send(job_result_message(result.clone())).await {
+    /// control plane. The send is repeated until the journal entry expires.
+    pub async fn send_stored_results(&self) {
+        let stored = lock(&self.journal).stored_results();
+        for result in stored {
+            if !self.send(job_result_message(result)).await {
                 return;
-            }
-            let mut journal = lock(&self.journal);
-            journal.mark_delivered(&result.job_id);
-            if let Err(error) = journal.persist() {
-                tracing::warn!(%error, "cannot write the job journal");
             }
         }
     }
@@ -319,12 +328,27 @@ impl Jobs {
             let started_at = now_timestamp();
             let mut limit = step_timeout(step.timeout_seconds, job.timeout_seconds);
             if let Some(deadline) = job_deadline {
-                limit = limit.min(deadline.saturating_duration_since(tokio::time::Instant::now()));
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    // The job deadline passed between two steps, so the next step does not start.
+                    failed += 1;
+                    stopped_code = Some(StepOutcome::failed().exit_code);
+                    self.send_step_result(
+                        &job_id,
+                        step,
+                        StepOutcome::failed(),
+                        started_at,
+                        started_at,
+                    )
+                    .await;
+                    break;
+                }
+                limit = limit.min(remaining);
             }
             if is_init {
                 init_ran = true;
             }
-            let outcome = self.run_step(&validated, step, &cancel, limit).await;
+            let outcome = self.run_step(&validated, step, &cancel, Some(limit)).await;
             let finished_at = now_timestamp();
             self.send_step_result(&job_id, step, outcome, started_at, finished_at)
                 .await;
@@ -357,7 +381,6 @@ impl Jobs {
             }
         }
 
-        lock(&self.running).remove(&job_id);
         let outcome = job_outcome(
             cancelled,
             stopped_code,
@@ -384,31 +407,33 @@ impl Jobs {
             outcome: outcome as i32,
             error: job_error(outcome),
         };
-        // The result is durable before the agent tries to send it, so a dropped stream cannot lose it
-        // (ADR-0020).
-        {
+        // The result is durable before the job leaves `running`, so a redelivery in between gets the
+        // acknowledgement and a later one gets the stored result, never a second run (ADR-0020).
+        let snapshot = {
             let mut journal = lock(&self.journal);
             journal.record_completed(&job_id, result.clone());
             journal.prune(now_timestamp());
-            if let Err(error) = journal.persist() {
-                tracing::warn!(%error, "cannot write the job journal");
-            }
+            journal.snapshot()
+        };
+        if let Err(error) = self.write_journal(snapshot).await {
+            tracing::warn!(%error, "cannot write the job journal");
         }
-        // The send goes through the stream that is open now; the result stays pending in the journal
-        // until a connection confirms it, so a dropped stream re-sends it (ADR-0020, FR-AG-12).
+        lock(&self.running).remove(&job_id);
+        // The result stays in the journal and goes out at every connection until the entry expires
+        // (ADR-0020, FR-AG-12).
         let _ = self.send(job_result_message(result)).await;
     }
 
     /// Runs one step with the bundled restic and stops it in two stages (FR-AG-05, FR-AG-06,
     /// FR-AG-09, FR-AG-10).
     ///
-    /// `limit` is the timeout of the step, or zero for no timeout.
+    /// `limit` is the timeout of the step, or `None` for no timeout.
     async fn run_step(
         &self,
         validated: &ValidatedJob,
         step: &Step,
         cancel: &CancelHandle,
-        limit: Duration,
+        limit: Option<Duration>,
     ) -> StepOutcome {
         // A cancel that arrived before the spawn starts no process (FR-AG-10).
         if cancel.is_cancelled() {
@@ -468,7 +493,10 @@ impl Jobs {
                     return StepOutcome::cancelled(hard_killed);
                 }
                 if timed_out {
-                    return StepOutcome::failed();
+                    return StepOutcome {
+                        possible_stale_lock: hard_killed,
+                        ..StepOutcome::failed()
+                    };
                 }
                 return StepOutcome::from_exit(code);
             }
@@ -476,7 +504,7 @@ impl Jobs {
                 if cancel.is_cancelled() {
                     interrupt(&cancel.child);
                     stopped_at = Some(tokio::time::Instant::now());
-                } else if !limit.is_zero() && started.elapsed() >= limit {
+                } else if limit.is_some_and(|limit| started.elapsed() >= limit) {
                     timed_out = true;
                     interrupt(&cancel.child);
                     stopped_at = Some(tokio::time::Instant::now());
@@ -563,29 +591,6 @@ fn verify_and_validate(
         });
     }
     Ok(validated)
-}
-
-/// Verifies, validates and admits one signed job (FR-PR-03, FR-PR-01, ADR-0020).
-///
-/// The function is separate from [`Jobs::handle`] so a test can drive the checks without a restic
-/// child. It records the acceptance of a new job in the journal; the caller persists it.
-pub fn intake(
-    signed: &SignedJob,
-    ring: &KeyRing,
-    expected: &Expected,
-    journal: &mut FileJournal,
-) -> Intake {
-    match verify_and_validate(signed, ring, expected) {
-        Ok(validated) => match admit(validated.job(), journal, expected.now) {
-            Admission::AlreadyCompleted(result) => Intake::Completed(Box::new(result)),
-            Admission::New => Intake::New(Box::new(validated)),
-            Admission::InProgress => Intake::InProgress(Box::new(validated)),
-        },
-        Err(rejection) => Intake::Rejected {
-            job_id: rejection.job_id.unwrap_or_default(),
-            reason: rejection.reason,
-        },
-    }
 }
 
 /// The step kinds that this step of the epic runs (FR-PR-02).
@@ -801,10 +806,38 @@ mod tests {
     };
     use restichub_proto::signing::{Expected, KeyRing, sign_job};
 
-    use super::{Intake, intake, job_error, job_outcome, status_for_exit};
+    use super::{job_error, job_outcome, status_for_exit, verify_and_validate};
     use crate::journal::FileJournal;
-    use restichub_proto::agent::v1::{JobStatus, RejectReason, StepStatus};
+    use restichub_compiler::ValidatedJob;
+    use restichub_proto::agent::v1::{JobStatus, RejectReason, SignedJob, StepStatus};
+    use restichub_proto::signing::{Admission, admit};
     use std::time::Duration;
+
+    /// The decision of the verification and the journal for one signed job.
+    enum Intake {
+        Rejected(RejectReason),
+        Completed(Box<restichub_proto::agent::v1::JobResult>),
+        New(Box<ValidatedJob>),
+    }
+
+    /// Runs the same checks as `Jobs::handle` and admits the job with the expiry that it carries.
+    fn intake(
+        signed: &SignedJob,
+        ring: &KeyRing,
+        expected: &Expected,
+        journal: &mut FileJournal,
+    ) -> Intake {
+        match verify_and_validate(signed, ring, expected) {
+            Ok(validated) => {
+                let expires_at = validated.job().expires_at.unwrap_or(expected.now);
+                match admit(validated.job(), journal, expires_at) {
+                    Admission::AlreadyCompleted(result) => Intake::Completed(Box::new(result)),
+                    Admission::New | Admission::InProgress => Intake::New(Box::new(validated)),
+                }
+            }
+            Err(rejection) => Intake::Rejected(rejection.reason),
+        }
+    }
 
     const KEY_ID: &str = "job-key-1";
 
@@ -881,7 +914,7 @@ mod tests {
 
     fn expected_reason(decision: &Intake) -> Option<RejectReason> {
         match decision {
-            Intake::Rejected { reason, .. } => Some(*reason),
+            Intake::Rejected(reason) => Some(*reason),
             _ => None,
         }
     }

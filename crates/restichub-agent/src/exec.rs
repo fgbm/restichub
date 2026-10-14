@@ -85,19 +85,67 @@ fn restic_command_with(
 /// Puts a restic child in its own process group, so a stop reaches its whole tree (FR-AG-10).
 ///
 /// On Unix the child becomes the leader of a new group; the agent signals the group with a negative
-/// pid. On Windows the child becomes a new process group and the agent sends it `CTRL_BREAK`.
+/// pid. On Linux the kernel also kills the child when the agent dies. On Windows the child becomes a
+/// new process group and the agent sends it `CTRL_BREAK`.
 fn apply_process_group(command: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
         command.process_group(0);
     }
+    #[cfg(target_os = "linux")]
+    die_with_parent(command);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
-        use windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
-        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        command.creation_flags(windows_job::process_flags());
     }
+}
+
+/// Makes the kernel kill the child with `SIGKILL` when the agent dies (AC-AG-07).
+///
+/// The kernel ties the signal to the thread that started the child, so the agent starts a restic
+/// child only from a thread that lives as long as the runtime.
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code, clippy::cast_sign_loss)]
+fn die_with_parent(command: &mut Command) {
+    use std::os::unix::process::CommandExt as _;
+    // SAFETY: `getpid` has no preconditions.
+    let parent = unsafe { libc::getpid() };
+    // SAFETY: the closure runs between fork and exec and calls only async-signal-safe functions.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(
+                libc::PR_SET_PDEATHSIG,
+                libc::SIGKILL as libc::c_ulong,
+                0,
+                0,
+                0,
+            ) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            // The agent may have died before the call above, and then nothing sends the signal.
+            if libc::getppid() != parent {
+                libc::_exit(1);
+            }
+            Ok(())
+        });
+    }
+}
+
+/// Allocates a hidden console for a process that has none, so `CTRL_BREAK` reaches a restic child
+/// (FR-AG-10).
+///
+/// A Windows service has no console, and `GenerateConsoleCtrlEvent` fails with an invalid handle
+/// without one (spike P1). The restic children inherit this console. The window stays hidden.
+///
+/// # Errors
+///
+/// Returns an error when Windows refuses the console.
+#[cfg(windows)]
+pub fn allocate_hidden_console() -> Result<()> {
+    windows_job::allocate_hidden_console().context("cannot allocate the console")
 }
 
 /// Re-checks the pinned hash and starts the child process (FR-AG-11, threat T20).
@@ -170,6 +218,15 @@ pub(crate) fn spawn_job_restic(
 ) -> Result<JobChild> {
     let (file, mut command) = verified_command(path, expected_hex, line.args(), line.env(), cache)?;
     command.stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        // The child starts suspended and joins the job object before it runs, so no grandchild
+        // escapes the job (FR-AG-10).
+        command.creation_flags(
+            windows_job::process_flags() | windows_sys::Win32::System::Threading::CREATE_SUSPENDED,
+        );
+    }
     let child = command.spawn().context("cannot start restic")?;
     drop(file);
     JobChild::new(child)
@@ -185,9 +242,19 @@ pub(crate) struct JobChild {
 
 impl JobChild {
     /// Wraps a spawned child and, on Windows, holds its tree in a job object (FR-AG-10).
-    fn new(child: Child) -> Result<Self> {
+    ///
+    /// On Windows the child must start suspended: it joins the job object and then resumes. A child
+    /// that cannot join the job is killed, because the agent could not stop its tree.
+    fn new(#[cfg_attr(not(windows), allow(unused_mut))] mut child: Child) -> Result<Self> {
         #[cfg(windows)]
-        let job = windows_job::create(&child);
+        let job = match windows_job::contain(&child) {
+            Ok(job) => Some(job),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error).context("cannot hold the restic tree in a job object");
+            }
+        };
         Ok(Self {
             child,
             #[cfg(windows)]
@@ -262,12 +329,22 @@ mod windows_job {
     use std::os::windows::io::AsRawHandle as _;
     use std::process::Child;
 
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Console::{
+        AllocConsole, GetConsoleProcessList, GetConsoleWindow,
+    };
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
         SetInformationJobObject, TerminateJobObject,
     };
+    use windows_sys::Win32::System::Threading::{
+        CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
 
     /// Owns the job object and closes it on drop, which kills the tree (FR-AG-10).
     pub(super) struct JobObject(HANDLE);
@@ -292,20 +369,60 @@ mod windows_job {
         }
     }
 
-    /// Creates a job object for `child` with `KILL_ON_JOB_CLOSE` (FR-AG-10).
+    /// The creation flags of a restic child: a new process group for `CTRL_BREAK` (FR-AG-10).
     ///
-    /// A failure gives `None`, so the stop falls back to the direct child only.
-    pub(super) fn create(child: &Child) -> Option<JobObject> {
+    /// A child of a process without a console gets a visible console window of its own, which
+    /// `CREATE_NO_WINDOW` prevents. A child of a process with a console must inherit it, because
+    /// `CTRL_BREAK` reaches only a child on the console of the sender.
+    pub(super) fn process_flags() -> u32 {
+        if has_console() {
+            CREATE_NEW_PROCESS_GROUP
+        } else {
+            CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        }
+    }
+
+    /// True when the process is attached to a console.
+    fn has_console() -> bool {
+        let mut process = 0_u32;
+        // SAFETY: the buffer holds one element, as the size argument says.
+        unsafe { GetConsoleProcessList(&mut process, 1) != 0 }
+    }
+
+    /// Allocates a console and hides its window, unless the process already has a console.
+    pub(super) fn allocate_hidden_console() -> std::io::Result<()> {
+        if has_console() {
+            return Ok(());
+        }
+        // SAFETY: the call takes no pointer.
+        if unsafe { AllocConsole() } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: the window handle comes from the call before and `ShowWindow` accepts any value.
+        unsafe {
+            let window = GetConsoleWindow();
+            if !window.is_null() {
+                ShowWindow(window, SW_HIDE);
+            }
+        }
+        Ok(())
+    }
+
+    /// Creates a job object with `KILL_ON_JOB_CLOSE`, puts the suspended `child` in it and resumes
+    /// the child (FR-AG-10).
+    ///
+    /// The child joins the job before its first instruction, so every grandchild is in the job too.
+    pub(super) fn contain(child: &Child) -> std::io::Result<JobObject> {
         // SAFETY: the two pointers are null, so Windows uses the default attributes and no name.
         let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if handle.is_null() {
-            return None;
+            return Err(std::io::Error::last_os_error());
         }
         let job = JobObject(handle);
         let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let length =
-            u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).ok()?;
+        let length = u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+            .map_err(|_| std::io::Error::other("the job limit structure is too large"))?;
         // SAFETY: the job object is valid and the information pointer is a local of the right size.
         let ok = unsafe {
             SetInformationJobObject(
@@ -316,15 +433,57 @@ mod windows_job {
             )
         };
         if ok == 0 {
-            return None;
+            return Err(std::io::Error::last_os_error());
         }
         // The process handle from `Child` is valid while the child lives.
         let process = child.as_raw_handle() as HANDLE;
         // SAFETY: both handles are valid; the child joins the job and cannot leave it.
         if unsafe { AssignProcessToJobObject(job.0, process) } == 0 {
-            return None;
+            return Err(std::io::Error::last_os_error());
         }
-        Some(job)
+        resume_threads(child.id())?;
+        Ok(job)
+    }
+
+    /// Resumes the threads of a process that started suspended.
+    ///
+    /// `std` gives no handle to the main thread, so the function finds the threads of the process
+    /// with a snapshot.
+    fn resume_threads(process_id: u32) -> std::io::Result<()> {
+        // SAFETY: the call takes no pointer.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut entry = THREADENTRY32 {
+            dwSize: u32::try_from(std::mem::size_of::<THREADENTRY32>()).unwrap_or(0),
+            ..THREADENTRY32::default()
+        };
+        let mut resumed = false;
+        // SAFETY: the snapshot is valid and the entry is a local with its size set.
+        let mut more = unsafe { Thread32First(snapshot, &mut entry) };
+        while more != 0 {
+            if entry.th32OwnerProcessID == process_id {
+                // SAFETY: the thread identifier comes from the snapshot.
+                let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+                if !thread.is_null() {
+                    // SAFETY: the thread handle is valid and closed once.
+                    unsafe {
+                        resumed |= ResumeThread(thread) != u32::MAX;
+                        CloseHandle(thread);
+                    }
+                }
+            }
+            // SAFETY: the snapshot is valid and the entry is a local with its size set.
+            more = unsafe { Thread32Next(snapshot, &mut entry) };
+        }
+        // SAFETY: the snapshot handle is closed once.
+        unsafe { CloseHandle(snapshot) };
+        if resumed {
+            Ok(())
+        } else {
+            Err(std::io::Error::other("cannot resume the restic child"))
+        }
     }
 }
 
@@ -663,6 +822,40 @@ mod tests {
         }
         assert!(!alive(child_pid), "the child of the tree must be killed");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// AC-AG-07: the kernel kills a restic child when the thread that started it ends.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ac_ag_07_a_child_dies_with_its_parent() {
+        use std::process::Command as StdCommand;
+        use std::time::Duration;
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        // The thread ends after it starts the child, as the agent process does when it dies.
+        std::thread::spawn(move || {
+            let mut command = StdCommand::new("sleep");
+            command.arg("30");
+            super::apply_process_group(&mut command);
+            let child = command.spawn().expect("cannot start the child");
+            sender.send(child).expect("cannot hand over the child");
+        })
+        .join()
+        .expect("the starter thread panicked");
+        let mut child = receiver.recv().expect("no child");
+
+        let mut exited = false;
+        for _ in 0..300 {
+            if child.try_wait().expect("cannot wait").is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if !exited {
+            let _ = child.kill();
+        }
+        assert!(exited, "the child must die with its parent thread");
     }
 
     /// Reads the child pid that the fake tree writes, or panics after two seconds.

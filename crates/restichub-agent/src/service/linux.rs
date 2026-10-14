@@ -144,6 +144,19 @@ mod tests {
     }
 
     #[test]
+    fn ac_ag_07_the_unit_stops_the_whole_control_group() {
+        let unit = unit_contents(
+            Path::new("/opt/restichub-agent/restichub-agent"),
+            Path::new("/etc/restichub-agent"),
+        );
+        // The default `KillMode=control-group` also stops a restic tree after an agent stop.
+        assert!(
+            !unit.contains("KillMode="),
+            "a KillMode other than the default can leave a restic child"
+        );
+    }
+
+    #[test]
     fn ac_in_03_the_unit_keeps_the_restic_capabilities() {
         let unit = unit_contents(
             Path::new("/opt/restichub-agent/restichub-agent"),

@@ -297,7 +297,7 @@ pub async fn connect_once(
     // The results go through this stream now, and a result that a dropped stream lost reaches the
     // control plane (ADR-0020).
     jobs.attach(&tx);
-    jobs.flush_pending().await;
+    jobs.send_stored_results().await;
     let started = tokio::time::Instant::now();
     let mut pinged = false;
     loop {
