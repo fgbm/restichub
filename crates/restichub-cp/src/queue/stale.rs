@@ -22,6 +22,10 @@ use crate::server::AppState;
 /// How long the control plane waits after it loses an agent that held a lock (FR-SC-06).
 pub const STALE_LOCK_WAIT: time::Duration = time::Duration::minutes(30);
 
+/// How long a running job may outlive its job timeout before the control plane fails it. The grace
+/// covers the clock skew and the time that the agent needs to stop the job.
+pub const TIMEOUT_GRACE: time::Duration = time::Duration::minutes(10);
+
 /// How long an unlock job stays valid in the queue.
 const UNLOCK_JOB_LIFETIME: time::Duration = time::Duration::hours(24);
 
@@ -37,6 +41,13 @@ pub async fn recover_tenant(
         return Ok(());
     }
     let cutoff = now - STALE_LOCK_WAIT;
+
+    // The agent enforces the job timeout. A running job far past it is gone, also when the agent
+    // is online again: it restarted and lost the job. Its lock becomes a suspect.
+    let default_timeout = i32::try_from(crate::jobs::JOB_TIMEOUT_SECONDS).unwrap_or(i32::MAX);
+    for id in queue_repo::timed_out_running(&mut tx, now, TIMEOUT_GRACE, default_timeout).await? {
+        queue_repo::mark_timed_out(&mut tx, id, now).await?;
+    }
 
     // A running job whose agent vanished for the whole wait time holds a lock that nobody will
     // release. The job fails and its lock becomes a suspect.

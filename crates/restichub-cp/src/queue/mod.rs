@@ -142,11 +142,15 @@ async fn dispatch_tenant(
     let config = state.queue_config();
     let mut tx = state.db().begin_tenant(tenant).await?;
     queue_repo::fail_for_revoked_agents(&mut tx, now).await?;
-    if online.is_empty() || !queue_repo::try_lock_tenant(&mut tx).await? {
+    if !queue_repo::try_lock_tenant(&mut tx).await? {
         return tx.commit().await;
     }
-    // A cancelled job that never got an acknowledgement ends with its lease.
+    // A cancelled job that never got an acknowledgement ends with its lease, also while no agent
+    // is online.
     queue_repo::cancel_unacknowledged(&mut tx, now).await?;
+    if online.is_empty() {
+        return tx.commit().await;
+    }
     let waiting = queue_repo::dispatchable(&mut tx, now, online, BATCH_PER_AGENT).await?;
     if waiting.is_empty() {
         return tx.commit().await;
@@ -265,7 +269,8 @@ async fn first_send(
         ciphertext: sealed.ciphertext,
         secrets: built.secrets,
     };
-    queue_repo::mark_dispatched(tx, job.id, now, lease_until, &stored).await?;
+    let timeout = i32::try_from(build::JOB_TIMEOUT_SECONDS).unwrap_or(i32::MAX);
+    queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, &stored).await?;
     Ok(Prepared::Send(signed))
 }
 

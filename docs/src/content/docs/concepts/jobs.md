@@ -75,7 +75,7 @@ The control plane ends the job that reported the lock and queues a new job with 
 
 ## Stale locks
 
-A hard stop of restic can leave a lock in the repository. The control plane marks the lock when the agent reports a possible stale lock, or when the agent is lost while a job runs. A job on a lost agent fails with the reason `agent_lost`.
+A hard stop of restic can leave a lock in the repository. The control plane marks the lock when the agent reports a possible stale lock, or when the agent is lost while a job runs. A job on a lost agent fails with the reason `agent_lost`. A running job that stays past its timeout and a grace period of 10 minutes fails with the reason `timed_out`, and its lock is marked too. A sent job that the agent did not confirm before it expired fails with the reason `unacknowledged_expired`, and its lock is marked too.
 
 When the mark is 30 minutes old and no job waits or runs on the repository, the control plane queues an `unlock` job (FR-SC-06, AC-SC-06). The job never removes the locks of a running operation. If a later job succeeded on the repository, the control plane queues no unlock.
 

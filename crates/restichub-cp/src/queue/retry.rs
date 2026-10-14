@@ -63,7 +63,7 @@ pub async fn apply_lock(
 ) -> Result<LockOutcome, DbError> {
     let attempt = job.attempt.saturating_add(1);
     if u32::try_from(attempt).unwrap_or(u32::MAX) >= config.lock_retry_limit {
-        queue_repo::dead_letter(tx, job.id, DEAD_LETTER_MESSAGE, attempt, now).await?;
+        queue_repo::dead_letter(tx, job.id, DEAD_LETTER_MESSAGE, now).await?;
         let mut event = AuditEvent::new(AuditAction::JobDeadLetter, "job");
         event.object_id = Some(job.id.as_uuid());
         event.diff = Some(diff(

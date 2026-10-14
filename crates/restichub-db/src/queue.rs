@@ -115,9 +115,9 @@ pub async fn try_lock_tenant(tx: &mut TenantTx<'_>) -> Result<bool, DbError> {
 /// A `queued` job is dispatchable at once, or after `run_at` when a lock retry delayed it. A `sent`
 /// job is dispatchable again once its lease passed without an acknowledgement (FR-PR-06). A job
 /// past its queue lifetime and a job with a cancel request never qualify. Only the jobs of the
-/// given online agents qualify, and each agent contributes its `per_agent` oldest rows, so the
-/// backlog of one agent never hides the jobs of another. A locked row of another instance is
-/// skipped.
+/// given online agents qualify, and each agent and repository pair contributes its `per_agent`
+/// oldest rows, so the backlog of one repository never hides the jobs of another. A locked row of
+/// another instance is skipped.
 pub async fn dispatchable(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
@@ -132,7 +132,7 @@ pub async fn dispatchable(
         job_columns!(),
         " FROM jobs WHERE id IN ( \
               SELECT id FROM ( \
-                SELECT id, row_number() OVER (PARTITION BY agent_id ORDER BY created_at, id) AS rank \
+                SELECT id, row_number() OVER (PARTITION BY agent_id, repository_id ORDER BY created_at, id) AS rank \
                 FROM jobs \
                 WHERE ((status = 'queued' AND (attempt = 0 OR run_at <= $1)) \
                        OR (status = 'sent' AND lease_until IS NOT NULL AND lease_until <= $1)) \
@@ -180,13 +180,15 @@ pub async fn mark_dispatched(
     id: JobId,
     now: OffsetDateTime,
     lease_until: OffsetDateTime,
+    timeout_seconds: i32,
     signed: &StoredSignedJob,
 ) -> Result<bool, DbError> {
     let secrets: Vec<Uuid> = signed.secrets.iter().map(|id| id.as_uuid()).collect();
     let result = sqlx::query(
         "UPDATE jobs SET status = 'sent', sent_at = $2, lease_until = $3, \
                 deliveries = deliveries + 1, signed_job = $4, signed_job_nonce = $5, \
-                signed_job_key_version = $6, signed_job_secrets = $7, updated_at = now() \
+                signed_job_key_version = $6, signed_job_secrets = $7, timeout_seconds = $8, \
+                updated_at = now() \
          WHERE id = $1 AND status = 'queued'",
     )
     .bind(id)
@@ -196,6 +198,7 @@ pub async fn mark_dispatched(
     .bind(&signed.nonce)
     .bind(signed.key_version)
     .bind(&secrets)
+    .bind(timeout_seconds)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -332,7 +335,8 @@ pub async fn revert_dispatch(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, D
 ///
 /// The agent journal returns the stored result for a known `job_id`, so the retry needs its own
 /// identifier. The old row becomes `failed` first, so the active-job index of the repository allows
-/// the new row. `None` when the old row is already terminal.
+/// the new row. The retry keeps the creation time of the old row, so it keeps its place in the
+/// queue order. `None` when the old row is already terminal.
 pub async fn retry_as_new_job(
     tx: &mut TenantTx<'_>,
     old: &Job,
@@ -359,8 +363,8 @@ pub async fn retry_as_new_job(
     sqlx::query(
         "INSERT INTO jobs \
          (id, tenant_id, kind, agent_id, repository_id, plan_id, fire_time, status, expires_at, \
-          location_fingerprint, created_by, attempt, run_at, retry_of) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12, $13)",
+          location_fingerprint, created_by, attempt, run_at, retry_of, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(id)
     .bind(tx.tenant())
@@ -375,6 +379,7 @@ pub async fn retry_as_new_job(
     .bind(attempt)
     .bind(run_at)
     .bind(old.id)
+    .bind(old.created_at)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -386,17 +391,17 @@ pub async fn dead_letter(
     tx: &mut TenantTx<'_>,
     id: JobId,
     message: &str,
-    attempt: i32,
     now: OffsetDateTime,
 ) -> Result<bool, DbError> {
+    // The attempt stays as it is: the unique key `(plan_id, fire_time, attempt)` must keep one row
+    // for each attempt.
     let result = sqlx::query(
         "UPDATE jobs SET status = 'dead_letter', result_code = 'failed', result_message = $2, \
-                attempt = $3, finished_at = $4, lease_until = NULL, updated_at = now() \
+                finished_at = $3, lease_until = NULL, updated_at = now() \
          WHERE id = $1 AND status NOT IN ('succeeded', 'failed', 'expired', 'dead_letter')",
     )
     .bind(id)
     .bind(message)
-    .bind(attempt)
     .bind(now)
     .execute(tx.as_conn())
     .await
@@ -495,6 +500,52 @@ pub async fn mark_agent_lost(
     )
     .bind(id)
     .bind(lost_at)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Lists and locks the running jobs that outlived their job timeout and the grace period.
+///
+/// The agent enforces the timeout, so a job past it is gone: the agent restarted, or it lost the
+/// job. A job without a stored timeout is an on-demand job and uses `default_timeout_seconds`.
+pub async fn timed_out_running(
+    tx: &mut TenantTx<'_>,
+    now: OffsetDateTime,
+    grace: time::Duration,
+    default_timeout_seconds: i32,
+) -> Result<Vec<JobId>, DbError> {
+    let rows = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM jobs \
+         WHERE status = 'running' \
+           AND COALESCE(started_at, sent_at, created_at) \
+               + make_interval(secs => COALESCE(timeout_seconds, $3)) \
+               + make_interval(secs => $2) < $1 \
+         FOR UPDATE SKIP LOCKED",
+    )
+    .bind(now)
+    .bind(grace.as_seconds_f64())
+    .bind(default_timeout_seconds)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(JobId::from_uuid).collect())
+}
+
+/// Fails a running job that outlived its timeout, and marks the repository lock as possibly stale.
+pub async fn mark_timed_out(
+    tx: &mut TenantTx<'_>,
+    id: JobId,
+    now: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'failed', result_code = 'failed', result_message = 'timed_out', \
+                stale_lock_since = $2, finished_at = $2, lease_until = NULL, updated_at = now() \
+         WHERE id = $1 AND status = 'running'",
+    )
+    .bind(id)
     .bind(now)
     .execute(tx.as_conn())
     .await

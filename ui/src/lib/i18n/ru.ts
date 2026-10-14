@@ -590,6 +590,8 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.lock_retry': 'Репозиторий был заблокирован. Новая попытка стоит в очереди.',
 	'jobs.reason.signed_job_unavailable': 'Сохранённое задание нечитаемо.',
 	'jobs.reason.agent_lost': 'Хост отключился во время задания.',
+	'jobs.reason.timed_out': 'Задание выполнялось дольше своего тайм-аута.',
+	'jobs.reason.unacknowledged_expired': 'Хост не подтвердил задание до его истечения.',
 	'jobs.reason.agent_revoked': 'Хост отозван.',
 	'jobs.reason.not_acknowledged': 'Хост не подтвердил получение задания.',
 	'jobs.reason.secret_unavailable': 'Секрет репозитория недоступен.',

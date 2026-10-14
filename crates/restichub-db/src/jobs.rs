@@ -238,18 +238,21 @@ pub async fn get_for_update(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<J
     Ok(row.map(Job::from))
 }
 
-/// Moves a queued job to `sent` and sets `sent_at`. `false` when the row is not queued.
+/// Moves a queued job to `sent`, sets `sent_at` and stores the job timeout. `false` when the row is
+/// not queued.
 pub async fn mark_sent(
     tx: &mut TenantTx<'_>,
     id: JobId,
     now: OffsetDateTime,
+    timeout_seconds: i32,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE jobs SET status = 'sent', sent_at = $2, updated_at = now() \
+        "UPDATE jobs SET status = 'sent', sent_at = $2, timeout_seconds = $3, updated_at = now() \
          WHERE id = $1 AND status = 'queued'",
     )
     .bind(id)
     .bind(now)
+    .bind(timeout_seconds)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -383,45 +386,57 @@ pub async fn cancel_for_plan(
     Ok(result.rows_affected())
 }
 
-/// Moves one overdue job to the terminal `expired` status. `false` when the job is not overdue in
-/// the sense of [`expire_overdue`].
+/// Ends one overdue job. `false` when the job is not overdue in the sense of [`expire_overdue`].
 pub async fn mark_expired(
     tx: &mut TenantTx<'_>,
     id: JobId,
     now: OffsetDateTime,
 ) -> Result<bool, DbError> {
-    let result = sqlx::query(
-        "UPDATE jobs SET status = 'expired', finished_at = $2, updated_at = now() \
-         WHERE id = $1 AND expires_at IS NOT NULL AND expires_at <= $2 \
-           AND (status = 'queued' \
-                OR (status = 'sent' AND (lease_until IS NULL OR lease_until <= $2)))",
-    )
-    .bind(id)
-    .bind(now)
-    .execute(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
-    Ok(result.rows_affected() == 1)
+    Ok(end_overdue(tx, now, Some(id)).await? == 1)
 }
 
-/// Marks every overdue job of the tenant `expired`.
+/// Ends every overdue job of the tenant.
 ///
-/// The expiry is the queue lifetime: it ends a `queued` job, and a `sent` job whose lease passed
-/// too. A `running` job never expires here: the agent may still run it, and only the stale lock
-/// recovery ends it (FR-SC-06). The periodic sweep calls it. The update is idempotent, so two
-/// control plane instances both run it without a conflict.
+/// The expiry is the queue lifetime. It moves a `queued` job to `expired`. A `sent` job whose lease
+/// passed too is different: the agent may have run it, and the job that the agent already finished
+/// never reaches the control plane. It fails with the reason `unacknowledged_expired` and marks a
+/// possible stale lock, so the repository stays blocked until the stale lock recovery clears it
+/// (FR-SC-06). A `running` job never expires here: the agent may still run it, and only the
+/// timeout and the stale lock recovery end it. The periodic sweep calls it. The update is
+/// idempotent, so two control plane instances both run it without a conflict.
 pub async fn expire_overdue(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<u64, DbError> {
-    let result = sqlx::query(
+    end_overdue(tx, now, None).await
+}
+
+async fn end_overdue(
+    tx: &mut TenantTx<'_>,
+    now: OffsetDateTime,
+    only: Option<JobId>,
+) -> Result<u64, DbError> {
+    let expired = sqlx::query(
         "UPDATE jobs SET status = 'expired', finished_at = $1, updated_at = now() \
-         WHERE expires_at IS NOT NULL AND expires_at <= $1 \
-           AND (status = 'queued' \
-                OR (status = 'sent' AND (lease_until IS NULL OR lease_until <= $1)))",
+         WHERE expires_at IS NOT NULL AND expires_at <= $1 AND status = 'queued' \
+           AND ($2::uuid IS NULL OR id = $2)",
     )
     .bind(now)
+    .bind(only)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(result.rows_affected())
+    let unacknowledged = sqlx::query(
+        "UPDATE jobs SET status = 'failed', result_code = 'failed', \
+                result_message = 'unacknowledged_expired', stale_lock_since = $1, \
+                finished_at = $1, lease_until = NULL, updated_at = now() \
+         WHERE expires_at IS NOT NULL AND expires_at <= $1 AND status = 'sent' \
+           AND (lease_until IS NULL OR lease_until <= $1) \
+           AND ($2::uuid IS NULL OR id = $2)",
+    )
+    .bind(now)
+    .bind(only)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(expired.rows_affected() + unacknowledged.rows_affected())
 }
 
 #[derive(sqlx::FromRow)]

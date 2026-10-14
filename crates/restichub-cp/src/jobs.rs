@@ -70,7 +70,7 @@ const JOB_LIFETIME: time::Duration = time::Duration::minutes(30);
 const STEP_TIMEOUT_SECONDS: u32 = 600;
 
 /// Timeout of the full job (FR-AG-05).
-const JOB_TIMEOUT_SECONDS: u32 = 900;
+pub(crate) const JOB_TIMEOUT_SECONDS: u32 = 900;
 
 /// How long a job that a busy agent refused waits before it goes out again.
 const BUSY_DELAY: time::Duration = time::Duration::seconds(10);
@@ -381,7 +381,13 @@ async fn create_repository_job(
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     if sent {
-        job_repo::mark_sent(&mut tx, job_id, now).await?;
+        job_repo::mark_sent(
+            &mut tx,
+            job_id,
+            now,
+            i32::try_from(JOB_TIMEOUT_SECONDS).unwrap_or(i32::MAX),
+        )
+        .await?;
     } else {
         job_repo::mark_refused(&mut tx, job_id, "agent_offline", now).await?;
     }
@@ -432,8 +438,9 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
         return;
     }
     // A cancel that raced the dispatch reached the agent before the job did, so the agent ignored
-    // it. The acknowledgement of the flagged job gets the cancel again.
-    if job.cancel_requested && !job.status.is_terminal() {
+    // it. The acknowledgement of the flagged job gets the cancel again, also when the job already
+    // ended: the agent runs it until it gets the cancel.
+    if job.cancel_requested {
         state.agent_registry().send_to_agent(
             agent,
             ControlMessage {
@@ -571,7 +578,8 @@ pub async fn handle_job_result(
     // marks the row (see `queue::stale::handle_step_result`).
     let lock_held = (job.lock_reported && outcome.result_code == JobResultCode::Failed)
         || result.status == StepStatus::Retry as i32;
-    if lock_held && retry::is_retryable(job.kind) {
+    // A cancel ends the retry chain: a flagged job never returns to the queue.
+    if lock_held && !job.cancel_requested && retry::is_retryable(job.kind) {
         if let Err(error) = retry::apply_lock(&mut tx, state.queue_config(), &job, now).await {
             tracing::warn!(job = %job_id, %error, "the lock result could not update the job");
             return;
@@ -583,6 +591,15 @@ pub async fn handle_job_result(
         state.wake_dispatcher();
         return;
     }
+    let outcome = if lock_held && job.cancel_requested {
+        JobOutcome {
+            status: JobStatus::Failed,
+            result_code: JobResultCode::Cancelled,
+            result_message: None,
+        }
+    } else {
+        outcome
+    };
     // A `not_initialized` result on an initialized repository is a location mismatch, not a normal
     // result: the job fails with the typed access error and the flag stays.
     let outcome = match (outcome.result_code, job.repository_id) {

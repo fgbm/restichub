@@ -23,7 +23,7 @@ use crate::profiles::{compiler_profile_from_row, target_facts};
 use crate::server::AppState;
 
 /// The job timeout that the queue grants an agent (FR-AG-05).
-const JOB_TIMEOUT_SECONDS: u32 = 12 * 3600;
+pub(super) const JOB_TIMEOUT_SECONDS: u32 = 12 * 3600;
 
 /// The longest lifetime that the control plane signs. The agent rejects a lifetime above 24 h
 /// (FR-PR-03).

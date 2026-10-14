@@ -153,7 +153,7 @@ async fn ac_sc_06_a_running_job_past_its_queue_lifetime_stays_in_flight() {
 }
 
 #[tokio::test]
-async fn ac_pr_04_a_sent_job_expires_only_after_its_lease_and_its_lifetime() {
+async fn ac_pr_04_a_sent_job_ends_only_after_its_lease_and_its_lifetime() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -172,7 +172,9 @@ async fn ac_pr_04_a_sent_job_expires_only_after_its_lease_and_its_lifetime() {
     assert_eq!(env.job_status(job).await, "sent", "the lease still runs");
     env.clock.advance(60);
     expire(env).await;
-    assert_eq!(env.job_status(job).await, "expired");
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["result_message"], "unacknowledged_expired");
     assert!(
         !signed_stored(env, job).await,
         "the terminal row drops the blob"

@@ -584,6 +584,8 @@ export const en = {
 	'jobs.reason.lock_retry': 'The repository was locked. A new attempt is queued.',
 	'jobs.reason.signed_job_unavailable': 'The stored job is not readable.',
 	'jobs.reason.agent_lost': 'The host went offline during the job.',
+	'jobs.reason.timed_out': 'The job ran longer than its timeout.',
+	'jobs.reason.unacknowledged_expired': 'The host did not confirm the job before it expired.',
 	'jobs.reason.agent_revoked': 'The host is revoked.',
 	'jobs.reason.not_acknowledged': 'The host never confirmed the job.',
 	'jobs.reason.secret_unavailable': 'A repository secret is not available.',

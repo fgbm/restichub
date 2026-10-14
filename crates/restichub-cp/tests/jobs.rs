@@ -1209,9 +1209,9 @@ async fn the_initialized_flag_needs_the_same_location() {
     db.cleanup().await;
 }
 
-/// A job past its expiry reads as expired on the next poll.
+/// A sent job past its expiry reads as failed on the next poll.
 #[tokio::test]
-async fn an_overdue_job_reads_as_expired() {
+async fn an_overdue_sent_job_reads_as_failed_unacknowledged() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1232,14 +1232,20 @@ async fn an_overdue_job_reads_as_expired() {
     .await;
 
     let job = get_job(&app, &setup.admin, &job_id).await;
-    assert_eq!(job.get("status").and_then(Value::as_str), Some("expired"));
+    // The agent got the job and never acknowledged it, so the job may have run: it fails and the
+    // repository lock stays a suspect.
+    assert_eq!(job.get("status").and_then(Value::as_str), Some("failed"));
+    assert_eq!(
+        job.get("result_message").and_then(Value::as_str),
+        Some("unacknowledged_expired")
+    );
 
     db.cleanup().await;
 }
 
-/// The periodic sweep marks the overdue jobs of every tenant.
+/// The periodic sweep ends the overdue jobs of every tenant.
 #[tokio::test]
-async fn the_expiry_sweep_marks_overdue_jobs() {
+async fn the_expiry_sweep_ends_overdue_jobs() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -1263,7 +1269,13 @@ async fn the_expiry_sweep_marks_overdue_jobs() {
         .await
         .expect("the sweep must run");
     let job = get_job(&app, &setup.admin, &job_id).await;
-    assert_eq!(job.get("status").and_then(Value::as_str), Some("expired"));
+    // The agent got the job and never acknowledged it, so the job may have run: it fails and the
+    // repository lock stays a suspect.
+    assert_eq!(job.get("status").and_then(Value::as_str), Some("failed"));
+    assert_eq!(
+        job.get("result_message").and_then(Value::as_str),
+        Some("unacknowledged_expired")
+    );
 
     db.cleanup().await;
 }
