@@ -78,6 +78,7 @@ pub async fn register_async(
             keys: enrolled.signing_keys,
             signature: enrolled.signing_keys_signature,
         },
+        key_updates: Vec::new(),
     };
     identity.save(dir)?;
     println!("the agent is registered");
@@ -95,47 +96,38 @@ pub fn status(dir: &Path) -> Result<()> {
     print_identity(&identity)
 }
 
-/// Loads the identity and waits for the shutdown signal (FR-AG-01).
+/// Loads the identity and serves the protocol stream until the shutdown signal (FR-AG-01, FR-ID-07).
 ///
-/// The protocol stream arrives with #50. The agent holds no timer and starts no job (ADR-0002).
+/// The agent holds no timer that starts a job (ADR-0002).
 ///
 /// # Errors
 ///
-/// Returns an error when the identity is absent or restic is not the pinned binary.
+/// Returns an error when the identity is absent, restic is not the pinned binary, or the runtime
+/// cannot start.
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
-    let identity = StoredIdentity::load(dir)
+    let mut identity = StoredIdentity::load(dir)
         .with_context(|| format!("no agent identity in {}", dir.display()))?;
-    // Rebuild the key ring, so a job that the current key signed verifies (ADR-0026).
-    crate::verify::verify_key_set(
-        &identity.signing_keys.keys,
-        &identity.signing_keys.signature,
-    )?;
+    // Rebuild the key ring, so a job that the current key signed verifies (ADR-0026, ADR-0030).
+    let mut ring = crate::stream::key_ring(&identity)?;
     let restic = ResticBinary::locate()?;
     restic.verify()?;
+    let restic_version = restic.version().unwrap_or_default();
     tracing::info!(
         agent_id = %identity.agent_id,
         keys = identity.signing_keys.keys.len(),
         "the agent identity is loaded"
     );
-    tracing::info!("the stream is not available yet (#50)");
-    wait_for_shutdown(shutdown)
-}
-
-fn wait_for_shutdown(channel: Option<Receiver<()>>) -> Result<()> {
-    match channel {
-        Some(receiver) => {
-            let _ = receiver.recv();
-        }
-        None => {
-            let (sender, receiver) = std::sync::mpsc::channel();
-            ctrlc::set_handler(move || {
-                let _ = sender.send(());
-            })
-            .context("cannot install the signal handler")?;
-            let _ = receiver.recv();
-        }
-    }
-    Ok(())
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("cannot start the runtime")?;
+    runtime.block_on(crate::stream::serve(
+        &mut identity,
+        dir,
+        &mut ring,
+        &restic_version,
+        shutdown,
+    ))
 }
 
 fn print_identity(identity: &StoredIdentity) -> Result<()> {

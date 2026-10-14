@@ -18,12 +18,17 @@ use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair, PKCS_ECDSA_P256_SHA256,
 };
+use restichub_cp::agent_listener::{
+    ListenerLimits, serve_listener, server_cert_sans, tls_config_from_issued,
+};
 use restichub_cp::config::{AuthConfig, TenancyConfig};
+use restichub_cp::pki::{CaService, CaStore};
 use restichub_cp::server::{AppState, AuthState, router};
 use restichub_db::test_util::{TestDatabase, test_database};
-use restichub_db::{Database, Role, TenantId, enrollment_tokens, tenants, users};
+use restichub_db::{Database, Role, TenantId, enrollment_tokens, signing, tenants, users};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use time::{Duration, OffsetDateTime};
+use uuid::Uuid;
 
 /// The gRPC endpoint that the enrollment tests report to an agent.
 pub const AGENT_ENDPOINT: &str = "https://agents.example:8443";
@@ -139,7 +144,7 @@ async fn create_tenant(db: &Database, name: &str) -> TenantId {
     tenant
 }
 
-async fn create_user(
+pub async fn create_user(
     db: &Database,
     tenant: TenantId,
     username: &str,
@@ -317,4 +322,194 @@ fn test_tls() -> (String, Arc<rustls::ServerConfig>) {
         .with_single_cert(vec![cert], key)
         .expect("cannot build the server TLS configuration");
     (ca.pem(), Arc::new(config))
+}
+
+/// A test database, a tenant, a one-time token and a real agent listener.
+pub struct StreamFixture {
+    pub db: TestDatabase,
+    pub tenant: TenantId,
+    pub token: String,
+    pub server: StreamServer,
+}
+
+/// Makes a fresh tenant, a one-time token and a running agent listener.
+pub async fn stream_fixture(name: &str) -> Option<StreamFixture> {
+    let db = test_database().await?;
+    let tenant = create_tenant(db.database(), name).await;
+    let creator = create_user(db.database(), tenant, "agent-admin", "phc", "admin").await;
+    let (token, _) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &["host".to_owned()],
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    )
+    .await;
+    let server = StreamServer::start(db.database()).await;
+    Some(StreamFixture {
+        db,
+        tenant,
+        token,
+        server,
+    })
+}
+
+/// The real agent listener over TLS with the installation CA (ADR-0026).
+pub struct StreamServer {
+    pub state: AppState,
+    pub addr: SocketAddr,
+    pub endpoint: String,
+    root_der: Vec<u8>,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl StreamServer {
+    /// Binds a loopback port and serves the listener with the installation CA.
+    pub async fn start(db: &Database) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("cannot bind the listener");
+        let addr = listener.local_addr().expect("the listener address");
+        // The agent dials the endpoint host and verifies the name, so use the certificate DNS name.
+        let endpoint = format!("https://localhost:{}", addr.port());
+        let (state, ca) = pki_state(db, &endpoint).await;
+        let sans = server_cert_sans(Some(&endpoint), addr);
+        let issued = CaService::new(test_kek())
+            .issue_server_certificate(&ca, &sans)
+            .expect("cannot issue the server certificate");
+        let root_der = ca.root().cert_der.clone();
+        let tls = tls_config_from_issued(&issued, &root_der).expect("cannot build the TLS config");
+        let (shutdown, rx) = tokio::sync::oneshot::channel();
+        let serve_state = state.clone();
+        let task = tokio::spawn(async move {
+            let _ = serve_listener(
+                listener,
+                serve_state,
+                tls,
+                ListenerLimits::default(),
+                async move {
+                    let _ = rx.await;
+                },
+            )
+            .await;
+        });
+        Self {
+            state,
+            addr,
+            endpoint,
+            root_der,
+            shutdown: Some(shutdown),
+            task,
+        }
+    }
+
+    /// The pinned installation root CA in PEM, as `register --ca-file` reads it.
+    #[must_use]
+    pub fn root_pem(&self) -> String {
+        restichub_cp::agent_listener::der_to_pem("CERTIFICATE", &self.root_der)
+    }
+
+    /// Revokes an agent as the API does: the status change and the stream close (FR-ID-04).
+    pub async fn revoke(
+        &self,
+        db: &Database,
+        tenant: TenantId,
+        agent: Uuid,
+        actor: restichub_db::UserId,
+    ) {
+        let mut tx = db
+            .begin_tenant(tenant)
+            .await
+            .expect("cannot begin the transaction");
+        restichub_db::agents::revoke(
+            &mut tx,
+            restichub_db::AgentId::from_uuid(agent),
+            actor,
+            OffsetDateTime::now_utc(),
+        )
+        .await
+        .expect("cannot revoke the agent");
+        tx.commit().await.expect("cannot commit the revoke");
+        self.state
+            .agent_registry()
+            .close_by_agent(restichub_db::AgentId::from_uuid(agent));
+    }
+}
+
+impl Drop for StreamServer {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        self.task.abort();
+    }
+}
+
+/// Builds the application state with a real certificate authority and job signing key set.
+pub async fn pki_state(db: &Database, endpoint: &str) -> (AppState, Arc<CaStore>) {
+    let provider = test_kek();
+    let ca = CaService::new(provider.clone());
+    let store = Arc::new(
+        ca.ensure_initialized(db)
+            .await
+            .expect("cannot create the CA"),
+    );
+    let job_signing = restichub_cp::job_signing::JobSigningService::new(provider.clone());
+    job_signing
+        .ensure_initialized(db)
+        .await
+        .expect("cannot create the job signing key set");
+    let auth = AuthState::new(AuthConfig::default());
+    let state = AppState::with_auth(db.clone(), auth)
+        .with_kek(provider)
+        .with_tenancy(TenancyConfig::multi())
+        .with_pki(store.clone(), job_signing, Some(endpoint.to_owned()));
+    (state, store)
+}
+
+/// Reads `last_seen_at` of an agent through a tenant transaction.
+pub async fn last_seen(db: &Database, tenant: TenantId, agent: Uuid) -> Option<OffsetDateTime> {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let row = restichub_db::agents::get(&mut tx, restichub_db::AgentId::from_uuid(agent))
+        .await
+        .expect("cannot read the agent");
+    tx.commit().await.expect("cannot commit the read");
+    row.and_then(|agent| agent.last_seen_at)
+}
+
+/// Sets `last_seen_at` of an agent through the owner connection.
+pub async fn set_last_seen(
+    db: &TestDatabase,
+    tenant: TenantId,
+    agent: Uuid,
+    value: OffsetDateTime,
+) {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query("UPDATE agents SET last_seen_at = $2 WHERE id = $1")
+        .bind(agent)
+        .bind(value)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set last_seen_at");
+    tx.commit().await.expect("cannot commit last_seen_at");
+}
+
+/// The number of retired job signing keys in the platform tenant (ADR-0026).
+pub async fn retired_keys(db: &Database) -> usize {
+    let mut tx = db
+        .begin_tenant(restichub_db::PLATFORM_TENANT_ID)
+        .await
+        .expect("cannot begin the transaction");
+    let rows = signing::list(&mut tx).await.expect("cannot list the keys");
+    tx.commit().await.expect("cannot commit the read");
+    rows.iter().filter(|row| row.retired_at.is_some()).count()
 }

@@ -75,6 +75,8 @@ impl Restic for ResticBinary {
     fn version(&self) -> Result<String> {
         let output = Command::new(&self.path)
             .arg("version")
+            // A restic child never inherits the agent environment (FR-AG-06, ADR-0021).
+            .env_clear()
             .output()
             .with_context(|| format!("cannot run {}", self.path.display()))?;
         if !output.status.success() {

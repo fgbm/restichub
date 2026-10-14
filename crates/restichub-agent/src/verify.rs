@@ -204,6 +204,15 @@ fn valid_at(certificate: &X509Certificate<'_>, now: OffsetDateTime) -> Result<()
     Ok(())
 }
 
+/// The identifiers of one adopted key update (FR-PR-11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedKeyUpdate {
+    /// The key that signed the update, that is the current key that the agent acknowledges.
+    pub signer_key_id: String,
+    /// The key that the update introduced, that is the next key.
+    pub key_id: String,
+}
+
 /// Adopts one signed job signing key update into the ring (FR-PR-11, ADR-0026).
 ///
 /// The signature is verified whenever the agent can check it: it holds the signer in the ring, or
@@ -217,8 +226,10 @@ fn valid_at(certificate: &X509Certificate<'_>, now: OffsetDateTime) -> Result<()
 ///
 /// Returns an error when the update does not decode, names two different signers, names no key, or
 /// carries a public key or a signature that does not verify.
-pub fn adopt_key_update(ring: &mut KeyRing, bytes: &[u8]) -> Result<()> {
-    let envelope = SigningKeyUpdate::decode(bytes).context("the key update does not decode")?;
+pub fn adopt_key_update(
+    ring: &mut KeyRing,
+    envelope: &SigningKeyUpdate,
+) -> Result<AcceptedKeyUpdate> {
     let inner = KeyUpdate::decode(envelope.key_update.as_slice())
         .context("the inner key update does not decode")?;
     if inner.signer_key_id != envelope.signer_key_id {
@@ -234,13 +245,17 @@ pub fn adopt_key_update(ring: &mut KeyRing, bytes: &[u8]) -> Result<()> {
     probe
         .insert(inner.key_id.clone(), key)
         .map_err(|error| anyhow::anyhow!("the key update is not valid: {error:?}"))?;
-    match probe.apply_key_update(&envelope) {
+    match probe.apply_key_update(envelope) {
         Ok(()) | Err(KeyUpdateError::UnknownSigner) => {}
         Err(error) => bail!("the key update is not valid: {error:?}"),
     }
-    ring.insert(inner.key_id, key)
+    let accepted = AcceptedKeyUpdate {
+        signer_key_id: envelope.signer_key_id.clone(),
+        key_id: inner.key_id,
+    };
+    ring.insert(accepted.key_id.clone(), key)
         .map_err(|error| anyhow::anyhow!("the key update is not valid: {error:?}"))?;
-    Ok(())
+    Ok(accepted)
 }
 
 fn verifying_key(bytes: &[u8]) -> Result<VerifyingKey> {
@@ -367,7 +382,7 @@ mod tests {
         };
         let envelope = sign_key_update(&update, &current);
         let mut ring = KeyRing::new();
-        adopt_key_update(&mut ring, &envelope.encode_to_vec()).expect("first use must be accepted");
+        adopt_key_update(&mut ring, &envelope).expect("first use must be accepted");
         assert!(ring.get("next").is_some());
     }
 
@@ -385,8 +400,8 @@ mod tests {
         let mut envelope = sign_key_update(&update, &signer);
         envelope.signature[0] ^= 0xff;
         let mut ring = KeyRing::new();
-        let error = adopt_key_update(&mut ring, &envelope.encode_to_vec())
-            .expect_err("a bad signature must be refused");
+        let error =
+            adopt_key_update(&mut ring, &envelope).expect_err("a bad signature must be refused");
         assert!(error.to_string().contains("not valid"), "{error}");
         assert!(ring.get("key").is_none());
     }

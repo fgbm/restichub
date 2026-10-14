@@ -309,6 +309,15 @@ fn system_roots() -> Result<RootCertStore> {
     Ok(roots)
 }
 
+/// The host of an `https://` URL, for the server name check of the stream (ADR-0033).
+///
+/// # Errors
+///
+/// Returns an error when the URL is not `https` or holds no host.
+pub fn host_of(url: &str) -> Result<String> {
+    Ok(Origin::parse(url)?.host)
+}
+
 struct Origin {
     host: String,
     port: u16,
