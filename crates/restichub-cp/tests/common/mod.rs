@@ -100,6 +100,7 @@ pub fn bearer_request(method: &str, uri: &str, token: &str, body: Option<Value>)
 /// A malformed body would stop a request before the handler runs the authorization and the
 /// isolation checks, so the two tests send a valid body. A Platform Admin acts in the platform
 /// tenant, where the only valid role is `platform_admin`.
+#[allow(clippy::too_many_arguments)]
 pub fn write_body(
     method: &str,
     path: &str,
@@ -107,6 +108,8 @@ pub fn write_body(
     platform_admin: bool,
     tenant_id: &str,
     repository_id: &str,
+    profile_id: &str,
+    agent_id: &str,
 ) -> Option<Value> {
     let role = if platform_admin {
         "platform_admin"
@@ -152,6 +155,27 @@ pub fn write_body(
             "paths": {"all": ["/srv"]},
         })),
         ("POST", "/api/v1/profiles/{id}/preview") => Some(json!({"agent_id": repository_id})),
+        ("POST", "/api/v1/plans") => Some(json!({
+            "name": format!("matrix-plan-{index}"),
+            "profile_id": profile_id,
+            "agent_id": agent_id,
+            "cron": "0 2 * * *",
+            "time_zone": "UTC",
+            "missed_run_policy": "run_all",
+        })),
+        ("PATCH", "/api/v1/plans/{id}") => Some(json!({
+            "name": format!("matrix-plan-{index}"),
+            "profile_id": profile_id,
+            "agent_id": agent_id,
+            "cron": "0 2 * * *",
+            "time_zone": "UTC",
+            "missed_run_policy": "run_all",
+        })),
+        ("POST", "/api/v1/plans/preview") => Some(json!({
+            "cron": "0 2 * * *",
+            "time_zone": "UTC",
+            "count": 3,
+        })),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
@@ -581,6 +605,8 @@ pub async fn seed_job(
             kind: restichub_db::JobKind::TestAccess,
             agent_id: agent,
             repository_id: Some(repository),
+            plan_id: None,
+            fire_time: None,
             expires_at: None,
             location_fingerprint: None,
             created_by: None,
@@ -590,6 +616,141 @@ pub async fn seed_job(
     .expect("cannot create the job");
     tx.commit().await.expect("cannot commit the job");
     id
+}
+
+/// Inserts a queued scheduled job of one plan and returns its identifier (FR-SC-02).
+///
+/// The scheduler creates the row in production; a test seeds it directly, so a route test can name
+/// the job of a plan without a scheduler pass.
+pub async fn seed_scheduled_job(
+    db: &Database,
+    tenant: TenantId,
+    plan: restichub_db::PlanId,
+    agent: restichub_db::AgentId,
+    repository: restichub_db::RepositoryId,
+    fire_time: OffsetDateTime,
+) -> restichub_db::JobId {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::JobId::new();
+    restichub_db::jobs::create_scheduled(
+        &mut tx,
+        &restichub_db::jobs::NewJob {
+            id,
+            kind: restichub_db::JobKind::Backup,
+            agent_id: agent,
+            repository_id: Some(repository),
+            plan_id: Some(plan),
+            fire_time: Some(fire_time),
+            expires_at: None,
+            location_fingerprint: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the scheduled job")
+    .expect("the scheduled job is created");
+    tx.commit().await.expect("cannot commit the job");
+    id
+}
+
+/// Inserts a plan row of a tenant and returns its identifier.
+///
+/// A test uses it only for a route fixture. The profile and the agent must already exist in the
+/// tenant.
+pub async fn seed_plan(
+    db: &Database,
+    tenant: TenantId,
+    name: &str,
+    profile: restichub_db::ProfileId,
+    agent: restichub_db::AgentId,
+) -> restichub_db::PlanId {
+    seed_scheduled_plan(
+        db,
+        tenant,
+        name,
+        profile,
+        agent,
+        "0 2 * * *",
+        "UTC",
+        restichub_db::MissedRunPolicy::RunAll,
+        None,
+    )
+    .await
+}
+
+/// Inserts a plan row with an explicit schedule and returns its identifier.
+///
+/// A scheduler test uses it to place the next fire time at a known instant.
+#[allow(clippy::too_many_arguments)]
+pub async fn seed_scheduled_plan(
+    db: &Database,
+    tenant: TenantId,
+    name: &str,
+    profile: restichub_db::ProfileId,
+    agent: restichub_db::AgentId,
+    cron: &str,
+    time_zone: &str,
+    missed_run_policy: restichub_db::MissedRunPolicy,
+    next_run_at: Option<OffsetDateTime>,
+) -> restichub_db::PlanId {
+    use restichub_db::plans::{NewPlan, create};
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::PlanId::new();
+    create(
+        &mut tx,
+        &NewPlan {
+            id,
+            name,
+            profile_id: profile,
+            agent_id: agent,
+            cron,
+            time_zone,
+            missed_run_policy,
+            enabled: true,
+            next_run_at,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the plan");
+    tx.commit().await.expect("cannot commit the plan");
+    id
+}
+
+/// Every row that names the given schedule, oldest fire time first.
+pub async fn plan_jobs(
+    db: &Database,
+    tenant: TenantId,
+    plan: restichub_db::PlanId,
+) -> Vec<restichub_db::jobs::Job> {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let jobs = restichub_db::jobs::list_for_plan(&mut tx, plan)
+        .await
+        .expect("cannot list the jobs");
+    tx.commit().await.expect("cannot commit the list");
+    jobs
+}
+
+/// The fire times of the jobs of one plan, in UTC, oldest first.
+pub async fn plan_fire_times(
+    db: &Database,
+    tenant: TenantId,
+    plan: restichub_db::PlanId,
+) -> Vec<OffsetDateTime> {
+    plan_jobs(db, tenant, plan)
+        .await
+        .into_iter()
+        .filter_map(|job| job.fire_time)
+        .collect()
 }
 
 /// Inserts an unused enrollment token row of a tenant and returns its identifier.
@@ -899,4 +1060,16 @@ pub fn retry_after(response: &axum::response::Response) -> Option<String> {
 
 pub async fn test_db() -> Option<TestDatabase> {
     test_database().await
+}
+
+/// Builds an instant of the tests without the `time` macros feature.
+pub fn utc(year: i32, month: time::Month, day: u8, hour: u8, minute: u8) -> OffsetDateTime {
+    let date = time::Date::from_calendar_date(year, month, day).expect("a valid date");
+    let time = time::Time::from_hms(hour, minute, 0).expect("a valid time");
+    date.with_time(time).assume_utc()
+}
+
+/// The whole seconds from `from` to `to`, for [`restichub_cp::clock::ManualClock::advance`].
+pub fn seconds_between(from: OffsetDateTime, to: OffsetDateTime) -> i64 {
+    (to - from).whole_seconds()
 }

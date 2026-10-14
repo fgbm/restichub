@@ -25,6 +25,7 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 		'Hosts',
 		'Repositories',
 		'Profiles',
+		'Plans',
 		'Audit',
 		'Settings'
 	]);
@@ -56,7 +57,14 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 
 	await expect(page).toHaveURL(/\/$/);
 	await expect(switcher).toHaveText('globex');
-	expect(await tabNames(page)).toEqual(['Overview', 'Hosts', 'Repositories', 'Profiles', 'Audit']);
+	expect(await tabNames(page)).toEqual([
+		'Overview',
+		'Hosts',
+		'Repositories',
+		'Profiles',
+		'Plans',
+		'Audit'
+	]);
 });
 
 test('the current organization leaves the platform mode for its overview', async ({ page }) => {
@@ -77,6 +85,7 @@ test('the current organization leaves the platform mode for its overview', async
 		'Hosts',
 		'Repositories',
 		'Profiles',
+		'Plans',
 		'Audit',
 		'Settings'
 	]);

@@ -15,6 +15,7 @@ import type {
 	CreateApiTokenRequest,
 	CreateEnrollmentTokenRequest,
 	CreatePlatformUserRequest,
+	CreatePlanRequest,
 	CreateProfileRequest,
 	CreateRepositoryRequest,
 	CreateTenantRequest,
@@ -28,12 +29,17 @@ import type {
 	JobStatus,
 	Me,
 	MembershipInput,
+	NextRunsResponse,
+	Plan,
+	PlanResponse,
 	PlatformUser,
 	PreviewResponse,
+	PreviewScheduleRequest,
 	Profile,
 	ProfileResponse,
 	Repository,
 	ResetPasswordRequest,
+	SchedulePreviewResponse,
 	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
@@ -41,16 +47,24 @@ import type {
 	Tenant,
 	TenantAccess,
 	UpdateAccountRequest,
+	UpdatePlanRequest,
 	UpdateProfileRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
 	User
 } from './types';
 
+import { nextRunsFromCron } from '#lib/schedule.ts';
+
 const REDACTED = '<redacted>';
 
 function iso(minutesAgo: number): string {
 	return new Date(Date.now() - minutesAgo * 60_000).toISOString();
+}
+
+/// The next fire time of a plan, from its cron and time zone (FR-SC-01).
+function nextFireTime(cron: string, timeZone: string): string {
+	return nextRunsFromCron(cron, timeZone, 1)[0] ?? new Date(Date.now() + 60 * 60_000).toISOString();
 }
 
 /// The paths of a profile for one operating system: `all` plus the paths of that system.
@@ -97,6 +111,9 @@ const SAMPLE_AGENTS_KEY = 'restichub.mock.agents';
 // The mock starts without a profile. A review capture sets this storage key to see a filled list.
 const SAMPLE_PROFILES_KEY = 'restichub.mock.profiles';
 
+// The mock starts without a plan. A review capture or an e2e test sets this storage key to see a
+// filled list.
+const SAMPLE_PLANS_KEY = 'restichub.mock.plans';
 // A review capture or an e2e test sets this storage key to drive the mock as a Platform Admin
 // without a membership. The sign-in then survives a full page load, so a direct visit to an
 // address keeps the session, the way a session cookie does.
@@ -211,6 +228,33 @@ function makeProfiles(): Profile[] {
 			created_at: iso(60 * 24 * 5),
 			updated_at: iso(60 * 24),
 			created_by: 'u_01'
+		}
+	];
+}
+
+/// One sample plan that binds the first profile to the first agent (FR-SC-01). A review capture or
+/// an e2e test sets the storage key to see it.
+function makePlans(): Plan[] {
+	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_PLANS_KEY) !== 'sample') {
+		return [];
+	}
+	return [
+		{
+			id: 'pl_1',
+			name: 'nightly-web',
+			profile_id: 'p_1',
+			profile_name: 'web-daily',
+			repository_id: 'r_1',
+			agent_id: '1',
+			agent_hostname: 'win-fs01',
+			cron: '0 2 * * *',
+			time_zone: 'Europe/Berlin',
+			missed_run_policy: 'latest_only',
+			enabled: true,
+			next_run_at: nextFireTime('0 2 * * *', 'Europe/Berlin'),
+			last_fire_time: iso(60 * 24),
+			created_at: iso(60 * 24 * 9),
+			updated_at: iso(60 * 24)
 		}
 	];
 }
@@ -456,6 +500,7 @@ export class MockApiService {
 	private repositories: Repository[] = [];
 	private jobs: MockJob[] = [];
 	private profiles: Profile[] = makeProfiles();
+	private plans: Plan[] = makePlans();
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
@@ -812,7 +857,7 @@ export class MockApiService {
 			created_by: this.users[0].id
 		};
 		this.profiles = [...this.profiles, profile];
-		return { profile, warnings: warningsFor(profile) };
+		return { profile, warnings: warningsFor(profile), plan_warnings: [] };
 	}
 
 	async updateProfile(id: string, request: UpdateProfileRequest): Promise<ProfileResponse> {
@@ -833,11 +878,95 @@ export class MockApiService {
 			updated_at: new Date().toISOString()
 		};
 		this.profiles = this.profiles.map((item) => (item.id === id ? updated : item));
-		return { profile: updated, warnings: warningsFor(updated) };
+		return { profile: updated, warnings: warningsFor(updated), plan_warnings: [] };
 	}
 
 	async deleteProfile(id: string): Promise<void> {
 		this.profiles = this.profiles.filter((item) => item.id !== id);
+	}
+
+	async listPlans(): Promise<Plan[]> {
+		return [...this.plans];
+	}
+
+	async createPlan(request: CreatePlanRequest): Promise<PlanResponse> {
+		const profile = this.profiles.find((item) => item.id === request.profile_id);
+		const agent = this.agents.find((item) => item.id === request.agent_id);
+		if (!profile) throw problemError('invalid_argument', 'profile_id', 'unknown');
+		if (!agent || agent.status !== 'active') {
+			throw problemError('invalid_argument', 'agent_id', 'unknown');
+		}
+		const now = new Date().toISOString();
+		const plan: Plan = {
+			id: `pl_${this.plans.length + 1}`,
+			name: request.name,
+			profile_id: request.profile_id,
+			profile_name: profile.name,
+			repository_id: profile.repository_id,
+			agent_id: request.agent_id,
+			agent_hostname: agent.hostname,
+			cron: request.cron,
+			time_zone: request.time_zone,
+			missed_run_policy: request.missed_run_policy,
+			enabled: request.enabled ?? true,
+			next_run_at: request.enabled === false ? null : nextFireTime(request.cron, request.time_zone),
+			last_fire_time: null,
+			created_at: now,
+			updated_at: now
+		};
+		this.plans = [...this.plans, plan];
+		return { plan };
+	}
+
+	async updatePlan(id: string, request: UpdatePlanRequest): Promise<PlanResponse> {
+		const current = this.plans.find((item) => item.id === id);
+		if (!current) throw new Error('not found');
+		const profile = this.profiles.find((item) => item.id === request.profile_id);
+		const agent = this.agents.find((item) => item.id === request.agent_id);
+		if (!profile) throw problemError('invalid_argument', 'profile_id', 'unknown');
+		if (!agent || agent.status !== 'active') {
+			throw problemError('invalid_argument', 'agent_id', 'unknown');
+		}
+		const enabled = request.enabled ?? true;
+		const updated: Plan = {
+			...current,
+			name: request.name ?? current.name,
+			profile_id: request.profile_id,
+			profile_name: profile.name,
+			repository_id: profile.repository_id,
+			agent_id: request.agent_id,
+			agent_hostname: agent.hostname,
+			cron: request.cron,
+			time_zone: request.time_zone,
+			missed_run_policy: request.missed_run_policy,
+			enabled,
+			next_run_at: enabled ? nextFireTime(request.cron, request.time_zone) : null,
+			updated_at: new Date().toISOString()
+		};
+		this.plans = this.plans.map((item) => (item.id === id ? updated : item));
+		return { plan: updated };
+	}
+
+	async deletePlan(id: string): Promise<void> {
+		this.plans = this.plans.filter((item) => item.id !== id);
+	}
+
+	async nextRuns(id: string, count: number): Promise<NextRunsResponse> {
+		const plan = this.plans.find((item) => item.id === id);
+		if (!plan) throw new Error('not found');
+		return {
+			plan_id: id,
+			time_zone: plan.time_zone,
+			runs: nextRunsFromCron(plan.cron, plan.time_zone, count)
+		};
+	}
+
+	async previewSchedule(request: PreviewScheduleRequest): Promise<SchedulePreviewResponse> {
+		const count = request.count ?? 5;
+		return {
+			time_zone: request.time_zone,
+			runs: nextRunsFromCron(request.cron, request.time_zone, count)
+		};
 	}
 
 	async previewProfile(id: string, agentId: string): Promise<PreviewResponse> {

@@ -10,6 +10,7 @@ mod audit;
 mod auth;
 mod enrollment_tokens;
 mod migrations;
+mod plans;
 mod profiles;
 mod repositories;
 mod rls;
@@ -65,7 +66,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 13] = [
+const TENANT_TABLES: [&str; 14] = [
     "users",
     "memberships",
     "sessions",
@@ -79,6 +80,7 @@ const TENANT_TABLES: [&str; 13] = [
     "repositories",
     "jobs",
     "profiles",
+    "plans",
 ];
 
 struct Seed {
@@ -259,6 +261,17 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     .bind(crate::ProfileId::new())
     .bind(tenant)
     .bind(repository_id)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO plans \
+         (id, tenant_id, name, profile_id, agent_id, cron, time_zone, missed_run_policy) \
+         VALUES ($1, $2, 'plan', (SELECT id FROM profiles WHERE tenant_id = $2), \
+                 (SELECT id FROM agents WHERE tenant_id = $2), '0 2 * * *', 'UTC', 'run_all')",
+    )
+    .bind(crate::PlanId::new())
+    .bind(tenant)
     .execute(tx.as_conn())
     .await?;
 

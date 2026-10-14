@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::enums::{JobKind, JobResultCode, JobStatus};
-use crate::ids::{AgentId, JobId, RepositoryId, UserId};
+use crate::ids::{AgentId, JobId, PlanId, RepositoryId, UserId};
 use crate::tx::TenantTx;
 
 /// One stored row with its lifecycle, kind, agent and result.
@@ -25,6 +25,10 @@ pub struct Job {
     pub kind: JobKind,
     pub agent_id: AgentId,
     pub repository_id: Option<RepositoryId>,
+    /// The plan of a scheduled job (FR-SC-01). Null for an on-demand job.
+    pub plan_id: Option<PlanId>,
+    /// Set for a job that a plan created, in UTC. Absent for an on-demand job.
+    pub fire_time: Option<OffsetDateTime>,
     pub status: JobStatus,
     pub result_code: Option<JobResultCode>,
     /// A machine-readable error code from the agent. Never a secret and never prose (NFR-DOC-04).
@@ -48,6 +52,10 @@ pub struct NewJob {
     pub kind: JobKind,
     pub agent_id: AgentId,
     pub repository_id: Option<RepositoryId>,
+    /// The plan of a scheduled job. `None` for an on-demand job.
+    pub plan_id: Option<PlanId>,
+    /// Set for a job that a plan created, in UTC. `None` for an on-demand job.
+    pub fire_time: Option<OffsetDateTime>,
     pub expires_at: Option<OffsetDateTime>,
     /// A hash of the repository location at create time. It holds no secret.
     pub location_fingerprint: Option<String>,
@@ -67,15 +75,17 @@ pub struct JobOutcome {
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewJob) -> Result<JobId, DbError> {
     sqlx::query(
         "INSERT INTO jobs \
-         (id, tenant_id, kind, agent_id, repository_id, status, expires_at, location_fingerprint, \
-          created_by) \
-         VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $8)",
+         (id, tenant_id, kind, agent_id, repository_id, plan_id, fire_time, status, expires_at, \
+          location_fingerprint, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10)",
     )
     .bind(new.id)
     .bind(tx.tenant())
     .bind(new.kind.as_str())
     .bind(new.agent_id)
     .bind(new.repository_id)
+    .bind(new.plan_id)
+    .bind(new.fire_time)
     .bind(new.expires_at)
     .bind(new.location_fingerprint.as_deref())
     .bind(new.created_by)
@@ -85,12 +95,45 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewJob) -> Result<JobId, DbErro
     Ok(new.id)
 }
 
+/// Creates one scheduled job for a plan and a fire time (FR-SC-02).
+///
+/// The unique key `(plan_id, fire_time)` makes the create idempotent: a second control plane
+/// instance, or a second run over the same fire time, inserts no row and gets `None` (AC-SC-02,
+/// ADR-0010).
+pub async fn create_scheduled(
+    tx: &mut TenantTx<'_>,
+    new: &NewJob,
+) -> Result<Option<JobId>, DbError> {
+    let row = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO jobs \
+         (id, tenant_id, kind, agent_id, repository_id, plan_id, fire_time, status, expires_at, \
+          location_fingerprint, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10) \
+         ON CONFLICT (plan_id, fire_time) DO NOTHING \
+         RETURNING id",
+    )
+    .bind(new.id)
+    .bind(tx.tenant())
+    .bind(new.kind.as_str())
+    .bind(new.agent_id)
+    .bind(new.repository_id)
+    .bind(new.plan_id)
+    .bind(new.fire_time)
+    .bind(new.expires_at)
+    .bind(new.location_fingerprint.as_deref())
+    .bind(new.created_by)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(JobId::from_uuid))
+}
+
 /// Reads one job of the tenant of the transaction. A job of another tenant is absent.
 pub async fn get(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbError> {
     let row = sqlx::query_as::<_, JobRow>(
-        "SELECT id, kind, agent_id, repository_id, status, result_code, result_message, \
-                location_fingerprint, expires_at, sent_at, started_at, finished_at, created_at, \
-                updated_at, created_by \
+        "SELECT id, kind, agent_id, repository_id, plan_id, fire_time, status, result_code, \
+                result_message, location_fingerprint, expires_at, sent_at, started_at, finished_at, \
+                created_at, updated_at, created_by \
          FROM jobs WHERE id = $1",
     )
     .bind(id)
@@ -106,9 +149,9 @@ pub async fn get(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbErro
 /// (FR-PR-08).
 pub async fn get_for_update(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbError> {
     let row = sqlx::query_as::<_, JobRow>(
-        "SELECT id, kind, agent_id, repository_id, status, result_code, result_message, \
-                location_fingerprint, expires_at, sent_at, started_at, finished_at, created_at, \
-                updated_at, created_by \
+        "SELECT id, kind, agent_id, repository_id, plan_id, fire_time, status, result_code, \
+                result_message, location_fingerprint, expires_at, sent_at, started_at, finished_at, \
+                created_at, updated_at, created_by \
          FROM jobs WHERE id = $1 FOR UPDATE",
     )
     .bind(id)
@@ -204,20 +247,64 @@ pub async fn mark_refused(
     Ok(result.rows_affected() == 1)
 }
 
-/// True when the repository holds a job that is queued, sent or running.
+/// Lists the scheduled jobs of one plan, oldest fire time first (FR-SC-02).
+pub async fn list_for_plan(tx: &mut TenantTx<'_>, plan_id: PlanId) -> Result<Vec<Job>, DbError> {
+    let rows = sqlx::query_as::<_, JobRow>(
+        "SELECT id, kind, agent_id, repository_id, plan_id, fire_time, status, result_code, \
+                result_message, location_fingerprint, expires_at, sent_at, started_at, finished_at, \
+                created_at, updated_at, created_by \
+         FROM jobs WHERE plan_id = $1 ORDER BY fire_time",
+    )
+    .bind(plan_id)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(Job::from).collect())
+}
+
+/// True when the repository holds an active maintenance job, or a sent or running backup.
+///
+/// A queued backup does not lock the repository location: several backup jobs may run on one
+/// repository at the same time (FR-SC-04). A maintenance kind (init, test_access, forget, prune,
+/// check) locks it in every active status.
 pub async fn has_active_for_repository(
     tx: &mut TenantTx<'_>,
     repository_id: RepositoryId,
 ) -> Result<bool, DbError> {
     let (active,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 \
-         AND status IN ('queued', 'sent', 'running'))",
+         AND status IN ('queued', 'sent', 'running') \
+         AND (kind IN ('init', 'test_access', 'forget', 'prune', 'check') \
+              OR (kind = 'backup' AND status IN ('sent', 'running'))))",
     )
     .bind(repository_id)
     .fetch_one(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
     Ok(active)
+}
+
+/// Moves the queued jobs of a plan to the terminal `failed` status with the `cancelled` result.
+///
+/// A plan delete cancels the jobs that the scheduler created and the queue did not send yet, in the
+/// same transaction as the delete. A sent or running job keeps its lifecycle. The update is
+/// idempotent, so a second call changes nothing.
+pub async fn cancel_for_plan(
+    tx: &mut TenantTx<'_>,
+    plan_id: PlanId,
+    now: OffsetDateTime,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'failed', result_code = 'cancelled', finished_at = $2, \
+                updated_at = now() \
+         WHERE plan_id = $1 AND status = 'queued'",
+    )
+    .bind(plan_id)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
 }
 
 /// Moves one overdue job to the terminal `expired` status. `false` when it is terminal
@@ -257,59 +344,47 @@ pub async fn expire_overdue(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Resul
     Ok(result.rows_affected())
 }
 
-type JobRow = (
-    Uuid,
-    JobKind,
-    Uuid,
-    Option<Uuid>,
-    JobStatus,
-    Option<JobResultCode>,
-    Option<String>,
-    Option<String>,
-    Option<OffsetDateTime>,
-    Option<OffsetDateTime>,
-    Option<OffsetDateTime>,
-    Option<OffsetDateTime>,
-    OffsetDateTime,
-    OffsetDateTime,
-    Option<Uuid>,
-);
+#[derive(sqlx::FromRow)]
+struct JobRow {
+    id: Uuid,
+    kind: JobKind,
+    agent_id: Uuid,
+    repository_id: Option<Uuid>,
+    plan_id: Option<Uuid>,
+    fire_time: Option<OffsetDateTime>,
+    status: JobStatus,
+    result_code: Option<JobResultCode>,
+    result_message: Option<String>,
+    location_fingerprint: Option<String>,
+    expires_at: Option<OffsetDateTime>,
+    sent_at: Option<OffsetDateTime>,
+    started_at: Option<OffsetDateTime>,
+    finished_at: Option<OffsetDateTime>,
+    created_at: OffsetDateTime,
+    updated_at: OffsetDateTime,
+    created_by: Option<Uuid>,
+}
 
 impl From<JobRow> for Job {
     fn from(row: JobRow) -> Self {
-        let (
-            id,
-            kind,
-            agent_id,
-            repository_id,
-            status,
-            result_code,
-            result_message,
-            location_fingerprint,
-            expires_at,
-            sent_at,
-            started_at,
-            finished_at,
-            created_at,
-            updated_at,
-            created_by,
-        ) = row;
         Self {
-            id: JobId::from_uuid(id),
-            kind,
-            agent_id: AgentId::from_uuid(agent_id),
-            repository_id: repository_id.map(RepositoryId::from_uuid),
-            status,
-            result_code,
-            result_message,
-            location_fingerprint,
-            expires_at,
-            sent_at,
-            started_at,
-            finished_at,
-            created_at,
-            updated_at,
-            created_by: created_by.map(UserId::from_uuid),
+            id: JobId::from_uuid(row.id),
+            kind: row.kind,
+            agent_id: AgentId::from_uuid(row.agent_id),
+            repository_id: row.repository_id.map(RepositoryId::from_uuid),
+            plan_id: row.plan_id.map(PlanId::from_uuid),
+            fire_time: row.fire_time,
+            status: row.status,
+            result_code: row.result_code,
+            result_message: row.result_message,
+            location_fingerprint: row.location_fingerprint,
+            expires_at: row.expires_at,
+            sent_at: row.sent_at,
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            created_by: row.created_by.map(UserId::from_uuid),
         }
     }
 }

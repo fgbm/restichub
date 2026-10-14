@@ -4,6 +4,29 @@ export function formatTime(value: string): string {
 	return new Date(value).toLocaleString(getLocale());
 }
 
+/** Formats an instant in a given IANA time zone (FR-SC-01). */
+export function formatTimeInZone(value: string, timeZone: string): string {
+	try {
+		return new Intl.DateTimeFormat(getLocale(), {
+			dateStyle: 'medium',
+			timeStyle: 'short',
+			timeZone
+		}).format(new Date(value));
+	} catch {
+		return formatTime(value);
+	}
+}
+
+/**
+ * Formats an instant in a given IANA time zone and appends the zone name; the local time follows
+ * when it differs (FR-SC-01).
+ */
+export function formatTimeInZoneWithLocal(value: string, timeZone: string): string {
+	const zoned = formatTimeInZone(value, timeZone);
+	const local = formatTime(value);
+	return local === zoned ? `${zoned} ${timeZone}` : `${zoned} ${timeZone} · ${local} local`;
+}
+
 const relativeSteps: [Intl.RelativeTimeFormatUnit, number][] = [
 	['second', 60],
 	['minute', 60],

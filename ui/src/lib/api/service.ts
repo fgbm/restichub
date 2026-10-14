@@ -18,6 +18,7 @@ import type {
 	ChangePasswordRequest,
 	CreateApiTokenRequest,
 	CreateEnrollmentTokenRequest,
+	CreatePlanRequest,
 	CreateProfileRequest,
 	CreateRepositoryRequest,
 	CreateTenantRequest,
@@ -31,10 +32,15 @@ import type {
 	JobActionRequest,
 	Me,
 	MembershipInput,
+	NextRunsResponse,
+	Plan,
+	PlanListResponse,
+	PlanResponse,
 	PlatformUser,
 	PlatformUserListResponse,
 	PreviewRequest,
 	PreviewResponse,
+	PreviewScheduleRequest,
 	Profile,
 	ProfileListResponse,
 	ProfileResponse,
@@ -42,6 +48,7 @@ import type {
 	Repository,
 	RepositoryListResponse,
 	ResetPasswordRequest,
+	SchedulePreviewResponse,
 	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
@@ -51,6 +58,7 @@ import type {
 	TenantAccessListResponse,
 	TenantListResponse,
 	UpdateAccountRequest,
+	UpdatePlanRequest,
 	UpdateProfileRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
@@ -114,6 +122,16 @@ export interface ApiService {
 	deleteProfile(id: string): Promise<void>;
 	/** The compiled steps of a profile for one agent, with masked secrets (FR-PF-04). */
 	previewProfile(id: string, agentId: string): Promise<PreviewResponse>;
+
+	/** The plans of the tenant (FR-SC-01). */
+	listPlans(): Promise<Plan[]>;
+	createPlan(request: CreatePlanRequest): Promise<PlanResponse>;
+	updatePlan(id: string, request: UpdatePlanRequest): Promise<PlanResponse>;
+	deletePlan(id: string): Promise<void>;
+	/** The next fire times of a plan, in UTC (FR-SC-01). */
+	nextRuns(id: string, count: number): Promise<NextRunsResponse>;
+	/** The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
+	previewSchedule(request: PreviewScheduleRequest): Promise<SchedulePreviewResponse>;
 
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
@@ -195,6 +213,14 @@ const httpService: ApiService = {
 		api.post<PreviewResponse>(endpoints.profiles.preview(id), {
 			agent_id: agentId
 		} satisfies PreviewRequest),
+
+	listPlans: () =>
+		api.get<PlanListResponse>(endpoints.plans.list).then((response) => response.items),
+	createPlan: (request) => api.post<PlanResponse>(endpoints.plans.create, request),
+	updatePlan: (id, request) => api.patch<PlanResponse>(endpoints.plans.byId(id), request),
+	deletePlan: (id) => api.delete<void>(endpoints.plans.byId(id)),
+	nextRuns: (id, count) => api.get<NextRunsResponse>(endpoints.plans.nextRuns(id, count)),
+	previewSchedule: (request) => api.post<SchedulePreviewResponse>(endpoints.plans.preview, request),
 
 	listTenants: () =>
 		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),

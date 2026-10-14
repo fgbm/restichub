@@ -365,6 +365,44 @@ impl JobStatus {
     }
 }
 
+/// How many jobs the scheduler creates after a downtime, or after an agent was not active
+/// (FR-SC-07).
+///
+/// The policy decides how many jobs the scheduler creates after the control plane was down, or
+/// after an agent that was not active for a while (FR-SC-07). The string value of each variant is
+/// the stored value of the `missed_run_policy` column. It is stable: do not change a string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum MissedRunPolicy {
+    /// One job for each missed fire time.
+    RunAll,
+    /// One job for the latest missed fire time.
+    LatestOnly,
+    /// No job for a missed fire time.
+    Skip,
+}
+
+impl MissedRunPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RunAll => "run_all",
+            Self::LatestOnly => "latest_only",
+            Self::Skip => "skip",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "run_all" => Some(Self::RunAll),
+            "latest_only" => Some(Self::LatestOnly),
+            "skip" => Some(Self::Skip),
+            _ => None,
+        }
+    }
+}
+
 /// The typed result of a finished job (FR-AG-09, AC-RP-01).
 ///
 /// The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the

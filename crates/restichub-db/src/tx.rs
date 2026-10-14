@@ -63,6 +63,37 @@ impl<'a> TenantTx<'a> {
         &mut self.tx
     }
 
+    /// Marks a point inside the open transaction.
+    ///
+    /// A caller that runs several independent units of work in one transaction uses a savepoint, so
+    /// a failure of one unit does not roll back the whole transaction. The name is a fixed
+    /// identifier that the caller chooses, never user input.
+    pub async fn savepoint(&mut self, name: &str) -> Result<(), DbError> {
+        sqlx::query(sqlx::AssertSqlSafe(format!("SAVEPOINT {name}")))
+            .execute(&mut *self.tx)
+            .await
+            .map_err(DbError::Query)?;
+        Ok(())
+    }
+
+    /// Rolls the transaction back to a savepoint. The savepoint stays defined.
+    pub async fn rollback_to_savepoint(&mut self, name: &str) -> Result<(), DbError> {
+        sqlx::query(sqlx::AssertSqlSafe(format!("ROLLBACK TO SAVEPOINT {name}")))
+            .execute(&mut *self.tx)
+            .await
+            .map_err(DbError::Query)?;
+        Ok(())
+    }
+
+    /// Releases a savepoint. The work inside it stays part of the transaction.
+    pub async fn release_savepoint(&mut self, name: &str) -> Result<(), DbError> {
+        sqlx::query(sqlx::AssertSqlSafe(format!("RELEASE SAVEPOINT {name}")))
+            .execute(&mut *self.tx)
+            .await
+            .map_err(DbError::Query)?;
+        Ok(())
+    }
+
     pub async fn commit(self) -> Result<(), DbError> {
         self.tx.commit().await.map_err(DbError::Query)
     }

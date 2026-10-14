@@ -21,6 +21,7 @@ describe('navigation', () => {
 			'/(app)/hosts',
 			'/(app)/repositories',
 			'/(app)/profiles',
+			'/(app)/plans',
 			'/(app)/audit',
 			'/(app)/settings'
 		]);
@@ -32,6 +33,7 @@ describe('navigation', () => {
 			'/(app)/hosts',
 			'/(app)/repositories',
 			'/(app)/profiles',
+			'/(app)/plans',
 			'/(app)/audit'
 		]);
 		expect(hrefs('organization', 'viewer', false)).toEqual([
@@ -39,6 +41,7 @@ describe('navigation', () => {
 			'/(app)/hosts',
 			'/(app)/repositories',
 			'/(app)/profiles',
+			'/(app)/plans',
 			'/(app)/audit'
 		]);
 	});
@@ -49,6 +52,7 @@ describe('navigation', () => {
 			'/(app)/hosts',
 			'/(app)/repositories',
 			'/(app)/profiles',
+			'/(app)/plans',
 			'/(app)/audit',
 			'/(app)/settings'
 		]);

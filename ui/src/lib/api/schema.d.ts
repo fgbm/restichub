@@ -352,6 +352,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the plans of the tenant with keyset pagination. */
+        get: operations["list_plans"];
+        put?: never;
+        /**
+         * Creates a plan in the tenant.
+         * @description The control plane validates the cron expression, the time zone and the stored profile against the agent before the write (FR-PF-05).
+         */
+        post: operations["create_plan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Previews the next fire times of a schedule.
+         * @description The fire times are in UTC; the user interface renders them in the given time zone.
+         */
+        post: operations["preview_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one plan of the tenant. */
+        get: operations["get_plan"];
+        put?: never;
+        post?: never;
+        /** Removes a plan. */
+        delete: operations["delete_plan"];
+        options?: never;
+        head?: never;
+        /** Updates a plan. The body replaces the schedule; an absent name keeps the name. */
+        patch: operations["update_plan"];
+        trace?: never;
+    };
+    "/api/v1/plans/{id}/next-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Previews the next fire times of a plan.
+         * @description The fire times are in UTC; the user interface renders them in the plan time zone.
+         */
+        get: operations["next_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/audit": {
         parameters: {
             query?: never;
@@ -1078,6 +1158,17 @@ export interface components {
             /** @description Returned only here. */
             token: string;
         };
+        /** @description The request body of a plan create (FR-SC-01, FR-SC-07, FR-SC-11). */
+        CreatePlanRequest: {
+            agent_id: string;
+            cron: string;
+            enabled?: boolean;
+            missed_run_policy: components["schemas"]["MissedRunPolicy"];
+            name: string;
+            profile_id: string;
+            /** @description An IANA name, such as `Europe/Berlin`, validated before the write. */
+            time_zone: string;
+        };
         /** @description The fields that arrive at the create endpoint (FR-PF-01). */
         CreateProfileRequest: {
             check?: components["schemas"]["CheckOptions"] | null;
@@ -1328,6 +1419,65 @@ export interface components {
             role: components["schemas"]["Role"];
             tenant_id: string;
         };
+        /**
+         * @description How many jobs the scheduler creates after a downtime, or after an agent was not active
+         *     (FR-SC-07).
+         *
+         *     The policy decides how many jobs the scheduler creates after the control plane was down, or
+         *     after an agent that was not active for a while (FR-SC-07). The string value of each variant is
+         *     the stored value of the `missed_run_policy` column. It is stable: do not change a string.
+         * @enum {string}
+         */
+        MissedRunPolicy: "run_all" | "latest_only" | "skip";
+        /** @description The next fire times of a plan, in UTC (FR-SC-01). */
+        NextRunsResponse: {
+            plan_id: string;
+            /** @description The fire times in UTC, formatted as RFC 3339. */
+            runs: string[];
+            /** @description The time zone of the plan; the user interface renders each run in it. */
+            time_zone: string;
+        };
+        PlanListResponse: {
+            items: components["schemas"]["PlanView"][];
+            next_cursor?: string | null;
+        };
+        PlanResponse: {
+            plan: components["schemas"]["PlanView"];
+        };
+        /** @description One plan with its display values (FR-SC-01). */
+        PlanView: {
+            agent_hostname: string;
+            agent_id: string;
+            created_at: string;
+            cron: string;
+            enabled: boolean;
+            id: string;
+            /** @description The last fire time that the scheduler processed, in RFC 3339. */
+            last_fire_time?: string | null;
+            missed_run_policy: components["schemas"]["MissedRunPolicy"];
+            name: string;
+            /** @description In UTC, in RFC 3339. Null when the plan is disabled. */
+            next_run_at?: string | null;
+            profile_id: string;
+            profile_name: string;
+            repository_id: string;
+            time_zone: string;
+            updated_at: string;
+        };
+        /**
+         * @description A plan that the updated profile no longer compiles for (FR-SC-11).
+         *
+         *     The update does not refuse the change. The plan keeps its schedule and fails at dispatch time,
+         *     when the queue recompiles the profile for the facts of the agent, in a later part of epic #7.
+         */
+        PlanWarning: {
+            /** @description The compiler field that the profile fails on, for example `paths`. */
+            field: string;
+            name: string;
+            plan_id: string;
+            /** @description Stable snake_case code. */
+            reason: string;
+        };
         /** @description One membership of an account in the platform account list (ADR-0028). */
         PlatformMembershipView: {
             /** @description Off in this organization only. */
@@ -1386,6 +1536,12 @@ export interface components {
             repository_id: string;
             steps: components["schemas"]["PreviewStepView"][];
         };
+        /** @description The request body of the schedule preview (FR-SC-01). */
+        PreviewScheduleRequest: {
+            count?: number;
+            cron: string;
+            time_zone: string;
+        };
         /**
          * @description One previewed step: the kind, the maintenance flag, the command line and the environment
          *     (FR-PF-04, AC-PF-01).
@@ -1435,6 +1591,8 @@ export interface components {
          *     (FR-PF-05).
          */
         ProfileResponse: {
+            /** @description The plans of the profile that the updated settings no longer compile for (FR-SC-11). */
+            plan_warnings: components["schemas"]["PlanWarning"][];
             profile: components["schemas"]["ProfileView"];
             warnings: components["schemas"]["ProfileWarning"][];
         };
@@ -1525,6 +1683,13 @@ export interface components {
          * @enum {string}
          */
         Role: "platform_admin" | "admin" | "operator" | "viewer";
+        /** @description The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
+        SchedulePreviewResponse: {
+            /** @description The fire times in UTC, formatted as RFC 3339. */
+            runs: string[];
+            /** @description The time zone that the user interface renders each run in. */
+            time_zone: string;
+        };
         /**
          * @description The metadata of one secret with the marker that the value is set (FR-RP-05).
          *
@@ -1652,6 +1817,16 @@ export interface components {
             password?: string | null;
             /** @description True when the account holds the installation-wide right (ADR-0029). */
             platform_admin?: boolean | null;
+        };
+        /** @description The request body of a plan update. An absent name keeps the name. */
+        UpdatePlanRequest: {
+            agent_id: string;
+            cron: string;
+            enabled?: boolean;
+            missed_run_policy: components["schemas"]["MissedRunPolicy"];
+            name?: string | null;
+            profile_id: string;
+            time_zone: string;
         };
         /** @description The body of a profile update. The body replaces the settings; an absent name keeps the name. */
         UpdateProfileRequest: {
@@ -2694,6 +2869,388 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_plans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cursor: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The plans of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanListResponse"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description The plan is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    preview_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description The next fire times. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulePreviewResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the plan. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The plan. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The plan is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the plan. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The plan is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The plan is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    update_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the plan. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated plan. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The plan is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    next_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the plan. */
+                id: string;
+                count: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The next fire times. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NextRunsResponse"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The plan is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
             };
         };
     };

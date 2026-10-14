@@ -14,7 +14,7 @@ The queue must do more than first-in, first-out. It must hold exclusive operatio
 - Repository barriers and limits are part of the selection query.
 - The scheduler uses `croner` to calculate the next fire time. Each plan stores its time zone and `next_run_at`.
 - Job creation is idempotent: unique key `(plan_id, fire_time)`. Two scheduler instances cannot create the same job.
-- In a DST gap, the job runs once, immediately after the clock change. In a DST overlap, the job runs once, at the first occurrence.
+- In a DST gap, a fixed-time job runs once, immediately after the clock change. In a DST overlap, a fixed-time job runs once, at the first occurrence. An interval expression, such as `0 * * * *` or `*/15`, names no wall-clock time, so it runs in both halves of the overlap.
 
 ## Consequences
 

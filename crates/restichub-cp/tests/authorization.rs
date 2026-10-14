@@ -157,6 +157,8 @@ async fn ac_au_02_role_operation_matrix() {
                 role == Role::PlatformAdmin,
                 &session_tenant.to_string(),
                 &id,
+                &id,
+                &id,
             );
             let (status, _, _) = send(&app, request(&method, &path, Some(&cookie), body)).await;
 
@@ -211,6 +213,14 @@ async fn ac_au_02_role_operation_matrix() {
     assert!(Operation::RepositoriesRead.is_tenant_only());
     assert!(Operation::RepositoriesWrite.is_tenant_only());
     assert!(!Operation::UsersRead.is_tenant_only());
+    // An Operator manages the plans too; a Viewer reads them (requirements section 2).
+    assert_eq!(minimum_role(Operation::PlansRead), Role::Viewer);
+    assert_eq!(minimum_role(Operation::PlansWrite), Role::Operator);
+    assert!(Role::Viewer.allows(minimum_role(Operation::PlansRead)));
+    assert!(!Role::Viewer.allows(minimum_role(Operation::PlansWrite)));
+    assert!(Role::Operator.allows(minimum_role(Operation::PlansWrite)));
+    assert!(Operation::PlansRead.is_tenant_only());
+    assert!(Operation::PlansWrite.is_tenant_only());
     // The account operations are the allow-list of the platform tenant.
     assert!(Operation::AuthMe.is_auth());
     assert!(Operation::AuthPasswordChange.is_auth());
