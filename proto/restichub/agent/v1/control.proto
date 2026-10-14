@@ -56,6 +56,8 @@ message AgentMessage {
     Pong pong = 8;
     // CertificateSigningRequest asks for certificate rotation (FR-ID-03).
     CertificateSigningRequest certificate_signing_request = 9;
+    // KeyUpdateAck confirms a signing key set update (ADR-0026, FR-PR-11).
+    KeyUpdateAck key_update_ack = 10;
   }
 }
 
@@ -103,6 +105,15 @@ message SigningKeyUpdate {
   // signer before it decodes key_update (ADR-0005). The decoded KeyUpdate
   // carries the same identifier; a difference is an error (FR-PR-11).
   string signer_key_id = 3;
+}
+
+// KeyUpdateAck confirms that the agent accepted a signing key set update, so
+// the control plane can retire the old key once every online agent answered
+// (ADR-0026, FR-PR-11).
+message KeyUpdateAck {
+  // Identifier of the current key that the agent now holds, that is the
+  // signer_key_id of the accepted SigningKeyUpdate.
+  string key_id = 1;
 }
 
 // KeyUpdate rotates the job signing key (FR-PR-11, ADR-0005).
