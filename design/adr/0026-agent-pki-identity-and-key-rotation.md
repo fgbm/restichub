@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-10-13
+- Extended by [ADR-0033](0033-enrollment-transport-and-agent-trust-bootstrap.md) on 2026-10-14. The enrollment endpoint is also served on the public web origin. The agent pins the installation root CA for the stream.
 - Requirements: FR-ID-01..05, FR-ID-07, FR-ID-08, FR-PR-03, FR-PR-04, FR-PR-05, FR-PR-08, FR-PR-11, NFR-SEC-01, NFR-SEC-04
 
 ## Context

@@ -15,13 +15,14 @@
 //! the concurrent handshakes, a cap on the established connections, an idle timeout for a connection
 //! without a client certificate and the HTTP/2 limits of the gRPC server.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -51,18 +52,41 @@ pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// A connection without a client certificate must send its request within this time (HIGH 2).
 pub const ANONYMOUS_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The total lifetime of a connection without a client certificate (MEDIUM 2).
+pub const ANONYMOUS_LIFETIME: Duration = Duration::from_secs(30);
+
 /// The largest number of concurrent TLS handshakes (HIGH 2).
 const HANDSHAKE_CONCURRENCY: usize = 256;
+
+/// The largest number of concurrent handshakes from one address (MEDIUM 2).
+const HANDSHAKES_PER_IP: usize = 16;
+
+/// The largest number of concurrent connections without a client certificate from one address
+/// (MEDIUM 2).
+const ANONYMOUS_PER_IP: usize = 16;
+
+/// Connections without a client certificate may use at most this fraction of the cap (MEDIUM 2).
+const ANONYMOUS_SHARE_DIVISOR: usize = 10;
 
 /// The default cap on the established connections. It covers 2000 agents and a margin (HIGH 2).
 pub const DEFAULT_MAX_CONNECTIONS: usize = 2200;
 
-/// Load bounds of the listener (HIGH 2).
+/// The load bounds of the listener (HIGH 2, MEDIUM 2).
 #[derive(Debug, Clone, Copy)]
 pub struct ListenerLimits {
     pub max_connections: usize,
     pub handshake_timeout: Duration,
     pub anonymous_idle_timeout: Duration,
+    pub anonymous_lifetime: Duration,
+    pub handshakes_per_ip: usize,
+    pub anonymous_per_ip: usize,
+}
+
+impl ListenerLimits {
+    /// The number of connections without a client certificate that the cap allows (MEDIUM 2).
+    fn anonymous_share(&self) -> usize {
+        (self.max_connections / ANONYMOUS_SHARE_DIVISOR).max(1)
+    }
 }
 
 impl Default for ListenerLimits {
@@ -71,6 +95,9 @@ impl Default for ListenerLimits {
             max_connections: DEFAULT_MAX_CONNECTIONS,
             handshake_timeout: TLS_HANDSHAKE_TIMEOUT,
             anonymous_idle_timeout: ANONYMOUS_IDLE_TIMEOUT,
+            anonymous_lifetime: ANONYMOUS_LIFETIME,
+            handshakes_per_ip: HANDSHAKES_PER_IP,
+            anonymous_per_ip: ANONYMOUS_PER_IP,
         }
     }
 }
@@ -297,16 +324,162 @@ pub fn der_to_pem(label: &str, der: &[u8]) -> String {
     text
 }
 
-/// One accepted connection with its peer information and its load guards (HIGH 2).
+/// The counters that bound the load of the listener (HIGH 2, MEDIUM 2).
+struct Load {
+    connections: AtomicUsize,
+    anonymous: AtomicUsize,
+    anonymous_by_ip: Mutex<HashMap<IpAddr, usize>>,
+    handshakes_by_ip: Mutex<HashMap<IpAddr, usize>>,
+    max_connections: usize,
+    anonymous_share: usize,
+    anonymous_per_ip: usize,
+    handshakes_per_ip: usize,
+}
+
+impl Load {
+    fn new(limits: &ListenerLimits) -> Self {
+        Self {
+            connections: AtomicUsize::new(0),
+            anonymous: AtomicUsize::new(0),
+            anonymous_by_ip: Mutex::new(HashMap::new()),
+            handshakes_by_ip: Mutex::new(HashMap::new()),
+            max_connections: limits.max_connections,
+            anonymous_share: limits.anonymous_share(),
+            anonymous_per_ip: limits.anonymous_per_ip,
+            handshakes_per_ip: limits.handshakes_per_ip,
+        }
+    }
+
+    /// Reserves a handshake slot for an address. `None` when the address holds its per-IP limit.
+    fn try_handshake(self: &Arc<Self>, ip: IpAddr) -> Option<HandshakeGuard> {
+        let mut by_ip = self
+            .handshakes_by_ip
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let count = by_ip.entry(ip).or_insert(0);
+        if *count >= self.handshakes_per_ip {
+            return None;
+        }
+        *count += 1;
+        Some(HandshakeGuard {
+            load: Arc::clone(self),
+            ip,
+        })
+    }
+
+    /// Reserves a connection slot. `None` when the cap or an anonymous limit is reached (MEDIUM 2).
+    fn try_connect(self: &Arc<Self>, ip: IpAddr, authenticated: bool) -> Option<ConnectGuard> {
+        if self.connections.load(Ordering::Acquire) >= self.max_connections {
+            return None;
+        }
+        if !authenticated {
+            if self.anonymous.load(Ordering::Acquire) >= self.anonymous_share {
+                return None;
+            }
+            let mut by_ip = self
+                .anonymous_by_ip
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let count = by_ip.entry(ip).or_insert(0);
+            if *count >= self.anonymous_per_ip {
+                return None;
+            }
+            *count += 1;
+            self.anonymous.fetch_add(1, Ordering::AcqRel);
+        }
+        self.connections.fetch_add(1, Ordering::AcqRel);
+        Some(ConnectGuard {
+            load: Arc::clone(self),
+            ip,
+            anonymous: !authenticated,
+        })
+    }
+}
+
+/// One in-progress handshake slot of an address (MEDIUM 2).
+struct HandshakeGuard {
+    load: Arc<Load>,
+    ip: IpAddr,
+}
+
+impl Drop for HandshakeGuard {
+    fn drop(&mut self) {
+        let mut by_ip = self
+            .load
+            .handshakes_by_ip
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(count) = by_ip.get_mut(&self.ip) {
+            *count -= 1;
+            if *count == 0 {
+                by_ip.remove(&self.ip);
+            }
+        }
+    }
+}
+
+/// One established connection slot (HIGH 2, MEDIUM 2).
+struct ConnectGuard {
+    load: Arc<Load>,
+    ip: IpAddr,
+    anonymous: bool,
+}
+
+impl Drop for ConnectGuard {
+    fn drop(&mut self) {
+        self.load.connections.fetch_sub(1, Ordering::AcqRel);
+        if self.anonymous {
+            self.load.anonymous.fetch_sub(1, Ordering::AcqRel);
+            let mut by_ip = self
+                .load
+                .anonymous_by_ip
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(count) = by_ip.get_mut(&self.ip) {
+                *count -= 1;
+                if *count == 0 {
+                    by_ip.remove(&self.ip);
+                }
+            }
+        }
+    }
+}
+
+/// One accepted connection with its peer information and its load guards (HIGH 2, MEDIUM 2).
 ///
-/// The type counts the established connection and closes an anonymous connection that sends no
-/// request within the idle timeout.
+/// The type closes a connection without a client certificate at the idle timeout and at the total
+/// lifetime cap, whatever the HTTP/2 keepalive does.
 struct AgentConnection {
     inner: TlsStream<TcpStream>,
     peer: PeerInfo,
-    connections: Arc<AtomicUsize>,
+    _guard: ConnectGuard,
     /// The deadline for the first read of an anonymous connection; `None` once a byte arrives.
     first_byte: Option<Pin<Box<tokio::time::Sleep>>>,
+    /// The total lifetime of an anonymous connection; always armed for one.
+    lifetime: Option<Pin<Box<tokio::time::Sleep>>>,
+}
+
+impl AgentConnection {
+    /// Polls the deadlines. An elapsed deadline closes the connection.
+    fn check_deadlines(&mut self, cx: &mut Context<'_>) -> io::Result<()> {
+        if let Some(deadline) = self.first_byte.as_mut()
+            && deadline.as_mut().poll(cx).is_ready()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the connection sent no request",
+            ));
+        }
+        if let Some(deadline) = self.lifetime.as_mut()
+            && deadline.as_mut().poll(cx).is_ready()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the connection reached its lifetime",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl AsyncRead for AgentConnection {
@@ -316,13 +489,8 @@ impl AsyncRead for AgentConnection {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        if let Some(deadline) = this.first_byte.as_mut()
-            && deadline.as_mut().poll(cx).is_ready()
-        {
-            return Poll::Ready(Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "the connection sent no request",
-            )));
+        if let Err(error) = this.check_deadlines(cx) {
+            return Poll::Ready(Err(error));
         }
         let before = buf.filled().len();
         let result = Pin::new(&mut this.inner).poll_read(cx, buf);
@@ -339,7 +507,11 @@ impl AsyncWrite for AgentConnection {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+        let this = self.get_mut();
+        if let Err(error) = this.check_deadlines(cx) {
+            return Poll::Ready(Err(error));
+        }
+        Pin::new(&mut this.inner).poll_write(cx, buf)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -356,12 +528,6 @@ impl Connected for AgentConnection {
 
     fn connect_info(&self) -> PeerInfo {
         self.peer.clone()
-    }
-}
-
-impl Drop for AgentConnection {
-    fn drop(&mut self) {
-        self.connections.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -389,7 +555,7 @@ pub async fn serve_listener(
 ) -> Result<(), ListenerError> {
     let acceptor = TlsAcceptor::from(tls);
     let handshakes = Arc::new(Semaphore::new(HANDSHAKE_CONCURRENCY));
-    let connections = Arc::new(AtomicUsize::new(0));
+    let load = Arc::new(Load::new(&limits));
     let (tx, rx) = tokio::sync::mpsc::channel::<io::Result<AgentConnection>>(64);
     tokio::spawn(async move {
         loop {
@@ -402,16 +568,23 @@ pub async fn serve_listener(
                 }
             };
             set_keepalive(&stream);
-            // A handshake over the limit drops the connection, so a flood cannot exhaust memory.
+            let ip = peer.ip();
+            // A handshake over the global or the per-IP limit drops the connection, so a flood
+            // cannot exhaust memory and one address cannot hold every slot (HIGH 2, MEDIUM 2).
             let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+                drop(stream);
+                continue;
+            };
+            let Some(handshake) = load.try_handshake(ip) else {
                 drop(stream);
                 continue;
             };
             let acceptor = acceptor.clone();
             let tx = tx.clone();
-            let connections = Arc::clone(&connections);
+            let load = Arc::clone(&load);
             tokio::spawn(async move {
                 let _permit = permit;
+                let _handshake = handshake;
                 let tls =
                     match tokio::time::timeout(limits.handshake_timeout, acceptor.accept(stream))
                         .await
@@ -420,28 +593,31 @@ pub async fn serve_listener(
                         // A failed or a slow handshake drops the connection.
                         _ => return,
                     };
-                if connections.fetch_add(1, Ordering::AcqRel) >= limits.max_connections {
-                    connections.fetch_sub(1, Ordering::AcqRel);
-                    return;
-                }
                 let certs = tls
                     .get_ref()
                     .1
                     .peer_certificates()
                     .map(|certs| Arc::new(certs.to_vec()));
+                let authenticated = certs.is_some();
+                // The cap and the anonymous share of it bound the established connections.
+                let Some(guard) = load.try_connect(ip, authenticated) else {
+                    return;
+                };
                 // A connection without a client certificate may only enroll, so it must send its
-                // request promptly (HIGH 2).
-                let first_byte = certs
-                    .is_none()
+                // request promptly and it lives for a bounded time (HIGH 2, MEDIUM 2).
+                let first_byte = (!authenticated)
                     .then(|| Box::pin(tokio::time::sleep(limits.anonymous_idle_timeout)));
+                let lifetime = (!authenticated)
+                    .then(|| Box::pin(tokio::time::sleep(limits.anonymous_lifetime)));
                 let connection = AgentConnection {
                     inner: tls,
                     peer: PeerInfo {
                         remote: Some(peer),
                         certs,
                     },
-                    connections,
+                    _guard: guard,
                     first_byte,
+                    lifetime,
                 };
                 let _ = tx.send(Ok(connection)).await;
             });

@@ -50,6 +50,9 @@ pub const IDLE_CLOSE: Duration = Duration::from_secs(3 * HEARTBEAT_INTERVAL.as_s
 /// Control messages buffered for one agent.
 const OUTBOUND_CHANNEL: usize = 64;
 
+/// The largest accepted key identifier in a `KeyUpdateAck` (MEDIUM 3).
+const MAX_KEY_ID_LEN: usize = 64;
+
 const SAN_PREFIX: &str = "restichub://tenant/";
 const SAN_MIDDLE: &str = "/agent/";
 
@@ -100,10 +103,10 @@ pub struct StreamRegistry {
 struct Inner {
     streams: HashMap<AgentId, StreamEntry>,
     ack: Option<AckRun>,
-    /// Acknowledgements that arrived before the rotation was recorded, keyed by the current key id.
-    pending_acks: HashMap<String, HashSet<AgentId>>,
     /// The agents that reported activity since the last flush, with the serial to guard.
     last_seen: HashMap<TenantId, HashMap<AgentId, String>>,
+    /// The last acknowledgement that arrived before its rotation was recorded, one per agent.
+    pending_acks: HashMap<AgentId, String>,
 }
 
 /// One signing key rotation that waits for the acknowledgements.
@@ -247,10 +250,15 @@ impl StreamRegistry {
             return None;
         }
         let expected: HashSet<AgentId> = inner.streams.keys().copied().collect();
-        let acked = inner
+        let acked: HashSet<AgentId> = inner
             .pending_acks
-            .remove(current_key_id)
-            .unwrap_or_default();
+            .iter()
+            .filter(|(_, key_id)| key_id.as_str() == current_key_id)
+            .map(|(agent, _)| *agent)
+            .collect();
+        inner
+            .pending_acks
+            .retain(|_, key_id| key_id.as_str() != current_key_id);
         if expected.is_subset(&acked) {
             inner.ack = None;
             return Some(pending_id);
@@ -280,12 +288,13 @@ impl StreamRegistry {
             }
             return None;
         }
-        inner
-            .pending_acks
-            .entry(current_key_id.to_owned())
-            .or_default()
-            .insert(agent);
+        inner.pending_acks.insert(agent, current_key_id.to_owned());
         None
+    }
+
+    #[cfg(test)]
+    fn pending_ack_count(&self) -> usize {
+        self.lock().pending_acks.len()
     }
 }
 
@@ -445,24 +454,21 @@ impl AgentService for AgentStreamService {
         // Subscribe before the fresh key set, so a rotation in between is not lost (LOW 6).
         let rotation = self.state.job_signing().map(JobSigningService::subscribe);
 
+        let now = self.state.auth().clock.now();
+        // Check the registry before the registration: a refused connection must not touch the live
+        // stream of the same agent (MEDIUM 1).
+        check_registry(self.state.db(), &identity, now).await?;
+
         let (tx, rx) = mpsc::channel::<ControlMessage>(OUTBOUND_CHANNEL);
         let (close_tx, close_rx) = watch::channel(false);
-        // Register before the registry check: a revoke that lands in the window closes this stream
-        // and the check refuses the open (HIGH 1).
         let generation = self
             .state
             .agent_registry()
             .open(identity.agent, close_tx, tx.clone());
 
-        let now = self.state.auth().clock.now();
-        if let Err(status) = check_registry(self.state.db(), &identity, now).await {
-            self.state
-                .agent_registry()
-                .remove(identity.agent, generation);
-            return Err(status);
-        }
         // The guarded write re-checks the status, the serial and the expiry in one statement. A
-        // revoke or an expiry in the window refuses the stream (HIGH 1).
+        // revoke in the window closes this stream and refuses the open (HIGH 1). The refusal removes
+        // the new stream only, by generation (MEDIUM 1).
         if !touch_connected(self.state.db(), &identity, now).await {
             self.state
                 .agent_registry()
@@ -541,7 +547,7 @@ async fn run_stream(
                 Ok(Some(message)) => {
                     last_activity = tokio::time::Instant::now();
                     active = true;
-                    handle_message(&state, &identity, message);
+                    handle_message(&state, &identity, message).await;
                 }
                 Ok(None) | Err(_) => break,
             },
@@ -625,13 +631,23 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
     let _ = state.agent_registry().send_to_agent(agent, message);
 }
 
-/// Handles one inbound message (FR-PR-08, ADR-0026).
+/// Handles one inbound message (FR-PR-08, ADR-0026, MEDIUM 3).
 ///
-/// The identity comes from the certificate, never from the message. Job messages belong to #7; the
-/// stream records an acknowledgement of the key set and ignores a job message.
-fn handle_message(state: &AppState, identity: &PeerIdentity, message: AgentMessage) {
+/// The identity comes from the certificate, never from the message. An acknowledgement is accepted
+/// only for the current key identifier of the signing service and within the length bound, so a
+/// flood of other identifiers cannot grow the registry. Job messages belong to #7.
+async fn handle_message(state: &AppState, identity: &PeerIdentity, message: AgentMessage) {
     match message.payload {
         Some(agent_message::Payload::KeyUpdateAck(ack)) => {
+            if ack.key_id.len() > MAX_KEY_ID_LEN {
+                return;
+            }
+            let Some(signing) = state.job_signing() else {
+                return;
+            };
+            if signing.current_key_id(state.db()).await.as_deref() != Some(ack.key_id.as_str()) {
+                return;
+            }
             if let Some(pending) = state.agent_registry().ack(identity.agent, &ack.key_id) {
                 retire(state, pending);
             }
@@ -789,5 +805,16 @@ mod tests {
         assert!(registry.ack(agent, "key-2").is_none());
         let pending = Uuid::now_v7();
         assert_eq!(registry.note_rotation(pending, "key-2"), Some(pending));
+    }
+
+    /// MEDIUM 3: many acknowledgements keep at most one pending entry for each agent.
+    #[test]
+    fn many_acknowledgements_keep_one_pending_entry_for_each_agent() {
+        let registry = StreamRegistry::new();
+        let agent = AgentId::new();
+        for index in 0..10_000u32 {
+            registry.ack(agent, &format!("key-{index}"));
+        }
+        assert_eq!(registry.pending_ack_count(), 1);
     }
 }
