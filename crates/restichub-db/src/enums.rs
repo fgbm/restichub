@@ -251,6 +251,164 @@ impl BackendKind {
     }
 }
 
+/// The kind of a job (FR-PR-02, the seed of the scheduler of epic #7).
+///
+/// The kind is general, not init-specific. The string value of each variant is the stored value of
+/// the `kind` column. It is stable: do not change a string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum JobKind {
+    /// Creates a new restic repository when the repository does not exist (FR-RP-02).
+    Init,
+    /// Reads the repository configuration (FR-RP-02).
+    TestAccess,
+    /// Creates one snapshot of the selected paths on the agent.
+    Backup,
+    /// Tests the repository structure.
+    Check,
+    /// Applies the retention policy.
+    Forget,
+    /// Removes unused data.
+    Prune,
+    /// Restores a snapshot.
+    Restore,
+    /// Removes stale locks.
+    Unlock,
+    /// A job that does not fit any other kind of the closed set.
+    Other,
+}
+
+impl JobKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Init => "init",
+            Self::TestAccess => "test_access",
+            Self::Backup => "backup",
+            Self::Check => "check",
+            Self::Forget => "forget",
+            Self::Prune => "prune",
+            Self::Restore => "restore",
+            Self::Unlock => "unlock",
+            Self::Other => "other",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "init" => Some(Self::Init),
+            "test_access" => Some(Self::TestAccess),
+            "backup" => Some(Self::Backup),
+            "check" => Some(Self::Check),
+            "forget" => Some(Self::Forget),
+            "prune" => Some(Self::Prune),
+            "restore" => Some(Self::Restore),
+            "unlock" => Some(Self::Unlock),
+            "other" => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
+
+/// The lifecycle status of a job (FR-SC-03, FR-SC-07).
+///
+/// The MVP sends an on-demand job at once, so `queued` is the state before the send and `sent` the
+/// state after it. The scheduler of epic #7 adds the queue. The string value of each variant is the
+/// stored value of the `status` column. It is stable: do not change a string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum JobStatus {
+    /// The row exists; the control plane did not send the job.
+    Queued,
+    /// The control plane sent the job to the agent over the stream.
+    Sent,
+    /// The agent acknowledged the job and runs it (FR-PR-06).
+    Running,
+    /// The job finished and every step reported success to the control plane.
+    Succeeded,
+    /// The job finished and at least one step reported a failure.
+    Failed,
+    /// The job expired before the agent ran it, so the control plane discards it (FR-SC-07).
+    Expired,
+}
+
+impl JobStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Sent => "sent",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Expired => "expired",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "queued" => Some(Self::Queued),
+            "sent" => Some(Self::Sent),
+            "running" => Some(Self::Running),
+            "succeeded" => Some(Self::Succeeded),
+            "failed" => Some(Self::Failed),
+            "expired" => Some(Self::Expired),
+            _ => None,
+        }
+    }
+
+    /// True for a terminal status. A job in a terminal status never changes again.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Succeeded | Self::Failed | Self::Expired)
+    }
+}
+
+/// The typed result of a finished job (FR-AG-09, AC-RP-01).
+///
+/// The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the
+/// `result_code` column holds one of these strings. It is stable: do not change a string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum JobResultCode {
+    /// Every step succeeded.
+    Succeeded,
+    /// A step failed, so the job result carries the status of that step.
+    Failed,
+    /// The repository password or the backend credentials are wrong (AC-RP-01).
+    ConfigError,
+    /// The repository does not exist. A test_access job reports it (FR-RP-02).
+    NotInitialized,
+    /// The control plane cancelled the job (FR-AG-10).
+    Cancelled,
+}
+
+impl JobResultCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::ConfigError => "config_error",
+            Self::NotInitialized => "not_initialized",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "succeeded" => Some(Self::Succeeded),
+            "failed" => Some(Self::Failed),
+            "config_error" => Some(Self::ConfigError),
+            "not_initialized" => Some(Self::NotInitialized),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+}
+
 /// Audit actor type (ADR-0023, section Audit log).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -287,7 +445,8 @@ impl ActorType {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActorType, AdminState, AgentStatus, BackendKind, CaRole, Role, SigningKeyRole, TenantStatus,
+        ActorType, AdminState, AgentStatus, BackendKind, CaRole, JobKind, JobResultCode, JobStatus,
+        Role, SigningKeyRole, TenantStatus,
     };
 
     #[test]
@@ -368,5 +527,58 @@ mod tests {
             assert_eq!(BackendKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(BackendKind::parse("sftp"), None);
+    }
+
+    #[test]
+    fn the_job_kind_strings_are_stable() {
+        for kind in [
+            JobKind::Init,
+            JobKind::TestAccess,
+            JobKind::Backup,
+            JobKind::Check,
+            JobKind::Forget,
+            JobKind::Prune,
+            JobKind::Restore,
+            JobKind::Unlock,
+            JobKind::Other,
+        ] {
+            assert_eq!(JobKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(JobKind::parse("nope"), None);
+    }
+
+    #[test]
+    fn the_job_status_strings_are_stable() {
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Sent,
+            JobStatus::Running,
+            JobStatus::Succeeded,
+            JobStatus::Failed,
+            JobStatus::Expired,
+        ] {
+            assert_eq!(JobStatus::parse(status.as_str()), Some(status));
+        }
+        assert_eq!(JobStatus::parse("nope"), None);
+        assert!(JobStatus::Succeeded.is_terminal());
+        assert!(JobStatus::Failed.is_terminal());
+        assert!(JobStatus::Expired.is_terminal());
+        assert!(!JobStatus::Queued.is_terminal());
+        assert!(!JobStatus::Sent.is_terminal());
+        assert!(!JobStatus::Running.is_terminal());
+    }
+
+    #[test]
+    fn the_job_result_code_strings_are_stable() {
+        for code in [
+            JobResultCode::Succeeded,
+            JobResultCode::Failed,
+            JobResultCode::ConfigError,
+            JobResultCode::NotInitialized,
+            JobResultCode::Cancelled,
+        ] {
+            assert_eq!(JobResultCode::parse(code.as_str()), Some(code));
+        }
+        assert_eq!(JobResultCode::parse("nope"), None);
     }
 }

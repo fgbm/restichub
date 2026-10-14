@@ -215,6 +215,27 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: RepositoryId) -> Result<bool, DbE
     Ok(result.rows_affected() == 1)
 }
 
+/// Marks a repository as ready, or clears the mark (FR-RP-02).
+///
+/// The control plane sets it true after a successful `init` or a successful `test_access` on an
+/// existing repository. `false` when the row is absent or the flag already holds the value.
+pub async fn set_initialized(
+    tx: &mut TenantTx<'_>,
+    id: RepositoryId,
+    initialized: bool,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE repositories SET initialized = $2, updated_at = now() \
+         WHERE id = $1 AND initialized <> $2",
+    )
+    .bind(id)
+    .bind(initialized)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
 /// True when a repository of the tenant binds the secret as its password.
 ///
 /// The password of a repository cannot change until the rotation of FR-RP-06 (1.0).

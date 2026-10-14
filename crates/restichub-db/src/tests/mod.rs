@@ -64,7 +64,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 11] = [
+const TENANT_TABLES: [&str; 12] = [
     "users",
     "memberships",
     "sessions",
@@ -76,6 +76,7 @@ const TENANT_TABLES: [&str; 11] = [
     "agents",
     "enrollment_tokens",
     "repositories",
+    "jobs",
 ];
 
 struct Seed {
@@ -233,6 +234,18 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     )
     .bind(crate::RepositoryId::new())
     .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO jobs \
+         (id, tenant_id, kind, agent_id, repository_id, status, created_by) \
+         VALUES ($1, $2, 'test_access', (SELECT id FROM agents WHERE tenant_id = $2), \
+                 (SELECT id FROM repositories WHERE tenant_id = $2), 'queued', $3)",
+    )
+    .bind(crate::JobId::new())
+    .bind(tenant)
+    .bind(user)
     .execute(tx.as_conn())
     .await?;
 

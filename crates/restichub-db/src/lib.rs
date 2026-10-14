@@ -22,6 +22,7 @@ pub mod delivery;
 pub mod enrollment_tokens;
 pub mod enums;
 pub mod ids;
+pub mod jobs;
 pub mod kek;
 pub mod memberships;
 pub mod repositories;
@@ -37,11 +38,12 @@ pub mod users;
 pub mod test_util;
 
 pub use enums::{
-    ActorType, AdminState, AgentStatus, BackendKind, CaRole, Role, SigningKeyRole, TenantStatus,
+    ActorType, AdminState, AgentStatus, BackendKind, CaRole, JobKind, JobResultCode, JobStatus,
+    Role, SigningKeyRole, TenantStatus,
 };
 pub use ids::{
-    AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, PLATFORM_TENANT_ID, RepositoryId, SecretId,
-    SessionId, SetupTokenId, TenantId, UserId,
+    AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, JobId, PLATFORM_TENANT_ID, RepositoryId,
+    SecretId, SessionId, SetupTokenId, TenantId, UserId,
 };
 pub use tx::{EnrollmentTx, PlatformTx, TenantTx};
 
