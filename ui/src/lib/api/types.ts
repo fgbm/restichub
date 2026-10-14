@@ -190,6 +190,12 @@ export type PlanResponse = components['schemas']['PlanResponse'];
 /** The next fire times of a plan, in UTC (FR-SC-01). */
 export type NextRunsResponse = components['schemas']['NextRunsResponse'];
 
+/** The request body of the schedule preview (FR-SC-01). */
+export type PreviewScheduleRequest = components['schemas']['PreviewScheduleRequest'];
+
+/** The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
+export type SchedulePreviewResponse = components['schemas']['SchedulePreviewResponse'];
+
 /**
  * One audit record. The generated `diff` type is an opaque object, so the UI
  * replaces it with the diff shape that the control plane writes.

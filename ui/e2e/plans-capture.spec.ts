@@ -80,6 +80,8 @@ async function capture(page: Page, scheme: string, labels: Labels, suffix: strin
 	await page.locator('#plan-agent').selectOption({ index: 1 });
 	await page.locator('#plan-cron').fill('30 3 * * *');
 	await page.locator('#plan-time-zone').fill('Europe/Berlin');
+	await page.locator('.runs').waitFor();
+	await page.locator('.runs').scrollIntoViewIfNeeded();
 	await page.waitForTimeout(150);
 	await shot(page, `plans-create${suffix}`, scheme);
 	await page.keyboard.press('Escape');
@@ -89,6 +91,7 @@ async function capture(page: Page, scheme: string, labels: Labels, suffix: strin
 	await page.getByRole('menuitem', { name: labels.edit }).click();
 	await expect(page.getByRole('dialog')).toBeVisible();
 	await page.locator('.runs li').first().waitFor();
+	await page.locator('.runs').scrollIntoViewIfNeeded();
 	await page.waitForTimeout(150);
 	await shot(page, `plans-edit-next-runs${suffix}`, scheme);
 	await page.keyboard.press('Escape');

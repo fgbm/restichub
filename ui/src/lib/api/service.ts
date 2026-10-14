@@ -40,6 +40,7 @@ import type {
 	PlatformUserListResponse,
 	PreviewRequest,
 	PreviewResponse,
+	PreviewScheduleRequest,
 	Profile,
 	ProfileListResponse,
 	ProfileResponse,
@@ -47,6 +48,7 @@ import type {
 	Repository,
 	RepositoryListResponse,
 	ResetPasswordRequest,
+	SchedulePreviewResponse,
 	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
@@ -128,6 +130,8 @@ export interface ApiService {
 	deletePlan(id: string): Promise<void>;
 	/** The next fire times of a plan, in UTC (FR-SC-01). */
 	nextRuns(id: string, count: number): Promise<NextRunsResponse>;
+	/** The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
+	previewSchedule(request: PreviewScheduleRequest): Promise<SchedulePreviewResponse>;
 
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
@@ -216,6 +220,7 @@ const httpService: ApiService = {
 	updatePlan: (id, request) => api.patch<PlanResponse>(endpoints.plans.byId(id), request),
 	deletePlan: (id) => api.delete<void>(endpoints.plans.byId(id)),
 	nextRuns: (id, count) => api.get<NextRunsResponse>(endpoints.plans.nextRuns(id, count)),
+	previewSchedule: (request) => api.post<SchedulePreviewResponse>(endpoints.plans.preview, request),
 
 	listTenants: () =>
 		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),

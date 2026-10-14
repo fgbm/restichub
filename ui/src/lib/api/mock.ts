@@ -34,10 +34,12 @@ import type {
 	PlanResponse,
 	PlatformUser,
 	PreviewResponse,
+	PreviewScheduleRequest,
 	Profile,
 	ProfileResponse,
 	Repository,
 	ResetPasswordRequest,
+	SchedulePreviewResponse,
 	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
@@ -52,15 +54,17 @@ import type {
 	User
 } from './types';
 
+import { nextRunsFromCron } from '#lib/schedule.ts';
+
 const REDACTED = '<redacted>';
 
 function iso(minutesAgo: number): string {
 	return new Date(Date.now() - minutesAgo * 60_000).toISOString();
 }
 
-/// The next fire time of a mock plan: one hour from now, in UTC (FR-SC-01).
-function nextFireTime(): string {
-	return new Date(Date.now() + 60 * 60_000).toISOString();
+/// The next fire time of a plan, from its cron and time zone (FR-SC-01).
+function nextFireTime(cron: string, timeZone: string): string {
+	return nextRunsFromCron(cron, timeZone, 1)[0] ?? new Date(Date.now() + 60 * 60_000).toISOString();
 }
 
 /// The paths of a profile for one operating system: `all` plus the paths of that system.
@@ -247,7 +251,7 @@ function makePlans(): Plan[] {
 			time_zone: 'Europe/Berlin',
 			missed_run_policy: 'latest_only',
 			enabled: true,
-			next_run_at: nextFireTime(),
+			next_run_at: nextFireTime('0 2 * * *', 'Europe/Berlin'),
 			last_fire_time: iso(60 * 24),
 			created_at: iso(60 * 24 * 9),
 			updated_at: iso(60 * 24)
@@ -853,7 +857,7 @@ export class MockApiService {
 			created_by: this.users[0].id
 		};
 		this.profiles = [...this.profiles, profile];
-		return { profile, warnings: warningsFor(profile) };
+		return { profile, warnings: warningsFor(profile), plan_warnings: [] };
 	}
 
 	async updateProfile(id: string, request: UpdateProfileRequest): Promise<ProfileResponse> {
@@ -874,7 +878,7 @@ export class MockApiService {
 			updated_at: new Date().toISOString()
 		};
 		this.profiles = this.profiles.map((item) => (item.id === id ? updated : item));
-		return { profile: updated, warnings: warningsFor(updated) };
+		return { profile: updated, warnings: warningsFor(updated), plan_warnings: [] };
 	}
 
 	async deleteProfile(id: string): Promise<void> {
@@ -905,7 +909,7 @@ export class MockApiService {
 			time_zone: request.time_zone,
 			missed_run_policy: request.missed_run_policy,
 			enabled: request.enabled ?? true,
-			next_run_at: request.enabled === false ? null : nextFireTime(),
+			next_run_at: request.enabled === false ? null : nextFireTime(request.cron, request.time_zone),
 			last_fire_time: null,
 			created_at: now,
 			updated_at: now
@@ -936,7 +940,7 @@ export class MockApiService {
 			time_zone: request.time_zone,
 			missed_run_policy: request.missed_run_policy,
 			enabled,
-			next_run_at: enabled ? nextFireTime() : null,
+			next_run_at: enabled ? nextFireTime(request.cron, request.time_zone) : null,
 			updated_at: new Date().toISOString()
 		};
 		this.plans = this.plans.map((item) => (item.id === id ? updated : item));
@@ -950,14 +954,19 @@ export class MockApiService {
 	async nextRuns(id: string, count: number): Promise<NextRunsResponse> {
 		const plan = this.plans.find((item) => item.id === id);
 		if (!plan) throw new Error('not found');
-		// The mock has no cron parser, so it stands in one fire time a day from now.
-		const runs: string[] = [];
-		let at = Date.now() + 60 * 60_000;
-		for (let index = 0; index < count; index += 1) {
-			runs.push(new Date(at).toISOString());
-			at += 24 * 60 * 60_000;
-		}
-		return { plan_id: id, time_zone: plan.time_zone, runs };
+		return {
+			plan_id: id,
+			time_zone: plan.time_zone,
+			runs: nextRunsFromCron(plan.cron, plan.time_zone, count)
+		};
+	}
+
+	async previewSchedule(request: PreviewScheduleRequest): Promise<SchedulePreviewResponse> {
+		const count = request.count ?? 5;
+		return {
+			time_zone: request.time_zone,
+			runs: nextRunsFromCron(request.cron, request.time_zone, count)
+		};
 	}
 
 	async previewProfile(id: string, agentId: string): Promise<PreviewResponse> {

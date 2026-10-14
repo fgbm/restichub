@@ -575,6 +575,12 @@ export const ru: Record<MessageKey, string> = {
 	'plans.section.source': 'Источник',
 	'plans.section.schedule': 'Расписание',
 	'plans.nextRuns': 'Следующие 5 запусков',
+	'plans.cronPresets': 'Шаблоны cron',
+	'plans.preset.hourly': 'Каждый час',
+	'plans.preset.daily': 'Ежедневно в 02:00',
+	'plans.preset.weekly': 'По воскресеньям в 03:00',
+	'plans.queuedNote':
+		'Плановое задание ждёт в очереди. Агент получит его, когда появится диспетчер очереди (issue #86).',
 	'plans.created': 'План создан.',
 	'plans.updated': 'План изменён.',
 	'plans.deleted': 'План удалён.',

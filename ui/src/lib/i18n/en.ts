@@ -571,6 +571,12 @@ export const en = {
 	'plans.section.source': 'Source',
 	'plans.section.schedule': 'Schedule',
 	'plans.nextRuns': 'Next 5 runs',
+	'plans.cronPresets': 'Cron presets',
+	'plans.preset.hourly': 'Hourly',
+	'plans.preset.daily': 'Daily at 02:00',
+	'plans.preset.weekly': 'Sundays at 03:00',
+	'plans.queuedNote':
+		'A scheduled job waits in the queue. The agent receives it when the queue dispatcher arrives (issue #86).',
 	'plans.created': 'The plan is created.',
 	'plans.updated': 'The plan is updated.',
 	'plans.deleted': 'The plan is deleted.',

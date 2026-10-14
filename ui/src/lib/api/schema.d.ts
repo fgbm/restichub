@@ -373,6 +373,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Previews the next fire times of a schedule.
+         * @description The fire times are in UTC; the user interface renders them in the given time zone.
+         */
+        post: operations["preview_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans/{id}": {
         parameters: {
             query?: never;
@@ -1444,6 +1464,20 @@ export interface components {
             time_zone: string;
             updated_at: string;
         };
+        /**
+         * @description A plan that the updated profile no longer compiles for (FR-SC-11).
+         *
+         *     The update does not refuse the change. The plan keeps its schedule and fails at dispatch time,
+         *     when the queue recompiles the profile for the facts of the agent (issue #86).
+         */
+        PlanWarning: {
+            /** @description The compiler field that the profile fails on, for example `paths`. */
+            field: string;
+            name: string;
+            plan_id: string;
+            /** @description Stable snake_case code. */
+            reason: string;
+        };
         /** @description One membership of an account in the platform account list (ADR-0028). */
         PlatformMembershipView: {
             /** @description Off in this organization only. */
@@ -1502,6 +1536,12 @@ export interface components {
             repository_id: string;
             steps: components["schemas"]["PreviewStepView"][];
         };
+        /** @description The request body of the schedule preview (FR-SC-01). */
+        PreviewScheduleRequest: {
+            count?: number;
+            cron: string;
+            time_zone: string;
+        };
         /**
          * @description One previewed step: the kind, the maintenance flag, the command line and the environment
          *     (FR-PF-04, AC-PF-01).
@@ -1551,6 +1591,8 @@ export interface components {
          *     (FR-PF-05).
          */
         ProfileResponse: {
+            /** @description The plans of the profile that the updated settings no longer compile for (FR-SC-11). */
+            plan_warnings: components["schemas"]["PlanWarning"][];
             profile: components["schemas"]["ProfileView"];
             warnings: components["schemas"]["ProfileWarning"][];
         };
@@ -1641,6 +1683,13 @@ export interface components {
          * @enum {string}
          */
         Role: "platform_admin" | "admin" | "operator" | "viewer";
+        /** @description The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
+        SchedulePreviewResponse: {
+            /** @description The fire times in UTC, formatted as RFC 3339. */
+            runs: string[];
+            /** @description The time zone that the user interface renders each run in. */
+            time_zone: string;
+        };
         /**
          * @description The metadata of one secret with the marker that the value is set (FR-RP-05).
          *
@@ -2924,6 +2973,57 @@ export interface operations {
             };
             /** @description The name exists. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    preview_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description The next fire times. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulePreviewResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

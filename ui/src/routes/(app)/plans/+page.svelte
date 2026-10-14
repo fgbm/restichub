@@ -24,14 +24,29 @@
 	} from '#lib/components/ui/index.ts';
 	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { formatTimeInZone } from '#lib/format.ts';
-	import { describeCron, describeMissedRunPolicy } from '#lib/schedule.ts';
+	import type { MessageKey } from '#lib/i18n/index.ts';
+	import { formatTimeInZoneWithLocal } from '#lib/format.ts';
+	import {
+		browserTimeZone,
+		describeCron,
+		describeMissedRunPolicy,
+		timeZoneNames
+	} from '#lib/schedule.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	const POLICIES: MissedRunPolicy[] = ['run_all', 'latest_only', 'skip'];
 	// The number of fire times that the dialog preview requests (FR-SC-01).
 	const PREVIEW_RUNS = 5;
+	// The IANA names of the searchable time zone input, and its datalist identifier.
+	const TIME_ZONES = timeZoneNames();
+	const TIME_ZONE_LIST_ID = 'plan-time-zones';
+	// The quick cron presets of the dialog (FR-SC-01).
+	const CRON_PRESETS: { label: MessageKey; cron: string }[] = [
+		{ label: 'plans.preset.hourly', cron: '0 * * * *' },
+		{ label: 'plans.preset.daily', cron: '0 2 * * *' },
+		{ label: 'plans.preset.weekly', cron: '0 3 * * 0' }
+	];
 
 	let plans = $state<Plan[]>([]);
 	let profilesOptions = $state<SelectOption[]>([]);
@@ -80,7 +95,8 @@
 		{
 			key: 'next_run_at',
 			header: t('plans.nextRun'),
-			value: (row) => (row.next_run_at ? formatTimeInZone(row.next_run_at, row.time_zone) : ''),
+			value: (row) =>
+				row.next_run_at ? formatTimeInZoneWithLocal(row.next_run_at, row.time_zone) : '',
 			render: nextRunCell
 		},
 		{
@@ -152,6 +168,16 @@
 		if (!formOpen) resetForm();
 	});
 
+	// The dialog previews the next fire times from the cron and the time zone of the form, so the
+	// user sees them before the save (FR-SC-01). The run list follows the edit of either field.
+	$effect(() => {
+		if (!formOpen) return;
+		const previewCron = cron;
+		const previewTimeZone = timeZone;
+		const handle = setTimeout(() => void loadRuns(previewCron, previewTimeZone), 200);
+		return () => clearTimeout(handle);
+	});
+
 	function resetForm(): void {
 		name = '';
 		profileId = '';
@@ -171,6 +197,7 @@
 		resetForm();
 		profileId = profilesOptions[0]?.value ?? '';
 		agentId = agentOptions[0]?.value ?? '';
+		timeZone = browserTimeZone();
 		formOpen = true;
 	}
 
@@ -185,17 +212,20 @@
 		policy = plan.missed_run_policy;
 		enabled = plan.enabled;
 		formOpen = true;
-		void loadRuns();
 	}
 
-	async function loadRuns(): Promise<void> {
-		if (!editing) {
+	async function loadRuns(previewCron: string, previewTimeZone: string): Promise<void> {
+		if (!previewCron.trim() || !previewTimeZone.trim()) {
 			runs = null;
 			return;
 		}
 		runsLoading = true;
 		try {
-			const response = await service.nextRuns(editing.id, PREVIEW_RUNS);
+			const response = await service.previewSchedule({
+				cron: previewCron,
+				time_zone: previewTimeZone,
+				count: PREVIEW_RUNS
+			});
 			runs = response.runs;
 		} catch {
 			runs = null;
@@ -269,7 +299,9 @@
 
 {#snippet nextRunCell(plan: Plan)}
 	<span class="plan__meta">
-		{plan.next_run_at ? formatTimeInZone(plan.next_run_at, plan.time_zone) : t('common.none')}
+		{plan.next_run_at
+			? formatTimeInZoneWithLocal(plan.next_run_at, plan.time_zone)
+			: t('common.none')}
 	</span>
 {/snippet}
 
@@ -286,6 +318,8 @@
 		<Button variant="primary" icon="plus" onclick={openCreate}>{t('plans.add')}</Button>
 	{/if}
 </PageHeader>
+
+<Alert tone="info" variant="inline" title={t('plans.queuedNote')} />
 
 {#if empty}
 	<EmptyState
@@ -369,15 +403,28 @@
 				bind:value={cron}
 				required
 			/>
+			<div class="presets" role="group" aria-label={t('plans.cronPresets')}>
+				{#each CRON_PRESETS as preset (preset.cron)}
+					<Button type="button" variant="ghost" onclick={() => (cron = preset.cron)}>
+						{t(preset.label)}
+					</Button>
+				{/each}
+			</div>
 			<TextField
 				id="plan-time-zone"
 				label={t('plans.timeZone')}
 				help={t('plans.timeZoneHint')}
 				error={fieldError(formProblem, 'time_zone')}
 				placeholder={t('plans.timeZonePlaceholder')}
+				list={TIME_ZONE_LIST_ID}
 				bind:value={timeZone}
 				required
 			/>
+			<datalist id={TIME_ZONE_LIST_ID}>
+				{#each TIME_ZONES as zone (zone)}
+					<option value={zone}></option>
+				{/each}
+			</datalist>
 			<Select
 				id="plan-policy"
 				label={t('plans.missedRunPolicy')}
@@ -394,12 +441,13 @@
 			{:else if runs && runs.length > 0}
 				<ul class="runs">
 					{#each runs as run (run)}
-						<li>{formatTimeInZone(run, timeZone)}</li>
+						<li>{formatTimeInZoneWithLocal(run, timeZone)}</li>
 					{/each}
 				</ul>
 			{:else}
 				<p class="preview__hint">{t('plans.previewEmpty')}</p>
 			{/if}
+			<p class="preview__hint">{t('plans.queuedNote')}</p>
 		</section>
 	</div>
 	{#snippet footer()}
@@ -466,6 +514,12 @@
 	.runs {
 		margin: 0;
 		padding-left: var(--rh-space-4);
+	}
+
+	.presets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--rh-space-2);
 	}
 
 	.preview__hint {

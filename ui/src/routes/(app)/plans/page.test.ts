@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 	createPlan: vi.fn(),
 	deletePlan: vi.fn(),
 	nextRuns: vi.fn(),
+	previewSchedule: vi.fn(),
 	pushToast: vi.fn()
 }));
 
@@ -50,7 +51,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listAgents: mocks.listAgents,
 			createPlan: mocks.createPlan,
 			deletePlan: mocks.deletePlan,
-			nextRuns: mocks.nextRuns
+			nextRuns: mocks.nextRuns,
+			previewSchedule: mocks.previewSchedule
 		}
 	};
 });
@@ -93,6 +95,7 @@ describe('the Plans screen', () => {
 		mocks.listPlans.mockResolvedValue([]);
 		mocks.listProfiles.mockResolvedValue([profile()]);
 		mocks.listAgents.mockResolvedValue([agent()]);
+		mocks.previewSchedule.mockResolvedValue({ time_zone: 'Europe/Berlin', runs: [] });
 	});
 
 	it('lists a plan with its host and its schedule', async () => {
@@ -119,6 +122,8 @@ describe('the Plans screen', () => {
 		const input = (id: string) => document.querySelector<HTMLInputElement>(id) as HTMLInputElement;
 		await user.type(input('#plan-name'), 'nightly-web');
 		await user.type(input('#plan-cron'), '0 2 * * *');
+		// The create dialog fills the time zone with the browser zone, so the test replaces it.
+		await user.clear(input('#plan-time-zone'));
 		await user.type(input('#plan-time-zone'), 'Europe/Berlin');
 		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 

@@ -17,6 +17,16 @@ export function formatTimeInZone(value: string, timeZone: string): string {
 	}
 }
 
+/**
+ * Formats an instant in a given IANA time zone and appends the zone name; the local time follows
+ * when it differs (FR-SC-01).
+ */
+export function formatTimeInZoneWithLocal(value: string, timeZone: string): string {
+	const zoned = formatTimeInZone(value, timeZone);
+	const local = formatTime(value);
+	return local === zoned ? `${zoned} ${timeZone}` : `${zoned} ${timeZone} · ${local} local`;
+}
+
 const relativeSteps: [Intl.RelativeTimeFormatUnit, number][] = [
 	['second', 60],
 	['minute', 60],
