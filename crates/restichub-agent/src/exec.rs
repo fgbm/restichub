@@ -51,9 +51,12 @@ pub fn restic_command(program: &Path, line: &CommandLine, cache_dir: &Path) -> C
 ///
 /// Returns an error when the hash differs or the process cannot start.
 pub fn spawn_restic(restic: &ResticBinary, line: &CommandLine) -> Result<Child> {
-    let cache = crate::paths::cache_dir();
-    crate::paths::create_protected_dir(&cache)?;
-    spawn_verified(restic.path(), EXPECTED_SHA256, line, &cache)
+    spawn_verified(
+        restic.path(),
+        EXPECTED_SHA256,
+        line,
+        &crate::paths::cache_dir(),
+    )
 }
 
 /// Opens the binary, checks the hash through the handle and starts the child from it (threat T20).
@@ -67,6 +70,8 @@ fn spawn_verified(
     let digest = digest_of(&file)?;
     crate::restic::verify_digest(&digest, expected_hex)
         .with_context(|| format!("the bundled restic at {}", path.display()))?;
+    // The cache directory is created after the check, so an unverified binary never creates one.
+    crate::paths::create_protected_dir(cache)?;
     let child = start(&file, path, line, cache)?;
     // The handle stays open until the child has started, so the checked inode is the one that runs.
     drop(file);
@@ -322,6 +327,17 @@ mod tests {
         );
         let _ = std::fs::remove_file(&script);
         let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    /// The production entry refuses a binary that is not next to the agent (FR-AG-11).
+    #[test]
+    fn fr_ag_11_spawn_restic_refuses_a_missing_binary() {
+        let restic = crate::restic::ResticBinary::locate().expect("cannot locate the restic path");
+        let line = command_line();
+        assert!(
+            super::spawn_restic(&restic, &line).is_err(),
+            "a missing binary must refuse the spawn"
+        );
     }
 
     #[cfg(unix)]
