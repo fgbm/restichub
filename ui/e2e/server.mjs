@@ -31,4 +31,4 @@ createServer((request, response) => {
 	response.setHeader('content-type', types[extname(path)] ?? 'application/octet-stream');
 	response.setHeader('content-security-policy', policy);
 	response.end(readFileSync(path));
-}).listen(4173, '127.0.0.1');
+}).listen(Number(process.env.PORT ?? 4173), '127.0.0.1');

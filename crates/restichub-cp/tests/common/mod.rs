@@ -106,6 +106,7 @@ pub fn write_body(
     index: usize,
     platform_admin: bool,
     tenant_id: &str,
+    repository_id: &str,
 ) -> Option<Value> {
     let role = if platform_admin {
         "platform_admin"
@@ -141,6 +142,16 @@ pub fn write_body(
             "s3_secret_key": "matrix-secret",
         })),
         ("PATCH", "/api/v1/repositories/{id}") => Some(json!({"name": "matrix-repo"})),
+        ("POST", "/api/v1/profiles") => Some(json!({
+            "name": format!("matrix-profile-{index}"),
+            "repository_id": repository_id,
+            "paths": {"all": ["/srv"]},
+        })),
+        ("PATCH", "/api/v1/profiles/{id}") => Some(json!({
+            "repository_id": repository_id,
+            "paths": {"all": ["/srv"]},
+        })),
+        ("POST", "/api/v1/profiles/{id}/preview") => Some(json!({"agent_id": repository_id})),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
@@ -473,6 +484,51 @@ pub async fn seed_repository(
     id
 }
 
+/// Inserts a profile row of a tenant and returns its identifier.
+///
+/// A test uses it only for a route fixture. The repository must already exist in the tenant.
+pub async fn seed_profile(
+    db: &Database,
+    tenant: TenantId,
+    name: &str,
+    repository: restichub_db::RepositoryId,
+) -> restichub_db::ProfileId {
+    use restichub_db::profiles::{NewProfile, create};
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::ProfileId::new();
+    create(
+        &mut tx,
+        &NewProfile {
+            id,
+            name,
+            repository_id: repository,
+            paths_all: &["/srv".to_owned()],
+            paths_windows: &[],
+            paths_linux: &[],
+            paths_macos: &[],
+            excludes: &[],
+            exclude_files: &[],
+            tags: &[],
+            use_fs_snapshot: false,
+            one_file_system: false,
+            exclude_caches: false,
+            limit_upload_kib: 0,
+            limit_download_kib: 0,
+            retention: None,
+            check_options: None,
+            hooks: serde_json::json!([]),
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the profile");
+    tx.commit().await.expect("cannot commit the profile");
+    id
+}
+
 /// Inserts an active agent row of a tenant and returns its identifier.
 ///
 /// The enrollment exchange (#48) creates the row in production; a test seeds it directly.
@@ -501,6 +557,38 @@ pub async fn seed_agent(db: &Database, tenant: TenantId, hostname: &str) -> rest
     .await
     .expect("cannot create the agent");
     tx.commit().await.expect("cannot commit the agent");
+    id
+}
+
+/// Inserts a job row of a tenant and returns its identifier.
+///
+/// The control plane creates the row in production; a test seeds it directly for a route fixture.
+pub async fn seed_job(
+    db: &Database,
+    tenant: TenantId,
+    agent: restichub_db::AgentId,
+    repository: restichub_db::RepositoryId,
+) -> restichub_db::JobId {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::JobId::new();
+    restichub_db::jobs::create(
+        &mut tx,
+        &restichub_db::jobs::NewJob {
+            id,
+            kind: restichub_db::JobKind::TestAccess,
+            agent_id: agent,
+            repository_id: Some(repository),
+            expires_at: None,
+            location_fingerprint: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the job");
+    tx.commit().await.expect("cannot commit the job");
     id
 }
 

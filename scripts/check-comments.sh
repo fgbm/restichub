@@ -50,6 +50,8 @@ restatement='^\s*//[/!]?\s*(The|A|An|Returns?|Creates?|Gets?|Sets?|Checks?)\b[^.
 # A reference to a review finding or an issue.
 review_id='^\s*//.*\b[NDMHL][0-9]+\b'
 review_text='^\s*//.*(per (the )?review|review finding|issue #[0-9]+)'
+# A reference to a security review finding.
+review_finding='^\s*//.*\b(HIGH|MEDIUM|LOW|CRITICAL) [0-9]+'
 # A comment that narrates a step.
 narration='^\s*//\s*(Now|Then|First|Next|Finally|Step [0-9])\b'
 # Boilerplate that names the code item instead of the contract.
@@ -58,6 +60,7 @@ boilerplate='^\s*//[/!]?\s*The function (returns|selects|takes|checks)\b'
 emit 0 < <(scan "$restatement" "${dirs[@]}")
 emit 0 < <(scan "$review_id" "${dirs[@]}")
 emit 0 < <(scan "$review_text" "${dirs[@]}")
+emit 0 < <(scan "$review_finding" "${dirs[@]}")
 emit 0 < <(scan "$narration" "${dirs[@]}")
 emit 0 < <(scan "$boilerplate" "${dirs[@]}")
 

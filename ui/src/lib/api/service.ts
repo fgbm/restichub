@@ -18,6 +18,7 @@ import type {
 	ChangePasswordRequest,
 	CreateApiTokenRequest,
 	CreateEnrollmentTokenRequest,
+	CreateProfileRequest,
 	CreateRepositoryRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
@@ -26,10 +27,17 @@ import type {
 	EnrollmentTokenCreated,
 	EnrollmentTokenListResponse,
 	Instance,
+	Job,
+	JobActionRequest,
 	Me,
 	MembershipInput,
 	PlatformUser,
 	PlatformUserListResponse,
+	PreviewRequest,
+	PreviewResponse,
+	Profile,
+	ProfileListResponse,
+	ProfileResponse,
 	RenameAgentRequest,
 	Repository,
 	RepositoryListResponse,
@@ -43,6 +51,7 @@ import type {
 	TenantAccessListResponse,
 	TenantListResponse,
 	UpdateAccountRequest,
+	UpdateProfileRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
 	User,
@@ -90,6 +99,21 @@ export interface ApiService {
 	createRepository(request: CreateRepositoryRequest): Promise<Repository>;
 	updateRepository(id: string, request: UpdateRepositoryRequest): Promise<Repository>;
 	deleteRepository(id: string): Promise<void>;
+
+	/** Starts an init job on an agent (FR-RP-02). */
+	initRepository(id: string, request?: JobActionRequest): Promise<Job>;
+	/** Starts a test-access job on an agent (FR-RP-02). */
+	testAccessRepository(id: string, request?: JobActionRequest): Promise<Job>;
+	/** Polls one job (FR-PR-01). */
+	getJob(id: string): Promise<Job>;
+
+	/** The profiles of the tenant (FR-PF-01). */
+	listProfiles(): Promise<Profile[]>;
+	createProfile(request: CreateProfileRequest): Promise<ProfileResponse>;
+	updateProfile(id: string, request: UpdateProfileRequest): Promise<ProfileResponse>;
+	deleteProfile(id: string): Promise<void>;
+	/** The compiled steps of a profile for one agent, with masked secrets (FR-PF-04). */
+	previewProfile(id: string, agentId: string): Promise<PreviewResponse>;
 
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
@@ -156,6 +180,21 @@ const httpService: ApiService = {
 	updateRepository: (id, request) =>
 		api.patch<Repository>(endpoints.repositories.byId(id), request),
 	deleteRepository: (id) => api.delete<void>(endpoints.repositories.byId(id)),
+
+	initRepository: (id, request) => api.post<Job>(endpoints.repositories.init(id), request ?? {}),
+	testAccessRepository: (id, request) =>
+		api.post<Job>(endpoints.repositories.testAccess(id), request ?? {}),
+	getJob: (id) => api.get<Job>(endpoints.jobs.byId(id)),
+
+	listProfiles: () =>
+		api.get<ProfileListResponse>(endpoints.profiles.list).then((response) => response.items),
+	createProfile: (request) => api.post<ProfileResponse>(endpoints.profiles.create, request),
+	updateProfile: (id, request) => api.patch<ProfileResponse>(endpoints.profiles.byId(id), request),
+	deleteProfile: (id) => api.delete<void>(endpoints.profiles.byId(id)),
+	previewProfile: (id, agentId) =>
+		api.post<PreviewResponse>(endpoints.profiles.preview(id), {
+			agent_id: agentId
+		} satisfies PreviewRequest),
 
 	listTenants: () =>
 		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),

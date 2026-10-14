@@ -5,7 +5,7 @@
 	import Icon from './Icon.svelte';
 	import type { IconName } from './icons';
 
-	type Size = 'sm' | 'md' | 'lg';
+	type Size = 'sm' | 'md' | 'lg' | 'xl';
 
 	let {
 		open = $bindable(false),
@@ -21,7 +21,7 @@
 		open?: boolean;
 		title: string;
 		description?: string;
-		/** Width: `sm` 400px, `md` 440px, `lg` 480px. */
+		/** Width: `sm` 400px, `md` 440px, `lg` 480px, `xl` 760px. */
 		size?: Size;
 		/** Title icon; a destructive dialog uses `octagon`. */
 		icon?: IconName;
@@ -108,6 +108,10 @@
 
 	:global(.rh-dialog--lg) {
 		width: min(480px, calc(100vw - 32px));
+	}
+
+	:global(.rh-dialog--xl) {
+		width: min(760px, calc(100vw - 32px));
 	}
 
 	:global(.rh-dialog:focus-visible) {

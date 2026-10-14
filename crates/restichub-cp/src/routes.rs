@@ -415,4 +415,73 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::RepositoriesWrite),
         handler: || routes!(crate::repositories::delete_repository),
     },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/init",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || {
+            routes!(crate::jobs::init_repository)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/test-access",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || {
+            routes!(crate::jobs::test_access_repository)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/jobs/{id}",
+        access: Access::Protected(Operation::JobsRead),
+        handler: || routes!(crate::jobs::get_job),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/profiles",
+        access: Access::Protected(Operation::ProfilesRead),
+        handler: || routes!(crate::profiles::list_profiles),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/profiles",
+        access: Access::Protected(Operation::ProfilesWrite),
+        handler: || {
+            routes!(crate::profiles::create_profile)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/profiles/{id}",
+        access: Access::Protected(Operation::ProfilesRead),
+        handler: || routes!(crate::profiles::get_profile),
+    },
+    Route {
+        method: "patch",
+        path: "/api/v1/profiles/{id}",
+        access: Access::Protected(Operation::ProfilesWrite),
+        handler: || {
+            routes!(crate::profiles::update_profile)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "delete",
+        path: "/api/v1/profiles/{id}",
+        access: Access::Protected(Operation::ProfilesWrite),
+        handler: || routes!(crate::profiles::delete_profile),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/profiles/{id}/preview",
+        access: Access::Protected(Operation::ProfilesRead),
+        handler: || {
+            routes!(crate::profiles::preview_profile)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
 ];

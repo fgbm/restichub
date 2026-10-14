@@ -119,6 +119,44 @@ impl Executor for FakeRestic {
     }
 }
 
+/// An executor that returns a fixed exit code for each step kind (test helper).
+///
+/// A test drives the init chain: the `test_access` code and the `init` code are separate, so the
+/// rule "init runs only after test_access exit code 10" is observable (FR-RP-02, AC-RP-01).
+#[derive(Debug, Clone, Copy)]
+pub struct Scripted {
+    pub test_access_code: i32,
+    pub init_code: i32,
+    pub other_code: i32,
+}
+
+impl Scripted {
+    /// Builds a fixed outcome for each step kind.
+    #[must_use]
+    pub fn new(test_access_code: i32, init_code: i32) -> Self {
+        Self {
+            test_access_code,
+            init_code,
+            other_code: 0,
+        }
+    }
+}
+
+#[async_trait]
+impl Executor for Scripted {
+    async fn run_step(&self, step: &Step, _progress: &ProgressSink) -> StepOutcome {
+        let code = match step.kind.as_ref() {
+            Some(step::Kind::TestAccess(_)) => self.test_access_code,
+            Some(step::Kind::Init(_)) => self.init_code,
+            _ => self.other_code,
+        };
+        StepOutcome {
+            status: status_for_exit(code),
+            exit_code: code,
+        }
+    }
+}
+
 /// Builds the command line of a step (FR-PR-10, ADR-0021). The function
 /// returns `None` for a hook step, because the emulator runs no hook.
 #[must_use]
@@ -157,6 +195,11 @@ pub fn restic_arguments(step: &Step) -> Option<Vec<String>> {
         step::Kind::UnlockAll(_) => {
             arguments.push("unlock".to_owned());
             arguments.push("--remove-all".to_owned());
+        }
+        step::Kind::Init(_) => arguments.push("init".to_owned()),
+        step::Kind::TestAccess(_) => {
+            arguments.push("cat".to_owned());
+            arguments.push("config".to_owned());
         }
         step::Kind::Forget(_) => {
             arguments.push("forget".to_owned());

@@ -599,7 +599,7 @@ async fn ac_id_04_a_revoke_closes_an_open_stream() {
     db.cleanup().await;
 }
 
-/// HIGH 2: a silent socket is closed by the handshake timeout.
+/// The listener closes a silent socket when the handshake timeout passes.
 #[tokio::test]
 async fn a_silent_socket_is_closed_by_the_handshake_timeout() {
     let Some(db) = common::test_db().await else {
@@ -630,7 +630,7 @@ async fn a_silent_socket_is_closed_by_the_handshake_timeout() {
     db.cleanup().await;
 }
 
-/// HIGH 2: an anonymous connection that sends no request is closed by the idle timeout.
+/// An anonymous connection that sends no request is closed by the idle timeout.
 #[tokio::test]
 async fn an_anonymous_idle_connection_is_closed() {
     let Some(db) = common::test_db().await else {
@@ -658,7 +658,7 @@ async fn an_anonymous_idle_connection_is_closed() {
     db.cleanup().await;
 }
 
-/// FR-ID-07 / MEDIUM 3: a stream without an answer closes after three ping intervals.
+/// FR-ID-07 /: a stream without an answer closes after three ping intervals.
 #[tokio::test]
 async fn ac_id_07_an_idle_stream_closes_after_three_ping_intervals() {
     let Some(db) = common::test_db().await else {
@@ -688,7 +688,7 @@ async fn ac_id_07_an_idle_stream_closes_after_three_ping_intervals() {
     db.cleanup().await;
 }
 
-/// LOW 7: the batch flush closes a stream whose row is no longer valid.
+/// The batch flush closes a stream whose row is no longer valid.
 #[tokio::test]
 async fn the_last_seen_batch_closes_a_revoked_stream() {
     let Some(db) = common::test_db().await else {
@@ -727,7 +727,7 @@ async fn the_last_seen_batch_closes_a_revoked_stream() {
     db.cleanup().await;
 }
 
-/// LOW 7: the batch flush updates `last_seen_at` in one statement per tenant.
+/// The batch flush updates `last_seen_at` in one statement per tenant.
 #[tokio::test]
 async fn the_last_seen_batch_updates_a_live_stream() {
     let Some(db) = common::test_db().await else {
@@ -832,7 +832,7 @@ async fn set_last_seen(
     tx.commit().await.expect("cannot commit last_seen_at");
 }
 
-/// MEDIUM 1: a refused connection must not close the active stream of the same agent.
+/// A refused connection must not close the active stream of the same agent.
 #[tokio::test]
 async fn a_registry_refusal_does_not_close_the_active_stream() {
     let Some(db) = common::test_db().await else {
@@ -884,7 +884,7 @@ async fn a_registry_refusal_does_not_close_the_active_stream() {
     db.cleanup().await;
 }
 
-/// MEDIUM 2: an anonymous connection closes at the total lifetime cap.
+/// The listener closes an anonymous connection when the total lifetime cap passes.
 #[tokio::test]
 async fn an_anonymous_connection_closes_at_the_lifetime_cap() {
     let Some(db) = common::test_db().await else {
@@ -917,7 +917,7 @@ async fn an_anonymous_connection_closes_at_the_lifetime_cap() {
     db.cleanup().await;
 }
 
-/// MEDIUM 2: the per-IP anonymous cap refuses the next connection from the same address.
+/// The per-IP anonymous cap refuses the next connection from the same address.
 #[tokio::test]
 async fn the_per_ip_anonymous_cap_refuses_the_next_connection() {
     let Some(db) = common::test_db().await else {
@@ -948,7 +948,7 @@ async fn the_per_ip_anonymous_cap_refuses_the_next_connection() {
     db.cleanup().await;
 }
 
-/// MEDIUM 2: an authenticated agent connects while the anonymous share is full.
+/// An authenticated agent connects while the anonymous share is full.
 #[tokio::test]
 async fn an_authenticated_agent_connects_when_the_anonymous_share_is_full() {
     let Some(db) = common::test_db().await else {

@@ -112,6 +112,66 @@ export type CreateRepositoryRequest = components['schemas']['CreateRepositoryReq
 
 export type UpdateRepositoryRequest = components['schemas']['UpdateRepositoryRequest'];
 
+/** The kind of a job (FR-PR-02). */
+export type JobKind = components['schemas']['JobKind'];
+
+/** The lifecycle status of a job (FR-SC-03). */
+export type JobStatus = components['schemas']['JobStatus'];
+
+/** The typed result of a finished job (FR-AG-09). */
+export type JobResultCode = components['schemas']['JobResultCode'];
+
+/** One job with its lifecycle (FR-PR-01). */
+export type Job = components['schemas']['JobView'];
+
+/** The optional agent that runs a repository job. An absent value uses the maintenance agent. */
+export type JobActionRequest = components['schemas']['JobActionRequest'];
+
+/** The paths of a profile for each operating system (FR-PF-01). */
+export type ProfilePaths = components['schemas']['ProfilePaths'];
+
+/** The backup options of a profile (FR-PF-01). */
+export type ProfileBackupOptions = components['schemas']['BackupOptions'];
+
+/** Position of a hook in the job (FR-HK-05). */
+export type HookPhase = components['schemas']['HookPhase'];
+
+export type HookParameter = components['schemas']['HookParameter'];
+
+export type HookRef = components['schemas']['HookRef'];
+
+export type GroupBy = components['schemas']['GroupBy'];
+
+export type SnapshotFilter = components['schemas']['SnapshotFilter'];
+
+export type Retention = components['schemas']['Retention'];
+
+export type CheckOptions = components['schemas']['CheckOptions'];
+
+/** One profile (FR-PF-01). It holds no secret. */
+export type Profile = components['schemas']['ProfileView'];
+
+export type ProfileListResponse = components['schemas']['ProfileListResponse'];
+
+export type CreateProfileRequest = components['schemas']['CreateProfileRequest'];
+
+export type UpdateProfileRequest = components['schemas']['UpdateProfileRequest'];
+
+/** A warning that the save-time compile reported (FR-PF-05). */
+export type ProfileWarning = components['schemas']['ProfileWarning'];
+
+/** The result of a profile create or update: the profile and the save-time warnings. */
+export type ProfileResponse = components['schemas']['ProfileResponse'];
+
+/** One previewed step with masked secrets (FR-PF-04). */
+export type PreviewStep = components['schemas']['PreviewStepView'];
+
+export type PreviewResponse = components['schemas']['PreviewResponse'];
+
+export type PreviewRequest = components['schemas']['PreviewRequest'];
+
+export type PreviewEnvVar = components['schemas']['PreviewEnvView'];
+
 /**
  * One audit record. The generated `diff` type is an opaque object, so the UI
  * replaces it with the diff shape that the control plane writes.

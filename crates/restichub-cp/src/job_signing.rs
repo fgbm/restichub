@@ -382,7 +382,7 @@ impl JobSigningService {
         Ok(self.current_set(db).await?.enrollment_keys())
     }
 
-    /// The identifier of the current signing key, or `None` when the set is absent (MEDIUM 3).
+    /// The identifier of the current signing key, or `None` when the set is absent.
     ///
     /// The agent stream accepts a `KeyUpdateAck` only for this identifier.
     pub async fn current_key_id(&self, db: &Database) -> Option<String> {

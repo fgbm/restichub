@@ -575,7 +575,7 @@ async fn the_validation_refuses_a_bad_backend_and_a_foreign_agent() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["field"], "backend.endpoint");
 
-    // The endpoint holds no user information, no query and no fragment (HIGH 1).
+    // The endpoint holds no user information, no query and no fragment.
     for endpoint in [
         "https://u:p@s3.example.net",
         "https://s3.example.net?x=1",

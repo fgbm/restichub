@@ -294,7 +294,7 @@ message StatsSummary {
 message JobResult {
   // Identifier of the job.
   string job_id = 1;
-  // Result of the job.
+  // Result of the last step, or of the failing step.
   StepStatus status = 2;
   // Number of steps in the job.
   uint32 steps_total = 3;
@@ -302,4 +302,26 @@ message JobResult {
   uint32 steps_succeeded = 4;
   // Number of failed steps.
   uint32 steps_failed = 5;
+  // Typed result of the full job (AC-RP-01).
+  JobStatus outcome = 6;
+  // Machine-readable error. Present when the outcome is not SUCCEEDED.
+  ErrorDetail error = 7;
+}
+
+// JobStatus is the result of a full job. The control plane maps the status of
+// the steps to one of these values (FR-AG-09, AC-RP-01).
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  // Every step succeeded.
+  JOB_STATUS_SUCCEEDED = 1;
+  // A step failed. The status of the step gives the detail.
+  JOB_STATUS_FAILED = 2;
+  // The repository password or the backend credentials are wrong. The agent
+  // reports this value for restic exit code 12 (AC-RP-01).
+  JOB_STATUS_CONFIG_ERROR = 3;
+  // The repository does not exist. A test_access step reports this value for
+  // restic exit code 10. It is a normal result, not an error (FR-RP-02).
+  JOB_STATUS_NOT_INITIALIZED = 4;
+  // The control plane cancelled the job (FR-AG-10).
+  JOB_STATUS_CANCELLED = 5;
 }

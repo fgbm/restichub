@@ -39,9 +39,11 @@ pub use settings::{
 };
 use settings::{
     bind_new_credentials, created_diff, current_diff, ensure_agent, parse_optional_agent_id,
-    parse_repository_id, replace_credentials, repository_location, updated_diff, validate_backend,
-    validate_credentials, validate_secret_value, validated_from_row,
+    replace_credentials, repository_location, updated_diff, validate_backend, validate_credentials,
+    validate_secret_value, validated_from_row,
 };
+
+pub(crate) use settings::{parse_repository_id, stored_location};
 
 /// Lists the repositories of the tenant.
 #[utoipa::path(
@@ -258,7 +260,7 @@ pub async fn update_repository(
             validated_from_row(&current, kind)
         }
     };
-    repository_location(&backend)?;
+    let new_location = repository_location(&backend)?;
     let agent_set = match maintenance_agent_id {
         Some(value) => Some(parse_optional_agent_id(Some(&value))?),
         None => None,
@@ -268,6 +270,21 @@ pub async fn update_repository(
         None => current.maintenance_agent_id,
     };
     ensure_agent(&mut tx, agent).await?;
+
+    // A local path lives on one host, so a maintenance agent change is a location change for the
+    // local backend. The location of an initialized repository cannot change in this version, and
+    // neither can the location of a repository with an active job.
+    let location_changed = new_location != stored_location(&current)
+        || (current.backend == restichub_db::BackendKind::Local
+            && agent != current.maintenance_agent_id);
+    if location_changed {
+        if current.initialized {
+            return Err(ApiError::conflict());
+        }
+        if restichub_db::jobs::has_active_for_repository(&mut tx, repository_id).await? {
+            return Err(ApiError::conflict());
+        }
+    }
 
     let mut secrets = RepositorySecrets {
         password: current.password_secret_id,
@@ -350,7 +367,8 @@ pub async fn update_repository(
     responses(
         (status = 204, description = "The repository is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
+        (status = 409, description = "An active job or a profile holds the repository.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn delete_repository(
@@ -364,7 +382,19 @@ pub async fn delete_repository(
     let Some(current) = repo::get_for_update(&mut tx, repository_id).await? else {
         return Err(ApiError::not_found());
     };
-    repo::delete(&mut tx, repository_id).await?;
+    // A profile binds the repository. Remove or repoint the profiles first, so the foreign key
+    // never blocks the delete with an internal error.
+    if restichub_db::profiles::is_repository_used(&mut tx, repository_id).await? {
+        return Err(ApiError::conflict());
+    }
+    // An active job holds the repository, so the agent never loses it in the middle of a job.
+    if restichub_db::jobs::has_active_for_repository(&mut tx, repository_id).await? {
+        return Err(ApiError::conflict());
+    }
+    // The finished jobs keep their history with a null link (migration 0030).
+    repo::delete(&mut tx, repository_id)
+        .await
+        .map_err(map_write_error)?;
     // The bound secrets belong to the repository. Remove them in the same transaction, so the
     // secrets screen does not keep an orphan and the foreign key never blocks the delete.
     restichub_db::secrets::delete(&mut tx, current.password_secret_id).await?;

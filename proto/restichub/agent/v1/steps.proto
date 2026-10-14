@@ -44,8 +44,12 @@ message Step {
     HookStep hook = 12;
     // UnlockAllStep runs "restic unlock --remove-all" (FR-SC-06).
     UnlockAllStep unlock_all = 13;
-    // Field numbers 14 to 19 are reserved for the 1.0 step types of FR-PR-02:
-    // find, dump, copy, init, key_add and key_remove.
+    // InitStep runs "restic init" (FR-RP-02).
+    InitStep init = 14;
+    // TestAccessStep runs "restic cat config" (FR-RP-02).
+    TestAccessStep test_access = 15;
+    // Field numbers 16 to 19 are reserved for the 1.0 step types of FR-PR-02:
+    // find, dump, copy, key_add and key_remove.
   }
 }
 
@@ -158,6 +162,28 @@ message UnlockStep {
 // UnlockAllStep removes all locks, including live locks. The control plane
 // creates this step only from an Admin action with a confirmation (FR-SC-06).
 message UnlockAllStep {
+  // Identifier of the repository of this job.
+  string repository_id = 1;
+}
+
+// InitStep creates a new restic repository (FR-RP-02). The agent decides
+// whether to run it. An init job carries a test_access step before the init
+// step, and the agent runs init only when test_access exited with restic code
+// 10 (the repository does not exist). Any other result of test_access (code 0,
+// 1, 11, 12, a timeout, access denied) skips init, so an existing repository is
+// never re-initialized. A successful init after the code-10 probe makes the job
+// succeed; a wrong password on an existing repository gives config_error and no
+// init (AC-RP-01).
+message InitStep {
+  // Identifier of the repository of this job.
+  string repository_id = 1;
+}
+
+// TestAccessStep reads the repository configuration (FR-RP-02). The agent runs
+// "restic cat config", which is read-only and opens the repository with the
+// password and the backend credentials of the job. A missing repository gives
+// restic exit code 10; a wrong password gives exit code 12 (AC-RP-01).
+message TestAccessStep {
   // Identifier of the repository of this job.
   string repository_id = 1;
 }

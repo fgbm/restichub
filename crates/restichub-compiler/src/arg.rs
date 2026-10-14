@@ -148,6 +148,13 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
             args.push("unlock".to_owned());
             args.push("--remove-all".to_owned());
         }
+        step::Kind::Init(_) => {
+            args.push("init".to_owned());
+        }
+        step::Kind::TestAccess(_) => {
+            args.push("cat".to_owned());
+            args.push("config".to_owned());
+        }
         step::Kind::Forget(forget) => {
             args.push("forget".to_owned());
             push_count(&mut args, "--keep-last", forget.keep_last);
@@ -252,6 +259,8 @@ fn repository_id(kind: &step::Kind) -> Option<&str> {
         step::Kind::Restore(restore) => Some(&restore.repository_id),
         step::Kind::Unlock(unlock) => Some(&unlock.repository_id),
         step::Kind::UnlockAll(unlock_all) => Some(&unlock_all.repository_id),
+        step::Kind::Init(init) => Some(&init.repository_id),
+        step::Kind::TestAccess(test_access) => Some(&test_access.repository_id),
         step::Kind::Forget(forget) => Some(&forget.repository_id),
         step::Kind::Prune(prune) => Some(&prune.repository_id),
         step::Kind::Stats(stats) => Some(&stats.repository_id),

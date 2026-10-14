@@ -102,6 +102,12 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
         step::Kind::UnlockAll(unlock_all) => {
             check_repository_id(job, repository_ids, &unlock_all.repository_id)?;
         }
+        step::Kind::Init(init) => {
+            check_repository_id(job, repository_ids, &init.repository_id)?;
+        }
+        step::Kind::TestAccess(test_access) => {
+            check_repository_id(job, repository_ids, &test_access.repository_id)?;
+        }
         step::Kind::Forget(forget) => {
             check_repository_id(job, repository_ids, &forget.repository_id)?;
             check_format(job, &forget.keep_within, is_keep_within)?;

@@ -1965,6 +1965,7 @@ dependencies = [
  "prost-types",
  "rcgen",
  "restichub-canary-scan",
+ "restichub-compiler",
  "restichub-db",
  "restichub-emulator",
  "restichub-proto",

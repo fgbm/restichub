@@ -290,6 +290,28 @@ pub(super) fn repository_location(backend: &ValidatedBackend) -> Result<String, 
     Ok(location)
 }
 
+/// The restic address that the agent opens for one repository job (ADR-0021).
+///
+/// The job dispatcher uses it. The stored settings were validated at the create and the update, so
+/// the location is the same form as [`repository_location`] gives.
+pub(crate) fn stored_location(repository: &Repository) -> String {
+    match repository.backend {
+        BackendKind::S3 => {
+            let endpoint = repository.s3_endpoint.as_deref().unwrap_or_default();
+            let bucket = repository.s3_bucket.as_deref().unwrap_or_default();
+            match repository.s3_prefix.as_deref() {
+                Some(prefix) => format!("s3:{endpoint}/{bucket}/{prefix}"),
+                None => format!("s3:{endpoint}/{bucket}"),
+            }
+        }
+        BackendKind::Rest => format!(
+            "rest:{}",
+            repository.rest_endpoint.as_deref().unwrap_or_default()
+        ),
+        BackendKind::Local => repository.local_path.clone().unwrap_or_default(),
+    }
+}
+
 /// The secret values of a create or an update, after validation.
 pub(super) struct Credentials {
     s3_access_key: Option<SecretString>,
@@ -599,7 +621,7 @@ fn backend_value(backend: &ValidatedBackend) -> serde_json::Value {
     }
 }
 
-pub(super) fn parse_repository_id(value: &str) -> Result<RepositoryId, ApiError> {
+pub(crate) fn parse_repository_id(value: &str) -> Result<RepositoryId, ApiError> {
     Uuid::parse_str(value)
         .map(RepositoryId::from_uuid)
         .map_err(|error| {

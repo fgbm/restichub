@@ -110,6 +110,14 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         restichub_cp::maintenance::SIGNING_KEY_RETIRE_INTERVAL,
     );
 
+    // The periodic sweep moves an overdue job to `expired`, so a poll sees a terminal status
+    // It is a maintenance task of the control plane, not job scheduling (ADR-0002).
+    restichub_cp::maintenance::spawn_job_expiry(
+        database.clone(),
+        Arc::new(restichub_cp::clock::SystemClock),
+        restichub_cp::maintenance::JOB_EXPIRY_INTERVAL,
+    );
+
     let auth = restichub_cp::server::AuthState::new(config.auth.clone());
     restichub_cp::maintenance::spawn_limiter_sweep(
         auth.user_limiter.clone(),
@@ -132,7 +140,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .await
         .context("cannot bind the listen address")?;
 
-    // The batch flush writes the `last_seen_at` buffer of the agent streams (LOW 7).
+    // The batch flush writes the `last_seen_at` buffer of the agent streams.
     restichub_cp::agent_stream::spawn_last_seen_flush(
         state.db().clone(),
         state.agent_registry_shared(),
