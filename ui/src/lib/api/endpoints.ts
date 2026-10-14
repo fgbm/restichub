@@ -45,6 +45,12 @@ export const endpoints = {
 		create: '/repositories',
 		byId: (id: string) => `/repositories/${encodeURIComponent(id)}`
 	},
+	profiles: {
+		list: '/profiles',
+		create: '/profiles',
+		byId: (id: string) => `/profiles/${encodeURIComponent(id)}`,
+		preview: (id: string) => `/profiles/${encodeURIComponent(id)}/preview`
+	},
 	audit: {
 		list: '/audit'
 	},

@@ -20,7 +20,14 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 	await signIn(page);
 	const switcher = page.getByRole('button', { name: 'Switch organization' });
 	await expect(switcher).toHaveText('acme');
-	expect(await tabNames(page)).toEqual(['Overview', 'Hosts', 'Repositories', 'Audit', 'Settings']);
+	expect(await tabNames(page)).toEqual([
+		'Overview',
+		'Hosts',
+		'Repositories',
+		'Profiles',
+		'Audit',
+		'Settings'
+	]);
 
 	await switcher.click();
 	await page.getByRole('menuitem', { name: 'Platform administration' }).click();
@@ -49,7 +56,7 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 
 	await expect(page).toHaveURL(/\/$/);
 	await expect(switcher).toHaveText('globex');
-	expect(await tabNames(page)).toEqual(['Overview', 'Hosts', 'Repositories', 'Audit']);
+	expect(await tabNames(page)).toEqual(['Overview', 'Hosts', 'Repositories', 'Profiles', 'Audit']);
 });
 
 test('the current organization leaves the platform mode for its overview', async ({ page }) => {
@@ -65,7 +72,14 @@ test('the current organization leaves the platform mode for its overview', async
 	await expect(page).toHaveURL(/\/$/);
 	await expect(switcher).toHaveText('acme');
 	await expect(page).toHaveTitle(/^Overview · ResticHub$/);
-	expect(await tabNames(page)).toEqual(['Overview', 'Hosts', 'Repositories', 'Audit', 'Settings']);
+	expect(await tabNames(page)).toEqual([
+		'Overview',
+		'Hosts',
+		'Repositories',
+		'Profiles',
+		'Audit',
+		'Settings'
+	]);
 });
 
 // ADR-0029: the Platform Admin right without a membership leaves no organization screen to open.
