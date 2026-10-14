@@ -8,6 +8,7 @@
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::Router;
@@ -18,12 +19,27 @@ use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair, PKCS_ECDSA_P256_SHA256,
 };
+use restichub_cp::agent_listener::{
+    ListenerLimits, der_to_pem, serve_listener, server_cert_sans, tls_config_from_issued,
+};
 use restichub_cp::config::{AuthConfig, TenancyConfig};
+use restichub_cp::pki::{CaService, CaStore};
 use restichub_cp::server::{AppState, AuthState, router};
 use restichub_db::test_util::{TestDatabase, test_database};
-use restichub_db::{Database, Role, TenantId, enrollment_tokens, tenants, users};
+use restichub_db::{Database, Role, TenantId, enrollment_tokens, signing, tenants, users};
+use restichub_proto::agent::v1::{
+    AgentMessage, ControlMessage, Ping,
+    agent_service_server::{AgentService, AgentServiceServer},
+    control_message,
+};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use time::{Duration, OffsetDateTime};
+use tokio_stream::Stream;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
+use tonic::{Request, Response, Status, Streaming};
+use uuid::Uuid;
 
 /// The gRPC endpoint that the enrollment tests report to an agent.
 pub const AGENT_ENDPOINT: &str = "https://agents.example:8443";
@@ -139,7 +155,7 @@ async fn create_tenant(db: &Database, name: &str) -> TenantId {
     tenant
 }
 
-async fn create_user(
+pub async fn create_user(
     db: &Database,
     tenant: TenantId,
     username: &str,
@@ -317,4 +333,374 @@ fn test_tls() -> (String, Arc<rustls::ServerConfig>) {
         .with_single_cert(vec![cert], key)
         .expect("cannot build the server TLS configuration");
     (ca.pem(), Arc::new(config))
+}
+
+/// A test database, a tenant, a one-time token and a real agent listener.
+pub struct StreamFixture {
+    pub db: TestDatabase,
+    pub tenant: TenantId,
+    pub token: String,
+    pub server: StreamServer,
+}
+
+/// Makes a fresh tenant, a one-time token and a running agent listener.
+pub async fn stream_fixture(name: &str) -> Option<StreamFixture> {
+    let db = test_database().await?;
+    let tenant = create_tenant(db.database(), name).await;
+    let creator = create_user(db.database(), tenant, "agent-admin", "phc", "admin").await;
+    let (token, _) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &["host".to_owned()],
+        OffsetDateTime::now_utc() + Duration::hours(1),
+    )
+    .await;
+    let server = StreamServer::start(db.database()).await;
+    Some(StreamFixture {
+        db,
+        tenant,
+        token,
+        server,
+    })
+}
+
+/// The real agent listener over TLS with the installation CA (ADR-0026).
+pub struct StreamServer {
+    pub state: AppState,
+    pub addr: SocketAddr,
+    pub endpoint: String,
+    ca: Arc<CaStore>,
+    root_der: Vec<u8>,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl StreamServer {
+    /// Binds a loopback port and serves the listener with the installation CA.
+    pub async fn start(db: &Database) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("cannot bind the listener");
+        let addr = listener.local_addr().expect("the listener address");
+        // The agent dials the endpoint host and verifies the name, so use the certificate DNS name.
+        let endpoint = format!("https://localhost:{}", addr.port());
+        let (state, ca) = pki_state(db, &endpoint).await;
+        let sans = server_cert_sans(Some(&endpoint), addr);
+        let issued = CaService::new(test_kek())
+            .issue_server_certificate(&ca, &sans)
+            .expect("cannot issue the server certificate");
+        let root_der = ca.root().cert_der.clone();
+        let tls = tls_config_from_issued(&issued, &root_der).expect("cannot build the TLS config");
+        let (shutdown, rx) = tokio::sync::oneshot::channel();
+        let serve_state = state.clone();
+        let task = tokio::spawn(async move {
+            let _ = serve_listener(
+                listener,
+                serve_state,
+                tls,
+                ListenerLimits::default(),
+                async move {
+                    let _ = rx.await;
+                },
+            )
+            .await;
+        });
+        Self {
+            state,
+            addr,
+            endpoint,
+            ca,
+            root_der,
+            shutdown: Some(shutdown),
+            task,
+        }
+    }
+
+    /// The installation certificate authority, for a test that issues another server certificate.
+    #[must_use]
+    pub fn ca(&self) -> &Arc<CaStore> {
+        &self.ca
+    }
+
+    /// Pinned installation CA, in DER.
+    #[must_use]
+    pub fn root_der(&self) -> &[u8] {
+        &self.root_der
+    }
+
+    /// The pinned installation root CA in PEM, as `register --ca-file` reads it.
+    #[must_use]
+    pub fn root_pem(&self) -> String {
+        restichub_cp::agent_listener::der_to_pem("CERTIFICATE", &self.root_der)
+    }
+
+    /// Revokes an agent as the API does: the status change and the stream close (FR-ID-04).
+    pub async fn revoke(
+        &self,
+        db: &Database,
+        tenant: TenantId,
+        agent: Uuid,
+        actor: restichub_db::UserId,
+    ) {
+        let mut tx = db
+            .begin_tenant(tenant)
+            .await
+            .expect("cannot begin the transaction");
+        restichub_db::agents::revoke(
+            &mut tx,
+            restichub_db::AgentId::from_uuid(agent),
+            actor,
+            OffsetDateTime::now_utc(),
+        )
+        .await
+        .expect("cannot revoke the agent");
+        tx.commit().await.expect("cannot commit the revoke");
+        self.state
+            .agent_registry()
+            .close_by_agent(restichub_db::AgentId::from_uuid(agent));
+    }
+}
+
+impl Drop for StreamServer {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        self.task.abort();
+    }
+}
+
+/// Builds the application state with a real certificate authority and job signing key set.
+pub async fn pki_state(db: &Database, endpoint: &str) -> (AppState, Arc<CaStore>) {
+    let provider = test_kek();
+    let ca = CaService::new(provider.clone());
+    let store = Arc::new(
+        ca.ensure_initialized(db)
+            .await
+            .expect("cannot create the CA"),
+    );
+    let job_signing = restichub_cp::job_signing::JobSigningService::new(provider.clone());
+    job_signing
+        .ensure_initialized(db)
+        .await
+        .expect("cannot create the job signing key set");
+    let auth = AuthState::new(AuthConfig::default());
+    let state = AppState::with_auth(db.clone(), auth)
+        .with_kek(provider)
+        .with_tenancy(TenancyConfig::multi())
+        .with_pki(store.clone(), job_signing, Some(endpoint.to_owned()));
+    (state, store)
+}
+
+/// Reads `last_seen_at` of an agent through a tenant transaction.
+pub async fn last_seen(db: &Database, tenant: TenantId, agent: Uuid) -> Option<OffsetDateTime> {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let row = restichub_db::agents::get(&mut tx, restichub_db::AgentId::from_uuid(agent))
+        .await
+        .expect("cannot read the agent");
+    tx.commit().await.expect("cannot commit the read");
+    row.and_then(|agent| agent.last_seen_at)
+}
+
+/// Sets `last_seen_at` of an agent through the owner connection.
+pub async fn set_last_seen(
+    db: &TestDatabase,
+    tenant: TenantId,
+    agent: Uuid,
+    value: OffsetDateTime,
+) {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query("UPDATE agents SET last_seen_at = $2 WHERE id = $1")
+        .bind(agent)
+        .bind(value)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set last_seen_at");
+    tx.commit().await.expect("cannot commit last_seen_at");
+}
+
+/// The number of retired job signing keys in the platform tenant (ADR-0026).
+pub async fn retired_keys(db: &Database) -> usize {
+    let mut tx = db
+        .begin_tenant(restichub_db::PLATFORM_TENANT_ID)
+        .await
+        .expect("cannot begin the transaction");
+    let rows = signing::list(&mut tx).await.expect("cannot list the keys");
+    tx.commit().await.expect("cannot commit the read");
+    rows.iter().filter(|row| row.retired_at.is_some()).count()
+}
+
+/// The identifier of the current active job signing key (ADR-0026).
+pub async fn current_key_id(db: &Database) -> String {
+    let mut tx = db
+        .begin_tenant(restichub_db::PLATFORM_TENANT_ID)
+        .await
+        .expect("cannot begin the transaction");
+    let rows = signing::list(&mut tx).await.expect("cannot list the keys");
+    tx.commit().await.expect("cannot commit the read");
+    rows.into_iter()
+        .find(|row| {
+            row.role == restichub_db::SigningKeyRole::Current
+                && row.retired_at.is_none()
+                && row.retire_after.is_none()
+        })
+        .expect("the current key is present")
+        .id
+        .to_string()
+}
+
+/// A gRPC listener that accepts the agent stream and never sends a message (FR-ID-07).
+///
+/// The listener presents a certificate from the installation CA and verifies the agent against the
+/// installation root, so the agent reaches it over mTLS. It counts the accepted streams.
+pub struct SilentServer {
+    addr: SocketAddr,
+    connections: Arc<std::sync::atomic::AtomicUsize>,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+/// How the silent server ends a stream (FR-ID-07, FR-ID-08).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SilentMode {
+    /// Keeps the stream open and sends no message.
+    Silent,
+    /// Ends the stream at once, without a message.
+    Closing,
+    /// Sends one ping and then fails, as a control plane restart does.
+    PingThenError,
+}
+
+impl SilentServer {
+    /// Serves a silent agent stream on a loopback port (FR-ID-07).
+    pub async fn start(ca: &CaStore, root_der: &[u8]) -> Self {
+        Self::start_mode(ca, root_der, SilentMode::Silent).await
+    }
+
+    /// Serves a stream that ends at once, for the reconnect-backoff test (FR-ID-08).
+    pub async fn start_closing(ca: &CaStore, root_der: &[u8]) -> Self {
+        Self::start_mode(ca, root_der, SilentMode::Closing).await
+    }
+
+    /// Serves a stream that answers one ping and then fails, for the healthy-stream test (FR-ID-08).
+    pub async fn start_ping_then_error(ca: &CaStore, root_der: &[u8]) -> Self {
+        Self::start_mode(ca, root_der, SilentMode::PingThenError).await
+    }
+
+    async fn start_mode(ca: &CaStore, root_der: &[u8], mode: SilentMode) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("cannot bind the silent server");
+        let addr = listener.local_addr().expect("the silent server address");
+        let endpoint = format!("https://localhost:{}", addr.port());
+        let sans = server_cert_sans(Some(&endpoint), addr);
+        let issued = CaService::new(test_kek())
+            .issue_server_certificate(ca, &sans)
+            .expect("cannot issue the server certificate");
+        let mut chain = der_to_pem("CERTIFICATE", &issued.cert_der);
+        for der in &issued.chain_der {
+            chain.push_str(&der_to_pem("CERTIFICATE", der));
+        }
+        let tls = ServerTlsConfig::new()
+            .identity(Identity::from_pem(
+                chain,
+                der_to_pem("PRIVATE KEY", issued.key_der.as_slice()),
+            ))
+            .client_ca_root(Certificate::from_pem(der_to_pem("CERTIFICATE", root_der)));
+        let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let service = SilentService {
+            connections: Arc::clone(&connections),
+            mode,
+        };
+        let (shutdown, rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let incoming = TcpListenerStream::new(listener);
+            let _ = Server::builder()
+                .tls_config(tls)
+                .expect("cannot build the silent TLS config")
+                .add_service(AgentServiceServer::new(service))
+                .serve_with_incoming_shutdown(incoming, async move {
+                    let _ = rx.await;
+                })
+                .await;
+        });
+        Self {
+            addr,
+            connections,
+            shutdown: Some(shutdown),
+            task,
+        }
+    }
+
+    /// Address that the agent dials.
+    #[must_use]
+    pub fn endpoint(&self) -> String {
+        format!("https://localhost:{}", self.addr.port())
+    }
+
+    /// Count of the accepted agent streams.
+    #[must_use]
+    pub fn connections(&self) -> usize {
+        self.connections.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Drop for SilentServer {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        self.task.abort();
+    }
+}
+
+/// The gRPC service of the silent server. It sends no control message (FR-ID-07), closes at once
+/// (FR-ID-08), or answers one ping and then fails (FR-ID-08).
+#[derive(Clone)]
+struct SilentService {
+    connections: Arc<std::sync::atomic::AtomicUsize>,
+    mode: SilentMode,
+}
+
+#[tonic::async_trait]
+impl AgentService for SilentService {
+    type ConnectStream = Pin<Box<dyn Stream<Item = Result<ControlMessage, Status>> + Send>>;
+
+    async fn connect(
+        &self,
+        request: Request<Streaming<AgentMessage>>,
+    ) -> Result<Response<Self::ConnectStream>, Status> {
+        self.connections
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut inbound = request.into_inner();
+        tokio::spawn(async move { while let Ok(Some(_)) = inbound.message().await {} });
+        let (tx, rx) = tokio::sync::mpsc::channel::<ControlMessage>(1);
+        match self.mode {
+            SilentMode::Silent => {
+                // The sender is leaked, so the outbound stream stays open and sends nothing.
+                std::mem::forget(tx);
+                Ok(Response::new(Box::pin(ReceiverStream::new(rx).map(Ok))))
+            }
+            SilentMode::Closing => Ok(Response::new(Box::pin(ReceiverStream::new(rx).map(Ok)))),
+            SilentMode::PingThenError => {
+                let ping = ControlMessage {
+                    payload: Some(control_message::Payload::Ping(Ping { nonce: 1 })),
+                };
+                let stream = tokio_stream::iter(vec![
+                    Ok(ping),
+                    Err(Status::unavailable("the control plane restarted")),
+                ]);
+                Ok(Response::new(Box::pin(stream)))
+            }
+        }
+    }
 }

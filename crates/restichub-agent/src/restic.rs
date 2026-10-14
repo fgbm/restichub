@@ -1,7 +1,6 @@
 //! The bundled restic binary and its embedded SHA-256 (ADR-0031, FR-AG-11).
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
@@ -29,11 +28,12 @@ pub trait Restic {
 
     /// Asks restic for its build identifier (FR-AG-11).
     ///
-    /// Call the hash check before this call.
+    /// The child runs the checked inode, so the caller needs no earlier hash check.
     ///
     /// # Errors
     ///
-    /// Returns an error when restic does not run or prints no version.
+    /// Returns an error when the hash differs, when restic does not run, or when it prints no
+    /// version.
     fn version(&self) -> Result<String>;
 }
 
@@ -73,10 +73,9 @@ impl Restic for ResticBinary {
     }
 
     fn version(&self) -> Result<String> {
-        let output = Command::new(&self.path)
-            .arg("version")
-            .output()
-            .with_context(|| format!("cannot run {}", self.path.display()))?;
+        // The query runs the checked inode through the same handle pin and environment as a job
+        // (FR-AG-06, threat T20).
+        let output = crate::exec::version_output(self)?;
         if !output.status.success() {
             bail!("`restic version` failed with {}", output.status);
         }
@@ -95,21 +94,32 @@ impl Restic for ResticBinary {
 pub fn verify_hash(path: &Path, expected_hex: &str) -> Result<()> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("cannot read the bundled restic at {}", path.display()))?;
-    let actual = hex(&Sha256::digest(&bytes));
+    verify_digest(&Sha256::digest(&bytes), expected_hex)
+}
+
+/// Checks a SHA-256 digest against the expected hexadecimal value (AC-AG-11).
+///
+/// The caller hashes the bytes it will run, so the check and the use share one reading of the
+/// binary (threat T20).
+///
+/// # Errors
+///
+/// Returns an error when the digest differs from `expected_hex`, or when the build holds no pinned
+/// hash and the `dev-unpinned-restic` feature is absent.
+pub fn verify_digest(actual: &[u8], expected_hex: &str) -> Result<()> {
+    let actual = hex(actual);
     if expected_hex.is_empty() {
         if cfg!(feature = "dev-unpinned-restic") {
-            tracing::warn!(path = %path.display(), "the restic hash is not pinned in this build");
+            tracing::warn!("the restic hash is not pinned in this build");
             return Ok(());
         }
         bail!(
-            "the restic binary at {} is not verified: this build holds no pinned SHA-256; install a released agent package",
-            path.display()
+            "the restic binary is not verified: this build holds no pinned SHA-256; install a released agent package"
         );
     }
     if !actual.eq_ignore_ascii_case(expected_hex) {
         bail!(
-            "the restic binary at {} does not match the pinned SHA-256: expected {expected_hex}, got {actual}",
-            path.display()
+            "the restic binary does not match the pinned SHA-256: expected {expected_hex}, got {actual}"
         );
     }
     Ok(())

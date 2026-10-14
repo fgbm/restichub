@@ -17,7 +17,7 @@ COMMANDS:
   register           enroll this host with a control plane
   install-service    write and enable the operating system service
   uninstall-service  stop and remove the operating system service
-  run                run the agent (the protocol stream arrives with #50)
+  run                run the agent (the protocol stream)
   status             print the stored identity facts
   version            print the agent version
   help               print this help

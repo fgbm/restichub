@@ -49,7 +49,11 @@ pub const LAST_SEEN_INTERVAL: Duration = Duration::from_secs(30);
 pub const IDLE_CLOSE: Duration = Duration::from_secs(3 * HEARTBEAT_INTERVAL.as_secs());
 
 /// Control messages buffered for one agent.
-const OUTBOUND_CHANNEL: usize = 64;
+/// The buffer of the messages that the control plane sends to one agent.
+///
+/// It holds the greeting and the whole bounded key chain, so the connect handler never blocks on a
+/// full buffer before the response stream reaches the client.
+const OUTBOUND_CHANNEL: usize = 128;
 
 /// The largest accepted key identifier in a `KeyUpdateAck`.
 const MAX_KEY_ID_LEN: usize = 64;
@@ -479,10 +483,16 @@ impl AgentService for AgentStreamService {
             })),
         };
         let _ = tx.try_send(hello);
-        if let Some(update) = self.fresh_key_update(now).await {
-            let _ = tx.try_send(ControlMessage {
-                payload: Some(control_message::Payload::SigningKeyUpdate(update)),
-            });
+
+        // The whole key chain on every connect, so an agent that missed several rotations re-syncs
+        // (ADR-0030). The agent applies the steps in order. The chain is bounded and the buffer
+        // holds it, so the awaited send never blocks before the response stream reaches the client.
+        for update in self.fresh_key_updates().await {
+            let _ = tx
+                .send(ControlMessage {
+                    payload: Some(control_message::Payload::SigningKeyUpdate(update)),
+                })
+                .await;
         }
 
         // The guarded write re-checks the status, the serial and the expiry in one statement. A
@@ -614,13 +624,15 @@ async fn recv_rotation(
     }
 }
 
-/// Delivers a fresh key set after a rotation and records the acknowledgement run (ADR-0026).
+/// Delivers the fresh key set after a rotation and records the acknowledgement run (ADR-0026).
+///
+/// The delivery uses the stored step of the new next key, so it is the same signed message that a
+/// later re-sync delivers (ADR-0030).
 async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent) {
     let Some(signing) = state.job_signing() else {
         return;
     };
-    let now = state.auth().clock.now();
-    let Ok(update) = signing.key_update(state.db(), now).await else {
+    let Ok(update) = signing.current_step(state.db()).await else {
         return;
     };
     if let Some(pending) = state
@@ -696,10 +708,21 @@ fn retire(state: &AppState, pending: Uuid) {
 }
 
 impl AgentStreamService {
-    /// Builds the fresh signed key set for a connecting agent (FR-PR-11).
-    async fn fresh_key_update(&self, now: time::OffsetDateTime) -> Option<SigningKeyUpdate> {
-        let signing = self.state.job_signing()?;
-        signing.key_update(self.state.db(), now).await.ok()
+    /// Builds the key chain for a connecting agent (ADR-0030, FR-PR-11).
+    ///
+    /// The chain starts at the first key, so an agent that missed several rotations catches up. An
+    /// agent that already holds the earlier keys skips those steps.
+    async fn fresh_key_updates(&self) -> Vec<SigningKeyUpdate> {
+        let Some(signing) = self.state.job_signing() else {
+            return Vec::new();
+        };
+        match signing.key_chain(self.state.db()).await {
+            Ok(chain) => chain,
+            Err(error) => {
+                tracing::warn!(%error, "cannot build the job signing key chain");
+                Vec::new()
+            }
+        }
     }
 }
 

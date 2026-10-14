@@ -155,7 +155,11 @@ impl KeyRing {
         Ok(())
     }
 
-    fn revoke(&mut self, key_id: &str) {
+    /// Revokes a key identifier, so the ring never returns it again (FR-PR-11).
+    ///
+    /// The agent applies the persisted revoked set at load, so a key that the control plane retired
+    /// stays revoked across a restart.
+    pub fn revoke(&mut self, key_id: &str) {
         self.keys.remove(key_id);
         self.revoked.insert(key_id.to_owned());
     }

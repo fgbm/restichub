@@ -35,9 +35,37 @@ The directory holds these files:
 - `agent-cert.pem`: the agent certificate. The certificate holds the agent ID and the tenant ID.
 - `ca-chain.pem`: the issuing CA and the root CA.
 - `identity.json`: the agent ID, the tenant ID, the control plane URL and the gRPC endpoint.
-- `signing-key-update.bin`: the signed job signing key set.
+- `signing-keys.json`: the job signing key set from the enrollment.
+- `signing-key-updates.json`: the signed key updates that the agent accepted. The agent verifies a job after a key rotation with this chain (ADR-0030).
 
 The token never reaches a file and never reaches a log.
+
+## Check the connection
+
+The agent connects to the control plane after the service starts. The agent keeps one stream open and answers the heartbeat of the control plane (FR-ID-07). The stream uses mTLS. The agent verifies the control plane with the installation root CA only, never with the system root certificates.
+
+To check the connection:
+
+1. Open the "Hosts" screen in the Web UI.
+2. Find the host by its name.
+3. Read the status. The status is `active` when the agent is enrolled.
+4. Read the "Last seen" time. The control plane writes this time while the stream is open. A time within the last minute shows a live connection.
+
+The control plane marks an agent offline after a grace period of 300 seconds without a heartbeat (FR-ID-08). A short network failure therefore does not change the status.
+
+The agent writes one line when the control plane greets it:
+
+```text
+the control plane greeted the agent
+```
+
+An agent with a revoked or an unknown certificate writes this line:
+
+```text
+the control plane refused the agent identity; check that the agent is enrolled and not revoked
+```
+
+The agent then waits 60 seconds and tries again. Register the host again after a revoke (see above).
 
 ## Install the service
 
@@ -62,6 +90,12 @@ The unit sets `CacheDirectory=restichub-agent` and `RESTIC_CACHE_DIR=/var/cache/
 ## The restic binary
 
 The agent package holds `restic` next to `restichub-agent`. The build embeds the expected SHA-256 of the restic binary. At the start of `register` and `run` the agent checks the hash and refuses a different binary (ADR-0031). The control plane cannot set the restic path.
+
+## Proxy settings
+
+A repository behind a proxy uses the proxy of the host. The agent passes `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` from its own environment to the restic child process, and the lower-case forms on Linux and macOS. Set these variables in the environment of the agent service, never in a job.
+
+The restic child holds no other variable of the agent, so a job cannot redirect the traffic of a repository (FR-AG-06).
 
 ## Related
 

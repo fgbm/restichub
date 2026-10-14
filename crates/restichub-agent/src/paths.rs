@@ -2,9 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-#[cfg(not(windows))]
-use anyhow::Context as _;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 
 /// Path of the directory that holds the agent identity (FR-AG-04).
 ///
@@ -21,6 +19,22 @@ pub fn config_dir() -> PathBuf {
     #[cfg(not(windows))]
     {
         PathBuf::from("/etc/restichub-agent")
+    }
+}
+
+/// The cache directory of the agent. The restic child writes its cache there (FR-AG-06).
+///
+/// Linux uses `/var/cache/restichub-agent`, which the systemd unit creates. Windows uses a
+/// subdirectory of the configuration directory.
+#[must_use]
+pub fn cache_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        config_dir().join("cache")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/var/cache/restichub-agent")
     }
 }
 
@@ -78,6 +92,25 @@ pub fn create_protected_file(path: &Path, contents: &[u8]) -> Result<()> {
     }
 }
 
+/// Replaces a file with one rename, so a reader sees the old or the new content (FR-AG-04).
+///
+/// # Errors
+///
+/// Returns an error when the temporary file cannot be written or the rename fails.
+pub fn replace_file(path: &Path, contents: &[u8]) -> Result<()> {
+    let temporary = path.with_extension("tmp");
+    // A crash between the write and the rename leaves a stale temporary file. Remove it first, so a
+    // create that refuses an existing file cannot fail the replacement.
+    let _ = std::fs::remove_file(&temporary);
+    create_protected_file(&temporary, contents)?;
+    std::fs::rename(&temporary, path)
+        .with_context(|| format!("cannot replace {}", path.display()))?;
+    if let Some(parent) = path.parent() {
+        sync_dir(parent)?;
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn restrict(dir: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
@@ -88,19 +121,16 @@ fn restrict(dir: &Path) -> Result<()> {
 #[cfg(unix)]
 fn write_owner_only(path: &Path, contents: &[u8]) -> Result<()> {
     use std::io::Write as _;
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    use std::os::unix::fs::OpenOptionsExt as _;
+    // `create_new` never follows an existing file, so a pre-created path cannot redirect the write.
     let mut file = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(path)
         .with_context(|| format!("cannot create {}", path.display()))?;
     file.write_all(contents)
         .with_context(|| format!("cannot write {}", path.display()))?;
-    // The mode above applies at creation only; an overwritten file keeps its old mode.
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("cannot set the mode of {}", path.display()))?;
     // The identity must survive a power loss, so the data and the metadata are flushed.
     file.sync_all()
         .with_context(|| format!("cannot flush {}", path.display()))

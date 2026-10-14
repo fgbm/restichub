@@ -450,3 +450,42 @@ fn a_reserved_default_tenant_name_is_refused() {
         })
     ));
 }
+
+/// the reported agent endpoint must use `https`, because the agent dials it (ADR-0033).
+#[test]
+fn a_plain_http_agent_endpoint_is_refused() {
+    let env = MapEnv::new(&[
+        ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+        ("RESTICHUB_AGENT_ENDPOINT", "http://agents.example:8443"),
+    ]);
+    let error = Config::load_with(&Cli::default(), &env).expect_err("http must be refused");
+    assert!(error.to_string().contains("https"), "{error}");
+}
+
+/// an `https` agent endpoint is accepted and reported as it is.
+#[test]
+fn an_https_agent_endpoint_is_accepted() {
+    let env = MapEnv::new(&[
+        ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+        ("RESTICHUB_AGENT_ENDPOINT", "https://agents.example:8443"),
+    ]);
+    let config = Config::load_with(&Cli::default(), &env).expect("https is accepted");
+    assert_eq!(
+        config.agent_endpoint.as_deref(),
+        Some("https://agents.example:8443")
+    );
+}
+
+/// an endpoint with a userinfo is refused, because the agent refuses it too (ADR-0033).
+#[test]
+fn an_agent_endpoint_with_a_userinfo_is_refused() {
+    let env = MapEnv::new(&[
+        ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+        (
+            "RESTICHUB_AGENT_ENDPOINT",
+            "https://user:pass@agents.example:8443",
+        ),
+    ]);
+    let error = Config::load_with(&Cli::default(), &env).expect_err("a userinfo must be refused");
+    assert!(error.to_string().contains("userinfo"), "{error}");
+}

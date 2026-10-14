@@ -32,6 +32,10 @@ pub struct SigningKeyRow {
     pub retire_after: Option<OffsetDateTime>,
     /// Set when the key is retired; its identifier is a revoked key.
     pub retired_at: Option<OffsetDateTime>,
+    /// The signed `SigningKeyUpdate` envelope of the step that introduced this key, if any.
+    pub step_update: Option<Vec<u8>>,
+    /// `rotation` or `compromise` when the key is retired; the chain never carries a compromise.
+    pub retired_reason: Option<String>,
 }
 
 /// The caller wraps the private key and passes the ciphertext with the key encryption key (KEK)
@@ -44,6 +48,8 @@ pub struct NewSigningKey<'a> {
     pub nonce: &'a [u8],
     pub wrapped_key: &'a [u8],
     pub public_key: &'a [u8],
+    /// The signed envelope of the step that introduces the key; the first key holds none.
+    pub step_update: Option<&'a [u8]>,
 }
 
 /// A cheap change token of the table: the row count, the retired row count and the newest row time.
@@ -72,10 +78,12 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<SigningKeyRow>, DbError> 
             OffsetDateTime,
             Option<OffsetDateTime>,
             Option<OffsetDateTime>,
+            Option<Vec<u8>>,
+            Option<String>,
         ),
     >(
         "SELECT id, role, kek_id, nonce, wrapped_key, public_key, created_at, retire_after, \
-         retired_at FROM signing_keys ORDER BY created_at, id",
+         retired_at, step_update, retired_reason FROM signing_keys ORDER BY created_at, id",
     )
     .fetch_all(tx.as_conn())
     .await
@@ -93,6 +101,8 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<SigningKeyRow>, DbError> 
                 created_at,
                 retire_after,
                 retired_at,
+                step_update,
+                retired_reason,
             )| {
                 SigningKeyRow {
                     id,
@@ -104,6 +114,8 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<SigningKeyRow>, DbError> 
                     created_at,
                     retire_after,
                     retired_at,
+                    step_update,
+                    retired_reason,
                 }
             },
         )
@@ -128,8 +140,8 @@ pub async fn version(tx: &mut TenantTx<'_>) -> Result<Version, DbError> {
 
 pub async fn insert(tx: &mut TenantTx<'_>, new: &NewSigningKey<'_>) -> Result<(), DbError> {
     sqlx::query(
-        "INSERT INTO signing_keys (tenant_id, id, role, kek_id, nonce, wrapped_key, public_key) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "INSERT INTO signing_keys (tenant_id, id, role, kek_id, nonce, wrapped_key, public_key, \
+         step_update) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(tx.tenant())
     .bind(new.id)
@@ -138,6 +150,7 @@ pub async fn insert(tx: &mut TenantTx<'_>, new: &NewSigningKey<'_>) -> Result<()
     .bind(new.nonce)
     .bind(new.wrapped_key)
     .bind(new.public_key)
+    .bind(new.step_update)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -189,7 +202,7 @@ pub async fn schedule_retire(
 /// Retires the pending keys whose `retire_after` is not after `now`. Returns the retired rows.
 pub async fn retire_due(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<Vec<Uuid>, DbError> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
-        "UPDATE signing_keys SET retired_at = $1 \
+        "UPDATE signing_keys SET retired_at = $1, retired_reason = 'rotation' \
          WHERE retired_at IS NULL AND retire_after IS NOT NULL AND retire_after <= $1 \
          RETURNING id",
     )
@@ -208,8 +221,31 @@ pub async fn retire_pending(
     now: OffsetDateTime,
 ) -> Result<Vec<Uuid>, DbError> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
-        "UPDATE signing_keys SET retired_at = $1 \
+        "UPDATE signing_keys SET retired_at = $1, retired_reason = 'rotation' \
          WHERE id = $2 AND retired_at IS NULL AND retire_after IS NOT NULL \
+         RETURNING id",
+    )
+    .bind(now)
+    .bind(id)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// Retires a key for a compromise. Returns the retired row, or none when the key is already retired.
+///
+/// A key that the control plane retired for a compromise is never part of the chain: the key must
+/// not sign a later update, because an attacker who holds it would otherwise be trusted (ADR-0030).
+pub async fn retire_compromised(
+    tx: &mut TenantTx<'_>,
+    id: Uuid,
+    now: OffsetDateTime,
+) -> Result<Vec<Uuid>, DbError> {
+    // The retirement check needs `retire_after` on a retired row, and a compromise retires at once.
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "UPDATE signing_keys SET retired_at = $1, retire_after = $1, \
+         retired_reason = 'compromise' WHERE id = $2 AND retired_at IS NULL \
          RETURNING id",
     )
     .bind(now)

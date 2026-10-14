@@ -14,6 +14,8 @@ ADR-0026 fixes the job signing key rotation. The control plane sends the key set
 - A re-sync sends the chain of `KeyUpdate` messages, one step per rotation. Each message is signed by the key that the agent already holds. The agent reaches the current key in a few steps.
 - A rotation refuses while an earlier rotation still holds its overlap. One overlap row exists at a time, so the chain stays short.
 - A key that the control plane retired for a compromise is never part of the chain. The chain carries the keys of a normal rotation only. An agent that needs a compromised key re-enrolls instead.
+- The control plane signs each chain step once, at the rotation that creates the key, and stores the step in the key row (2026-10-14). The delivery reads the stored steps, so it needs no private key of a retired row. It skips a step that does not decode, and it always delivers the current step. The chain carries the newest 64 steps.
+- The row of a key holds the reason for its retirement: `rotation` or `compromise` (2026-10-14). A key whose reason is `compromise` is not part of the chain.
 - The delivery of the chain and the acknowledgement are issue #50.
 - The enrollment delivers the current key and the next key (2026-10-14). An agent that enrolls holds the current key at once, so it verifies a job before the first rotation.
 

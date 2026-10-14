@@ -13,6 +13,8 @@ use restichub_secrets::{EnvReader, SecretString, SystemEnv, read_secret};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use axum::http::Uri;
+
 use crate::client_ip::TrustedProxies;
 
 pub const CONFIG_PATH_ENV: &str = "RESTICHUB_CONFIG";
@@ -266,11 +268,42 @@ pub struct SecretsConfig {
     pub kek_file: Option<PathBuf>,
 }
 
+/// Validates the reported listener address as an `https` URL with a host (ADR-0033).
+///
+/// The control plane reports this address to an agent at enrollment and the agent dials it, so a
+/// plain `http` or a URL without a host must never reach the enrollment response.
+fn agent_endpoint(value: &str) -> Result<String, ConfigError> {
+    let uri: Uri = value.parse().map_err(|_| ConfigError::Invalid {
+        name: "agent_endpoint",
+        reason: format!("`{value}` is not a URL"),
+    })?;
+    if uri.scheme_str() != Some("https") {
+        return Err(ConfigError::Invalid {
+            name: "agent_endpoint",
+            reason: format!("`{value}` must use the `https` scheme"),
+        });
+    }
+    let Some(authority) = uri.authority() else {
+        return Err(ConfigError::Invalid {
+            name: "agent_endpoint",
+            reason: format!("`{value}` holds no host"),
+        });
+    };
+    // The agent refuses a userinfo in the endpoint (ADR-0033), so the control plane never reports
+    // one to an agent.
+    if authority.as_str().contains('@') {
+        return Err(ConfigError::Invalid {
+            name: "agent_endpoint",
+            reason: format!("`{value}` must not hold a userinfo"),
+        });
+    }
+    Ok(value.to_owned())
+}
+
 impl Config {
     pub fn load(cli: &Cli) -> Result<Self, ConfigError> {
         Self::load_with(cli, &SystemEnv)
     }
-
     /// Loads the configuration from a given environment. A test uses this function.
     ///
     /// The precedence is: the default value, then the configuration file, then the environment.
@@ -301,7 +334,10 @@ impl Config {
         let auth = auth_config(env, file.auth.as_ref(), file.server.as_ref())?;
         let secrets = secrets_config(env, file.secrets.as_ref());
         let tenancy = tenancy_config(env, file.tenancy.as_ref())?;
-        let agent_endpoint = env.get(AGENT_ENDPOINT_ENV).or(file.agent_endpoint);
+        let agent_endpoint = match env.get(AGENT_ENDPOINT_ENV).or(file.agent_endpoint) {
+            Some(value) => Some(agent_endpoint(&value)?),
+            None => None,
+        };
         let agent_listen_addr = match env.get(AGENT_LISTEN_ENV).or(file.agent_listen) {
             Some(value) => Some(value.parse().map_err(|_| ConfigError::Invalid {
                 name: "agent_listen",

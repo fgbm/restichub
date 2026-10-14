@@ -185,7 +185,7 @@ fn sibling(dir: &Path, suffix: &str) -> std::path::PathBuf {
 ///
 /// A swap that a crash interrupted leaves the old identity in the backup and no identity in the
 /// main directory. The function moves the backup back, so the agent keeps its identity.
-fn recover(dir: &Path) -> std::path::PathBuf {
+pub(crate) fn recover(dir: &Path) -> std::path::PathBuf {
     if dir.join(METADATA_FILE).exists() {
         return dir.to_path_buf();
     }
