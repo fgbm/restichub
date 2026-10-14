@@ -483,7 +483,7 @@ export interface paths {
         put?: never;
         /**
          * Runs a plan now.
-         * @description The job waits in the queue and starts as soon as the agent is online and the limits allow it.
+         * @description The job waits in the queue and starts as soon as the agent is online and the limits allow it. A plan holds at most one queued manual run: a second run gives HTTP 409 `already_queued`.
          */
         post: operations["run_plan"];
         delete?: never;
@@ -1401,7 +1401,7 @@ export interface components {
             used_at?: string | null;
         };
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued";
         /**
          * @description Grouping key of the retention rule.
          * @enum {string}
@@ -3543,7 +3543,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The agent of the plan is revoked. */
+            /** @description The agent of the plan is revoked, or a manual run of the plan is already queued (`already_queued`). */
             409: {
                 headers: {
                     [name: string]: unknown;

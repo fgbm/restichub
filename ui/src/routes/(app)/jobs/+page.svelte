@@ -227,12 +227,12 @@
 
 {#snippet startedCell(job: Job)}
 	<span class="job__meta">
-		{job.started_at ? formatLocalTime(job.started_at) : t('common.none')}
+		{job.started_at ? formatLocalTime(job.started_at) : '—'}
 	</span>
 {/snippet}
 
 {#snippet durationCell(job: Job)}
-	<span class="job__meta">{durationOf(job) || t('common.none')}</span>
+	<span class="job__meta">{durationOf(job) || '—'}</span>
 {/snippet}
 
 <svelte:head>
@@ -255,15 +255,6 @@
 		bordered
 	/>
 {:else}
-	<div class="filter">
-		<Select
-			id="jobs-status"
-			label={t('jobs.filterStatus')}
-			options={statusOptions}
-			bind:value={statusFilter}
-			onchange={load}
-		/>
-	</div>
 	<Table
 		{columns}
 		rows={jobs}
@@ -273,6 +264,17 @@
 		paginated={false}
 		filterPlaceholder={t('jobs.searchPlaceholder')}
 	>
+		{#snippet toolbar()}
+			<div class="filter">
+				<Select
+					id="jobs-status"
+					aria-label={t('jobs.filterStatus')}
+					options={statusOptions}
+					bind:value={statusFilter}
+					onchange={load}
+				/>
+			</div>
+		{/snippet}
 		{#snippet rowActions(job)}
 			{#if actionsFor(job).length > 0}
 				<DropdownMenu
@@ -325,12 +327,11 @@
 	}
 
 	.job__reason {
-		max-width: 32ch;
+		max-width: 22ch;
 	}
 
 	.filter {
-		max-width: 16rem;
-		margin-bottom: var(--rh-space-3);
+		min-width: 12rem;
 	}
 
 	.more {

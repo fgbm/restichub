@@ -88,6 +88,20 @@ describe('the Jobs screen', () => {
 		expect(screen.getByText('primary-s3')).toBeInTheDocument();
 	});
 
+	it('shows a dash for an empty start and duration and keeps the filter in the toolbar', async () => {
+		mocks.listJobs.mockResolvedValue({
+			items: [job({ status: 'queued', started_at: null })],
+			next_cursor: null
+		});
+		render(Jobs);
+
+		const table = within(await screen.findByRole('table'));
+		expect((await table.findAllByText('—')).length).toBe(2);
+		expect(screen.queryByText('None')).not.toBeInTheDocument();
+		const filter = screen.getByRole('combobox', { name: 'Status filter' });
+		expect(filter.closest('.table-toolbar')).not.toBeNull();
+	});
+
 	it('shows a cancelled job apart from a failed one and translates the reason', async () => {
 		mocks.listJobs.mockResolvedValue({
 			items: [

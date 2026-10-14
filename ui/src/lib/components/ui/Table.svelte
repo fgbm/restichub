@@ -25,7 +25,8 @@
 		emptyIcon,
 		sort,
 		onRowClick,
-		rowActions
+		rowActions,
+		toolbar
 	}: {
 		columns: TableColumn<T>[];
 		rows?: T[];
@@ -45,6 +46,8 @@
 		sort?: { key: string; direction: 'asc' | 'desc' };
 		onRowClick?: (row: T) => void;
 		rowActions?: Snippet<[T]>;
+		/** Controls shown in the toolbar next to the search field. */
+		toolbar?: Snippet;
 	} = $props();
 
 	const columnCount = $derived(columns.length + (rowActions ? 1 : 0));
@@ -119,17 +122,20 @@
 </script>
 
 <div class="table-wrap">
-	{#if filterable}
+	{#if filterable || toolbar}
 		<div class="table-toolbar">
-			<label class="table-search">
-				<Icon name="search" />
-				<input
-					type="search"
-					bind:value={filter}
-					placeholder={filterPlaceholder ?? t('table.filterPlaceholder')}
-					aria-label={t('common.filter')}
-				/>
-			</label>
+			{#if filterable}
+				<label class="table-search">
+					<Icon name="search" />
+					<input
+						type="search"
+						bind:value={filter}
+						placeholder={filterPlaceholder ?? t('table.filterPlaceholder')}
+						aria-label={t('common.filter')}
+					/>
+				</label>
+			{/if}
+			{@render toolbar?.()}
 		</div>
 	{/if}
 

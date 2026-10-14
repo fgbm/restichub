@@ -587,6 +587,8 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.compile_failed': 'Профиль больше не подходит этому хосту.',
 	'jobs.reason.lock_retries_exhausted':
 		'Репозиторий оставался заблокированным после всех повторов.',
+	'jobs.reason.lock_retry': 'Репозиторий был заблокирован. Новая попытка стоит в очереди.',
+	'jobs.reason.signed_job_unavailable': 'Сохранённое задание нечитаемо.',
 	'jobs.reason.agent_lost': 'Хост отключился во время задания.',
 	'jobs.reason.agent_revoked': 'Хост отозван.',
 	'jobs.reason.not_acknowledged': 'Хост не подтвердил получение задания.',
@@ -759,6 +761,7 @@ export const ru: Record<MessageKey, string> = {
 	'error.email_taken': 'Этот адрес электронной почты занят.',
 	'error.agent_offline':
 		'Хост не в сети. Очереди заданий нет, поэтому сервер управления отклонил задание. Подключите хост и повторите.',
+	'error.already_queued': 'Ручной запуск этого плана уже стоит в очереди.',
 	'error.internal_error': 'В сервере управления внутренняя проблема.',
 	'error.network': 'Сервер управления не ответил.',
 	'error.field': 'Исправьте это поле.',

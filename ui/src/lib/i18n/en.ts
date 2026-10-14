@@ -581,6 +581,8 @@ export const en = {
 	'jobs.kind.other': 'Other',
 	'jobs.reason.compile_failed': 'The profile no longer fits the host.',
 	'jobs.reason.lock_retries_exhausted': 'The repository stayed locked after every retry.',
+	'jobs.reason.lock_retry': 'The repository was locked. A new attempt is queued.',
+	'jobs.reason.signed_job_unavailable': 'The stored job is not readable.',
 	'jobs.reason.agent_lost': 'The host went offline during the job.',
 	'jobs.reason.agent_revoked': 'The host is revoked.',
 	'jobs.reason.not_acknowledged': 'The host never confirmed the job.',
@@ -753,6 +755,7 @@ export const en = {
 	'error.email_taken': 'This email is taken.',
 	'error.agent_offline':
 		'The host is offline. The control plane holds no job queue, so it refused the job. Connect the host and try again.',
+	'error.already_queued': 'This plan already has a manual run in the queue.',
 	'error.internal_error': 'The control plane has an internal problem.',
 	'error.network': 'The control plane did not answer.',
 	'error.field': 'Correct this field.',
