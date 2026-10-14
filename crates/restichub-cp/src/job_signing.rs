@@ -296,6 +296,16 @@ impl JobSigningService {
         Ok(self.current_set(db).await?.enrollment_keys())
     }
 
+    /// The identifier of the current signing key, or `None` when the set is absent (MEDIUM 3).
+    ///
+    /// The agent stream accepts a `KeyUpdateAck` only for this identifier.
+    pub async fn current_key_id(&self, db: &Database) -> Option<String> {
+        self.current_set(db)
+            .await
+            .ok()
+            .map(|set| set.current_key_id().to_owned())
+    }
+
     async fn current_set(&self, db: &Database) -> Result<Arc<KeySet>, JobSigningError> {
         let version = {
             let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;

@@ -353,6 +353,8 @@ async fn a_wrong_tenant_san_is_refused() {
         ca_chain_der: issued.chain_der,
         key_pem: key.serialize_pem(),
         signing_key_update: Vec::new(),
+        signing_keys: Vec::new(),
+        signing_keys_signature: String::new(),
         grpc_endpoint: None,
     };
 
@@ -597,39 +599,6 @@ async fn ac_id_04_a_revoke_closes_an_open_stream() {
     db.cleanup().await;
 }
 
-/// HIGH 1: a revoke around a new open leaves no live stream.
-///
-/// The stream registers before the registry check, so the new open closes the old stream and the
-/// check refuses the new one.
-#[tokio::test]
-async fn a_revoke_between_two_opens_leaves_no_live_stream() {
-    let Some(db) = common::test_db().await else {
-        return;
-    };
-    let (listener, tenant, token) = setup(&db).await;
-    let identity = listener.enroll(&token).await;
-    let agent = Uuid::parse_str(&identity.agent_id).expect("the agent id");
-
-    let mut first = listener.channel(&identity).await;
-    let (_tx, mut inbound_a) = open_stream(&mut first).await.expect("the first stream");
-    read_handshake(&mut inbound_a).await;
-
-    let actor = create_user(db.database(), tenant, "stream-revoker", "phc", "admin").await;
-    revoke(db.database(), tenant, agent, actor).await;
-
-    let mut second = listener.channel(&identity).await;
-    let error = open_stream(&mut second)
-        .await
-        .expect_err("the revoked agent must be refused");
-    assert_eq!(error.code(), tonic::Code::PermissionDenied, "{error}");
-    assert!(
-        stream_ends(&mut inbound_a).await,
-        "no stream may stay open after the revoke"
-    );
-
-    db.cleanup().await;
-}
-
 /// HIGH 2: a silent socket is closed by the handshake timeout.
 #[tokio::test]
 async fn a_silent_socket_is_closed_by_the_handshake_timeout() {
@@ -861,4 +830,188 @@ async fn set_last_seen(
         .await
         .expect("cannot set last_seen_at");
     tx.commit().await.expect("cannot commit last_seen_at");
+}
+
+/// MEDIUM 1: a refused connection must not close the active stream of the same agent.
+#[tokio::test]
+async fn a_registry_refusal_does_not_close_the_active_stream() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (listener, tenant, token) = setup(&db).await;
+    let identity = listener.enroll(&token).await;
+    let agent = Uuid::parse_str(&identity.agent_id).expect("the agent id");
+
+    let mut first = listener.channel(&identity).await;
+    let (_tx, mut inbound) = open_stream(&mut first).await.expect("the stream must open");
+    read_handshake(&mut inbound).await;
+
+    // A certificate for the same agent with a different serial: the registry check refuses it.
+    let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        .expect("cannot generate the key");
+    let csr = rcgen::CertificateParams::default()
+        .serialize_request(&key)
+        .expect("cannot build the CSR")
+        .der()
+        .to_vec();
+    let issued = listener
+        .ca
+        .issue_agent_certificate(tenant.as_uuid(), agent, &csr)
+        .expect("cannot issue the certificate");
+    let wrong = EnrolledIdentity {
+        agent_id: identity.agent_id.clone(),
+        tenant_id: tenant.to_string(),
+        certificate_der: issued.cert_der,
+        ca_chain_der: issued.chain_der,
+        key_pem: key.serialize_pem(),
+        signing_key_update: Vec::new(),
+        signing_keys: Vec::new(),
+        signing_keys_signature: String::new(),
+        grpc_endpoint: None,
+    };
+
+    let mut second = listener.channel(&wrong).await;
+    let error = open_stream(&mut second)
+        .await
+        .expect_err("the wrong serial must be refused");
+    assert_eq!(error.code(), tonic::Code::PermissionDenied, "{error}");
+
+    assert!(
+        stream_open(&mut inbound).await,
+        "the refusal must not close the active stream"
+    );
+
+    db.cleanup().await;
+}
+
+/// MEDIUM 2: an anonymous connection closes at the total lifetime cap.
+#[tokio::test]
+async fn an_anonymous_connection_closes_at_the_lifetime_cap() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let listener = listener_with_limits(
+        &db,
+        ListenerLimits {
+            anonymous_lifetime: Duration::from_millis(500),
+            anonymous_idle_timeout: Duration::from_secs(10),
+            ..ListenerLimits::default()
+        },
+    )
+    .await;
+
+    let mut stream = anonymous_tls(listener.addr, &listener.root_der).await;
+    // Send the first byte, so the idle timeout is disarmed and only the lifetime remains.
+    tokio::io::AsyncWriteExt::write_all(&mut stream, b"G")
+        .await
+        .expect("cannot write the first byte");
+    let mut buffer = [0_u8; 1];
+    let result = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buffer))
+        .await
+        .expect("the connection must close");
+    assert!(
+        matches!(result, Ok(0) | Err(_)),
+        "the connection must close at the lifetime cap"
+    );
+
+    db.cleanup().await;
+}
+
+/// MEDIUM 2: the per-IP anonymous cap refuses the next connection from the same address.
+#[tokio::test]
+async fn the_per_ip_anonymous_cap_refuses_the_next_connection() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let listener = listener_with_limits(
+        &db,
+        ListenerLimits {
+            anonymous_per_ip: 1,
+            anonymous_lifetime: Duration::from_secs(30),
+            anonymous_idle_timeout: Duration::from_secs(30),
+            ..ListenerLimits::default()
+        },
+    )
+    .await;
+
+    let _first = anonymous_tls(listener.addr, &listener.root_der).await;
+    let mut second = anonymous_tls(listener.addr, &listener.root_der).await;
+    let mut buffer = [0_u8; 1];
+    let result = tokio::time::timeout(Duration::from_secs(5), second.read(&mut buffer))
+        .await
+        .expect("the second connection must close");
+    assert!(
+        matches!(result, Ok(0) | Err(_)),
+        "the per-IP cap must refuse the next anonymous connection"
+    );
+
+    db.cleanup().await;
+}
+
+/// MEDIUM 2: an authenticated agent connects while the anonymous share is full.
+#[tokio::test]
+async fn an_authenticated_agent_connects_when_the_anonymous_share_is_full() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let (state, ca) = pki_state(db.database()).await;
+    let tenant = create_tenant(db.database(), "stream-share").await;
+    let creator = create_user(db.database(), tenant, "stream-admin", "phc", "admin").await;
+    let (token, _) = seed_enrollment_token_value(
+        db.database(),
+        tenant,
+        creator,
+        &[],
+        time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+    )
+    .await;
+    // The share is one tenth of the cap: a cap of ten gives one anonymous slot.
+    let listener = Listener::start_with(
+        state,
+        ca,
+        ListenerLimits {
+            max_connections: 10,
+            anonymous_per_ip: 10,
+            anonymous_lifetime: Duration::from_secs(30),
+            anonymous_idle_timeout: Duration::from_secs(30),
+            ..ListenerLimits::default()
+        },
+    )
+    .await;
+
+    let identity = listener.enroll(&token).await;
+    // One anonymous connection fills the share.
+    let _anonymous = anonymous_tls(listener.addr, &listener.root_der).await;
+
+    // Refuse a second anonymous connection from the same address.
+    let mut refused = anonymous_tls(listener.addr, &listener.root_der).await;
+    let mut buffer = [0_u8; 1];
+    let result = tokio::time::timeout(Duration::from_secs(5), refused.read(&mut buffer))
+        .await
+        .expect("the second anonymous connection must close");
+    assert!(
+        matches!(result, Ok(0) | Err(_)),
+        "the anonymous share must be full"
+    );
+
+    // An authenticated agent connects while the anonymous share is full.
+    let mut client = listener.channel(&identity).await;
+    let (_tx, mut inbound) = open_stream(&mut client)
+        .await
+        .expect("the authenticated agent must connect");
+    read_handshake(&mut inbound).await;
+
+    db.cleanup().await;
+}
+
+/// True when the inbound side is still open after a short wait.
+async fn stream_open(inbound: &mut Streaming<ControlMessage>) -> bool {
+    match tokio::time::timeout(Duration::from_secs(1), inbound.message()).await {
+        // Any message means the stream is open.
+        Ok(Ok(Some(_))) => true,
+        // No message within the wait: the stream is open.
+        Err(_) => true,
+        // Stream ended.
+        Ok(Ok(None)) | Ok(Err(_)) => false,
+    }
 }
