@@ -10,6 +10,7 @@ mod audit;
 mod auth;
 mod enrollment_tokens;
 mod migrations;
+mod profiles;
 mod repositories;
 mod rls;
 mod roles;
@@ -64,7 +65,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 11] = [
+const TENANT_TABLES: [&str; 12] = [
     "users",
     "memberships",
     "sessions",
@@ -76,6 +77,7 @@ const TENANT_TABLES: [&str; 11] = [
     "agents",
     "enrollment_tokens",
     "repositories",
+    "profiles",
 ];
 
 struct Seed {
@@ -224,6 +226,7 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     .execute(tx.as_conn())
     .await?;
 
+    let repository_id = crate::RepositoryId::new();
     sqlx::query(
         "INSERT INTO repositories \
          (id, tenant_id, name, backend, local_path, password_secret_id, maintenance_agent_id) \
@@ -231,8 +234,18 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
                  (SELECT id FROM secrets WHERE tenant_id = $2), \
                  (SELECT id FROM agents WHERE tenant_id = $2))",
     )
-    .bind(crate::RepositoryId::new())
+    .bind(repository_id)
     .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO profiles (id, tenant_id, name, repository_id, paths_all, tags) \
+         VALUES ($1, $2, 'profile', $3, ARRAY['/srv'], ARRAY['daily'])",
+    )
+    .bind(crate::ProfileId::new())
+    .bind(tenant)
+    .bind(repository_id)
     .execute(tx.as_conn())
     .await?;
 
