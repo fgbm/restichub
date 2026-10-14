@@ -100,7 +100,16 @@ async fn ac_pr_07_a_result_that_finished_offline_arrives_after_the_reconnect() {
             .contains("warning: one file changed while it was read")
     );
 
-    // After a restart of the agent the journal gives the same answer (FR-AG-12).
+    // After a restart of the agent the journal gives the same answer (FR-AG-12). The write of the
+    // result runs off the async workers, so the restart waits until the file holds it.
+    let journal_file = dir.join(restichub_agent::journal::JOURNAL_FILE);
+    for _ in 0..200 {
+        let text = std::fs::read_to_string(&journal_file).unwrap_or_default();
+        if text.contains("\"result\":\"") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let restarted = program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(64);
     restarted.attach(&tx);
