@@ -120,10 +120,8 @@ fn start(file: &std::fs::File, _path: &Path, line: &CommandLine, cache: &Path) -
 fn open_for_exec(path: &Path) -> Result<std::fs::File> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::FromRawHandle as _;
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-    use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_SHARE_READ, GENERIC_READ, OPEN_EXISTING,
-    };
+    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, OPEN_EXISTING};
     let wide: Vec<u16> = path
         .as_os_str()
         .encode_wide()
