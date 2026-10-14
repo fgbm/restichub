@@ -83,7 +83,12 @@
 
 	const columns = $derived<TableColumn<Plan>[]>([
 		{ key: 'name', header: t('plans.plan'), value: (row) => row.name, render: nameCell },
-		{ key: 'host', header: t('plans.host'), value: (row) => row.agent_hostname },
+		{
+			key: 'host',
+			header: t('plans.host'),
+			value: (row) => row.agent_hostname,
+			render: hostCell
+		},
 		{ key: 'profile', header: t('plans.profile'), value: (row) => row.profile_name },
 		{
 			key: 'schedule',
@@ -111,6 +116,7 @@
 	function actionsFor(plan: Plan): MenuItem[] {
 		const items: MenuItem[] = [];
 		if (canWrite) {
+			items.push({ label: t('plans.run'), icon: 'activity', onSelect: () => void runNow(plan) });
 			items.push({ label: t('plans.edit'), icon: 'settings', onSelect: () => openEdit(plan) });
 			items.push({
 				label: t('plans.delete'),
@@ -264,6 +270,15 @@
 		}
 	}
 
+	async function runNow(plan: Plan): Promise<void> {
+		try {
+			await service.runPlan(plan.id);
+			pushToast('success', t('plans.runQueued'));
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		}
+	}
+
 	async function confirmDelete(): Promise<void> {
 		if (!deleteTarget) return;
 		deleting = true;
@@ -288,6 +303,10 @@
 			<Badge tone="neutral">{t('plans.disabled')}</Badge>
 		{/if}
 	</span>
+{/snippet}
+
+{#snippet hostCell(plan: Plan)}
+	<span class="plan__host">{plan.agent_hostname}</span>
 {/snippet}
 
 {#snippet scheduleCell(plan: Plan)}
@@ -318,8 +337,6 @@
 		<Button variant="primary" icon="plus" onclick={openCreate}>{t('plans.add')}</Button>
 	{/if}
 </PageHeader>
-
-<Alert tone="info" variant="inline" title={t('plans.queuedNote')} />
 
 {#if empty}
 	<EmptyState
@@ -405,7 +422,7 @@
 			/>
 			<div class="presets" role="group" aria-label={t('plans.cronPresets')}>
 				{#each CRON_PRESETS as preset (preset.cron)}
-					<Button type="button" variant="ghost" onclick={() => (cron = preset.cron)}>
+					<Button type="button" size="sm" onclick={() => (cron = preset.cron)}>
 						{t(preset.label)}
 					</Button>
 				{/each}
@@ -447,7 +464,6 @@
 			{:else}
 				<p class="preview__hint">{t('plans.previewEmpty')}</p>
 			{/if}
-			<p class="preview__hint">{t('plans.queuedNote')}</p>
 		</section>
 	</div>
 	{#snippet footer()}
@@ -476,6 +492,10 @@
 
 	.plan__name {
 		font-weight: var(--rh-font-weight-semibold);
+		white-space: nowrap;
+	}
+
+	.plan__host {
 		white-space: nowrap;
 	}
 

@@ -124,6 +124,19 @@ export type JobResultCode = components['schemas']['JobResultCode'];
 /** One job with its lifecycle (FR-PR-01). */
 export type Job = components['schemas']['JobView'];
 
+/** One page of the job list, newest first (FR-SC-09). */
+export type JobListResponse = components['schemas']['JobListResponse'];
+
+/** The filters and the cursor of the job list (FR-SC-09). */
+export interface JobQuery {
+	status?: JobStatus;
+	plan_id?: string;
+	repository_id?: string;
+	agent_id?: string;
+	cursor?: string;
+	limit?: number;
+}
+
 /** The optional agent that runs a repository job. An absent value uses the maintenance agent. */
 export type JobActionRequest = components['schemas']['JobActionRequest'];
 

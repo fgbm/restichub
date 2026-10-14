@@ -25,6 +25,8 @@ import type {
 	Instance,
 	Job,
 	JobActionRequest,
+	JobListResponse,
+	JobQuery,
 	JobKind,
 	JobStatus,
 	Me,
@@ -259,6 +261,63 @@ function makePlans(): Plan[] {
 	];
 }
 
+/// Sample jobs of the sample plan, one for each lifecycle state that the Jobs screen shows
+/// (FR-SC-09). The sample plan storage key shows them too.
+function makeJobs(): MockJob[] {
+	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_PLANS_KEY) !== 'sample') {
+		return [];
+	}
+	const job = (
+		id: string,
+		status: JobStatus,
+		resultCode: Job['result_code'],
+		message: string | null,
+		createdMinutesAgo: number,
+		startedMinutesAgo: number | null,
+		finishedMinutesAgo: number | null
+	): MockJob => ({
+		job: {
+			id,
+			kind: 'backup',
+			repository_id: 'r_1',
+			repository_name: 'primary-s3',
+			agent_id: '1',
+			agent_hostname: 'win-fs01',
+			plan_id: 'pl_1',
+			plan_name: 'nightly-web',
+			status,
+			result_code: resultCode,
+			result_message: message,
+			created_at: iso(createdMinutesAgo),
+			updated_at: iso(finishedMinutesAgo ?? startedMinutesAgo ?? createdMinutesAgo),
+			finished_at: finishedMinutesAgo === null ? null : iso(finishedMinutesAgo),
+			started_at: startedMinutesAgo === null ? null : iso(startedMinutesAgo),
+			expires_at: null,
+			run_at: iso(createdMinutesAgo),
+			attempt: 0
+		},
+		// A sample job never changes on its own.
+		readyAt: Number.MAX_SAFE_INTEGER,
+		repositoryId: 'r_1',
+		initializes: false
+	});
+	return [
+		job('j_s1', 'running', null, null, 12, 11, null),
+		job('j_s2', 'queued', null, null, 3, null, null),
+		job('j_s3', 'succeeded', 'succeeded', null, 60 * 24 + 40, 60 * 24 + 38, 60 * 24 + 20),
+		job('j_s4', 'failed', 'config_error', 'compile_failed', 60 * 48 + 5, null, 60 * 48 + 5),
+		job(
+			'j_s5',
+			'dead_letter',
+			'failed',
+			'lock_retries_exhausted',
+			60 * 72 + 30,
+			60 * 72,
+			60 * 72 - 20
+		)
+	];
+}
+
 function makeUsers(): User[] {
 	return [
 		{
@@ -487,7 +546,12 @@ interface MockJob {
 }
 
 function isTerminal(status: JobStatus): boolean {
-	return status === 'succeeded' || status === 'failed' || status === 'expired';
+	return (
+		status === 'succeeded' ||
+		status === 'failed' ||
+		status === 'expired' ||
+		status === 'dead_letter'
+	);
 }
 
 export class MockApiService {
@@ -498,7 +562,7 @@ export class MockApiService {
 	private agents: Agent[] = makeAgents();
 	private enrollmentTokens: EnrollmentToken[] = [];
 	private repositories: Repository[] = [];
-	private jobs: MockJob[] = [];
+	private jobs: MockJob[] = makeJobs();
 	private profiles: Profile[] = makeProfiles();
 	private plans: Plan[] = makePlans();
 	private audit: AuditRecord[] = makeAudit();
@@ -819,11 +883,88 @@ export class MockApiService {
 			created_at: now,
 			updated_at: now,
 			finished_at: null,
-			expires_at: null
+			expires_at: null,
+			plan_id: null,
+			plan_name: null,
+			agent_hostname: this.agents.find((item) => item.id === agentId)?.hostname ?? null,
+			repository_name: repository.name,
+			started_at: null,
+			run_at: now,
+			attempt: 0
 		};
 		this.jobs = [
 			...this.jobs,
 			{ job, readyAt: Date.now() + 700, repositoryId: id, initializes: true }
+		];
+		return { ...job };
+	}
+
+	async listJobs(query?: JobQuery): Promise<JobListResponse> {
+		const rows = this.jobs
+			.map((entry) => entry.job)
+			.filter(
+				(job) =>
+					(!query?.status || job.status === query.status) &&
+					(!query?.plan_id || job.plan_id === query.plan_id) &&
+					(!query?.repository_id || job.repository_id === query.repository_id) &&
+					(!query?.agent_id || job.agent_id === query.agent_id)
+			)
+			.sort((a, b) => b.created_at.localeCompare(a.created_at));
+		const limit = query?.limit ?? 50;
+		const start = query?.cursor ? Number(query.cursor) : 0;
+		const page = rows.slice(start, start + limit);
+		return {
+			items: page.map((job) => ({ ...job })),
+			next_cursor: start + limit < rows.length ? String(start + limit) : null
+		};
+	}
+
+	async cancelJob(id: string): Promise<Job> {
+		const entry = this.jobs.find((item) => item.job.id === id);
+		if (!entry) throw new Error('not found');
+		if (isTerminal(entry.job.status)) throw problemError('conflict', 'id', 'conflict');
+		const now = new Date().toISOString();
+		if (entry.job.status === 'queued') {
+			entry.job.status = 'failed';
+			entry.job.result_code = 'cancelled';
+			entry.job.finished_at = now;
+		}
+		entry.job.updated_at = now;
+		return { ...entry.job };
+	}
+
+	async runPlan(id: string): Promise<Job> {
+		const plan = this.plans.find((item) => item.id === id);
+		if (!plan) throw new Error('not found');
+		const now = new Date().toISOString();
+		const job: Job = {
+			id: `j_${this.jobs.length + 1}`,
+			kind: 'backup',
+			repository_id: plan.repository_id,
+			repository_name: null,
+			agent_id: plan.agent_id,
+			agent_hostname: plan.agent_hostname,
+			plan_id: plan.id,
+			plan_name: plan.name,
+			status: 'queued',
+			result_code: null,
+			result_message: null,
+			created_at: now,
+			updated_at: now,
+			finished_at: null,
+			started_at: null,
+			expires_at: null,
+			run_at: now,
+			attempt: 0
+		};
+		this.jobs = [
+			...this.jobs,
+			{
+				job,
+				readyAt: Number.MAX_SAFE_INTEGER,
+				repositoryId: plan.repository_id,
+				initializes: false
+			}
 		];
 		return { ...job };
 	}

@@ -48,7 +48,9 @@ export const endpoints = {
 		testAccess: (id: string) => `/repositories/${encodeURIComponent(id)}/test-access`
 	},
 	jobs: {
-		byId: (id: string) => `/jobs/${encodeURIComponent(id)}`
+		list: '/jobs',
+		byId: (id: string) => `/jobs/${encodeURIComponent(id)}`,
+		cancel: (id: string) => `/jobs/${encodeURIComponent(id)}/cancel`
 	},
 	profiles: {
 		list: '/profiles',
@@ -61,6 +63,7 @@ export const endpoints = {
 		create: '/plans',
 		preview: '/plans/preview',
 		byId: (id: string) => `/plans/${encodeURIComponent(id)}`,
+		run: (id: string) => `/plans/${encodeURIComponent(id)}/run`,
 		nextRuns: (id: string, count: number) =>
 			`/plans/${encodeURIComponent(id)}/next-runs?count=${count}`
 	},

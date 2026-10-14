@@ -1,4 +1,4 @@
-import { getLocale } from '#lib/i18n/index.ts';
+import { getLocale, t } from '#lib/i18n/index.ts';
 
 export function formatTime(value: string): string {
 	return new Date(value).toLocaleString(getLocale());
@@ -17,14 +17,45 @@ export function formatTimeInZone(value: string, timeZone: string): string {
 	}
 }
 
+/** Formats an instant in the time zone of the browser, in the style of [`formatTimeInZone`]. */
+export function formatLocalTime(value: string): string {
+	return new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(
+		new Date(value)
+	);
+}
+
 /**
  * Formats an instant in a given IANA time zone and appends the zone name; the local time follows
  * when it differs (FR-SC-01).
  */
 export function formatTimeInZoneWithLocal(value: string, timeZone: string): string {
 	const zoned = formatTimeInZone(value, timeZone);
-	const local = formatTime(value);
-	return local === zoned ? `${zoned} ${timeZone}` : `${zoned} ${timeZone} · ${local} local`;
+	const local = formatLocalTime(value);
+	return local === zoned
+		? `${zoned} ${timeZone}`
+		: `${zoned} ${timeZone} · ${local} ${t('common.localTime')}`;
+}
+
+/** The distance between two instants as hours, minutes and seconds, such as "1 h 5 min". */
+export function formatDuration(from: string, to: string): string {
+	const total = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000));
+	const parts: [number, string][] = [
+		[Math.floor(total / 3600), 'hour'],
+		[Math.floor((total % 3600) / 60), 'minute'],
+		[total % 60, 'second']
+	];
+	// Show the two largest non-zero units; a zero duration shows "0 s".
+	const shown = parts.filter(([amount]) => amount > 0).slice(0, 2);
+	if (shown.length === 0) shown.push([0, 'second']);
+	return shown
+		.map(([amount, unit]) =>
+			new Intl.NumberFormat(getLocale(), {
+				style: 'unit',
+				unit,
+				unitDisplay: 'narrow'
+			}).format(amount)
+		)
+		.join(' ');
 }
 
 const relativeSteps: [Intl.RelativeTimeFormatUnit, number][] = [

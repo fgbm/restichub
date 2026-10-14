@@ -318,6 +318,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lists the jobs of the tenant.
+         * @description The list is newest first. Filter by plan, repository, agent and status.
+         */
+        get: operations["list_jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{id}": {
         parameters: {
             query?: never;
@@ -329,6 +349,26 @@ export interface paths {
         get: operations["get_job"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancels a job.
+         * @description A queued job is cancelled at once. For a sent or running job the control plane sends the cancel message to the agent, and an offline agent gives HTTP 409 `agent_offline`.
+         */
+        post: operations["cancel_job"];
         delete?: never;
         options?: never;
         head?: never;
@@ -426,6 +466,26 @@ export interface paths {
         get: operations["next_runs"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Runs a plan now.
+         * @description The job waits in the queue and starts as soon as the agent is online and the limits allow it.
+         */
+        post: operations["run_plan"];
         delete?: never;
         options?: never;
         head?: never;
@@ -763,6 +823,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/repositories/{id}/unlock-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Removes every lock of a repository.
+         * @description The body must hold the repository name as the confirmation. A repository with a waiting or running job gives HTTP 409.
+         */
+        post: operations["unlock_all_repository"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/secrets": {
         parameters: {
             query?: never;
@@ -1024,6 +1104,7 @@ export interface components {
          * @example config_delete
          * @example job_run
          * @example job_cancel
+         * @example job_dead_letter
          * @example restore_start
          * @example secret_delivered
          * @example agent_enroll
@@ -1049,6 +1130,7 @@ export interface components {
          * @example repository_create
          * @example repository_update
          * @example repository_delete
+         * @example repository_unlock_all
          * @example profile_create
          * @example profile_update
          * @example profile_delete
@@ -1362,7 +1444,11 @@ export interface components {
          *     the `kind` column. It is stable: do not change a string.
          * @enum {string}
          */
-        JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "other";
+        JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "unlock_all" | "other";
+        JobListResponse: {
+            items: components["schemas"]["JobView"][];
+            next_cursor?: string | null;
+        };
         /**
          * @description The typed result of a finished job (FR-AG-09, AC-RP-01).
          *
@@ -1374,15 +1460,22 @@ export interface components {
         /**
          * @description The lifecycle status of a job (FR-SC-03, FR-SC-07).
          *
-         *     The MVP sends an on-demand job at once, so `queued` is the state before the send and `sent` the
-         *     state after it. The scheduler of epic #7 adds the queue. The string value of each variant is the
-         *     stored value of the `status` column. It is stable: do not change a string.
+         *     `queued` is the state before the send and `sent` the state after it, until the agent
+         *     acknowledges the job. The string value of each variant is the stored value of the `status`
+         *     column. It is stable: do not change a string.
          * @enum {string}
          */
-        JobStatus: "queued" | "sent" | "running" | "succeeded" | "failed" | "expired";
+        JobStatus: "queued" | "sent" | "running" | "succeeded" | "failed" | "expired" | "dead_letter";
         /** @description One job with its lifecycle (FR-PR-01). */
         JobView: {
+            /** @description Null in a response that joins no display names. */
+            agent_hostname?: string | null;
             agent_id: string;
+            /**
+             * Format: int32
+             * @description Lock retries so far (restic exit code 11).
+             */
+            attempt: number;
             /** @description In RFC 3339. */
             created_at: string;
             /** @description In RFC 3339. Null when the job holds no expiry. */
@@ -1391,14 +1484,24 @@ export interface components {
             finished_at?: string | null;
             id: string;
             kind: components["schemas"]["JobKind"];
+            /** @description Null for an on-demand job and for a job whose plan was deleted. */
+            plan_id?: string | null;
+            /** @description Null in a response that joins no display names. */
+            plan_name?: string | null;
             /** @description Null for a job that touches no repository. */
             repository_id?: string | null;
+            /** @description Null in a response that joins no display names. */
+            repository_name?: string | null;
             result_code?: components["schemas"]["JobResultCode"] | null;
             /**
              * @description A machine-readable error code from the agent. The user interface translates it (NFR-DOC-04).
              *     It never holds a secret.
              */
             result_message?: string | null;
+            /** @description In RFC 3339. The earliest time at which the queue sends the job. */
+            run_at: string;
+            /** @description In RFC 3339. Null until the agent starts the job. */
+            started_at?: string | null;
             status: components["schemas"]["JobStatus"];
             /** @description In RFC 3339. */
             updated_at: string;
@@ -1804,6 +1907,13 @@ export interface components {
         TenantView: {
             id: string;
             name: string;
+        };
+        /** @description The request body of the `unlock_all` action (FR-SC-06). */
+        UnlockAllRequest: {
+            /** @description The agent that runs the step. An absent value uses the maintenance agent of the repository. */
+            agent_id?: string | null;
+            /** @description The name of the repository. The action refuses a different value. */
+            confirm: string;
         };
         /** @description Absent fields leave the value unchanged. */
         UpdateAccountRequest: {
@@ -2804,6 +2914,60 @@ export interface operations {
             };
         };
     };
+    list_jobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cursor: string | null;
+                limit: number | null;
+                plan_id: string | null;
+                repository_id: string | null;
+                agent_id: string | null;
+                status: components["schemas"]["JobStatus"] | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The jobs of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobListResponse"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     get_job: {
         parameters: {
             query?: never;
@@ -2845,6 +3009,74 @@ export interface operations {
             };
             /** @description The job is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    cancel_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the job. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The queued job is cancelled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description The cancel message is sent to the agent. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The job is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The job finished, or the agent is offline. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3245,6 +3477,74 @@ export interface operations {
             };
             /** @description The plan is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    run_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the plan. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job is queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description The profile does not compile for the agent. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The plan is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent of the plan is revoked. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4754,6 +5054,78 @@ export interface operations {
                 };
             };
             /** @description The agent is offline. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    unlock_all_repository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnlockAllRequest"];
+            };
+        };
+        responses: {
+            /** @description The job is queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description The confirmation or a field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description A job waits or runs on the repository. */
             409: {
                 headers: {
                     [name: string]: unknown;

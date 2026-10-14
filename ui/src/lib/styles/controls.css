@@ -299,3 +299,9 @@
 .rh-switch__label {
 	color: var(--rh-color-text);
 }
+
+/* A text input with a datalist shows the same plain field as the other inputs: the browser arrow is
+   hidden, and the list opens while the person types. */
+.rh-input[list]::-webkit-calendar-picker-indicator {
+	display: none !important;
+}

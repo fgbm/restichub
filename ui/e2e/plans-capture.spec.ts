@@ -12,6 +12,7 @@ const out = dir as string;
 type Labels = {
 	nav: string;
 	plans: string;
+	jobs: string;
 	addPlan: string;
 	edit: string;
 	moreActions: (name: string) => string;
@@ -20,6 +21,7 @@ type Labels = {
 const EN: Labels = {
 	nav: 'Primary navigation',
 	plans: 'Plans',
+	jobs: 'Jobs',
 	addPlan: 'Add plan',
 	edit: 'Edit',
 	moreActions: (name) => `More actions for ${name}`
@@ -28,6 +30,7 @@ const EN: Labels = {
 const RU: Labels = {
 	nav: 'Основная навигация',
 	plans: 'Планы',
+	jobs: 'Задания',
 	addPlan: 'Добавить план',
 	edit: 'Изменить',
 	moreActions: (name) => `Другие действия для ${name}`
@@ -95,6 +98,14 @@ async function capture(page: Page, scheme: string, labels: Labels, suffix: strin
 	await page.waitForTimeout(150);
 	await shot(page, `plans-edit-next-runs${suffix}`, scheme);
 	await page.keyboard.press('Escape');
+
+	// The Jobs screen lists the sample jobs in every lifecycle state.
+	await page
+		.getByRole('navigation', { name: labels.nav })
+		.getByRole('link', { name: labels.jobs, exact: true })
+		.click();
+	await page.getByRole('table').getByText('win-fs01').first().waitFor();
+	await shot(page, `jobs-list${suffix}`, scheme);
 }
 
 for (const scheme of ['light', 'dark'] as const) {

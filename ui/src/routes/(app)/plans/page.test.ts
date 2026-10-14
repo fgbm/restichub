@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 	listAgents: vi.fn(),
 	createPlan: vi.fn(),
 	deletePlan: vi.fn(),
+	runPlan: vi.fn(),
 	nextRuns: vi.fn(),
 	previewSchedule: vi.fn(),
 	pushToast: vi.fn()
@@ -51,6 +52,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listAgents: mocks.listAgents,
 			createPlan: mocks.createPlan,
 			deletePlan: mocks.deletePlan,
+			runPlan: mocks.runPlan,
 			nextRuns: mocks.nextRuns,
 			previewSchedule: mocks.previewSchedule
 		}
@@ -139,6 +141,24 @@ describe('the Plans screen', () => {
 			})
 		);
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
+	});
+
+	it('runs a plan now and shows no queue note', async () => {
+		const user = userEvent.setup();
+		mocks.listPlans.mockResolvedValue([plan()]);
+		mocks.runPlan.mockResolvedValue({ id: 'j_1', status: 'queued' });
+		render(Plans);
+
+		await screen.findByText('nightly-web');
+		expect(screen.queryByText(/dispatcher/i)).not.toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'More actions for nightly-web' }));
+		// The menu content is hidden in jsdom, so the text query finds the item.
+		await user.click(await screen.findByText('Run now'));
+
+		await waitFor(() => expect(mocks.runPlan).toHaveBeenCalledWith('pl_1'));
+		await waitFor(() =>
+			expect(mocks.pushToast).toHaveBeenCalledWith('success', expect.stringContaining('queued'))
+		);
 	});
 
 	it('hides every write action from a Viewer', async () => {

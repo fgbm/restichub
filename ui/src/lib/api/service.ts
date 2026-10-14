@@ -30,6 +30,8 @@ import type {
 	Instance,
 	Job,
 	JobActionRequest,
+	JobListResponse,
+	JobQuery,
 	Me,
 	MembershipInput,
 	NextRunsResponse,
@@ -114,6 +116,10 @@ export interface ApiService {
 	testAccessRepository(id: string, request?: JobActionRequest): Promise<Job>;
 	/** Polls one job (FR-PR-01). */
 	getJob(id: string): Promise<Job>;
+	/** One page of the jobs of the tenant, newest first (FR-SC-09). */
+	listJobs(query?: JobQuery): Promise<JobListResponse>;
+	/** Cancels a job. A queued job ends at once; a running job gets the cancel message (FR-SC-09). */
+	cancelJob(id: string): Promise<Job>;
 
 	/** The profiles of the tenant (FR-PF-01). */
 	listProfiles(): Promise<Profile[]>;
@@ -128,6 +134,8 @@ export interface ApiService {
 	createPlan(request: CreatePlanRequest): Promise<PlanResponse>;
 	updatePlan(id: string, request: UpdatePlanRequest): Promise<PlanResponse>;
 	deletePlan(id: string): Promise<void>;
+	/** Queues a backup of the plan now (FR-SC-09). */
+	runPlan(id: string): Promise<Job>;
 	/** The next fire times of a plan, in UTC (FR-SC-01). */
 	nextRuns(id: string, count: number): Promise<NextRunsResponse>;
 	/** The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
@@ -203,6 +211,11 @@ const httpService: ApiService = {
 	testAccessRepository: (id, request) =>
 		api.post<Job>(endpoints.repositories.testAccess(id), request ?? {}),
 	getJob: (id) => api.get<Job>(endpoints.jobs.byId(id)),
+	listJobs: (query) =>
+		api.get<JobListResponse>(endpoints.jobs.list, {
+			query: (query ?? {}) as Record<string, string | number | undefined>
+		}),
+	cancelJob: (id) => api.post<Job>(endpoints.jobs.cancel(id)),
 
 	listProfiles: () =>
 		api.get<ProfileListResponse>(endpoints.profiles.list).then((response) => response.items),
@@ -219,6 +232,7 @@ const httpService: ApiService = {
 	createPlan: (request) => api.post<PlanResponse>(endpoints.plans.create, request),
 	updatePlan: (id, request) => api.patch<PlanResponse>(endpoints.plans.byId(id), request),
 	deletePlan: (id) => api.delete<void>(endpoints.plans.byId(id)),
+	runPlan: (id) => api.post<Job>(endpoints.plans.run(id)),
 	nextRuns: (id, count) => api.get<NextRunsResponse>(endpoints.plans.nextRuns(id, count)),
 	previewSchedule: (request) => api.post<SchedulePreviewResponse>(endpoints.plans.preview, request),
 

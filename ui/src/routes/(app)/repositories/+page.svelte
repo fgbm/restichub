@@ -75,7 +75,8 @@
 		running: 'repositories.job.running',
 		succeeded: 'repositories.job.succeeded',
 		failed: 'repositories.job.failed',
-		expired: 'repositories.job.expired'
+		expired: 'repositories.job.expired',
+		dead_letter: 'repositories.job.failed'
 	};
 
 	const jobResultLabels: Record<JobResultCode, MessageKey> = {
