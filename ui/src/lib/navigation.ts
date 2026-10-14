@@ -69,7 +69,7 @@ export const navigation: NavSection = {
 		{
 			href: '/(app)/profiles',
 			labelKey: 'nav.profiles',
-			icon: 'repository',
+			icon: 'checklist',
 			roles: ['admin', 'operator', 'viewer']
 		},
 		{ href: '/(app)/audit', labelKey: 'nav.audit', icon: 'audit', roles: ALL_ROLES },

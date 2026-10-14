@@ -27,6 +27,7 @@ import type {
 	PlatformUser,
 	PreviewResponse,
 	Profile,
+	ProfileResponse,
 	Repository,
 	ResetPasswordRequest,
 	SetRoleRequest,
@@ -46,6 +47,44 @@ const REDACTED = '<redacted>';
 
 function iso(minutesAgo: number): string {
 	return new Date(Date.now() - minutesAgo * 60_000).toISOString();
+}
+
+/// The paths of a profile for one operating system: `all` plus the paths of that system.
+function pathsForOs(profile: Profile, os: string): string[] {
+	const paths = profile.paths ?? { all: [], windows: [], linux: [], macos: [] };
+	const extra =
+		os === 'windows'
+			? (paths.windows ?? [])
+			: os === 'linux'
+				? (paths.linux ?? [])
+				: (paths.macos ?? []);
+	return [...(paths.all ?? []), ...extra];
+}
+
+/// The save-time warnings of the mock (FR-PF-05). The VSS flag is a warning for a non-Windows
+/// target, not a refusal.
+function warningsFor(profile: Profile): { field: string; reason: string; os?: string }[] {
+	const warnings: { field: string; reason: string; os?: string }[] = [];
+	if (profile.options?.use_fs_snapshot) {
+		warnings.push({ field: 'options.use_fs_snapshot', reason: 'unsupported', os: 'linux' });
+		warnings.push({ field: 'options.use_fs_snapshot', reason: 'unsupported', os: 'macos' });
+	}
+	return warnings;
+}
+
+/// A problem error that the UI reads as an API problem, the way the HTTP client does.
+function problemError(code: string, field: string, reason: string): Error {
+	return Object.assign(new Error(`${field}: ${reason}`), {
+		problem: {
+			type: 'about:blank',
+			title: 'Bad Request',
+			status: 400,
+			code,
+			request_id: '',
+			field,
+			reason
+		}
+	});
 }
 
 // The mock starts without an agent. A review capture sets this storage key to see a filled list.
@@ -118,11 +157,11 @@ function makeProfiles(): Profile[] {
 		keep_daily: 7,
 		keep_weekly: 0,
 		keep_monthly: 0,
-		keep_yearly: 0,
+		keep_yearly: 2,
 		keep_within: '',
 		keep_tags: [],
 		group_by: [],
-		filter: { hosts: [], tags: [], paths: [] }
+		filter: { hosts: ['web-*'], tags: [], paths: [] }
 	};
 	return [
 		{
@@ -676,7 +715,7 @@ export class MockApiService {
 		return [...this.profiles];
 	}
 
-	async createProfile(request: CreateProfileRequest): Promise<Profile> {
+	async createProfile(request: CreateProfileRequest): Promise<ProfileResponse> {
 		const now = new Date().toISOString();
 		const profile: Profile = {
 			id: `p_${this.profiles.length + 1}`,
@@ -701,10 +740,10 @@ export class MockApiService {
 			created_by: this.users[0].id
 		};
 		this.profiles = [...this.profiles, profile];
-		return profile;
+		return { profile, warnings: warningsFor(profile) };
 	}
 
-	async updateProfile(id: string, request: UpdateProfileRequest): Promise<Profile> {
+	async updateProfile(id: string, request: UpdateProfileRequest): Promise<ProfileResponse> {
 		const current = this.profiles.find((item) => item.id === id);
 		if (!current) throw new Error('not found');
 		const updated: Profile = {
@@ -722,7 +761,7 @@ export class MockApiService {
 			updated_at: new Date().toISOString()
 		};
 		this.profiles = this.profiles.map((item) => (item.id === id ? updated : item));
-		return updated;
+		return { profile: updated, warnings: warningsFor(updated) };
 	}
 
 	async deleteProfile(id: string): Promise<void> {
@@ -730,9 +769,15 @@ export class MockApiService {
 	}
 
 	async previewProfile(id: string, agentId: string): Promise<PreviewResponse> {
-		void agentId;
 		const profile = this.profiles.find((item) => item.id === id);
 		if (!profile) throw new Error('not found');
+		const agent = this.agents.find((item) => item.id === agentId);
+		if (!agent) throw new Error('not found');
+		const paths = pathsForOs(profile, agent.os);
+		if (paths.length === 0) {
+			// The compiler refuses a target without a path for its operating system.
+			throw problemError('invalid_argument', 'paths', 'empty');
+		}
 		return {
 			profile_id: id,
 			repository_id: profile.repository_id,
@@ -740,7 +785,7 @@ export class MockApiService {
 				{
 					kind: 'backup',
 					maintenance: false,
-					command: `restic backup --one-file-system --exclude=*.tmp --tag=daily -- ${(profile.paths.all ?? []).join(' ')}`,
+					command: `restic backup --one-file-system --tag=daily -- ${paths.join(' ')}`,
 					environment: [
 						{ name: 'RESTIC_REPOSITORY', value: 's3:https://s3.example.net/backups-prod' },
 						{ name: 'RESTIC_PASSWORD', value: '***' },

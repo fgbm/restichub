@@ -4,10 +4,12 @@
 	import type {
 		ApiProblem,
 		CreateProfileRequest,
+		GroupBy,
 		HookPhase,
 		HookRef,
 		PreviewResponse,
 		Profile,
+		ProfileWarning,
 		UpdateProfileRequest
 	} from '#lib/api/index.ts';
 	import {
@@ -31,11 +33,7 @@
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
-	type HookDraft = {
-		hookId: string;
-		phase: HookPhase;
-		parameters: { name: string; value: string }[];
-	};
+	type HookDraft = { hookId: string; phase: HookPhase };
 
 	const PHASES: HookPhase[] = ['before', 'after', 'on_success', 'on_error', 'finally'];
 
@@ -44,6 +42,7 @@
 	let agents = $state<{ id: string; hostname: string; status: string }[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let savedWarnings = $state<ProfileWarning[]>([]);
 
 	let formOpen = $state(false);
 	let editing = $state<Profile | null>(null);
@@ -63,14 +62,23 @@
 	let vss = $state(false);
 	let oneFileSystem = $state(false);
 	let excludeCaches = $state(false);
-	let limitUpload = $state('0');
-	let limitDownload = $state('0');
+	let limitUpload = $state('');
+	let limitDownload = $state('');
 	let retentionEnabled = $state(false);
 	let keepLast = $state('0');
+	let keepHourly = $state('0');
 	let keepDaily = $state('0');
 	let keepWeekly = $state('0');
 	let keepMonthly = $state('0');
+	let keepYearly = $state('0');
 	let keepWithin = $state('');
+	let keepTags = $state('');
+	let groupByHost = $state(false);
+	let groupByPaths = $state(false);
+	let groupByTags = $state(false);
+	let filterHosts = $state('');
+	let filterTags = $state('');
+	let filterPaths = $state('');
 	let checkEnabled = $state(false);
 	let readDataSubset = $state('');
 	let hooks = $state<HookDraft[]>([]);
@@ -128,8 +136,13 @@
 			.filter((line) => line.length > 0);
 	}
 
-	function joinLines(values: string[]): string {
-		return values.join('\n');
+	function joinLines(values: string[] | undefined): string {
+		return (values ?? []).join('\n');
+	}
+
+	function numberOrZero(value: string): number {
+		const parsed = Number.parseInt(value, 10);
+		return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 	}
 
 	function phaseLabel(phase: HookPhase): string {
@@ -170,11 +183,6 @@
 		return items;
 	}
 
-	function numberOrZero(value: string): number {
-		const parsed = Number.parseInt(value, 10);
-		return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-	}
-
 	function retentionSummary(profile: Profile): string {
 		if (!profile.retention) return t('common.none');
 		const retention = profile.retention;
@@ -183,6 +191,7 @@
 		if ((retention.keep_daily ?? 0) > 0) parts.push(`daily ${retention.keep_daily}`);
 		if ((retention.keep_weekly ?? 0) > 0) parts.push(`weekly ${retention.keep_weekly}`);
 		if ((retention.keep_monthly ?? 0) > 0) parts.push(`monthly ${retention.keep_monthly}`);
+		if ((retention.keep_yearly ?? 0) > 0) parts.push(`yearly ${retention.keep_yearly}`);
 		if (retention.keep_within) parts.push(`within ${retention.keep_within}`);
 		return parts.length > 0 ? parts.join(', ') : t('common.none');
 	}
@@ -190,6 +199,14 @@
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
 		return t('table.error');
+	}
+
+	function problemOf(problem: unknown): ApiProblem | null {
+		if (problem instanceof ApiError) return problem.problem;
+		if (problem && typeof problem === 'object' && 'problem' in problem) {
+			return (problem as { problem: ApiProblem }).problem;
+		}
+		return null;
 	}
 
 	async function load(): Promise<void> {
@@ -230,14 +247,23 @@
 		vss = false;
 		oneFileSystem = false;
 		excludeCaches = false;
-		limitUpload = '0';
-		limitDownload = '0';
+		limitUpload = '';
+		limitDownload = '';
 		retentionEnabled = false;
 		keepLast = '0';
+		keepHourly = '0';
 		keepDaily = '0';
 		keepWeekly = '0';
 		keepMonthly = '0';
+		keepYearly = '0';
 		keepWithin = '';
+		keepTags = '';
+		groupByHost = false;
+		groupByPaths = false;
+		groupByTags = false;
+		filterHosts = '';
+		filterTags = '';
+		filterPaths = '';
 		checkEnabled = false;
 		readDataSubset = '';
 		hooks = [];
@@ -257,72 +283,66 @@
 		resetForm();
 		name = profile.name;
 		repositoryId = profile.repository_id;
-		pathsAll = joinLines(profile.paths.all ?? []);
-		pathsWindows = joinLines(profile.paths.windows ?? []);
-		pathsLinux = joinLines(profile.paths.linux ?? []);
-		pathsMacos = joinLines(profile.paths.macos ?? []);
-		excludes = joinLines(profile.excludes ?? []);
-		excludeFiles = joinLines(profile.exclude_files ?? []);
-		tags = joinLines(profile.tags ?? []);
-		vss = profile.options.use_fs_snapshot ?? false;
-		oneFileSystem = profile.options.one_file_system ?? false;
-		excludeCaches = profile.options.exclude_caches ?? false;
-		limitUpload = String(profile.options.limit_upload_kib ?? 0);
-		limitDownload = String(profile.options.limit_download_kib ?? 0);
+		pathsAll = joinLines(profile.paths?.all);
+		pathsWindows = joinLines(profile.paths?.windows);
+		pathsLinux = joinLines(profile.paths?.linux);
+		pathsMacos = joinLines(profile.paths?.macos);
+		excludes = joinLines(profile.excludes);
+		excludeFiles = joinLines(profile.exclude_files);
+		tags = joinLines(profile.tags);
+		vss = profile.options?.use_fs_snapshot ?? false;
+		oneFileSystem = profile.options?.one_file_system ?? false;
+		excludeCaches = profile.options?.exclude_caches ?? false;
+		limitUpload = profile.options?.limit_upload_kib ? String(profile.options.limit_upload_kib) : '';
+		limitDownload = profile.options?.limit_download_kib
+			? String(profile.options.limit_download_kib)
+			: '';
 		if (profile.retention) {
+			const retention = profile.retention;
 			retentionEnabled = true;
-			keepLast = String(profile.retention.keep_last ?? 0);
-			keepDaily = String(profile.retention.keep_daily ?? 0);
-			keepWeekly = String(profile.retention.keep_weekly ?? 0);
-			keepMonthly = String(profile.retention.keep_monthly ?? 0);
-			keepWithin = profile.retention.keep_within ?? '';
+			keepLast = String(retention.keep_last ?? 0);
+			keepHourly = String(retention.keep_hourly ?? 0);
+			keepDaily = String(retention.keep_daily ?? 0);
+			keepWeekly = String(retention.keep_weekly ?? 0);
+			keepMonthly = String(retention.keep_monthly ?? 0);
+			keepYearly = String(retention.keep_yearly ?? 0);
+			keepWithin = retention.keep_within ?? '';
+			keepTags = joinLines(retention.keep_tags);
+			groupByHost = (retention.group_by ?? []).includes('host');
+			groupByPaths = (retention.group_by ?? []).includes('paths');
+			groupByTags = (retention.group_by ?? []).includes('tags');
+			filterHosts = joinLines(retention.filter?.hosts);
+			filterTags = joinLines(retention.filter?.tags);
+			filterPaths = joinLines(retention.filter?.paths);
 		}
 		if (profile.check) {
 			checkEnabled = true;
 			readDataSubset = profile.check.read_data_subset ?? '';
 		}
-		hooks = profile.hooks.map((hook) => ({
-			hookId: hook.hook_id,
-			phase: hook.phase,
-			parameters: (hook.parameters ?? []).map((parameter) => ({ ...parameter }))
-		}));
+		hooks = (profile.hooks ?? []).map((hook) => ({ hookId: hook.hook_id, phase: hook.phase }));
 		formOpen = true;
 	}
 
 	function addHook(): void {
-		hooks = [...hooks, { hookId: '', phase: 'before', parameters: [] }];
+		hooks = [...hooks, { hookId: '', phase: 'before' }];
 	}
 
 	function removeHook(index: number): void {
 		hooks = hooks.filter((_, position) => position !== index);
 	}
 
-	function addParameter(index: number): void {
-		hooks = hooks.map((hook, position) =>
-			position === index
-				? { ...hook, parameters: [...hook.parameters, { name: '', value: '' }] }
-				: hook
-		);
-	}
-
-	function removeParameter(index: number, parameter: number): void {
-		hooks = hooks.map((hook, position) =>
-			position === index
-				? { ...hook, parameters: hook.parameters.filter((_, item) => item !== parameter) }
-				: hook
-		);
+	function groupBy(): GroupBy[] {
+		const keys: GroupBy[] = [];
+		if (groupByHost) keys.push('host');
+		if (groupByPaths) keys.push('paths');
+		if (groupByTags) keys.push('tags');
+		return keys;
 	}
 
 	function hookRefs(): HookRef[] {
 		return hooks
 			.filter((hook) => hook.hookId.trim().length > 0)
-			.map((hook) => ({
-				hook_id: hook.hookId.trim(),
-				phase: hook.phase,
-				parameters: hook.parameters
-					.filter((parameter) => parameter.name.trim().length > 0)
-					.map((parameter) => ({ name: parameter.name.trim(), value: parameter.value }))
-			}));
+			.map((hook) => ({ hook_id: hook.hookId.trim(), phase: hook.phase, parameters: [] }));
 	}
 
 	function settings() {
@@ -347,15 +367,19 @@
 			retention: retentionEnabled
 				? {
 						keep_last: numberOrZero(keepLast),
-						keep_hourly: 0,
+						keep_hourly: numberOrZero(keepHourly),
 						keep_daily: numberOrZero(keepDaily),
 						keep_weekly: numberOrZero(keepWeekly),
 						keep_monthly: numberOrZero(keepMonthly),
-						keep_yearly: 0,
+						keep_yearly: numberOrZero(keepYearly),
 						keep_within: keepWithin.trim(),
-						keep_tags: [],
-						group_by: [],
-						filter: { hosts: [], tags: [], paths: [] }
+						keep_tags: splitLines(keepTags),
+						group_by: groupBy(),
+						filter: {
+							hosts: splitLines(filterHosts),
+							tags: splitLines(filterTags),
+							paths: splitLines(filterPaths)
+						}
 					}
 				: null,
 			check: checkEnabled ? { read_data_subset: readDataSubset.trim() } : null
@@ -368,28 +392,24 @@
 		formProblem = null;
 		try {
 			const shared = settings();
-			if (editing) {
-				const request: UpdateProfileRequest = {
-					name,
-					repository_id: repositoryId,
-					...shared
-				};
-				await service.updateProfile(editing.id, request);
-				pushToast('success', t('profiles.updated'));
-			} else {
-				const request: CreateProfileRequest = {
-					name,
-					repository_id: repositoryId,
-					...shared
-				};
-				await service.createProfile(request);
-				pushToast('success', t('profiles.created'));
-			}
+			const response = editing
+				? await service.updateProfile(editing.id, {
+						name,
+						repository_id: repositoryId,
+						...shared
+					} satisfies UpdateProfileRequest)
+				: await service.createProfile({
+						name,
+						repository_id: repositoryId,
+						...shared
+					} satisfies CreateProfileRequest);
+			savedWarnings = response.warnings;
+			pushToast('success', t(editing ? 'profiles.updated' : 'profiles.created'));
 			formOpen = false;
 			resetForm();
 			await load();
 		} catch (problem) {
-			formProblem = problem instanceof ApiError ? problem.problem : null;
+			formProblem = problemOf(problem);
 			formError = formProblem ? null : messageOf(problem);
 		} finally {
 			saving = false;
@@ -428,7 +448,7 @@
 		try {
 			previewResult = await service.previewProfile(previewTarget.id, previewAgentId);
 		} catch (problem) {
-			previewProblem = problem instanceof ApiError ? problem.problem : null;
+			previewProblem = problemOf(problem);
 		} finally {
 			previewLoading = false;
 		}
@@ -464,9 +484,23 @@
 	{/if}
 </PageHeader>
 
+{#if savedWarnings.length > 0}
+	<div class="warnings">
+		<Alert tone="attention" title={t('profiles.warningsTitle')}>
+			<ul class="warnings__list">
+				{#each savedWarnings as warning (warning.field + warning.reason + (warning.os ?? ''))}
+					<li>
+						{warning.field} · {warning.reason}{warning.os ? ` · ${warning.os}` : ''}
+					</li>
+				{/each}
+			</ul>
+		</Alert>
+	</div>
+{/if}
+
 {#if empty}
 	<EmptyState
-		icon="repository"
+		icon="checklist"
 		title={t('profiles.emptyTitle')}
 		description={t('profiles.emptyDescription')}
 		bordered
@@ -497,7 +531,7 @@
 
 <Dialog
 	bind:open={formOpen}
-	size="lg"
+	size="xl"
 	title={editing ? t('profiles.editTitle') : t('profiles.addTitle')}
 	description={editing ? t('profiles.editDescription') : t('profiles.addDescription')}
 	onsubmit={save}
@@ -506,148 +540,244 @@
 		<Alert tone="danger" title={formError} />
 	{/if}
 	<div class="form">
-		<TextField
-			id="profile-name"
-			label={t('profiles.profile')}
-			error={fieldError(formProblem, 'name')}
-			bind:value={name}
-			required
-		/>
-		<Select
-			id="profile-repository"
-			label={t('profiles.repository')}
-			options={repositoryOptions}
-			error={fieldError(formProblem, 'repository_id')}
-			bind:value={repositoryId}
-			required
-		/>
+		<section class="section">
+			<h3 class="section__title">{t('profiles.section.source')}</h3>
+			<TextField
+				id="profile-name"
+				label={t('profiles.profile')}
+				error={fieldError(formProblem, 'name')}
+				bind:value={name}
+				required
+			/>
+			<Select
+				id="profile-repository"
+				label={t('profiles.repository')}
+				options={repositoryOptions}
+				error={fieldError(formProblem, 'repository_id')}
+				bind:value={repositoryId}
+				required
+			/>
+			<Field
+				label={t('profiles.pathsAll')}
+				help={t('profiles.listSeparatorHint')}
+				error={fieldError(formProblem, 'paths.all')}
+				for="profile-paths-all"
+			>
+				<textarea id="profile-paths-all" class="rh-textarea rh-input--mono" bind:value={pathsAll}
+				></textarea>
+			</Field>
+			<div class="grid">
+				<Field
+					label={t('profiles.pathsWindows')}
+					error={fieldError(formProblem, 'paths.windows')}
+					for="profile-paths-windows"
+				>
+					<textarea
+						id="profile-paths-windows"
+						class="rh-textarea rh-input--mono"
+						bind:value={pathsWindows}></textarea>
+				</Field>
+				<Field
+					label={t('profiles.pathsLinux')}
+					error={fieldError(formProblem, 'paths.linux')}
+					for="profile-paths-linux"
+				>
+					<textarea
+						id="profile-paths-linux"
+						class="rh-textarea rh-input--mono"
+						bind:value={pathsLinux}></textarea>
+				</Field>
+				<Field
+					label={t('profiles.pathsMacos')}
+					error={fieldError(formProblem, 'paths.macos')}
+					for="profile-paths-macos"
+				>
+					<textarea
+						id="profile-paths-macos"
+						class="rh-textarea rh-input--mono"
+						bind:value={pathsMacos}></textarea>
+				</Field>
+			</div>
+		</section>
 
-		<h3 class="form__section">{t('profiles.paths')}</h3>
-		<Field
-			label={t('profiles.pathsAll')}
-			help={t('profiles.listSeparatorHint')}
-			error={fieldError(formProblem, 'paths.all')}
-			for="profile-paths-all"
-		>
-			<textarea id="profile-paths-all" class="list-input" bind:value={pathsAll}></textarea>
-		</Field>
-		<Field
-			label={t('profiles.pathsWindows')}
-			error={fieldError(formProblem, 'paths.windows')}
-			for="profile-paths-windows"
-		>
-			<textarea id="profile-paths-windows" class="list-input" bind:value={pathsWindows}></textarea>
-		</Field>
-		<Field
-			label={t('profiles.pathsLinux')}
-			error={fieldError(formProblem, 'paths.linux')}
-			for="profile-paths-linux"
-		>
-			<textarea id="profile-paths-linux" class="list-input" bind:value={pathsLinux}></textarea>
-		</Field>
-		<Field
-			label={t('profiles.pathsMacos')}
-			error={fieldError(formProblem, 'paths.macos')}
-			for="profile-paths-macos"
-		>
-			<textarea id="profile-paths-macos" class="list-input" bind:value={pathsMacos}></textarea>
-		</Field>
-		<Field
-			label={t('profiles.excludes')}
-			help={t('profiles.listSeparatorHint')}
-			error={fieldError(formProblem, 'excludes')}
-			for="profile-excludes"
-		>
-			<textarea id="profile-excludes" class="list-input" bind:value={excludes}></textarea>
-		</Field>
-		<Field
-			label={t('profiles.excludeFiles')}
-			help={t('profiles.listSeparatorHint')}
-			error={fieldError(formProblem, 'exclude_files')}
-			for="profile-exclude-files"
-		>
-			<textarea id="profile-exclude-files" class="list-input" bind:value={excludeFiles}></textarea>
-		</Field>
-		<Field
-			label={t('profiles.tags')}
-			help={t('profiles.listSeparatorHint')}
-			error={fieldError(formProblem, 'tags')}
-			for="profile-tags"
-		>
-			<textarea id="profile-tags" class="list-input" bind:value={tags}></textarea>
-		</Field>
+		<section class="section">
+			<h3 class="section__title">{t('profiles.section.exclusions')}</h3>
+			<Field
+				label={t('profiles.excludes')}
+				help={t('profiles.listSeparatorHint')}
+				error={fieldError(formProblem, 'excludes')}
+				for="profile-excludes"
+			>
+				<textarea id="profile-excludes" class="rh-textarea rh-input--mono" bind:value={excludes}
+				></textarea>
+			</Field>
+			<Field
+				label={t('profiles.excludeFiles')}
+				help={t('profiles.listSeparatorHint')}
+				error={fieldError(formProblem, 'exclude_files')}
+				for="profile-exclude-files"
+			>
+				<textarea
+					id="profile-exclude-files"
+					class="rh-textarea rh-input--mono"
+					bind:value={excludeFiles}></textarea>
+			</Field>
+			<Field
+				label={t('profiles.tags')}
+				help={t('profiles.listSeparatorHint')}
+				error={fieldError(formProblem, 'tags')}
+				for="profile-tags"
+			>
+				<textarea id="profile-tags" class="rh-textarea rh-input--mono" bind:value={tags}></textarea>
+			</Field>
+		</section>
 
-		<h3 class="form__section">{t('profiles.options')}</h3>
-		<Checkbox label={t('profiles.options.vss')} bind:checked={vss} />
-		<Checkbox label={t('profiles.options.oneFileSystem')} bind:checked={oneFileSystem} />
-		<Checkbox label={t('profiles.options.excludeCaches')} bind:checked={excludeCaches} />
-		<TextField
-			id="profile-limit-upload"
-			type="number"
-			label={t('profiles.options.limitUpload')}
-			bind:value={limitUpload}
-		/>
-		<TextField
-			id="profile-limit-download"
-			type="number"
-			label={t('profiles.options.limitDownload')}
-			bind:value={limitDownload}
-		/>
-
-		<h3 class="form__section">{t('profiles.retention')}</h3>
-		<Checkbox label={t('profiles.retention.enabled')} bind:checked={retentionEnabled} />
-		{#if retentionEnabled}
+		<section class="section">
+			<h3 class="section__title">{t('profiles.options')}</h3>
+			<Checkbox label={t('profiles.options.vss')} bind:checked={vss} />
+			<Checkbox label={t('profiles.options.oneFileSystem')} bind:checked={oneFileSystem} />
+			<Checkbox label={t('profiles.options.excludeCaches')} bind:checked={excludeCaches} />
 			<div class="grid">
 				<TextField
-					id="profile-keep-last"
+					id="profile-limit-upload"
 					type="number"
-					label={t('profiles.retention.keepLast')}
-					bind:value={keepLast}
+					label={t('profiles.options.limitUpload')}
+					placeholder={t('profiles.options.limitNone')}
+					bind:value={limitUpload}
 				/>
 				<TextField
-					id="profile-keep-daily"
+					id="profile-limit-download"
 					type="number"
-					label={t('profiles.retention.keepDaily')}
-					bind:value={keepDaily}
-				/>
-				<TextField
-					id="profile-keep-weekly"
-					type="number"
-					label={t('profiles.retention.keepWeekly')}
-					bind:value={keepWeekly}
-				/>
-				<TextField
-					id="profile-keep-monthly"
-					type="number"
-					label={t('profiles.retention.keepMonthly')}
-					bind:value={keepMonthly}
+					label={t('profiles.options.limitDownload')}
+					placeholder={t('profiles.options.limitNone')}
+					bind:value={limitDownload}
 				/>
 			</div>
-			<TextField
-				id="profile-keep-within"
-				label={t('profiles.retention.keepWithin')}
-				placeholder="30d"
-				error={fieldError(formProblem, 'retention.keep_within')}
-				bind:value={keepWithin}
-			/>
-		{/if}
+		</section>
 
-		<h3 class="form__section">{t('profiles.check')}</h3>
-		<Checkbox label={t('profiles.check.enabled')} bind:checked={checkEnabled} />
-		{#if checkEnabled}
-			<TextField
-				id="profile-read-data-subset"
-				label={t('profiles.check.readDataSubset')}
-				placeholder="10%"
-				error={fieldError(formProblem, 'check.read_data_subset')}
-				bind:value={readDataSubset}
-			/>
-		{/if}
+		<section class="section">
+			<h3 class="section__title">{t('profiles.retention')}</h3>
+			<Checkbox label={t('profiles.retention.enabled')} bind:checked={retentionEnabled} />
+			{#if retentionEnabled}
+				<div class="grid">
+					<TextField
+						id="profile-keep-last"
+						type="number"
+						label={t('profiles.retention.keepLast')}
+						bind:value={keepLast}
+					/>
+					<TextField
+						id="profile-keep-hourly"
+						type="number"
+						label={t('profiles.retention.keepHourly')}
+						bind:value={keepHourly}
+					/>
+					<TextField
+						id="profile-keep-daily"
+						type="number"
+						label={t('profiles.retention.keepDaily')}
+						bind:value={keepDaily}
+					/>
+					<TextField
+						id="profile-keep-weekly"
+						type="number"
+						label={t('profiles.retention.keepWeekly')}
+						bind:value={keepWeekly}
+					/>
+					<TextField
+						id="profile-keep-monthly"
+						type="number"
+						label={t('profiles.retention.keepMonthly')}
+						bind:value={keepMonthly}
+					/>
+					<TextField
+						id="profile-keep-yearly"
+						type="number"
+						label={t('profiles.retention.keepYearly')}
+						bind:value={keepYearly}
+					/>
+				</div>
+				<TextField
+					id="profile-keep-within"
+					label={t('profiles.retention.keepWithin')}
+					placeholder="30d"
+					error={fieldError(formProblem, 'retention.keep_within')}
+					bind:value={keepWithin}
+				/>
+				<Field
+					label={t('profiles.retention.keepTags')}
+					help={t('profiles.listSeparatorHint')}
+					error={fieldError(formProblem, 'retention.keep_tags')}
+					for="profile-keep-tags"
+				>
+					<textarea id="profile-keep-tags" class="rh-textarea rh-input--mono" bind:value={keepTags}
+					></textarea>
+				</Field>
+				<div class="checks">
+					<span class="checks__label">{t('profiles.retention.groupBy')}</span>
+					<Checkbox label={t('profiles.retention.groupBy.host')} bind:checked={groupByHost} />
+					<Checkbox label={t('profiles.retention.groupBy.paths')} bind:checked={groupByPaths} />
+					<Checkbox label={t('profiles.retention.groupBy.tags')} bind:checked={groupByTags} />
+				</div>
+				<Field
+					label={t('profiles.retention.filterHosts')}
+					help={t('profiles.listSeparatorHint')}
+					error={fieldError(formProblem, 'retention.filter.hosts')}
+					for="profile-filter-hosts"
+				>
+					<textarea
+						id="profile-filter-hosts"
+						class="rh-textarea rh-input--mono"
+						bind:value={filterHosts}></textarea>
+				</Field>
+				<Field
+					label={t('profiles.retention.filterTags')}
+					help={t('profiles.listSeparatorHint')}
+					error={fieldError(formProblem, 'retention.filter.tags')}
+					for="profile-filter-tags"
+				>
+					<textarea
+						id="profile-filter-tags"
+						class="rh-textarea rh-input--mono"
+						bind:value={filterTags}></textarea>
+				</Field>
+				<Field
+					label={t('profiles.retention.filterPaths')}
+					help={t('profiles.listSeparatorHint')}
+					error={fieldError(formProblem, 'retention.filter.paths')}
+					for="profile-filter-paths"
+				>
+					<textarea
+						id="profile-filter-paths"
+						class="rh-textarea rh-input--mono"
+						bind:value={filterPaths}></textarea>
+				</Field>
+			{/if}
+		</section>
 
-		<h3 class="form__section">{t('profiles.hooks')}</h3>
-		<Alert variant="inline" icon="lock" title={t('profiles.hooksUnavailable')} />
-		{#each hooks as hook, index (index)}
-			<div class="hook">
+		<section class="section">
+			<h3 class="section__title">{t('profiles.check')}</h3>
+			<Checkbox label={t('profiles.check.enabled')} bind:checked={checkEnabled} />
+			{#if checkEnabled}
+				<TextField
+					id="profile-read-data-subset"
+					label={t('profiles.check.readDataSubset')}
+					placeholder="10%"
+					error={fieldError(formProblem, 'check.read_data_subset')}
+					bind:value={readDataSubset}
+				/>
+			{/if}
+		</section>
+
+		<section class="section">
+			<h3 class="section__title">{t('profiles.hooks')}</h3>
+			<Alert variant="inline" icon="lock" title={t('profiles.hooksUnavailable')} />
+			{#if formProblem?.field?.startsWith('hooks')}
+				<Alert tone="danger" title={tErrorCode(formProblem.code) ?? formProblem.title}>
+					{formProblem.field}{formProblem.reason ? `: ${formProblem.reason}` : ''}
+				</Alert>
+			{/if}
+			{#each hooks as hook, index (index)}
 				<div class="hook__row">
 					<TextField
 						label={t('profiles.hooks.hookId')}
@@ -663,21 +793,9 @@
 						{t('profiles.hooks.remove')}
 					</Button>
 				</div>
-				{#each hook.parameters as parameter, position (position)}
-					<div class="hook__row">
-						<TextField label={t('profiles.hooks.parameters')} bind:value={parameter.name} />
-						<TextField label="" bind:value={parameter.value} />
-						<Button variant="ghost" icon="x" onclick={() => removeParameter(index, position)}>
-							{t('common.delete')}
-						</Button>
-					</div>
-				{/each}
-				<Button variant="ghost" icon="plus" onclick={() => addParameter(index)}>
-					{t('profiles.hooks.parameters')}
-				</Button>
-			</div>
-		{/each}
-		<Button variant="ghost" icon="plus" onclick={addHook}>{t('profiles.hooks.add')}</Button>
+			{/each}
+			<Button variant="ghost" icon="plus" onclick={addHook}>{t('profiles.hooks.add')}</Button>
+		</section>
 	</div>
 	{#snippet footer()}
 		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
@@ -700,7 +818,7 @@
 		/>
 		{#if previewProblem}
 			<Alert tone="danger" title={tErrorCode(previewProblem.code) ?? previewProblem.title}>
-				{previewProblem.field ? `${previewProblem.field}: ${previewProblem.reason ?? ''}` : ''}
+				{previewProblem.field}{previewProblem.reason ? `: ${previewProblem.reason}` : ''}
 			</Alert>
 		{/if}
 		{#if previewLoading}
@@ -758,16 +876,37 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
+	.warnings {
+		margin-bottom: var(--rh-space-4);
+	}
+
+	.warnings__list {
+		margin: 0;
+		padding-left: var(--rh-space-4);
+		font-family: var(--rh-font-mono);
+		font-size: var(--rh-font-size-sm);
+	}
+
 	.form {
 		display: flex;
 		flex-direction: column;
-		gap: var(--rh-space-4);
+		gap: var(--rh-space-5);
 	}
 
-	.form__section {
-		margin: var(--rh-space-2) 0 0;
+	.section {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-3);
+	}
+
+	.section__title {
+		margin: 0;
+		padding-bottom: var(--rh-space-1);
+		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
 		font-size: var(--rh-font-size-sm);
 		font-weight: var(--rh-font-weight-semibold);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 		color: var(--rh-color-text-muted);
 	}
 
@@ -777,26 +916,16 @@
 		gap: var(--rh-space-3);
 	}
 
-	.list-input {
-		width: 100%;
-		min-height: 4.5rem;
-		padding: var(--rh-space-2);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
-		background-color: var(--rh-color-control-bg);
-		color: var(--rh-color-text);
-		font-family: var(--rh-font-mono);
-		font-size: var(--rh-font-size-sm);
-		resize: vertical;
+	.checks {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--rh-space-3);
 	}
 
-	.hook {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-2);
-		padding: var(--rh-space-3);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
+	.checks__label {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.hook__row {

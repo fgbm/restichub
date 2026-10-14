@@ -95,21 +95,28 @@ async function capture(page: Page, scheme: string, labels: Labels, suffix: strin
 	await page.getByText('web-daily').waitFor();
 	await shot(page, `profiles-list${suffix}`, scheme);
 
-	// The create dialog.
+	// The create dialog, at the top and at the bottom.
 	await page.getByRole('button', { name: labels.addProfile, exact: true }).click();
 	await page.locator('#profile-name').fill('mac-files');
 	await page.locator('#profile-paths-all').fill('/Users');
 	await page.locator('#profile-tags').fill('macos');
 	await page.locator('input[type="checkbox"]').first().check();
-	await shot(page, `profiles-create${suffix}`, scheme);
+	await page.locator('.rh-dialog__body').evaluate((element) => element.scrollTo(0, 0));
+	await page.waitForTimeout(150);
+	await shot(page, `profiles-create-top${suffix}`, scheme);
+	await page
+		.locator('.rh-dialog__body')
+		.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+	await page.waitForTimeout(150);
+	await shot(page, `profiles-create-bottom${suffix}`, scheme);
 	await page.keyboard.press('Escape');
 
-	// The preview panel.
-	await page.getByRole('button', { name: labels.moreActions('web-daily'), exact: true }).click();
+	// The preview of a Windows profile for a Windows host: the Windows paths are used.
+	await page.getByRole('button', { name: labels.moreActions('win-files'), exact: true }).click();
 	await page.getByRole('menuitem').first().click();
-	await page.locator('#preview-host').selectOption({ index: 1 });
-	await expect(page.getByText('restic backup', { exact: false })).toBeVisible();
-	await shot(page, `profiles-preview${suffix}`, scheme);
+	await page.locator('#preview-host').selectOption({ label: 'win-fs01' });
+	await expect(page.getByText('C:\\Data', { exact: false })).toBeVisible();
+	await shot(page, `profiles-preview-windows${suffix}`, scheme);
 	await page.keyboard.press('Escape');
 }
 
