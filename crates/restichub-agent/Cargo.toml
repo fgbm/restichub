@@ -41,6 +41,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 x509-parser = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"
 windows-sys = { version = "0.61", features = [
@@ -48,6 +51,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
+  "Win32_System_SystemServices",
 ] }
 
 [dev-dependencies]
