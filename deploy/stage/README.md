@@ -92,10 +92,12 @@ Add the option `-v` to remove the data volumes. The command deletes the PostgreS
 
 The control plane serves the agent listener on its own port (ADR-0026). It is the gRPC stream with mTLS and the enrollment endpoint `POST /agent/v1/enroll` on one port. The listener terminates TLS itself, so the port is published directly on the `cp` service and Caddy does not proxy it: a proxy would terminate the mTLS of the agents.
 
-Set the public address in `.env` so that an enrolled agent learns where to dial:
+The enrollment endpoint is also served on the public origin through Caddy (ADR-0033). An agent reaches it with the publicly trusted certificate of the proxy and pins the installation root CA for the stream. Caddy forwards `POST /agent/v1/enroll` to the control plane.
+
+Set the public address of the listener in `.env`, so an enrolled agent learns where to dial:
 
 ```sh
 RESTICHUB_AGENT_ENDPOINT=https://agents.example.com:8443
 ```
 
-The host is the placeholder `agents.example.com` by default. Set the real host and the published port. `RESTICHUB_AGENT_PORT` changes the published port (the default is `8443`). The control plane issues the listener certificate from the installation CA with the endpoint host and the listen address as the subject alternative names.
+The host is the placeholder `agents.example.com` by default. Set the real host and the published port. `RESTICHUB_AGENT_PORT` changes the published port (the default is `8443`). `RESTICHUB_AGENT_MAX_CONNECTIONS` bounds the established connections (the default is `2200`). The control plane issues the listener certificate from the installation CA with the endpoint host and the listen address as the subject alternative names.

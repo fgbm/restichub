@@ -23,5 +23,14 @@
 		-Server
 	}
 
-	reverse_proxy cp:8080
+	# The enrollment endpoint is served on the public origin too (ADR-0033). The
+	# agent reaches it with the publicly trusted certificate of this proxy and then
+	# pins the installation root CA for the stream.
+	handle /agent/v1/enroll {
+		reverse_proxy cp:8080
+	}
+
+	handle {
+		reverse_proxy cp:8080
+	}
 }
