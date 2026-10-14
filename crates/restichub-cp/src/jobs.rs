@@ -82,12 +82,6 @@ const MAX_RESULT_MESSAGE_LEN: usize = 64;
 /// repository. The user interface translates it (NFR-DOC-04).
 const ACCESS_ERROR_CODE: &str = "repository_missing_here";
 
-/// The `result_message` of a job whose steps finished with restic warnings (exit code 3).
-const WARNINGS_CODE: &str = "succeeded_with_warnings";
-
-/// The `result_message` of a job that a lock on the repository stopped (restic exit code 11).
-const LOCKED_CODE: &str = "repository_locked";
-
 /// The request body of an init or a test-access action.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -582,7 +576,8 @@ pub async fn handle_job_result(
     // or, after the last retry, to the dead-letter status (FR-SC-05). The agent reports the lock on
     // the step, and the job result of a stopped job has the status `failed`, so the step result
     // marks the row (see `queue::stale::handle_step_result`).
-    let lock_held = (job.lock_reported && outcome.result_code == JobResultCode::Failed)
+    let lock_held = outcome.result_code == JobResultCode::RepositoryLocked
+        || (job.lock_reported && outcome.result_code == JobResultCode::Failed)
         || result.status == StepStatus::Retry as i32;
     // A cancel ends the retry chain: a flagged job never returns to the queue.
     if lock_held && !job.cancel_requested && retry::is_retryable(job.kind) {
@@ -629,8 +624,10 @@ pub async fn handle_job_result(
         tracing::warn!(job = %job_id, %error, "the job result could not update the job");
         return;
     }
-    if outcome.result_code == JobResultCode::Succeeded
-        && let Some(repository_id) = job.repository_id
+    if matches!(
+        outcome.result_code,
+        JobResultCode::Succeeded | JobResultCode::SucceededWithWarnings
+    ) && let Some(repository_id) = job.repository_id
     {
         apply_initialized(
             &mut tx,
@@ -885,11 +882,6 @@ fn repository_steps(kind: JobKind, repository_id: &str) -> Vec<Step> {
 
 /// Maps the typed outcome of a `JobResult` to the stored outcome (FR-AG-09).
 ///
-/// The stored result codes have no value for a warning or a locked repository, so these two outcomes
-/// keep the closest code and carry a fixed `result_message`: a job with warnings is `succeeded` with
-/// the message `succeeded_with_warnings`, and a locked repository is `failed` with the message
-/// `repository_locked`.
-///
 /// The error code from the agent is bounded and sanitized, so a malicious agent cannot store a huge
 /// value or a control character (FR-PR-08).
 fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
@@ -900,32 +892,35 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         ProtoJobStatus::ConfigError => JobResultCode::ConfigError,
         ProtoJobStatus::NotInitialized => JobResultCode::NotInitialized,
         ProtoJobStatus::Cancelled => JobResultCode::Cancelled,
-        ProtoJobStatus::SucceededWithWarnings => JobResultCode::Succeeded,
-        ProtoJobStatus::RepositoryLocked => JobResultCode::Failed,
+        ProtoJobStatus::SucceededWithWarnings => JobResultCode::SucceededWithWarnings,
+        ProtoJobStatus::RepositoryLocked => JobResultCode::RepositoryLocked,
         ProtoJobStatus::Unspecified => return None,
     };
     let status = match result_code {
-        JobResultCode::Succeeded => JobStatus::Succeeded,
+        JobResultCode::Succeeded | JobResultCode::SucceededWithWarnings => JobStatus::Succeeded,
         JobResultCode::Failed
+        | JobResultCode::RepositoryLocked
         | JobResultCode::ConfigError
         | JobResultCode::NotInitialized
         | JobResultCode::AccessError
         | JobResultCode::Cancelled => JobStatus::Failed,
     };
-    let result_message = match outcome {
-        ProtoJobStatus::SucceededWithWarnings => Some(WARNINGS_CODE.to_owned()),
-        ProtoJobStatus::RepositoryLocked => Some(LOCKED_CODE.to_owned()),
-        _ => result
-            .error
-            .as_ref()
-            .map(|error| error.code.as_str())
-            .filter(|code| {
-                !code.is_empty()
-                    && code.len() <= MAX_RESULT_MESSAGE_LEN
-                    && !restichub_proto::validate::has_forbidden(code)
-            })
-            .map(str::to_owned),
-    };
+    // The typed code says all: the agent repeats it as the error code of the job.
+    let typed = matches!(
+        result_code,
+        JobResultCode::SucceededWithWarnings | JobResultCode::RepositoryLocked
+    );
+    let result_message = result
+        .error
+        .as_ref()
+        .filter(|_| !typed)
+        .map(|error| error.code.as_str())
+        .filter(|code| {
+            !code.is_empty()
+                && code.len() <= MAX_RESULT_MESSAGE_LEN
+                && !restichub_proto::validate::has_forbidden(code)
+        })
+        .map(str::to_owned);
     Some(JobOutcome {
         status,
         result_code,
@@ -993,12 +988,10 @@ mod tests {
         let outcome = outcome_of(&result(ProtoJobStatus::SucceededWithWarnings))
             .expect("the outcome must map");
         assert_eq!(outcome.status, JobStatus::Succeeded);
-        assert_eq!(outcome.result_code, JobResultCode::Succeeded);
-        assert_eq!(
-            outcome.result_message.as_deref(),
-            Some("succeeded_with_warnings")
-        );
+        assert_eq!(outcome.result_code, JobResultCode::SucceededWithWarnings);
+        assert_eq!(outcome.result_message, None);
         let plain = outcome_of(&result(ProtoJobStatus::Succeeded)).expect("the outcome must map");
+        assert_eq!(plain.result_code, JobResultCode::Succeeded);
         assert_eq!(plain.result_message, None);
     }
 
@@ -1007,6 +1000,7 @@ mod tests {
         let outcome =
             outcome_of(&result(ProtoJobStatus::RepositoryLocked)).expect("the outcome must map");
         assert_eq!(outcome.status, JobStatus::Failed);
-        assert_eq!(outcome.result_message.as_deref(), Some("repository_locked"));
+        assert_eq!(outcome.result_code, JobResultCode::RepositoryLocked);
+        assert_eq!(outcome.result_message, None);
     }
 }

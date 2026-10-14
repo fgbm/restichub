@@ -85,7 +85,9 @@
 		config_error: 'repositories.result.config_error',
 		not_initialized: 'repositories.result.not_initialized',
 		access_error: 'repositories.result.access_error',
-		cancelled: 'repositories.result.cancelled'
+		cancelled: 'repositories.result.cancelled',
+		succeeded_with_warnings: 'repositories.result.succeeded_with_warnings',
+		repository_locked: 'repositories.result.repository_locked'
 	};
 
 	const jobDone = $derived(
@@ -414,7 +416,9 @@
 
 	function jobTone(): StatusTone {
 		if (!job) return 'neutral';
-		if (job.status === 'succeeded') return 'success';
+		if (job.status === 'succeeded') {
+			return job.result_code === 'succeeded_with_warnings' ? 'warning' : 'success';
+		}
 		if (job.status === 'failed' || job.status === 'expired') return 'failed';
 		if (job.status === 'running') return 'running';
 		if (job.status === 'sent' || job.status === 'queued') return 'queued';

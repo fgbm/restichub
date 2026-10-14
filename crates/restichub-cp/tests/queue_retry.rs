@@ -243,3 +243,58 @@ async fn ac_sc_06_a_lost_agent_leaves_an_unlock_after_thirty_minutes() {
     );
     env.db.cleanup().await;
 }
+
+#[tokio::test]
+async fn ac_sc_05_a_typed_repository_locked_result_retries_without_a_step_result() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("typed-lock").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(repository, json!({})).await;
+    let plan = env.create_plan(profile, agent.id).await;
+    let backup = env.run_plan(plan).await;
+    env.pass().await;
+    let id = queue_support::decode_job_id(&agent.job().await);
+    agent.start(&env, &id).await;
+
+    agent
+        .result(&id, JobStatus::RepositoryLocked, StepStatus::Failed)
+        .await;
+
+    eventually(|| async { env.plan_jobs(plan).await.len() == 2 }).await;
+    let newest = env.plan_jobs(plan).await.remove(0);
+    assert_eq!(newest["status"], "queued", "{newest}");
+    assert_eq!(newest["attempt"], 1);
+    let ended = env.job(backup).await;
+    assert_eq!(ended["status"], "failed");
+    assert_eq!(ended["result_message"], "lock_retry");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_sc_05_a_result_with_warnings_is_a_typed_success() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("typed-warnings").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(repository, json!({})).await;
+    let plan = env.create_plan(profile, agent.id).await;
+    let backup = env.run_plan(plan).await;
+    env.pass().await;
+    let id = queue_support::decode_job_id(&agent.job().await);
+    agent.start(&env, &id).await;
+
+    agent
+        .result(&id, JobStatus::SucceededWithWarnings, StepStatus::Warning)
+        .await;
+
+    eventually(|| async { env.job_status(backup).await == "succeeded" }).await;
+    let ended = env.job(backup).await;
+    assert_eq!(ended["result_code"], "succeeded_with_warnings", "{ended}");
+    assert!(ended["result_message"].is_null(), "{ended}");
+    env.db.cleanup().await;
+}

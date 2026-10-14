@@ -443,6 +443,8 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.result.config_error': 'Пароль репозитория или учётные данные неверны.',
 	'repositories.result.failed': 'Задание завершилось ошибкой.',
 	'repositories.result.cancelled': 'Задание отменено.',
+	'repositories.result.succeeded_with_warnings': 'Задание завершено с предупреждениями.',
+	'repositories.result.repository_locked': 'Репозиторий заблокирован другим процессом.',
 	'repositories.result.access_error':
 		'Репозитория нет по этому пути на этом хосте. Проверьте путь, точку монтирования и хост.',
 	'repositories.jobExpired': 'Срок задания истёк до ответа хоста. Запустите его снова.',
@@ -574,6 +576,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.status.expired': 'Срок истёк',
 	'jobs.status.dead_letter': 'Остановлено',
 	'jobs.status.cancelled': 'Отменено',
+	'jobs.status.succeeded_with_warnings': 'Успешно, есть предупреждения',
 	'jobs.kind.init': 'Инициализация',
 	'jobs.kind.test_access': 'Проверка доступа',
 	'jobs.kind.backup': 'Резервная копия',
@@ -587,6 +590,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.compile_failed': 'Профиль больше не подходит этому хосту.',
 	'jobs.reason.lock_retries_exhausted':
 		'Репозиторий оставался заблокированным после всех повторов.',
+	'jobs.reason.repository_locked': 'Репозиторий заблокирован другим процессом.',
 	'jobs.reason.lock_retry': 'Репозиторий был заблокирован. Новая попытка стоит в очереди.',
 	'jobs.reason.signed_job_unavailable': 'Сохранённое задание нечитаемо.',
 	'jobs.reason.agent_lost': 'Хост отключился во время задания.',

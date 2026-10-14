@@ -1,10 +1,9 @@
 //! The lock retry with the messages of the real agent job runner (FR-SC-05, AC-SC-05, ADR-0020).
 //!
-//! The agent on this branch runs `init` and `test_access` steps only, so it cannot run a queued
-//! backup. The restic double is the `fake-restic` example of the agent crate. The test runs a
-//! `test_access` job on the real job runner with restic exit code 11 and captures the step result
-//! and the job result that the runner produces. It then sends those messages, with the job
-//! identifier of a queued backup, to the control plane. The control plane must retry the backup.
+//! The restic double is the `fake-restic` example of the agent crate. Each test runs the queued
+//! backup job on the real job runner, captures the step result and the job result that the runner
+//! produces, and sends those messages to the control plane. Restic exit code 11 must retry the
+//! backup as a new job. Restic exit code 3 must end it as `succeeded_with_warnings`.
 //!
 //! The example is built by `cargo test --workspace`. A run of this package alone needs
 //! `cargo build -p restichub-agent --example fake-restic` first.
@@ -17,7 +16,7 @@ mod queue_support;
 use std::path::{Path, PathBuf};
 
 use restichub_agent::jobs::Jobs;
-use restichub_proto::agent::v1::{AgentMessage, StepStatus, agent_message};
+use restichub_proto::agent::v1::{AgentMessage, agent_message};
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
@@ -50,19 +49,23 @@ fn sha256_hex(path: &Path) -> String {
     text
 }
 
-#[tokio::test]
-async fn ac_sc_05_the_messages_of_the_real_agent_for_exit_code_11_retry_the_job() {
-    let Some(db) = common::test_db().await else {
-        return;
-    };
-    let env = Env::start(db, test_queue()).await;
-    let mut agent = env.connect_agent("real-agent").await;
+/// Runs the queued backup on the real runner with the scripted exit code and sends every message
+/// of the runner to the control plane. Returns the plan and the backup job.
+async fn run_backup(
+    env: &Env,
+    agent: &mut queue_support::FakeAgent,
+    exit_code: i32,
+) -> (Uuid, Uuid) {
     let ring = Env::key_ring(&agent.identity);
-
     let work = std::env::temp_dir().join(format!("restichub-real-agent-{}", Uuid::now_v7()));
     std::fs::create_dir_all(&work).expect("cannot create the work directory");
     let location = work.join("repo");
-    std::fs::write(work.join("repo.restichub-fake"), "11 0").expect("cannot write the script");
+    std::fs::write(work.join("repo.restichub-fake"), "0 0").expect("cannot write the script");
+    std::fs::write(
+        work.join("repo.restichub-code-backup"),
+        exit_code.to_string(),
+    )
+    .expect("cannot write the backup code");
     let program = fake_restic();
     let jobs = Jobs::open(
         program.clone(),
@@ -71,7 +74,7 @@ async fn ac_sc_05_the_messages_of_the_real_agent_for_exit_code_11_retry_the_job(
         &work,
     )
     .expect("the job journal must open");
-    let (captured_tx, mut captured) = tokio::sync::mpsc::channel(32);
+    let (captured_tx, mut captured) = tokio::sync::mpsc::channel(64);
     jobs.attach(&captured_tx);
 
     let repository = env
@@ -85,70 +88,66 @@ async fn ac_sc_05_the_messages_of_the_real_agent_for_exit_code_11_retry_the_job(
     let plan = env.create_plan(profile, agent.id).await;
     let backup = env.run_plan(plan).await;
     env.pass().await;
-    let sent = decode_job_id(&agent.job().await);
-    assert_eq!(sent, backup.to_string());
-    agent.start(&env, &sent).await;
-
-    // A test-access job runs on the real runner and exits with code 11.
-    let (status, probe) = env
-        .call(
-            &env.admin,
-            "POST",
-            &format!("/api/v1/repositories/{repository}/test-access"),
-            Some(json!({})),
-        )
-        .await;
-    assert_eq!(status, axum::http::StatusCode::ACCEPTED, "{probe}");
     let signed = agent.job().await;
+    assert_eq!(decode_job_id(&signed), backup.to_string());
     let tenant = agent.identity.tenant_id.clone();
     let agent_id = agent.identity.agent_id.clone();
     jobs.handle(signed, &ring, &agent_id, &tenant).await;
 
-    let mut step = None;
-    let mut result = None;
-    while result.is_none() {
+    let mut finished = false;
+    while !finished {
         let message = tokio::time::timeout(std::time::Duration::from_secs(10), captured.recv())
             .await
             .expect("the real agent must report")
             .expect("the channel stays open");
-        match message.payload {
-            Some(agent_message::Payload::StepResult(found)) => step = Some(found),
-            Some(agent_message::Payload::JobResult(found)) => result = Some(found),
-            _ => {}
-        }
-    }
-    let (mut step, mut result) = (step.expect("a step result"), result.expect("a job result"));
-    assert_eq!(step.exit_code, 11);
-    assert_eq!(step.status, StepStatus::Retry as i32);
-    assert_eq!(
-        result.status,
-        StepStatus::Failed as i32,
-        "the real agent reports the stopped job as failed"
-    );
-
-    // The control plane gets the same messages for the queued backup.
-    step.job_id = sent.clone();
-    result.job_id = sent.clone();
-    for payload in [
-        agent_message::Payload::StepResult(step),
-        agent_message::Payload::JobResult(result),
-    ] {
+        finished = matches!(message.payload, Some(agent_message::Payload::JobResult(_)));
         agent
             .tx
             .send(AgentMessage {
-                payload: Some(payload),
+                payload: message.payload,
             })
             .await
             .expect("cannot send the message");
     }
+    std::fs::remove_dir_all(&work).expect("cannot remove the work directory");
+    (plan, backup)
+}
+
+#[tokio::test]
+async fn ac_sc_05_the_backup_of_the_real_agent_with_exit_code_11_retries_as_a_new_job() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("real-agent").await;
+
+    let (plan, backup) = run_backup(&env, &mut agent, 11).await;
+
     eventually(|| async { env.plan_jobs(plan).await.len() == 2 }).await;
     let newest = env.plan_jobs(plan).await.remove(0);
     assert_eq!(newest["status"], "queued", "{newest}");
     assert_eq!(newest["attempt"], 1);
-    assert_ne!(newest["id"], sent.as_str());
+    assert_ne!(newest["id"], backup.to_string().as_str());
     let ended = env.job(backup).await;
     assert_eq!(ended["status"], "failed");
     assert_eq!(ended["result_message"], "lock_retry");
-    std::fs::remove_dir_all(&work).expect("cannot remove the work directory");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_sc_05_the_backup_of_the_real_agent_with_exit_code_3_ends_with_warnings() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("real-agent").await;
+
+    let (plan, backup) = run_backup(&env, &mut agent, 3).await;
+
+    eventually(|| async { env.job_status(backup).await == "succeeded" }).await;
+    let ended = env.job(backup).await;
+    assert_eq!(ended["result_code"], "succeeded_with_warnings", "{ended}");
+    assert!(ended["result_message"].is_null(), "{ended}");
+    assert_eq!(env.plan_jobs(plan).await.len(), 1);
     env.db.cleanup().await;
 }

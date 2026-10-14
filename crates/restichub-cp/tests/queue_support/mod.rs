@@ -633,6 +633,7 @@ impl FakeAgent {
                         code: "step_failed".to_owned(),
                         params: Vec::new(),
                     }),
+                    ..JobResult::default()
                 })),
             })
             .await
@@ -650,6 +651,7 @@ impl FakeAgent {
                     steps_failed: u32::from(outcome != JobStatus::Succeeded),
                     outcome: outcome as i32,
                     error: None,
+                    ..JobResult::default()
                 })),
             })
             .await

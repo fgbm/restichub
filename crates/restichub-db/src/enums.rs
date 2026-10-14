@@ -446,6 +446,10 @@ pub enum JobResultCode {
     AccessError,
     /// The control plane cancelled the job (FR-AG-10).
     Cancelled,
+    /// Every step finished, but restic reported warnings (exit code 3).
+    SucceededWithWarnings,
+    /// A lock on the repository stopped the job (restic exit code 11, FR-SC-05).
+    RepositoryLocked,
 }
 
 impl JobResultCode {
@@ -457,6 +461,8 @@ impl JobResultCode {
             Self::NotInitialized => "not_initialized",
             Self::AccessError => "access_error",
             Self::Cancelled => "cancelled",
+            Self::SucceededWithWarnings => "succeeded_with_warnings",
+            Self::RepositoryLocked => "repository_locked",
         }
     }
 
@@ -469,6 +475,8 @@ impl JobResultCode {
             "not_initialized" => Some(Self::NotInitialized),
             "access_error" => Some(Self::AccessError),
             "cancelled" => Some(Self::Cancelled),
+            "succeeded_with_warnings" => Some(Self::SucceededWithWarnings),
+            "repository_locked" => Some(Self::RepositoryLocked),
             _ => None,
         }
     }
@@ -645,6 +653,8 @@ mod tests {
             JobResultCode::NotInitialized,
             JobResultCode::AccessError,
             JobResultCode::Cancelled,
+            JobResultCode::SucceededWithWarnings,
+            JobResultCode::RepositoryLocked,
         ] {
             assert_eq!(JobResultCode::parse(code.as_str()), Some(code));
         }

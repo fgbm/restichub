@@ -130,6 +130,31 @@ describe('the Jobs screen', () => {
 		expect(screen.getByText('The repository stayed locked after every retry.')).toBeInTheDocument();
 	});
 
+	it('shows a job with warnings and a locked job with their typed results', async () => {
+		mocks.listJobs.mockResolvedValue({
+			items: [
+				job({
+					id: 'j_4',
+					status: 'succeeded',
+					result_code: 'succeeded_with_warnings',
+					finished_at: '2026-10-14T10:03:00Z'
+				}),
+				job({
+					id: 'j_5',
+					status: 'failed',
+					result_code: 'repository_locked',
+					finished_at: '2026-10-14T10:03:00Z'
+				})
+			],
+			next_cursor: null
+		});
+		render(Jobs);
+
+		const table = within(await screen.findByRole('table'));
+		expect(await table.findByText('Succeeded with warnings')).toBeInTheDocument();
+		expect(screen.getByText('The repository is locked by another process.')).toBeInTheDocument();
+	});
+
 	it('shows the empty state when no job exists', async () => {
 		render(Jobs);
 		expect(await screen.findByText('No jobs yet')).toBeInTheDocument();

@@ -84,12 +84,18 @@
 		return job.status === 'failed' && job.result_code === 'cancelled';
 	}
 
+	function hasWarnings(job: Job): boolean {
+		return job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings';
+	}
+
 	function statusLabel(job: Job): string {
+		if (hasWarnings(job)) return t('jobs.status.succeeded_with_warnings');
 		return t(`jobs.status.${isCancelled(job) ? 'cancelled' : job.status}` as MessageKey);
 	}
 
 	function toneOf(job: Job): StatusTone {
 		if (isCancelled(job)) return 'cancelled';
+		if (hasWarnings(job)) return 'warning';
 		switch (job.status) {
 			case 'queued':
 				return 'queued';
@@ -111,10 +117,13 @@
 	}
 
 	function reasonOf(job: Job): string | null {
-		if (!job.result_message || isCancelled(job)) return null;
-		const key = `jobs.reason.${job.result_message}` as MessageKey;
+		if (isCancelled(job)) return null;
+		const code =
+			job.result_message ?? (job.result_code === 'repository_locked' ? job.result_code : null);
+		if (!code) return null;
+		const key = `jobs.reason.${code}` as MessageKey;
 		const text = t(key);
-		return text === key ? job.result_message : text;
+		return text === key ? code : text;
 	}
 
 	function durationOf(job: Job): string {
