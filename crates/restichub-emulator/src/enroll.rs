@@ -38,7 +38,21 @@ pub struct EnrolledIdentity {
     pub ca_chain_der: Vec<Vec<u8>>,
     pub key_pem: String,
     pub signing_key_update: Vec<u8>,
+    /// The public job signing key set: the current key and the next key (ADR-0026).
+    pub signing_keys: Vec<EnrollmentKeyBody>,
+    /// Ed25519 signature over the key set, base64 (standard alphabet).
+    pub signing_keys_signature: String,
     pub grpc_endpoint: Option<String>,
+}
+
+/// One public job signing key of the enrollment response (ADR-0026).
+#[derive(Debug, Clone)]
+pub struct EnrollmentKeyBody {
+    /// `current` or `next`.
+    pub role: String,
+    pub key_id: String,
+    /// Base64 of the 32 Ed25519 bytes (standard alphabet).
+    pub public_key: String,
 }
 
 /// The enrollment route of the control plane (ADR-0026).
@@ -152,6 +166,31 @@ fn parse_response(body: &[u8], key_pem: String) -> anyhow::Result<EnrolledIdenti
                 .context("a chain entry is not base64")
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
+    let signing_keys = value
+        .get("signing_keys")
+        .and_then(serde_json::Value::as_array)
+        .context("the response holds no `signing_keys`")?
+        .iter()
+        .map(|entry| {
+            Ok(EnrollmentKeyBody {
+                role: entry
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .context("a key holds no `role`")?
+                    .to_owned(),
+                key_id: entry
+                    .get("key_id")
+                    .and_then(serde_json::Value::as_str)
+                    .context("a key holds no `key_id`")?
+                    .to_owned(),
+                public_key: entry
+                    .get("public_key")
+                    .and_then(serde_json::Value::as_str)
+                    .context("a key holds no `public_key`")?
+                    .to_owned(),
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(EnrolledIdentity {
         agent_id: text("agent_id")?,
         tenant_id: text("tenant_id")?,
@@ -159,6 +198,8 @@ fn parse_response(body: &[u8], key_pem: String) -> anyhow::Result<EnrolledIdenti
         ca_chain_der,
         key_pem,
         signing_key_update: der("signing_key_update")?,
+        signing_keys,
+        signing_keys_signature: text("signing_keys_signature")?,
         grpc_endpoint: value
             .get("grpc_endpoint")
             .and_then(serde_json::Value::as_str)

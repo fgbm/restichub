@@ -54,7 +54,21 @@ pub struct Enrolled {
     /// Issuing CA first, root last.
     pub ca_chain_der: Vec<Vec<u8>>,
     pub signing_key_update: Vec<u8>,
+    /// The public job signing key set: the current key and the next key (ADR-0026).
+    pub signing_keys: Vec<EnrollmentKeyBody>,
+    /// Ed25519 signature over the key set, base64 (standard alphabet).
+    pub signing_keys_signature: String,
     pub grpc_endpoint: Option<String>,
+}
+
+/// One public job signing key of the enrollment response (ADR-0026).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnrollmentKeyBody {
+    /// `current` or `next`.
+    pub role: String,
+    pub key_id: String,
+    /// Base64 of the 32 Ed25519 bytes (standard alphabet).
+    pub public_key: String,
 }
 
 /// Speaks to the enrollment endpoint over verified HTTPS (ADR-0032).
@@ -207,6 +221,8 @@ struct EnrollResponse {
     certificate: String,
     ca_chain: Vec<String>,
     signing_key_update: String,
+    signing_keys: Vec<EnrollmentKeyBody>,
+    signing_keys_signature: String,
     grpc_endpoint: Option<String>,
 }
 
@@ -241,6 +257,8 @@ fn parse_response(body: &[u8]) -> Result<Enrolled> {
         signing_key_update: STANDARD
             .decode(&response.signing_key_update)
             .context("the key update is not base64")?,
+        signing_keys: response.signing_keys,
+        signing_keys_signature: response.signing_keys_signature,
         grpc_endpoint: response.grpc_endpoint,
     })
 }

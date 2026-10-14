@@ -67,7 +67,8 @@ async fn ac_in_02_register_enrolls_the_host_and_stores_no_token() {
         identity.grpc_endpoint.as_deref(),
         Some(common::AGENT_ENDPOINT)
     );
-    assert!(!identity.signing_key_update.is_empty());
+    assert!(!identity.signing_keys.keys.is_empty());
+    assert_eq!(identity.signing_keys.keys.len(), 2);
     assert!(identity.certificate_expiry().is_ok());
 
     // The certificate carries the SAN URI of the identity (ADR-0026).
@@ -158,6 +159,13 @@ fn sample_identity() -> StoredIdentity {
         key_pem: "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n".to_owned(),
         certificate_der: vec![1, 2, 3],
         ca_chain_der: vec![vec![4, 5]],
-        signing_key_update: vec![6, 7, 8],
+        signing_keys: restichub_agent::identity::StoredSigningKeys {
+            keys: vec![restichub_agent::enroll::EnrollmentKeyBody {
+                role: "current".to_owned(),
+                key_id: "key-1".to_owned(),
+                public_key: "AAAA".to_owned(),
+            }],
+            signature: "AAAA".to_owned(),
+        },
     }
 }

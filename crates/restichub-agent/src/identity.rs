@@ -14,7 +14,16 @@ pub const KEY_FILE: &str = "agent-key.pem";
 pub const CERT_FILE: &str = "agent-cert.pem";
 pub const CA_CHAIN_FILE: &str = "ca-chain.pem";
 pub const METADATA_FILE: &str = "identity.json";
-pub const SIGNING_KEY_FILE: &str = "signing-key-update.bin";
+pub const SIGNING_KEYS_FILE: &str = "signing-keys.json";
+
+/// The public job signing key set that the identity keeps (ADR-0026).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredSigningKeys {
+    /// Current entry first, then the next entry.
+    pub keys: Vec<crate::enroll::EnrollmentKeyBody>,
+    /// Base64 of the Ed25519 value over the set (standard alphabet).
+    pub signature: String,
+}
 
 /// The identity that the agent keeps between runs (FR-AG-04).
 #[derive(Debug)]
@@ -26,7 +35,7 @@ pub struct StoredIdentity {
     pub key_pem: String,
     pub certificate_der: Vec<u8>,
     pub ca_chain_der: Vec<Vec<u8>>,
-    pub signing_key_update: Vec<u8>,
+    pub signing_keys: StoredSigningKeys,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,7 +80,9 @@ impl StoredIdentity {
             .map(|der| pem::encode("CERTIFICATE", der))
             .collect();
         paths::create_protected_file(&staging.join(CA_CHAIN_FILE), chain.as_bytes())?;
-        paths::create_protected_file(&staging.join(SIGNING_KEY_FILE), &self.signing_key_update)?;
+        let keys =
+            serde_json::to_vec(&self.signing_keys).context("cannot serialize the key set")?;
+        paths::create_protected_file(&staging.join(SIGNING_KEYS_FILE), &keys)?;
         let metadata = Metadata {
             agent_id: self.agent_id.clone(),
             tenant_id: self.tenant_id.clone(),
@@ -90,6 +101,7 @@ impl StoredIdentity {
     ///
     /// Returns an error when a file is missing or malformed.
     pub fn load(dir: &Path) -> Result<Self> {
+        let dir = recover(dir);
         let metadata: Metadata =
             serde_json::from_slice(&read(dir.join(METADATA_FILE))?).context("bad identity.json")?;
         let key_pem =
@@ -99,7 +111,8 @@ impl StoredIdentity {
             std::str::from_utf8(&read(dir.join(CA_CHAIN_FILE))?)
                 .context("the CA chain file is not text")?,
         )?;
-        let signing_key_update = read(dir.join(SIGNING_KEY_FILE))?;
+        let signing_keys = serde_json::from_slice(&read(dir.join(SIGNING_KEYS_FILE))?)
+            .context("bad signing-keys.json")?;
         Ok(Self {
             agent_id: metadata.agent_id,
             tenant_id: metadata.tenant_id,
@@ -108,14 +121,14 @@ impl StoredIdentity {
             key_pem,
             certificate_der,
             ca_chain_der,
-            signing_key_update,
+            signing_keys,
         })
     }
 
     /// Reports whether the directory holds a stored identity.
     #[must_use]
     pub fn exists(dir: &Path) -> bool {
-        dir.join(METADATA_FILE).exists()
+        recover(dir).join(METADATA_FILE).exists()
     }
 
     /// The time when the stored leaf certificate stops being valid (FR-AG-04).
@@ -166,6 +179,24 @@ fn sibling(dir: &Path, suffix: &str) -> std::path::PathBuf {
         .and_then(|name| name.to_str())
         .unwrap_or("restichub-agent");
     dir.with_file_name(format!("{name}{suffix}"))
+}
+
+/// The directory that holds the identity, with the backup of an interrupted swap (FR-AG-04).
+///
+/// A swap that a crash interrupted leaves the old identity in the backup and no identity in the
+/// main directory. The function moves the backup back, so the agent keeps its identity.
+fn recover(dir: &Path) -> std::path::PathBuf {
+    if dir.join(METADATA_FILE).exists() {
+        return dir.to_path_buf();
+    }
+    let backup = sibling(dir, ".old");
+    if backup.join(METADATA_FILE).exists() {
+        if std::fs::rename(&backup, dir).is_ok() {
+            return dir.to_path_buf();
+        }
+        return backup;
+    }
+    dir.to_path_buf()
 }
 
 /// Replaces `dir` with `staging` in one rename, keeping the old directory until the swap succeeds.
@@ -222,7 +253,14 @@ mod tests {
             key_pem: "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n".to_owned(),
             certificate_der: vec![1, 2, 3],
             ca_chain_der: vec![vec![4, 5], vec![6, 7]],
-            signing_key_update: vec![8, 9, 10],
+            signing_keys: StoredSigningKeys {
+                keys: vec![crate::enroll::EnrollmentKeyBody {
+                    role: "current".to_owned(),
+                    key_id: "key-1".to_owned(),
+                    public_key: "AAAA".to_owned(),
+                }],
+                signature: "AAAA".to_owned(),
+            },
         }
     }
 
@@ -263,7 +301,7 @@ mod tests {
         assert_eq!(loaded.key_pem, identity.key_pem);
         assert_eq!(loaded.certificate_der, identity.certificate_der);
         assert_eq!(loaded.ca_chain_der, identity.ca_chain_der);
-        assert_eq!(loaded.signing_key_update, identity.signing_key_update);
+        assert_eq!(loaded.signing_keys, identity.signing_keys);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -303,6 +341,21 @@ mod tests {
         assert_eq!(loaded.agent_id, old.agent_id);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_file(&staging);
+    }
+
+    #[test]
+    fn a_failed_swap_is_recovered_from_the_backup() {
+        let dir = temp_dir("recover");
+        let identity = sample();
+        identity.save(&dir).expect("the first save must succeed");
+        // A swap that a crash interrupted leaves the identity in the backup and no main directory.
+        let backup = sibling(&dir, ".old");
+        std::fs::rename(&dir, &backup).expect("cannot move the identity to the backup");
+        assert!(!dir.exists());
+        let loaded = StoredIdentity::load(&dir).expect("the backup must recover");
+        assert_eq!(loaded.agent_id, identity.agent_id);
+        assert!(dir.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
