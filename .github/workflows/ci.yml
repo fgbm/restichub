@@ -19,15 +19,63 @@ env:
   VALE_VERSION: 3.24.0
 
 jobs:
-  rust:
-    name: Rust (${{ matrix.os }})
+  # The agent tests that run the real restic need the pinned release. The job fetches it with the
+  # script of the agent packages, which verifies the signed checksums and the archive hash, so the
+  # Windows runner needs no gpg.
+  restic:
+    name: Restic (${{ matrix.restic }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        restic: [linux, windows]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch and verify restic
+        run: >-
+          packaging/fetch-restic.sh
+          --os "${{ matrix.restic }}" --arch amd64
+          --output "$RUNNER_TEMP/restic"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: restic-ci-${{ matrix.restic }}
+          path: |
+            ${{ runner.temp }}/restic/restic
+            ${{ runner.temp }}/restic/restic.exe
+          if-no-files-found: error
+
+  rust:
+    name: Rust (${{ matrix.os }})
+    needs: restic
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            restic: linux
+          - os: windows-latest
+            restic: windows
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: restic-ci-${{ matrix.restic }}
+          path: ${{ runner.temp }}/restic
+      # The tests fail, and do not skip, when this restic is missing.
+      - name: Use the verified restic
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.restic }}" = windows ]; then
+            binary="$RUNNER_TEMP/restic/restic.exe"
+          else
+            binary="$RUNNER_TEMP/restic/restic"
+            chmod +x "$binary"
+          fi
+          "$binary" version
+          echo "RESTICHUB_TEST_RESTIC=$binary" >> "$GITHUB_ENV"
+          echo "RESTICHUB_REQUIRE_RESTIC=1" >> "$GITHUB_ENV"
       # The action reads rust-toolchain.toml.
       - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
