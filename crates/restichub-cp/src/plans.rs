@@ -581,7 +581,7 @@ fn profile_field(error: ScheduleError) -> &'static str {
     }
 }
 
-fn parse_schedule(cron: &str, time_zone: &str) -> Result<Schedule, ApiError> {
+pub(crate) fn parse_schedule(cron: &str, time_zone: &str) -> Result<Schedule, ApiError> {
     Schedule::parse(cron, time_zone)
         .map_err(|error| schedule_error_to_api(profile_field(error), error))
 }
@@ -597,7 +597,7 @@ fn schedule_error_to_api(field: &'static str, error: ScheduleError) -> ApiError 
 }
 
 /// The next fire time for an enabled plan. A disabled plan holds none.
-fn next_run_at(
+pub(crate) fn next_run_at(
     schedule: &Schedule,
     enabled: bool,
     now: time::OffsetDateTime,

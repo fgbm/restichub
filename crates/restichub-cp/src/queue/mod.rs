@@ -16,6 +16,7 @@
 //! A suspended tenant dispatches nothing, and its agents stay connected (AC-TN-03).
 
 pub mod build;
+pub mod maintenance;
 pub mod retry;
 pub mod select;
 pub mod stale;

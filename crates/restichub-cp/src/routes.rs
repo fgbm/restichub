@@ -444,6 +444,30 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/api/v1/repositories/{id}/maintenance",
+        access: Access::Protected(Operation::RepositoriesRead),
+        handler: || routes!(crate::repository_maintenance::get_maintenance),
+    },
+    Route {
+        method: "put",
+        path: "/api/v1/repositories/{id}/maintenance",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || {
+            routes!(crate::repository_maintenance::update_maintenance)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/maintenance/run",
+        access: Access::Protected(Operation::JobsWrite),
+        handler: || {
+            routes!(crate::repository_maintenance::run_maintenance)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
         path: "/api/v1/jobs",
         access: Access::Protected(Operation::JobsRead),
         handler: || routes!(crate::job_api::list_jobs),

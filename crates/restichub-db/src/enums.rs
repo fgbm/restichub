@@ -425,6 +425,49 @@ impl MissedRunPolicy {
     }
 }
 
+/// The maintenance task of a repository schedule (FR-RP-08, ADR-0034).
+///
+/// The string value of each variant is the stored value of the `task` column. It is stable: do not
+/// change a string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum MaintenanceTask {
+    /// The `forget` steps of every profile, then one `prune` step.
+    Retention,
+    /// One `check` step, with the data subset of the first profile that sets one.
+    Check,
+}
+
+impl MaintenanceTask {
+    pub const ALL: [Self; 2] = [Self::Retention, Self::Check];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Retention => "retention",
+            Self::Check => "check",
+        }
+    }
+
+    /// The retention cycle is one `forget` job that also holds the `prune` step. The check is a
+    /// `check` job.
+    pub fn job_kind(self) -> JobKind {
+        match self {
+            Self::Retention => JobKind::Forget,
+            Self::Check => JobKind::Check,
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "retention" => Some(Self::Retention),
+            "check" => Some(Self::Check),
+            _ => None,
+        }
+    }
+}
+
 /// The typed result of a finished job (FR-AG-09, AC-RP-01).
 ///
 /// The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the

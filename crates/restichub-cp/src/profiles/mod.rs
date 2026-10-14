@@ -44,13 +44,13 @@ use crate::secrets::actor_user;
 use crate::server::AppState;
 use crate::validation::Reason;
 
-pub(crate) use settings::compiler_profile_from_row;
 pub use settings::{
     BackupOptions, CheckOptions, CreateProfileRequest, GroupBy, HookParameter, HookPhase, HookRef,
     MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS, PlanWarning, PreviewEnvView,
     PreviewRequest, PreviewResponse, PreviewStepView, ProfileListResponse, ProfilePaths,
     ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter, UpdateProfileRequest,
 };
+pub(crate) use settings::{compiler_profile_from_row, profile_tag};
 use settings::{
     parse_profile_id, profile_value, save_warnings, stored_value, validate_create, validate_update,
 };

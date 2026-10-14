@@ -177,6 +177,8 @@ pub async fn create_repository(
     )
     .await
     .map_err(map_write_error)?;
+    crate::maintenance_scheduler::create_defaults(&mut tx, repository_id, state.auth().clock.now())
+        .await?;
 
     let mut event = context.audit_event(
         AuditAction::RepositoryCreate,

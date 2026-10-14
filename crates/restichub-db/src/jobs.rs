@@ -207,6 +207,40 @@ pub async fn create_scheduled(
     Ok(row.map(JobId::from_uuid))
 }
 
+/// Creates one scheduled maintenance job for a schedule and a fire time (FR-RP-08).
+///
+/// The unique key `(maintenance_schedule_id, fire_time, attempt)` makes the create idempotent: a
+/// second control plane instance inserts no row and gets `None` (ADR-0034).
+pub async fn create_maintenance(
+    tx: &mut TenantTx<'_>,
+    new: &NewJob,
+    schedule: crate::MaintenanceScheduleId,
+) -> Result<Option<JobId>, DbError> {
+    let row = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO jobs \
+         (id, tenant_id, kind, agent_id, repository_id, plan_id, fire_time, status, expires_at, \
+          location_fingerprint, created_by, maintenance_schedule_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11) \
+         ON CONFLICT (maintenance_schedule_id, fire_time, attempt) DO NOTHING \
+         RETURNING id",
+    )
+    .bind(new.id)
+    .bind(tx.tenant())
+    .bind(new.kind.as_str())
+    .bind(new.agent_id)
+    .bind(new.repository_id)
+    .bind(new.plan_id)
+    .bind(new.fire_time)
+    .bind(new.expires_at)
+    .bind(new.location_fingerprint.as_deref())
+    .bind(new.created_by)
+    .bind(schedule)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(JobId::from_uuid))
+}
+
 /// Reads one job of the tenant of the transaction. A job of another tenant is absent.
 pub async fn get(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<Job>, DbError> {
     let row = sqlx::query_as::<_, JobRow>(concat!(

@@ -39,6 +39,7 @@ pub enum Refusal {
     ProfileMissing,
     RepositoryMissing,
     RepositoryChanged,
+    NotMaintenanceAgent,
     AgentFactsInvalid,
     CompileFailed,
     StepMissing,
@@ -56,6 +57,7 @@ impl Refusal {
             Self::ProfileMissing => "profile_missing",
             Self::RepositoryMissing => "repository_missing",
             Self::RepositoryChanged => "repository_changed",
+            Self::NotMaintenanceAgent => "not_maintenance_agent",
             Self::AgentFactsInvalid => "agent_facts_invalid",
             Self::CompileFailed => "compile_failed",
             Self::StepMissing => "step_missing",
@@ -120,8 +122,13 @@ pub async fn build(
     };
 
     let steps = match job.kind {
-        JobKind::Backup | JobKind::Forget | JobKind::Prune | JobKind::Check => {
-            plan_steps(tx, job, &agent, repository_id, now).await?
+        JobKind::Backup => plan_steps(tx, job, &agent, repository_id, now).await?,
+        // Only the maintenance agent of the repository receives these steps (FR-RP-08, AC-RP-04).
+        JobKind::Forget | JobKind::Prune | JobKind::Check => {
+            if repository.maintenance_agent_id != Some(job.agent_id) {
+                return Err(BuildError::Refused(Refusal::NotMaintenanceAgent));
+            }
+            super::maintenance::steps(tx, job, repository_id, now).await?
         }
         JobKind::Unlock => vec![simple_step(
             "unlock",
@@ -181,7 +188,7 @@ fn delivery_error(error: DeliveryError) -> BuildError {
     }
 }
 
-fn simple_step(step_id: &str, kind: step::Kind) -> Step {
+pub(super) fn simple_step(step_id: &str, kind: step::Kind) -> Step {
     Step {
         step_id: step_id.to_owned(),
         timeout_seconds: 0,
@@ -189,7 +196,7 @@ fn simple_step(step_id: &str, kind: step::Kind) -> Step {
     }
 }
 
-/// Recompiles the stored profile of the plan for the agent and picks the steps of the job kind.
+/// Recompiles the stored profile of the plan for the agent and picks its backup steps.
 async fn plan_steps(
     tx: &mut TenantTx<'_>,
     job: &Job,
@@ -225,20 +232,12 @@ async fn plan_steps(
         BuildError::Refused(Refusal::CompileFailed)
     })?;
 
-    let mut steps: Vec<Step> = match job.kind {
-        JobKind::Backup => compiled
-            .steps
-            .into_iter()
-            .filter(|planned| !planned.maintenance)
-            .map(|planned| planned.step)
-            .collect(),
-        kind => compiled
-            .steps
-            .into_iter()
-            .filter(|planned| planned.maintenance && step_matches(kind, &planned.step))
-            .map(|planned| planned.step)
-            .collect(),
-    };
+    let mut steps: Vec<Step> = compiled
+        .steps
+        .into_iter()
+        .filter(|planned| !planned.maintenance)
+        .map(|planned| planned.step)
+        .collect();
     if steps.is_empty() {
         return Err(BuildError::Refused(Refusal::StepMissing));
     }
@@ -248,17 +247,8 @@ async fn plan_steps(
     Ok(steps)
 }
 
-fn step_matches(kind: JobKind, step: &Step) -> bool {
-    matches!(
-        (kind, step.kind.as_ref()),
-        (JobKind::Forget, Some(step::Kind::Forget(_)))
-            | (JobKind::Prune, Some(step::Kind::Prune(_)))
-            | (JobKind::Check, Some(step::Kind::Check(_)))
-    )
-}
-
 /// The control plane always sends `--retry-lock` (FR-SC-05).
-fn force_retry_lock(step: &mut Step) {
+pub(super) fn force_retry_lock(step: &mut Step) {
     match step.kind.as_mut() {
         Some(step::Kind::Backup(backup)) => backup.retry_lock = true,
         Some(step::Kind::Forget(forget)) => forget.retry_lock = true,

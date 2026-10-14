@@ -66,7 +66,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 14] = [
+const TENANT_TABLES: [&str; 15] = [
     "users",
     "memberships",
     "sessions",
@@ -81,6 +81,7 @@ const TENANT_TABLES: [&str; 14] = [
     "jobs",
     "profiles",
     "plans",
+    "maintenance_schedules",
 ];
 
 struct Seed {
@@ -271,6 +272,16 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
                  (SELECT id FROM agents WHERE tenant_id = $2), '0 2 * * *', 'UTC', 'run_all')",
     )
     .bind(crate::PlanId::new())
+    .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO maintenance_schedules (id, tenant_id, repository_id, task, cron, time_zone) \
+         VALUES ($1, $2, (SELECT id FROM repositories WHERE tenant_id = $2), 'retention', \
+                 '0 3 * * 0', 'UTC')",
+    )
+    .bind(crate::MaintenanceScheduleId::new())
     .bind(tenant)
     .execute(tx.as_conn())
     .await?;

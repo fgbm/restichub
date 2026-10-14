@@ -146,6 +146,12 @@ pub fn write_body(
         })),
         ("PATCH", "/api/v1/repositories/{id}") => Some(json!({"name": "matrix-repo"})),
         ("POST", "/api/v1/repositories/{id}/unlock-all") => Some(json!({"confirm": "matrix-repo"})),
+        ("PUT", "/api/v1/repositories/{id}/maintenance") => Some(json!({
+            "time_zone": "UTC",
+            "retention": {"cron": "0 3 * * 0", "enabled": true},
+            "check": {"cron": "0 4 1 * *", "enabled": true},
+        })),
+        ("POST", "/api/v1/repositories/{id}/maintenance/run") => Some(json!({"task": "check"})),
         ("POST", "/api/v1/profiles") => Some(json!({
             "name": format!("matrix-profile-{index}"),
             "repository_id": repository_id,

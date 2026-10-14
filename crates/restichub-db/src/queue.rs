@@ -363,8 +363,10 @@ pub async fn retry_as_new_job(
     sqlx::query(
         "INSERT INTO jobs \
          (id, tenant_id, kind, agent_id, repository_id, plan_id, fire_time, status, expires_at, \
-          location_fingerprint, created_by, attempt, run_at, retry_of, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12, $13, $14)",
+          location_fingerprint, created_by, attempt, run_at, retry_of, created_at, \
+          maintenance_schedule_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12, $13, $14, \
+                 (SELECT maintenance_schedule_id FROM jobs WHERE id = $13))",
     )
     .bind(id)
     .bind(tx.tenant())
@@ -638,6 +640,45 @@ pub async fn has_any_active_for_repository(
     .await
     .map_err(DbError::Query)?;
     Ok(active)
+}
+
+/// True when the repository holds a queued, sent or running job of an exclusive kind (FR-SC-04).
+///
+/// The active-job index allows one such job for each repository, so the maintenance scheduler
+/// waits for it instead of inserting a second row.
+pub async fn has_active_exclusive_for_repository(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+) -> Result<bool, DbError> {
+    let (active,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 AND kind <> 'backup' \
+                        AND status IN ('queued', 'sent', 'running'))",
+    )
+    .bind(repository_id)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(active)
+}
+
+/// Reads the latest job of a kind on a repository, newest first (FR-RP-08).
+pub async fn latest_of_kind(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+    kind: JobKind,
+) -> Result<Option<Job>, DbError> {
+    let row = sqlx::query_as::<_, JobRow>(concat!(
+        "SELECT ",
+        job_columns!(),
+        " FROM jobs WHERE repository_id = $1 AND kind = $2 \
+          ORDER BY created_at DESC, id DESC LIMIT 1"
+    ))
+    .bind(repository_id)
+    .bind(kind.as_str())
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(Job::from))
 }
 
 /// Reads one job with the display names of its plan, agent and repository.

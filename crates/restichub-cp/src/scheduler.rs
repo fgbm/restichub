@@ -10,6 +10,8 @@
 //! the fire time. The row holds no secret and no compiled command; the dispatcher of
 //! [`crate::queue`] recompiles the stored profile when it sends the job.
 //!
+//! The same pass runs the maintenance schedules of the repositories ([`crate::maintenance_scheduler`]).
+//!
 //! A suspended tenant and a plan whose agent is revoked create no jobs (AC-TN-03). A plan whose
 //! agent is revoked still advances its fire time, so the control plane does not reprocess it on
 //! every pass.
@@ -67,6 +69,9 @@ pub async fn run_once(db: &Database, clock: &dyn Clock) -> Result<(), DbError> {
         }
         if let Err(error) = process_tenant(db, tenant.id, now).await {
             tracing::warn!(tenant = %tenant.id, %error, "the scheduler pass of a tenant failed");
+        }
+        if let Err(error) = crate::maintenance_scheduler::process_tenant(db, tenant.id, now).await {
+            tracing::warn!(tenant = %tenant.id, %error, "the maintenance pass of a tenant failed");
         }
     }
     Ok(())

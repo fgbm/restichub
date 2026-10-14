@@ -619,15 +619,26 @@ impl ValidatedProfile {
     }
 }
 
+/// The tag that marks the snapshots of one profile (FR-PF-04, FR-RP-08).
+///
+/// The job builder adds it to every backup of the profile. The `forget` step of the maintenance job
+/// filters on it, so the retention of one profile never removes the snapshots of another profile
+/// that shares the repository, the host or the paths.
+pub fn profile_tag(id: restichub_db::ProfileId) -> String {
+    format!("restichub-profile-{id}")
+}
+
 /// The stored profile as the compiler input (FR-PF-04).
 pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, ApiError> {
+    let mut tags = profile.tags.clone();
+    tags.push(profile_tag(profile.id));
     let validated = ValidatedProfile {
         name: profile.name.clone(),
         repository_id: profile.repository_id,
         paths: paths_from_row(profile),
         excludes: profile.excludes.clone(),
         exclude_files: profile.exclude_files.clone(),
-        tags: profile.tags.clone(),
+        tags,
         options: BackupOptions {
             use_fs_snapshot: profile.use_fs_snapshot,
             one_file_system: profile.one_file_system,

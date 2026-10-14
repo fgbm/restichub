@@ -160,6 +160,27 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
     Ok(new.id)
 }
 
+/// Lists the profiles that use a repository, oldest first (FR-RP-08, FR-PF-01).
+///
+/// The maintenance job reads them to build one `forget` step for each profile and agent.
+pub async fn list_for_repository(
+    tx: &mut TenantTx<'_>,
+    repository: RepositoryId,
+) -> Result<Vec<Profile>, DbError> {
+    let rows = sqlx::query_as::<_, ProfileRow>(
+        "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
+                excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
+                limit_upload_kib, limit_download_kib, retention, check_options, hooks, created_at, \
+                updated_at, created_by \
+         FROM profiles WHERE repository_id = $1 ORDER BY created_at, id",
+    )
+    .bind(repository)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(Profile::from).collect())
+}
+
 /// Lists the profiles of the tenant of the transaction, newest first.
 pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePageResult, DbError> {
     let limit = page.limit.clamp(1, MAX_PAGE_LIMIT);
