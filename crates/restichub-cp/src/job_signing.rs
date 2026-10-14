@@ -307,7 +307,7 @@ impl JobSigningService {
         Ok(self.current_set(db).await?.key_update(now))
     }
 
-    /// The stored step that introduces the current next key (ADR-0030).
+    /// The stored update that introduces the newest next key (ADR-0030).
     ///
     /// The stream delivers this step after a rotation, so the message equals the last step of a
     /// later re-sync.

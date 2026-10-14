@@ -242,9 +242,10 @@ pub async fn retire_compromised(
     id: Uuid,
     now: OffsetDateTime,
 ) -> Result<Vec<Uuid>, DbError> {
+    // The retirement check needs `retire_after` on a retired row, and a compromise retires at once.
     let rows: Vec<(Uuid,)> = sqlx::query_as(
-        "UPDATE signing_keys SET retired_at = $1, retired_reason = 'compromise' \
-         WHERE id = $2 AND retired_at IS NULL \
+        "UPDATE signing_keys SET retired_at = $1, retire_after = $1, \
+         retired_reason = 'compromise' WHERE id = $2 AND retired_at IS NULL \
          RETURNING id",
     )
     .bind(now)

@@ -572,11 +572,11 @@ pub struct SilentServer {
 /// How the silent server ends a stream (FR-ID-07, FR-ID-08).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SilentMode {
-    /// The stream stays open and sends nothing.
+    /// Keeps the stream open and sends no message.
     Silent,
-    /// The stream ends at once, without a message.
+    /// Ends the stream at once, without a message.
     Closing,
-    /// The stream sends one ping and then fails, as a control plane restart does.
+    /// Sends one ping and then fails, as a control plane restart does.
     PingThenError,
 }
 
