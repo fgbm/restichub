@@ -244,28 +244,42 @@ pub const AGENT_ENDPOINT: &str = "https://agents.example:8443";
 /// Builds a router with a real certificate authority and job signing key set, so the enrollment
 /// endpoint can issue a certificate and return the signed key set.
 pub async fn app_with_pki(db: &Database) -> Router {
+    router(pki_state(db).await.0)
+}
+
+/// Builds the application state with a real certificate authority and job signing key set.
+///
+/// The agent listener tests use the state with [`agent_router`]; the enrollment tests use it with
+/// both the web router and the agent router.
+pub async fn pki_state(db: &Database) -> (AppState, Arc<restichub_cp::pki::CaStore>) {
     let provider = test_kek();
     let ca = restichub_cp::pki::CaService::new(provider.clone());
-    let store = ca
-        .ensure_initialized(db)
-        .await
-        .expect("cannot create the CA");
+    let store = Arc::new(
+        ca.ensure_initialized(db)
+            .await
+            .expect("cannot create the CA"),
+    );
     let job_signing = restichub_cp::job_signing::JobSigningService::new(provider.clone());
     job_signing
         .ensure_initialized(db)
         .await
         .expect("cannot create the job signing key set");
     let auth = AuthState::new(AuthConfig::default());
-    router(
-        AppState::with_auth(db.clone(), auth)
-            .with_kek(provider)
-            .with_tenancy(TenancyConfig::multi())
-            .with_pki(
-                Arc::new(store),
-                job_signing,
-                Some(AGENT_ENDPOINT.to_owned()),
-            ),
-    )
+    let state = AppState::with_auth(db.clone(), auth)
+        .with_kek(provider)
+        .with_tenancy(TenancyConfig::multi())
+        .with_pki(store.clone(), job_signing, Some(AGENT_ENDPOINT.to_owned()));
+    (state, store)
+}
+
+/// Builds the listener routes for a test that drives them without TLS.
+pub fn agent_router(state: AppState) -> Router {
+    restichub_cp::agent_listener::agent_router(state)
+}
+
+/// Public web router of a state.
+pub fn api_router(state: AppState) -> Router {
+    router(state)
 }
 
 /// Builds a router with a certificate authority but no job signing key set.
@@ -273,6 +287,11 @@ pub async fn app_with_pki(db: &Database) -> Router {
 /// The enrollment endpoint builds the signed key set before it consumes the token, so this router
 /// refuses an enrollment without spending the token.
 pub async fn app_with_ca_without_signing_keys(db: &Database) -> Router {
+    router(ca_without_signing_state(db).await)
+}
+
+/// Builds the state with a certificate authority but no job signing key set.
+pub async fn ca_without_signing_state(db: &Database) -> AppState {
     let provider = test_kek();
     let ca = restichub_cp::pki::CaService::new(provider.clone());
     let store = ca
@@ -281,16 +300,14 @@ pub async fn app_with_ca_without_signing_keys(db: &Database) -> Router {
         .expect("cannot create the CA");
     let job_signing = restichub_cp::job_signing::JobSigningService::new(provider.clone());
     let auth = AuthState::new(AuthConfig::default());
-    router(
-        AppState::with_auth(db.clone(), auth)
-            .with_kek(provider)
-            .with_tenancy(TenancyConfig::multi())
-            .with_pki(
-                Arc::new(store),
-                job_signing,
-                Some(AGENT_ENDPOINT.to_owned()),
-            ),
-    )
+    AppState::with_auth(db.clone(), auth)
+        .with_kek(provider)
+        .with_tenancy(TenancyConfig::multi())
+        .with_pki(
+            Arc::new(store),
+            job_signing,
+            Some(AGENT_ENDPOINT.to_owned()),
+        )
 }
 
 /// Creates an enrollment token with a known value, so a test can send it to the endpoint.

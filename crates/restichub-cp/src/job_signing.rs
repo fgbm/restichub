@@ -30,6 +30,7 @@ use restichub_secrets::{
     wrap_signing_key,
 };
 use time::{Duration, OffsetDateTime};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -175,19 +176,38 @@ struct CachedSet {
     set: Arc<KeySet>,
 }
 
+/// One signing key rotation, announced to the agent streams (ADR-0026).
+#[derive(Debug, Clone)]
+pub struct RotationEvent {
+    /// The old current key that retires when every online agent acknowledged the new set.
+    pub pending_key_id: Uuid,
+    /// The new current key that the agents acknowledge.
+    pub current_key_id: String,
+}
+
 /// Owns the job signing key set of the installation.
 #[derive(Debug, Clone)]
 pub struct JobSigningService {
     provider: Arc<dyn KekProvider>,
     cache: Arc<Mutex<Option<CachedSet>>>,
+    events: broadcast::Sender<RotationEvent>,
 }
 
 impl JobSigningService {
     pub fn new(provider: Arc<dyn KekProvider>) -> Self {
+        // The channel carries a rotation to the open agent streams (ADR-0026). A lost event is
+        // harmless: the periodic retirement still bounds the overlap.
+        let (events, _) = broadcast::channel(16);
         Self {
             provider,
             cache: Arc::new(Mutex::new(None)),
+            events,
         }
+    }
+
+    /// Subscribes to the rotation events. The agent stream re-delivers the key set after a rotation.
+    pub fn subscribe(&self) -> broadcast::Receiver<RotationEvent> {
+        self.events.subscribe()
     }
 
     /// Creates the key set on the first start and keeps it healthy on every later start.
@@ -322,6 +342,12 @@ impl JobSigningService {
             .await?;
         audit_rotation(&mut tx, next, current, new_next).await?;
         tx.commit().await?;
+
+        // Announce the rotation, so each open stream delivers the fresh key set (ADR-0026).
+        let _ = self.events.send(RotationEvent {
+            pending_key_id: current,
+            current_key_id: next.to_string(),
+        });
 
         self.load(db).await?.ok_or(JobSigningError::Missing)
     }

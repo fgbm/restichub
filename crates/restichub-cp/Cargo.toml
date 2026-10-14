@@ -34,7 +34,10 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging"] }
+tokio-stream = { version = "0.1", features = ["net"] }
 toml = { workspace = true }
+tonic = { version = "0.14", features = ["tls-ring"] }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

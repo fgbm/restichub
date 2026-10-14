@@ -18,8 +18,8 @@ use time::{Duration, OffsetDateTime};
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
 use common::{
-    AGENT_ENDPOINT, app_with_pki, create_tenant, create_user, request, seed_enrollment_token_value,
-    seed_session, send,
+    AGENT_ENDPOINT, agent_router, api_router, create_tenant, create_user, pki_state, request,
+    seed_enrollment_token_value, seed_session, send,
 };
 
 #[tokio::test]
@@ -38,17 +38,19 @@ async fn ac_id_01_the_emulator_enrolls_end_to_end_against_the_control_plane() {
     )
     .await;
 
-    // Serve the control plane router on a loopback port.
-    let app = app_with_pki(db.database()).await;
+    // Serve the agent listener router on a loopback port. The transport-agnostic test drives the
+    // enrollment handler without TLS; the TLS path is in `agent_stream.rs`.
+    let (state, _ca) = pki_state(db.database()).await;
+    let app = api_router(state.clone());
+    let agent = agent_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("cannot bind the test server");
     let addr = listener.local_addr().expect("the server address");
-    let server_app = app.clone();
     let server = tokio::spawn(async move {
         axum::serve(
             listener,
-            server_app.into_make_service_with_connect_info::<SocketAddr>(),
+            agent.into_make_service_with_connect_info::<SocketAddr>(),
         )
         .await
         .expect("the test server stopped");

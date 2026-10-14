@@ -52,15 +52,6 @@ pub const ROUTES: &[Route] = &[
         handler: || routes!(crate::server::readyz),
     },
     Route {
-        method: "post",
-        path: "/agent/v1/enroll",
-        access: Access::Public,
-        handler: || {
-            routes!(crate::enrollment::enroll)
-                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
-        },
-    },
-    Route {
         method: "get",
         path: "/api/v1/openapi.json",
         access: Access::Public,

@@ -20,9 +20,15 @@ use time::{Duration, OffsetDateTime};
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
 use common::{
-    AGENT_ENDPOINT, app_with_ca_without_signing_keys, app_with_pki, count, create_tenant,
-    create_user, request, seed_enrollment_token_value, seed_session, send,
+    AGENT_ENDPOINT, agent_router, api_router, ca_without_signing_state, count, create_tenant,
+    create_user, pki_state, request, seed_enrollment_token_value, seed_session, send,
 };
+
+/// Builds the web router and the agent listener router over one state (ADR-0026).
+async fn routers(db: &restichub_db::Database) -> (Router, Router) {
+    let (state, _ca) = pki_state(db).await;
+    (api_router(state.clone()), agent_router(state))
+}
 
 /// Builds a certificate signing request with an ECDSA P-256 key (ADR-0026).
 fn p256_csr() -> Vec<u8> {
@@ -147,9 +153,9 @@ async fn ac_id_01_a_valid_token_enrolls_an_agent_in_its_tenant() {
         OffsetDateTime::now_utc() + Duration::hours(1),
     )
     .await;
-    let app = app_with_pki(db.database()).await;
+    let (app, agent) = routers(db.database()).await;
 
-    let (status, response) = enroll(&app, &token, &p256_csr()).await;
+    let (status, response) = enroll(&agent, &token, &p256_csr()).await;
     assert_eq!(status, StatusCode::CREATED, "{response}");
     let agent_id = response
         .get("agent_id")
@@ -269,7 +275,7 @@ async fn ac_in_02_a_used_expired_revoked_or_unknown_token_is_refused() {
     };
     let tenant = create_tenant(db.database(), "enroll-refuse").await;
     let creator = create_user(db.database(), tenant, "enroll-admin", "phc", "admin").await;
-    let app = app_with_pki(db.database()).await;
+    let (app, agent) = routers(db.database()).await;
     let reader = seed_session(db.database(), tenant, "reader", "viewer").await;
 
     // Used: the first enroll succeeds, the second gives the generic refusal.
@@ -282,10 +288,10 @@ async fn ac_in_02_a_used_expired_revoked_or_unknown_token_is_refused() {
     )
     .await;
     assert_eq!(
-        enroll(&app, &used, &p256_csr()).await.0,
+        enroll(&agent, &used, &p256_csr()).await.0,
         StatusCode::CREATED
     );
-    let (status, used_refusal) = enroll(&app, &used, &p256_csr()).await;
+    let (status, used_refusal) = enroll(&agent, &used, &p256_csr()).await;
 
     // Expired: the row stays unused after the refusal.
     let (expired, expired_id) = seed_enrollment_token_value(
@@ -296,7 +302,7 @@ async fn ac_in_02_a_used_expired_revoked_or_unknown_token_is_refused() {
         OffsetDateTime::now_utc() - Duration::seconds(1),
     )
     .await;
-    let (_, expired_refusal) = enroll(&app, &expired, &p256_csr()).await;
+    let (_, expired_refusal) = enroll(&agent, &expired, &p256_csr()).await;
 
     // Revoked: an Admin revokes the unused token.
     let (revoked, revoked_id) = seed_enrollment_token_value(
@@ -318,10 +324,10 @@ async fn ac_in_02_a_used_expired_revoked_or_unknown_token_is_refused() {
             .unwrap_or_else(|e| panic!("{e}"))
     );
     tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
-    let (_, revoked_refusal) = enroll(&app, &revoked, &p256_csr()).await;
+    let (_, revoked_refusal) = enroll(&agent, &revoked, &p256_csr()).await;
 
     // Unknown: no token holds the hash.
-    let (_, unknown_refusal) = enroll(&app, "re_unknown-token-value", &p256_csr()).await;
+    let (_, unknown_refusal) = enroll(&agent, "re_unknown-token-value", &p256_csr()).await;
 
     // One generic refusal for the client: the status, the code, the field and the reason match.
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -369,13 +375,13 @@ async fn ac_id_05_the_eleventh_enrollment_from_one_ip_is_rate_limited() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    let app = app_with_pki(db.database()).await;
+    let (_app, agent) = routers(db.database()).await;
     let csr = p256_csr();
     for _ in 0..10 {
-        let (status, _) = enroll(&app, "re_unknown-token-value", &csr).await;
+        let (status, _) = enroll(&agent, "re_unknown-token-value", &csr).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
-    let (status, problem) = enroll(&app, "re_unknown-token-value", &csr).await;
+    let (status, problem) = enroll(&agent, "re_unknown-token-value", &csr).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{problem}");
     assert_eq!(
         problem.get("code").and_then(Value::as_str),
@@ -396,7 +402,7 @@ async fn ac_tn_02_the_request_carries_no_tenant_and_the_subject_is_ignored() {
     let tenant = create_tenant(db.database(), "enroll-forge").await;
     let other = create_tenant(db.database(), "enroll-other").await;
     let creator = create_user(db.database(), tenant, "enroll-admin", "phc", "admin").await;
-    let app = app_with_pki(db.database()).await;
+    let (_app, agent) = routers(db.database()).await;
 
     // A forged `tenant_id` is an unknown field, so the request is refused.
     let (token, _) = seed_enrollment_token_value(
@@ -410,14 +416,14 @@ async fn ac_tn_02_the_request_carries_no_tenant_and_the_subject_is_ignored() {
     let mut forged = body(&token, &p256_csr());
     forged["tenant_id"] = json!(other.to_string());
     let (status, _, _) = send(
-        &app,
+        &agent,
         request("POST", "/agent/v1/enroll", None, Some(forged)),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // The same token still enrols, because the failed request consumed nothing.
-    let (status, response) = enroll(&app, &token, &csr_with_subject("evil.example")).await;
+    let (status, response) = enroll(&agent, &token, &csr_with_subject("evil.example")).await;
     assert_eq!(status, StatusCode::CREATED, "{response}");
     let agent_id = response
         .get("agent_id")
@@ -454,14 +460,14 @@ async fn a_p384_csr_is_refused() {
         OffsetDateTime::now_utc() + Duration::hours(1),
     )
     .await;
-    let app = app_with_pki(db.database()).await;
+    let (_app, agent) = routers(db.database()).await;
     let key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384).expect("cannot generate the key");
     let csr = CertificateParams::default()
         .serialize_request(&key)
         .expect("cannot build the CSR")
         .der()
         .to_vec();
-    let (status, problem) = enroll(&app, &token, &csr).await;
+    let (status, problem) = enroll(&agent, &token, &csr).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem.get("field").and_then(Value::as_str), Some("csr"));
 
@@ -484,14 +490,14 @@ async fn ac_id_01_concurrent_requests_with_one_token_create_one_agent() {
         OffsetDateTime::now_utc() + Duration::hours(1),
     )
     .await;
-    let app = app_with_pki(db.database()).await;
+    let (app, agent) = routers(db.database()).await;
 
     let mut handles = Vec::new();
     for _ in 0..4 {
-        let app = app.clone();
+        let agent = agent.clone();
         let token = token.clone();
         handles.push(tokio::spawn(async move {
-            enroll(&app, &token, &p256_csr()).await.0
+            enroll(&agent, &token, &p256_csr()).await.0
         }));
     }
     let mut successes = 0;
@@ -531,9 +537,9 @@ async fn a_p384_key_with_a_sha256_signature_is_refused() {
         OffsetDateTime::now_utc() + Duration::hours(1),
     )
     .await;
-    let app = app_with_pki(db.database()).await;
+    let (_app, agent) = routers(db.database()).await;
 
-    let (status, problem) = enroll(&app, &token, &csr).await;
+    let (status, problem) = enroll(&agent, &token, &csr).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem.get("field").and_then(Value::as_str), Some("csr"));
 
@@ -576,9 +582,9 @@ async fn a_live_token_and_a_bad_csr_leave_the_token_unused() {
         OffsetDateTime::now_utc() + Duration::hours(1),
     )
     .await;
-    let app = app_with_pki(db.database()).await;
+    let (_app, agent) = routers(db.database()).await;
 
-    let (status, problem) = enroll(&app, &token, &rsa).await;
+    let (status, problem) = enroll(&agent, &token, &rsa).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem.get("field").and_then(Value::as_str), Some("csr"));
 
@@ -598,7 +604,7 @@ async fn a_live_token_and_a_bad_csr_leave_the_token_unused() {
     );
 
     // The same token still enrols with a valid request.
-    let (status, response) = enroll(&app, &token, &p256_csr()).await;
+    let (status, response) = enroll(&agent, &token, &p256_csr()).await;
     assert_eq!(status, StatusCode::CREATED, "{response}");
 
     db.cleanup().await;
@@ -620,9 +626,9 @@ async fn a_missing_signing_key_set_refuses_without_spending_the_token() {
         OffsetDateTime::now_utc() + Duration::hours(1),
     )
     .await;
-    let app = app_with_ca_without_signing_keys(db.database()).await;
+    let agent = agent_router(ca_without_signing_state(db.database()).await);
 
-    let (status, _) = enroll(&app, &token, &p256_csr()).await;
+    let (status, _) = enroll(&agent, &token, &p256_csr()).await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
 
     let mut tx = db
