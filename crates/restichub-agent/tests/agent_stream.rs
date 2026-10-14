@@ -141,11 +141,13 @@ async fn ac_id_07_the_agent_connects_and_acknowledges_a_key_rotation() {
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let task = tokio::spawn(async move {
         let mut keys = KeyState::load(&identity_task, &dir_task).expect("the key state must load");
+        let jobs = common::unused_jobs(&dir_task);
         stream::run(
             &identity_task,
             &dir_task,
             &mut keys,
             "0.19.1",
+            &jobs,
             options(),
             &mut stop_rx,
         )
@@ -205,11 +207,13 @@ async fn ac_id_04_a_revoke_closes_the_stream_and_the_agent_is_refused() {
     let identity_task = identity;
     let (_stop_tx, mut stop_rx) = watch::channel(false);
     let task = tokio::spawn(async move {
+        let jobs = common::unused_jobs(&dir_task);
         stream::connect_once(
             &identity_task,
             &dir_task,
             &mut keys,
             "0.19.1",
+            &jobs,
             Timeouts::default(),
             &mut stop_rx,
         )
@@ -243,12 +247,14 @@ async fn ac_id_04_a_revoke_closes_the_stream_and_the_agent_is_refused() {
     // Open a fresh attempt; the registry check refuses it.
     let identity = StoredIdentity::load(&dir).expect("the identity must load");
     let mut keys = KeyState::load(&identity, &dir).expect("the key state must load");
+    let jobs = common::unused_jobs(&dir);
     let (_keep, mut stop_rx) = watch::channel(false);
     let outcome = stream::connect_once(
         &identity,
         &dir,
         &mut keys,
         "0.19.1",
+        &jobs,
         Timeouts::default(),
         &mut stop_rx,
     )
@@ -289,11 +295,13 @@ async fn fr_id_08_a_refused_identity_keeps_the_agent_in_the_loop() {
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let task = tokio::spawn(async move {
         let mut keys = KeyState::load(&identity_task, &dir_task).expect("the key state must load");
+        let jobs = common::unused_jobs(&dir_task);
         stream::run(
             &identity_task,
             &dir_task,
             &mut keys,
             "0.19.1",
+            &jobs,
             options(),
             &mut stop_rx,
         )
@@ -333,11 +341,13 @@ async fn m2_a_server_that_closes_at_once_grows_the_delay() {
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let task = tokio::spawn(async move {
         let mut keys = KeyState::load(&identity_task, &dir_task).expect("the key state must load");
+        let jobs = common::unused_jobs(&dir_task);
         stream::run(
             &identity_task,
             &dir_task,
             &mut keys,
             "0.19.1",
+            &jobs,
             options(),
             &mut stop_rx,
         )
@@ -373,12 +383,14 @@ async fn fr_id_08_a_healthy_stream_that_fails_resets_the_attempt() {
     identity.grpc_endpoint = Some(server.endpoint());
 
     let mut keys = KeyState::load(&identity, &dir).expect("the key state must load");
+    let jobs = common::unused_jobs(&dir);
     let (_stop_tx, mut stop_rx) = watch::channel(false);
     let outcome = stream::connect_once(
         &identity,
         &dir,
         &mut keys,
         "0.19.1",
+        &jobs,
         short_timeouts(),
         &mut stop_rx,
     )
@@ -415,11 +427,13 @@ async fn m5_a_silent_server_makes_the_agent_reconnect() {
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let task = tokio::spawn(async move {
         let mut keys = KeyState::load(&identity_task, &dir_task).expect("the key state must load");
+        let jobs = common::unused_jobs(&dir_task);
         stream::run(
             &identity_task,
             &dir_task,
             &mut keys,
             "0.19.1",
+            &jobs,
             options,
             &mut stop_rx,
         )
@@ -464,11 +478,13 @@ async fn adr_0030_an_agent_that_missed_two_rotations_catches_up() {
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let first = tokio::spawn(async move {
         let mut keys = KeyState::load(&identity_task, &dir_task).expect("the key state must load");
+        let jobs = common::unused_jobs(&dir_task);
         stream::run(
             &identity_task,
             &dir_task,
             &mut keys,
             "0.19.1",
+            &jobs,
             options(),
             &mut stop_rx,
         )
@@ -507,11 +523,13 @@ async fn adr_0030_an_agent_that_missed_two_rotations_catches_up() {
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let second = tokio::spawn(async move {
         let mut keys = KeyState::load(&identity_task, &dir_task).expect("the key state must load");
+        let jobs = common::unused_jobs(&dir_task);
         stream::run(
             &identity_task,
             &dir_task,
             &mut keys,
             "0.19.1",
+            &jobs,
             options(),
             &mut stop_rx,
         )

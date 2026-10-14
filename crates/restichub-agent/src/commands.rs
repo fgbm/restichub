@@ -111,6 +111,14 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let restic = ResticBinary::locate()?;
     restic.verify()?;
     let restic_version = restic.version().unwrap_or_default();
+    // The job journal lives in the configuration directory; the runner uses the verified restic
+    // binary (ADR-0020, ADR-0031).
+    let jobs = crate::jobs::Jobs::open(
+        restic.path().to_path_buf(),
+        crate::restic::EXPECTED_SHA256.to_owned(),
+        crate::paths::cache_dir(),
+        dir,
+    )?;
     tracing::info!(
         agent_id = %identity.agent_id,
         keys = identity.signing_keys.keys.len(),
@@ -125,6 +133,7 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
         dir,
         &mut keys,
         &restic_version,
+        &jobs,
         shutdown,
     ))
 }

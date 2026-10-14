@@ -144,15 +144,32 @@ async fn app_with_pki(db: &Database) -> Router {
 }
 
 async fn create_tenant(db: &Database, name: &str) -> TenantId {
+    // The tenant needs a wrapped data encryption key, so a repository job can store a secret.
+    let kek = test_kek();
+    let id = TenantId::new();
+    let dek = restichub_secrets::generate_dek().expect("cannot generate the DEK");
+    let wrapped = restichub_secrets::wrap_dek(kek.current(), id.as_uuid(), 1, &dek)
+        .expect("cannot wrap the DEK");
     let mut tx = db
         .begin_platform()
         .await
         .expect("cannot begin the transaction");
-    let tenant = tenants::create(&mut tx, name)
+    let input = tenants::BootstrapTenant {
+        id,
+        name,
+        key_version: 1,
+        kek_id: wrapped.kek_id.as_str(),
+        wrapped_dek: &wrapped.ciphertext,
+        nonce: wrapped.nonce.as_slice(),
+        actor: restichub_db::audit::Actor::System,
+        source_ip: None,
+        admin: None,
+    };
+    tenants::create_with_bootstrap(&mut tx, &input)
         .await
-        .expect("cannot create the tenant");
+        .expect("cannot create the tenant with a key");
     tx.commit().await.expect("cannot commit the tenant");
-    tenant
+    id
 }
 
 pub async fn create_user(
@@ -704,3 +721,11 @@ impl AgentService for SilentService {
         }
     }
 }
+
+pub mod api;
+pub mod jobs;
+
+#[allow(unused_imports)]
+pub use api::*;
+#[allow(unused_imports)]
+pub use jobs::*;

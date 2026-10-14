@@ -237,6 +237,13 @@ enum RejectReason {
   // The issued_at time is after the current time plus the clock skew
   // (ADR-0020).
   REJECT_REASON_NOT_YET_VALID = 14;
+  // The agent runs the largest allowed number of jobs at the same time, or the
+  // job journal is full (ADR-0020). The job is not failed: the control plane
+  // keeps it and may deliver it again until it expires.
+  REJECT_REASON_BUSY = 15;
+  // The agent cannot record the accepted job (ADR-0020). It refuses the job
+  // rather than risk a second run.
+  REJECT_REASON_INTERNAL = 16;
 }
 
 // Pong answers a Ping from the control plane (FR-ID-07).
