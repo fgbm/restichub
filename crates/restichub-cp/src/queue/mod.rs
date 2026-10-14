@@ -105,22 +105,32 @@ impl QueueConfig {
 /// The clock is injectable, so a test drives the lease, the backoff and the stale lock wait without
 /// a sleep.
 pub async fn run_once(state: &AppState, now: OffsetDateTime) -> Result<(), DbError> {
+    let online = state.agent_registry().online_agents();
+    run_with_online(state, now, &online).await
+}
+
+/// Like [`run_once`], with the set of online agents that the caller took earlier. An agent can
+/// leave between the snapshot and the build of its job (FR-PR-09).
+pub async fn run_with_online(
+    state: &AppState,
+    now: OffsetDateTime,
+    online: &[AgentId],
+) -> Result<(), DbError> {
     let tenant_list = {
         let mut tx = state.db().begin_platform().await?;
         let list = tenants::list(&mut tx).await?;
         tx.commit().await?;
         list
     };
-    let online = state.agent_registry().online_agents();
     for tenant in tenant_list {
         // A suspended tenant dispatches nothing; its agents stay connected (AC-TN-03).
         if tenant.status != TenantStatus::Active {
             continue;
         }
-        if let Err(error) = stale::recover_tenant(state, tenant.id, now, &online).await {
+        if let Err(error) = stale::recover_tenant(state, tenant.id, now, online).await {
             tracing::warn!(tenant = %tenant.id, %error, "the stale lock pass of a tenant failed");
         }
-        if let Err(error) = dispatch_tenant(state, tenant.id, now, &online).await {
+        if let Err(error) = dispatch_tenant(state, tenant.id, now, online).await {
             tracing::warn!(tenant = %tenant.id, %error, "the dispatch pass of a tenant failed");
         }
     }
@@ -335,10 +345,11 @@ async fn redeliver(
             ));
         }
     };
-    let live = state
-        .agent_registry()
-        .capabilities(job.agent_id)
-        .unwrap_or_default();
+    // The agent went offline after the dispatcher took its snapshot. The lease stays and the next
+    // pass decides.
+    let Some(live) = state.agent_registry().capabilities(job.agent_id) else {
+        return Ok(Prepared::Skip);
+    };
     if required.iter().any(|need| !live.contains(need)) {
         let refusal = build::Refusal::AgentCapabilityMissing;
         return Ok(Prepared::Fail(refusal.code(), refusal.result_code()));

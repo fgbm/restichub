@@ -638,13 +638,13 @@ async fn run_stream(
         return;
     };
     let capabilities = AgentCapability::parse_list(&hello.capabilities);
-    crate::agents::record_capabilities(&state, identity.tenant, agent, &capabilities).await;
     if !state
         .agent_registry()
-        .set_capabilities(agent, generation, capabilities)
+        .set_capabilities(agent, generation, capabilities.clone())
     {
         return;
     }
+    crate::agents::record_capabilities(&state, identity.tenant, agent, &capabilities).await;
 
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

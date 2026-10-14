@@ -154,11 +154,10 @@ pub async fn build(
     };
 
     // The capabilities of the live connection, never the stored row: a downgraded agent keeps its
-    // identity (FR-PR-09). An offline agent gets none.
-    let capabilities = state
-        .agent_registry()
-        .capabilities(job.agent_id)
-        .unwrap_or_default();
+    // identity (FR-PR-09). An agent that went offline since the snapshot keeps the job queued.
+    let Some(capabilities) = state.agent_registry().capabilities(job.agent_id) else {
+        return Err(BuildError::Transient("the agent is offline".to_owned()));
+    };
     super::compat::fit_steps(&mut steps, &capabilities).map_err(BuildError::Refused)?;
 
     let provider = state

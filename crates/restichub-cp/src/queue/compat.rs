@@ -20,7 +20,7 @@ pub(super) fn fit_steps(
             continue;
         };
         let Some(filter) = forget.filter.as_mut() else {
-            continue;
+            return Err(Refusal::ForgetWithoutTags);
         };
         if filter.all_tags.len() == 1 && filter.tags.is_empty() {
             filter.tags = std::mem::take(&mut filter.all_tags);
@@ -108,6 +108,19 @@ mod tests {
     #[test]
     fn fr_rp_08_a_forget_without_any_tag_filter_is_refused() {
         let mut steps = [forget(&[])];
+        assert_eq!(
+            fit_steps(&mut steps, &[AgentCapability::ForgetAllTags]),
+            Err(Refusal::ForgetWithoutTags)
+        );
+    }
+
+    #[test]
+    fn fr_rp_08_a_forget_without_a_filter_is_refused() {
+        let mut steps = [Step {
+            step_id: "forget".to_owned(),
+            timeout_seconds: 0,
+            kind: Some(step::Kind::Forget(ForgetStep::default())),
+        }];
         assert_eq!(
             fit_steps(&mut steps, &[AgentCapability::ForgetAllTags]),
             Err(Refusal::ForgetWithoutTags)

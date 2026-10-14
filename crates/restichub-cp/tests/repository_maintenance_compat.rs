@@ -314,3 +314,74 @@ async fn fr_rp_08_a_template_in_the_host_filter_is_refused() {
     assert_eq!(problem["field"], "retention.filter.hosts", "{problem}");
     env.db.cleanup().await;
 }
+
+async fn wait_offline(env: &Env, agent: AgentId) {
+    queue_support::eventually(|| async {
+        env.state.agent_registry().capabilities(agent).is_none()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn fr_pr_09_an_agent_that_left_after_the_snapshot_keeps_its_queued_job() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let agent = env.connect_agent("snapshot-host").await;
+    let agent_id = agent.id;
+    let repository = initialized_repository(&env, agent_id).await;
+    let profile = env
+        .create_profile(
+            repository,
+            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
+        )
+        .await;
+    env.create_plan(profile, agent_id).await;
+    let job = run_retention(&env, repository).await;
+
+    let online = env.state.agent_registry().online_agents();
+    assert_eq!(online, vec![agent_id]);
+    drop(agent);
+    wait_offline(&env, agent_id).await;
+    restichub_cp::queue::run_with_online(&env.state, env.now(), &online)
+        .await
+        .expect("the dispatcher pass");
+
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "queued", "{body}");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_pr_09_an_agent_that_left_after_the_snapshot_keeps_the_lease_of_a_redelivery() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("redeliver-offline-host").await;
+    let agent_id = agent.id;
+    let repository = initialized_repository(&env, agent_id).await;
+    let profile = env
+        .create_profile(
+            repository,
+            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
+        )
+        .await;
+    env.create_plan(profile, agent_id).await;
+    let job = run_retention(&env, repository).await;
+    env.pass().await;
+    let _ = agent.job().await;
+
+    let online = env.state.agent_registry().online_agents();
+    drop(agent);
+    wait_offline(&env, agent_id).await;
+    env.clock.advance(61);
+    restichub_cp::queue::run_with_online(&env.state, env.now(), &online)
+        .await
+        .expect("the dispatcher pass");
+
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "sent", "{body}");
+    env.db.cleanup().await;
+}
