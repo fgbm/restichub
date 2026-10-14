@@ -795,6 +795,8 @@ fn now_nonce() -> u64 {
 /// Builds the `AgentServiceServer` of the listener.
 pub fn agent_service(state: AppState) -> AgentServiceServer<AgentStreamService> {
     AgentServiceServer::new(AgentStreamService::new(state))
+        .max_decoding_message_size(restichub_proto::MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(restichub_proto::MAX_MESSAGE_BYTES)
 }
 
 #[cfg(test)]

@@ -724,8 +724,11 @@ impl AgentService for SilentService {
 
 pub mod api;
 pub mod jobs;
+pub mod steps;
 
 #[allow(unused_imports)]
 pub use api::*;
 #[allow(unused_imports)]
 pub use jobs::*;
+#[allow(unused_imports)]
+pub use steps::*;

@@ -285,7 +285,9 @@ pub async fn connect_once(
     stop: &mut watch::Receiver<bool>,
 ) -> Result<Disconnect> {
     let channel = channel(identity, timeouts).await?;
-    let mut client = AgentServiceClient::new(channel);
+    let mut client = AgentServiceClient::new(channel)
+        .max_decoding_message_size(restichub_proto::MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(restichub_proto::MAX_MESSAGE_BYTES);
     let (tx, rx) = mpsc::channel::<AgentMessage>(OUTBOUND);
     let response = match client.connect(ReceiverStream::new(rx)).await {
         Ok(response) => response,

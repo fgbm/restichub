@@ -12,10 +12,11 @@
 //! check and the spawn is therefore refused (threat T20).
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio};
 
 use anyhow::{Context, Result};
 use restichub_compiler::arg::CommandLine;
+use restichub_proto::agent::v1::ProcessPriority;
 
 use crate::restic::{EXPECTED_SHA256, ResticBinary};
 
@@ -199,13 +200,13 @@ fn spawn_verified(
     Ok(child)
 }
 
-/// Starts the verified restic child of one job with its standard streams detached (FR-AG-06,
-/// threat T9, threat T20).
+/// Starts the verified restic child of one job with piped output (FR-AG-06, FR-AG-08, threat T9,
+/// threat T20).
 ///
-/// A restic message can carry the repository location, so the agent reads the exit code only and
-/// never the output. The hash check and the start share one opening of the binary, as in
-/// [`spawn_verified`]. The child runs in its own process group, so the agent stops its whole tree
-/// (FR-AG-10).
+/// A restic message can carry the repository location, so the caller scrubs every line before it
+/// sends or stores it ([`crate::scrub`]). The hash check and the start share one opening of the
+/// binary, as in [`spawn_verified`]. The child runs in its own process group, so the agent stops
+/// its whole tree (FR-AG-10). It has no standard input.
 ///
 /// # Errors
 ///
@@ -215,22 +216,97 @@ pub(crate) fn spawn_job_restic(
     expected_hex: &str,
     line: &CommandLine,
     cache: &Path,
+    priority: ProcessPriority,
 ) -> Result<JobChild> {
     let (file, mut command) = verified_command(path, expected_hex, line.args(), line.env(), cache)?;
-    command.stdout(Stdio::null()).stderr(Stdio::null());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_priority(&mut command, priority);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
+        use windows_sys::Win32::System::Threading::{
+            BELOW_NORMAL_PRIORITY_CLASS, CREATE_SUSPENDED,
+        };
         // The child starts suspended and joins the job object before it runs, so no grandchild
         // escapes the job (FR-AG-10).
-        command.creation_flags(
-            windows_job::process_flags() | windows_sys::Win32::System::Threading::CREATE_SUSPENDED,
-        );
+        let class = if priority == ProcessPriority::Low {
+            BELOW_NORMAL_PRIORITY_CLASS
+        } else {
+            0
+        };
+        command.creation_flags(windows_job::process_flags() | CREATE_SUSPENDED | class);
     }
     let child = command.spawn().context("cannot start restic")?;
     drop(file);
     JobChild::new(child)
 }
+
+/// Lowers the process and I/O priority of the child when the step asks for it (FR-AG-15).
+///
+/// On Linux the child gets a nice value 10 above the agent, capped at 19, and the best-effort I/O
+/// class at level 7. A failure of either
+/// call is ignored: the priority is a courtesy to the host, not a safety rule. On Windows the
+/// creation flags carry the priority class.
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn apply_priority(command: &mut Command, priority: ProcessPriority) {
+    use std::os::unix::process::CommandExt as _;
+    if priority != ProcessPriority::Low {
+        return;
+    }
+    // SAFETY: the closure runs between fork and exec and calls only async-signal-safe functions.
+    unsafe {
+        command.pre_exec(|| {
+            let current = libc::getpriority(libc::PRIO_PROCESS, 0);
+            libc::setpriority(libc::PRIO_PROCESS, 0, lowered_nice(current));
+            libc::syscall(
+                libc::SYS_ioprio_set,
+                IOPRIO_WHO_PROCESS,
+                0,
+                (IOPRIO_CLASS_BE << IOPRIO_CLASS_SHIFT) | LOW_IO_LEVEL,
+            );
+            Ok(())
+        });
+    }
+}
+
+/// How far above the nice value of the agent a low-priority child runs (FR-AG-15).
+#[cfg(target_os = "linux")]
+const LOW_NICE_STEP: libc::c_int = 10;
+
+/// Nice 19 is the lowest priority that Linux allows.
+#[cfg(target_os = "linux")]
+const MAX_NICE: libc::c_int = 19;
+
+/// The nice value of a low-priority child: a step above the agent, so an agent that already runs
+/// at a low priority does not get a child that runs before it (FR-AG-15).
+#[cfg(target_os = "linux")]
+fn lowered_nice(current: libc::c_int) -> libc::c_int {
+    current.saturating_add(LOW_NICE_STEP).min(MAX_NICE)
+}
+
+/// The best-effort I/O level of a low-priority child; level 7 is the lowest (FR-AG-15).
+#[cfg(target_os = "linux")]
+const LOW_IO_LEVEL: libc::c_long = 7;
+
+/// The `ioprio_set` target selector for one process.
+#[cfg(target_os = "linux")]
+const IOPRIO_WHO_PROCESS: libc::c_long = 1;
+
+/// Best-effort I/O scheduling class of `ioprio_set`.
+#[cfg(target_os = "linux")]
+const IOPRIO_CLASS_BE: libc::c_long = 2;
+
+/// The bit position of the class in an I/O priority value.
+#[cfg(target_os = "linux")]
+const IOPRIO_CLASS_SHIFT: libc::c_long = 13;
+
+/// A system without a priority call runs the child at the default priority.
+#[cfg(not(target_os = "linux"))]
+fn apply_priority(_command: &mut Command, _priority: ProcessPriority) {}
 
 /// The restic child of one job and the handle that stops its whole tree (FR-AG-10).
 pub(crate) struct JobChild {
@@ -260,6 +336,11 @@ impl JobChild {
             #[cfg(windows)]
             job,
         })
+    }
+
+    /// Takes the output pipes of the child. A second call gives `None` for both.
+    pub(crate) fn take_output(&mut self) -> (Option<ChildStdout>, Option<ChildStderr>) {
+        (self.child.stdout.take(), self.child.stderr.take())
     }
 
     /// Reports the exit of the child, or `None` while it runs.
@@ -822,6 +903,17 @@ mod tests {
         }
         assert!(!alive(child_pid), "the child of the tree must be killed");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// FR-AG-15: the low priority is relative to the agent and never passes the highest nice value.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fr_ag_15_the_low_priority_is_relative_to_the_agent() {
+        assert_eq!(super::lowered_nice(0), 10);
+        assert_eq!(super::lowered_nice(5), 15);
+        assert_eq!(super::lowered_nice(15), 19);
+        assert_eq!(super::lowered_nice(19), 19);
+        assert_eq!(super::lowered_nice(-5), 5);
     }
 
     /// AC-AG-07: the kernel kills a restic child when the thread that started it ends.

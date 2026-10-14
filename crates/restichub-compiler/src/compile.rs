@@ -298,6 +298,7 @@ fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileE
             limit_upload_kib: options.limit_upload_kib,
             limit_download_kib: options.limit_download_kib,
             retry_lock: true,
+            priority: 0,
         })),
     })
 }
@@ -362,6 +363,7 @@ fn forget_step(
                 .collect(),
             filter: Some(filter),
             retry_lock: true,
+            priority: 0,
         })),
     })
 }
@@ -375,6 +377,7 @@ fn prune_step(profile: &Profile) -> Step {
             max_unused: String::new(),
             max_repack_size: String::new(),
             retry_lock: true,
+            priority: 0,
         })),
     }
 }
@@ -395,6 +398,7 @@ fn check_step(
                 "check.read_data_subset",
             )?,
             retry_lock: true,
+            priority: 0,
         })),
     })
 }

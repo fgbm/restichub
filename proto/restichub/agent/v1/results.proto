@@ -183,6 +183,9 @@ message Snapshot {
 message SnapshotList {
   // Snapshots that match the filter.
   repeated Snapshot snapshots = 1;
+  // True when the agent dropped the oldest snapshots to keep the result inside
+  // the size limit of a step result.
+  bool truncated = 2;
 }
 
 // Node is one entry of "restic ls --json" (FR-RS-02).
@@ -238,6 +241,9 @@ message LsPage {
 message ForgetResult {
   // One entry for each snapshot group.
   repeated ForgetGroup groups = 1;
+  // True when the agent dropped snapshots or groups to keep the result inside
+  // the size limit of a step result.
+  bool truncated = 2;
 }
 
 // ForgetGroup is one group of the retention rule.
@@ -306,6 +312,13 @@ message JobResult {
   JobStatus outcome = 6;
   // Machine-readable error. Present when the outcome is not SUCCEEDED.
   ErrorDetail error = 7;
+  // Results of the steps that ran. The agent keeps them in its journal and
+  // sends them again after a reconnect (AC-PR-07). The journal copy holds the
+  // small summaries only: it drops the snapshot list and the forget result.
+  repeated StepResult steps = 8;
+  // Bounded tail of the job log. The agent keeps it in its journal and sends
+  // it again after a reconnect (AC-PR-07).
+  repeated LogChunk log_tail = 9;
 }
 
 // JobStatus is the result of a full job. The control plane maps the status of
@@ -324,4 +337,10 @@ enum JobStatus {
   JOB_STATUS_NOT_INITIALIZED = 4;
   // The control plane cancelled the job (FR-AG-10).
   JOB_STATUS_CANCELLED = 5;
+  // Every step finished and restic reported a warning, for example files that
+  // it could not read (restic exit code 3). The data is in the repository.
+  JOB_STATUS_SUCCEEDED_WITH_WARNINGS = 6;
+  // A step stopped the job because another process holds a lock on the
+  // repository (restic exit code 11). The job can be retried (FR-SC-05).
+  JOB_STATUS_REPOSITORY_LOCKED = 7;
 }

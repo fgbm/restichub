@@ -1,0 +1,2 @@
+{"message_type":"status","percent_done":1,"total_files":2,"files_done":2,"total_bytes":300010,"bytes_done":300010}
+{"message_type":"summary","files_new":0,"files_changed":1,"files_unmodified":1,"dirs_new":0,"dirs_changed":1,"dirs_unmodified":1,"data_blobs":1,"tree_blobs":2,"data_added":1107,"data_added_packed":777,"total_files_processed":2,"total_bytes_processed":300010,"total_duration":0.68390972,"backup_start":"2026-10-14T18:42:42.496558456Z","backup_end":"2026-10-14T18:42:43.180468178Z","snapshot_id":"9c07579db982e80ed4563f50688f13bca55936cc7b661ae13c967efc0976a56f"}
