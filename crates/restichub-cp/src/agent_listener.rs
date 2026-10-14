@@ -11,7 +11,7 @@
 //! the installation root CA at the handshake; the handler then applies the per-agent registry check
 //! (FR-PR-08).
 //!
-//! The listener bounds the unauthenticated load (HIGH 2): a TLS handshake timeout, a semaphore for
+//! The listener bounds the unauthenticated load : a TLS handshake timeout, a semaphore for
 //! the concurrent handshakes, a cap on the established connections, an idle timeout for a connection
 //! without a client certificate and the HTTP/2 limits of the gRPC server.
 
@@ -46,32 +46,32 @@ use crate::config::Config;
 use crate::pki::IssuedServerCertificate;
 use crate::server::{AppState, BODY_LIMIT};
 
-/// The TLS handshake of one connection must finish within this time (HIGH 2).
+/// The TLS handshake of one connection must finish within this time.
 pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A connection without a client certificate must send its request within this time (HIGH 2).
+/// A connection without a client certificate must send its request within this time.
 pub const ANONYMOUS_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The total lifetime of a connection without a client certificate (MEDIUM 2).
+/// The total lifetime of a connection without a client certificate.
 pub const ANONYMOUS_LIFETIME: Duration = Duration::from_secs(30);
 
-/// The largest number of concurrent TLS handshakes (HIGH 2).
+/// The largest number of concurrent TLS handshakes.
 const HANDSHAKE_CONCURRENCY: usize = 256;
 
-/// The largest number of concurrent handshakes from one address (MEDIUM 2).
+/// The largest number of concurrent handshakes from one address.
 const HANDSHAKES_PER_IP: usize = 16;
 
 /// The largest number of concurrent connections without a client certificate from one address
-/// (MEDIUM 2).
+/// ( ).
 const ANONYMOUS_PER_IP: usize = 16;
 
-/// Connections without a client certificate may use at most this fraction of the cap (MEDIUM 2).
+/// Connections without a client certificate may use at most this fraction of the cap.
 const ANONYMOUS_SHARE_DIVISOR: usize = 10;
 
-/// The default cap on the established connections. It covers 2000 agents and a margin (HIGH 2).
+/// The default cap on the established connections. It covers 2000 agents and a margin.
 pub const DEFAULT_MAX_CONNECTIONS: usize = 2200;
 
-/// The load bounds of the listener (HIGH 2, MEDIUM 2).
+/// The load bounds of the listener, checked at start.
 #[derive(Debug, Clone, Copy)]
 pub struct ListenerLimits {
     pub max_connections: usize,
@@ -83,7 +83,7 @@ pub struct ListenerLimits {
 }
 
 impl ListenerLimits {
-    /// The number of connections without a client certificate that the cap allows (MEDIUM 2).
+    /// The number of connections without a client certificate that the cap allows.
     fn anonymous_share(&self) -> usize {
         (self.max_connections / ANONYMOUS_SHARE_DIVISOR).max(1)
     }
@@ -128,7 +128,7 @@ pub enum ListenerError {
 /// Builds the routes of the agent listener: the gRPC service and the enrollment route (ADR-0026).
 ///
 /// The tonic `Routes` wraps an axum router, so the gRPC service and the enrollment endpoint share
-/// one listener. The enrollment route keeps the 16 KiB body limit (LOW 5).
+/// one listener. The enrollment route keeps the 16 KiB body limit.
 pub fn agent_routes(state: AppState) -> tonic::service::Routes {
     let mut routes = tonic::service::Routes::new(crate::agent_stream::agent_service(state.clone()));
     let enrollment = Router::new()
@@ -153,7 +153,7 @@ pub fn agent_router(state: AppState) -> Router {
 ///
 /// The enrollment handler reads the client address through [`crate::client_ip::ClientIp`]. The
 /// listener has no proxy in front, so the middleware marks the request to ignore
-/// `X-Forwarded-For` (MEDIUM 4).
+/// `X-Forwarded-For`.
 async fn inject_peer(mut request: axum::extract::Request, next: Next) -> axum::response::Response {
     request.extensions_mut().insert(IgnoreForwarded);
     if request
@@ -172,7 +172,7 @@ async fn inject_peer(mut request: axum::extract::Request, next: Next) -> axum::r
 ///
 /// The host of the public endpoint comes first, so an agent verifies the name it dials. The listen
 /// address covers a direct connection. An unspecified address (`0.0.0.0`, `::`) is not a name and is
-/// left out (LOW 8).
+/// left out.
 pub fn server_cert_sans(endpoint: Option<&str>, listen: SocketAddr) -> Vec<String> {
     let mut sans = Vec::new();
     if let Some(host) = endpoint.and_then(endpoint_host) {
@@ -324,7 +324,7 @@ pub fn der_to_pem(label: &str, der: &[u8]) -> String {
     text
 }
 
-/// The counters that bound the load of the listener (HIGH 2, MEDIUM 2).
+/// The live counters of the listener, used by the guards.
 struct Load {
     connections: AtomicUsize,
     anonymous: AtomicUsize,
@@ -367,7 +367,7 @@ impl Load {
         })
     }
 
-    /// Reserves a connection slot. `None` when the cap or an anonymous limit is reached (MEDIUM 2).
+    /// Reserves a connection slot. `None` when the cap or an anonymous limit is reached.
     fn try_connect(self: &Arc<Self>, ip: IpAddr, authenticated: bool) -> Option<ConnectGuard> {
         if self.connections.load(Ordering::Acquire) >= self.max_connections {
             return None;
@@ -396,7 +396,7 @@ impl Load {
     }
 }
 
-/// One in-progress handshake slot of an address (MEDIUM 2).
+/// One in-progress handshake slot of an address.
 struct HandshakeGuard {
     load: Arc<Load>,
     ip: IpAddr,
@@ -418,7 +418,7 @@ impl Drop for HandshakeGuard {
     }
 }
 
-/// One established connection slot (HIGH 2, MEDIUM 2).
+/// One established connection slot.
 struct ConnectGuard {
     load: Arc<Load>,
     ip: IpAddr,
@@ -445,7 +445,7 @@ impl Drop for ConnectGuard {
     }
 }
 
-/// One accepted connection with its peer information and its load guards (HIGH 2, MEDIUM 2).
+/// One accepted connection with its peer information and its load guards.
 ///
 /// The type closes a connection without a client certificate at the idle timeout and at the total
 /// lifetime cap, whatever the HTTP/2 keepalive does.
@@ -532,7 +532,7 @@ impl Connected for AgentConnection {
 }
 
 /// Applies TCP keepalive to an accepted socket, because the gRPC server ignores its own setting on
-/// a pre-terminated stream (HIGH 2).
+/// a pre-terminated stream.
 fn set_keepalive(stream: &TcpStream) {
     let socket = socket2::SockRef::from(stream);
     let keepalive = socket2::TcpKeepalive::new()
@@ -570,7 +570,7 @@ pub async fn serve_listener(
             set_keepalive(&stream);
             let ip = peer.ip();
             // A handshake over the global or the per-IP limit drops the connection, so a flood
-            // cannot exhaust memory and one address cannot hold every slot (HIGH 2, MEDIUM 2).
+            // cannot exhaust memory and one address cannot hold every slot.
             let Ok(permit) = handshakes.clone().try_acquire_owned() else {
                 drop(stream);
                 continue;
@@ -604,7 +604,7 @@ pub async fn serve_listener(
                     return;
                 };
                 // A connection without a client certificate may only enroll, so it must send its
-                // request promptly and it lives for a bounded time (HIGH 2, MEDIUM 2).
+                // request promptly and it lives for a bounded time.
                 let first_byte = (!authenticated)
                     .then(|| Box::pin(tokio::time::sleep(limits.anonymous_idle_timeout)));
                 let lifetime = (!authenticated)

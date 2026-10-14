@@ -831,7 +831,7 @@ async fn ac_id_01_both_origins_serve_the_enrollment() {
     db.cleanup().await;
 }
 
-/// MEDIUM 4: the agent listener ignores `X-Forwarded-For`, even with a trusted proxy list.
+/// The agent listener ignores `X-Forwarded-For`, even with a trusted proxy list.
 #[tokio::test]
 async fn an_x_forwarded_for_header_does_not_change_the_source_ip() {
     let Some(db) = common::test_db().await else {
@@ -880,7 +880,7 @@ async fn an_x_forwarded_for_header_does_not_change_the_source_ip() {
     db.cleanup().await;
 }
 
-/// LOW 5: the enrollment route keeps the 16 KiB body limit.
+/// The enrollment route keeps the 16 KiB body limit.
 #[tokio::test]
 async fn a_body_over_the_limit_is_refused_with_413() {
     let Some(db) = common::test_db().await else {

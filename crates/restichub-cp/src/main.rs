@@ -111,7 +111,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     );
 
     // The periodic sweep moves an overdue job to `expired`, so a poll sees a terminal status
-    // (MEDIUM 5). It is a maintenance task of the control plane, not job scheduling (ADR-0002).
+    // It is a maintenance task of the control plane, not job scheduling (ADR-0002).
     restichub_cp::maintenance::spawn_job_expiry(
         database.clone(),
         Arc::new(restichub_cp::clock::SystemClock),
@@ -140,7 +140,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .await
         .context("cannot bind the listen address")?;
 
-    // The batch flush writes the `last_seen_at` buffer of the agent streams (LOW 7).
+    // The batch flush writes the `last_seen_at` buffer of the agent streams.
     restichub_cp::agent_stream::spawn_last_seen_flush(
         state.db().clone(),
         state.agent_registry_shared(),
