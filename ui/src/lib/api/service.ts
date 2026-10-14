@@ -35,6 +35,7 @@ import type {
 	PreviewResponse,
 	Profile,
 	ProfileListResponse,
+	ProfileResponse,
 	RenameAgentRequest,
 	Repository,
 	RepositoryListResponse,
@@ -99,8 +100,8 @@ export interface ApiService {
 
 	/** The profiles of the tenant (FR-PF-01). */
 	listProfiles(): Promise<Profile[]>;
-	createProfile(request: CreateProfileRequest): Promise<Profile>;
-	updateProfile(id: string, request: UpdateProfileRequest): Promise<Profile>;
+	createProfile(request: CreateProfileRequest): Promise<ProfileResponse>;
+	updateProfile(id: string, request: UpdateProfileRequest): Promise<ProfileResponse>;
 	deleteProfile(id: string): Promise<void>;
 	/** The compiled steps of a profile for one agent, with masked secrets (FR-PF-04). */
 	previewProfile(id: string, agentId: string): Promise<PreviewResponse>;
@@ -173,8 +174,8 @@ const httpService: ApiService = {
 
 	listProfiles: () =>
 		api.get<ProfileListResponse>(endpoints.profiles.list).then((response) => response.items),
-	createProfile: (request) => api.post<Profile>(endpoints.profiles.create, request),
-	updateProfile: (id, request) => api.patch<Profile>(endpoints.profiles.byId(id), request),
+	createProfile: (request) => api.post<ProfileResponse>(endpoints.profiles.create, request),
+	updateProfile: (id, request) => api.patch<ProfileResponse>(endpoints.profiles.byId(id), request),
 	deleteProfile: (id) => api.delete<void>(endpoints.profiles.byId(id)),
 	previewProfile: (id, agentId) =>
 		api.post<PreviewResponse>(endpoints.profiles.preview(id), {

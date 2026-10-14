@@ -533,7 +533,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lists the profiles of the tenant. */
+        /** Lists the profiles of the tenant with keyset pagination. */
         get: operations["list_profiles"];
         put?: never;
         /**
@@ -959,7 +959,7 @@ export interface components {
             kind: "local";
             path: string;
         };
-        /** @description The backup options of a profile (FR-PF-01). */
+        /** @description The restic flags that a profile sets (FR-PF-01). */
         BackupOptions: {
             exclude_caches?: boolean;
             /**
@@ -981,7 +981,7 @@ export interface components {
             /** @description At least 12 characters. */
             new_password: string;
         };
-        /** @description The check options of a profile (FR-PF-01). */
+        /** @description Settings of the verification step (FR-PF-01). */
         CheckOptions: {
             /** @description Portion to check, for example `10%` or `1/7`. */
             read_data_subset?: string;
@@ -1021,7 +1021,7 @@ export interface components {
             /** @description Returned only here. */
             token: string;
         };
-        /** @description The body of a profile create (FR-PF-01). */
+        /** @description The fields that arrive at the create endpoint (FR-PF-01). */
         CreateProfileRequest: {
             check?: components["schemas"]["CheckOptions"] | null;
             exclude_files?: string[];
@@ -1262,7 +1262,7 @@ export interface components {
             name: string;
             value: string;
         };
-        /** @description The body of a preview request (FR-PF-04). */
+        /** @description The agent identifier of the request (FR-PF-04). */
         PreviewRequest: {
             /** @description The identifier of the registered agent that supplies the target facts. */
             agent_id: string;
@@ -1278,9 +1278,9 @@ export interface components {
          *     (FR-PF-04, AC-PF-01).
          */
         PreviewStepView: {
-            /** @description The command line with masked secrets. */
+            /** @description Rendered argv with masked secrets. */
             command: string;
-            /** @description The process variables with masked secrets. */
+            /** @description Process variables with masked secrets. */
             environment: components["schemas"]["PreviewEnvView"][];
             /** @description The step kind, for example `backup`, `forget`, `prune`, `check` or `hook`. */
             kind: string;
@@ -1302,9 +1302,11 @@ export interface components {
         };
         ProfileListResponse: {
             items: components["schemas"]["ProfileView"][];
+            /** @description Null when the table holds no later profile. */
+            next_cursor?: string | null;
         };
         /**
-         * @description The paths of a profile (FR-PF-01).
+         * @description The source paths for each operating system (FR-PF-01).
          *
          *     `all` applies to every operating system. `windows`, `linux` and `macos` add the paths of one
          *     operating system.
@@ -1314,6 +1316,14 @@ export interface components {
             linux?: string[];
             macos?: string[];
             windows?: string[];
+        };
+        /**
+         * @description The result of a profile create or update: the stored profile and the save-time warnings
+         *     (FR-PF-05).
+         */
+        ProfileResponse: {
+            profile: components["schemas"]["ProfileView"];
+            warnings: components["schemas"]["ProfileWarning"][];
         };
         /** @description One stored profile (FR-PF-01). It holds no secret. */
         ProfileView: {
@@ -1334,6 +1344,15 @@ export interface components {
             tags: string[];
             /** @description In RFC 3339. */
             updated_at: string;
+        };
+        /** @description A warning that the save-time compile reported for one target (FR-PF-05). */
+        ProfileWarning: {
+            /** @description Where the warning applies, for example `paths.all`. */
+            field: string;
+            /** @description The operating system of the synthetic target, when the warning is specific to it. */
+            os?: string | null;
+            /** @description Stable snake_case code. */
+            reason: string;
         };
         RenameAgentRequest: {
             hostname: string;
@@ -1368,7 +1387,7 @@ export interface components {
             /** @description At least 12 characters. */
             new_password: string;
         };
-        /** @description The retention policy of a profile (FR-PF-01). */
+        /** @description How long the snapshots stay (FR-PF-01). */
         Retention: {
             filter?: components["schemas"]["SnapshotFilter"];
             group_by?: components["schemas"]["GroupBy"][];
@@ -3283,7 +3302,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                cursor: string | null;
+                limit: number | null;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -3295,6 +3317,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileListResponse"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -3336,7 +3367,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProfileView"];
+                    "application/json": components["schemas"]["ProfileResponse"];
                 };
             };
             /** @description A field is not valid. */
@@ -3497,7 +3528,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProfileView"];
+                    "application/json": components["schemas"]["ProfileResponse"];
                 };
             };
             /** @description A field is not valid. */

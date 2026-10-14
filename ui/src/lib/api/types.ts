@@ -142,6 +142,12 @@ export type CreateProfileRequest = components['schemas']['CreateProfileRequest']
 
 export type UpdateProfileRequest = components['schemas']['UpdateProfileRequest'];
 
+/** A warning that the save-time compile reported (FR-PF-05). */
+export type ProfileWarning = components['schemas']['ProfileWarning'];
+
+/** The result of a profile create or update: the profile and the save-time warnings. */
+export type ProfileResponse = components['schemas']['ProfileResponse'];
+
 /** One previewed step with masked secrets (FR-PF-04). */
 export type PreviewStep = components['schemas']['PreviewStepView'];
 

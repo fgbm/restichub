@@ -82,3 +82,33 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await expect(page.getByText('The profile is deleted.')).toBeVisible();
 	await expect(page.getByText('No profiles yet')).toBeVisible();
 });
+
+test('editing a profile keeps the retention fields', async ({ page }) => {
+	// The sample profile holds a keep-yearly rule and a snapshot filter.
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.profiles', 'sample'));
+	await signIn(page);
+	await createRepository(page);
+
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Profiles', exact: true })
+		.click();
+	await expect(page.getByText('web-daily')).toBeVisible();
+
+	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Edit the profile' });
+	await expect(dialog).toBeVisible();
+	// The retention fields that the form shows carry the stored values.
+	await expect(page.locator('#profile-keep-yearly')).toHaveValue('2');
+	await expect(page.locator('#profile-filter-hosts')).toHaveValue('web-*');
+	await page.locator('#profile-name').fill('web-renamed');
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('The profile is updated.')).toBeVisible();
+
+	// A second edit keeps the fields after the rename.
+	await page.getByRole('button', { name: 'More actions for web-renamed' }).click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await expect(page.locator('#profile-keep-yearly')).toHaveValue('2');
+	await expect(page.locator('#profile-filter-hosts')).toHaveValue('web-*');
+});
