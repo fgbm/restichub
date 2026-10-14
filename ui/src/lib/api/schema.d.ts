@@ -13,7 +13,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Enrolls an agent with a one-time token and a certificate signing request. */
+        /**
+         * Enrolls an agent with a one-time token and a certificate signing request.
+         * @description The control plane serves the route on the agent listener and on the public web origin, so an
+         *     agent reaches it with a publicly trusted certificate and pins the returned installation root CA
+         *     for the stream (ADR-0033).
+         */
         post: operations["enroll"];
         delete?: never;
         options?: never;
@@ -1027,7 +1032,25 @@ export interface components {
              *     agent verifies the update before it uses the next key (FR-PR-04, FR-PR-11).
              */
             signing_key_update: string;
+            /**
+             * @description The public job signing key set: the current key and the next key (ADR-0026). The agent
+             *     verifies a job that the current key signed with this set at once.
+             */
+            signing_keys: components["schemas"]["EnrollmentKeyBody"][];
+            /**
+             * @description Ed25519 signature over the key set, base64 (standard alphabet). The current key signs it
+             *     (ADR-0026).
+             */
+            signing_keys_signature: string;
             tenant_id: string;
+        };
+        /** @description One public job signing key of the enrollment response (ADR-0026). */
+        EnrollmentKeyBody: {
+            key_id: string;
+            /** @description Base64 of the 32 Ed25519 bytes (standard alphabet). */
+            public_key: string;
+            /** @description `current` or `next`. */
+            role: string;
         };
         EnrollmentTokenListResponse: {
             items: components["schemas"]["EnrollmentTokenView"][];
@@ -1355,6 +1378,15 @@ export interface operations {
             };
             /** @description The request or the certificate signing request is not valid. */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request body is larger than the limit. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
