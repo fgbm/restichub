@@ -43,7 +43,9 @@ test('the repositories screen creates, edits and deletes a repository', async ({
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
 	const edit = page.getByRole('dialog', { name: 'Edit the repository' });
 	await expect(edit).toBeVisible();
-	await expect(page.locator('#repo-password')).toHaveValue('');
+	// The password field is create-only: the password cannot be replaced until FR-RP-06.
+	await expect(page.locator('#repo-password')).toHaveCount(0);
+	await expect(edit.getByText('cannot be replaced')).toBeVisible();
 	await page.locator('#repo-name').fill('s3-prod-renamed');
 	await edit.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The repository is updated.')).toBeVisible();

@@ -156,6 +156,11 @@
 
 	onMount(load);
 
+	// A closed dialog drops the secret values, so they never stay in the component state.
+	$effect(() => {
+		if (!formOpen) resetForm();
+	});
+
 	function resetForm(): void {
 		name = '';
 		kind = 's3';
@@ -226,7 +231,6 @@
 					backend: backendRequest(),
 					maintenance_agent_id: maintenanceAgentId
 				};
-				if (password) request.password = password;
 				if (kind === 's3') {
 					if (s3AccessKey) request.s3_access_key = s3AccessKey;
 					if (s3SecretKey) request.s3_secret_key = s3SecretKey;
@@ -250,6 +254,7 @@
 				pushToast('success', t('repositories.created'));
 			}
 			formOpen = false;
+			resetForm();
 			await load();
 		} catch (problem) {
 			formProblem = problem instanceof ApiError ? problem.problem : null;
@@ -440,15 +445,21 @@
 			/>
 		{/if}
 
-		<PasswordField
-			id="repo-password"
-			label={t('repositories.password')}
-			help={editing ? t('repositories.passwordKeepHint') : t('repositories.passwordHint')}
-			error={fieldError(formProblem, 'password')}
-			autocomplete="new-password"
-			bind:value={password}
-			required={!editing}
-		/>
+		{#if editing}
+			<Alert tone="info" icon="lock" title={t('repositories.password')}>
+				{t('repositories.passwordLocked')}
+			</Alert>
+		{:else}
+			<PasswordField
+				id="repo-password"
+				label={t('repositories.password')}
+				help={t('repositories.passwordHint')}
+				error={fieldError(formProblem, 'password')}
+				autocomplete="new-password"
+				bind:value={password}
+				required
+			/>
+		{/if}
 		{#if kind === 's3'}
 			<PasswordField
 				id="repo-s3-access-key"

@@ -389,6 +389,8 @@ export const en = {
 	'repositories.passwordHint':
 		'ResticHub shows this value never again after you save it. You can only replace it.',
 	'repositories.passwordKeepHint': 'Leave the field empty to keep the current value.',
+	'repositories.passwordLocked':
+		'The repository password cannot be replaced in this version. Rotation arrives in a later release.',
 	'repositories.s3AccessKey': 'S3 access key',
 	'repositories.s3SecretKey': 'S3 secret key',
 	'repositories.restPassword': 'REST server password',
