@@ -116,9 +116,18 @@ services:
       # The control plane reads the client address from `X-Forwarded-For` only
       # when the socket peer is in this list. The list holds the Caddy network.
       RESTICHUB_TRUSTED_PROXIES: ${RESTICHUB_TRUSTED_PROXIES:-172.28.0.0/24}
-    # The control plane is not published. Caddy reaches it on this network.
+      # The agent listener: gRPC with mTLS and the enrollment endpoint (ADR-0026).
+      RESTICHUB_AGENT_LISTEN: 0.0.0.0:8443
+      # The public address of the listener that an agent reports at enrollment. Set
+      # the host and the port that the agents dial. The placeholder is not a real host.
+      RESTICHUB_AGENT_ENDPOINT: ${RESTICHUB_AGENT_ENDPOINT:-https://agents.example.com:8443}
+    # The control plane is not published on 8080. Caddy reaches it on this network.
     expose:
       - '8080'
+    # The agent listener is published directly. The proxy must not terminate its TLS:
+    # the client certificate has to reach the control plane (ADR-0026).
+    ports:
+      - '${RESTICHUB_AGENT_PORT:-8443}:8443'
     healthcheck:
       # The runtime image holds no HTTP client. Bash opens a socket and reads the
       # status line of `/healthz`.
@@ -138,10 +147,9 @@ services:
       options:
         max-size: '10m'
         max-file: '3'
-    # The agent listener (gRPC with mTLS) is not part of this deployment yet.
-    # Its port stays closed until epic #1 lands.
-    # ports:
-    #   - '8443:8443'
+    # The agent listener (gRPC with mTLS and the enrollment endpoint) is published
+    # directly on the control plane. It is not behind Caddy, because the proxy must
+    # not terminate the mTLS of the agents (ADR-0026). See the `ports` above.
 
   # The reverse proxy. It gets the certificate for the domain automatically.
   caddy:
