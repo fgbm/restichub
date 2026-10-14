@@ -56,6 +56,8 @@ pub enum Reason {
     Unsupported,
     /// The installed restic version lacks the option (AC-AG-09).
     Incompatible,
+    /// Not available yet (FR-HK-04).
+    Unavailable,
 }
 
 impl Reason {
@@ -75,6 +77,7 @@ impl Reason {
             Self::TooFarInFuture => "too_far_in_future",
             Self::Unsupported => "unsupported",
             Self::Incompatible => "incompatible",
+            Self::Unavailable => "unavailable",
         }
     }
 }

@@ -4,17 +4,20 @@
 //! write (FR-PF-05) and the mapping to the compiler types (FR-PF-04). The handlers live in the
 //! parent module.
 //!
-//! The profile holds no secret. The repository password and the backend credentials stay in the
-//! `secrets` table (ADR-0017), so a profile value is safe in an audit diff.
+//! The profile holds no secret today. The repository password and the backend credentials stay in
+//! the `secrets` table (ADR-0017). A hook parameter is refused until the agent reports the allow-list
+//! with the secret flag (FR-HK-04); a later secret hook parameter must be a secret reference
+//! (ADR-0017) and is masked in the view and in the audit diff.
 
 use std::collections::BTreeMap;
 
 use restichub_compiler::{
-    BackupOptions as CompilerBackupOptions, CheckOptions as CompilerCheckOptions,
-    GroupBy as CompilerGroupBy, HookParameter as CompilerHookParameter,
-    HookPhase as CompilerHookPhase, HookRef as CompilerHookRef, OperatingSystem,
-    Profile as CompilerProfile, ProfilePaths as CompilerProfilePaths,
-    Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter,
+    AllowListedHook, Architecture, BackupOptions as CompilerBackupOptions,
+    CheckOptions as CompilerCheckOptions, CompileError, GroupBy as CompilerGroupBy,
+    HookParameter as CompilerHookParameter, HookPhase as CompilerHookPhase,
+    HookRef as CompilerHookRef, OperatingSystem, Profile as CompilerProfile,
+    ProfilePaths as CompilerProfilePaths, ResticVersion, Retention as CompilerRetention,
+    SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
 };
 use restichub_db::profiles::{NewProfile, Profile, ProfileUpdate};
 use restichub_db::{ProfileId, RepositoryId, UserId};
@@ -34,6 +37,18 @@ pub const MAX_HOOK_ID: usize = 64;
 pub const MAX_PATTERN: usize = 4096;
 /// Limit in characters of one path entry. A Windows path is longer than a Unix path.
 pub const MAX_PATH_ENTRY: usize = 4096;
+/// Limit of the path entries of a profile, across every operating system.
+pub const MAX_PATHS: usize = 256;
+/// Limit of the exclude patterns.
+pub const MAX_EXCLUDES: usize = 256;
+/// Limit of the exclude files.
+pub const MAX_EXCLUDE_FILES: usize = 32;
+/// Limit of the tags.
+pub const MAX_TAGS: usize = 64;
+/// Limit of the hooks.
+pub const MAX_HOOKS: usize = 32;
+/// Limit of the retention lists: the keep tags, the group-by keys and the snapshot filter.
+pub const MAX_RETENTION_LIST: usize = 64;
 
 /// The source paths for each operating system (FR-PF-01).
 ///
@@ -235,6 +250,140 @@ pub struct ProfileView {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProfileListResponse {
     pub items: Vec<ProfileView>,
+    /// Null when the table holds no later profile.
+    pub next_cursor: Option<String>,
+}
+
+/// A warning that the save-time compile reported for one target (FR-PF-05).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProfileWarning {
+    /// Where the warning applies, for example `paths.all`.
+    pub field: String,
+    /// Stable snake_case code.
+    pub reason: String,
+    /// The operating system of the synthetic target, when the warning is specific to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
+}
+
+/// The result of a profile create or update: the stored profile and the save-time warnings
+/// (FR-PF-05).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProfileResponse {
+    pub profile: ProfileView,
+    pub warnings: Vec<ProfileWarning>,
+}
+
+/// The outcome of one synthetic compile at save time (FR-PF-05, AC-PF-02).
+enum SaveOutcome {
+    /// The profile is wrong for every target: the request is refused.
+    Refusal(ApiError),
+    /// The profile is wrong for one target only: the caller gets a warning.
+    Warning(ProfileWarning),
+}
+
+/// Runs the compiler against a synthetic target for each operating system (FR-PF-05).
+///
+/// A template error and an unknown hook are wrong for every target, so they refuse the request.
+/// An operating-system or version mismatch is a warning, because a profile may target several
+/// operating systems. The hook allow-list is empty until the agent reports it (FR-HK-04), so the
+/// synthetic target holds the hook identifiers of the profile.
+///
+/// # Errors
+///
+/// Returns a field error for a defect that no target accepts.
+pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, ApiError> {
+    let compiler_profile = profile.to_compiler_profile();
+    let allow_list: BTreeMap<String, AllowListedHook> = profile
+        .hooks
+        .iter()
+        .map(|hook| (hook.hook_id.clone(), AllowListedHook::default()))
+        .collect();
+    let mut warnings = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for os in [
+        OperatingSystem::Linux,
+        OperatingSystem::Windows,
+        OperatingSystem::Macos,
+    ] {
+        let target = synthetic_target(os, &allow_list);
+        if let Err(error) = compile(&compiler_profile, &target) {
+            match classify_save_error(error) {
+                SaveOutcome::Refusal(api) => return Err(api),
+                SaveOutcome::Warning(warning) => {
+                    let key = (
+                        warning.field.clone(),
+                        warning.reason.clone(),
+                        warning.os.clone(),
+                    );
+                    if seen.insert(key) {
+                        warnings.push(warning);
+                    }
+                }
+            }
+        }
+    }
+    Ok(warnings)
+}
+
+fn synthetic_target(
+    os: OperatingSystem,
+    allow_list: &BTreeMap<String, AllowListedHook>,
+) -> TargetFacts {
+    TargetFacts {
+        agent_id: "synthetic".to_owned(),
+        agent_name: "agent".to_owned(),
+        hostname: "host".to_owned(),
+        os,
+        arch: Architecture::X86_64,
+        labels: BTreeMap::new(),
+        // The newest supported version: the option and version check runs in the preview against
+        // the real agent (FR-PF-05, AC-AG-09).
+        restic_version: ResticVersion {
+            major: 0,
+            minor: 19,
+            patch: 0,
+        },
+        now: time::OffsetDateTime::now_utc(),
+        allow_list: allow_list.clone(),
+    }
+}
+
+fn classify_save_error(error: CompileError) -> SaveOutcome {
+    let warning = |field: &str, reason: &str, os: Option<String>| {
+        SaveOutcome::Warning(ProfileWarning {
+            field: field.to_owned(),
+            reason: reason.to_owned(),
+            os,
+        })
+    };
+    match error {
+        CompileError::UnknownVariable { field, .. }
+        | CompileError::InvalidDate { field, .. }
+        | CompileError::UnterminatedTemplate { field }
+        | CompileError::InvalidValue { field } => SaveOutcome::Refusal(ApiError::invalid_field(
+            field.as_str(),
+            Reason::InvalidFormat,
+        )),
+        CompileError::UnknownHook { field, .. }
+        | CompileError::UnknownHookParameter { field, .. }
+        | CompileError::DuplicateHookParameter { field, .. } => {
+            SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unknown))
+        }
+        CompileError::StepsRejected { .. } => {
+            SaveOutcome::Refusal(ApiError::invalid_field("steps", Reason::InvalidFormat))
+        }
+        CompileError::MissingLabel { field, .. } => warning(field.as_str(), "unknown", None),
+        CompileError::UnsupportedOs { field, os, .. } => {
+            warning(field.as_str(), "unsupported", Some(os.as_str().to_owned()))
+        }
+        CompileError::NoPaths { os } => warning("paths", "empty", Some(os.as_str().to_owned())),
+        CompileError::IncompatibleOption { field, .. } => {
+            warning(field.as_str(), "incompatible", None)
+        }
+        CompileError::UnsupportedRestic { .. } => warning("agent_id", "incompatible", None),
+        CompileError::InvalidCron { .. } => warning("cron", "invalid_format", None),
+    }
 }
 
 /// The agent identifier of the request (FR-PF-04).
@@ -578,8 +727,11 @@ fn validate_profile(
     let repository_id = parse_repository_id("repository_id", &repository_id)?;
     let paths = validate_paths(paths)?;
     let excludes = validate_patterns("excludes", excludes)?;
+    ensure_count("excludes", excludes.len(), MAX_EXCLUDES)?;
     let exclude_files = validate_patterns("exclude_files", exclude_files)?;
+    ensure_count("exclude_files", exclude_files.len(), MAX_EXCLUDE_FILES)?;
     let tags = validate_tags("tags", tags)?;
+    ensure_count("tags", tags.len(), MAX_TAGS)?;
     let hooks = validate_hooks(hooks)?;
     let retention = match retention {
         Some(retention) => Some(validate_retention(retention)?),
@@ -627,29 +779,58 @@ pub fn validate_profile_name(field: &'static str, value: &str) -> Result<String,
 }
 
 fn validate_paths(paths: ProfilePaths) -> Result<ProfilePaths, ApiError> {
+    let all = validate_path_entries("paths.all", paths.all)?;
+    let windows = validate_path_entries("paths.windows", paths.windows)?;
+    let linux = validate_path_entries("paths.linux", paths.linux)?;
+    let macos = validate_path_entries("paths.macos", paths.macos)?;
+    let total = all.len() + windows.len() + linux.len() + macos.len();
+    if total > MAX_PATHS {
+        return Err(ApiError::invalid_field("paths", Reason::TooLong));
+    }
     Ok(ProfilePaths {
-        all: validate_path_entries("paths.all", paths.all)?,
-        windows: validate_path_entries("paths.windows", paths.windows)?,
-        linux: validate_path_entries("paths.linux", paths.linux)?,
-        macos: validate_path_entries("paths.macos", paths.macos)?,
+        all,
+        windows,
+        linux,
+        macos,
     })
 }
 
 /// A path entry is absolute: it starts with `/` or a drive letter (FR-PF-01). A template variable
-/// is allowed inside the path (FR-PF-03).
+/// is allowed inside the path (FR-PF-03). A root path (`/` or `C:\`) is allowed and one trailing
+/// separator is dropped, so `/srv/` becomes `/srv`.
 fn validate_path_entries(
     field: &'static str,
     values: Vec<String>,
 ) -> Result<Vec<String>, ApiError> {
     let mut result = Vec::with_capacity(values.len());
     for value in values {
-        let validated = validation::validate_local_path(field, &value)?;
-        if validated.chars().count() > MAX_PATH_ENTRY {
-            return Err(ApiError::invalid_field(field, Reason::TooLong));
-        }
-        result.push(validated);
+        result.push(validate_path_entry(field, &value)?);
     }
     Ok(result)
+}
+
+fn validate_path_entry(field: &'static str, value: &str) -> Result<String, ApiError> {
+    let value = value.trim();
+    if value == "/" {
+        return Ok("/".to_owned());
+    }
+    let bytes = value.as_bytes();
+    if bytes.len() == 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+    {
+        return Ok(format!("{}:\\", char::from(bytes[0])));
+    }
+    let trimmed = value
+        .strip_suffix('/')
+        .or_else(|| value.strip_suffix('\\'))
+        .unwrap_or(value);
+    let validated = validation::validate_local_path(field, trimmed)?;
+    if validated.chars().count() > MAX_PATH_ENTRY {
+        return Err(ApiError::invalid_field(field, Reason::TooLong));
+    }
+    Ok(validated)
 }
 
 /// An exclude, an exclude file or a tag holds no control character (FR-PF-01).
@@ -691,36 +872,21 @@ fn validate_tags(field: &'static str, values: Vec<String>) -> Result<Vec<String>
 }
 
 fn validate_hooks(hooks: Vec<HookRef>) -> Result<Vec<HookRef>, ApiError> {
+    ensure_count("hooks", hooks.len(), MAX_HOOKS)?;
     let mut result = Vec::with_capacity(hooks.len());
-    for hook in hooks {
+    for (index, hook) in hooks.into_iter().enumerate() {
         let hook_id = validate_identifier("hooks.hook_id", &hook.hook_id)?;
-        let mut seen = std::collections::BTreeSet::new();
-        let mut parameters = Vec::with_capacity(hook.parameters.len());
-        for parameter in hook.parameters {
-            let name = validate_identifier("hooks.parameters.name", &parameter.name)?;
-            if !seen.insert(name.clone()) {
-                return Err(ApiError::invalid_field(
-                    "hooks.parameters.name",
-                    Reason::Unknown,
-                ));
-            }
-            if parameter.value.chars().count() > MAX_PATTERN
-                || restichub_proto::validate::has_forbidden(&parameter.value)
-            {
-                return Err(ApiError::invalid_field(
-                    "hooks.parameters.value",
-                    Reason::InvalidCharacter,
-                ));
-            }
-            parameters.push(HookParameter {
-                name,
-                value: parameter.value,
-            });
+        // A hook parameter may be secret, and the agent allow-list that reports the secret flag is
+        // not available yet (FR-HK-04). Refuse a parameter, so a secret value never reaches the
+        // profile row, the view or the audit diff.
+        if !hook.parameters.is_empty() {
+            let field = format!("hooks[{index}].parameters");
+            return Err(ApiError::invalid_field(field, Reason::Unavailable));
         }
         result.push(HookRef {
             hook_id,
             phase: hook.phase,
-            parameters,
+            parameters: Vec::new(),
         });
     }
     Ok(result)
@@ -755,16 +921,40 @@ fn validate_retention(retention: Retention) -> Result<Retention, ApiError> {
         ));
     }
     let keep_tags = validate_tags("retention.keep_tags", retention.keep_tags)?;
+    ensure_count("retention.keep_tags", keep_tags.len(), MAX_RETENTION_LIST)?;
     let filter = SnapshotFilter {
         hosts: validate_patterns("retention.filter.hosts", retention.filter.hosts)?,
         tags: validate_tags("retention.filter.tags", retention.filter.tags)?,
         paths: validate_patterns("retention.filter.paths", retention.filter.paths)?,
     };
+    ensure_count(
+        "retention.filter.hosts",
+        filter.hosts.len(),
+        MAX_RETENTION_LIST,
+    )?;
+    ensure_count(
+        "retention.filter.tags",
+        filter.tags.len(),
+        MAX_RETENTION_LIST,
+    )?;
+    ensure_count(
+        "retention.filter.paths",
+        filter.paths.len(),
+        MAX_RETENTION_LIST,
+    )?;
     Ok(Retention {
         keep_tags,
         filter,
         ..retention
     })
+}
+
+/// Refuses a list that is longer than the limit (FR-PF-05).
+fn ensure_count(field: &'static str, length: usize, maximum: usize) -> Result<(), ApiError> {
+    if length > maximum {
+        return Err(ApiError::invalid_field(field, Reason::TooLong));
+    }
+    Ok(())
 }
 
 fn validate_check(check: CheckOptions) -> Result<CheckOptions, ApiError> {
