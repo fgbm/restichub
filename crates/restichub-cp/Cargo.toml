@@ -23,6 +23,7 @@ libc = { workspace = true }
 prost = "0.14"
 prost-types = "0.14"
 rcgen = { workspace = true }
+restichub-compiler = { workspace = true }
 restichub-db = { workspace = true }
 restichub-proto = { workspace = true }
 restichub-secrets = { workspace = true, features = ["serde"] }

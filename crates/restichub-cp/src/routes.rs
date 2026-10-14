@@ -415,4 +415,28 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::RepositoriesWrite),
         handler: || routes!(crate::repositories::delete_repository),
     },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/init",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || {
+            routes!(crate::jobs::init_repository)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/test-access",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || {
+            routes!(crate::jobs::test_access_repository)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/jobs/{id}",
+        access: Access::Protected(Operation::JobsRead),
+        handler: || routes!(crate::jobs::get_job),
+    },
 ];

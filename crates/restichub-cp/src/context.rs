@@ -54,6 +54,7 @@ pub enum Operation {
     SecretsWrite,
     RepositoriesRead,
     RepositoriesWrite,
+    JobsRead,
 }
 
 impl Operation {
@@ -84,6 +85,7 @@ impl Operation {
                 | Self::EnrollmentTokensWrite
                 | Self::RepositoriesRead
                 | Self::RepositoriesWrite
+                | Self::JobsRead
         )
     }
 
@@ -104,7 +106,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 23] = [
+    pub const ALL: [Operation; 24] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -128,6 +130,7 @@ impl Operation {
         Operation::SecretsWrite,
         Operation::RepositoriesRead,
         Operation::RepositoriesWrite,
+        Operation::JobsRead,
     ];
 
     /// The class of an operation, for the platform-tenant allow-list. The `match` lists every
@@ -156,7 +159,8 @@ impl Operation {
             | Operation::SecretsRead
             | Operation::SecretsWrite
             | Operation::RepositoriesRead
-            | Operation::RepositoriesWrite => OperationClass::Tenant,
+            | Operation::RepositoriesWrite
+            | Operation::JobsRead => OperationClass::Tenant,
         }
     }
 }
@@ -198,6 +202,7 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::SecretsWrite => Role::Admin,
         Operation::RepositoriesRead => Role::Viewer,
         Operation::RepositoriesWrite => Role::Admin,
+        Operation::JobsRead => Role::Viewer,
     }
 }
 

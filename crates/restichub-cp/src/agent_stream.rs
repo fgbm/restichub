@@ -10,7 +10,8 @@
 //! The stream sends the `ServerHello`, a fresh signing key set and a `Ping` each
 //! [`HEARTBEAT_INTERVAL`]; it closes when the agent does not answer for [`IDLE_CLOSE`]. A
 //! `KeyUpdateAck` feeds the retirement of the old key once every known online agent acknowledged the
-//! new set (ADR-0026). Job delivery is a typed channel stub for #7; the stream starts no job.
+//! new set (ADR-0026). Job delivery is a typed channel stub for #7; the stream starts no job. A
+//! `JobAck` and a `JobResult` update the job row ([`crate::jobs`]).
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -210,6 +211,14 @@ impl StreamRegistry {
             .get(&agent)
             .map(|entry| entry.out.try_send(message).is_ok())
             .unwrap_or(false)
+    }
+
+    /// True when the agent holds an open stream at this moment.
+    ///
+    /// The on-demand job dispatcher checks it before it reads a secret, so an offline agent gives a
+    /// clear error and no delivery record.
+    pub fn is_online(&self, agent: AgentId) -> bool {
+        self.lock().streams.contains_key(&agent)
     }
 
     #[cfg(test)]
@@ -653,16 +662,20 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
             }
         }
         Some(agent_message::Payload::AgentHello(_) | agent_message::Payload::Pong(_)) => {}
+        Some(agent_message::Payload::JobAck(ack)) => {
+            crate::jobs::handle_job_ack(state, identity.tenant, identity.agent, &ack).await;
+        }
+        Some(agent_message::Payload::JobResult(result)) => {
+            crate::jobs::handle_job_result(state, identity.tenant, identity.agent, &result).await;
+        }
         Some(
-            agent_message::Payload::JobAck(_)
-            | agent_message::Payload::JobRejected(_)
+            agent_message::Payload::JobRejected(_)
             | agent_message::Payload::StepProgress(_)
             | agent_message::Payload::LogChunk(_)
             | agent_message::Payload::StepResult(_)
-            | agent_message::Payload::JobResult(_)
             | agent_message::Payload::CertificateSigningRequest(_),
         ) => {
-            // Job progress, results and certificate rotation belong to #7 and #51.
+            // Job rejection, progress, logs and certificate rotation belong to #7 and #51.
         }
         None => {}
     }

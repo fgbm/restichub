@@ -1,0 +1,611 @@
+//! The job model and the on-demand job dispatcher (FR-PR-01, FR-PR-03, FR-PR-05, FR-RP-02,
+//! FR-RP-08, ADR-0003).
+//!
+//! An Admin initializes a repository or tests its access from the web API. The control plane builds
+//! one job, validates it ([`ValidatedJob`], FR-PR-10), signs it with the current job signing key
+//! (FR-PR-03, ADR-0030) and sends it to the agent over the open stream (FR-PR-05). The agent
+//! receives the repository password and the backend credentials inside the signed bytes only
+//! (ADR-0003).
+//!
+//! The row in the `jobs` table holds no secret. The dispatcher reads each secret with
+//! [`SecretReader`], which writes the `secret_delivered` audit record in the same transaction
+//! (AC-RP-03). The transaction commits before the control plane sends the value to the agent.
+//!
+//! The MVP holds no queue for an on-demand job: an offline agent gives HTTP 409 `agent_offline` at
+//! once (the scheduler of epic #7 adds the queue).
+//!
+//! The safety rule of an init: the job always holds a `test_access` step before the `init` step, so
+//! the agent runs `init` only when the repository does not exist. A wrong password on an existing
+//! repository gives `config_error` and no init (AC-RP-01). The agent applies the rule; the control
+//! plane never sends a bare init.
+//!
+//! The agent result updates the job row. A successful `init` or a successful `test_access` sets
+//! `repositories.initialized = true` (FR-RP-02). A `test_access` that finds no repository gives the
+//! typed result `not_initialized`, which is not an error.
+
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use restichub_compiler::ValidatedJob;
+use restichub_db::audit::{AuditAction, diff};
+use restichub_db::jobs::{self as job_repo, Job, JobOutcome, NewJob};
+use restichub_db::repositories::{self as repo, Repository};
+use restichub_db::{
+    AgentId, AgentStatus, BackendKind, JobId, JobKind, JobResultCode, JobStatus, RepositoryId,
+    SecretId, TenantId, agents as agents_repo,
+};
+use restichub_proto::agent::v1::{
+    ControlMessage, InitStep, Job as ProtoJob, JobAck, JobResult, JobStatus as ProtoJobStatus,
+    LocalCredentials, RepositoryAccess, RestCredentials, S3Credentials, Step, TestAccessStep,
+    control_message, repository_access::BackendCredentials, step,
+};
+use restichub_secrets::{KekProvider, SecretString};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use time::OffsetDateTime;
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::context::{Operation, RequestContext};
+use crate::delivery::SecretReader;
+use crate::error::ApiError;
+use crate::json::ApiJson;
+use crate::repositories::stored_location;
+use crate::server::AppState;
+use crate::validation::Reason;
+
+/// How long an on-demand job stays valid after the control plane issues it (ADR-0020).
+const JOB_LIFETIME: time::Duration = time::Duration::minutes(30);
+
+/// Timeout of one step of a repository job (FR-AG-05).
+const STEP_TIMEOUT_SECONDS: u32 = 600;
+
+/// Timeout of the full job (FR-AG-05).
+const JOB_TIMEOUT_SECONDS: u32 = 900;
+
+/// The largest accepted error code from an agent (FR-PR-08).
+const MAX_RESULT_MESSAGE_LEN: usize = 64;
+
+/// The request body of an init or a test-access action.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JobActionRequest {
+    /// The agent that runs the job. An absent value uses the maintenance agent of the repository
+    /// (FR-RP-08). A local-path repository needs an explicit or a maintenance agent.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+/// One job with its lifecycle (FR-PR-01).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct JobView {
+    pub id: String,
+    pub kind: JobKind,
+    /// Null for a job that touches no repository.
+    pub repository_id: Option<String>,
+    pub agent_id: String,
+    pub status: JobStatus,
+    /// Null until the job finishes.
+    pub result_code: Option<JobResultCode>,
+    /// A machine-readable error code from the agent. The user interface translates it (NFR-DOC-04).
+    /// It never holds a secret.
+    pub result_message: Option<String>,
+    /// In RFC 3339.
+    pub created_at: String,
+    /// In RFC 3339.
+    pub updated_at: String,
+    /// In RFC 3339. Null until the job finishes.
+    pub finished_at: Option<String>,
+    /// In RFC 3339. Null when the job holds no expiry.
+    pub expires_at: Option<String>,
+}
+
+impl From<&Job> for JobView {
+    fn from(job: &Job) -> Self {
+        Self {
+            id: job.id.to_string(),
+            kind: job.kind,
+            repository_id: job.repository_id.map(|id| id.to_string()),
+            agent_id: job.agent_id.to_string(),
+            status: job.status,
+            result_code: job.result_code,
+            result_message: job.result_message.clone(),
+            created_at: format_time(job.created_at),
+            updated_at: format_time(job.updated_at),
+            finished_at: job.finished_at.map(format_time),
+            expires_at: job.expires_at.map(format_time),
+        }
+    }
+}
+
+/// Initializes a repository from a selected agent (FR-RP-02).
+///
+/// The job runs `test_access` first and `init` after it, so the agent never re-initializes an
+/// existing repository. An offline agent gives HTTP 409 `agent_offline`.
+#[utoipa::path(
+    post,
+    path = "/api/v1/repositories/{id}/init",
+    summary = "Initializes a repository from an agent.",
+    description = "The control plane sends the repository password and the backend credentials with the signed job only (ADR-0003). An offline agent gives HTTP 409 `agent_offline`.",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the repository.")),
+    request_body = JobActionRequest,
+    responses(
+        (status = 202, description = "The job is sent to the agent.", body = JobView),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
+        (status = 409, description = "The agent is offline.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn init_repository(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<JobActionRequest>,
+) -> Result<(StatusCode, Json<JobView>), ApiError> {
+    context.authorize(Operation::RepositoriesWrite)?;
+    let repository_id = crate::repositories::parse_repository_id(&id)?;
+    let agent_id = parse_optional_agent_id(body.agent_id.as_deref())?;
+    let job =
+        create_repository_job(&state, &context, repository_id, agent_id, JobKind::Init).await?;
+    Ok((StatusCode::ACCEPTED, Json(job)))
+}
+
+/// Tests the access to a repository from a selected agent (FR-RP-02).
+///
+/// The job runs `restic cat config`, which is read-only. A missing repository gives the typed result
+/// `not_initialized`, not an error. A wrong password gives `config_error`.
+#[utoipa::path(
+    post,
+    path = "/api/v1/repositories/{id}/test-access",
+    summary = "Tests the access to a repository from an agent.",
+    description = "The job runs `restic cat config`. A missing repository gives the typed result `not_initialized`. An offline agent gives HTTP 409 `agent_offline`.",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the repository.")),
+    request_body = JobActionRequest,
+    responses(
+        (status = 202, description = "The job is sent to the agent.", body = JobView),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
+        (status = 409, description = "The agent is offline.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn test_access_repository(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<JobActionRequest>,
+) -> Result<(StatusCode, Json<JobView>), ApiError> {
+    context.authorize(Operation::RepositoriesWrite)?;
+    let repository_id = crate::repositories::parse_repository_id(&id)?;
+    let agent_id = parse_optional_agent_id(body.agent_id.as_deref())?;
+    let job = create_repository_job(
+        &state,
+        &context,
+        repository_id,
+        agent_id,
+        JobKind::TestAccess,
+    )
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(job)))
+}
+
+/// Reads one job of the tenant for polling.
+#[utoipa::path(
+    get,
+    path = "/api/v1/jobs/{id}",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the job.")),
+    responses(
+        (status = 200, description = "The job.", body = JobView),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The job is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn get_job(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+) -> Result<Json<JobView>, ApiError> {
+    context.authorize(Operation::JobsRead)?;
+    let job_id = parse_job_id(&id)?;
+    let job = context
+        .tenant_tx(&state, async |tx| Ok(job_repo::get(tx, job_id).await?))
+        .await?;
+    match job {
+        Some(job) => Ok(Json(JobView::from(&job))),
+        None => Err(ApiError::not_found()),
+    }
+}
+
+/// Builds, signs and sends one repository job (FR-PR-03, FR-PR-05).
+async fn create_repository_job(
+    state: &AppState,
+    context: &RequestContext,
+    repository_id: RepositoryId,
+    explicit_agent: Option<AgentId>,
+    kind: JobKind,
+) -> Result<JobView, ApiError> {
+    let now = state.auth().clock.now();
+    let expires_at = now + JOB_LIFETIME;
+    let job_id = JobId::new();
+    let created_by = crate::secrets::actor_user(&context.actor);
+
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    // The read locks the row: a concurrent delete cannot remove the repository between the read and
+    // the job create. A repository of another tenant gives HTTP 404 (AC-TN-01).
+    let Some(repository) = repo::get_for_update(&mut tx, repository_id).await? else {
+        return Err(ApiError::not_found());
+    };
+    let agent_id = resolve_agent(&repository, explicit_agent)?;
+    ensure_agent_active(&mut tx, agent_id).await?;
+    // The MVP holds no queue for an on-demand job. The check comes before the secret read, so an
+    // offline agent writes no delivery record.
+    if !state.agent_registry().is_online(agent_id) {
+        return Err(ApiError::agent_offline());
+    }
+
+    job_repo::create(
+        &mut tx,
+        &NewJob {
+            id: job_id,
+            kind,
+            agent_id,
+            repository_id: Some(repository_id),
+            expires_at: Some(expires_at),
+            created_by,
+        },
+    )
+    .await?;
+
+    let provider = state
+        .kek()
+        .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
+    let access = repository_access(&mut tx, provider, &repository, agent_id, job_id).await?;
+    let proto_job = ProtoJob {
+        job_id: job_id.to_string(),
+        tenant_id: context.tenant_id.to_string(),
+        agent_id: agent_id.to_string(),
+        issued_at: Some(timestamp(now)),
+        expires_at: Some(timestamp(expires_at)),
+        timeout_seconds: JOB_TIMEOUT_SECONDS,
+        repositories: vec![access],
+        steps: repository_steps(kind, &repository_id.to_string()),
+    };
+    // The control plane validates before it signs the job (FR-PR-10, ADR-0021).
+    let validated = ValidatedJob::new(proto_job).map_err(|rejection| {
+        ApiError::internal(format!(
+            "the control plane built a job that does not validate: {:?}",
+            rejection.reason
+        ))
+    })?;
+
+    let mut event = context.audit_event(AuditAction::JobRun, "job", job_id.as_uuid());
+    event.diff = Some(diff(
+        None,
+        Some(&json!({
+            "kind": kind.as_str(),
+            "repository_id": repository_id.to_string(),
+            "agent_id": agent_id.to_string(),
+        })),
+        &[],
+    ));
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
+
+    let signing = state
+        .job_signing()
+        .ok_or_else(|| ApiError::internal("the server holds no job signing key set"))?;
+    let signed = signing.sign_job(state.db(), validated.job()).await?;
+
+    let sent = state.agent_registry().send_to_agent(
+        agent_id,
+        ControlMessage {
+            payload: Some(control_message::Payload::SignedJob(signed)),
+        },
+    );
+
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    if sent {
+        job_repo::mark_sent(&mut tx, job_id, now).await?;
+    } else {
+        job_repo::mark_refused(&mut tx, job_id, "agent_offline", now).await?;
+    }
+    let job = job_repo::get(&mut tx, job_id).await?;
+    tx.commit().await?;
+
+    if !sent {
+        return Err(ApiError::agent_offline());
+    }
+    let Some(job) = job else {
+        return Err(ApiError::internal("the job is not found after the send"));
+    };
+    Ok(JobView::from(&job))
+}
+
+/// Records a `JobAck` from the stream: the job moves to `running` (FR-PR-06).
+///
+/// The identity comes from the certificate, never from the message (FR-PR-08), so a message for
+/// another agent changes no row.
+pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, ack: &JobAck) {
+    let Some(job_id) = parse_job_id_value(&ack.job_id) else {
+        return;
+    };
+    let now = state.auth().clock.now();
+    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+        return;
+    };
+    let Ok(Some(job)) = job_repo::get_for_update(&mut tx, job_id).await else {
+        return;
+    };
+    if job.agent_id != agent {
+        return;
+    }
+    if job.status == JobStatus::Sent {
+        let _ = job_repo::mark_running(&mut tx, job_id, now).await;
+    }
+    let _ = tx.commit().await;
+}
+
+/// Records a `JobResult` from the stream: it updates the job and the repository state (FR-RP-02).
+///
+/// A successful `init` or a successful `test_access` sets `repositories.initialized = true`. A
+/// `not_initialized` result clears it. The identity comes from the certificate (FR-PR-08).
+pub async fn handle_job_result(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    result: &JobResult,
+) {
+    let Some(job_id) = parse_job_id_value(&result.job_id) else {
+        return;
+    };
+    let now = state.auth().clock.now();
+    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+        return;
+    };
+    let Ok(Some(job)) = job_repo::get_for_update(&mut tx, job_id).await else {
+        return;
+    };
+    if job.agent_id != agent || job.status.is_terminal() {
+        return;
+    }
+    let Some(outcome) = outcome_of(result) else {
+        return;
+    };
+    let _ = job_repo::finish(&mut tx, job_id, &outcome, now).await;
+    if let Some(repository_id) = job.repository_id {
+        match outcome.result_code {
+            JobResultCode::Succeeded => {
+                let _ = repo::set_initialized(&mut tx, repository_id, true).await;
+            }
+            JobResultCode::NotInitialized => {
+                let _ = repo::set_initialized(&mut tx, repository_id, false).await;
+            }
+            JobResultCode::Failed | JobResultCode::ConfigError | JobResultCode::Cancelled => {}
+        }
+    }
+    let _ = tx.commit().await;
+}
+
+/// Resolves the target agent: the explicit value, or the maintenance agent (FR-RP-08).
+fn resolve_agent(repository: &Repository, explicit: Option<AgentId>) -> Result<AgentId, ApiError> {
+    explicit
+        .or(repository.maintenance_agent_id)
+        .ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Empty))
+}
+
+/// Refuses an agent that is absent, of another tenant, or revoked (FR-RP-08).
+async fn ensure_agent_active(
+    tx: &mut restichub_db::TenantTx<'_>,
+    agent: AgentId,
+) -> Result<(), ApiError> {
+    let Some(row) = agents_repo::get(tx, agent).await? else {
+        return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
+    };
+    if row.status != AgentStatus::Active {
+        return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
+    }
+    Ok(())
+}
+
+/// Builds the repository access of the job and records each secret delivery (FR-PR-05, AC-RP-03).
+async fn repository_access(
+    tx: &mut restichub_db::TenantTx<'_>,
+    provider: &dyn KekProvider,
+    repository: &Repository,
+    agent_id: AgentId,
+    job_id: JobId,
+) -> Result<RepositoryAccess, ApiError> {
+    let reader = SecretReader::new(provider);
+    let agent = agent_id.as_uuid();
+    let job = job_id.as_uuid();
+    let repository_uuid = repository.id.as_uuid();
+    let password = read_secret(
+        tx,
+        &reader,
+        Some(repository.password_secret_id),
+        agent,
+        job,
+        repository_uuid,
+    )
+    .await?
+    .unwrap_or_default();
+    let mut access = RepositoryAccess {
+        repository_id: repository.id.to_string(),
+        location: stored_location(repository),
+        password,
+        backend_credentials: None,
+    };
+    match repository.backend {
+        BackendKind::S3 => {
+            let access_key = read_secret(
+                tx,
+                &reader,
+                repository.s3_access_key_secret_id,
+                agent,
+                job,
+                repository_uuid,
+            )
+            .await?
+            .unwrap_or_default();
+            let secret_key = read_secret(
+                tx,
+                &reader,
+                repository.s3_secret_key_secret_id,
+                agent,
+                job,
+                repository_uuid,
+            )
+            .await?
+            .unwrap_or_default();
+            access.backend_credentials = Some(BackendCredentials::S3(S3Credentials {
+                access_key_id: access_key,
+                secret_access_key: secret_key,
+                session_token: String::new(),
+                region: repository.s3_region.clone().unwrap_or_default(),
+            }));
+        }
+        BackendKind::Rest => {
+            let rest_password = read_secret(
+                tx,
+                &reader,
+                repository.rest_password_secret_id,
+                agent,
+                job,
+                repository_uuid,
+            )
+            .await?
+            .unwrap_or_default();
+            access.backend_credentials = Some(BackendCredentials::Rest(RestCredentials {
+                username: String::new(),
+                password: rest_password,
+            }));
+        }
+        BackendKind::Local => {
+            access.backend_credentials = Some(BackendCredentials::Local(LocalCredentials {}));
+        }
+    }
+    Ok(access)
+}
+
+/// Reads one secret value for delivery, or `None` when the repository binds no such secret.
+async fn read_secret(
+    tx: &mut restichub_db::TenantTx<'_>,
+    reader: &SecretReader<'_>,
+    secret: Option<SecretId>,
+    agent: Uuid,
+    job: Uuid,
+    repository: Uuid,
+) -> Result<Option<String>, ApiError> {
+    let Some(secret) = secret else {
+        return Ok(None);
+    };
+    let value: SecretString = reader
+        .read_for_delivery(tx, secret, agent, job, repository)
+        .await?;
+    Ok(Some(value.expose_secret().to_owned()))
+}
+
+/// The ordered steps that the agent runs for one repository job (FR-RP-02).
+///
+/// A `test_access` step always comes first. An `init` job adds the `init` step after it, so the
+/// agent runs `init` only when the repository does not exist. A bare init never leaves the control
+/// plane.
+fn repository_steps(kind: JobKind, repository_id: &str) -> Vec<Step> {
+    let mut steps = vec![Step {
+        step_id: "test-access".to_owned(),
+        timeout_seconds: STEP_TIMEOUT_SECONDS,
+        kind: Some(step::Kind::TestAccess(TestAccessStep {
+            repository_id: repository_id.to_owned(),
+        })),
+    }];
+    if kind == JobKind::Init {
+        steps.push(Step {
+            step_id: "init".to_owned(),
+            timeout_seconds: STEP_TIMEOUT_SECONDS,
+            kind: Some(step::Kind::Init(InitStep {
+                repository_id: repository_id.to_owned(),
+            })),
+        });
+    }
+    steps
+}
+
+/// Maps the typed outcome of a `JobResult` to the stored outcome (FR-AG-09).
+///
+/// The error code from the agent is bounded and sanitized, so a malicious agent cannot store a huge
+/// value or a control character (FR-PR-08).
+fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
+    let outcome = ProtoJobStatus::try_from(result.outcome).ok()?;
+    let result_code = match outcome {
+        ProtoJobStatus::Succeeded => JobResultCode::Succeeded,
+        ProtoJobStatus::Failed => JobResultCode::Failed,
+        ProtoJobStatus::ConfigError => JobResultCode::ConfigError,
+        ProtoJobStatus::NotInitialized => JobResultCode::NotInitialized,
+        ProtoJobStatus::Cancelled => JobResultCode::Cancelled,
+        ProtoJobStatus::Unspecified => return None,
+    };
+    let status = match result_code {
+        JobResultCode::Succeeded => JobStatus::Succeeded,
+        JobResultCode::Failed
+        | JobResultCode::ConfigError
+        | JobResultCode::NotInitialized
+        | JobResultCode::Cancelled => JobStatus::Failed,
+    };
+    let result_message = result
+        .error
+        .as_ref()
+        .map(|error| error.code.as_str())
+        .filter(|code| {
+            !code.is_empty()
+                && code.len() <= MAX_RESULT_MESSAGE_LEN
+                && !restichub_proto::validate::has_forbidden(code)
+        })
+        .map(str::to_owned);
+    Some(JobOutcome {
+        status,
+        result_code,
+        result_message,
+    })
+}
+
+/// An absent value uses the maintenance agent; an anonymous identifier is not useful.
+fn parse_optional_agent_id(value: Option<&str>) -> Result<Option<AgentId>, ApiError> {
+    match value.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(value) => Uuid::parse_str(value)
+            .map(AgentId::from_uuid)
+            .map(Some)
+            .map_err(|error| {
+                ApiError::invalid_field_cause("agent_id", Reason::InvalidFormat, error.to_string())
+            }),
+    }
+}
+
+fn parse_job_id(value: &str) -> Result<JobId, ApiError> {
+    Uuid::parse_str(value)
+        .map(JobId::from_uuid)
+        .map_err(|error| {
+            ApiError::invalid_field_cause("id", Reason::InvalidFormat, error.to_string())
+        })
+}
+
+/// Parses a job identifier from a stream message. `None` on a malformed value.
+fn parse_job_id_value(value: &str) -> Option<JobId> {
+    Uuid::parse_str(value).ok().map(JobId::from_uuid)
+}
+
+fn timestamp(time: OffsetDateTime) -> prost_types::Timestamp {
+    prost_types::Timestamp {
+        seconds: time.unix_timestamp(),
+        nanos: time.nanosecond() as i32,
+    }
+}
+
+fn format_time(value: OffsetDateTime) -> String {
+    use time::format_description::well_known::Rfc3339;
+    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+}

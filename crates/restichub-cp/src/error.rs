@@ -45,6 +45,7 @@ pub enum ErrorCode {
     SharedAccount,
     UsernameTaken,
     EmailTaken,
+    AgentOffline,
 }
 
 impl ErrorCode {
@@ -68,6 +69,7 @@ impl ErrorCode {
             Self::SharedAccount => "shared_account",
             Self::UsernameTaken => "username_taken",
             Self::EmailTaken => "email_taken",
+            Self::AgentOffline => "agent_offline",
         }
     }
 }
@@ -274,6 +276,13 @@ impl ApiError {
     pub fn email_taken() -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::EmailTaken, "Conflict")
     }
+
+    /// The target agent holds no open stream, so the control plane refuses an on-demand job at
+    /// once. The MVP has no queue for an on-demand job, so it does not hold the job for a later
+    /// delivery. The user interface translates the code (NFR-DOC-04).
+    pub fn agent_offline() -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorCode::AgentOffline, "Conflict")
+    }
 }
 
 /// In seconds.
@@ -308,6 +317,17 @@ impl From<CryptoError> for ApiError {
 impl From<crate::job_signing::JobSigningError> for ApiError {
     fn from(error: crate::job_signing::JobSigningError) -> Self {
         Self::internal(cause_chain(&error))
+    }
+}
+
+impl From<crate::delivery::DeliveryError> for ApiError {
+    fn from(error: crate::delivery::DeliveryError) -> Self {
+        match error {
+            crate::delivery::DeliveryError::NotFound => {
+                Self::internal("the repository binds a secret that does not exist")
+            }
+            other => Self::internal(cause_chain(&other)),
+        }
     }
 }
 

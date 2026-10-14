@@ -39,9 +39,11 @@ pub use settings::{
 };
 use settings::{
     bind_new_credentials, created_diff, current_diff, ensure_agent, parse_optional_agent_id,
-    parse_repository_id, replace_credentials, repository_location, updated_diff, validate_backend,
-    validate_credentials, validate_secret_value, validated_from_row,
+    replace_credentials, repository_location, updated_diff, validate_backend, validate_credentials,
+    validate_secret_value, validated_from_row,
 };
+
+pub(crate) use settings::{parse_repository_id, stored_location};
 
 /// Lists the repositories of the tenant.
 #[utoipa::path(

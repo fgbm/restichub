@@ -20,6 +20,7 @@ pub mod error;
 pub mod harden;
 pub mod instance;
 pub mod job_signing;
+pub mod jobs;
 pub mod json;
 pub mod maintenance;
 pub mod password;
