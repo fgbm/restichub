@@ -16,6 +16,7 @@ use utoipa::ToSchema;
 use axum::http::Uri;
 
 use crate::client_ip::TrustedProxies;
+use crate::queue::QueueConfig;
 
 pub const CONFIG_PATH_ENV: &str = "RESTICHUB_CONFIG";
 pub const LISTEN_ADDR_ENV: &str = "RESTICHUB_LISTEN_ADDR";
@@ -57,6 +58,19 @@ pub const AGENT_TLS_KEY_FILE_ENV: &str = "RESTICHUB_AGENT_TLS_KEY_FILE";
 ///
 /// Covers 2000 agents and a margin.
 pub const AGENT_MAX_CONNECTIONS_ENV: &str = "RESTICHUB_AGENT_MAX_CONNECTIONS";
+/// The largest number of jobs that run on one agent (FR-SC-08).
+pub const QUEUE_AGENT_LIMIT_ENV: &str = "RESTICHUB_QUEUE_AGENT_LIMIT";
+/// The largest number of backups that run on one repository (FR-SC-04, FR-SC-08).
+pub const QUEUE_REPOSITORY_LIMIT_ENV: &str = "RESTICHUB_QUEUE_REPOSITORY_LIMIT";
+/// The largest number of jobs that run in one organization (FR-SC-08).
+pub const QUEUE_GLOBAL_LIMIT_ENV: &str = "RESTICHUB_QUEUE_GLOBAL_LIMIT";
+/// The seconds that the control plane waits for an acknowledgement before it sends a job again
+/// (FR-PR-06).
+pub const QUEUE_LEASE_SECS_ENV: &str = "RESTICHUB_QUEUE_LEASE_SECS";
+/// The lock results after which a job goes to the dead-letter status (FR-SC-05).
+pub const QUEUE_LOCK_RETRY_LIMIT_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_LIMIT";
+/// The seconds before the first lock retry. The delay doubles for each retry (FR-SC-05).
+pub const QUEUE_LOCK_RETRY_BASE_SECS_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_BASE_SECS";
 /// The tenancy mode: `single` or `multi` (ADR-0024).
 pub const TENANCY_MODE_ENV: &str = "RESTICHUB_TENANCY_MODE";
 /// The tenant that single mode uses and that the switch from multi mode expects.
@@ -256,6 +270,8 @@ pub struct Config {
     pub agent_tls_key_file: Option<PathBuf>,
     /// The largest number of established connections on the agent listener (ADR-0026).
     pub agent_max_connections: usize,
+    /// The limits and the retry settings of the job queue (FR-SC-08).
+    pub queue: QueueConfig,
 }
 
 /// Secret handling configuration (ADR-0023, section Secrets).
@@ -358,6 +374,8 @@ impl Config {
                 .unwrap_or(DEFAULT_AGENT_MAX_CONNECTIONS)
                 .max(1);
 
+        let queue = queue_config(env, file.queue.as_ref())?;
+
         let database_url = env
             .get(DATABASE_URL_ENV)
             .or(file.database_url)
@@ -420,6 +438,7 @@ impl Config {
             agent_tls_cert_file,
             agent_tls_key_file,
             agent_max_connections,
+            queue,
         })
     }
 }
@@ -483,6 +502,18 @@ struct FileConfig {
     agent_tls_cert_file: Option<PathBuf>,
     agent_tls_key_file: Option<PathBuf>,
     agent_max_connections: Option<usize>,
+    queue: Option<QueueSection>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueueSection {
+    agent_limit: Option<usize>,
+    repository_limit: Option<usize>,
+    global_limit: Option<usize>,
+    lease_secs: Option<u64>,
+    lock_retry_limit: Option<u32>,
+    lock_retry_base_secs: Option<u64>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -673,6 +704,39 @@ fn tenancy_config(
     Ok(TenancyConfig {
         mode,
         default_tenant,
+    })
+}
+
+/// Reads the queue settings. A limit below one is raised to one, so the queue never stalls.
+fn queue_config(
+    env: &dyn EnvReader,
+    file: Option<&QueueSection>,
+) -> Result<QueueConfig, ConfigError> {
+    let defaults = QueueConfig::default();
+    let section = file.cloned().unwrap_or_default();
+    let secs = |name: &'static str, file: Option<u64>, default: Duration| {
+        number(env, name, file).map(|value| value.map(Duration::from_secs).unwrap_or(default))
+    };
+    Ok(QueueConfig {
+        agent_limit: number(env, QUEUE_AGENT_LIMIT_ENV, section.agent_limit)?
+            .unwrap_or(defaults.agent_limit)
+            .max(1),
+        repository_limit: number(env, QUEUE_REPOSITORY_LIMIT_ENV, section.repository_limit)?
+            .unwrap_or(defaults.repository_limit)
+            .max(1),
+        global_limit: number(env, QUEUE_GLOBAL_LIMIT_ENV, section.global_limit)?
+            .unwrap_or(defaults.global_limit)
+            .max(1),
+        lease: secs(QUEUE_LEASE_SECS_ENV, section.lease_secs, defaults.lease)?,
+        lock_retry_limit: number(env, QUEUE_LOCK_RETRY_LIMIT_ENV, section.lock_retry_limit)?
+            .unwrap_or(defaults.lock_retry_limit)
+            .max(1),
+        lock_retry_base: secs(
+            QUEUE_LOCK_RETRY_BASE_SECS_ENV,
+            section.lock_retry_base_secs,
+            defaults.lock_retry_base,
+        )?,
+        ..defaults
     })
 }
 

@@ -44,6 +44,7 @@ use crate::secrets::actor_user;
 use crate::server::AppState;
 use crate::validation::Reason;
 
+pub(crate) use settings::compiler_profile_from_row;
 pub use settings::{
     BackupOptions, CheckOptions, CreateProfileRequest, GroupBy, HookParameter, HookPhase, HookRef,
     MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS, PlanWarning, PreviewEnvView,
@@ -51,8 +52,7 @@ pub use settings::{
     ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter, UpdateProfileRequest,
 };
 use settings::{
-    compiler_profile_from_row, parse_profile_id, profile_value, save_warnings, stored_value,
-    validate_create, validate_update,
+    parse_profile_id, profile_value, save_warnings, stored_value, validate_create, validate_update,
 };
 
 /// Validates a name with the rule of a profile name (FR-SC-01). The caller stores the trimmed value.
@@ -421,7 +421,10 @@ fn decode_cursor(value: &str) -> Result<ProfileCursor, String> {
 /// The hook allow-list is empty until the agent reports it (FR-HK-04). A profile with a hook
 /// therefore gives `unknown hook` in the preview, which is the FR-HK-04 behavior while no agent
 /// reports its allow-list.
-fn target_facts(agent: &Agent, now: time::OffsetDateTime) -> Result<TargetFacts, ApiError> {
+pub(crate) fn target_facts(
+    agent: &Agent,
+    now: time::OffsetDateTime,
+) -> Result<TargetFacts, ApiError> {
     let os =
         parse_os(&agent.os).ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Unknown))?;
     let arch = parse_arch(&agent.arch);

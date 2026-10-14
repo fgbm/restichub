@@ -1,0 +1,689 @@
+//! The shared fixture of the queue tests: a control plane with a manual clock, the real agent
+//! listener, enrolled agents on open streams and the API objects that a plan needs.
+
+#![allow(clippy::expect_used, dead_code)]
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::Router;
+use axum::http::StatusCode;
+use restichub_cp::agent_listener::{
+    ListenerLimits, der_to_pem, serve_listener, server_cert_sans, tls_config_from_issued,
+};
+use restichub_cp::clock::ManualClock;
+use restichub_cp::config::{AuthConfig, TenancyConfig};
+use restichub_cp::pki::{CaService, CaStore};
+use restichub_cp::queue::QueueConfig;
+use restichub_cp::server::{AppState, AuthState};
+use restichub_db::test_util::TestDatabase;
+use restichub_db::{AgentId, PLATFORM_TENANT_ID, SigningKeyRole, TenantId, signing};
+use restichub_emulator::enroll::{EnrollFacts, EnrollTls, EnrolledIdentity, enroll_tls};
+use restichub_proto::agent::v1::{
+    AgentHello, AgentMessage, ControlMessage, Job, JobAck, JobResult, JobStatus, SignedJob,
+    StepResult, StepStatus, agent_message, agent_service_client::AgentServiceClient,
+    control_message,
+};
+use restichub_proto::signing::{Expected, KeyRing, verify_job};
+use serde_json::{Value, json};
+use tokio::sync::{mpsc, oneshot};
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::Streaming;
+use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
+use uuid::Uuid;
+
+use crate::common::{
+    self, api_router, bearer_request, create_tenant_with_key, create_user,
+    seed_enrollment_token_value, send,
+};
+
+pub struct Listener {
+    pub addr: SocketAddr,
+    pub root_der: Vec<u8>,
+    shutdown: Option<oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Listener {
+    async fn start(state: AppState, ca: Arc<CaStore>) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("cannot bind the listener");
+        let addr = listener.local_addr().expect("the listener address");
+        let sans = server_cert_sans(None, addr);
+        let issued = CaService::new(common::test_kek())
+            .issue_server_certificate(&ca, &sans)
+            .expect("cannot issue the server certificate");
+        let root_der = ca.root().cert_der.clone();
+        let tls = tls_config_from_issued(&issued, &root_der).expect("cannot build the TLS config");
+        let (shutdown, rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = serve_listener(
+                listener,
+                state,
+                tls,
+                ListenerLimits::default(),
+                async move {
+                    let _ = rx.await;
+                },
+            )
+            .await;
+        });
+        Self {
+            addr,
+            root_der,
+            shutdown: Some(shutdown),
+            task,
+        }
+    }
+
+    pub fn https_url(&self) -> String {
+        format!("https://127.0.0.1:{}", self.addr.port())
+    }
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        self.task.abort();
+    }
+}
+
+pub fn client_chain_pem(identity: &EnrolledIdentity) -> String {
+    let mut pem = der_to_pem("CERTIFICATE", &identity.certificate_der);
+    for der in &identity.ca_chain_der {
+        pem.push_str(&der_to_pem("CERTIFICATE", der));
+    }
+    pem
+}
+
+/// One control plane instance on a test database, with a manual clock.
+pub struct Env {
+    pub db: TestDatabase,
+    pub state: AppState,
+    pub clock: Arc<ManualClock>,
+    pub listener: Listener,
+    pub app: Router,
+    pub tenant: TenantId,
+    pub admin: String,
+    pub operator: String,
+    pub viewer: String,
+    creator: restichub_db::UserId,
+}
+
+/// The queue settings of the tests: the delays are short, so a test needs no sleep.
+pub fn test_queue() -> QueueConfig {
+    QueueConfig {
+        interval: Duration::from_millis(100),
+        lease: Duration::from_secs(60),
+        agent_limit: 10,
+        repository_limit: 10,
+        global_limit: 100,
+        lock_retry_limit: 5,
+        lock_retry_base: Duration::from_secs(30),
+        max_deliveries: 5,
+    }
+}
+
+impl Env {
+    pub async fn start(db: TestDatabase, queue: QueueConfig) -> Self {
+        let clock = Arc::new(ManualClock::new(time::OffsetDateTime::now_utc()));
+        let provider = common::test_kek();
+        let ca_service = CaService::new(provider.clone());
+        let store = Arc::new(
+            ca_service
+                .ensure_initialized(db.database())
+                .await
+                .expect("cannot create the CA"),
+        );
+        let signing_service = restichub_cp::job_signing::JobSigningService::new(provider.clone());
+        signing_service
+            .ensure_initialized(db.database())
+            .await
+            .expect("cannot create the job signing key set");
+        let shared: Arc<dyn restichub_cp::clock::Clock> = clock.clone();
+        let auth = AuthState::new(AuthConfig::default()).with_clock(shared);
+        let state = AppState::with_auth(db.database().clone(), auth)
+            .with_kek(provider)
+            .with_tenancy(TenancyConfig::multi())
+            .with_queue(queue)
+            .with_pki(
+                store.clone(),
+                signing_service,
+                Some(common::AGENT_ENDPOINT.to_owned()),
+            );
+        let listener = Listener::start(state.clone(), store).await;
+        let tenant = create_tenant_with_key(db.database(), "queue-tenant").await;
+        let creator = create_user(db.database(), tenant, "queue-admin", "phc", "admin").await;
+        // API tokens do not idle out, so a test may move the manual clock by hours.
+        let admin = common::seed_api_token(db.database(), tenant, "admin").await;
+        let operator = common::seed_api_token(db.database(), tenant, "operator").await;
+        let viewer = common::seed_api_token(db.database(), tenant, "viewer").await;
+        let app = api_router(state.clone());
+        Self {
+            db,
+            state,
+            clock,
+            listener,
+            app,
+            tenant,
+            admin,
+            operator,
+            viewer,
+            creator,
+        }
+    }
+
+    /// An owner-level transaction scoped to the tenant, for the rows that the API does not expose.
+    pub async fn scoped(&self) -> sqlx::Transaction<'static, sqlx::Postgres> {
+        let mut tx = self.db.owner_pool().begin().await.expect("cannot begin");
+        sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+            .bind(self.tenant.to_string())
+            .execute(&mut *tx)
+            .await
+            .expect("cannot set the tenant scope");
+        tx
+    }
+
+    pub fn now(&self) -> time::OffsetDateTime {
+        use restichub_cp::clock::Clock;
+        self.clock.now()
+    }
+
+    /// Runs one dispatcher pass at the time of the manual clock.
+    pub async fn pass(&self) {
+        restichub_cp::queue::run_once(&self.state, self.now())
+            .await
+            .expect("the dispatcher pass");
+    }
+
+    /// Spends a one-time enrollment token over HTTPS and returns the issued identity.
+    pub async fn enroll_agent(&self, hostname: &str) -> EnrolledIdentity {
+        let (token, _) = seed_enrollment_token_value(
+            self.db.database(),
+            self.tenant,
+            self.creator,
+            &[],
+            time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        )
+        .await;
+        let tls = EnrollTls {
+            ca_der: self.listener.root_der.clone(),
+            server_name: "localhost".to_owned(),
+        };
+        let facts = EnrollFacts {
+            hostname: hostname.to_owned(),
+            os: "linux".to_owned(),
+            arch: "amd64".to_owned(),
+            agent_version: "0.1.0".to_owned(),
+            restic_version: "0.19.0".to_owned(),
+        };
+        enroll_tls(&self.listener.https_url(), &token, &facts, &tls)
+            .await
+            .expect("the agent must enroll over HTTPS")
+    }
+
+    /// Enrolls an agent, opens its stream and drains the hello messages.
+    pub async fn connect_agent(&self, hostname: &str) -> FakeAgent {
+        let identity = self.enroll_agent(hostname).await;
+        let client_tls = ClientTlsConfig::new()
+            .ca_certificate(Certificate::from_pem(der_to_pem(
+                "CERTIFICATE",
+                &self.listener.root_der,
+            )))
+            .identity(Identity::from_pem(
+                client_chain_pem(&identity),
+                identity.key_pem.clone(),
+            ))
+            .domain_name("localhost");
+        let channel = Endpoint::from_shared(self.listener.https_url())
+            .expect("the endpoint URL")
+            .tls_config(client_tls)
+            .expect("the client TLS config")
+            .connect()
+            .await
+            .expect("the TLS channel");
+        let mut client = AgentServiceClient::new(channel);
+        let (tx, rx) = mpsc::channel::<AgentMessage>(64);
+        let response = client
+            .connect(ReceiverStream::new(rx))
+            .await
+            .expect("the stream must open");
+        tx.send(hello()).await.expect("cannot send the hello");
+        let mut inbound = response.into_inner();
+        let (mut hello_seen, mut update_seen) = (false, false);
+        for _ in 0..8 {
+            let message = next_message(&mut inbound).await;
+            match message.payload {
+                Some(control_message::Payload::ServerHello(_)) => hello_seen = true,
+                Some(control_message::Payload::SigningKeyUpdate(_)) => update_seen = true,
+                _ => {}
+            }
+            if hello_seen && update_seen {
+                break;
+            }
+        }
+        assert!(hello_seen && update_seen, "the stream hello must arrive");
+        let agent_id = AgentId::from_uuid(Uuid::parse_str(&identity.agent_id).expect("agent id"));
+        FakeAgent {
+            id: agent_id,
+            identity,
+            tx,
+            inbound,
+        }
+    }
+
+    /// Creates a local repository whose maintenance agent is `agent` and returns its identifier.
+    pub async fn create_repository(&self, agent: AgentId, password: &str) -> Uuid {
+        let body = json!({
+            "name": format!("repo-{}", Uuid::now_v7()),
+            "backend": {"kind": "local", "path": "/srv/backup/restic"},
+            "password": password,
+            "maintenance_agent_id": agent.to_string(),
+        });
+        let (status, _, repository) = send(
+            &self.app,
+            bearer_request("POST", "/api/v1/repositories", &self.admin, Some(body)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{repository}");
+        id_of(&repository)
+    }
+
+    /// The fields of `extra` replace or add to the request body.
+    pub async fn create_profile(&self, repository: Uuid, extra: Value) -> Uuid {
+        let mut body = json!({
+            "name": format!("profile-{}", Uuid::now_v7()),
+            "repository_id": repository.to_string(),
+            "paths": {"all": ["/srv"]},
+        });
+        if let (Some(target), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
+            for (key, value) in extra {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+        let (status, _, response) = send(
+            &self.app,
+            bearer_request("POST", "/api/v1/profiles", &self.admin, Some(body)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{response}");
+        id_of(&response["profile"])
+    }
+
+    /// Creates a plan that no scheduler pass fires during the test (a far cron).
+    pub async fn create_plan(&self, profile: Uuid, agent: AgentId) -> Uuid {
+        let body = json!({
+            "name": format!("plan-{}", Uuid::now_v7()),
+            "profile_id": profile.to_string(),
+            "agent_id": agent.to_string(),
+            "cron": "0 2 1 1 *",
+            "time_zone": "UTC",
+            "missed_run_policy": "skip",
+        });
+        let (status, _, response) = send(
+            &self.app,
+            bearer_request("POST", "/api/v1/plans", &self.admin, Some(body)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{response}");
+        id_of(&response["plan"])
+    }
+
+    /// Posts the manual run as an Operator and returns the new job.
+    pub async fn run_plan(&self, plan: Uuid) -> Uuid {
+        let (status, _, job) = send(
+            &self.app,
+            bearer_request(
+                "POST",
+                &format!("/api/v1/plans/{plan}/run"),
+                &self.operator,
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{job}");
+        id_of(&job)
+    }
+
+    /// Writes a queued job of any queue kind, as the maintenance of a later epic does.
+    pub async fn enqueue(
+        &self,
+        kind: restichub_db::JobKind,
+        agent: AgentId,
+        repository: Uuid,
+        plan: Option<Uuid>,
+    ) -> Uuid {
+        let id = restichub_db::JobId::new();
+        let mut tx = self
+            .db
+            .database()
+            .begin_tenant(self.tenant)
+            .await
+            .expect("cannot begin the transaction");
+        restichub_db::jobs::create(
+            &mut tx,
+            &restichub_db::jobs::NewJob {
+                id,
+                kind,
+                agent_id: agent,
+                repository_id: Some(restichub_db::RepositoryId::from_uuid(repository)),
+                plan_id: plan.map(restichub_db::PlanId::from_uuid),
+                fire_time: None,
+                expires_at: Some(self.now() + time::Duration::hours(1)),
+                location_fingerprint: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("cannot create the job");
+        tx.commit().await.expect("cannot commit the job");
+        id.as_uuid()
+    }
+
+    pub async fn job(&self, job: Uuid) -> Value {
+        let (status, _, body) = send(
+            &self.app,
+            bearer_request("GET", &format!("/api/v1/jobs/{job}"), &self.admin, None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    }
+
+    pub async fn job_status(&self, job: Uuid) -> String {
+        self.job(job).await["status"]
+            .as_str()
+            .expect("the job status")
+            .to_owned()
+    }
+
+    /// Sends an API call with a bearer token and returns the status and the body.
+    pub async fn call(
+        &self,
+        token: &str,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let (status, _, body) = send(&self.app, bearer_request(method, uri, token, body)).await;
+        (status, body)
+    }
+
+    /// Reads the signed job key of the installation, to verify a delivered job.
+    pub async fn verify(&self, signed: &SignedJob, agent: &FakeAgent) -> Job {
+        let mut tx = self
+            .db
+            .database()
+            .begin_tenant(PLATFORM_TENANT_ID)
+            .await
+            .expect("cannot begin the transaction");
+        let rows = signing::list(&mut tx).await.expect("cannot list the keys");
+        tx.commit().await.expect("cannot commit the read");
+        let row = rows
+            .into_iter()
+            .find(|row| {
+                row.role == SigningKeyRole::Current
+                    && row.retired_at.is_none()
+                    && row.retire_after.is_none()
+            })
+            .expect("the current key is present");
+        let bytes: [u8; 32] = row.public_key.as_slice().try_into().expect("a 32-byte key");
+        let mut ring = KeyRing::new();
+        ring.insert(
+            row.id.to_string(),
+            ed25519_dalek::VerifyingKey::from_bytes(&bytes).expect("a valid key"),
+        )
+        .expect("the ring must accept the key");
+        verify_job(
+            signed,
+            &ring,
+            &Expected {
+                agent_id: agent.identity.agent_id.clone(),
+                tenant_id: self.tenant.to_string(),
+                now: prost_types::Timestamp {
+                    seconds: self.now().unix_timestamp(),
+                    nanos: 0,
+                },
+            },
+        )
+        .expect("the agent must verify the job")
+    }
+}
+
+pub fn id_of(value: &Value) -> Uuid {
+    Uuid::parse_str(value["id"].as_str().expect("the object id")).expect("the id is a UUID")
+}
+
+fn hello() -> AgentMessage {
+    AgentMessage {
+        payload: Some(agent_message::Payload::AgentHello(AgentHello {
+            protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
+            protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
+            agent_version: "0.1.0".to_owned(),
+            ..AgentHello::default()
+        })),
+    }
+}
+
+async fn next_message(inbound: &mut Streaming<ControlMessage>) -> ControlMessage {
+    tokio::time::timeout(Duration::from_secs(10), inbound.message())
+        .await
+        .expect("the message must arrive")
+        .expect("the stream must not fail")
+        .expect("the stream must not end")
+}
+
+/// An enrolled agent on an open stream. The test plays the agent side by hand.
+pub struct FakeAgent {
+    pub id: AgentId,
+    pub identity: EnrolledIdentity,
+    pub tx: mpsc::Sender<AgentMessage>,
+    pub inbound: Streaming<ControlMessage>,
+}
+
+impl FakeAgent {
+    /// The next signed job within `wait`, or `None`. A heartbeat is skipped.
+    pub async fn try_job(&mut self, wait: Duration) -> Option<SignedJob> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let message = tokio::time::timeout(left, self.inbound.message())
+                .await
+                .ok()?
+                .ok()??;
+            if let Some(control_message::Payload::SignedJob(signed)) = message.payload {
+                return Some(signed);
+            }
+        }
+    }
+
+    /// Fails the test when no signed job arrives within ten seconds.
+    pub async fn job(&mut self) -> SignedJob {
+        self.try_job(Duration::from_secs(10))
+            .await
+            .expect("the signed job must arrive")
+    }
+
+    /// The identifier of the next cancel message within `wait`, or `None`. A heartbeat is skipped.
+    pub async fn try_cancel(&mut self, wait: Duration) -> Option<String> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let message = tokio::time::timeout(left, self.inbound.message())
+                .await
+                .ok()?
+                .ok()??;
+            if let Some(control_message::Payload::CancelJob(cancel)) = message.payload {
+                return Some(cancel.job_id);
+            }
+        }
+    }
+
+    /// Collects every signed job that arrives before the deadline, in order.
+    pub async fn jobs_within(&mut self, wait: Duration) -> Vec<String> {
+        let mut ids = Vec::new();
+        let deadline = tokio::time::Instant::now() + wait;
+        while let Some(signed) = self
+            .try_job(deadline.saturating_duration_since(tokio::time::Instant::now()))
+            .await
+        {
+            ids.push(decode_job_id(&signed));
+        }
+        ids
+    }
+
+    pub async fn ack(&self, job_id: &str) {
+        self.tx
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::JobAck(JobAck {
+                    job_id: job_id.to_owned(),
+                })),
+            })
+            .await
+            .expect("cannot send the acknowledgement");
+    }
+
+    /// Acknowledges a job and waits until the control plane shows it as running.
+    pub async fn start(&self, env: &Env, job_id: &str) {
+        self.ack(job_id).await;
+        let job = Uuid::parse_str(job_id).expect("job id");
+        eventually(|| async { env.job_status(job).await == "running" }).await;
+    }
+
+    /// Reports a success and waits until the control plane shows the job as succeeded.
+    pub async fn finish(&self, env: &Env, job_id: &str) {
+        self.result(job_id, JobStatus::Succeeded, StepStatus::Success)
+            .await;
+        let job = Uuid::parse_str(job_id).expect("job id");
+        eventually(|| async { env.job_status(job).await == "succeeded" }).await;
+    }
+
+    /// Reports a hard-killed step that can leave a stale lock (FR-AG-10).
+    pub async fn stale_lock_step(&self, job_id: &str) {
+        self.tx
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::StepResult(StepResult {
+                    job_id: job_id.to_owned(),
+                    step_id: "backup".to_owned(),
+                    status: StepStatus::Failed as i32,
+                    exit_code: -1,
+                    possible_stale_lock: true,
+                    ..StepResult::default()
+                })),
+            })
+            .await
+            .expect("cannot send the step result");
+    }
+
+    pub async fn result(&self, job_id: &str, outcome: JobStatus, status: StepStatus) {
+        self.tx
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::JobResult(JobResult {
+                    job_id: job_id.to_owned(),
+                    status: status as i32,
+                    steps_total: 1,
+                    steps_succeeded: u32::from(outcome == JobStatus::Succeeded),
+                    steps_failed: u32::from(outcome != JobStatus::Succeeded),
+                    outcome: outcome as i32,
+                    error: None,
+                })),
+            })
+            .await
+            .expect("cannot send the job result");
+    }
+}
+
+pub fn decode_job_id(signed: &SignedJob) -> String {
+    use prost::Message as _;
+    Job::decode(signed.job.as_slice())
+        .expect("the signed bytes hold a job")
+        .job_id
+}
+
+/// Waits until `check` holds, polling the API. The test fails after ten seconds.
+pub async fn eventually<F, Fut>(mut check: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    for _ in 0..200 {
+        if check().await {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the condition did not hold within ten seconds");
+}
+
+/// An emulated agent that runs the jobs with the given executor.
+pub struct Emulator {
+    pub id: AgentId,
+    shutdown: tokio::sync::watch::Sender<bool>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Emulator {
+    pub async fn stop(self) {
+        let _ = self.shutdown.send(true);
+        let _ = tokio::time::timeout(Duration::from_secs(2), self.task).await;
+    }
+}
+
+impl Env {
+    /// Enrolls an agent and runs the emulator with the executor against the listener.
+    pub async fn start_emulator(
+        &self,
+        hostname: &str,
+        executor: Arc<dyn restichub_emulator::executor::Executor>,
+    ) -> Emulator {
+        use base64::Engine as _;
+        use restichub_emulator::agent::{AgentConfig, AgentLoad, Backoff, run_agent};
+        use restichub_emulator::identity::AgentIdentity;
+        use restichub_emulator::metrics::Metrics;
+
+        let identity = self.enroll_agent(hostname).await;
+        let mut ring = KeyRing::new();
+        for key in &identity.signing_keys {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&key.public_key)
+                .expect("the public key is base64");
+            let bytes: [u8; 32] = bytes.as_slice().try_into().expect("a 32-byte key");
+            ring.insert(
+                key.key_id.clone(),
+                ed25519_dalek::VerifyingKey::from_bytes(&bytes).expect("a valid key"),
+            )
+            .expect("the ring must accept the enrollment key");
+        }
+        let id = AgentId::from_uuid(Uuid::parse_str(&identity.agent_id).expect("agent id"));
+        let config = Arc::new(AgentConfig {
+            tenant_id: identity.tenant_id.clone(),
+            server_url: self.listener.https_url(),
+            server_name: "localhost".to_owned(),
+            ca_pem: der_to_pem("CERTIFICATE", &self.listener.root_der),
+            identity: AgentIdentity {
+                agent_id: identity.agent_id.clone(),
+                cert_pem: client_chain_pem(&identity),
+                key_pem: identity.key_pem.clone(),
+            },
+            key_ring: ring,
+            executor,
+            backoff: Backoff {
+                base: Duration::from_millis(50),
+                max: Duration::from_millis(200),
+            },
+            load: AgentLoad::new(Arc::new(Metrics::default())),
+        });
+        let (shutdown, rx) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(run_agent(config, rx));
+        eventually_online(&self.state, id).await;
+        Emulator { id, shutdown, task }
+    }
+}
+
+async fn eventually_online(state: &AppState, agent: AgentId) {
+    eventually(|| async { state.agent_registry().is_online(agent) }).await;
+}

@@ -413,9 +413,8 @@ pub async fn delete_plan(
     let Some(current) = repo::get_for_update(&mut tx, plan_id).await? else {
         return Err(ApiError::not_found());
     };
-    // Until the queue dispatcher of a later part of epic #7 exists, the queued jobs of the plan go
-    // to the terminal `cancelled` status in the delete transaction, so no job outlives its plan
-    // (FR-SC-07).
+    // The queued jobs of the plan end as cancelled in the delete transaction, so no queued job
+    // outlives its plan (FR-SC-07). A sent or running job keeps its lifecycle.
     restichub_db::jobs::cancel_for_plan(&mut tx, plan_id, now).await?;
     repo::delete(&mut tx, plan_id).await?;
     let mut event = context.audit_event(AuditAction::PlanDelete, "plan", plan_id.as_uuid());
@@ -644,7 +643,7 @@ fn parse_id<T>(field: &'static str, value: &str, wrap: fn(uuid::Uuid) -> T) -> R
         })
 }
 
-fn parse_plan_id(value: &str) -> Result<PlanId, ApiError> {
+pub(crate) fn parse_plan_id(value: &str) -> Result<PlanId, ApiError> {
     parse_id("id", value, PlanId::from_uuid)
 }
 

@@ -7,8 +7,8 @@
 //! for a `(plan_id, fire_time)` pair (AC-SC-02).
 //!
 //! The scheduler creates a job row only: the kind `backup`, the agent, the repository, the plan and
-//! the fire time. The row holds no secret and no compiled command; the control plane recompiles the
-//! stored profile when it dispatches the job (a later part of epic #7).
+//! the fire time. The row holds no secret and no compiled command; the dispatcher of
+//! [`crate::queue`] recompiles the stored profile when it sends the job.
 //!
 //! A suspended tenant and a plan whose agent is revoked create no jobs (AC-TN-03). A plan whose
 //! agent is revoked still advances its fire time, so the control plane does not reprocess it on

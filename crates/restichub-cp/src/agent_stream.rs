@@ -208,7 +208,7 @@ impl StreamRegistry {
 
     /// Sends a control message to the open stream of an agent. False when the agent is offline.
     ///
-    /// The job dispatcher of #7 delivers `SignedJob` messages through this call.
+    /// The queue dispatcher delivers `SignedJob` messages through this call.
     pub fn send_to_agent(&self, agent: AgentId, message: ControlMessage) -> bool {
         self.lock()
             .streams
@@ -225,8 +225,8 @@ impl StreamRegistry {
         self.lock().streams.contains_key(&agent)
     }
 
-    #[cfg(test)]
-    fn online_agents(&self) -> Vec<AgentId> {
+    /// The agents that hold an open stream at this moment. The queue dispatcher sends to these only.
+    pub fn online_agents(&self) -> Vec<AgentId> {
         self.lock().streams.keys().copied().collect()
     }
 
@@ -652,7 +652,7 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
 ///
 /// The identity comes from the certificate, never from the message. An acknowledgement is accepted
 /// only for the current key identifier of the signing service and within the length bound, so a
-/// flood of other identifiers cannot grow the registry. Job messages belong to #7.
+/// flood of other identifiers cannot grow the registry.
 async fn handle_message(state: &AppState, identity: &PeerIdentity, message: AgentMessage) {
     match message.payload {
         Some(agent_message::Payload::KeyUpdateAck(ack)) => {
@@ -680,13 +680,21 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
         Some(agent_message::Payload::JobResult(result)) => {
             crate::jobs::handle_job_result(state, identity.tenant, identity.agent, &result).await;
         }
+        Some(agent_message::Payload::StepResult(result)) => {
+            crate::queue::stale::handle_step_result(
+                state,
+                identity.tenant,
+                identity.agent,
+                &result,
+            )
+            .await;
+        }
         Some(
             agent_message::Payload::StepProgress(_)
             | agent_message::Payload::LogChunk(_)
-            | agent_message::Payload::StepResult(_)
             | agent_message::Payload::CertificateSigningRequest(_),
         ) => {
-            // Job progress, logs and certificate rotation belong to #7 and #51.
+            // Job progress, logs and certificate rotation belong to other parts of the plan.
         }
         None => {}
     }

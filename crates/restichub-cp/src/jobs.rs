@@ -11,8 +11,8 @@
 //! [`SecretReader`], which writes the `secret_delivered` audit record in the same transaction
 //! (AC-RP-03). The transaction commits before the control plane sends the value to the agent.
 //!
-//! The MVP holds no queue for an on-demand job: an offline agent gives HTTP 409 `agent_offline` at
-//! once (the scheduler of epic #7 adds the queue).
+//! An on-demand job holds no queue slot: an offline agent gives HTTP 409 `agent_offline` at once.
+//! The scheduled jobs go through the queue of [`crate::queue`].
 //!
 //! The safety rule of an init: the job always holds a `test_access` step before the `init` step, and
 //! the agent runs `init` only when `test_access` exited with restic code 10 (the repository does not
@@ -35,6 +35,7 @@ use axum::http::StatusCode;
 use restichub_compiler::ValidatedJob;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::jobs::{self as job_repo, Job, JobOutcome, NewJob};
+use restichub_db::queue::JobDetail;
 use restichub_db::repositories::{self as repo, Repository};
 use restichub_db::{
     AgentId, AgentStatus, BackendKind, JobId, JobKind, JobResultCode, JobStatus, RepositoryId,
@@ -43,8 +44,8 @@ use restichub_db::{
 use restichub_proto::agent::v1::{
     ControlMessage, InitStep, Job as ProtoJob, JobAck, JobRejected, JobResult,
     JobStatus as ProtoJobStatus, LocalCredentials, RejectReason, RepositoryAccess, RestCredentials,
-    S3Credentials, Step, TestAccessStep, control_message, repository_access::BackendCredentials,
-    step,
+    S3Credentials, Step, StepStatus, TestAccessStep, control_message,
+    repository_access::BackendCredentials, step,
 };
 use restichub_secrets::{KekProvider, SecretString};
 use serde::{Deserialize, Serialize};
@@ -54,9 +55,10 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
-use crate::delivery::SecretReader;
+use crate::delivery::{DeliveryError, SecretReader};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
+use crate::queue::retry;
 use crate::repositories::stored_location;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -109,6 +111,30 @@ pub struct JobView {
     pub finished_at: Option<String>,
     /// In RFC 3339. Null when the job holds no expiry.
     pub expires_at: Option<String>,
+    /// Null for an on-demand job and for a job whose plan was deleted.
+    pub plan_id: Option<String>,
+    /// Null in a response that joins no display names.
+    pub plan_name: Option<String>,
+    /// Null in a response that joins no display names.
+    pub agent_hostname: Option<String>,
+    /// Null in a response that joins no display names.
+    pub repository_name: Option<String>,
+    /// In RFC 3339. Null until the agent starts the job.
+    pub started_at: Option<String>,
+    /// In RFC 3339. The earliest time at which the queue sends the job.
+    pub run_at: String,
+    /// Lock retries so far (restic exit code 11).
+    pub attempt: i32,
+}
+
+impl From<&JobDetail> for JobView {
+    fn from(detail: &JobDetail) -> Self {
+        let mut view = Self::from(&detail.job);
+        view.plan_name = detail.plan_name.clone();
+        view.agent_hostname = detail.agent_hostname.clone();
+        view.repository_name = detail.repository_name.clone();
+        view
+    }
 }
 
 impl From<&Job> for JobView {
@@ -125,6 +151,13 @@ impl From<&Job> for JobView {
             updated_at: format_time(job.updated_at),
             finished_at: job.finished_at.map(format_time),
             expires_at: job.expires_at.map(format_time),
+            plan_id: job.plan_id.map(|id| id.to_string()),
+            plan_name: None,
+            agent_hostname: None,
+            repository_name: None,
+            started_at: job.started_at.map(format_time),
+            run_at: format_time(job.run_at),
+            attempt: job.attempt,
         }
     }
 }
@@ -227,7 +260,7 @@ pub async fn get_job(
         .tenant_tx(&state, async |tx| {
             // An overdue job moves to `expired` on read, so a poll sees a terminal status.
             job_repo::mark_expired(tx, job_id, now).await?;
-            Ok(job_repo::get(tx, job_id).await?)
+            Ok(restichub_db::queue::get_detail(tx, job_id).await?)
         })
         .await?;
     match job {
@@ -439,7 +472,9 @@ pub async fn handle_job_rejected(
     }
     if let Err(error) = tx.commit().await {
         tracing::warn!(job = %job_id, %error, "the rejection could not commit");
+        return;
     }
+    state.wake_dispatcher();
 }
 
 /// The stable code of a `RejectReason`. The user interface translates it (NFR-DOC-04).
@@ -498,6 +533,20 @@ pub async fn handle_job_result(
         tracing::warn!(job = %job_id, "the job result holds an unknown outcome");
         return;
     };
+    // Restic exit code 11 is a held lock, not a failure: the job returns to the queue or, after the
+    // last retry, to the dead-letter status (FR-SC-05).
+    if result.status == StepStatus::Retry as i32 && retry::is_retryable(job.kind) {
+        if let Err(error) = retry::apply_lock(&mut tx, state.queue_config(), &job, now).await {
+            tracing::warn!(job = %job_id, %error, "the lock result could not update the job");
+            return;
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::warn!(job = %job_id, %error, "the lock result could not commit");
+            return;
+        }
+        state.wake_dispatcher();
+        return;
+    }
     // A `not_initialized` result on an initialized repository is a location mismatch, not a normal
     // result: the job fails with the typed access error and the flag stays.
     let outcome = match (outcome.result_code, job.repository_id) {
@@ -534,7 +583,10 @@ pub async fn handle_job_result(
     }
     if let Err(error) = tx.commit().await {
         tracing::warn!(job = %job_id, %error, "the job result could not commit");
+        return;
     }
+    // A finished job frees its slot, so the queue may start the next job.
+    state.wake_dispatcher();
 }
 
 /// Sets `repositories.initialized = true` while the location still matches the job.
@@ -571,7 +623,7 @@ async fn apply_initialized(
 /// An init and a local-path test-access run only on the maintenance agent: an init belongs to the
 /// host that owns the repository, and a local path lives on one host. A test-access of an S3 or
 /// rest repository defaults to the maintenance agent and accepts another explicit agent.
-fn resolve_agent(
+pub(crate) fn resolve_agent(
     repository: &Repository,
     explicit: Option<AgentId>,
     kind: JobKind,
@@ -622,7 +674,7 @@ fn repository_fingerprint(repository: &Repository) -> String {
 }
 
 /// Refuses an agent that is absent, of another tenant, or revoked (FR-RP-08).
-async fn ensure_agent_active(
+pub(crate) async fn ensure_agent_active(
     tx: &mut restichub_db::TenantTx<'_>,
     agent: AgentId,
 ) -> Result<(), ApiError> {
@@ -636,13 +688,13 @@ async fn ensure_agent_active(
 }
 
 /// Builds the repository access of the job and records each secret delivery (FR-PR-05, AC-RP-03).
-async fn repository_access(
+pub(crate) async fn repository_access(
     tx: &mut restichub_db::TenantTx<'_>,
     provider: &dyn KekProvider,
     repository: &Repository,
     agent_id: AgentId,
     job_id: JobId,
-) -> Result<RepositoryAccess, ApiError> {
+) -> Result<RepositoryAccess, DeliveryError> {
     let reader = SecretReader::new(provider);
     let agent = agent_id.as_uuid();
     let job = job_id.as_uuid();
@@ -723,7 +775,7 @@ async fn read_secret(
     agent: Uuid,
     job: Uuid,
     repository: Uuid,
-) -> Result<Option<String>, ApiError> {
+) -> Result<Option<String>, DeliveryError> {
     let Some(secret) = secret else {
         return Ok(None);
     };
@@ -810,7 +862,7 @@ fn parse_optional_agent_id(value: Option<&str>) -> Result<Option<AgentId>, ApiEr
     }
 }
 
-fn parse_job_id(value: &str) -> Result<JobId, ApiError> {
+pub(crate) fn parse_job_id(value: &str) -> Result<JobId, ApiError> {
     Uuid::parse_str(value)
         .map(JobId::from_uuid)
         .map_err(|error| {
@@ -819,18 +871,18 @@ fn parse_job_id(value: &str) -> Result<JobId, ApiError> {
 }
 
 /// Parses a job identifier from a stream message. `None` on a malformed value.
-fn parse_job_id_value(value: &str) -> Option<JobId> {
+pub(crate) fn parse_job_id_value(value: &str) -> Option<JobId> {
     Uuid::parse_str(value).ok().map(JobId::from_uuid)
 }
 
-fn timestamp(time: OffsetDateTime) -> prost_types::Timestamp {
+pub(crate) fn timestamp(time: OffsetDateTime) -> prost_types::Timestamp {
     prost_types::Timestamp {
         seconds: time.unix_timestamp(),
         nanos: time.nanosecond() as i32,
     }
 }
 
-fn format_time(value: OffsetDateTime) -> String {
+pub(crate) fn format_time(value: OffsetDateTime) -> String {
     use time::format_description::well_known::Rfc3339;
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }

@@ -9,7 +9,7 @@ use axum::{Json, Router};
 use http_body_util::BodyExt;
 use restichub_db::Database;
 use restichub_secrets::KekProvider;
-use tokio::sync::Semaphore;
+use tokio::sync::{Notify, Semaphore};
 use tower_http::request_id::{
     MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
 };
@@ -29,6 +29,7 @@ use crate::config::{AuthConfig, TenancyConfig};
 use crate::error::{ApiError, InternalCause, PROBLEM_CONTENT_TYPE};
 use crate::job_signing::JobSigningService;
 use crate::pki::CaStore;
+use crate::queue::QueueConfig;
 use crate::rate_limit::RateLimiter;
 use crate::routes::ROUTES;
 
@@ -157,6 +158,8 @@ pub struct AppState {
     job_signing: Option<JobSigningService>,
     agent_endpoint: Option<String>,
     agent_registry: Arc<StreamRegistry>,
+    queue: QueueConfig,
+    dispatch_wake: Arc<Notify>,
 }
 
 impl AppState {
@@ -177,6 +180,8 @@ impl AppState {
             job_signing: None,
             agent_endpoint: None,
             agent_registry: Arc::new(StreamRegistry::new()),
+            queue: QueueConfig::default(),
+            dispatch_wake: Arc::new(Notify::new()),
         }
     }
 
@@ -191,6 +196,8 @@ impl AppState {
             job_signing: None,
             agent_endpoint: None,
             agent_registry: Arc::new(StreamRegistry::new()),
+            queue: QueueConfig::default(),
+            dispatch_wake: Arc::new(Notify::new()),
         }
     }
 
@@ -224,6 +231,12 @@ impl AppState {
         self.ca = Some(ca);
         self.job_signing = Some(job_signing);
         self.agent_endpoint = agent_endpoint;
+        self
+    }
+
+    /// The server passes the settings of the job queue here (FR-SC-08).
+    pub fn with_queue(mut self, queue: QueueConfig) -> Self {
+        self.queue = queue;
         self
     }
 
@@ -266,6 +279,20 @@ impl AppState {
     /// The in-process map of the live streams (ADR-0026).
     pub fn agent_registry(&self) -> &StreamRegistry {
         &self.agent_registry
+    }
+
+    pub fn queue_config(&self) -> &QueueConfig {
+        &self.queue
+    }
+
+    /// Asks the dispatcher for a pass now. A manual run and a finished job call it.
+    pub fn wake_dispatcher(&self) {
+        self.dispatch_wake.notify_one();
+    }
+
+    /// The signal that the dispatcher loop waits on.
+    pub fn dispatch_wake(&self) -> Arc<Notify> {
+        Arc::clone(&self.dispatch_wake)
     }
 
     /// The shared registry, for the batch flush of the `last_seen_at` writes.

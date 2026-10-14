@@ -58,6 +58,8 @@ pub enum Reason {
     Incompatible,
     /// Not available yet (FR-HK-04).
     Unavailable,
+    /// A confirmation value does not match the object (FR-SC-06).
+    Mismatch,
 }
 
 impl Reason {
@@ -78,6 +80,7 @@ impl Reason {
             Self::Unsupported => "unsupported",
             Self::Incompatible => "incompatible",
             Self::Unavailable => "unavailable",
+            Self::Mismatch => "mismatch",
         }
     }
 }

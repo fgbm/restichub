@@ -55,6 +55,7 @@ pub enum Operation {
     RepositoriesRead,
     RepositoriesWrite,
     JobsRead,
+    JobsWrite,
     ProfilesRead,
     ProfilesWrite,
     PlansRead,
@@ -90,6 +91,7 @@ impl Operation {
                 | Self::RepositoriesRead
                 | Self::RepositoriesWrite
                 | Self::JobsRead
+                | Self::JobsWrite
                 | Self::ProfilesRead
                 | Self::ProfilesWrite
                 | Self::PlansRead
@@ -114,7 +116,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 28] = [
+    pub const ALL: [Operation; 29] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -139,6 +141,7 @@ impl Operation {
         Operation::RepositoriesRead,
         Operation::RepositoriesWrite,
         Operation::JobsRead,
+        Operation::JobsWrite,
         Operation::ProfilesRead,
         Operation::ProfilesWrite,
         Operation::PlansRead,
@@ -173,6 +176,7 @@ impl Operation {
             | Operation::RepositoriesRead
             | Operation::RepositoriesWrite
             | Operation::JobsRead
+            | Operation::JobsWrite
             | Operation::ProfilesRead
             | Operation::ProfilesWrite
             | Operation::PlansRead
@@ -219,6 +223,8 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::RepositoriesRead => Role::Viewer,
         Operation::RepositoriesWrite => Role::Admin,
         Operation::JobsRead => Role::Viewer,
+        // An Operator runs and cancels jobs (requirements section 2).
+        Operation::JobsWrite => Role::Operator,
         Operation::ProfilesRead => Role::Viewer,
         // An Operator manages the profiles and the plans (requirements section 2).
         Operation::ProfilesWrite => Role::Operator,

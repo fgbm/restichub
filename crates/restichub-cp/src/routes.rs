@@ -434,10 +434,31 @@ pub const ROUTES: &[Route] = &[
         },
     },
     Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/unlock-all",
+        access: Access::Protected(Operation::RepositoriesWrite),
+        handler: || {
+            routes!(crate::job_api::unlock_all_repository)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/jobs",
+        access: Access::Protected(Operation::JobsRead),
+        handler: || routes!(crate::job_api::list_jobs),
+    },
+    Route {
         method: "get",
         path: "/api/v1/jobs/{id}",
         access: Access::Protected(Operation::JobsRead),
         handler: || routes!(crate::jobs::get_job),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/jobs/{id}/cancel",
+        access: Access::Protected(Operation::JobsWrite),
+        handler: || routes!(crate::job_api::cancel_job),
     },
     Route {
         method: "get",
@@ -519,6 +540,12 @@ pub const ROUTES: &[Route] = &[
         path: "/api/v1/plans/{id}",
         access: Access::Protected(Operation::PlansWrite),
         handler: || routes!(crate::plans::delete_plan),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/plans/{id}/run",
+        access: Access::Protected(Operation::PlansWrite),
+        handler: || routes!(crate::job_api::run_plan),
     },
     Route {
         method: "get",

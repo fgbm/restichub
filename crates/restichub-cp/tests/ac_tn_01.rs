@@ -131,7 +131,13 @@ const FIXTURES: &[(&str, Fixture)] = &[
         "/api/v1/repositories/{id}/test-access",
         Fixture::Object(Object::Repository),
     ),
+    (
+        "/api/v1/repositories/{id}/unlock-all",
+        Fixture::Object(Object::Repository),
+    ),
+    ("/api/v1/jobs", Fixture::Collection),
     ("/api/v1/jobs/{id}", Fixture::Object(Object::Job)),
+    ("/api/v1/jobs/{id}/cancel", Fixture::Object(Object::Job)),
     ("/api/v1/profiles", Fixture::Collection),
     ("/api/v1/profiles/{id}", Fixture::Object(Object::Profile)),
     (
@@ -140,6 +146,7 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ),
     ("/api/v1/plans", Fixture::Collection),
     ("/api/v1/plans/{id}", Fixture::Object(Object::Plan)),
+    ("/api/v1/plans/{id}/run", Fixture::Object(Object::Plan)),
     (
         "/api/v1/plans/{id}/next-runs",
         Fixture::Object(Object::Plan),

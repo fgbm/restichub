@@ -138,11 +138,15 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .with_trusted_proxies(config.trusted_proxies.clone())
         .with_kek(kek)
         .with_tenancy(config.tenancy.clone())
+        .with_queue(config.queue.clone())
         .with_pki(
             ca_store.clone(),
             job_signing.clone(),
             config.agent_endpoint.clone(),
         );
+    // The dispatcher sends the queued jobs to the online agents (FR-SC-03, ADR-0010). It runs in the
+    // control plane; the agent holds no schedule (ADR-0002).
+    restichub_cp::queue::spawn(state.clone(), state.auth().clock.clone());
     let app = server::router(state.clone());
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await
