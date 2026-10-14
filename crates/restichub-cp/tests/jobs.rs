@@ -945,17 +945,44 @@ async fn run_job_with_emulator(
 ) -> (String, Option<String>, bool) {
     let (shutdown, task) = start_emulator(setup, executor);
     let agent = AgentId::from_uuid(setup.agent_id());
-    let mut online = false;
+
+    // The emulator reconnects with backoff, and the stream can drop between the check and the
+    // action. Retry the action while the agent is not ready (the job start needs a live stream).
+    let mut job_id = None;
     for _ in 0..200 {
         if setup.listener.state.agent_registry().is_online(agent) {
-            online = true;
-            break;
+            // Give the stream a moment to settle after the handshake, then start the job.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let (status, _, job) = send(
+                app,
+                request(
+                    "POST",
+                    &format!("/api/v1/repositories/{repository_id}/{action}"),
+                    Some(&setup.admin),
+                    Some(json!({})),
+                ),
+            )
+            .await;
+            if status == StatusCode::ACCEPTED {
+                job_id = Some(
+                    job.get("id")
+                        .and_then(Value::as_str)
+                        .expect("the job id")
+                        .to_owned(),
+                );
+                break;
+            }
+            assert_eq!(status, StatusCode::CONFLICT, "{job}");
+            assert_eq!(
+                job.get("code").and_then(Value::as_str),
+                Some("agent_offline"),
+                "{job}"
+            );
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert!(online, "the emulator agent must connect");
+    let job_id = job_id.expect("the job must start while the emulator is online");
 
-    let job_id = start_action(app, setup, repository_id, action).await;
     let mut finished = json!({});
     for _ in 0..200 {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -985,9 +1012,9 @@ async fn run_job_with_emulator(
     )
 }
 
-/// HIGH 2: the init chain through the real emulator and a scripted executor.
+/// HIGH 2: test_access exit 1 runs no init and the job fails.
 #[tokio::test]
-async fn high_2_the_init_chain_through_the_emulator() {
+async fn high_2_a_test_access_failure_runs_no_init() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -995,7 +1022,6 @@ async fn high_2_the_init_chain_through_the_emulator() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
 
-    // test_access exit 1: the init step must not run.
     let (status, code, initialized) = run_job_with_emulator(
         &setup,
         &app,
@@ -1008,7 +1034,19 @@ async fn high_2_the_init_chain_through_the_emulator() {
     assert_eq!(code.as_deref(), Some("failed"));
     assert!(!initialized, "a failed test_access must not initialize");
 
-    // test_access exit 12: config_error, no init.
+    db.cleanup().await;
+}
+
+/// HIGH 2: test_access exit 12 gives config_error and runs no init.
+#[tokio::test]
+async fn high_2_a_wrong_password_gives_config_error() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let setup = setup(&db).await;
+    let app = api_router(setup.listener.state.clone());
+    let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
+
     let (status, code, initialized) = run_job_with_emulator(
         &setup,
         &app,
@@ -1021,7 +1059,19 @@ async fn high_2_the_init_chain_through_the_emulator() {
     assert_eq!(code.as_deref(), Some("config_error"));
     assert!(!initialized);
 
-    // test_access exit 10 then init exit 0: succeeded and initialized.
+    db.cleanup().await;
+}
+
+/// HIGH 2: test_access exit 10 then init exit 0 succeeds and initializes the repository.
+#[tokio::test]
+async fn high_2_an_init_after_a_missing_repository_succeeds() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let setup = setup(&db).await;
+    let app = api_router(setup.listener.state.clone());
+    let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
+
     let (status, code, initialized) = run_job_with_emulator(
         &setup,
         &app,
