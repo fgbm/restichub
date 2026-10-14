@@ -277,6 +277,8 @@ async fn create_repository_job(
             kind,
             agent_id,
             repository_id: Some(repository_id),
+            plan_id: None,
+            fire_time: None,
             expires_at: Some(expires_at),
             location_fingerprint: Some(fingerprint),
             created_by,
