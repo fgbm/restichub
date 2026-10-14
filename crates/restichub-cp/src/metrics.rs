@@ -53,7 +53,7 @@ pub async fn metrics(
     Ok(response)
 }
 
-/// Renders a snapshot. `online` tells whether the agent holds an open stream.
+/// Writes the exposition text for one tenant. `online` tells whether an agent holds a stream.
 pub fn render(
     tenant: TenantId,
     snapshot: &MetricsSnapshot,

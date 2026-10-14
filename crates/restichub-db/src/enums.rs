@@ -515,7 +515,7 @@ impl ActorType {
     }
 }
 
-/// The result of one step of a job (FR-AG-09).
+/// How one step of a job ended. The agent maps the restic exit code to it (FR-AG-09).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -557,7 +557,7 @@ impl StepStatus {
     }
 }
 
-/// The source of a job log line (FR-AG-08).
+/// Where a log line came from: a restic stream or the agent itself (FR-AG-08).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]

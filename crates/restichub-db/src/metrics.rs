@@ -17,7 +17,7 @@ pub const DURATION_BUCKETS: [f64; 10] = [
     1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0, 3600.0,
 ];
 
-/// The job durations of one kind as a cumulative histogram.
+/// Cumulative histogram of the job durations of one kind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DurationHistogram {
     /// For each bound of [`DURATION_BUCKETS`], the jobs that took at most that long.
@@ -26,17 +26,16 @@ pub struct DurationHistogram {
     pub sum_seconds: f64,
 }
 
-/// The values of one scrape for one tenant.
+/// Everything one scrape reads. Each query runs under the tenant policy of the transaction.
 #[derive(Debug, Clone, Default)]
 pub struct MetricsSnapshot {
     /// The time of the last successful backup job of each plan.
     pub last_success: Vec<(PlanId, OffsetDateTime)>,
     pub durations: BTreeMap<&'static str, DurationHistogram>,
-    /// The count of each terminal job status.
+    /// Only the final statuses, so that the counter never decreases.
     pub jobs_total: Vec<(JobStatus, i64)>,
     /// For each repository, whether a job that waits or runs reported a held lock.
     pub repo_lock_held: Vec<(RepositoryId, bool)>,
-    /// The active agents of the tenant.
     pub agents: Vec<AgentId>,
 }
 

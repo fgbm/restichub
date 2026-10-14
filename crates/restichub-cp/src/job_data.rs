@@ -348,12 +348,12 @@ fn valid_step_id(value: &str) -> bool {
     !value.is_empty() && value.chars().count() <= MAX_STEP_ID_LEN
 }
 
-/// A counter as a signed database value.
+/// Clamps a counter into the signed range of the database.
 fn count(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-/// A float that is finite and not negative.
+/// Maps NaN, infinity and negative values to zero.
 fn non_negative(value: f64) -> f64 {
     if value.is_finite() && value > 0.0 {
         value
@@ -362,7 +362,6 @@ fn non_negative(value: f64) -> f64 {
     }
 }
 
-/// A fraction from 0 to 1.
 fn fraction(value: f64) -> f64 {
     non_negative(value).min(1.0)
 }

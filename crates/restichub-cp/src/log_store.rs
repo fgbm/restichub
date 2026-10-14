@@ -24,7 +24,7 @@ pub const DEFAULT_RETENTION_DAYS: u32 = 30;
 /// How often the retention sweep runs.
 pub const RETENTION_INTERVAL: Duration = Duration::from_secs(3600);
 
-/// The lines that one delete statement removes.
+/// Bounds one delete statement, so a sweep never holds a long lock.
 const SWEEP_BATCH: i64 = 5000;
 
 /// The most bytes that the control plane accepts in one log chunk. The agent sends 8 KiB.
@@ -40,7 +40,7 @@ pub struct LogPage {
     pub state: Option<LogState>,
 }
 
-/// The backend of the job log text.
+/// Where the text of the job logs lives. Metadata never goes through it.
 pub trait LogStore: Send + Sync {
     /// Stores one chunk. A chunk that was stored before changes nothing.
     fn append(
@@ -51,7 +51,7 @@ pub trait LogStore: Send + Sync {
         now: OffsetDateTime,
     ) -> impl Future<Output = Result<AppendOutcome, DbError>> + Send;
 
-    /// Reads the lines after a line number, oldest first.
+    /// Returns up to `limit` lines numbered above `after_seq`, oldest first.
     fn read(
         &self,
         tenant: TenantId,
@@ -128,7 +128,7 @@ impl LogStore for DatabaseLogStore {
     }
 }
 
-/// Splits the text of a chunk into lines for storage.
+/// Makes the text of a chunk storable and returns one entry for each line.
 ///
 /// The agent scrubs the text before it sends it (FR-AG-06, NFR-SEC-05). The control plane still
 /// makes the text safe to store and to show: invalid UTF-8 and control characters never reach a

@@ -56,7 +56,7 @@ pub struct SnapshotsSummary {
     pub truncated: bool,
 }
 
-/// The counts of a `restic forget` step.
+/// Counts that `restic forget` reported, summed over the groups.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ForgetSummary {
@@ -67,7 +67,7 @@ pub struct ForgetSummary {
     pub truncated: bool,
 }
 
-/// The result of a `restic check` step.
+/// What `restic check --json` reported.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CheckSummary {
@@ -77,7 +77,7 @@ pub struct CheckSummary {
     pub packs_checked: i64,
 }
 
-/// The result of a `restic stats` step.
+/// What `restic stats --json` reported.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StatsSummary {
@@ -134,7 +134,7 @@ pub struct JobStep {
     pub exit_code: i32,
     pub started_at: Option<OffsetDateTime>,
     pub finished_at: Option<OffsetDateTime>,
-    /// A machine-readable error code (NFR-DOC-04). Never a secret.
+    /// Translated by the user interface (NFR-DOC-04). Never a secret.
     pub error_code: Option<String>,
     pub error_params: BTreeMap<String, String>,
     pub possible_stale_lock: bool,
@@ -267,7 +267,7 @@ macro_rules! step_columns {
 /// Stores one step result of a job.
 ///
 /// A second write of a step keeps the first row. It only adds an output that the first row lacked.
-/// The function returns `false` when the job already holds [`MAX_STEPS_PER_JOB`] other steps.
+/// Returns `false` when the job already holds [`MAX_STEPS_PER_JOB`] other steps.
 pub async fn upsert(tx: &mut TenantTx<'_>, job: JobId, step: &JobStep) -> Result<bool, DbError> {
     let known: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM job_steps WHERE job_id = $1 AND step_id = $2)",

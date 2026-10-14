@@ -108,7 +108,6 @@ async fn fr_mn_01_the_running_job_shows_the_last_progress() {
     assert_eq!(detail["progress"]["percent_done"], 0.5);
     assert_eq!(detail["progress"]["current_files"][0], "/srv/data/a.bin");
 
-    // A finished job shows no progress.
     agent.finish(&env, &id).await;
     assert!(env.job(job).await["progress"].is_null());
     env.db.cleanup().await;

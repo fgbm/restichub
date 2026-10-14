@@ -13,12 +13,12 @@ use crate::enums::{LogLevel, LogStream};
 use crate::ids::JobId;
 use crate::tx::TenantTx;
 
-/// The bytes of log text that one job stores.
+/// The most bytes of log text that one job keeps.
 ///
 /// The agent stops at 1 MiB and adds one marker line (FR-AG-08). The margin keeps that marker.
 pub const MAX_JOB_LOG_BYTES: i64 = 1024 * 1024 + 4096;
 
-/// The most lines that one read returns.
+/// Largest page that a read returns. A larger request is cut to it.
 pub const MAX_READ_LIMIT: i64 = 2000;
 
 /// One line to store.
@@ -33,18 +33,18 @@ pub struct NewLine {
 pub struct NewChunk {
     pub step_id: String,
     pub stream: LogStream,
-    /// The number of the chunk in its stream, from 1.
+    /// Counted per stream by the agent, from 1.
     pub chunk: i64,
     pub lines: Vec<NewLine>,
 }
 
-/// The result of a chunk write.
+/// What a chunk write did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppendOutcome {
     /// The number of lines that the write stored. It can be below the lines of the chunk when the
     /// bound cut the chunk.
     Stored(usize),
-    /// The chunk was stored before.
+    /// Stored before. The write changed nothing.
     Duplicate,
 }
 
@@ -59,7 +59,7 @@ pub struct LogLine {
     pub text: String,
 }
 
-/// The write state of the log of a job.
+/// Write state of one log: the stored size, the cut marker and the deletion by the sweep.
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
 pub struct LogState {
     pub last_seq: i64,
@@ -89,7 +89,7 @@ impl Marks {
     }
 }
 
-/// Appends the lines of one chunk in one statement.
+/// Stores one chunk, or skips it when its number is not above the highest stored one.
 pub async fn append(
     tx: &mut TenantTx<'_>,
     job: JobId,
@@ -199,7 +199,7 @@ pub async fn read(
     .map_err(DbError::Query)
 }
 
-/// Reads the write state of the log of a job. A job without a stored line has none.
+/// `None` when the job stored no line yet.
 pub async fn state(tx: &mut TenantTx<'_>, job: JobId) -> Result<Option<LogState>, DbError> {
     sqlx::query_as::<_, LogState>(
         "SELECT last_seq, bytes, truncated, purged_at FROM job_log_state WHERE job_id = $1",

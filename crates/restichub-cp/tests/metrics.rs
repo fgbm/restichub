@@ -132,8 +132,10 @@ fn parse(text: &str) -> Exposition {
     Exposition { types, samples }
 }
 
+type Series = Vec<(String, String)>;
+
 fn check_histograms(exposition: &Exposition, family: &str) {
-    let mut groups: BTreeMap<Vec<(String, String)>, Vec<(f64, f64)>> = BTreeMap::new();
+    let mut groups: BTreeMap<Series, Vec<(f64, f64)>> = BTreeMap::new();
     let mut counts = BTreeMap::new();
     for sample in &exposition.samples {
         let mut labels: Vec<_> = sample

@@ -511,3 +511,25 @@ fn ac_pr_04_a_lease_below_fifteen_seconds_is_refused() {
         Some(15)
     );
 }
+
+#[test]
+fn fr_lg_02_the_log_retention_defaults_to_thirty_days_and_never_drops_below_one() {
+    let load = |value: Option<&str>| {
+        let mut pairs = vec![("RESTICHUB_DATABASE_URL", "postgres://host/db")];
+        if let Some(value) = value {
+            pairs.push(("RESTICHUB_LOG_RETENTION_DAYS", value));
+        }
+        Config::load_with(&Cli::default(), &MapEnv::new(&pairs))
+            .map(|config| config.log_retention_days)
+    };
+    assert_eq!(load(None).ok(), Some(30));
+    assert_eq!(load(Some("7")).ok(), Some(7));
+    assert_eq!(load(Some("0")).ok(), Some(1));
+    assert!(matches!(
+        load(Some("many")),
+        Err(ConfigError::Invalid {
+            name: "RESTICHUB_LOG_RETENTION_DAYS",
+            ..
+        })
+    ));
+}

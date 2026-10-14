@@ -65,7 +65,7 @@ async fn ac_lg_01_db_a_resent_chunk_stores_no_line_twice() -> TestResult {
         job_logs::append(&mut tx, job, &second, now).await?,
         AppendOutcome::Duplicate
     );
-    // The streams count their chunks apart.
+    // Each stream numbers its chunks from 1, so chunk 1 of stderr is new.
     assert_eq!(
         job_logs::append(&mut tx, job, &chunk(LogStream::Stderr, 1, &["e"]), now).await?,
         AppendOutcome::Stored(1)
@@ -110,7 +110,7 @@ async fn fr_ag_08_db_the_log_of_a_job_is_bounded() -> TestResult {
         .expect("the state exists");
     assert!(state.truncated);
     assert!(state.bytes <= job_logs::MAX_JOB_LOG_BYTES);
-    // A later chunk adds no line.
+    // After the bound, a chunk still moves its mark but stores no line.
     assert_eq!(
         job_logs::append(
             &mut tx,
@@ -168,7 +168,7 @@ async fn ac_lg_01_db_the_retention_deletes_old_lines_and_keeps_the_job() -> Test
         .await?
         .expect("the state exists");
     assert!(state.purged_at.is_some());
-    // The job row and its steps stay.
+    // Only log text ages out: the job row and its steps stay (FR-LG-03).
     assert!(crate::jobs::get(&mut tx, job).await?.is_some());
     assert_eq!(job_steps::list(&mut tx, job).await?.len(), 1);
     tx.commit().await?;

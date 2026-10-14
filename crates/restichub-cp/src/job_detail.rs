@@ -36,7 +36,7 @@ pub struct StepView {
     pub started_at: Option<String>,
     /// In RFC 3339.
     pub finished_at: Option<String>,
-    /// A machine-readable error code. The user interface translates it (NFR-DOC-04).
+    /// Translated by the user interface (NFR-DOC-04).
     pub error_code: Option<String>,
     pub error_params: BTreeMap<String, String>,
     /// True after a hard kill that can leave a stale lock.
@@ -60,7 +60,7 @@ impl From<&JobStep> for StepView {
     }
 }
 
-/// The last progress of a running job.
+/// Last progress of the running step. It holds no value once the job ends.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProgressView {
     pub step_id: String,
@@ -95,10 +95,9 @@ impl From<&JobProgress> for ProgressView {
     }
 }
 
-/// The state of the log of a job.
+/// Size and fate of the stored log text.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LogInfo {
-    /// The number of stored lines.
     pub lines: i64,
     /// True when the control plane refused lines because the log reached its bound.
     pub truncated: bool,
@@ -111,9 +110,9 @@ pub struct LogInfo {
 pub struct JobDetailView {
     #[serde(flatten)]
     pub job: JobView,
-    /// In the order in which the steps ran.
+    /// Ordered by first arrival from the agent.
     pub steps: Vec<StepView>,
-    /// The output of the first step that has a summary. Null when no step has one.
+    /// Taken from the first step that carries a typed output. Null when no step has one.
     pub summary: Option<StepOutput>,
     /// Null unless the job is sent or running and the agent reported progress.
     pub progress: Option<ProgressView>,
@@ -194,7 +193,7 @@ pub struct LogQuery {
 /// One line of a job log.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LogLineView {
-    /// The position of the line in the log, from 1.
+    /// Keyset for `after_seq`. Counts from 1.
     pub seq: i64,
     /// Empty for a line of the job itself.
     pub step_id: String,

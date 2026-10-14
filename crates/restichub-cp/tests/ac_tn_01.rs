@@ -75,6 +75,9 @@ enum Fixture {
 const FIXTURES: &[(&str, Fixture)] = &[
     ("/healthz", Fixture::Exempt),
     ("/readyz", Fixture::Exempt),
+    // The scrape answers with text and reads the tenant of the credential only. The metrics tests
+    // prove that another tenant sees none of its samples.
+    ("/metrics", Fixture::Exempt),
     ("/api/v1/openapi.json", Fixture::Exempt),
     ("/api/v1/auth/sign-in", Fixture::Exempt),
     ("/api/v1/auth/sign-out", Fixture::Exempt),
@@ -138,6 +141,7 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/jobs", Fixture::Collection),
     ("/api/v1/jobs/{id}", Fixture::Object(Object::Job)),
     ("/api/v1/jobs/{id}/cancel", Fixture::Object(Object::Job)),
+    ("/api/v1/jobs/{id}/logs", Fixture::Object(Object::Job)),
     ("/api/v1/profiles", Fixture::Collection),
     ("/api/v1/profiles/{id}", Fixture::Object(Object::Profile)),
     (
