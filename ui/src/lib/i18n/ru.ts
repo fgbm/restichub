@@ -618,7 +618,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.kind.test_access': 'Проверка доступа',
 	'jobs.kind.backup': 'Резервная копия',
 	'jobs.kind.check': 'Проверка',
-	'jobs.kind.forget': 'Удаление снимков и prune',
+	'jobs.kind.forget': 'Удаление снимков (forget)',
 	'jobs.kind.prune': 'Очистка',
 	'jobs.kind.restore': 'Восстановление',
 	'jobs.kind.unlock': 'Снятие блокировок',

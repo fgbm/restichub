@@ -614,7 +614,7 @@ export const en = {
 	'jobs.kind.test_access': 'Test access',
 	'jobs.kind.backup': 'Backup',
 	'jobs.kind.check': 'Check',
-	'jobs.kind.forget': 'Forget and prune',
+	'jobs.kind.forget': 'Forget',
 	'jobs.kind.prune': 'Prune',
 	'jobs.kind.restore': 'Restore',
 	'jobs.kind.unlock': 'Unlock',
