@@ -1468,7 +1468,7 @@ export interface components {
          * @description A plan that the updated profile no longer compiles for (FR-SC-11).
          *
          *     The update does not refuse the change. The plan keeps its schedule and fails at dispatch time,
-         *     when the queue recompiles the profile for the facts of the agent (issue #86).
+         *     when the queue recompiles the profile for the facts of the agent, in a later part of epic #7.
          */
         PlanWarning: {
             /** @description The compiler field that the profile fails on, for example `paths`. */
