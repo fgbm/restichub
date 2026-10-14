@@ -82,6 +82,9 @@ const MAX_RESULT_MESSAGE_LEN: usize = 64;
 /// repository. The user interface translates it (NFR-DOC-04).
 const ACCESS_ERROR_CODE: &str = "repository_missing_here";
 
+/// The stable warning code of a `forget` step that selected no snapshot (FR-RP-08).
+const FORGET_SELECTED_NOTHING: &str = "forget_selected_nothing";
+
 /// The request body of an init or a test-access action.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -619,6 +622,17 @@ pub async fn handle_job_result(
             }
         }
         _ => outcome,
+    };
+    // A `forget` that selects no snapshot may hide a wrong filter, so the job succeeds with a warning
+    // (FR-RP-08).
+    let outcome = if job.empty_forget_reported && outcome.result_code == JobResultCode::Succeeded {
+        JobOutcome {
+            status: JobStatus::Succeeded,
+            result_code: JobResultCode::SucceededWithWarnings,
+            result_message: Some(FORGET_SELECTED_NOTHING.to_owned()),
+        }
+    } else {
+        outcome
     };
     if let Err(error) = job_repo::finish(&mut tx, job_id, &outcome, now).await {
         tracing::warn!(job = %job_id, %error, "the job result could not update the job");

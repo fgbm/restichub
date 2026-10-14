@@ -122,11 +122,7 @@ async fn fr_rp_08_the_retention_of_a_profile_removes_only_its_own_snapshots() {
         "the backup host receives no maintenance step (AC-RP-04)"
     );
     let forgets = forget_steps(&job);
-    assert_eq!(
-        forgets.len(),
-        2,
-        "one forget step for each profile and agent"
-    );
+    assert_eq!(forgets.len(), 2, "one forget step for each profile");
     assert!(matches!(
         job.steps.last().and_then(|step| step.kind.as_ref()),
         Some(step::Kind::Prune(_))
@@ -140,22 +136,19 @@ async fn fr_rp_08_the_retention_of_a_profile_removes_only_its_own_snapshots() {
         let args = argv(&job, forget);
         if args.contains(&tag_a) {
             seen_a = true;
-            assert!(
-                args.contains(&"--host=maintenance-host".to_owned()),
-                "{args:?}"
-            );
-            assert!(args.contains(&"--path=/srv/a".to_owned()), "{args:?}");
             assert!(args.contains(&"--keep-last=3".to_owned()), "{args:?}");
             assert!(!args.contains(&tag_b), "{args:?}");
-            assert!(!args.iter().any(|arg| arg.contains("/srv/b")), "{args:?}");
         } else {
             seen_b = true;
             assert!(args.contains(&tag_b), "{args:?}");
-            assert!(args.contains(&"--host=backup-host".to_owned()), "{args:?}");
-            assert!(args.contains(&"--path=/srv/b".to_owned()), "{args:?}");
             assert!(args.contains(&"--keep-daily=7".to_owned()), "{args:?}");
-            assert!(!args.iter().any(|arg| arg.contains("/srv/a")), "{args:?}");
         }
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg.starts_with("--host") || arg.starts_with("--path")),
+            "the profile tag is the exact key: {args:?}"
+        );
         assert!(
             args.iter().any(|arg| arg.starts_with("--group-by=")),
             "{args:?}"

@@ -307,7 +307,7 @@ pub async fn arm(
     Ok(result.rows_affected() == 1)
 }
 
-/// True when a profile of the repository sets a retention and a plan runs that profile.
+/// True when a profile of the repository sets a retention and a plan of an active agent runs it.
 ///
 /// A repository without such a profile has nothing to forget, so the scheduler and the manual run
 /// create no retention job for it.
@@ -318,7 +318,9 @@ pub async fn has_retention_in_use(
     let (found,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM profiles p WHERE p.repository_id = $1 \
                         AND p.retention IS NOT NULL \
-                        AND EXISTS (SELECT 1 FROM plans pl WHERE pl.profile_id = p.id))",
+                        AND EXISTS (SELECT 1 FROM plans pl \
+                                    JOIN agents a ON a.tenant_id = pl.tenant_id AND a.id = pl.agent_id \
+                                    WHERE pl.profile_id = p.id AND a.status = 'active'))",
     )
     .bind(repository_id)
     .fetch_one(tx.as_conn())

@@ -149,6 +149,7 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
 fn check_filter(job: &Job, filter: &SnapshotsFilter) -> Result<(), Rejection> {
     check_free(job, filter.hosts.iter())?;
     check_tags(job, filter.tags.iter())?;
+    check_tags(job, filter.all_tags.iter())?;
     check_free(job, filter.paths.iter())
 }
 
@@ -899,6 +900,14 @@ mod tests {
                     repository_id: string("repo-1"),
                     filter: Some(SnapshotsFilter {
                         tags: vec![string(bad)],
+                        ..SnapshotsFilter::default()
+                    }),
+                    ..ForgetStep::default()
+                }))]),
+                job_with(vec![step(step::Kind::Forget(ForgetStep {
+                    repository_id: string("repo-1"),
+                    filter: Some(SnapshotsFilter {
+                        all_tags: vec![string(bad)],
                         ..SnapshotsFilter::default()
                     }),
                     ..ForgetStep::default()

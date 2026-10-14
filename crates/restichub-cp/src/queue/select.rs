@@ -147,6 +147,7 @@ mod tests {
             stale_lock_since: None,
             cancel_requested: false,
             lock_reported: false,
+            empty_forget_reported: false,
             retry_of: None,
         }
     }

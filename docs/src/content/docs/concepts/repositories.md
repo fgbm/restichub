@@ -24,7 +24,7 @@ The control plane creates a maintenance job only when the repository is initiali
 
 ### Run now
 
-An Operator or an Admin can run the retention or the check at once from the repository row. The job follows the same rules as a scheduled job. The retention needs a profile with a retention that a plan runs.
+An Operator or an Admin can run the retention or the check at once from the repository row. The job follows the same rules as a scheduled job. The retention needs a profile with a retention that a plan of an active agent runs.
 
 ### Barriers
 
@@ -35,15 +35,16 @@ A maintenance job is exclusive (FR-SC-04). It starts after the running backups o
 Several profiles can use one repository. The retention of a profile removes only the snapshots of that profile (ADR-0034):
 
 - The control plane adds the tag `restichub-profile-<profile id>` to every backup of a profile.
-- The `forget` step of a profile filters on this tag, on the host name of the agent and on the backup paths of the agent. It uses the grouping of the profile. A profile without a grouping uses `host,paths`.
-- A filter in the retention of the profile does not apply to the maintenance job.
-- A profile that runs on two hosts gets one `forget` step for each host.
+- The tag prefix `restichub-` is reserved. A profile tag, a keep tag and a retention filter tag cannot start with it.
+- Each profile with a retention gets one `forget` step. The step filters on the profile tag. It uses the grouping of the profile. A profile without a grouping uses `host,paths`, so each host and each set of paths keeps its own policy.
+- The filter in the retention of the profile narrows the step. A snapshot must have the profile tag and all the filter tags. The filter paths and the filter hosts narrow the step more. A plan agent whose host name is not in the filter hosts gives no step. The host name compares with the host name that restic records in the snapshot.
+- A `forget` step that selects no snapshot gives the job status `succeeded_with_warnings`. The reason is `forget_selected_nothing`.
 
 A snapshot that was made before the tag existed has no tag, and no retention selects it. Remove such snapshots by hand. A profile with a retention and without a plan gives no `forget` step.
 
 ### Check
 
-The `check` step reads the data subset of the first profile of the repository that sets one. If no profile sets a subset, the check reads the structure only.
+The `check` step reads the largest data subset that a profile of the repository sets. If two subsets are equal, the oldest profile wins. If no profile sets a subset, the check reads the structure only.
 
 ## Roles
 

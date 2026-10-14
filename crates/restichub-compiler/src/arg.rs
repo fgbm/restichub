@@ -208,6 +208,9 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
                 for tag in &filter.tags {
                     args.push(attached("--tag", tag));
                 }
+                if !filter.all_tags.is_empty() {
+                    args.push(attached("--tag", &filter.all_tags.join(",")));
+                }
                 for path in &filter.paths {
                     args.push(attached("--path", path));
                 }

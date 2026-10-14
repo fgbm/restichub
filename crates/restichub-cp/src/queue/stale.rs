@@ -13,7 +13,7 @@ use restichub_db::{
     AgentId, AgentStatus, DbError, JobId, JobKind, JobStatus, TenantId, TenantTx,
     agents as agents_repo, repositories as repo,
 };
-use restichub_proto::agent::v1::{StepResult, StepStatus};
+use restichub_proto::agent::v1::{StepResult, StepStatus, step_result};
 use serde_json::json;
 use time::OffsetDateTime;
 
@@ -121,7 +121,8 @@ pub async fn handle_step_result(
     result: &StepResult,
 ) {
     let lock_held = result.status == StepStatus::Retry as i32;
-    if !result.possible_stale_lock && !lock_held {
+    let empty_forget = selected_nothing(result);
+    if !result.possible_stale_lock && !lock_held && !empty_forget {
         return;
     }
     let Some(job_id) = crate::jobs::parse_job_id_value(&result.job_id) else {
@@ -140,6 +141,9 @@ pub async fn handle_step_result(
             if result.possible_stale_lock {
                 queue_repo::note_stale_lock(&mut tx, job_id, now).await?;
             }
+            if empty_forget {
+                queue_repo::note_empty_forget(&mut tx, job_id).await?;
+            }
         }
         tx.commit().await
     }
@@ -147,6 +151,22 @@ pub async fn handle_step_result(
     if let Err(error) = outcome {
         tracing::warn!(job = %job_id, %error, "the step result could not mark the job");
     }
+}
+
+/// True for a successful `forget` step whose result holds no snapshot. A truncated result and a
+/// step without a result make no claim (FR-RP-08).
+fn selected_nothing(result: &StepResult) -> bool {
+    result.status == StepStatus::Success as i32
+        && match &result.output {
+            Some(step_result::Output::ForgetResult(forget)) => {
+                !forget.truncated
+                    && forget
+                        .groups
+                        .iter()
+                        .all(|group| group.kept.is_empty() && group.removed.is_empty())
+            }
+            _ => false,
+        }
 }
 
 async fn agent_is_active(tx: &mut TenantTx<'_>, agent: AgentId) -> Result<bool, DbError> {

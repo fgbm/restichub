@@ -4,9 +4,9 @@
 //! repository and the plans that run them, and it compiles each profile against the facts of the
 //! agent of the plan.
 //!
-//! The retention of a profile may remove only the snapshots of that profile. Every `forget` step
-//! therefore carries a filter of the host, the paths and the profile tag of its profile and agent,
-//! and the grouping of the profile. A profile that two agents back up gives one step for each agent.
+//! The retention of a profile may remove only the snapshots of that profile. Each profile therefore
+//! gives one `forget` step. It filters on the profile tag, joined with the filter of the profile,
+//! and it groups by the grouping of the profile.
 
 use std::collections::HashSet;
 
@@ -54,7 +54,11 @@ pub(super) async fn steps(
     Ok(steps)
 }
 
-/// One `forget` step for each profile with a retention and each agent that backs it up.
+/// Gives the retention of every profile that has one, as a single step for each profile.
+///
+/// The step takes the facts of the first active agent that runs the profile and that the
+/// `retention.filter.hosts` list of the profile allows. The host name of the agent compares with the
+/// host name that restic records in its snapshots.
 async fn forget_steps(
     tx: &mut TenantTx<'_>,
     job: &Job,
@@ -70,7 +74,7 @@ async fn forget_steps(
         if compiler_profile.retention.is_none() {
             continue;
         }
-        // The retention step needs the backup paths only, so a hook of the profile never blocks it.
+        // The retention step needs no hook, so a hook of the profile never blocks it.
         compiler_profile.hooks.clear();
 
         let mut seen: HashSet<AgentId> = HashSet::new();
@@ -98,19 +102,22 @@ async fn forget_steps(
                     continue;
                 }
             };
-            let mut backup_paths = None;
-            let mut forget = None;
-            for planned in compiled.steps {
-                match planned.step.kind {
-                    Some(step::Kind::Backup(backup)) => backup_paths = Some(backup.paths),
-                    Some(step::Kind::Forget(step)) => forget = Some(step),
-                    _ => {}
-                }
-            }
-            let (Some(paths), Some(mut forget)) = (backup_paths, forget) else {
+            let Some(mut forget) =
+                compiled
+                    .steps
+                    .into_iter()
+                    .find_map(|planned| match planned.step.kind {
+                        Some(step::Kind::Forget(step)) => Some(step),
+                        _ => None,
+                    })
+            else {
                 continue;
             };
-            forget.filter = Some(isolation_filter(profile.id, &agent.hostname, paths));
+            let profile_filter = forget.filter.take().unwrap_or_default();
+            if !host_allowed(&profile_filter, &agent.hostname) {
+                continue;
+            }
+            forget.filter = Some(isolation_filter(profile.id, profile_filter));
             if forget.group_by.is_empty() {
                 forget.group_by = vec![ForgetGroupBy::Host as i32, ForgetGroupBy::Paths as i32];
             }
@@ -118,24 +125,31 @@ async fn forget_steps(
                 &format!("forget-{}", steps.len() + 1),
                 step::Kind::Forget(forget),
             ));
+            break;
         }
     }
     Ok(steps)
 }
 
-/// The filter that limits a `forget` step to the snapshots of one profile on one host.
+/// True when the host list of the profile filter is empty or names the host.
+fn host_allowed(filter: &SnapshotsFilter, hostname: &str) -> bool {
+    filter.hosts.is_empty() || filter.hosts.iter().any(|host| host == hostname)
+}
+
+/// The filter of a `forget` step: the profile filter narrowed to the snapshots of one profile.
 ///
-/// The profile tag is the exact key. The host and the paths narrow the step further and keep the
-/// intent visible in the command line.
-pub(super) fn isolation_filter(
-    profile: ProfileId,
-    hostname: &str,
-    paths: Vec<String>,
-) -> SnapshotsFilter {
+/// The profile tag is the exact key (FR-RP-08). The tags of the profile filter join it, so a
+/// snapshot needs the profile tag and every tag of the filter. The step has no host filter of its
+/// own, because the host name of an agent is editable. Each host and path set keeps its own policy
+/// through the grouping.
+pub(super) fn isolation_filter(profile: ProfileId, filter: SnapshotsFilter) -> SnapshotsFilter {
+    let mut all_tags = vec![profile_tag(profile)];
+    all_tags.extend(filter.tags);
     SnapshotsFilter {
-        hosts: vec![hostname.to_owned()],
-        tags: vec![profile_tag(profile)],
-        paths,
+        hosts: filter.hosts,
+        tags: Vec::new(),
+        paths: filter.paths,
+        all_tags,
     }
 }
 
@@ -149,8 +163,9 @@ fn prune_step(repository_id: RepositoryId) -> Step {
     )
 }
 
-/// The `check` step reads the subset of the first profile that sets one (FR-PF-01). A repository
-/// without such a profile gets the check of the structure only.
+/// The `check` step reads the largest subset that a profile of the repository sets (FR-PF-01). A
+/// repository without such a profile gets the check of the structure only. A tie goes to the oldest
+/// profile.
 async fn check_step(
     tx: &mut TenantTx<'_>,
     job: &Job,
@@ -163,10 +178,9 @@ async fn check_step(
             BuildError::Refused(Refusal::CompileFailed)
         })?;
         if let Some(check) = compiler_profile.check
-            && !check.read_data_subset.is_empty()
+            && subset_share(&check.read_data_subset) > subset_share(&read_data_subset)
         {
             read_data_subset = check.read_data_subset;
-            break;
         }
     }
     Ok(simple_step(
@@ -179,16 +193,51 @@ async fn check_step(
     ))
 }
 
+/// The share of the data that a `read_data_subset` value reads, or none for an empty value.
+fn subset_share(value: &str) -> Option<f64> {
+    if value.is_empty() {
+        return None;
+    }
+    let share = if let Some(percent) = value.strip_suffix('%') {
+        percent.parse::<f64>().ok().map(|percent| percent / 100.0)
+    } else if let Some((n, t)) = value.split_once('/') {
+        match (n.parse::<f64>(), t.parse::<f64>()) {
+            (Ok(n), Ok(t)) if t > 0.0 => Some(n / t),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    Some(share.unwrap_or(0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn fr_rp_08_the_filter_names_the_host_the_paths_and_the_profile_tag() {
+    fn fr_pf_01_the_subset_share_orders_the_values() {
+        assert_eq!(subset_share(""), None);
+        assert!(subset_share("") < subset_share("0%"));
+        assert!(subset_share("1/10") < subset_share("25%"));
+        assert!(subset_share("25%") < subset_share("5/5"));
+    }
+
+    #[test]
+    fn fr_rp_08_the_filter_joins_the_profile_tag_with_the_profile_filter() {
         let profile = ProfileId::new();
-        let filter = isolation_filter(profile, "host-a", vec!["/srv".to_owned()]);
+        let filter = isolation_filter(
+            profile,
+            SnapshotsFilter {
+                hosts: vec!["host-a".to_owned()],
+                tags: vec!["daily".to_owned()],
+                paths: vec!["/srv".to_owned()],
+                all_tags: Vec::new(),
+            },
+        );
         assert_eq!(filter.hosts, ["host-a"]);
         assert_eq!(filter.paths, ["/srv"]);
-        assert_eq!(filter.tags, [profile_tag(profile)]);
+        assert!(filter.tags.is_empty());
+        assert_eq!(filter.all_tags, [profile_tag(profile), "daily".to_owned()]);
     }
 }

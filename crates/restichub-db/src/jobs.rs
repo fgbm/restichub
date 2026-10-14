@@ -75,6 +75,8 @@ macro_rules! job_columns {
             $p,
             "lock_reported, ",
             $p,
+            "empty_forget_reported, ",
+            $p,
             "retry_of"
         )
     };
@@ -120,6 +122,8 @@ pub struct Job {
     pub cancel_requested: bool,
     /// Set when a step of the job exited with restic code 11, a held repository lock (FR-SC-05).
     pub lock_reported: bool,
+    /// Set when a `forget` step of the job selected no snapshot (FR-RP-08).
+    pub empty_forget_reported: bool,
     /// The job whose lock result created this retry.
     pub retry_of: Option<JobId>,
 }
@@ -499,6 +503,7 @@ pub(crate) struct JobRow {
     stale_lock_since: Option<OffsetDateTime>,
     cancel_requested: bool,
     lock_reported: bool,
+    empty_forget_reported: bool,
     retry_of: Option<Uuid>,
 }
 
@@ -529,6 +534,7 @@ impl From<JobRow> for Job {
             stale_lock_since: row.stale_lock_since,
             cancel_requested: row.cancel_requested,
             lock_reported: row.lock_reported,
+            empty_forget_reported: row.empty_forget_reported,
             retry_of: row.retry_of.map(JobId::from_uuid),
         }
     }

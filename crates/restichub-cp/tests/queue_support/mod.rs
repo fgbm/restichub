@@ -21,9 +21,9 @@ use restichub_db::test_util::TestDatabase;
 use restichub_db::{AgentId, PLATFORM_TENANT_ID, SigningKeyRole, TenantId, signing};
 use restichub_emulator::enroll::{EnrollFacts, EnrollTls, EnrolledIdentity, enroll_tls};
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, ControlMessage, Job, JobAck, JobResult, JobStatus, SignedJob,
-    StepResult, StepStatus, agent_message, agent_service_client::AgentServiceClient,
-    control_message,
+    AgentHello, AgentMessage, ControlMessage, ForgetGroup, ForgetResult, ForgetSnapshot, Job,
+    JobAck, JobResult, JobStatus, SignedJob, StepResult, StepStatus, agent_message,
+    agent_service_client::AgentServiceClient, control_message, step_result,
 };
 use restichub_proto::signing::{Expected, KeyRing, verify_job};
 use serde_json::{Value, json};
@@ -586,6 +586,34 @@ impl FakeAgent {
             .await;
         let job = Uuid::parse_str(job_id).expect("job id");
         eventually(|| async { env.job_status(job).await == "succeeded" }).await;
+    }
+
+    /// Sends the result of a successful retention step. With `selected` it holds one removed
+    /// snapshot, without it no group.
+    pub async fn forget_step(&self, job_id: &str, selected: bool) {
+        let groups = if selected {
+            vec![ForgetGroup {
+                removed: vec![ForgetSnapshot::default()],
+                ..ForgetGroup::default()
+            }]
+        } else {
+            Vec::new()
+        };
+        self.tx
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::StepResult(StepResult {
+                    job_id: job_id.to_owned(),
+                    step_id: "forget-1".to_owned(),
+                    status: StepStatus::Success as i32,
+                    output: Some(step_result::Output::ForgetResult(ForgetResult {
+                        groups,
+                        truncated: false,
+                    })),
+                    ..StepResult::default()
+                })),
+            })
+            .await
+            .expect("cannot send the step result");
     }
 
     /// Reports a hard-killed step that can leave a stale lock (FR-AG-10).

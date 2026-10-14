@@ -209,6 +209,9 @@ message SnapshotsFilter {
   repeated string tags = 2;
   // Filter by path.
   repeated string paths = 3;
+  // A snapshot must carry every one of these tags. The agent passes them as one
+  // comma-separated "--tag" value.
+  repeated string all_tags = 4;
 }
 
 // ForgetStep applies the retention policy (FR-PF-01).

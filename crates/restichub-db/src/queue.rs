@@ -317,6 +317,19 @@ pub async fn note_lock_reported(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool
     Ok(result.rows_affected() == 1)
 }
 
+/// Records that a `forget` step of a sent or running job selected no snapshot (FR-RP-08).
+pub async fn note_empty_forget(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET empty_forget_reported = true, updated_at = now() \
+         WHERE id = $1 AND status IN ('sent', 'running')",
+    )
+    .bind(id)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
 /// Returns a sent job to the queue because the control plane could not send it.
 pub async fn revert_dispatch(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
     let result = sqlx::query(

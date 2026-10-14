@@ -49,6 +49,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON maintenance_schedules TO restichub_app;
 
 ALTER TABLE jobs ADD COLUMN maintenance_schedule_id uuid;
 
+-- A step result sets `empty_forget_reported` when a `forget` step selected no snapshot. The job
+-- result then stores the job as `succeeded_with_warnings`.
+ALTER TABLE jobs ADD COLUMN empty_forget_reported boolean NOT NULL DEFAULT false;
+
 -- A schedule delete keeps the job history: the link becomes null and the job row stays.
 ALTER TABLE jobs ADD CONSTRAINT jobs_maintenance_schedule_fk
     FOREIGN KEY (tenant_id, maintenance_schedule_id)

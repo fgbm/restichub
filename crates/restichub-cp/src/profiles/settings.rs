@@ -625,8 +625,11 @@ impl ValidatedProfile {
 /// filters on it, so the retention of one profile never removes the snapshots of another profile
 /// that shares the repository, the host or the paths.
 pub fn profile_tag(id: restichub_db::ProfileId) -> String {
-    format!("restichub-profile-{id}")
+    format!("{RESERVED_TAG_PREFIX}profile-{id}")
 }
+
+/// The prefix of the tags that only the control plane sets. A user tag may not start with it.
+pub const RESERVED_TAG_PREFIX: &str = "restichub-";
 
 /// The stored profile as the compiler input (FR-PF-04).
 pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, ApiError> {
@@ -892,6 +895,13 @@ fn validate_tags(field: &'static str, values: Vec<String>) -> Result<Vec<String>
         }
         if restichub_proto::validate::has_forbidden(trimmed) {
             return Err(ApiError::invalid_field(field, Reason::InvalidCharacter));
+        }
+        // The maintenance job isolates the profiles with the tags of this prefix (FR-RP-08).
+        if trimmed
+            .to_ascii_lowercase()
+            .starts_with(RESERVED_TAG_PREFIX)
+        {
+            return Err(ApiError::invalid_field(field, Reason::Reserved));
         }
         result.push(trimmed.to_owned());
     }
