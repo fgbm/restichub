@@ -18,6 +18,13 @@ pub struct TrustedProxies {
     nets: Vec<(IpAddr, u8)>,
 }
 
+/// A request marker that the client address comes from the socket only (ADR-0026).
+///
+/// The agent listener has no proxy in front, so its routes insert the marker and the extractor
+/// ignores the `X-Forwarded-For` header.
+#[derive(Debug, Clone, Copy)]
+pub struct IgnoreForwarded;
+
 impl TrustedProxies {
     /// Parses a list of networks.
     ///
@@ -131,7 +138,12 @@ impl FromRequestParts<AppState> for ClientIp {
             .get::<ConnectInfo<SocketAddr>>()
             .map(|ConnectInfo(address)| address.ip())
             .ok_or_else(|| ApiError::internal("the request holds no socket peer address"))?;
-        let forwarded = forwarded_for(parts);
+        // The agent listener has no proxy, so it marks the request and the header is ignored.
+        let forwarded = if parts.extensions.get::<IgnoreForwarded>().is_some() {
+            None
+        } else {
+            forwarded_for(parts)
+        };
         Ok(Self(resolve_client_ip(
             peer,
             forwarded.as_deref(),

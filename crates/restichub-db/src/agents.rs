@@ -161,22 +161,58 @@ pub async fn get(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option<Agent>, Db
     Ok(row.map(Agent::from))
 }
 
-/// Records the last activity of an agent (FR-ID-07, FR-ID-08).
+/// Records the last activity of one agent under the registry guard (FR-ID-04, FR-ID-07).
 ///
-/// The stream layer calls the function in a batch, not for each message. A missing agent changes
-/// nothing.
-pub async fn touch_last_seen(
+/// The update runs only while the row is active, lists the certificate serial and is not expired, so
+/// a revoke or an expiry in the window changes no row. `true` when the row was written; `false`
+/// refuses the stream.
+pub async fn touch_last_seen_guarded(
     tx: &mut TenantTx<'_>,
     id: AgentId,
+    serial_hex: &str,
     now: OffsetDateTime,
-) -> Result<(), DbError> {
-    sqlx::query("UPDATE agents SET last_seen_at = $2 WHERE id = $1")
-        .bind(id)
-        .bind(now)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
-    Ok(())
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE agents SET last_seen_at = $3 \
+         WHERE id = $1 AND status = 'active' \
+           AND encode(ltrim(certificate_serial, '\\x00'::bytea), 'hex') = $2 \
+           AND certificate_expires_at > $3",
+    )
+    .bind(id)
+    .bind(serial_hex)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Writes `last_seen_at` for a batch of agents of one tenant under the registry guard (FR-ID-07).
+///
+/// The serials are lower-case hexadecimal. The function returns the identifiers of the rows it
+/// updated; an identifier that is absent is revoked, expired or no longer the enrolled serial, and
+/// the caller closes its stream.
+pub async fn touch_last_seen_batch(
+    tx: &mut TenantTx<'_>,
+    ids: &[Uuid],
+    serials_hex: &[String],
+    now: OffsetDateTime,
+) -> Result<Vec<Uuid>, DbError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "UPDATE agents AS a SET last_seen_at = $1 \
+         FROM unnest($2::uuid[], $3::text[]) AS u(id, serial) \
+         WHERE a.id = u.id AND a.status = 'active' \
+           AND encode(ltrim(a.certificate_serial, '\\x00'::bytea), 'hex') = u.serial \
+           AND a.certificate_expires_at > $1 \
+         RETURNING a.id",
+    )
+    .bind(now)
+    .bind(ids)
+    .bind(serials_hex)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
 /// Renames an agent of the tenant.

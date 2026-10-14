@@ -267,6 +267,11 @@ impl AppState {
     pub fn agent_registry(&self) -> &StreamRegistry {
         &self.agent_registry
     }
+
+    /// The shared registry, for the batch flush of the `last_seen_at` writes.
+    pub fn agent_registry_shared(&self) -> Arc<StreamRegistry> {
+        Arc::clone(&self.agent_registry)
+    }
 }
 
 /// The router registers one route for each entry of [`ROUTES`], so the routes table, the router and

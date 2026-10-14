@@ -31,6 +31,7 @@ use restichub_db::{AgentId, EnrollmentTokenId, TenantTx};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use utoipa::ToSchema;
 
 use crate::client_ip::ClientIp;
 use crate::error::ApiError;
@@ -42,7 +43,7 @@ use crate::validation::{self, Reason};
 /// The token prefix that the response of a refused request does not reveal.
 const TOKEN_PREFIX_LEN: usize = 8;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EnrollRequest {
     /// The one-time secret that the Web UI shows, `re_...`.
@@ -56,7 +57,7 @@ pub struct EnrollRequest {
     pub restic_version: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct EnrollResponse {
     pub agent_id: String,
     pub tenant_id: String,
@@ -91,7 +92,21 @@ pub struct EnrollmentKeyBody {
 
 /// Enrolls an agent with a one-time token and a certificate signing request (FR-ID-01, FR-ID-02).
 ///
-/// The route lives on the agent listener, not on the public web API (ADR-0026).
+/// The control plane serves the route on the agent listener and on the public web origin, so an
+/// agent reaches it with a publicly trusted certificate and pins the returned installation root CA
+/// for the stream (ADR-0033).
+#[utoipa::path(
+    post,
+    path = "/agent/v1/enroll",
+    summary = "Enrolls an agent with a one-time token and a certificate signing request.",
+    request_body = EnrollRequest,
+    responses(
+        (status = 201, description = "The agent is enrolled.", body = EnrollResponse),
+        (status = 400, description = "The request or the certificate signing request is not valid.", body = crate::error::ProblemBody),
+        (status = 413, description = "The request body is larger than the limit.", body = crate::error::ProblemBody),
+        (status = 429, description = "The rate limit is reached.", body = crate::error::ProblemBody),
+    )
+)]
 pub async fn enroll(
     State(state): State<AppState>,
     ClientIp(source_ip): ClientIp,
