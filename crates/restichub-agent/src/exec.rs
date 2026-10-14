@@ -246,7 +246,8 @@ pub(crate) fn spawn_job_restic(
 
 /// Lowers the process and I/O priority of the child when the step asks for it (FR-AG-15).
 ///
-/// On Linux the child gets nice 10 and the best-effort I/O class at level 7. A failure of either
+/// On Linux the child gets a nice value 10 above the agent, capped at 19, and the best-effort I/O
+/// class at level 7. A failure of either
 /// call is ignored: the priority is a courtesy to the host, not a safety rule. On Windows the
 /// creation flags carry the priority class.
 #[cfg(target_os = "linux")]
@@ -259,7 +260,8 @@ fn apply_priority(command: &mut Command, priority: ProcessPriority) {
     // SAFETY: the closure runs between fork and exec and calls only async-signal-safe functions.
     unsafe {
         command.pre_exec(|| {
-            libc::setpriority(libc::PRIO_PROCESS, 0, LOW_NICE);
+            let current = libc::getpriority(libc::PRIO_PROCESS, 0);
+            libc::setpriority(libc::PRIO_PROCESS, 0, lowered_nice(current));
             libc::syscall(
                 libc::SYS_ioprio_set,
                 IOPRIO_WHO_PROCESS,
@@ -271,9 +273,20 @@ fn apply_priority(command: &mut Command, priority: ProcessPriority) {
     }
 }
 
-/// The nice value of a low-priority child (FR-AG-15).
+/// How far above the nice value of the agent a low-priority child runs (FR-AG-15).
 #[cfg(target_os = "linux")]
-const LOW_NICE: libc::c_int = 10;
+const LOW_NICE_STEP: libc::c_int = 10;
+
+/// Nice 19 is the lowest priority that Linux allows.
+#[cfg(target_os = "linux")]
+const MAX_NICE: libc::c_int = 19;
+
+/// The nice value of a low-priority child: a step above the agent, so an agent that already runs
+/// at a low priority does not get a child that runs before it (FR-AG-15).
+#[cfg(target_os = "linux")]
+fn lowered_nice(current: libc::c_int) -> libc::c_int {
+    current.saturating_add(LOW_NICE_STEP).min(MAX_NICE)
+}
 
 /// The best-effort I/O level of a low-priority child; level 7 is the lowest (FR-AG-15).
 #[cfg(target_os = "linux")]
@@ -890,6 +903,17 @@ mod tests {
         }
         assert!(!alive(child_pid), "the child of the tree must be killed");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// FR-AG-15: the low priority is relative to the agent and never passes the highest nice value.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fr_ag_15_the_low_priority_is_relative_to_the_agent() {
+        assert_eq!(super::lowered_nice(0), 10);
+        assert_eq!(super::lowered_nice(5), 15);
+        assert_eq!(super::lowered_nice(15), 19);
+        assert_eq!(super::lowered_nice(19), 19);
+        assert_eq!(super::lowered_nice(-5), 5);
     }
 
     /// AC-AG-07: the kernel kills a restic child when the thread that started it ends.

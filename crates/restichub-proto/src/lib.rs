@@ -12,6 +12,13 @@ pub const PROTOCOL_VERSION_MAJOR: u32 = 1;
 /// `ServerHello`.
 pub const PROTOCOL_VERSION_MINOR: u32 = 0;
 
+/// The largest stream message that either side accepts or sends. A step result stays below
+/// [`MAX_STEP_RESULT_BYTES`], so it always fits with room for the other fields (FR-AG-08).
+pub const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+
+/// The largest encoded size of one step result that the agent sends (FR-AG-08).
+pub const MAX_STEP_RESULT_BYTES: usize = 3 * 1024 * 1024;
+
 pub mod agent {
     pub mod v1 {
         tonic::include_proto!("restichub.agent.v1");

@@ -153,6 +153,56 @@ async fn ac_pr_07_the_stored_copy_drops_the_snapshot_list() {
     let _ = std::fs::remove_dir_all(&path);
 }
 
+/// Counts the message kinds that one `send_stored_results` call sends: log chunks, step results
+/// and job results.
+async fn resent_kinds(jobs: &restichub_agent::jobs::Jobs) -> (usize, usize, usize) {
+    use restichub_proto::agent::v1::agent_message::Payload;
+    let (tx, mut rx) = mpsc::channel(64);
+    jobs.attach(&tx);
+    jobs.send_stored_results().await;
+    let mut kinds = (0, 0, 0);
+    while let Ok(message) = rx.try_recv() {
+        match message.payload {
+            Some(Payload::LogChunk(_)) => kinds.0 += 1,
+            Some(Payload::StepResult(_)) => kinds.1 += 1,
+            Some(Payload::JobResult(_)) => kinds.2 += 1,
+            _ => {}
+        }
+    }
+    kinds
+}
+
+/// ADR-0020: the control plane has no result acknowledgement, so a later connection sends the job
+/// result alone. The log tail and the step results go out once for each process start.
+#[tokio::test(flavor = "multi_thread")]
+async fn adr_0020_the_tail_and_the_steps_are_re_sent_once_for_each_process_start() {
+    let dir = directory("journal-resend-agent");
+    let path = directory("journal-resend-repo");
+    script_stderr(&path, "backup", "warning: one file changed\n");
+    let jobs = program_jobs(&dir);
+    let job = job(
+        "job-resend",
+        vec![access("repo-1", &path, "topsecret")],
+        vec![backup_step("repo-1", &["/srv"])],
+    );
+    let _ = run(&jobs, &job).await;
+
+    let (chunks, steps, results) = resent_kinds(&jobs).await;
+    assert!(chunks > 0 && steps == 1 && results == 1);
+    assert_eq!(
+        resent_kinds(&jobs).await,
+        (0, 0, 1),
+        "the second connection"
+    );
+    assert_eq!(resent_kinds(&jobs).await, (0, 0, 1), "the third connection");
+
+    let restarted = program_jobs(&dir);
+    let (chunks, steps, results) = resent_kinds(&restarted).await;
+    assert!(chunks > 0 && steps == 1 && results == 1, "after a restart");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
 fn scan_file(scanner: &Scanner, path: &Path) -> usize {
     scanner.scan_file(path).map_or(0, |found| found.len())
 }

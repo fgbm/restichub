@@ -105,11 +105,34 @@ async fn ac_ag_05_every_step_kind_maps_the_exit_codes() {
             assert_eq!(step.exit_code, code, "{command} exit {code}");
             let outcome = result.result().outcome;
             match status {
-                // A warning does not fail the job (restic finished and reported some files).
-                StepStatus::Success | StepStatus::Warning => {
+                StepStatus::Success => {
                     assert_eq!(
                         outcome,
                         JobStatus::Succeeded as i32,
+                        "{command} exit {code}"
+                    );
+                }
+                // A warning does not fail the job, but the job result names it.
+                StepStatus::Warning => {
+                    assert_eq!(
+                        outcome,
+                        JobStatus::SucceededWithWarnings as i32,
+                        "{command} exit {code}"
+                    );
+                }
+                StepStatus::Retry => {
+                    assert_eq!(
+                        outcome,
+                        JobStatus::RepositoryLocked as i32,
+                        "{command} exit {code}"
+                    );
+                    assert_eq!(
+                        result
+                            .result()
+                            .error
+                            .as_ref()
+                            .map(|error| error.code.as_str()),
+                        Some("repository_locked"),
                         "{command} exit {code}"
                     );
                 }
@@ -152,6 +175,10 @@ async fn ac_ag_05_the_job_result_names_a_warning_and_a_retry() {
     .await;
     assert_eq!(warned.result().status, StepStatus::Warning as i32);
     assert_eq!(
+        warned.result().outcome,
+        JobStatus::SucceededWithWarnings as i32
+    );
+    assert_eq!(
         warned.result().steps_succeeded,
         2,
         "a warning does not stop the job"
@@ -168,7 +195,7 @@ async fn ac_ag_05_the_job_result_names_a_warning_and_a_retry() {
     )
     .await;
     assert_eq!(locked.result().status, StepStatus::Retry as i32);
-    assert_eq!(locked.result().outcome, JobStatus::Failed as i32);
+    assert_eq!(locked.result().outcome, JobStatus::RepositoryLocked as i32);
     assert_eq!(locked.steps.len(), 1, "a locked repository stops the job");
 }
 

@@ -35,6 +35,11 @@ pub const JOURNAL_FILE: &str = "job-journal.json";
 /// The largest number of jobs that the journal keeps.
 const MAX_ENTRIES: usize = 4096;
 
+/// The most log bytes that all stored results hold together. When the total is larger, the journal
+/// drops the log tail of the oldest results first, so the file stays small however many jobs it
+/// holds (FR-AG-12).
+const MAX_TAIL_BYTES: u64 = 4 * 1024 * 1024;
+
 /// One job in the journal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Entry {
@@ -43,6 +48,9 @@ struct Entry {
     expires_at: i64,
     /// Base64 of the serialized [`JobResult`], or `None` while the job runs.
     result: Option<String>,
+    /// Bytes of log in the stored result, so the journal can cap the total without decoding.
+    #[serde(default)]
+    tail_bytes: u64,
 }
 
 /// The serialized journal, in the order of acceptance.
@@ -59,10 +67,11 @@ pub struct FileJournal {
     sequence: u64,
 }
 
-/// The serialized journal at one moment, written outside the lock of the journal (ADR-0020).
+/// The journal at one moment. The caller serializes and writes it outside the lock of the journal
+/// and off the async workers (ADR-0020).
 pub struct JournalSnapshot {
     path: PathBuf,
-    bytes: Vec<u8>,
+    entries: Vec<Entry>,
     sequence: u64,
 }
 
@@ -74,7 +83,7 @@ impl JournalSnapshot {
     ///
     /// # Errors
     ///
-    /// Returns an error when the file cannot be replaced.
+    /// Returns an error when the journal cannot be serialized or the file cannot be replaced.
     pub fn write(&self, written: &Mutex<u64>) -> Result<()> {
         let mut newest = written
             .lock()
@@ -82,7 +91,7 @@ impl JournalSnapshot {
         if self.sequence <= *newest {
             return Ok(());
         }
-        replace_file(&self.path, &self.bytes)?;
+        replace_file(&self.path, &serialize(&self.entries)?)?;
         *newest = self.sequence;
         Ok(())
     }
@@ -126,26 +135,38 @@ impl FileJournal {
         replace_file(&self.path, &bytes)
     }
 
-    /// Serializes the journal for a write outside the lock of the journal (ADR-0020).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the journal cannot be serialized.
-    pub fn snapshot(&mut self) -> Result<JournalSnapshot> {
-        let bytes = self.serialize()?;
+    /// Copies the journal for a write outside the lock of the journal (ADR-0020).
+    pub fn snapshot(&mut self) -> JournalSnapshot {
         self.sequence += 1;
-        Ok(JournalSnapshot {
+        JournalSnapshot {
             path: self.path.clone(),
-            bytes,
+            entries: self.entries.clone(),
             sequence: self.sequence,
-        })
+        }
     }
 
     fn serialize(&self) -> Result<Vec<u8>> {
-        let stored = StoredJournal {
-            entries: self.entries.clone(),
-        };
-        serde_json::to_vec(&stored).context("cannot serialize the job journal")
+        serialize(&self.entries)
+    }
+
+    /// Drops the log tail of the oldest results until the stored tails fit [`MAX_TAIL_BYTES`].
+    fn trim_tails(&mut self) {
+        let mut total: u64 = self.entries.iter().map(|entry| entry.tail_bytes).sum();
+        for entry in &mut self.entries {
+            if total <= MAX_TAIL_BYTES {
+                return;
+            }
+            if entry.tail_bytes == 0 {
+                continue;
+            }
+            let Some(mut result) = entry.result.as_deref().and_then(decode_result) else {
+                continue;
+            };
+            result.log_tail.clear();
+            entry.result = Some(STANDARD.encode(result.encode_to_vec()));
+            total -= entry.tail_bytes;
+            entry.tail_bytes = 0;
+        }
     }
 
     /// The stored results of the completed jobs that have not expired (ADR-0020).
@@ -207,21 +228,37 @@ impl JobJournal for FileJournal {
             job_id: job_id.to_owned(),
             expires_at: expires_at.seconds,
             result: None,
+            tail_bytes: 0,
         });
     }
 
     fn record_completed(&mut self, job_id: &str, result: JobResult) {
         let encoded = STANDARD.encode(result.encode_to_vec());
+        let tail_bytes = result
+            .log_tail
+            .iter()
+            .map(|chunk| chunk.data.len() as u64)
+            .sum();
         // The agent records the acceptance before it runs the job, so the entry exists here. A
         // missing entry would have no expiry and could never be pruned, so it is not stored.
         if let Some(entry) = self.entries.iter_mut().find(|entry| entry.job_id == job_id) {
             entry.result = Some(encoded);
+            entry.tail_bytes = tail_bytes;
+            self.trim_tails();
         }
     }
 
     fn purge_expired(&mut self, now: Timestamp) {
         self.prune(now);
     }
+}
+
+fn serialize(entries: &[Entry]) -> Result<Vec<u8>> {
+    #[derive(Serialize)]
+    struct Stored<'a> {
+        entries: &'a [Entry],
+    }
+    serde_json::to_vec(&Stored { entries }).context("cannot serialize the job journal")
 }
 
 /// Decodes a stored result. A value that does not decode is skipped, so it cannot block the drain.
@@ -235,7 +272,7 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use prost::Message as _;
-    use restichub_proto::agent::v1::JobResult;
+    use restichub_proto::agent::v1::{JobResult, LogChunk};
     use restichub_proto::signing::{JobJournal, JournalState};
 
     use super::{FileJournal, decode_result};
@@ -322,9 +359,9 @@ mod tests {
         let mut journal = FileJournal::load(path.clone()).expect("cannot load");
         let written = std::sync::Mutex::new(0);
         journal.record_accepted("job-1", at(2_000));
-        let older = journal.snapshot().expect("cannot snapshot");
+        let older = journal.snapshot();
         journal.record_accepted("job-2", at(2_000));
-        let newer = journal.snapshot().expect("cannot snapshot");
+        let newer = journal.snapshot();
         newer.write(&written).expect("cannot write");
         older.write(&written).expect("cannot write");
 
@@ -361,6 +398,36 @@ mod tests {
         );
         journal.prune(at(60 * 60 + 60 * 5));
         assert_eq!(journal.lookup("job-1"), JournalState::Unknown);
+    }
+
+    #[test]
+    fn fr_ag_12_the_stored_log_tails_stay_inside_the_bound() {
+        let path = temp_path("tails");
+        let mut journal = FileJournal::load(path.clone()).expect("cannot load");
+        // 100 results with a 60 KiB tail each hold 6 MiB of log, more than the bound.
+        for index in 0..100 {
+            let job_id = format!("job-{index}");
+            journal.record_accepted(&job_id, at(2_000));
+            journal.record_completed(
+                &job_id,
+                JobResult {
+                    log_tail: vec![LogChunk {
+                        job_id: job_id.clone(),
+                        data: vec![b'x'; 60 * 1024],
+                        ..LogChunk::default()
+                    }],
+                    ..result(&job_id)
+                },
+            );
+        }
+        journal.persist().expect("cannot persist");
+        let size = std::fs::metadata(&path).expect("metadata").len();
+        // The tails take 4 MiB at most, and base64 adds a third.
+        assert!(size <= super::MAX_TAIL_BYTES * 4 / 3 + 64 * 1024, "{size}");
+        let results = journal.stored_results();
+        assert_eq!(results.len(), 100, "no result is lost");
+        assert!(results[0].log_tail.is_empty(), "the oldest tail is dropped");
+        assert_eq!(results[99].log_tail.len(), 1, "the newest tail stays");
     }
 
     #[test]

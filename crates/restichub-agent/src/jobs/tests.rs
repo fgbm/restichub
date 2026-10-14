@@ -8,7 +8,7 @@ use restichub_proto::agent::v1::{
 };
 use restichub_proto::signing::{Expected, KeyRing, sign_job};
 
-use super::{job_error, job_outcome, verify_and_validate};
+use super::{Progress, job_error, job_outcome, verify_and_validate};
 use crate::journal::FileJournal;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{JobStatus, RejectReason, SignedJob};
@@ -343,52 +343,57 @@ fn fr_pr_02_accepts_the_step_kinds_of_the_agent_core() {
     }
 }
 
+fn progress(change: impl FnOnce(&mut Progress)) -> JobStatus {
+    let mut progress = Progress::default();
+    change(&mut progress);
+    job_outcome(&progress)
+}
+
 #[test]
 fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
     // A repository that exists: test_access exit 0, init skipped.
-    assert_eq!(
-        job_outcome(false, None, false, true, false, false, false),
-        JobStatus::Succeeded
-    );
+    assert_eq!(progress(|p| p.had_init = true), JobStatus::Succeeded);
     // A missing repository with a successful init.
     assert_eq!(
-        job_outcome(false, None, true, true, true, true, false),
+        progress(|p| {
+            p.probe_missing = true;
+            p.had_init = true;
+            p.init_ran = true;
+            p.init_succeeded = true;
+        }),
         JobStatus::Succeeded
     );
     // Init failure gives a failed job.
     assert_eq!(
-        job_outcome(false, None, true, true, true, false, false),
+        progress(|p| {
+            p.probe_missing = true;
+            p.had_init = true;
+            p.init_ran = true;
+        }),
         JobStatus::Failed
     );
     // A standalone test_access on a missing repository.
     assert_eq!(
-        job_outcome(false, None, true, false, false, false, false),
+        progress(|p| p.probe_missing = true),
         JobStatus::NotInitialized
     );
     // An init step without a matching test_access is an invalid sequence.
     assert_eq!(
-        job_outcome(false, None, false, true, false, false, true),
+        progress(|p| {
+            p.had_init = true;
+            p.init_invalid = true;
+        }),
         JobStatus::Failed
     );
     // A wrong password on an existing repository (exit code 12).
     assert_eq!(
-        job_outcome(false, Some(12), false, true, false, false, false),
+        progress(|p| p.stopped_code = Some(12)),
         JobStatus::ConfigError
     );
-    // Any other failure (exit codes 1, 11, a timeout).
-    assert_eq!(
-        job_outcome(false, Some(1), false, true, false, false, false),
-        JobStatus::Failed
-    );
-    assert_eq!(
-        job_outcome(false, Some(11), false, true, false, false, false),
-        JobStatus::Failed
-    );
+    // Any other failure (exit code 1, a timeout).
+    assert_eq!(progress(|p| p.stopped_code = Some(1)), JobStatus::Failed);
     // The control plane cancelled the job before any step finished.
-    assert_eq!(
-        job_outcome(true, None, false, true, false, false, false),
-        JobStatus::Cancelled
-    );
+    assert_eq!(progress(|p| p.cancelled = true), JobStatus::Cancelled);
     assert_eq!(
         job_error(JobStatus::ConfigError).map(|error| error.code),
         Some("wrong_password".to_owned())
@@ -396,6 +401,64 @@ fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
     assert_eq!(
         job_error(JobStatus::NotInitialized).map(|error| error.code),
         Some("repository_missing".to_owned())
+    );
+}
+
+#[test]
+fn fr_ag_09_a_warning_and_a_lock_are_typed_at_the_job_level() {
+    // A step with restic exit code 3 gives a job that succeeded with warnings.
+    assert_eq!(
+        progress(|p| p.warned = true),
+        JobStatus::SucceededWithWarnings
+    );
+    assert_eq!(
+        job_error(JobStatus::SucceededWithWarnings).map(|error| error.code),
+        Some("succeeded_with_warnings".to_owned())
+    );
+    // A step with restic exit code 11 gives a locked repository, not a plain failure.
+    assert_eq!(
+        progress(|p| p.stopped_code = Some(11)),
+        JobStatus::RepositoryLocked
+    );
+    assert_eq!(
+        job_error(JobStatus::RepositoryLocked).map(|error| error.code),
+        Some("repository_locked".to_owned())
+    );
+    // A later failure outweighs an earlier warning.
+    assert_eq!(
+        progress(|p| {
+            p.warned = true;
+            p.stopped_code = Some(1);
+        }),
+        JobStatus::Failed
+    );
+}
+
+#[test]
+fn fr_sc_06_the_agent_rejects_unlock_all_with_another_step() {
+    let unlock_all = || Step {
+        step_id: "unlock-all".to_owned(),
+        kind: Some(step::Kind::UnlockAll(UnlockAllStep {
+            repository_id: "repo-1".to_owned(),
+        })),
+        ..Step::default()
+    };
+    let signed = sign_job(
+        &job(
+            "agent-1",
+            "tenant-1",
+            900,
+            2_000,
+            vec![test_access(), unlock_all()],
+        ),
+        KEY_ID,
+        &signing_key(),
+    );
+    let mut journal = temp_journal("unlock-all-mixed");
+    let decision = intake(&signed, &ring(), &expected(), &mut journal);
+    assert_eq!(
+        expected_reason(&decision).as_ref(),
+        Some(&RejectReason::Malformed)
     );
 }
 

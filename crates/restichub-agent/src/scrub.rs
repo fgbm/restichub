@@ -10,28 +10,63 @@ use zeroize::Zeroizing;
 /// Name of the variable that carries the location, with its userinfo.
 const REPOSITORY_ENV: &str = "RESTIC_REPOSITORY";
 
+/// Name of the variable that carries the user name of a REST backend.
+const REST_USERNAME_ENV: &str = "RESTIC_REST_USERNAME";
+
 /// Holds every secret value of one step and masks them in restic text.
 pub(crate) struct Scrubber {
-    /// Secret values, the longest first, so a secret that holds another one is replaced whole.
+    /// Passwords, keys and tokens, the longest first, so a secret that holds another one is
+    /// replaced whole. They are masked in any context, whatever their length.
     secrets: Vec<Zeroizing<String>>,
+    /// User names, each with the URL forms in which it is masked. A user name is a common word
+    /// (`backup`), so it is masked only in a URL context.
+    names: Vec<NamePattern>,
     /// Repository URLs that carry userinfo, each with its masked form.
     locations: Vec<(Zeroizing<String>, String)>,
+}
+
+/// The URL forms of one user name and their masked replacement.
+struct NamePattern {
+    forms: [(Zeroizing<String>, String); 2],
+}
+
+impl NamePattern {
+    fn new(name: &str) -> Self {
+        Self {
+            forms: [
+                (Zeroizing::new(format!("://{name}:")), format!("://{MASK}:")),
+                (Zeroizing::new(format!("{name}@")), format!("{MASK}@")),
+            ],
+        }
+    }
 }
 
 impl Scrubber {
     /// Collects the secret values from the environment of the step command.
     pub(crate) fn for_command(line: &CommandLine) -> Self {
         let mut secrets: Vec<Zeroizing<String>> = Vec::new();
+        let mut names: Vec<String> = Vec::new();
         let mut locations = Vec::new();
         for (name, value) in line.env() {
             if name == REPOSITORY_ENV {
                 if let Some((masked, userinfo)) = mask_location(value) {
                     locations.push((Zeroizing::new(value.clone()), masked));
-                    for part in userinfo.split(':') {
-                        secrets.push(Zeroizing::new(part.to_owned()));
+                    match userinfo.split_once(':') {
+                        Some((user, password)) => {
+                            names.push(percent_decode(user).unwrap_or_else(|| user.to_owned()));
+                            names.push(user.to_owned());
+                            secrets.push(Zeroizing::new(password.to_owned()));
+                            // restic prints the decoded password when the backend rejects it.
+                            if let Some(decoded) = percent_decode(password) {
+                                secrets.push(Zeroizing::new(decoded));
+                            }
+                        }
+                        None => secrets.push(Zeroizing::new(userinfo.to_owned())),
                     }
                     secrets.push(Zeroizing::new(userinfo.to_owned()));
                 }
+            } else if name == REST_USERNAME_ENV {
+                names.push(value.clone());
             } else if !is_safe_env(name) {
                 secrets.push(Zeroizing::new(value.clone()));
             }
@@ -39,7 +74,14 @@ impl Scrubber {
         secrets.retain(|secret| !secret.is_empty());
         secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
         secrets.dedup();
-        Self { secrets, locations }
+        names.retain(|name| !name.is_empty());
+        names.sort();
+        names.dedup();
+        Self {
+            secrets,
+            names: names.iter().map(|name| NamePattern::new(name)).collect(),
+            locations,
+        }
     }
 
     /// Returns the text with every known secret replaced by the mask.
@@ -55,8 +97,64 @@ impl Scrubber {
                 text = text.replace(secret.as_str(), MASK);
             }
         }
+        for pattern in &self.names {
+            for (form, masked) in &pattern.forms {
+                if text.contains(form.as_str()) {
+                    text = text.replace(form.as_str(), masked);
+                }
+            }
+        }
         text
     }
+
+    /// A line that the reader cut can end inside a secret, so the end of a cut line loses any
+    /// part of a secret too (FR-AG-06).
+    pub(crate) fn scrub_line(&self, text: &str, cut: bool) -> String {
+        let mut text = self.scrub(text);
+        if cut {
+            self.mask_cut_end(&mut text);
+        }
+        text
+    }
+
+    fn mask_cut_end(&self, text: &mut String) {
+        for secret in &self.secrets {
+            let secret = secret.as_str();
+            let starts: Vec<usize> = secret.char_indices().map(|(index, _)| index).collect();
+            for &end in starts.iter().skip(1).rev() {
+                if text.ends_with(&secret[..end]) {
+                    text.truncate(text.len() - end);
+                    text.push_str(MASK);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Decodes `%XX` sequences. `None` when the text has none or the result is not UTF-8.
+fn percent_decode(text: &str) -> Option<String> {
+    if !text.contains('%') {
+        return None;
+    }
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let hex = bytes
+            .get(index + 1..index + 3)
+            .filter(|_| bytes[index] == b'%')
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        if let Some(byte) = hex {
+            decoded.push(byte);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 /// Splits a location with userinfo into the masked location and the userinfo. A location without
@@ -147,6 +245,47 @@ mod tests {
         });
         let scrubber = self::scrubber("rest:https://host/", Some(rest));
         assert_eq!(scrubber.scrub("pw CANARY-rest-pass"), "pw ***");
+    }
+
+    #[test]
+    fn fr_ag_06_a_user_name_is_masked_only_in_a_url_context() {
+        let scrubber = scrubber("rest:https://backup:CANARY-rest@host.example/repo", None);
+        assert_eq!(
+            scrubber.scrub("error during backup of /srv: backup finished"),
+            "error during backup of /srv: backup finished"
+        );
+        assert_eq!(
+            scrubber.scrub("see https://backup:other@elsewhere/x and backup@mail.example"),
+            "see https://***:other@elsewhere/x and ***@mail.example"
+        );
+        let rest = BackendCredentials::Rest(RestCredentials {
+            username: "bob".to_owned(),
+            password: "pw".to_owned(),
+        });
+        let scrubber = self::scrubber("rest:https://host/", Some(rest));
+        // A short password is masked everywhere, a short user name only in a URL.
+        assert_eq!(scrubber.scrub("bob has pw"), "bob has ***");
+        assert_eq!(scrubber.scrub("at https://bob@host"), "at https://***@host");
+    }
+
+    #[test]
+    fn fr_ag_06_the_decoded_password_of_the_location_is_masked() {
+        let scrubber = scrubber("rest:https://user:p%40ss%3Aword%21@host.example/repo", None);
+        let scrubbed = scrubber.scrub("backend said: bad credentials p@ss:word! for user");
+        assert!(!scrubbed.contains("p@ss:word!"), "{scrubbed}");
+    }
+
+    #[test]
+    fn fr_ag_06_a_secret_cut_by_the_line_limit_is_masked() {
+        let scrubber = scrubber("/srv/repo", None);
+        // The reader cut this line inside the password.
+        let cut = scrubber.scrub_line("Fatal: bad password CANARY-pas", true);
+        assert_eq!(cut, "Fatal: bad password ***");
+        // A line that the reader did not cut keeps its ending.
+        assert_eq!(
+            scrubber.scrub_line("value CANARY-pas", false),
+            "value CANARY-pas"
+        );
     }
 
     #[test]

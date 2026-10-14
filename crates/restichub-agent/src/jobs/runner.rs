@@ -46,9 +46,6 @@ const SEND_WAIT: Duration = Duration::from_millis(250);
 /// The lines that the agent takes before it looks at the child again.
 const LINES_PER_TURN: usize = 256;
 
-/// The depth of the line queue between the readers and the step loop.
-const LINE_QUEUE: usize = 64;
-
 /// Why a step is not a success. The stable code reaches the control plane (NFR-DOC-04).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StepError {
@@ -221,17 +218,18 @@ impl StepOutput {
                     log.push(
                         &self.step_id,
                         LogStream::Stdout,
-                        &self.scrubber.scrub(&text),
+                        &self.scrubber.scrub_line(&text, line.truncated),
                     );
                 }
                 Accepted::Progress(progress) => self.progress = Some(progress),
                 Accepted::Consumed => {}
             },
             Pipe::Stderr => {
+                let text = crate::output::stderr_text(&text, line.truncated);
                 log.push(
                     &self.step_id,
                     LogStream::Stderr,
-                    &self.scrubber.scrub(&text),
+                    &self.scrubber.scrub_line(&text, line.truncated),
                 );
             }
         }
@@ -285,7 +283,7 @@ impl Jobs {
 
         let kind = step.kind.as_ref().map_or(OutputKind::Plain, OutputKind::of);
         let (stdout, stderr) = child.take_output();
-        let (tx, mut lines) = mpsc::channel::<Line>(LINE_QUEUE);
+        let (tx, mut lines) = mpsc::channel::<Line>(kind.queue_depth());
         if let Some(stdout) = stdout {
             spawn_reader(stdout, Pipe::Stdout, kind.stdout_limit(), tx.clone());
         }

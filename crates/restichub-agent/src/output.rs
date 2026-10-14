@@ -6,8 +6,10 @@
 //! ignores unknown fields and message types (ADR-0011). A line that is not a known message is a log
 //! line.
 
+use std::collections::HashMap;
 use std::io::Read;
 
+use prost::Message as _;
 use prost_types::Timestamp;
 use restichub_proto::agent::v1::{
     BackupSummary, CheckSummary, ForgetGroup, ForgetResult, ForgetSnapshot, Snapshot, SnapshotList,
@@ -27,6 +29,17 @@ pub(crate) const MAX_DOCUMENT: usize = 8 * 1024 * 1024;
 /// The most snapshots that one result carries, so a result fits in a protocol message. The agent
 /// keeps the newest ones.
 pub(crate) const MAX_SNAPSHOTS: usize = 2_000;
+
+/// The encoded size that a snapshot list or a forget result may reach. The rest of the step result
+/// is small, so the whole message stays below [`restichub_proto::MAX_STEP_RESULT_BYTES`].
+const MAX_OUTPUT_BYTES: usize = restichub_proto::MAX_STEP_RESULT_BYTES - 64 * 1024;
+
+/// The depth of the line queue between the readers and the step loop for a text step.
+const TEXT_QUEUE: usize = 64;
+
+/// The depth for a step whose lines can be as long as a document. The queue holds at most this
+/// many documents in memory.
+const DOCUMENT_QUEUE: usize = 2;
 
 /// The most current files that one progress message carries.
 const MAX_CURRENT_FILES: usize = 10;
@@ -135,6 +148,14 @@ impl OutputKind {
         match self {
             Self::Snapshots | Self::Forget | Self::Stats => MAX_DOCUMENT,
             _ => MAX_LINE,
+        }
+    }
+
+    /// The depth of the line queue, which bounds the memory of the pending lines.
+    pub(crate) fn queue_depth(self) -> usize {
+        match self {
+            Self::Snapshots | Self::Forget | Self::Stats => DOCUMENT_QUEUE,
+            _ => TEXT_QUEUE,
         }
     }
 }
@@ -329,6 +350,34 @@ fn backup_error(message: &Value) -> String {
     }
 }
 
+/// The log text of a line on the standard error of restic.
+///
+/// With `--json` restic prints its errors as JSON messages: `error` for a failed item and
+/// `exit_error` for the fatal message. The agent shows the readable message. A line that is not one
+/// of them is a log line as it is (ADR-0011).
+pub(crate) fn stderr_text(line: &str, truncated: bool) -> String {
+    if truncated || !line.starts_with('{') {
+        return line.to_owned();
+    }
+    let Ok(message) = serde_json::from_str::<Value>(line) else {
+        return line.to_owned();
+    };
+    match message.get("message_type").and_then(Value::as_str) {
+        Some("error") => backup_error(&message),
+        Some("exit_error") => {
+            let detail = message
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("error");
+            match message.get("code").and_then(Value::as_i64) {
+                Some(code) => format!("{detail} (exit code {code})"),
+                None => detail.to_owned(),
+            }
+        }
+        _ => line.to_owned(),
+    }
+}
+
 fn timestamp(value: &Value, key: &str) -> Option<Timestamp> {
     let parsed = OffsetDateTime::parse(value.get(key)?.as_str()?, &Rfc3339).ok()?;
     Some(Timestamp {
@@ -354,8 +403,26 @@ fn strings(value: &Value, key: &str) -> Vec<String> {
 fn snapshot_list(document: &Value) -> SnapshotList {
     let items = document.as_array().map(Vec::as_slice).unwrap_or_default();
     let skip = items.len().saturating_sub(MAX_SNAPSHOTS);
-    let snapshots = items.iter().skip(skip).map(snapshot).collect();
-    SnapshotList { snapshots }
+    let mut snapshots: Vec<Snapshot> = items.iter().skip(skip).map(snapshot).collect();
+    let mut truncated = skip > 0;
+    let mut size = 0;
+    let mut keep = 0;
+    // A snapshot costs its own size plus a tag and a length prefix.
+    for snapshot in snapshots.iter().rev() {
+        size += snapshot.encoded_len() + 6;
+        if size > MAX_OUTPUT_BYTES {
+            break;
+        }
+        keep += 1;
+    }
+    if keep < snapshots.len() {
+        snapshots.drain(..snapshots.len() - keep);
+        truncated = true;
+    }
+    SnapshotList {
+        snapshots,
+        truncated,
+    }
 }
 
 fn snapshot(item: &Value) -> Snapshot {
@@ -380,47 +447,78 @@ fn snapshot(item: &Value) -> Snapshot {
 }
 
 fn forget_result(document: &Value) -> ForgetResult {
+    let mut truncated = false;
     let groups = document
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or_default()
         .iter()
         .map(|group| {
-            let reasons = group
+            let reasons: HashMap<String, String> = group
                 .get("reasons")
                 .and_then(Value::as_array)
                 .map(Vec::as_slice)
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|reason| {
+                    let id = text(reason.get("snapshot")?, "id");
+                    Some((id, strings(reason, "matches").join(",")))
+                })
+                .collect();
             ForgetGroup {
                 tags: strings(group, "tags"),
                 host: text(group, "host"),
                 paths: strings(group, "paths"),
-                kept: forget_snapshots(group, "keep", reasons),
-                removed: forget_snapshots(group, "remove", reasons),
+                kept: forget_snapshots(group, "keep", &reasons, &mut truncated),
+                removed: forget_snapshots(group, "remove", &reasons, &mut truncated),
             }
         })
         .collect();
-    ForgetResult { groups }
+    let mut result = ForgetResult { groups, truncated };
+    fit_forget_result(&mut result);
+    result
 }
 
-fn forget_snapshots(group: &Value, key: &str, reasons: &[Value]) -> Vec<ForgetSnapshot> {
-    group
+/// Drops snapshots, then groups, until the result fits the size limit.
+fn fit_forget_result(result: &mut ForgetResult) {
+    while result.encoded_len() > MAX_OUTPUT_BYTES {
+        result.truncated = true;
+        let longest = result
+            .groups
+            .iter_mut()
+            .flat_map(|group| [&mut group.kept, &mut group.removed])
+            .max_by_key(|list| list.len());
+        match longest {
+            Some(list) if !list.is_empty() => list.truncate(list.len() / 2),
+            _ => {
+                if result.groups.pop().is_none() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn forget_snapshots(
+    group: &Value,
+    key: &str,
+    reasons: &HashMap<String, String>,
+    truncated: &mut bool,
+) -> Vec<ForgetSnapshot> {
+    let items = group
         .get(key)
         .and_then(Value::as_array)
         .map(Vec::as_slice)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    *truncated |= items.len() > MAX_SNAPSHOTS;
+    items
         .iter()
         .take(MAX_SNAPSHOTS)
         .map(|item| {
             let id = text(item, "id");
-            let reason = reasons
-                .iter()
-                .find(|reason| reason.get("snapshot").is_some_and(|s| text(s, "id") == id))
-                .map(|reason| strings(reason, "matches").join(","))
-                .unwrap_or_default();
             ForgetSnapshot {
                 time: timestamp(item, "time"),
-                reason,
+                reason: reasons.get(&id).cloned().unwrap_or_default(),
                 id,
             }
         })

@@ -547,6 +547,8 @@ async fn run_job(
     );
     let status = match outcome {
         JobStatus::Succeeded => StepStatus::Success,
+        JobStatus::SucceededWithWarnings => StepStatus::Warning,
+        JobStatus::RepositoryLocked => StepStatus::Retry,
         JobStatus::Cancelled => StepStatus::Cancelled,
         JobStatus::ConfigError => StepStatus::ConfigError,
         JobStatus::Failed | JobStatus::NotInitialized | JobStatus::Unspecified => {
@@ -675,6 +677,8 @@ fn job_error(outcome: JobStatus) -> Option<ErrorDetail> {
         JobStatus::NotInitialized => "repository_missing",
         JobStatus::Failed => "step_failed",
         JobStatus::Cancelled => "cancelled",
+        JobStatus::RepositoryLocked => "repository_locked",
+        JobStatus::SucceededWithWarnings => "succeeded_with_warnings",
         JobStatus::Succeeded | JobStatus::Unspecified => return None,
     };
     Some(ErrorDetail {

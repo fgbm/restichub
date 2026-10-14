@@ -30,7 +30,7 @@
 //! repository does not exist); any other result of `test_access` stops the job with its typed
 //! outcome (AC-RP-01). A cancel or a timeout stops the step in two stages (FR-AG-10).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -74,7 +74,7 @@ enum Dispatch {
     /// caller writes before it runs the job.
     Run {
         cancel: CancelHandle,
-        snapshot: Option<Result<JournalSnapshot>>,
+        snapshot: Option<JournalSnapshot>,
     },
 }
 
@@ -91,6 +91,9 @@ pub struct Jobs {
     connection: Arc<Mutex<Option<mpsc::Sender<AgentMessage>>>>,
     /// The sequence of the newest journal write on disk, which also serializes the writers.
     written: Arc<Mutex<u64>>,
+    /// The jobs whose log tail and step results this process already re-sent. The control plane
+    /// has no acknowledgement of a result, so a later connection sends the job result alone.
+    resent: Arc<Mutex<HashSet<String>>>,
     /// The grace period between the graceful stop and the forced kill (FR-AG-10).
     stop_grace: Duration,
 }
@@ -118,6 +121,7 @@ impl Jobs {
             running: Arc::new(Mutex::new(HashMap::new())),
             connection: Arc::new(Mutex::new(None)),
             written: Arc::new(Mutex::new(0)),
+            resent: Arc::new(Mutex::new(HashSet::new())),
             stop_grace: STOP_GRACE,
         })
     }
@@ -221,8 +225,7 @@ impl Jobs {
     }
 
     /// Writes a journal snapshot off the async workers: the write waits for the disk (FR-AG-04).
-    async fn write_journal(&self, snapshot: Result<JournalSnapshot>) -> Result<()> {
-        let snapshot = snapshot?;
+    async fn write_journal(&self, snapshot: JournalSnapshot) -> Result<()> {
         let written = Arc::clone(&self.written);
         tokio::task::spawn_blocking(move || snapshot.write(&written))
             .await
@@ -254,9 +257,11 @@ impl Jobs {
     /// Re-sends the results that the control plane may have missed (ADR-0020).
     ///
     /// The agent calls it at every connection, so a result that a dropped stream lost reaches the
-    /// control plane. The send is repeated until the journal entry expires.
+    /// control plane. The job result is repeated until the journal entry expires; the log tail and
+    /// the step results go out once for each process start.
     pub async fn send_stored_results(&self) {
         let stored = lock(&self.journal).stored_results();
+        lock(&self.resent).retain(|id| stored.iter().any(|result| &result.job_id == id));
         for result in stored {
             if !self.send_result(result).await {
                 return;
@@ -266,8 +271,15 @@ impl Jobs {
 
     /// Sends the log tail, the step results and the job result of a stored job (AC-PR-07).
     ///
-    /// False when no stream is open or a send fails.
+    /// The log tail and the step results go out only if this process did not send them yet. False
+    /// when no stream is open or a send fails.
     async fn send_result(&self, mut result: JobResult) -> bool {
+        if lock(&self.resent).contains(&result.job_id) {
+            result.log_tail.clear();
+            result.steps.clear();
+            return self.send(job_result_message(result)).await;
+        }
+        let job_id = result.job_id.clone();
         for chunk in std::mem::take(&mut result.log_tail) {
             let message = AgentMessage {
                 payload: Some(agent_message::Payload::LogChunk(chunk)),
@@ -284,6 +296,7 @@ impl Jobs {
                 return false;
             }
         }
+        lock(&self.resent).insert(job_id);
         self.send(job_result_message(result)).await
     }
 
@@ -323,25 +336,21 @@ impl Jobs {
         let mut step_results: Vec<StepResult> = Vec::new();
         let mut succeeded = 0_u32;
         let mut failed = 0_u32;
-        let mut warned = false;
-        let mut cancelled = false;
-        // The exit code and the status of a step that stopped the job outside the missing-repository
-        // probe.
-        let mut stopped_code: Option<i32> = None;
+        let mut progress = Progress {
+            had_init,
+            ..Progress::default()
+        };
+        // The status of a step that stopped the job outside the missing-repository probe.
         let mut stopped_status: Option<StepStatus> = None;
-        // The repository of the test_access step and its probe result. The init step runs only when
-        // its own repository matches (FR-RP-02, AC-RP-01).
+        // The repository of the test_access step. The init step runs only when its own repository
+        // matches (FR-RP-02, AC-RP-01).
         let mut probe_repository: Option<String> = None;
-        let mut probe_missing = false;
-        let mut init_ran = false;
-        let mut init_succeeded = false;
-        let mut init_invalid = false;
 
         for step in &job.steps {
             // A cancel that arrived between two steps stops the job before the next step starts
             // (FR-AG-10).
             if cancel.is_cancelled() {
-                cancelled = true;
+                progress.cancelled = true;
                 break;
             }
             let is_test_access = matches!(step.kind, Some(step::Kind::TestAccess(_)));
@@ -353,7 +362,7 @@ impl Jobs {
                 if !bound {
                     // The job holds an init without a preceding test_access of the same repository,
                     // so the sequence is invalid and the job fails (FR-RP-02, AC-RP-01).
-                    init_invalid = true;
+                    progress.init_invalid = true;
                     failed += 1;
                     let now = now_timestamp();
                     step_results.push(
@@ -362,7 +371,7 @@ impl Jobs {
                     );
                     break;
                 }
-                if !probe_missing {
+                if !progress.probe_missing {
                     // The repository exists, so init is skipped and never re-initializes it.
                     let now = now_timestamp();
                     step_results.push(
@@ -379,7 +388,7 @@ impl Jobs {
                 if remaining.is_zero() {
                     // The job deadline passed between two steps, so the next step does not start.
                     failed += 1;
-                    stopped_code = Some(StepOutcome::failed().exit_code);
+                    progress.stopped_code = Some(StepOutcome::failed().exit_code);
                     stopped_status = Some(StepStatus::Failed);
                     step_results.push(
                         self.send_step_result(
@@ -396,7 +405,7 @@ impl Jobs {
                 limit = limit.min(remaining);
             }
             if is_init {
-                init_ran = true;
+                progress.init_ran = true;
             }
             let outcome = self
                 .run_step(&validated, step, &cancel, Some(limit), &mut log)
@@ -408,22 +417,22 @@ impl Jobs {
             );
             if is_test_access {
                 probe_repository = repository_id(step);
-                probe_missing = outcome.exit_code == 10;
+                progress.probe_missing = outcome.exit_code == 10;
             }
             match outcome.status {
                 StepStatus::Success => {
                     succeeded += 1;
                     if is_init {
-                        init_succeeded = true;
+                        progress.init_succeeded = true;
                     }
                 }
                 // Restic finished and reported a problem with some files: the job goes on.
                 StepStatus::Warning => {
                     succeeded += 1;
-                    warned = true;
+                    progress.warned = true;
                 }
                 StepStatus::Cancelled => {
-                    cancelled = true;
+                    progress.cancelled = true;
                     break;
                 }
                 _ => {
@@ -433,7 +442,7 @@ impl Jobs {
                     } else {
                         // Every other failure stops the job with its own outcome: no init runs
                         // (FR-RP-02, AC-RP-01).
-                        stopped_code = Some(outcome.exit_code);
+                        progress.stopped_code = Some(outcome.exit_code);
                         stopped_status = Some(outcome.status);
                         break;
                     }
@@ -442,19 +451,12 @@ impl Jobs {
         }
 
         self.send_log(&mut log).await;
-        let outcome = job_outcome(
-            cancelled,
-            stopped_code,
-            probe_missing,
-            had_init,
-            init_ran,
-            init_succeeded,
-            init_invalid,
-        );
+        let outcome = job_outcome(&progress);
         let status = stopped_status.unwrap_or(match outcome {
-            JobStatus::Succeeded if warned => StepStatus::Warning,
+            JobStatus::SucceededWithWarnings => StepStatus::Warning,
             JobStatus::Succeeded => StepStatus::Success,
             JobStatus::Cancelled => StepStatus::Cancelled,
+            JobStatus::RepositoryLocked => StepStatus::Retry,
             JobStatus::ConfigError => StepStatus::ConfigError,
             JobStatus::Failed | JobStatus::NotInitialized | JobStatus::Unspecified => {
                 StepStatus::Failed
@@ -598,48 +600,65 @@ fn step_timeout(step_seconds: u32, job_seconds: u32) -> Duration {
     }
 }
 
-/// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
-///
-/// The init chain: the agent runs init only after a `test_access` of the same repository exited with
-/// code 10 (a missing repository). A successful init after that probe is a successful job. A
-/// test_access that failed with any other code (1, 11, 12, a timeout, access denied) stops the job,
-/// and a standalone test_access with exit code 10 is the normal `NOT_INITIALIZED` result. An init
-/// without a matching test_access is an invalid sequence and fails the job.
-#[allow(clippy::fn_params_excessive_bools)]
-fn job_outcome(
+/// What the steps of one job did, as input of [`job_outcome`].
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Default)]
+struct Progress {
     cancelled: bool,
+    /// The exit code of the step that stopped the job, outside the missing-repository probe.
     stopped_code: Option<i32>,
     probe_missing: bool,
     had_init: bool,
     init_ran: bool,
     init_succeeded: bool,
     init_invalid: bool,
-) -> JobStatus {
-    if cancelled {
+    /// Exit code 3 of a step: restic finished but could not read some files.
+    warned: bool,
+}
+
+/// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
+///
+/// The init chain: the agent runs init only after a `test_access` of the same repository exited with
+/// code 10 (a missing repository). A successful init after that probe is a successful job. A
+/// test_access that failed with any other code (1, 12, a timeout, access denied) stops the job,
+/// and a standalone test_access with exit code 10 is the normal `NOT_INITIALIZED` result. An init
+/// without a matching test_access is an invalid sequence and fails the job. Exit code 11 gives
+/// `REPOSITORY_LOCKED` and exit code 3 gives `SUCCEEDED_WITH_WARNINGS`, so neither hides behind a
+/// plain failure or a plain success.
+fn job_outcome(progress: &Progress) -> JobStatus {
+    if progress.cancelled {
         return JobStatus::Cancelled;
     }
-    if let Some(code) = stopped_code {
+    if let Some(code) = progress.stopped_code {
         // restic exit code 12 is a wrong password or wrong credentials (AC-RP-01).
-        return if code == 12 {
-            JobStatus::ConfigError
-        } else {
-            JobStatus::Failed
+        return match code {
+            12 => JobStatus::ConfigError,
+            11 => JobStatus::RepositoryLocked,
+            _ => JobStatus::Failed,
         };
     }
-    if init_invalid {
+    if progress.init_invalid {
         return JobStatus::Failed;
     }
-    if had_init && init_ran {
-        return if init_succeeded {
-            JobStatus::Succeeded
+    if progress.had_init && progress.init_ran {
+        return if progress.init_succeeded {
+            succeeded(progress)
         } else {
             JobStatus::Failed
         };
     }
-    if !had_init && probe_missing {
+    if !progress.had_init && progress.probe_missing {
         return JobStatus::NotInitialized;
     }
-    JobStatus::Succeeded
+    succeeded(progress)
+}
+
+fn succeeded(progress: &Progress) -> JobStatus {
+    if progress.warned {
+        JobStatus::SucceededWithWarnings
+    } else {
+        JobStatus::Succeeded
+    }
 }
 
 /// The stable code that explains a failed or cancelled outcome (NFR-DOC-04). It holds no secret.
@@ -649,6 +668,8 @@ fn job_error(outcome: JobStatus) -> Option<ErrorDetail> {
         JobStatus::NotInitialized => "repository_missing",
         JobStatus::Failed => "step_failed",
         JobStatus::Cancelled => "cancelled",
+        JobStatus::RepositoryLocked => "repository_locked",
+        JobStatus::SucceededWithWarnings => "succeeded_with_warnings",
         JobStatus::Succeeded | JobStatus::Unspecified => return None,
     };
     Some(ErrorDetail {

@@ -55,6 +55,17 @@ pub fn validate_job(job: &Job) -> Result<(), Rejection> {
         check_step(job, &repository_ids, step)?;
     }
 
+    // `unlock --remove-all` removes the locks of a live backup, so it never shares a job with
+    // another step (FR-SC-06).
+    if job.steps.len() > 1
+        && job
+            .steps
+            .iter()
+            .any(|step| matches!(step.kind, Some(step::Kind::UnlockAll(_))))
+    {
+        return Err(reject(job, RejectReason::Malformed));
+    }
+
     Ok(())
 }
 
@@ -548,9 +559,6 @@ mod tests {
             step(step::Kind::Unlock(UnlockStep {
                 repository_id: string("repo-1"),
             })),
-            step(step::Kind::UnlockAll(UnlockAllStep {
-                repository_id: string("repo-1"),
-            })),
             step(step::Kind::Forget(ForgetStep {
                 repository_id: string("repo-1"),
                 keep_within: string("30d"),
@@ -578,6 +586,22 @@ mod tests {
         ];
 
         assert_eq!(validate_job(&job_with(steps)), Ok(()));
+    }
+
+    #[test]
+    fn fr_sc_06_unlock_all_runs_only_alone() {
+        let unlock_all = || {
+            step(step::Kind::UnlockAll(UnlockAllStep {
+                repository_id: string("repo-1"),
+            }))
+        };
+        let unlock = step(step::Kind::Unlock(UnlockStep {
+            repository_id: string("repo-1"),
+        }));
+        assert_eq!(validate_job(&job_with(vec![unlock_all()])), Ok(()));
+        assert!(malformed(&job_with(vec![unlock.clone(), unlock_all()])));
+        assert!(malformed(&job_with(vec![unlock_all(), unlock])));
+        assert!(malformed(&job_with(vec![unlock_all(), unlock_all()])));
     }
 
     #[test]

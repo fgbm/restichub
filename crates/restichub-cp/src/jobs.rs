@@ -77,6 +77,12 @@ const MAX_RESULT_MESSAGE_LEN: usize = 64;
 /// repository. The user interface translates it (NFR-DOC-04).
 const ACCESS_ERROR_CODE: &str = "repository_missing_here";
 
+/// The `result_message` of a job whose steps finished with restic warnings (exit code 3).
+const WARNINGS_CODE: &str = "succeeded_with_warnings";
+
+/// The `result_message` of a job that a lock on the repository stopped (restic exit code 11).
+const LOCKED_CODE: &str = "repository_locked";
+
 /// The request body of an init or a test-access action.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -768,6 +774,11 @@ fn repository_steps(kind: JobKind, repository_id: &str) -> Vec<Step> {
 
 /// Maps the typed outcome of a `JobResult` to the stored outcome (FR-AG-09).
 ///
+/// The stored result codes have no value for a warning or a locked repository, so these two outcomes
+/// keep the closest code and carry a fixed `result_message`: a job with warnings is `succeeded` with
+/// the message `succeeded_with_warnings`, and a locked repository is `failed` with the message
+/// `repository_locked`.
+///
 /// The error code from the agent is bounded and sanitized, so a malicious agent cannot store a huge
 /// value or a control character (FR-PR-08).
 fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
@@ -778,6 +789,8 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         ProtoJobStatus::ConfigError => JobResultCode::ConfigError,
         ProtoJobStatus::NotInitialized => JobResultCode::NotInitialized,
         ProtoJobStatus::Cancelled => JobResultCode::Cancelled,
+        ProtoJobStatus::SucceededWithWarnings => JobResultCode::Succeeded,
+        ProtoJobStatus::RepositoryLocked => JobResultCode::Failed,
         ProtoJobStatus::Unspecified => return None,
     };
     let status = match result_code {
@@ -788,16 +801,20 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         | JobResultCode::AccessError
         | JobResultCode::Cancelled => JobStatus::Failed,
     };
-    let result_message = result
-        .error
-        .as_ref()
-        .map(|error| error.code.as_str())
-        .filter(|code| {
-            !code.is_empty()
-                && code.len() <= MAX_RESULT_MESSAGE_LEN
-                && !restichub_proto::validate::has_forbidden(code)
-        })
-        .map(str::to_owned);
+    let result_message = match outcome {
+        ProtoJobStatus::SucceededWithWarnings => Some(WARNINGS_CODE.to_owned()),
+        ProtoJobStatus::RepositoryLocked => Some(LOCKED_CODE.to_owned()),
+        _ => result
+            .error
+            .as_ref()
+            .map(|error| error.code.as_str())
+            .filter(|code| {
+                !code.is_empty()
+                    && code.len() <= MAX_RESULT_MESSAGE_LEN
+                    && !restichub_proto::validate::has_forbidden(code)
+            })
+            .map(str::to_owned),
+    };
     Some(JobOutcome {
         status,
         result_code,
@@ -841,4 +858,44 @@ fn timestamp(time: OffsetDateTime) -> prost_types::Timestamp {
 fn format_time(value: OffsetDateTime) -> String {
     use time::format_description::well_known::Rfc3339;
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use restichub_db::{JobResultCode, JobStatus};
+    use restichub_proto::agent::v1::{JobResult, JobStatus as ProtoJobStatus};
+
+    use super::outcome_of;
+
+    fn result(outcome: ProtoJobStatus) -> JobResult {
+        JobResult {
+            job_id: "job-1".to_owned(),
+            outcome: outcome as i32,
+            ..JobResult::default()
+        }
+    }
+
+    #[test]
+    fn fr_ag_09_a_job_with_warnings_is_not_a_plain_success() {
+        let outcome = outcome_of(&result(ProtoJobStatus::SucceededWithWarnings))
+            .expect("the outcome must map");
+        assert_eq!(outcome.status, JobStatus::Succeeded);
+        assert_eq!(outcome.result_code, JobResultCode::Succeeded);
+        assert_eq!(
+            outcome.result_message.as_deref(),
+            Some("succeeded_with_warnings")
+        );
+        let plain = outcome_of(&result(ProtoJobStatus::Succeeded)).expect("the outcome must map");
+        assert_eq!(plain.result_message, None);
+    }
+
+    #[test]
+    fn fr_sc_05_a_locked_repository_is_a_typed_failure() {
+        let outcome =
+            outcome_of(&result(ProtoJobStatus::RepositoryLocked)).expect("the outcome must map");
+        assert_eq!(outcome.status, JobStatus::Failed);
+        assert_eq!(outcome.result_message.as_deref(), Some("repository_locked"));
+    }
 }

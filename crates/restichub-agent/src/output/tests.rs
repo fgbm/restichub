@@ -216,3 +216,140 @@ fn fr_ag_08_the_reader_stops_when_the_consumer_stops() {
     });
     assert_eq!(count, 1);
 }
+
+/// A snapshot document with long path lists, so the list is larger than the size limit.
+fn large_snapshots(count: usize) -> String {
+    let path = format!("/srv/{}", "p".repeat(2_000));
+    let paths = vec![format!("\"{path}\""); 20].join(",");
+    let items: Vec<String> = (0..count)
+        .map(|index| {
+            format!(
+                r#"{{"id":"{index:0>64}","short_id":"{index:0>8}","time":"2026-01-01T00:00:00Z","paths":[{paths}],"hostname":"h","username":"u","tree":"t"}}"#
+            )
+        })
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
+#[test]
+fn fr_ag_08_a_large_snapshot_list_stays_inside_the_step_result_limit() {
+    use prost::Message as _;
+    use restichub_proto::agent::v1::StepResult;
+
+    // 150 snapshots of about 40 KiB each are 6 MiB, which is over the limit.
+    let (_, output) = feed(OutputKind::Snapshots, &large_snapshots(150));
+    let Some(Output::SnapshotList(list)) = &output else {
+        panic!("snapshots must give a list");
+    };
+    assert!(list.truncated);
+    assert!(!list.snapshots.is_empty());
+    // Snapshot 149 is the newest one.
+    assert!(
+        list.snapshots
+            .last()
+            .is_some_and(|snapshot| snapshot.short_id.ends_with("149"))
+    );
+    let result = StepResult {
+        job_id: "job-1".to_owned(),
+        step_id: "step-1".to_owned(),
+        output,
+        ..StepResult::default()
+    };
+    assert!(
+        result.encoded_len() <= restichub_proto::MAX_STEP_RESULT_BYTES,
+        "{}",
+        result.encoded_len()
+    );
+}
+
+#[test]
+fn fr_ag_08_a_large_forget_result_stays_inside_the_step_result_limit() {
+    use prost::Message as _;
+    use restichub_proto::agent::v1::StepResult;
+
+    let removed: Vec<String> = (0..1_500)
+        .map(|index| {
+            format!(
+                r#"{{"id":"{index:0>64}","time":"2026-01-01T00:00:00Z","paths":["/srv"],"hostname":"h"}}"#
+            )
+        })
+        .collect();
+    let reasons: Vec<String> = (0..1_500)
+        .map(|index| {
+            format!(
+                r#"{{"snapshot":{{"id":"{index:0>64}"}},"matches":["last snapshot","hourly snapshot {}"]}}"#,
+                "x".repeat(2_000)
+            )
+        })
+        .collect();
+    let document = format!(
+        r#"[{{"tags":null,"host":"h","paths":["/srv"],"keep":[],"remove":[{}],"reasons":[{}]}}]"#,
+        removed.join(","),
+        reasons.join(",")
+    );
+    let (_, output) = feed(OutputKind::Forget, &document);
+    let Some(Output::ForgetResult(forget)) = &output else {
+        panic!("forget must give a result");
+    };
+    assert!(forget.truncated);
+    let result = StepResult {
+        output,
+        ..StepResult::default()
+    };
+    assert!(
+        result.encoded_len() <= restichub_proto::MAX_STEP_RESULT_BYTES,
+        "{}",
+        result.encoded_len()
+    );
+}
+
+#[test]
+fn fr_ag_08_a_small_result_is_not_marked_truncated() {
+    let (_, output) = feed(OutputKind::Snapshots, SNAPSHOTS);
+    let Some(Output::SnapshotList(list)) = output else {
+        panic!("snapshots must give a list");
+    };
+    assert!(!list.truncated);
+    let (_, output) = feed(OutputKind::Forget, FORGET);
+    let Some(Output::ForgetResult(forget)) = output else {
+        panic!("forget must give a result");
+    };
+    assert!(!forget.truncated);
+}
+
+#[test]
+fn fr_ag_08_a_document_step_keeps_a_short_line_queue() {
+    assert!(OutputKind::Snapshots.queue_depth() <= 2);
+    assert!(OutputKind::Forget.queue_depth() <= 2);
+    assert!(OutputKind::Stats.queue_depth() <= 2);
+    assert!(OutputKind::Backup.queue_depth() > 2);
+}
+
+#[test]
+fn fr_ag_08_restic_json_errors_on_the_standard_error_become_readable_lines() {
+    use super::stderr_text;
+
+    assert_eq!(
+        stderr_text(
+            r#"{"message_type":"exit_error","code":12,"message":"Fatal: wrong password or no key found"}"#,
+            false
+        ),
+        "Fatal: wrong password or no key found (exit code 12)"
+    );
+    assert_eq!(
+        stderr_text(
+            r#"{"message_type":"error","error":{"message":"permission denied"},"during":"archival","item":"/srv/a"}"#,
+            false
+        ),
+        "error during archival of /srv/a: permission denied"
+    );
+    // Other text and other JSON stay as they are.
+    assert_eq!(stderr_text("plain text", false), "plain text");
+    assert_eq!(
+        stderr_text(r#"{"message_type":"other"}"#, false),
+        r#"{"message_type":"other"}"#
+    );
+    // A cut line may hold half a message, so the agent does not parse it.
+    let cut = r#"{"message_type":"exit_error","code":1,"mess"#;
+    assert_eq!(stderr_text(cut, true), cut);
+}
