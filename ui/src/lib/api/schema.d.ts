@@ -1158,7 +1158,7 @@ export interface components {
          *     `result_code` column holds one of these strings. It is stable: do not change a string.
          * @enum {string}
          */
-        JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "cancelled";
+        JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "access_error" | "cancelled";
         /**
          * @description The lifecycle status of a job (FR-SC-03, FR-SC-07).
          *

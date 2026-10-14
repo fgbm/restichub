@@ -435,6 +435,11 @@ export const en = {
 	'repositories.result.config_error': 'The repository password or the credentials are not correct.',
 	'repositories.result.failed': 'The job failed.',
 	'repositories.result.cancelled': 'The job was cancelled.',
+	'repositories.result.access_error':
+		'The repository is not at this location on this host. Check the path, the mount and the host.',
+	'repositories.jobExpired': 'The job expired before the host answered. Start it again.',
+	'repositories.locationLocked':
+		'The location of an initialized repository cannot change in this version. It holds the stored snapshots.',
 
 	// Audit log
 	'audit.title': 'Audit log',

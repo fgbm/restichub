@@ -439,6 +439,11 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.result.config_error': 'Пароль репозитория или учётные данные неверны.',
 	'repositories.result.failed': 'Задание завершилось ошибкой.',
 	'repositories.result.cancelled': 'Задание отменено.',
+	'repositories.result.access_error':
+		'Репозитория нет по этому пути на этом хосте. Проверьте путь, точку монтирования и хост.',
+	'repositories.jobExpired': 'Срок задания истёк до ответа хоста. Запустите его снова.',
+	'repositories.locationLocked':
+		'Путь инициализированного репозитория нельзя изменить в этой версии. Там лежат снимки.',
 
 	// Audit log
 	'audit.title': 'Журнал аудита',

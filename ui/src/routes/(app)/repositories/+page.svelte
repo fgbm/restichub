@@ -83,6 +83,7 @@
 		failed: 'repositories.result.failed',
 		config_error: 'repositories.result.config_error',
 		not_initialized: 'repositories.result.not_initialized',
+		access_error: 'repositories.result.access_error',
 		cancelled: 'repositories.result.cancelled'
 	};
 
@@ -91,11 +92,22 @@
 			(job.status === 'succeeded' || job.status === 'failed' || job.status === 'expired')
 	);
 
+	// A job past its expiry with no answer: the poll stops and the dialog says so (MEDIUM 5).
+	const jobExpired = $derived(
+		job !== null &&
+			!jobDone &&
+			typeof job.expires_at === 'string' &&
+			Date.parse(job.expires_at) <= Date.now()
+	);
+
 	const jobAgentOptions = $derived<SelectOption[]>(
 		agents
 			.filter((agent) => agent.status === 'active')
 			.map((agent) => ({ value: agent.id, label: agent.hostname }))
 	);
+
+	// The location of an initialized repository cannot change in this version (MEDIUM 4).
+	const locationLocked = $derived(editing?.initialized === true);
 
 	const canWrite = $derived(getSession()?.role === 'admin');
 	const agentNames = $derived(new Map(agents.map((agent) => [agent.id, agent.hostname])));
@@ -377,6 +389,8 @@
 				if (jobDone) {
 					stopJobTimer();
 					await load();
+				} else if (jobExpired) {
+					stopJobTimer();
 				}
 			} catch (problem) {
 				stopJobTimer();
@@ -518,6 +532,9 @@
 	{#if formError}
 		<Alert tone="danger" title={formError} />
 	{/if}
+	{#if locationLocked}
+		<Alert tone="attention" icon="lock" title={t('repositories.locationLocked')} />
+	{/if}
 	<div class="form">
 		<TextField
 			id="repo-name"
@@ -541,6 +558,7 @@
 				placeholder={t('repositories.endpointPlaceholder')}
 				error={fieldError(formProblem, 'backend.endpoint')}
 				bind:value={endpoint}
+				disabled={locationLocked}
 				required
 			/>
 			<TextField
@@ -549,6 +567,7 @@
 				placeholder={t('repositories.bucketPlaceholder')}
 				error={fieldError(formProblem, 'backend.bucket')}
 				bind:value={bucket}
+				disabled={locationLocked}
 				required
 			/>
 			<TextField
@@ -557,6 +576,7 @@
 				placeholder={t('repositories.prefixPlaceholder')}
 				error={fieldError(formProblem, 'backend.prefix')}
 				bind:value={prefix}
+				disabled={locationLocked}
 			/>
 			<TextField
 				id="repo-region"
@@ -564,6 +584,7 @@
 				placeholder={t('repositories.regionPlaceholder')}
 				error={fieldError(formProblem, 'backend.region')}
 				bind:value={region}
+				disabled={locationLocked}
 			/>
 		{:else if kind === 'rest'}
 			<TextField
@@ -572,6 +593,7 @@
 				placeholder={t('repositories.endpointPlaceholder')}
 				error={fieldError(formProblem, 'backend.endpoint')}
 				bind:value={endpoint}
+				disabled={locationLocked}
 				required
 			/>
 		{:else}
@@ -581,6 +603,7 @@
 				placeholder={t('repositories.pathPlaceholder')}
 				error={fieldError(formProblem, 'backend.path')}
 				bind:value={path}
+				disabled={locationLocked}
 				required
 			/>
 		{/if}
@@ -682,9 +705,13 @@
 				<StatusPill tone={jobTone()}>{t(jobStatusLabels[job.status])}</StatusPill>
 			</div>
 			<p class="job__result">
-				{jobDone && job.result_code
-					? t(jobResultLabels[job.result_code])
-					: t('repositories.jobRunning')}
+				{#if jobExpired}
+					{t('repositories.jobExpired')}
+				{:else if jobDone && job.result_code}
+					{t(jobResultLabels[job.result_code])}
+				{:else}
+					{t('repositories.jobRunning')}
+				{/if}
 			</p>
 		</div>
 	{:else}
