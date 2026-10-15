@@ -135,7 +135,11 @@ describe('summarize', () => {
 		expect(sums.basics.state).toBe('warn');
 		expect(sums.paths).toEqual({ state: 'warn', text: 'No paths set' });
 		expect(sums.excludes).toEqual({ state: 'off', text: 'Off' });
-		expect(sums.limits.text).toBe('no progress 60 min (default) · at most 48 h (default)');
+		expect(sums.limits.text).toBe('no progress: server default · longest time: server default');
+		expect(
+			summarize(emptyDraft(), '', none, { stall_timeout_minutes: 30, max_duration_minutes: 90 })
+				.limits.text
+		).toBe('no progress 30 min (default) · at most 90 min (default)');
 	});
 
 	it('sums up a stored profile', () => {
@@ -166,7 +170,7 @@ describe('summarize', () => {
 
 	it('counts the sections that are on', () => {
 		const draft = draftFromProfile(stored());
-		expect(enabledCount(summarize(draft, 'r', none))).toEqual({ on: 3, total: 6 });
+		expect(enabledCount(summarize(draft, 'r', none))).toEqual({ on: 6, total: 9 });
 	});
 });
 
@@ -183,18 +187,19 @@ describe('settingsOf', () => {
 		expect(settings.check).toBeNull();
 	});
 
-	it('sends the default limits for empty fields and converts hours to minutes', () => {
+	it('omits an empty limit field and sends the entered minutes', () => {
 		const draft = emptyDraft('r_1');
-		expect(settingsOf(draft, context).options).toMatchObject({
-			stall_timeout_minutes: 60,
-			max_duration_minutes: 2880
-		});
+		const empty = settingsOf(draft, context).options;
+		expect(empty.stall_timeout_minutes).toBeUndefined();
+		expect(empty.max_duration_minutes).toBeUndefined();
 		draft.stallMinutes = '15';
-		draft.maxDurationHours = '3';
+		draft.maxDurationMinutes = '180';
 		expect(settingsOf(draft, context).options).toMatchObject({
 			stall_timeout_minutes: 15,
 			max_duration_minutes: 180
 		});
+		draft.stallMinutes = '0';
+		expect(settingsOf(draft, context).options.stall_timeout_minutes).toBe(0);
 	});
 
 	it('keeps the stored hooks and the stored scripts of an Operator', () => {
@@ -229,14 +234,19 @@ describe('settingsOf', () => {
 		).toEqual(retention);
 	});
 
-	it('shows a stored default limit as an empty field', () => {
+	it('fills a new draft with the server defaults and shows the stored limits', () => {
+		const defaults = { stall_timeout_minutes: 60, max_duration_minutes: 2880 };
+		const fresh = emptyDraft('r_1', defaults);
+		expect(fresh.stallMinutes).toBe('60');
+		expect(fresh.maxDurationMinutes).toBe('2880');
+		expect(emptyDraft('r_1').stallMinutes).toBe('');
 		const draft = draftFromProfile(
 			stored({
-				options: { stall_timeout_minutes: 60, max_duration_minutes: 2880 } as Profile['options']
+				options: { stall_timeout_minutes: 30, max_duration_minutes: 0 } as Profile['options']
 			})
 		);
-		expect(draft.stallMinutes).toBe('');
-		expect(draft.maxDurationHours).toBe('');
+		expect(draft.stallMinutes).toBe('30');
+		expect(draft.maxDurationMinutes).toBe('0');
 	});
 });
 

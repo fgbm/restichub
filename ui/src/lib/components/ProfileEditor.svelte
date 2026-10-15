@@ -7,6 +7,7 @@
 		Agent,
 		ApiProblem,
 		CreateProfileRequest,
+		JobLimitDefaults,
 		JobTemplate,
 		Plan,
 		Profile,
@@ -34,8 +35,6 @@
 	import type { SelectOption } from './ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import {
-		MAX_DURATION_DEFAULT_HOURS,
-		STALL_DEFAULT_MINUTES,
 		SUMMARY_ORDER,
 		buildSteps,
 		draftFromProfile,
@@ -64,6 +63,7 @@
 	let jobTemplates = $state<JobTemplate[]>([]);
 	let secrets = $state<Secret[]>([]);
 
+	let limitDefaults = $state<JobLimitDefaults | undefined>();
 	let draft = $state<ProfileDraft>(emptyDraft());
 	let baseline = $state('');
 	let saving = $state(false);
@@ -99,7 +99,7 @@
 		before: draft.scripts.filter((script) => script.phase === 'before').length,
 		after: draft.scripts.filter((script) => script.phase !== 'before').length
 	});
-	const summaries = $derived(summarize(draft, repositoryName, scriptCounts));
+	const summaries = $derived(summarize(draft, repositoryName, scriptCounts, limitDefaults));
 	const counts = $derived(enabledCount(summaries));
 	const steps = $derived(
 		buildSteps(
@@ -148,12 +148,15 @@
 
 	async function load(): Promise<void> {
 		try {
-			const [profileList, repositoryList, agentList, planList] = await Promise.all([
+			const [profileList, repositoryList, agentList, planList, defaults] = await Promise.all([
 				service.listProfiles(),
 				service.listRepositories(),
 				service.listAgents(),
-				service.listPlans()
+				service.listPlans(),
+				// Without the defaults the fields stay empty and the server decides.
+				service.getJobLimitDefaults().catch(() => undefined)
 			]);
+			limitDefaults = defaults;
 			repositories = repositoryList;
 			agents = agentList;
 			plans = planList;
@@ -166,7 +169,7 @@
 				existing = found;
 				draft = draftFromProfile(found);
 			} else {
-				draft = emptyDraft(repositoryList[0]?.id ?? '');
+				draft = emptyDraft(repositoryList[0]?.id ?? '', defaults);
 			}
 			setPageTitle(profileId ? draft.name : t('pe.newTitle'));
 			// The templates and the secrets serve the script editor only. A failure leaves the
@@ -564,22 +567,24 @@
 					<TextField
 						id="profile-stall-timeout"
 						type="number"
-						min="5"
 						label={t('pe.limits.stall')}
-						help={t('pe.limits.stallHelp', { count: STALL_DEFAULT_MINUTES })}
-						placeholder={t('pe.limits.stallPlaceholder', { count: STALL_DEFAULT_MINUTES })}
+						help={t('pe.limits.stallHelp', { count: limitDefaults?.stall_timeout_minutes ?? '' })}
+						placeholder={limitDefaults
+							? t('pe.limits.stallPlaceholder', { count: limitDefaults.stall_timeout_minutes })
+							: undefined}
 						error={fieldError(formProblem, 'options.stall_timeout_minutes')}
 						bind:value={draft.stallMinutes}
 					/>
 					<TextField
 						id="profile-max-duration"
 						type="number"
-						min="1"
 						label={t('pe.limits.max')}
-						help={t('pe.limits.maxHelp', { count: MAX_DURATION_DEFAULT_HOURS })}
-						placeholder={t('pe.limits.maxPlaceholder', { count: MAX_DURATION_DEFAULT_HOURS })}
+						help={t('pe.limits.maxHelp', { count: limitDefaults?.max_duration_minutes ?? '' })}
+						placeholder={limitDefaults
+							? t('pe.limits.maxPlaceholder', { count: limitDefaults.max_duration_minutes })
+							: undefined}
 						error={fieldError(formProblem, 'options.max_duration_minutes')}
-						bind:value={draft.maxDurationHours}
+						bind:value={draft.maxDurationMinutes}
 					/>
 				</div>
 			</ProfileSection>
@@ -634,16 +639,7 @@
 					{/each}
 					<p class="muted note">
 						<Icon name="clock" size="xs" />
-						{t('pe.side.limits', {
-							stall:
-								Number.parseInt(draft.stallMinutes, 10) > 0
-									? draft.stallMinutes
-									: STALL_DEFAULT_MINUTES,
-							max:
-								Number.parseInt(draft.maxDurationHours, 10) > 0
-									? draft.maxDurationHours
-									: MAX_DURATION_DEFAULT_HOURS
-						})}
+						{summaries.limits.text}
 					</p>
 				</div>
 			</div>

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 	listRepositories: vi.fn(),
 	listAgents: vi.fn(),
 	listPlans: vi.fn(),
+	getJobLimitDefaults: vi.fn(),
 	listScriptTemplates: vi.fn(),
 	listJobTemplates: vi.fn(),
 	listSecrets: vi.fn(),
@@ -49,6 +50,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listRepositories: mocks.listRepositories,
 			listAgents: mocks.listAgents,
 			listPlans: mocks.listPlans,
+			getJobLimitDefaults: mocks.getJobLimitDefaults,
 			listScriptTemplates: mocks.listScriptTemplates,
 			listJobTemplates: mocks.listJobTemplates,
 			listSecrets: mocks.listSecrets,
@@ -123,6 +125,10 @@ beforeEach(() => {
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	session.role = 'admin';
 	mocks.listProfiles.mockResolvedValue([profile()]);
+	mocks.getJobLimitDefaults.mockResolvedValue({
+		stall_timeout_minutes: 45,
+		max_duration_minutes: 1000
+	});
 	mocks.listRepositories.mockResolvedValue([{ id: 'r_1', name: 'offsite' }]);
 	mocks.listAgents.mockResolvedValue([agent()]);
 	mocks.listPlans.mockResolvedValue([{ id: 'pl_1', profile_id: 'p_1', agent_id: 'a_1' }]);
@@ -221,7 +227,9 @@ describe('Profile editor sections', () => {
 			screen.getByRole('button', { name: /Repository check.*read 5% of the data/ })
 		).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: /Tags.*web/ })).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: /Run limits.*default/ })).toBeInTheDocument();
+		expect(
+			screen.getByRole('button', { name: /Run limits.*45 min \(default\)/ })
+		).toBeInTheDocument();
 	});
 
 	it('has no hooks section', async () => {
@@ -300,15 +308,30 @@ describe('Profile editor tags and limits', () => {
 		expect(screen.getByRole('button', { name: 'Remove the tag db' })).toBeInTheDocument();
 	});
 
-	it('sends the default limits when the fields are empty', async () => {
+	it('omits the empty limit fields on an update', async () => {
 		const u = user();
 		render(ProfileEditor, { profileId: 'p_1' });
 		await screen.findByLabelText(/^Profile/);
+		await expand(u, /^Run limits/);
+		expect(screen.getByLabelText(/^Stop after no progress/)).toHaveAttribute(
+			'placeholder',
+			'45 (default)'
+		);
 		await u.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
 		const options = mocks.updateProfile.mock.calls[0][1].options;
-		expect(options.stall_timeout_minutes).toBe(60);
-		expect(options.max_duration_minutes).toBe(48 * 60);
+		expect(options.stall_timeout_minutes).toBeUndefined();
+		expect(options.max_duration_minutes).toBeUndefined();
+	});
+
+	it('starts a new profile with the server defaults and the standard retention', async () => {
+		const u = user();
+		render(ProfileEditor);
+		await screen.findByLabelText(/^Profile/);
+		await expand(u, /^Run limits/);
+		expect(screen.getByLabelText(/^Stop after no progress/)).toHaveValue(45);
+		expect(screen.getByLabelText(/^Maximum duration/)).toHaveValue(1000);
+		expect(screen.getByRole('button', { name: /Retention.*last 3/ })).toBeInTheDocument();
 	});
 
 	it('sends the limits that the operator enters', async () => {
@@ -317,7 +340,7 @@ describe('Profile editor tags and limits', () => {
 		await screen.findByLabelText(/^Profile/);
 		await expand(u, /^Run limits/);
 		await u.type(screen.getByLabelText(/^Stop after no progress/), '90');
-		await u.type(screen.getByLabelText(/^Maximum duration/), '2');
+		await u.type(screen.getByLabelText(/^Maximum duration/), '120');
 		await u.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
 		const options = mocks.updateProfile.mock.calls[0][1].options;
@@ -343,6 +366,6 @@ describe('Profile editor tags and limits', () => {
 		render(ProfileEditor, { profileId: 'p_1' });
 		await expand(u, /^Run limits/);
 		expect(screen.getByLabelText(/^Stop after no progress/)).toHaveValue(30);
-		expect(screen.getByLabelText(/^Maximum duration/)).toHaveValue(10);
+		expect(screen.getByLabelText(/^Maximum duration/)).toHaveValue(600);
 	});
 });

@@ -521,15 +521,6 @@ export const ru: Record<MessageKey, string> = {
 	'profiles.options.limitUpload': 'Ограничение отдачи (КиБ/с)',
 	'profiles.options.limitDownload': 'Ограничение приёма (КиБ/с)',
 	'profiles.options.limitNone': 'Без ограничения',
-	'profiles.limits': 'Ограничения',
-	'profiles.limits.hint':
-		'У копирования нет предельного времени. Узел останавливает шаг, который не продвигается.',
-	'profiles.limits.stall': 'Остановить без прогресса (минут)',
-	'profiles.limits.stallHelp': 'От 5 до 10080. По умолчанию 60.',
-	'profiles.limits.maxDuration': 'Предельная длительность (минут)',
-	'profiles.limits.maxDurationHelp':
-		'Останавливает задание по истечении времени, как бы оно ни шло.',
-	'profiles.limits.none': 'Без ограничения',
 	'profiles.retention': 'Хранение',
 	'profiles.retention.groupBy.host': 'Хост',
 	'profiles.retention.groupBy.paths': 'Пути',
@@ -1396,14 +1387,14 @@ export const ru: Record<MessageKey, string> = {
 		'Пример: 5% или 1/10. Чем больше доля, тем дольше проверка и тем больше трафика.',
 	'pe.check.placeholder': 'Только структура',
 	'pe.limits.lead':
-		'Защита от зависших и слишком долгих заданий. Лимиты действуют всегда: если поле пустое, берётся значение по умолчанию.',
+		'Защита от зависших и слишком долгих заданий. Пустое поле оставляет значение серверу: новый профиль получает значение по умолчанию, изменяемый сохраняет прежнее.',
 	'pe.limits.stall': 'Остановить, если нет прогресса, минут',
 	'pe.limits.stallHelp':
 		'Если агент не сообщает о прогрессе дольше этого срока, задание останавливается как зависшее. По умолчанию {count} минут; значение для всего стека задаёт переменная окружения RESTICHUB_JOB_STALL_TIMEOUT_SECS.',
 	'pe.limits.stallPlaceholder': '{count} (по умолчанию)',
-	'pe.limits.max': 'Максимальная длительность, часов',
+	'pe.limits.max': 'Максимальная длительность, минут',
 	'pe.limits.maxHelp':
-		'Задание, которое идёт дольше, останавливается, даже если прогресс есть. По умолчанию {count} часов; значение по умолчанию для всего стека задаёт переменная окружения RESTICHUB_JOB_MAX_DURATION_SECS.',
+		'Задание, которое идёт дольше, останавливается, даже если прогресс есть. Ноль означает без ограничения. Не больше 43200. По умолчанию {count} минут; значение по умолчанию для всего стека задаёт переменная окружения RESTICHUB_JOB_MAX_DURATION_SECS.',
 	'pe.limits.maxPlaceholder': '{count} (по умолчанию)',
 	'pe.retention.howto.title': 'Как работают правила',
 	'pe.retention.howto.union':
@@ -1491,7 +1482,6 @@ export const ru: Record<MessageKey, string> = {
 	'pe.side.copy': 'Копировать',
 	'pe.side.copied': 'Скопировано',
 	'pe.side.os': 'Команды для хоста:',
-	'pe.side.limits': 'Остановка задания: нет прогресса {stall} мин, всего {max} ч.',
 	'pe.save.dirty': 'Изменения не сохранены.',
 	'pe.save.plans':
 		'Планов с этим профилем: {count}. Новые настройки подействуют на их следующий запуск.',
@@ -1530,6 +1520,9 @@ export const ru: Record<MessageKey, string> = {
 	'pe.sum.scripts': 'до: {before} · после: {after}',
 	'pe.sum.stall': 'без прогресса {count} мин',
 	'pe.sum.stallDefault': 'без прогресса {count} мин (по умолчанию)',
-	'pe.sum.max': 'не дольше {count} ч',
-	'pe.sum.maxDefault': 'не дольше {count} ч (по умолчанию)'
+	'pe.sum.max': 'не дольше {count} мин',
+	'pe.sum.maxDefault': 'не дольше {count} мин (по умолчанию)',
+	'pe.sum.maxNone': 'без ограничения по времени',
+	'pe.sum.maxServer': 'предельное время: по умолчанию сервера',
+	'pe.sum.stallServer': 'без прогресса: по умолчанию сервера'
 };

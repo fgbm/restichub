@@ -2,14 +2,11 @@
  * The model of the profile editor page: the form draft, the conversion to the API shape, the
  * summary of each section, the retention preview and the command preview (FR-PF-01, FR-PF-04).
  */
-import type { GroupBy, Profile } from '#lib/api/index.ts';
+import type { GroupBy, JobLimitDefaults, Profile } from '#lib/api/index.ts';
 import { getLocale, t } from '#lib/i18n/index.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
 import { draftOf, scriptOf } from '#lib/scripts.ts';
 import type { ScriptDraft } from '#lib/scripts.ts';
-
-export const STALL_DEFAULT_MINUTES = 60;
-export const MAX_DURATION_DEFAULT_HOURS = 48;
 
 export type SectionKey = 'excludes' | 'tags' | 'options' | 'retention' | 'check' | 'scripts';
 export type Os = 'linux' | 'windows' | 'macos';
@@ -47,15 +44,9 @@ export interface ProfileDraft {
 	filterPaths: string;
 	readDataSubset: string;
 	stallMinutes: string;
-	maxDurationHours: string;
+	maxDurationMinutes: string;
 	enabled: Record<SectionKey, boolean>;
 	scripts: ScriptDraft[];
-}
-
-/** The execution limits of a profile. They arrive with the job limits (ADR-0039). */
-export interface LimitOptions {
-	stall_timeout_minutes?: number;
-	max_duration_minutes?: number;
 }
 
 export const RULES: { key: RuleKey; unit: Unit | 'last'; flag: string }[] = [
@@ -115,11 +106,19 @@ export function numberOrZero(value: string): number {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+/** An empty field leaves the value to the server. Zero goes to the server, which decides on it. */
+function optionalMinutes(value: string): number | undefined {
+	const text = String(value ?? '').trim();
+	if (text === '') return undefined;
+	const parsed = Number.parseInt(text, 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 function joinLines(values: string[] | undefined): string {
 	return (values ?? []).join('\n');
 }
 
-export function emptyDraft(repositoryId = ''): ProfileDraft {
+export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): ProfileDraft {
 	return {
 		name: '',
 		repositoryId,
@@ -145,8 +144,8 @@ export function emptyDraft(repositoryId = ''): ProfileDraft {
 		filterTags: [],
 		filterPaths: '',
 		readDataSubset: '',
-		stallMinutes: '',
-		maxDurationHours: '',
+		stallMinutes: defaults ? String(defaults.stall_timeout_minutes) : '',
+		maxDurationMinutes: defaults ? String(defaults.max_duration_minutes) : '',
 		enabled: {
 			excludes: false,
 			tags: false,
@@ -159,14 +158,9 @@ export function emptyDraft(repositoryId = ''): ProfileDraft {
 	};
 }
 
-export function limitsOf(options: unknown): LimitOptions {
-	return (options ?? {}) as LimitOptions;
-}
-
 export function draftFromProfile(profile: Profile): ProfileDraft {
 	const draft = emptyDraft(profile.repository_id);
 	const options = profile.options;
-	const limits = limitsOf(options);
 	draft.name = profile.name;
 	draft.pathsAll = joinLines(profile.paths?.all);
 	draft.pathsWindows = joinLines(profile.paths?.windows);
@@ -180,13 +174,12 @@ export function draftFromProfile(profile: Profile): ProfileDraft {
 	draft.excludeCaches = options?.exclude_caches ?? false;
 	draft.limitUpload = options?.limit_upload_kib ? String(options.limit_upload_kib) : '';
 	draft.limitDownload = options?.limit_download_kib ? String(options.limit_download_kib) : '';
-	const stall = limits.stall_timeout_minutes ?? 0;
-	draft.stallMinutes = stall > 0 && stall !== STALL_DEFAULT_MINUTES ? String(stall) : '';
-	const maxMinutes = limits.max_duration_minutes ?? 0;
-	draft.maxDurationHours =
-		maxMinutes > 0 && maxMinutes !== MAX_DURATION_DEFAULT_HOURS * 60
-			? String(Math.ceil(maxMinutes / 60))
-			: '';
+	if (options?.stall_timeout_minutes != null) {
+		draft.stallMinutes = String(options.stall_timeout_minutes);
+	}
+	if (options?.max_duration_minutes != null) {
+		draft.maxDurationMinutes = String(options.max_duration_minutes);
+	}
 	const retention = profile.retention;
 	if (retention) {
 		draft.keepLast = String(retention.keep_last ?? 0);
@@ -240,10 +233,6 @@ export function settingsOf(
 	context: { canEditScripts: boolean; existing: Profile | null }
 ) {
 	const on = draft.enabled;
-	const limits: LimitOptions = {
-		stall_timeout_minutes: numberOrZero(draft.stallMinutes) || STALL_DEFAULT_MINUTES,
-		max_duration_minutes: (numberOrZero(draft.maxDurationHours) || MAX_DURATION_DEFAULT_HOURS) * 60
-	};
 	return {
 		paths: {
 			all: splitLines(draft.pathsAll),
@@ -260,7 +249,8 @@ export function settingsOf(
 			exclude_caches: on.options && draft.excludeCaches,
 			limit_upload_kib: on.options ? numberOrZero(draft.limitUpload) : 0,
 			limit_download_kib: on.options ? numberOrZero(draft.limitDownload) : 0,
-			...limits
+			stall_timeout_minutes: optionalMinutes(draft.stallMinutes),
+			max_duration_minutes: optionalMinutes(draft.maxDurationMinutes)
 		},
 		hooks: context.existing?.hooks ?? [],
 		// An Operator keeps the scripts as they are stored: only an Admin changes them.
@@ -501,10 +491,20 @@ function switchable(
 	return { state: 'on', text };
 }
 
+function limitText(field: string, fallback: number | undefined, kind: 'stall' | 'max'): string {
+	const value = optionalMinutes(field);
+	if (value === 0 && kind === 'max') return t('pe.sum.maxNone');
+	if (value) return t(kind === 'stall' ? 'pe.sum.stall' : 'pe.sum.max', { count: value });
+	if (fallback === undefined)
+		return t(kind === 'stall' ? 'pe.sum.stallServer' : 'pe.sum.maxServer');
+	return t(kind === 'stall' ? 'pe.sum.stallDefault' : 'pe.sum.maxDefault', { count: fallback });
+}
+
 export function summarize(
 	draft: ProfileDraft,
 	repositoryName: string,
-	scriptCounts: { before: number; after: number }
+	scriptCounts: { before: number; after: number },
+	defaults?: JobLimitDefaults
 ): Record<SummaryKey, Summary> {
 	const pathCounts: string[] = [];
 	const paths: [string, string][] = [
@@ -549,15 +549,9 @@ export function summarize(
 			}
 		: { state: 'off', text: t('pe.sum.off') };
 
-	const stall = numberOrZero(draft.stallMinutes);
-	const maxHours = numberOrZero(draft.maxDurationHours);
 	const limits = [
-		stall
-			? t('pe.sum.stall', { count: stall })
-			: t('pe.sum.stallDefault', { count: STALL_DEFAULT_MINUTES }),
-		maxHours
-			? t('pe.sum.max', { count: maxHours })
-			: t('pe.sum.maxDefault', { count: MAX_DURATION_DEFAULT_HOURS })
+		limitText(draft.stallMinutes, defaults?.stall_timeout_minutes, 'stall'),
+		limitText(draft.maxDurationMinutes, defaults?.max_duration_minutes, 'max')
 	];
 
 	const scriptTotal = scriptCounts.before + scriptCounts.after;
@@ -591,8 +585,8 @@ export function enabledCount(summaries: Record<SummaryKey, Summary>): {
 	on: number;
 	total: number;
 } {
-	const keys: SectionKey[] = ['excludes', 'tags', 'options', 'retention', 'check', 'scripts'];
-	return { on: keys.filter((key) => summaries[key].state === 'on').length, total: keys.length };
+	const states = Object.values(summaries);
+	return { on: states.filter((summary) => summary.state === 'on').length, total: states.length };
 }
 
 /* ----------------------------------------------------------------- commands */

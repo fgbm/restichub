@@ -517,14 +517,6 @@ export const en = {
 	'profiles.options.limitUpload': 'Upload limit (KiB/s)',
 	'profiles.options.limitDownload': 'Download limit (KiB/s)',
 	'profiles.options.limitNone': 'No limit',
-	'profiles.limits': 'Limits',
-	'profiles.limits.hint':
-		'A backup has no fixed time limit. The host stops a step that makes no progress.',
-	'profiles.limits.stall': 'Stop after no progress (minutes)',
-	'profiles.limits.stallHelp': 'From 5 to 10080. The default is 60.',
-	'profiles.limits.maxDuration': 'Maximum duration (minutes)',
-	'profiles.limits.maxDurationHelp': 'Stops the job after this time, whatever its progress.',
-	'profiles.limits.none': 'No limit',
 	'profiles.retention': 'Retention',
 	'profiles.retention.groupBy.host': 'Host',
 	'profiles.retention.groupBy.paths': 'Paths',
@@ -1388,14 +1380,14 @@ export const en = {
 		'For example 5% or 1/10. A bigger share makes the check longer and uses more traffic.',
 	'pe.check.placeholder': 'Structure only',
 	'pe.limits.lead':
-		'A guard against a job that hangs or runs too long. The limits always apply: an empty field uses the default value.',
+		'A guard against a job that hangs or runs too long. An empty field leaves the value to the server: a new profile gets the default, an edited profile keeps the stored value.',
 	'pe.limits.stall': 'Stop after no progress (minutes)',
 	'pe.limits.stallHelp':
 		'If the agent reports no progress for longer than this time, the job stops as hung. The default is {count} minutes. The environment variable RESTICHUB_JOB_STALL_TIMEOUT_SECS sets the value for the whole stack.',
 	'pe.limits.stallPlaceholder': '{count} (default)',
-	'pe.limits.max': 'Maximum duration (hours)',
+	'pe.limits.max': 'Maximum duration (minutes)',
 	'pe.limits.maxHelp':
-		'A job that runs longer stops, even if it makes progress. The default is {count} hours. The environment variable RESTICHUB_JOB_MAX_DURATION_SECS sets the default for the whole stack.',
+		'A job that runs longer stops, even if it makes progress. Zero means no limit. At most 43200. The default is {count} minutes. The environment variable RESTICHUB_JOB_MAX_DURATION_SECS sets the default for the whole stack.',
 	'pe.limits.maxPlaceholder': '{count} (default)',
 	'pe.retention.howto.title': 'How the rules work',
 	'pe.retention.howto.union':
@@ -1485,8 +1477,6 @@ export const en = {
 	'pe.side.copy': 'Copy',
 	'pe.side.copied': 'Copied',
 	'pe.side.os': 'Commands for the host:',
-	'pe.side.limits':
-		'The job stops after {stall} minutes without progress, or after {max} hours in all.',
 	'pe.save.dirty': 'The changes are not saved.',
 	'pe.save.plans':
 		'Plans that use this profile: {count}. The new settings apply to their next run.',
@@ -1525,8 +1515,11 @@ export const en = {
 	'pe.sum.scripts': 'before: {before} · after: {after}',
 	'pe.sum.stall': 'no progress {count} min',
 	'pe.sum.stallDefault': 'no progress {count} min (default)',
-	'pe.sum.max': 'at most {count} h',
-	'pe.sum.maxDefault': 'at most {count} h (default)'
+	'pe.sum.max': 'at most {count} min',
+	'pe.sum.maxDefault': 'at most {count} min (default)',
+	'pe.sum.maxNone': 'no time limit',
+	'pe.sum.maxServer': 'longest time: server default',
+	'pe.sum.stallServer': 'no progress: server default'
 } as const;
 
 export type MessageKey = keyof typeof en;
