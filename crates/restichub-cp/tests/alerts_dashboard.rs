@@ -46,6 +46,7 @@ async fn ac_mn_09_dashboard_overview() {
     let profile = seed_profile(db.database(), tenant, "dash-profile", repository).await;
     let online = seed_agent(db.database(), tenant, "host-online").await;
     let offline = seed_agent(db.database(), tenant, "host-offline").await;
+    seed_agent(db.database(), tenant, "host-waiting").await;
     let now = OffsetDateTime::now_utc();
     set_last_seen(&db, tenant, online, Some(now - Duration::seconds(20))).await;
     set_last_seen(&db, tenant, offline, Some(now - Duration::minutes(10))).await;
@@ -149,9 +150,10 @@ async fn ac_mn_09_dashboard_overview() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["hosts"]["total"], 2);
+    assert_eq!(body["hosts"]["total"], 3);
     assert_eq!(body["hosts"]["online"], 1);
     assert_eq!(body["hosts"]["offline"], 1);
+    assert_eq!(body["hosts"]["waiting"], 1);
     assert_eq!(
         body["hosts"]["items"][0]["hostname"], "host-offline",
         "offline hosts come first"

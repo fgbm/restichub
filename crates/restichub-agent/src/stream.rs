@@ -299,13 +299,36 @@ pub async fn run(
         } else {
             next_attempt(attempt, healthy)
         };
+        let current = rotated.as_ref().unwrap_or(identity);
         tokio::select! {
-            () = tokio::time::sleep(delay) => {}
+            () = wait_before_retry(dir, current, delay, refused) => {}
             result = stop.changed() => {
                 if result.is_err() || *stop.borrow() {
                     return Ok(());
                 }
             }
+        }
+    }
+}
+
+/// How often a refused agent looks for an identity that a registration stored in the meantime.
+const IDENTITY_POLL: Duration = Duration::from_secs(2);
+
+/// Sleeps for `delay`. After a refusal it also ends early when the identity file holds a newer
+/// certificate: the control plane closes the stream of a re-registered host before the register
+/// command has stored the new identity (FR-ID-10).
+async fn wait_before_retry(dir: &Path, current: &StoredIdentity, delay: Duration, refused: bool) {
+    if !refused {
+        tokio::time::sleep(delay).await;
+        return;
+    }
+    let mut waited = Duration::ZERO;
+    while waited < delay {
+        let step = IDENTITY_POLL.min(delay - waited);
+        tokio::time::sleep(step).await;
+        waited += step;
+        if fresher_identity(dir, current).is_some() {
+            return;
         }
     }
 }
@@ -827,7 +850,7 @@ async fn send_hello(
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
             protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
-            agent_version: env!("CARGO_PKG_VERSION").to_owned(),
+            agent_version: restichub_common::BUILD_VERSION.to_owned(),
             restic_version: restic_version.to_owned(),
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),

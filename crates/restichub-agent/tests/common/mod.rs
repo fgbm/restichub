@@ -221,6 +221,7 @@ async fn seed_enrollment_token_value(
             labels,
             expires_at,
             created_by,
+            replaces_agent_id: None,
         },
     )
     .await

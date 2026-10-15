@@ -413,6 +413,24 @@ pub const ROUTES: &[Route] = &[
         handler: || routes!(crate::agents::revoke_agent),
     },
     Route {
+        method: "post",
+        path: "/api/v1/agents/{id}/reenroll",
+        access: Access::Protected(Operation::AgentsWrite),
+        handler: || {
+            routes!(crate::agents::reenroll_agent)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/agents/{id}/replace",
+        access: Access::Protected(Operation::AgentsWrite),
+        handler: || {
+            routes!(crate::agents::replace_agent)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
         method: "get",
         path: "/api/v1/enrollment-tokens",
         access: Access::Protected(Operation::EnrollmentTokensRead),

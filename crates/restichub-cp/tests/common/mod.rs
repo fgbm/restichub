@@ -132,6 +132,8 @@ pub fn write_body(
             Some(json!({"labels": ["matrix"], "ttl_seconds": 900}))
         }
         ("PATCH", "/api/v1/agents/{id}") => Some(json!({"hostname": "matrix-host"})),
+        ("POST", "/api/v1/agents/{id}/reenroll") => Some(json!({})),
+        ("POST", "/api/v1/agents/{id}/replace") => Some(json!({"old_agent_id": agent_id})),
         ("POST", "/api/v1/secrets") => Some(json!({
             "name": format!("matrix-secret-{index}"),
             "purpose": "repository_password",
@@ -414,6 +416,7 @@ pub async fn seed_enrollment_token_value(
             labels,
             expires_at,
             created_by,
+            replaces_agent_id: None,
         },
     )
     .await
@@ -617,6 +620,7 @@ pub async fn seed_agent(db: &Database, tenant: TenantId, hostname: &str) -> rest
             certificate_serial: &serial,
             certificate_expires_at: OffsetDateTime::now_utc() + time::Duration::days(30),
             last_seen_at: None,
+            machine_id_hash: None,
         },
     )
     .await
@@ -888,6 +892,7 @@ pub async fn seed_enrollment_token(
             labels: &["host".to_owned()],
             expires_at: OffsetDateTime::now_utc() + time::Duration::minutes(15),
             created_by,
+            replaces_agent_id: None,
         },
     )
     .await

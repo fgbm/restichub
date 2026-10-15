@@ -24,10 +24,10 @@ use axum::http::StatusCode;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use prost::Message as _;
-use restichub_db::agents::{self as agent_repo, NewAgent};
+use restichub_db::agents::{self as agent_repo, NewAgent, Reenrollment};
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
 use restichub_db::enrollment_tokens::{self, EnrollmentConsume, EnrollmentRefusal};
-use restichub_db::{AgentId, EnrollmentTokenId, TenantTx};
+use restichub_db::{AgentId, EnrollmentTokenId, TenantId, TenantTx};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -55,6 +55,9 @@ pub struct EnrollRequest {
     pub arch: String,
     pub agent_version: String,
     pub restic_version: String,
+    /// An application-specific digest of the machine identifier, for the duplicate warning. The
+    /// control plane stores a keyed hash of it only. Optional: an older agent or an unsupported system sends none.
+    pub machine_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -78,6 +81,9 @@ pub struct EnrollResponse {
     pub signing_keys_signature: String,
     /// The gRPC endpoint of the agent listener, when the installation sets it.
     pub grpc_endpoint: Option<String>,
+    /// True when the token was bound to an existing host. The agent keeps that identifier and the
+    /// plans of the host, and the old certificate stops working.
+    pub reenrolled: bool,
 }
 
 /// One public job signing key of the enrollment response (ADR-0026).
@@ -119,6 +125,11 @@ pub async fn enroll(
     let arch = validation::validate_token_name("arch", &body.arch)?;
     let agent_version = validation::validate_token_name("agent_version", &body.agent_version)?;
     let restic_version = validation::validate_token_name("restic_version", &body.restic_version)?;
+    let machine_id = body
+        .machine_id
+        .as_deref()
+        .map(|value| validation::validate_token_name("machine_id", value))
+        .transpose()?;
 
     // The request checks run before the token lookup: a bad request never spends a token and never
     // reveals the token state (AC-IN-02).
@@ -175,8 +186,9 @@ pub async fn enroll(
             tenant_id,
             token_id,
             labels,
+            replaces_agent_id,
         } => {
-            let agent_id = AgentId::new();
+            let agent_id = replaces_agent_id.unwrap_or_else(AgentId::new);
             let issued = store
                 .issue_agent_certificate_at(
                     tenant_id.as_uuid(),
@@ -187,28 +199,63 @@ pub async fn enroll(
                 )
                 .map_err(map_ca_error)?;
 
+            let machine_hash = match (machine_id.as_deref(), state.kek()) {
+                (Some(value), Some(kek)) => Some(machine_id_hash(kek, tenant_id, value)),
+                _ => None,
+            };
             let mut tx = tx.into_tenant_tx()?;
-            agent_repo::create(
-                &mut tx,
-                &NewAgent {
-                    id: agent_id,
-                    hostname: &hostname,
-                    os: &os,
-                    arch: &arch,
-                    agent_version: &agent_version,
-                    restic_version: &restic_version,
-                    labels: &labels,
-                    certificate_serial: &issued.serial,
-                    certificate_expires_at: issued.not_after,
-                    last_seen_at: Some(now),
-                },
-            )
-            .await?;
+            let reenrolled = replaces_agent_id.is_some();
+            if reenrolled {
+                let changed = agent_repo::reenroll(
+                    &mut tx,
+                    agent_id,
+                    &Reenrollment {
+                        os: &os,
+                        arch: &arch,
+                        agent_version: &agent_version,
+                        restic_version: &restic_version,
+                        certificate_serial: &issued.serial,
+                        certificate_expires_at: issued.not_after,
+                        machine_id_hash: machine_hash.as_deref(),
+                        now,
+                    },
+                )
+                .await?;
+                if !changed {
+                    // The host is revoked or gone. The refusal is a security signal, so it is
+                    // audited and the spent token stays spent (T8).
+                    write_refusal(&mut tx, token_id, EnrollmentRefusal::AgentNotActive).await?;
+                    tx.commit().await?;
+                    tracing::info!(%source_ip, %tenant_id, "enrollment refused: bound host not active");
+                    return Err(refused());
+                }
+                enrollment_tokens::revoke_unused_for_agent(&mut tx, agent_id, None, now).await?;
+            } else {
+                agent_repo::create(
+                    &mut tx,
+                    &NewAgent {
+                        id: agent_id,
+                        hostname: &hostname,
+                        os: &os,
+                        arch: &arch,
+                        agent_version: &agent_version,
+                        restic_version: &restic_version,
+                        labels: &labels,
+                        certificate_serial: &issued.serial,
+                        certificate_expires_at: issued.not_after,
+                        last_seen_at: None,
+                        machine_id_hash: machine_hash.as_deref(),
+                    },
+                )
+                .await?;
+            }
+            enrollment_tokens::set_used_by(&mut tx, token_id, agent_id).await?;
             write_use(&mut tx, token_id, agent_id, source_ip).await?;
             write_enroll(
                 &mut tx,
                 agent_id,
                 source_ip,
+                reenrolled,
                 &EnrollFacts {
                     hostname: &hostname,
                     os: &os,
@@ -222,6 +269,10 @@ pub async fn enroll(
             )
             .await?;
             tx.commit().await?;
+            if reenrolled {
+                // The old certificate is refused at the next guard; the open stream closes now.
+                state.agent_registry().close_by_agent(agent_id);
+            }
 
             tracing::info!(%source_ip, %tenant_id, %agent_id, "agent enrolled");
             Ok((
@@ -240,6 +291,7 @@ pub async fn enroll(
                     signing_keys,
                     signing_keys_signature: STANDARD.encode(&signing_keys_signature),
                     grpc_endpoint: state.agent_endpoint().map(str::to_owned),
+                    reenrolled,
                 }),
             ))
         }
@@ -352,9 +404,15 @@ async fn write_enroll(
     tx: &mut TenantTx<'_>,
     agent_id: AgentId,
     source_ip: std::net::IpAddr,
+    reenrolled: bool,
     facts: &EnrollFacts<'_>,
 ) -> Result<(), restichub_db::DbError> {
-    let mut event = AuditEvent::new(AuditAction::AgentEnroll, "agent");
+    let action = if reenrolled {
+        AuditAction::AgentReenroll
+    } else {
+        AuditAction::AgentEnroll
+    };
+    let mut event = AuditEvent::new(action, "agent");
     event.actor = Actor::Agent(agent_id.as_uuid());
     event.source_ip = Some(source_ip);
     event.object_id = Some(agent_id.as_uuid());
@@ -374,6 +432,23 @@ async fn write_enroll(
     ));
     restichub_db::audit::insert(tx, &event).await?;
     Ok(())
+}
+
+/// The keyed hash of a machine identifier (FR-ID-11, ADR-0041).
+///
+/// The key derives from the KEK and the tenant, so the same machine in two tenants gives unrelated
+/// values, a tenant never learns that a machine is enrolled elsewhere (FR-TN-01), and a database
+/// dump alone confirms no machine.
+pub(crate) fn machine_id_hash(
+    kek: &dyn restichub_secrets::KekProvider,
+    tenant: TenantId,
+    machine_id: &str,
+) -> Vec<u8> {
+    let mut context = b"restichub-machine-id-v2".to_vec();
+    context.extend_from_slice(tenant.as_uuid().as_bytes());
+    let key = restichub_secrets::derive_key(kek.current(), &context);
+    restichub_secrets::hmac_sha256(&*key, machine_id.trim().to_ascii_lowercase().as_bytes())
+        .to_vec()
 }
 
 fn to_hex(bytes: &[u8]) -> String {

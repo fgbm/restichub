@@ -47,7 +47,9 @@ jobs:
       # The action reads rust-toolchain.toml.
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       - name: Build the agent
-        run: cargo build --release -p restichub-agent
+        shell: bash
+        run: |
+          RESTICHUB_BUILD_VERSION="$(git rev-parse --short=7 HEAD)" cargo build --release -p restichub-agent
       # An input of the package job, not a deliverable. It expires after one day.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

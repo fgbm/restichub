@@ -61,6 +61,16 @@
 	let revokeOpen = $state(false);
 	let revoking = $state(false);
 
+	let reregisterTarget = $state<Agent | null>(null);
+	let reregisterOpen = $state(false);
+	let reregistering = $state(false);
+	let reregisterToken = $state<EnrollmentTokenCreated | null>(null);
+	let reregisterTokenOpen = $state(false);
+
+	let replaceTarget = $state<Agent | null>(null);
+	let replaceOpen = $state(false);
+	let replacing = $state(false);
+
 	const canWrite = $derived(getSession()?.role === 'admin');
 	// The registration command carries this installation URL (ADR-0032).
 	let origin = $state('');
@@ -70,6 +80,22 @@
 	const installCommand = $derived(
 		t('hosts.installPlaceholder', { url: origin, token: createdToken?.token ?? '<token>' })
 	);
+	const reregisterCommand = $derived(
+		t('hosts.reregisterCommand', { url: origin, token: reregisterToken?.token ?? '<token>' })
+	);
+
+	// The dialog shows the host when the agent used the token that the dialog created.
+	const registeredHost = $derived.by(() => {
+		if (!createdToken) return null;
+		const used = enrollmentTokens.find((token) => token.id === createdToken?.id);
+		if (!used?.used_at || !used.used_by_agent_id) return null;
+		return agents.find((agent) => agent.id === used.used_by_agent_id) ?? null;
+	});
+
+	function replacesName(token: EnrollmentToken): string | null {
+		if (!token.replaces_agent_id) return null;
+		return agents.find((agent) => agent.id === token.replaces_agent_id)?.hostname ?? null;
+	}
 
 	// A token stays in the pending list only while it can still enroll a host (FR-ID-01).
 	const pending = $derived(
@@ -148,8 +174,13 @@
 		return { expired: left <= 0, warn: agent.status === 'active' && left < CERT_WARNING_MS };
 	}
 
+	function isWaiting(agent: Agent): boolean {
+		return agent.status === 'active' && !agent.first_connected_at;
+	}
+
 	function statusLabel(agent: Agent): string {
-		return t(agent.status === 'revoked' ? 'hosts.status.revoked' : 'hosts.status.active');
+		if (agent.status === 'revoked') return t('hosts.status.revoked');
+		return t(isWaiting(agent) ? 'hosts.status.waiting' : 'hosts.status.active');
 	}
 
 	// The token row shows the creator's name when the caller created it (getSession is the caller).
@@ -183,6 +214,29 @@
 	}
 
 	onMount(load);
+
+	// A used token leaves the pending list and a new host appears without a manual reload.
+	const REFRESH_MS = 10_000;
+
+	async function refresh(): Promise<void> {
+		try {
+			const [agentList, tokenList] = await Promise.all([
+				service.listAgents(),
+				service.listEnrollmentTokens()
+			]);
+			agents = agentList;
+			enrollmentTokens = tokenList;
+		} catch {
+			// The next tick tries again; the visible list stays.
+		}
+	}
+
+	onMount(() => {
+		const timer = setInterval(() => {
+			if (!document.hidden && !loading) void refresh();
+		}, REFRESH_MS);
+		return () => clearInterval(timer);
+	});
 
 	function openAdd(): void {
 		labels = '';
@@ -242,8 +296,58 @@
 			await load();
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
+			// The token changed state since the list loaded, for example a host used it.
+			cancelOpen = false;
+			cancelTarget = null;
+			await load();
 		} finally {
 			cancelling = false;
+		}
+	}
+
+	function openReregister(agent: Agent): void {
+		reregisterTarget = agent;
+		reregisterOpen = true;
+	}
+
+	async function confirmReregister(): Promise<void> {
+		if (!reregisterTarget) return;
+		reregistering = true;
+		try {
+			reregisterToken = await service.reenrollAgent(reregisterTarget.id);
+			reregisterOpen = false;
+			reregisterTokenOpen = true;
+			await load();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			reregistering = false;
+		}
+	}
+
+	$effect(() => {
+		if (!reregisterTokenOpen) reregisterToken = null;
+	});
+
+	function openReplace(agent: Agent): void {
+		replaceTarget = agent;
+		replaceOpen = true;
+	}
+
+	async function confirmReplace(): Promise<void> {
+		const old = replaceTarget?.possible_duplicate_of;
+		if (!replaceTarget || !old) return;
+		replacing = true;
+		try {
+			const moved = await service.replaceAgent(replaceTarget.id, old.id);
+			pushToast('success', t('hosts.replaced', { plans: moved.plans_moved }));
+			replaceOpen = false;
+			replaceTarget = null;
+			await load();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			replacing = false;
 		}
 	}
 
@@ -302,11 +406,11 @@
 {/snippet}
 
 {#snippet lastSeenCell(agent: Agent)}
-	{@render timeCell(agent.last_seen_at)}
+	<span class="nowrap">{@render timeCell(agent.last_seen_at)}</span>
 {/snippet}
 
 {#snippet createdCell(agent: Agent)}
-	{@render timeCell(agent.created_at)}
+	<span class="nowrap">{@render timeCell(agent.created_at)}</span>
 {/snippet}
 
 {#snippet hostCell(agent: Agent)}
@@ -317,9 +421,22 @@
 {/snippet}
 
 {#snippet statusCell(agent: Agent)}
-	<StatusPill tone={agent.status === 'revoked' ? 'neutral' : 'success'}>
-		{statusLabel(agent)}
-	</StatusPill>
+	<span class="status">
+		<span title={isWaiting(agent) ? t('hosts.waitingTitle') : undefined}>
+			<StatusPill
+				tone={agent.status === 'revoked' ? 'neutral' : isWaiting(agent) ? 'info' : 'success'}
+			>
+				{statusLabel(agent)}
+			</StatusPill>
+		</span>
+		{#if agent.possible_duplicate_of && agent.status === 'active'}
+			<span title={t('hosts.duplicateTitle', { name: agent.possible_duplicate_of.hostname })}>
+				<Badge tone="warning">
+					{t('hosts.duplicate')}
+				</Badge>
+			</span>
+		{/if}
+	</span>
 {/snippet}
 
 {#snippet scriptsCell(agent: Agent)}
@@ -409,6 +526,13 @@
 								{#each token.labels as label (label)}
 									<Badge tone="neutral">{label}</Badge>
 								{/each}
+								{#if token.replaces_agent_id}
+									<Badge tone="info">
+										{t('hosts.pending.reregisters', {
+											name: replacesName(token) ?? token.replaces_agent_id
+										})}
+									</Badge>
+								{/if}
 							</span>
 							<span class="pending__meta">
 								{t('hosts.pending.meta', {
@@ -465,6 +589,20 @@
 							onSelect: () => openRename(agent)
 						},
 						{
+							label: t('hosts.reregister'),
+							icon: 'key',
+							onSelect: () => openReregister(agent)
+						},
+						...(agent.possible_duplicate_of?.is_older
+							? [
+									{
+										label: t('hosts.replaceOld'),
+										icon: 'host' as const,
+										onSelect: () => openReplace(agent)
+									}
+								]
+							: []),
+						{
 							label: t('hosts.revokeAgent'),
 							icon: 'octagon',
 							tone: 'danger',
@@ -483,12 +621,22 @@
 
 <Dialog
 	bind:open={addOpen}
-	size={createdToken ? 'lg' : 'md'}
-	title={createdToken ? t('hosts.tokenTitle') : t('hosts.addTitle')}
+	size={createdToken && !registeredHost ? 'lg' : 'md'}
+	title={registeredHost
+		? t('hosts.registeredTitle')
+		: createdToken
+			? t('hosts.tokenTitle')
+			: t('hosts.addTitle')}
 	description={createdToken ? undefined : t('hosts.addDescription')}
 	onsubmit={createdToken ? closeAdd : createToken}
 >
-	{#if createdToken}
+	{#if registeredHost}
+		<Alert
+			tone="success"
+			icon="check"
+			title={t('hosts.registered', { name: registeredHost.hostname })}
+		/>
+	{:else if createdToken}
 		<Alert tone="attention" icon="key" title={t('tokens.valueOnceBody')}>
 			{t('hosts.tokenNote')}
 		</Alert>
@@ -551,6 +699,50 @@
 		<Button onclick={() => (scriptsOpen = false)}>{t('common.close')}</Button>
 	{/snippet}
 </Dialog>
+
+<ConfirmDialog
+	bind:open={reregisterOpen}
+	title={t('hosts.reregisterTitle')}
+	message={t('hosts.reregisterBody', { name: reregisterTarget?.hostname ?? '' })}
+	confirmLabel={t('hosts.reregisterCreate')}
+	cancelLabel={t('common.cancel')}
+	loading={reregistering}
+	onConfirm={confirmReregister}
+/>
+
+<Dialog bind:open={reregisterTokenOpen} size="lg" title={t('hosts.reregisterTokenTitle')}>
+	{#if reregisterToken}
+		<Alert tone="attention" icon="key" title={t('tokens.valueOnceBody')}>
+			{t('hosts.reregisterNote', { name: reregisterTarget?.hostname ?? '' })}
+		</Alert>
+		<CopyField value={reregisterToken.token} label={t('hosts.tokenValue')} secret />
+		<CopyField value={reregisterCommand} label={t('hosts.installCommand')} />
+	{/if}
+	{#snippet footer()}
+		<Button variant="primary" onclick={() => (reregisterTokenOpen = false)}>
+			{t('common.done')}
+		</Button>
+	{/snippet}
+</Dialog>
+
+<ConfirmDialog
+	bind:open={replaceOpen}
+	title={t('hosts.replaceTitle')}
+	message={t('hosts.replaceBody', {
+		old: replaceTarget?.possible_duplicate_of?.hostname ?? '',
+		oldSeen: replaceTarget?.possible_duplicate_of?.last_seen_at
+			? relativeTime(replaceTarget.possible_duplicate_of.last_seen_at)
+			: t('common.never'),
+		newSeen: replaceTarget?.last_seen_at
+			? relativeTime(replaceTarget.last_seen_at)
+			: t('common.never')
+	})}
+	confirmLabel={t('hosts.replace')}
+	cancelLabel={t('common.cancel')}
+	tone="danger"
+	loading={replacing}
+	onConfirm={confirmReplace}
+/>
 
 <ConfirmDialog
 	bind:open={cancelOpen}
@@ -623,6 +815,17 @@
 		margin: 0 0 var(--rh-space-2);
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	.status {
+		display: inline-flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--rh-space-1);
+	}
+
+	.nowrap {
+		white-space: nowrap;
 	}
 
 	.host {

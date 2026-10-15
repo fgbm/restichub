@@ -37,6 +37,7 @@ pub mod check;
 pub mod envelope;
 pub mod error;
 pub mod kek;
+pub mod mac;
 pub mod secret;
 pub mod signing;
 
@@ -51,6 +52,7 @@ pub use kek::{
     EnvKekProvider, FileKekProvider, KEK_ENV, KEK_FILE_PARAM, KEK_LEN, Kek, KekConfig, KekId,
     KekProvider, generate_kek_encoded, load_kek_provider,
 };
+pub use mac::{derive_key, hmac_sha256};
 pub use secret::{
     EncryptedSecret, SecretPurpose, decrypt_job_blob, decrypt_secret, encrypt_job_blob,
     encrypt_secret,

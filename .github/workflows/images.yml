@@ -64,6 +64,8 @@ jobs:
             org.opencontainers.image.title=ResticHub control plane
             org.opencontainers.image.description=The ResticHub control plane.
             org.opencontainers.image.licenses=Apache-2.0
+          build-args: |
+            RESTICHUB_BUILD_VERSION=${{ steps.vars.outputs.short_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true

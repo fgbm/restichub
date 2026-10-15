@@ -334,6 +334,28 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.versionTitle': 'Протокол {protocol} · сервер управления {version}',
 	'hosts.status.active': 'Активен',
 	'hosts.status.revoked': 'Отозван',
+	'hosts.status.waiting': 'Ожидает подключения',
+	'hosts.waitingTitle': 'Агент зарегистрировался, но ещё не подключился.',
+	'hosts.registered': 'Хост зарегистрирован: {name}',
+	'hosts.registeredTitle': 'Хост зарегистрирован',
+	'hosts.reregister': 'Зарегистрировать заново',
+	'hosts.reregisterTitle': 'Зарегистрировать хост заново?',
+	'hosts.reregisterBody':
+		'Это действие создаст одноразовый токен для хоста «{name}». Хост сохранит планы, репозитории и метки. Когда агент зарегистрируется с токеном, старый сертификат сразу перестанет работать. Продолжить?',
+	'hosts.reregisterCreate': 'Создать токен',
+	'hosts.reregisterTokenTitle': 'Скопируйте токен повторной регистрации',
+	'hosts.reregisterNote':
+		'Токен действует один раз и истекает через час. Выполните команду на компьютере хоста «{name}».',
+	'hosts.reregisterCommand': 'restichub-agent register --force --url {url} --token {token}',
+	'hosts.duplicate': 'Дубль',
+	'hosts.duplicateTitle':
+		'Возможный дубль хоста «{name}»: другой активный хост сообщил об этом же компьютере.',
+	'hosts.replaceOld': 'Заменить старую запись',
+	'hosts.replaceTitle': 'Заменить старую запись?',
+	'hosts.replaceBody':
+		'Это действие перенесёт планы, ссылки на хост обслуживания, задания в очереди и метки хоста «{old}» на этот хост. Затем оно отзовёт «{old}» и отменит его выполняющиеся задания. Последний контакт: «{old}» — {oldSeen}, этот хост — {newSeen}. Продолжить?',
+	'hosts.replace': 'Заменить',
+	'hosts.replaced': 'Старая запись заменена. Перенесено планов: {plans}.',
 	'hosts.revoke': 'Отозвать',
 	'hosts.open': 'Открыть {name}',
 	'hosts.moreActions': 'Другие действия: {name}',
@@ -360,6 +382,7 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.pending.cancelBody':
 		'Это действие отзовёт токен регистрации с префиксом «{prefix}». Хост не сможет зарегистрироваться с ним. Продолжить?',
 	'hosts.pending.cancelled': 'Регистрация отменена.',
+	'hosts.pending.reregisters': 'Повторная регистрация хоста «{name}»',
 	'hosts.rename': 'Переименовать',
 	'hosts.renameTitle': 'Переименовать хост',
 	'hosts.renameHint': 'Имя хоста содержит от 1 до 128 символов.',
@@ -903,6 +926,9 @@ export const ru: Record<MessageKey, string> = {
 	'error.invalid_setup_token': 'Токен настройки указан неверно.',
 	'error.rate_limited': 'Слишком много попыток. Подождите и повторите.',
 	'error.conflict': 'Запись уже существует.',
+	'error.token_used': 'Хост уже использовал этот токен регистрации. Отменить его нельзя.',
+	'error.token_already_revoked': 'Этот токен регистрации уже отменён.',
+	'error.token_expired': 'Срок действия этого токена регистрации истёк.',
 	'error.shared_account':
 		'Учётная запись принадлежит другим организациям. Пароль может сбросить пользователь или администратор платформы.',
 	'error.username_taken': 'Это имя пользователя занято.',
@@ -1009,6 +1035,7 @@ export const ru: Record<MessageKey, string> = {
 	// Dashboard (FR-MN-01)
 	'dashboard.stat.online': 'Хосты в сети',
 	'dashboard.stat.offline': 'Хосты не в сети',
+	'dashboard.stat.waiting': 'Хосты ожидают подключения',
 	'dashboard.stat.atRisk': 'Планы под угрозой',
 	'dashboard.stat.violated': 'RPO нарушен',
 	'dashboard.stat.alerts': 'Открытые оповещения',
@@ -1025,6 +1052,7 @@ export const ru: Record<MessageKey, string> = {
 	'dashboard.hosts.empty': 'Хостов пока нет.',
 	'dashboard.hosts.online': 'В сети',
 	'dashboard.hosts.offline': 'Не в сети',
+	'dashboard.hosts.waiting': 'Ожидает подключения',
 	'dashboard.hosts.seen': 'Последний контакт: {time}',
 	'dashboard.hosts.neverSeen': 'Контактов не было',
 	'dashboard.repositories.title': 'Репозитории',

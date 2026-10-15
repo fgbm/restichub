@@ -124,7 +124,7 @@ test('the script templates screen opens a built-in template read-only and copies
 
 test('the hosts screen shows the trust mode and the command', async ({ page }) => {
 	await openSample(page, 'Hosts');
-	await page.getByRole('button', { name: 'Server scripts: win-fs01' }).click();
+	await page.getByRole('button', { name: 'Server scripts: win-fs01', exact: true }).click();
 	const dialog = page.getByRole('dialog', { name: 'Server scripts' });
 	await expect(dialog.locator('input[readonly]')).toHaveValue(
 		'restichub-agent.exe trust-server-scripts --enable'

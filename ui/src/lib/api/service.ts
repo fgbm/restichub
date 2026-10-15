@@ -36,6 +36,7 @@ import type {
 	CreateUserRequest,
 	CreatePlatformUserRequest,
 	EnrollmentToken,
+	ReplaceAgentResponse,
 	EnrollmentTokenCreated,
 	EnrollmentTokenListResponse,
 	Instance,
@@ -132,6 +133,10 @@ export interface ApiService {
 	listAgents(): Promise<Agent[]>;
 	renameAgent(id: string, hostname: string): Promise<Agent>;
 	revokeAgent(id: string): Promise<void>;
+	/** A token bound to the host: the enrollment keeps the identifier and the plans (FR-ID-01). */
+	reenrollAgent(id: string): Promise<EnrollmentTokenCreated>;
+	/** Moves the plans of the old duplicate record to this host and revokes the old record. */
+	replaceAgent(id: string, oldAgentId: string): Promise<ReplaceAgentResponse>;
 
 	/** One-time enrollment tokens (FR-ID-01). */
 	listEnrollmentTokens(): Promise<EnrollmentToken[]>;
@@ -278,6 +283,9 @@ const httpService: ApiService = {
 	renameAgent: (id, hostname) =>
 		api.patch<Agent>(endpoints.agents.byId(id), { hostname } satisfies RenameAgentRequest),
 	revokeAgent: (id) => api.post<void>(endpoints.agents.revoke(id)),
+	reenrollAgent: (id) => api.post<EnrollmentTokenCreated>(endpoints.agents.reenroll(id), {}),
+	replaceAgent: (id, oldAgentId) =>
+		api.post<ReplaceAgentResponse>(endpoints.agents.replace(id), { old_agent_id: oldAgentId }),
 
 	listEnrollmentTokens: () =>
 		api
