@@ -70,13 +70,16 @@ The command prints the digest that it verified. Use `ghcr.io/fgbm/restichub-cp@s
 
 ## Read the SBOM
 
-The SBOM files use the CycloneDX 1.5 JSON format. The SBOM of an image is also attached to the image as a signed attestation:
+The SBOM files use the CycloneDX 1.5 JSON format. The SBOM of each platform image is also attached to the platform image as a signed attestation. Read the digest of the platform first:
 
 ```sh
+IMAGE=ghcr.io/fgbm/restichub-cp
+DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' \
+  | jq -r '.manifests[] | select(.platform.architecture=="amd64") | .digest')
 cosign verify-attestation --type cyclonedx \
   --certificate-identity "$IDENTITY" \
   --certificate-oidc-issuer "$ISSUER" \
-  "ghcr.io/fgbm/restichub-cp:${VERSION}" \
+  "$IMAGE@$DIGEST" \
   | jq -r '.payload' | base64 -d | jq '.predicate.components | length'
 ```
 

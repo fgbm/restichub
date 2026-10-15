@@ -70,13 +70,16 @@ cosign verify \
 
 ## Чтение SBOM
 
-Файлы SBOM используют формат CycloneDX 1.5 JSON. SBOM образа также прикреплён к образу как подписанная аттестация:
+Файлы SBOM используют формат CycloneDX 1.5 JSON. SBOM образа каждой платформы также прикреплён к образу платформы как подписанная аттестация. Сначала прочитайте дайджест платформы:
 
 ```sh
+IMAGE=ghcr.io/fgbm/restichub-cp
+DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' \
+  | jq -r '.manifests[] | select(.platform.architecture=="amd64") | .digest')
 cosign verify-attestation --type cyclonedx \
   --certificate-identity "$IDENTITY" \
   --certificate-oidc-issuer "$ISSUER" \
-  "ghcr.io/fgbm/restichub-cp:${VERSION}" \
+  "$IMAGE@$DIGEST" \
   | jq -r '.payload' | base64 -d | jq '.predicate.components | length'
 ```
 
