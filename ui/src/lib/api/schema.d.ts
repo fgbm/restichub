@@ -1389,7 +1389,7 @@ export interface components {
             tree_blobs: number;
         };
         /**
-         * @description What a browse request returns at the moment of the read.
+         * @description Progress of a browse request at the moment of the read.
          * @enum {string}
          */
         BrowseState: "empty" | "pending" | "done" | "failed";
@@ -1785,7 +1785,7 @@ export interface components {
          * @enum {string}
          */
         LogStream: "stdout" | "stderr" | "agent";
-        /** @description The body of a tree page request. */
+        /** @description Window of a tree page: one directory, one offset and one limit. */
         LsQueryRequest: {
             /** @description The agent that reads the repository. An absent value uses the maintenance agent. */
             agent_id?: string | null;
@@ -1796,7 +1796,7 @@ export interface components {
             limit?: number;
             /**
              * Format: int64
-             * @description The number of entries to skip.
+             * @description The number of entries to skip. Entries are sorted by name as restic prints them.
              */
             offset?: number;
             /** @description The directory in the snapshot. Empty or `/` means the root. */
@@ -1804,7 +1804,7 @@ export interface components {
             /** @description The identifier of the snapshot, `latest` or 8 to 64 lower-case hexadecimal characters. */
             snapshot_id: string;
         };
-        /** @description One page of the entries of a directory in a snapshot. */
+        /** @description Result of a tree page request, with the state of its job. */
         LsView: {
             /** @description True when a stored page answered the request and no job ran. */
             cached: boolean;
@@ -1819,7 +1819,7 @@ export interface components {
             limit: number;
             /**
              * Format: int64
-             * @description The offset of the next page. Null on the last page.
+             * @description Start of the page that follows, to send as `offset` of the next request. Null on the last page.
              */
             next_offset?: number | null;
             nodes: components["schemas"]["NodeItem"][];
@@ -1909,7 +1909,7 @@ export interface components {
             /** @description In RFC 3339. Null when restic gave no valid time. */
             mtime?: string | null;
             name: string;
-            /** @description The full path in the snapshot. */
+            /** @description The path of the entry from the root of the snapshot. */
             path: string;
             permissions: string;
             /**
@@ -1919,7 +1919,7 @@ export interface components {
             size: number;
         };
         /**
-         * @description The type of an entry in a snapshot tree.
+         * @description Tells how the screen shows an entry of a snapshot tree.
          * @enum {string}
          */
         NodeKind: "file" | "dir" | "symlink" | "other";
@@ -2183,7 +2183,7 @@ export interface components {
              *     with a local path needs its maintenance agent, because the data stays on that host.
              */
             agent_id?: string | null;
-            /** @description Check the restore and write no file. */
+            /** @description Check the restore and write no file. The summary still counts the files. */
             dry_run?: boolean;
             /** @description Skip the paths that match. Not allowed together with `includes`. */
             excludes?: string[];
@@ -2196,7 +2196,7 @@ export interface components {
             overwrite: components["schemas"]["OverwriteMode"];
             /** @description The identifier of the snapshot, `latest` or 8 to 64 lower-case hexadecimal characters. */
             snapshot_id: string;
-            /** @description An absolute directory on the target agent. */
+            /** @description An absolute directory on the target agent, such as `/srv/restore` or `D:\restore`. */
             target: string;
             /** @description Read the restored files again and compare them with the snapshot. */
             verify?: boolean;
@@ -2342,9 +2342,9 @@ export interface components {
         /** @description One snapshot of a repository, as `restic snapshots --json` reports it. */
         SnapshotItem: {
             hostname: string;
-            /** @description The full identifier. */
+            /** @description The 64-character identifier. `restore` and `ls` take it. */
             id: string;
-            /** @description The backed-up paths. */
+            /** @description The paths that the backup read, as the backup recorded them. */
             paths: string[];
             program_version: string;
             short_id: string;
@@ -2363,15 +2363,15 @@ export interface components {
             total_files?: number | null;
             username: string;
         };
-        /** @description The body of a snapshot list request. */
+        /** @description Filters of a `snapshots` job. restic applies each of them. */
         SnapshotsQuery: {
             /** @description The agent that reads the repository. An absent value uses the maintenance agent. */
             agent_id?: string | null;
-            /** @description Keep the snapshots of these hosts. */
+            /** @description Names of the machines whose snapshots stay in the list. Empty keeps all. */
             hosts?: string[];
-            /** @description Keep the snapshots of these backed-up paths. */
+            /** @description Directories that a kept snapshot must have backed up. Empty keeps all. */
             paths?: string[];
-            /** @description Keep the snapshots that carry these tags. */
+            /** @description Labels that every kept snapshot carries. Empty keeps all. */
             tags?: string[];
         };
         /** @description The snapshot count of a `restic snapshots` step. */
@@ -2381,11 +2381,11 @@ export interface components {
             /** @description True when the agent dropped snapshots to fit the size limit of a result. */
             truncated: boolean;
         };
-        /** @description A snapshot list. */
+        /** @description Result of a snapshot list request, with the state of its job. */
         SnapshotsView: {
             /**
              * Format: int64
-             * @description The age of the list in seconds. Null unless the state is `done`.
+             * @description How old the list is, in whole seconds. Null unless the state is `done`.
              */
             age_seconds?: number | null;
             /** @description The agent that read the repository. Null when the state is `empty`. */
@@ -2394,7 +2394,7 @@ export interface components {
             error_code?: string | null;
             /** @description In RFC 3339. Null unless the state is `done`. */
             fetched_at?: string | null;
-            /** @description The filters that the job applied. */
+            /** @description The filters that the job applied. Empty lists mean no filter. */
             hosts: string[];
             /** @description Null when the state is `empty`. */
             job_id?: string | null;
@@ -5668,7 +5668,7 @@ export interface operations {
             path: {
                 /** @description The identifier of the repository. */
                 id: string;
-                /** @description The job of the page request. The call needs it. */
+                /** @description Identifier that the POST of the page returned. The call needs it. */
                 job: string | null;
             };
             cookie?: never;
@@ -6067,7 +6067,7 @@ export interface operations {
             path: {
                 /** @description The identifier of the repository. */
                 id: string;
-                /** @description The job of an earlier request. Without it the call returns the newest stored list. */
+                /** @description Identifier that an earlier POST returned. Without it the call returns the newest stored list. */
                 job: string | null;
                 /** @description Keep the snapshots made at this time or later, in RFC 3339. The control plane applies it. */
                 from: string | null;

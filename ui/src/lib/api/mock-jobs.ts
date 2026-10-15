@@ -44,6 +44,23 @@ const BACKUP_SUMMARY = {
 	dry_run: false
 };
 
+const RESTORE_SUMMARY = {
+	kind: 'restore' as const,
+	total_files: 4_210,
+	files_restored: 4_187,
+	files_skipped: 23,
+	files_deleted: 0,
+	total_bytes: 3_914_880_000,
+	bytes_restored: 3_902_113_792,
+	bytes_skipped: 12_766_208,
+	seconds_elapsed: 41.6,
+	dry_run: false
+};
+
+function stepIdOf(job: Job): string {
+	return job.kind === 'restore' ? 'restore' : 'backup';
+}
+
 function startOf(job: Job): number {
 	return Date.parse(job.started_at ?? job.created_at);
 }
@@ -53,6 +70,13 @@ function isWarning(job: Job): boolean {
 }
 
 function openingLines(job: Job): Draft[] {
+	if (job.kind === 'restore') {
+		return [
+			['info', `job ${job.id} accepted on ${job.agent_hostname ?? 'the host'}`, 'agent'],
+			['info', `repository ${job.repository_name ?? ''} is open`, 'agent'],
+			['info', 'restoring snapshot a1b2c3d4 to /srv/restore', 'stdout']
+		];
+	}
 	return [
 		['info', `job ${job.id} accepted on ${job.agent_hostname ?? 'the host'}`, 'agent'],
 		['info', `repository ${job.repository_name ?? ''} is open`, 'agent'],
@@ -73,6 +97,11 @@ function closingLines(job: Job): Draft[] {
 		lines.push(['error', 'Fatal: wrong password or no key found', 'stderr']);
 		return lines;
 	}
+	if (job.kind === 'restore' && job.status === 'succeeded') {
+		lines.push(['info', 'Summary: Restored 4187 files/dirs (3.634 GiB) in 0:41', 'stdout']);
+		lines.push(['info', `job ${job.id} finished`, 'agent']);
+		return lines;
+	}
 	if (job.status === 'failed' || job.status === 'dead_letter') {
 		lines.push(['error', 'Fatal: unable to open the repository lock', 'stderr']);
 		return lines;
@@ -90,7 +119,7 @@ export function logLinesOf(job: Job, now: number): JobLogLine[] {
 	const push = (draft: Draft, at: number) =>
 		lines.push({
 			seq: lines.length + 1,
-			step_id: 'backup',
+			step_id: stepIdOf(job),
 			stream: draft[2],
 			level: draft[0],
 			ts: new Date(at).toISOString(),
@@ -131,7 +160,7 @@ function progressOf(job: Job, now: number): JobProgress | null {
 	const elapsed = Math.max(1, (now - startOf(job)) / 1000);
 	const percent = Math.min(0.96, elapsed / RUNNING_SECONDS);
 	return {
-		step_id: 'backup',
+		step_id: stepIdOf(job),
 		bytes_done: Math.round(RUNNING_BYTES * percent),
 		total_bytes: RUNNING_BYTES,
 		files_done: Math.round(RUNNING_FILES * percent),
@@ -146,7 +175,7 @@ function progressOf(job: Job, now: number): JobProgress | null {
 
 function failedStep(job: Job, status: JobStep['status'], exit: number, code: string): JobStep {
 	return {
-		step_id: 'backup',
+		step_id: stepIdOf(job),
 		status,
 		exit_code: exit,
 		started_at: job.started_at ?? job.created_at,
@@ -166,9 +195,26 @@ function stepsOf(job: Job): JobStep[] {
 	if (job.status === 'failed' || job.status === 'dead_letter') {
 		return [failedStep(job, 'retry', 11, 'repository_locked')];
 	}
+	const started = job.started_at ?? job.created_at;
+	if (job.kind === 'restore') {
+		return [
+			{
+				step_id: 'restore',
+				status: 'success',
+				exit_code: 0,
+				started_at: started,
+				finished_at: new Date(
+					Date.parse(started) + RESTORE_SUMMARY.seconds_elapsed * 1000
+				).toISOString(),
+				error_code: null,
+				error_params: {},
+				possible_stale_lock: false,
+				output: RESTORE_SUMMARY
+			}
+		];
+	}
 	// Each step has its own time span: the backup takes the time of its summary, the forget a few
 	// seconds after it.
-	const started = job.started_at ?? job.created_at;
 	const backupEnd = Date.parse(started) + BACKUP_SUMMARY.total_duration_seconds * 1000;
 	const middle = new Date(backupEnd).toISOString();
 	const finished = new Date(backupEnd + FORGET_SECONDS * 1000).toISOString();
@@ -201,6 +247,7 @@ function stepsOf(job: Job): JobStep[] {
 /** The steps that the control plane signed into the job. A queued job has no list yet. */
 function plannedStepsOf(job: Job): string[] {
 	if (job.status === 'queued') return [];
+	if (job.kind === 'restore') return ['restore'];
 	if (job.status === 'running') return ['backup', 'forget', 'prune'];
 	return ['backup', 'forget'];
 }
@@ -211,7 +258,7 @@ export function detailOf(job: Job, now: number): JobDetail {
 	const summary = steps.map((step) => step.output).find((output) => output.kind !== 'none') ?? null;
 	return {
 		...job,
-		trigger: 'schedule',
+		trigger: job.kind === 'restore' ? 'manual' : 'schedule',
 		planned_steps: plannedStepsOf(job),
 		steps,
 		summary,

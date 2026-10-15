@@ -23,6 +23,7 @@ describe('navigation', () => {
 			'/(app)/profiles',
 			'/(app)/plans',
 			'/(app)/jobs',
+			'/(app)/restore',
 			'/(app)/audit',
 			'/(app)/settings'
 		]);
@@ -36,6 +37,7 @@ describe('navigation', () => {
 			'/(app)/profiles',
 			'/(app)/plans',
 			'/(app)/jobs',
+			'/(app)/restore',
 			'/(app)/audit'
 		]);
 		expect(hrefs('organization', 'viewer', false)).toEqual([
@@ -57,6 +59,7 @@ describe('navigation', () => {
 			'/(app)/profiles',
 			'/(app)/plans',
 			'/(app)/jobs',
+			'/(app)/restore',
 			'/(app)/audit',
 			'/(app)/settings'
 		]);

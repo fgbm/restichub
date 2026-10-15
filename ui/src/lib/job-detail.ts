@@ -158,6 +158,18 @@ export function statsOf(output: StepOutput | null | undefined): Stat[] {
 				{ label: 'jobDetail.stat.snapshots', value: formatCount(output.snapshots_count) },
 				{ label: 'jobDetail.stat.ratio', value: output.compression_ratio.toFixed(2) }
 			];
+		case 'restore':
+			return [
+				{ label: 'jobDetail.stat.filesRestored', value: formatCount(output.files_restored) },
+				{ label: 'jobDetail.stat.bytesRestored', value: formatBytes(output.bytes_restored) },
+				{ label: 'jobDetail.stat.duration', value: formatSeconds(output.seconds_elapsed) },
+				{
+					label: 'jobDetail.stat.dryRun',
+					value: t(output.dry_run ? 'common.yes' : 'common.no')
+				},
+				{ label: 'jobDetail.stat.filesSkipped', value: formatCount(output.files_skipped) },
+				{ label: 'jobDetail.stat.bytesSkipped', value: formatBytes(output.bytes_skipped) }
+			];
 		default:
 			return [];
 	}

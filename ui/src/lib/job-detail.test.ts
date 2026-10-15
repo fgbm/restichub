@@ -33,6 +33,27 @@ function byLabel(output: StepOutput) {
 }
 
 describe('statsOf', () => {
+	it('fr_rs_04_shows_the_summary_of_a_restore', () => {
+		const stats = Object.fromEntries(
+			statsOf({
+				kind: 'restore',
+				total_files: 10,
+				files_restored: 8,
+				files_skipped: 2,
+				files_deleted: 0,
+				total_bytes: 3_000,
+				bytes_restored: 2_048,
+				bytes_skipped: 952,
+				seconds_elapsed: 12,
+				dry_run: true
+			}).map((stat) => [stat.label, stat.value])
+		);
+		expect(stats['jobDetail.stat.filesRestored']).toBe('8');
+		expect(stats['jobDetail.stat.bytesRestored']).toBe('2 KiB');
+		expect(stats['jobDetail.stat.filesSkipped']).toBe('2');
+		expect(stats['jobDetail.stat.dryRun']).toBe('Yes');
+	});
+
 	it('ac_mn_04_shows_the_values_of_the_restic_backup_summary', () => {
 		const stats = byLabel(summary);
 		expect(stats['jobDetail.stat.dataAdded']).toBe('1.4 GiB');

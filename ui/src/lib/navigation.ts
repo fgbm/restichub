@@ -18,6 +18,7 @@ export type NavHref =
 	| '/(app)/profiles'
 	| '/(app)/plans'
 	| '/(app)/jobs'
+	| '/(app)/restore'
 	| '/(app)/audit'
 	| '/(app)/settings'
 	| SettingsHref
@@ -85,6 +86,12 @@ export const navigation: NavSection = {
 			labelKey: 'nav.jobs',
 			icon: 'job',
 			roles: ['admin', 'operator', 'viewer']
+		},
+		{
+			href: '/(app)/restore',
+			labelKey: 'nav.restore',
+			icon: 'restore',
+			roles: ['admin', 'operator']
 		},
 		{ href: '/(app)/audit', labelKey: 'nav.audit', icon: 'audit', roles: ALL_ROLES },
 		{ href: '/(app)/settings', labelKey: 'nav.settings', icon: 'settings', roles: ADMIN_ROLES }

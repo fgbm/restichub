@@ -175,6 +175,41 @@ export interface JobQuery {
 export type JobActionRequest = components['schemas']['JobActionRequest'];
 export type UnlockAllRequest = components['schemas']['UnlockAllRequest'];
 
+/** How far a snapshot list or a tree page request is (FR-RS-01, FR-RS-02). */
+export type BrowseState = components['schemas']['BrowseState'];
+
+/** One snapshot of a repository (FR-RS-01). */
+export type SnapshotItem = components['schemas']['SnapshotItem'];
+
+/** A snapshot list with the state of its job (FR-RS-01). */
+export type SnapshotsView = components['schemas']['SnapshotsView'];
+
+/** The filters of a snapshot list request. The date range goes to the read, not here. */
+export type SnapshotsQuery = components['schemas']['SnapshotsQuery'];
+
+/** The job and the date range of a snapshot list read. */
+export interface SnapshotsParams {
+	job?: string;
+	from?: string;
+	to?: string;
+}
+
+export type NodeKind = components['schemas']['NodeKind'];
+
+/** One entry of a snapshot tree (FR-RS-02). */
+export type NodeItem = components['schemas']['NodeItem'];
+
+/** One page of the entries of a directory in a snapshot (FR-RS-02). */
+export type LsView = components['schemas']['LsView'];
+
+export type LsQueryRequest = components['schemas']['LsQueryRequest'];
+
+/** The policy for a file that exists in the restore target (FR-RS-04). */
+export type OverwriteMode = components['schemas']['OverwriteMode'];
+
+/** The request of a restore (FR-RS-03, FR-RS-04). */
+export type RestoreRequest = components['schemas']['RestoreBody'];
+
 /** The paths of a profile for each operating system (FR-PF-01). */
 export type ProfilePaths = components['schemas']['ProfilePaths'];
 

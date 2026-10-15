@@ -35,6 +35,8 @@ import type {
 	JobLogPage,
 	JobLogQuery,
 	JobQuery,
+	LsQueryRequest,
+	LsView,
 	Maintenance,
 	MaintenanceTask,
 	Me,
@@ -53,6 +55,7 @@ import type {
 	ProfileResponse,
 	RenameAgentRequest,
 	Repository,
+	RestoreRequest,
 	RepositoryListResponse,
 	ResetPasswordRequest,
 	SchedulePreviewResponse,
@@ -60,6 +63,9 @@ import type {
 	SetupRequest,
 	SetupStatus,
 	SignInRequest,
+	SnapshotsParams,
+	SnapshotsQuery,
+	SnapshotsView,
 	Tenant,
 	TenantAccess,
 	TenantAccessListResponse,
@@ -128,6 +134,16 @@ export interface ApiService {
 	runMaintenance(id: string, task: MaintenanceTask): Promise<Job>;
 	/** Removes every lock of the repository. `confirm` is the repository name (FR-SC-06). */
 	unlockAllRepository(id: string, confirm: string): Promise<Job>;
+	/** Starts a job that lists the snapshots of a repository with the filters (FR-RS-01). */
+	startSnapshots(id: string, request: SnapshotsQuery): Promise<SnapshotsView>;
+	/** Reads the snapshot list of a job, or the newest stored list without a job (FR-RS-01). */
+	getSnapshots(id: string, params?: SnapshotsParams): Promise<SnapshotsView>;
+	/** Starts a job that reads one page of a snapshot directory. A stored page answers at once. */
+	startLs(id: string, request: LsQueryRequest): Promise<LsView>;
+	/** Reads the page of a tree job (FR-RS-02). */
+	getLs(id: string, job: string): Promise<LsView>;
+	/** Starts a restore on an agent (FR-RS-03, FR-RS-04). */
+	restoreSnapshot(id: string, request: RestoreRequest): Promise<Job>;
 	/** Polls one job (FR-PR-01). */
 	getJob(id: string): Promise<JobDetail>;
 	/** Reads a page of the log of a job after a line number (FR-LG-01). */
@@ -232,6 +248,15 @@ const httpService: ApiService = {
 	runMaintenance: (id, task) => api.post<Job>(endpoints.repositories.runMaintenance(id), { task }),
 	unlockAllRepository: (id, confirm) =>
 		api.post<Job>(endpoints.repositories.unlockAll(id), { confirm }),
+	startSnapshots: (id, request) =>
+		api.post<SnapshotsView>(endpoints.repositories.snapshots(id), request),
+	getSnapshots: (id, params) =>
+		api.get<SnapshotsView>(endpoints.repositories.snapshots(id), {
+			query: (params ?? {}) as Record<string, string | undefined>
+		}),
+	startLs: (id, request) => api.post<LsView>(endpoints.repositories.ls(id), request),
+	getLs: (id, job) => api.get<LsView>(endpoints.repositories.ls(id), { query: { job } }),
+	restoreSnapshot: (id, request) => api.post<Job>(endpoints.repositories.restore(id), request),
 	getJob: (id) => api.get<JobDetail>(endpoints.jobs.byId(id)),
 	getJobLogs: (id, query) =>
 		api.get<JobLogPage>(endpoints.jobs.logs(id), {

@@ -4,6 +4,7 @@
  * The module holds the same functions as the real service, so a screen does not
  * know which one it uses. The tenant functions are the planned API of issue #20.
  */
+import { filterSnapshots, inRange, listDirectory, makeSnapshots } from './mock-restore';
 import type {
 	Agent,
 	ApiToken,
@@ -32,6 +33,8 @@ import type {
 	JobQuery,
 	JobKind,
 	JobStatus,
+	LsQueryRequest,
+	LsView,
 	Maintenance,
 	MaintenanceTask,
 	Me,
@@ -46,11 +49,15 @@ import type {
 	ProfileResponse,
 	Repository,
 	ResetPasswordRequest,
+	RestoreRequest,
 	SchedulePreviewResponse,
 	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
 	SignInRequest,
+	SnapshotsParams,
+	SnapshotsQuery,
+	SnapshotsView,
 	Tenant,
 	TenantAccess,
 	UpdateAccountRequest,
@@ -120,6 +127,10 @@ const SAMPLE_AGENTS_KEY = 'restichub.mock.agents';
 // The mock starts without a profile. A review capture sets this storage key to see a filled list.
 const SAMPLE_PROFILES_KEY = 'restichub.mock.profiles';
 
+// The mock starts without a repository. A review capture or an e2e test sets this storage key to
+// see initialized repositories on the Restore screen.
+const SAMPLE_REPOSITORIES_KEY = 'restichub.mock.repositories';
+
 // The mock starts without a plan. A review capture or an e2e test sets this storage key to see a
 // filled list.
 const SAMPLE_PLANS_KEY = 'restichub.mock.plans';
@@ -171,6 +182,45 @@ function makeAgents(): Agent[] {
 		agent('4', 'nas-backup', 'linux', 'arm64', '0.4.2', 120),
 		agent('5', 'mac-build-01', 'darwin', 'arm64', '0.4.0', 60 * 48),
 		agent('6', 'srv-app-02', 'linux', 'amd64', '0.3.9', 180, 'revoked')
+	];
+}
+
+function makeRepositories(): Repository[] {
+	if (
+		typeof localStorage === 'undefined' ||
+		localStorage.getItem(SAMPLE_REPOSITORIES_KEY) !== 'sample'
+	) {
+		return [];
+	}
+	const repository = (
+		id: string,
+		name: string,
+		backend: Repository['backend'],
+		agent: string | null
+	): Repository => ({
+		id,
+		name,
+		backend,
+		credentials: {
+			password: true,
+			s3_access_key: backend.kind === 's3',
+			s3_secret_key: backend.kind === 's3',
+			rest_password: false
+		},
+		initialized: true,
+		maintenance_agent_id: agent,
+		created_at: iso(60 * 24 * 40),
+		updated_at: iso(60 * 24 * 2),
+		created_by: 'u_01'
+	});
+	return [
+		repository(
+			'r_1',
+			'offsite-s3',
+			{ kind: 's3', endpoint: 's3.eu.example.net', bucket: 'restichub-offsite', prefix: 'nas' },
+			'4'
+		),
+		repository('r_2', 'nas-local', { kind: 'local', path: '/srv/restic/nas' }, '4')
 	];
 }
 
@@ -569,7 +619,7 @@ export class MockApiService {
 	private tokens: ApiToken[] = makeTokens();
 	private agents: Agent[] = makeAgents();
 	private enrollmentTokens: EnrollmentToken[] = [];
-	private repositories: Repository[] = [];
+	private repositories: Repository[] = makeRepositories();
 	private jobs: MockJob[] = makeJobs();
 	private maintenance = new Map<
 		string,
@@ -990,6 +1040,149 @@ export class MockApiService {
 		};
 	}
 
+	// A snapshot list or a tree page needs a moment, so the screen shows the state `pending` first.
+	private browse = new Map<
+		string,
+		{ readyAt: number; repositoryId: string; query?: SnapshotsQuery; page?: LsQueryRequest }
+	>();
+	private latestSnapshots = new Map<string, { job: string; fetchedAt: number }>();
+	private storedPages = new Set<string>();
+
+	private pageKey(repositoryId: string, page: LsQueryRequest): string {
+		return [
+			repositoryId,
+			page.snapshot_id,
+			page.path ?? '',
+			page.offset ?? 0,
+			page.limit ?? 0
+		].join('|');
+	}
+
+	private browseRepository(id: string, agentId?: string | null): Repository {
+		const repository = this.repositories.find((item) => item.id === id);
+		if (!repository) throw new Error('not found');
+		if (!repository.initialized) throw problemError('conflict', 'id', 'conflict');
+		const agent = agentId || repository.maintenance_agent_id || this.agents[0]?.id;
+		if (!agent) throw problemError('agent_offline', 'agent_id', 'unknown');
+		return repository;
+	}
+
+	private snapshotsView(
+		jobId: string,
+		params: SnapshotsParams | undefined,
+		now: number
+	): SnapshotsView {
+		const entry = this.browse.get(jobId);
+		if (!entry?.query) throw new Error('not found');
+		const query = entry.query;
+		const base = {
+			job_id: jobId,
+			agent_id: this.repositories.find((item) => item.id === entry.repositoryId)
+				?.maintenance_agent_id,
+			hosts: query.hosts ?? [],
+			tags: query.tags ?? [],
+			paths: query.paths ?? [],
+			truncated: false,
+			error_code: null
+		};
+		if (now < entry.readyAt) {
+			return { ...base, state: 'pending', fetched_at: null, age_seconds: null, snapshots: [] };
+		}
+		const found = inRange(filterSnapshots(makeSnapshots(), query), params?.from, params?.to);
+		return {
+			...base,
+			state: 'done',
+			fetched_at: new Date(entry.readyAt).toISOString(),
+			age_seconds: Math.round((now - entry.readyAt) / 1000),
+			snapshots: found
+		};
+	}
+
+	async startSnapshots(id: string, request: SnapshotsQuery): Promise<SnapshotsView> {
+		this.browseRepository(id, request.agent_id);
+		const job = `b_${this.browse.size + 1}`;
+		const readyAt = Date.now() + 250;
+		this.browse.set(job, { readyAt, repositoryId: id, query: request });
+		this.latestSnapshots.set(id, { job, fetchedAt: readyAt });
+		return this.snapshotsView(job, undefined, Date.now());
+	}
+
+	async getSnapshots(id: string, params?: SnapshotsParams): Promise<SnapshotsView> {
+		if (!this.repositories.some((item) => item.id === id)) throw new Error('not found');
+		const job = params?.job ?? this.latestSnapshots.get(id)?.job;
+		if (!job) {
+			return {
+				state: 'empty',
+				job_id: null,
+				agent_id: null,
+				fetched_at: null,
+				age_seconds: null,
+				truncated: false,
+				hosts: [],
+				tags: [],
+				paths: [],
+				error_code: null,
+				snapshots: []
+			};
+		}
+		return this.snapshotsView(job, params, Date.now());
+	}
+
+	private lsView(jobId: string, now: number, cached = false): LsView {
+		const entry = this.browse.get(jobId);
+		if (!entry?.page) throw new Error('not found');
+		const page = entry.page;
+		const base = {
+			job_id: jobId,
+			snapshot_id: page.snapshot_id,
+			path: page.path ?? '',
+			offset: page.offset ?? 0,
+			limit: page.limit ?? 1000,
+			cached,
+			error_code: null
+		};
+		if (now < entry.readyAt) {
+			return {
+				...base,
+				state: 'pending',
+				fetched_at: null,
+				last: false,
+				next_offset: null,
+				nodes: []
+			};
+		}
+		const found = listDirectory(base.path, base.offset, base.limit);
+		return { ...base, state: 'done', fetched_at: new Date(entry.readyAt).toISOString(), ...found };
+	}
+
+	async startLs(id: string, request: LsQueryRequest): Promise<LsView> {
+		this.browseRepository(id, request.agent_id);
+		const key = this.pageKey(id, request);
+		const job = `b_${this.browse.size + 1}`;
+		const stored = this.storedPages.has(key);
+		this.browse.set(job, {
+			readyAt: Date.now() + (stored ? 0 : 150),
+			repositoryId: id,
+			page: request
+		});
+		this.storedPages.add(key);
+		return this.lsView(job, Date.now(), stored);
+	}
+
+	async getLs(id: string, job: string): Promise<LsView> {
+		const entry = this.browse.get(job);
+		if (!entry || entry.repositoryId !== id) throw new Error('not found');
+		return this.lsView(job, Date.now());
+	}
+
+	async restoreSnapshot(id: string, request: RestoreRequest): Promise<Job> {
+		this.browseRepository(id, request.agent_id);
+		if (request.includes?.length && request.excludes?.length) {
+			throw problemError('invalid_argument', 'excludes', 'invalid_body');
+		}
+		return this.startJob(id, 'restore', { agent_id: request.agent_id }, false);
+	}
+
 	async getJob(id: string): Promise<JobDetail> {
 		const entry = this.jobs.find((item) => item.job.id === id);
 		if (!entry) throw new Error('not found');
@@ -1016,7 +1209,7 @@ export class MockApiService {
 		return logPageOf(entry.job, query, Date.now());
 	}
 
-	private startJob(id: string, kind: JobKind, request?: JobActionRequest): Job {
+	private startJob(id: string, kind: JobKind, request?: JobActionRequest, initializes = true): Job {
 		const repository = this.repositories.find((item) => item.id === id);
 		if (!repository) throw new Error('not found');
 		const agentId =
@@ -1043,10 +1236,7 @@ export class MockApiService {
 			run_at: now,
 			attempt: 0
 		};
-		this.jobs = [
-			...this.jobs,
-			{ job, readyAt: Date.now() + 700, repositoryId: id, initializes: true }
-		];
+		this.jobs = [...this.jobs, { job, readyAt: Date.now() + 700, repositoryId: id, initializes }];
 		return { ...job };
 	}
 
