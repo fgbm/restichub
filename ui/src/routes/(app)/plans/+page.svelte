@@ -67,6 +67,8 @@
 	let timeZone = $state('');
 	let policy = $state<MissedRunPolicy>('run_all');
 	let enabled = $state(true);
+	// The objective in hours, as the person types it. Empty uses the schedule (ADR-0035).
+	let rpoHours = $state('');
 
 	let runs = $state<string[] | null>(null);
 	let runsLoading = $state(false);
@@ -110,6 +112,11 @@
 			value: (row) => describeMissedRunPolicy(row.missed_run_policy, t)
 		}
 	]);
+
+	function describeHours(seconds: number): string {
+		const hours = seconds / 3600;
+		return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h`;
+	}
 
 	const empty = $derived(!loading && !error && plans.length === 0);
 
@@ -192,6 +199,7 @@
 		timeZone = '';
 		policy = 'run_all';
 		enabled = true;
+		rpoHours = '';
 		runs = null;
 		runsLoading = false;
 		formError = null;
@@ -217,6 +225,7 @@
 		timeZone = plan.time_zone;
 		policy = plan.missed_run_policy;
 		enabled = plan.enabled;
+		rpoHours = plan.rpo_seconds ? String(plan.rpo_seconds / 3600) : '';
 		formOpen = true;
 	}
 
@@ -240,6 +249,13 @@
 		}
 	}
 
+	// An empty field gives null. Seconds above the limit of the API stay in the request, so the
+	// control plane names the field in its answer.
+	function rpoSeconds(): number | null {
+		const hours = Number(rpoHours.replace(',', '.'));
+		return rpoHours.trim() === '' || !Number.isFinite(hours) ? null : Math.round(hours * 3600);
+	}
+
 	async function save(): Promise<void> {
 		saving = true;
 		formError = null;
@@ -251,7 +267,8 @@
 				cron,
 				time_zone: timeZone,
 				missed_run_policy: policy,
-				enabled
+				enabled,
+				rpo_seconds: rpoSeconds()
 			};
 			if (editing) {
 				await service.updatePlan(editing.id, { name, ...body } satisfies UpdatePlanRequest);
@@ -447,6 +464,17 @@
 				label={t('plans.missedRunPolicy')}
 				options={policyOptions}
 				bind:value={policy}
+			/>
+			<TextField
+				id="plan-rpo"
+				label={t('plans.rpo')}
+				help={editing
+					? `${t('plans.rpoHint')} ${t('plans.rpoEffective', { value: describeHours(editing.effective_rpo_seconds) })}`
+					: t('plans.rpoHint')}
+				error={fieldError(formProblem, 'rpo_seconds')}
+				inputmode="decimal"
+				placeholder="26"
+				bind:value={rpoHours}
 			/>
 			<Checkbox label={t('plans.enabled')} bind:checked={enabled} />
 		</section>

@@ -71,6 +71,17 @@ export const endpoints = {
 		nextRuns: (id: string, count: number) =>
 			`/plans/${encodeURIComponent(id)}/next-runs?count=${count}`
 	},
+	dashboard: '/dashboard',
+	alerts: {
+		list: '/alerts',
+		rules: '/alert-rules'
+	},
+	channels: {
+		list: '/notification-channels',
+		create: '/notification-channels',
+		byId: (id: string) => `/notification-channels/${encodeURIComponent(id)}`,
+		test: (id: string) => `/notification-channels/${encodeURIComponent(id)}/test`
+	},
 	audit: {
 		list: '/audit'
 	},

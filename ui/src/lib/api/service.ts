@@ -10,12 +10,20 @@ import { endpoints } from './endpoints';
 import type {
 	Agent,
 	AgentListResponse,
+	AlertListResponse,
+	AlertQuery,
+	AlertRule,
 	ApiToken,
 	ApiTokenCreated,
 	ApiTokenListResponse,
 	AuditPage,
 	AuditQuery,
+	Dashboard,
 	ChangePasswordRequest,
+	ChannelList,
+	ChannelSaved,
+	ChannelTestResult,
+	CreateChannelRequest,
 	CreateApiTokenRequest,
 	CreateEnrollmentTokenRequest,
 	CreatePlanRequest,
@@ -65,6 +73,8 @@ import type {
 	TenantAccessListResponse,
 	TenantListResponse,
 	UpdateAccountRequest,
+	UpdateAlertRulesRequest,
+	UpdateChannelRequest,
 	UpdatePlanRequest,
 	UpdateProfileRequest,
 	UpdateMaintenanceRequest,
@@ -170,6 +180,21 @@ export interface ApiService {
 	addPlatformMembership(id: string, request: MembershipInput): Promise<void>;
 	setPlatformMembershipRole(id: string, tenantId: string, request: SetRoleRequest): Promise<void>;
 	removePlatformMembership(id: string, tenantId: string): Promise<void>;
+
+	/** The overview of the organization: hosts, plans, repositories, failed jobs, alerts (FR-MN-01). */
+	getDashboard(): Promise<Dashboard>;
+	/** One page of the alerts, newest first (FR-MN-03). */
+	listAlerts(query?: AlertQuery): Promise<AlertListResponse>;
+	/** The setting of each alert kind (FR-MN-03). */
+	listAlertRules(): Promise<AlertRule[]>;
+	updateAlertRules(request: UpdateAlertRulesRequest): Promise<AlertRule[]>;
+	/** The notification channels of the organization (FR-MN-04). */
+	listChannels(): Promise<ChannelList>;
+	createChannel(request: CreateChannelRequest): Promise<ChannelSaved>;
+	updateChannel(id: string, request: UpdateChannelRequest): Promise<ChannelSaved>;
+	deleteChannel(id: string): Promise<void>;
+	/** Sends a test message through the channel. */
+	testChannel(id: string): Promise<ChannelTestResult>;
 
 	listAudit(query: AuditQuery): Promise<AuditPage>;
 	listPlatformAudit(query: AuditQuery): Promise<AuditPage>;
@@ -279,6 +304,23 @@ const httpService: ApiService = {
 		api.patch<void>(endpoints.platform.userMembership(id, tenantId), request),
 	removePlatformMembership: (id, tenantId) =>
 		api.delete<void>(endpoints.platform.userMembership(id, tenantId)),
+
+	getDashboard: () => api.get<Dashboard>(endpoints.dashboard),
+	listAlerts: (query) =>
+		api.get<AlertListResponse>(endpoints.alerts.list, {
+			query: (query ?? {}) as Record<string, string | number | undefined>
+		}),
+	listAlertRules: () =>
+		api.get<{ items: AlertRule[] }>(endpoints.alerts.rules).then((response) => response.items),
+	updateAlertRules: (request) =>
+		api
+			.put<{ items: AlertRule[] }>(endpoints.alerts.rules, request)
+			.then((response) => response.items),
+	listChannels: () => api.get<ChannelList>(endpoints.channels.list),
+	createChannel: (request) => api.post<ChannelSaved>(endpoints.channels.create, request),
+	updateChannel: (id, request) => api.patch<ChannelSaved>(endpoints.channels.byId(id), request),
+	deleteChannel: (id) => api.delete<void>(endpoints.channels.byId(id)),
+	testChannel: (id) => api.post<ChannelTestResult>(endpoints.channels.test(id)),
 
 	listAudit: (query) =>
 		api.get<AuditPage>(endpoints.audit.list, {

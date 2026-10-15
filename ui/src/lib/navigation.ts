@@ -9,7 +9,11 @@ import type { MessageKey } from '#lib/i18n/index.ts';
 const ALL_ROLES: Role[] = ['platform_admin', 'admin', 'operator', 'viewer'];
 const ADMIN_ROLES: Role[] = ['platform_admin', 'admin'];
 
-export type SettingsHref = '/(app)/settings/access/users' | '/(app)/settings/access/api-tokens';
+export type SettingsHref =
+	| '/(app)/settings/access/users'
+	| '/(app)/settings/access/api-tokens'
+	| '/(app)/settings/notifications/channels'
+	| '/(app)/settings/notifications/rules';
 
 export type NavHref =
 	| '/(app)'
@@ -18,6 +22,7 @@ export type NavHref =
 	| '/(app)/profiles'
 	| '/(app)/plans'
 	| '/(app)/jobs'
+	| '/(app)/alerts'
 	| '/(app)/audit'
 	| '/(app)/settings'
 	| SettingsHref
@@ -86,6 +91,12 @@ export const navigation: NavSection = {
 			icon: 'job',
 			roles: ['admin', 'operator', 'viewer']
 		},
+		{
+			href: '/(app)/alerts',
+			labelKey: 'nav.alerts',
+			icon: 'bell',
+			roles: ['admin', 'operator', 'viewer']
+		},
 		{ href: '/(app)/audit', labelKey: 'nav.audit', icon: 'audit', roles: ALL_ROLES },
 		{ href: '/(app)/settings', labelKey: 'nav.settings', icon: 'settings', roles: ADMIN_ROLES }
 	]
@@ -132,6 +143,23 @@ export const settingsNavigation: SettingsGroup[] = [
 				href: '/(app)/settings/access/api-tokens',
 				labelKey: 'nav.apiTokens',
 				icon: 'key',
+				roles: ADMIN_ROLES
+			}
+		]
+	},
+	{
+		labelKey: 'settings.group.notifications',
+		items: [
+			{
+				href: '/(app)/settings/notifications/channels',
+				labelKey: 'nav.channels',
+				icon: 'mail',
+				roles: ADMIN_ROLES
+			},
+			{
+				href: '/(app)/settings/notifications/rules',
+				labelKey: 'nav.alertRules',
+				icon: 'bell',
 				roles: ADMIN_ROLES
 			}
 		]

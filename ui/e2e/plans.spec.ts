@@ -61,6 +61,8 @@ test('the plan dialog shows the next runs of an existing plan', async ({ page })
 		.getByRole('navigation', { name: 'Primary navigation' })
 		.getByRole('link', { name: 'Plans', exact: true })
 		.click();
+	// The Overview lists the sample plan too, so wait for the Plans screen first.
+	await expect(page.getByRole('heading', { level: 1, name: 'Plans' })).toBeVisible();
 	await expect(page.getByText('nightly-web')).toBeVisible();
 
 	await page.getByRole('button', { name: 'More actions for nightly-web' }).click();

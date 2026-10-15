@@ -295,3 +295,48 @@ export type SetRoleRequest = components['schemas']['SetRoleRequest'];
 
 /** An absent field leaves the value unchanged. */
 export type UpdateAccountRequest = components['schemas']['UpdateAccountRequest'];
+
+/** The kind of an alert (FR-MN-03). */
+export type AlertKind = components['schemas']['AlertKind'];
+
+export type AlertStatus = components['schemas']['AlertStatus'];
+
+export type Alert = components['schemas']['AlertView'];
+
+export type AlertListResponse = components['schemas']['AlertListResponse'];
+
+/** The setting of one alert kind (FR-MN-03). */
+export type AlertRule = components['schemas']['AlertRuleView'];
+
+export type UpdateAlertRulesRequest = components['schemas']['UpdateAlertRulesRequest'];
+
+export interface AlertQuery {
+	status?: 'open' | 'resolved' | 'all';
+	cursor?: string;
+	limit?: number;
+}
+
+/** A notification channel (FR-MN-04). It holds no signing secret. */
+export type NotificationChannel = components['schemas']['ChannelView'];
+
+export type ChannelKind = components['schemas']['ChannelKind'];
+
+export type ChannelList = components['schemas']['ChannelListResponse'];
+
+/** The signing secret of a new webhook appears one time only. */
+export type ChannelSaved = components['schemas']['ChannelResponse'];
+
+export type CreateChannelRequest = components['schemas']['CreateChannelRequest'];
+
+export type UpdateChannelRequest = components['schemas']['UpdateChannelRequest'];
+
+export type ChannelTestResult = components['schemas']['TestResponse'];
+
+/** The overview of the organization (FR-MN-01). */
+export type Dashboard = components['schemas']['DashboardResponse'];
+
+export type DashboardPlan = components['schemas']['DashboardPlan'];
+
+export type RpoState = components['schemas']['RpoState'];
+
+export type LockState = components['schemas']['LockState'];

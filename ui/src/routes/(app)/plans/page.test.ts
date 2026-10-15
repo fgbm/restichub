@@ -74,6 +74,8 @@ function plan(overrides: Record<string, unknown> = {}) {
 		time_zone: 'Europe/Berlin',
 		missed_run_policy: 'latest_only',
 		enabled: true,
+		rpo_seconds: null,
+		effective_rpo_seconds: 93600,
 		next_run_at: FUTURE,
 		last_fire_time: null,
 		created_at: FUTURE,
@@ -137,10 +139,33 @@ describe('the Plans screen', () => {
 				cron: '0 2 * * *',
 				time_zone: 'Europe/Berlin',
 				missed_run_policy: 'run_all',
-				enabled: true
+				enabled: true,
+				rpo_seconds: null
 			})
 		);
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
+	});
+
+	it('sends the objective of the plan in seconds (ADR-0035)', async () => {
+		const user = userEvent.setup();
+		mocks.listPlans.mockResolvedValueOnce([]).mockResolvedValueOnce([plan()]);
+		mocks.createPlan.mockResolvedValue({ plan: plan() });
+		render(Plans);
+
+		await screen.findByText('No plans yet');
+		await user.click(screen.getByRole('button', { name: 'Add plan' }));
+		const dialog = await screen.findByRole('dialog');
+		const input = (id: string) => document.querySelector<HTMLInputElement>(id) as HTMLInputElement;
+		await user.type(input('#plan-name'), 'nightly-web');
+		await user.type(input('#plan-cron'), '0 2 * * *');
+		await user.clear(input('#plan-time-zone'));
+		await user.type(input('#plan-time-zone'), 'Europe/Berlin');
+		await user.type(input('#plan-rpo'), '24,5');
+		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+		await waitFor(() =>
+			expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({ rpo_seconds: 88200 }))
+		);
 	});
 
 	it('runs a plan now and shows no queue note', async () => {

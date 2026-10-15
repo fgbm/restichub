@@ -8,6 +8,7 @@ export {
 	t,
 	tAuditAction,
 	tAuditActorType,
+	tChannelError,
 	tErrorCode,
 	tErrorReason,
 	type Locale

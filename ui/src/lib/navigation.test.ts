@@ -23,6 +23,7 @@ describe('navigation', () => {
 			'/(app)/profiles',
 			'/(app)/plans',
 			'/(app)/jobs',
+			'/(app)/alerts',
 			'/(app)/audit',
 			'/(app)/settings'
 		]);
@@ -36,6 +37,7 @@ describe('navigation', () => {
 			'/(app)/profiles',
 			'/(app)/plans',
 			'/(app)/jobs',
+			'/(app)/alerts',
 			'/(app)/audit'
 		]);
 		expect(hrefs('organization', 'viewer', false)).toEqual([
@@ -45,6 +47,7 @@ describe('navigation', () => {
 			'/(app)/profiles',
 			'/(app)/plans',
 			'/(app)/jobs',
+			'/(app)/alerts',
 			'/(app)/audit'
 		]);
 	});
@@ -57,6 +60,7 @@ describe('navigation', () => {
 			'/(app)/profiles',
 			'/(app)/plans',
 			'/(app)/jobs',
+			'/(app)/alerts',
 			'/(app)/audit',
 			'/(app)/settings'
 		]);
@@ -120,10 +124,17 @@ describe('navigation', () => {
 
 	it('puts users and API tokens under Settings, Access for an Admin', () => {
 		const groups = settingsGroupsForRole('admin');
-		expect(groups.map((group) => group.labelKey)).toEqual(['settings.group.access']);
+		expect(groups.map((group) => group.labelKey)).toEqual([
+			'settings.group.access',
+			'settings.group.notifications'
+		]);
 		expect(groups[0].items.map((item) => item.href)).toEqual([
 			'/(app)/settings/access/users',
 			'/(app)/settings/access/api-tokens'
+		]);
+		expect(groups[1].items.map((item) => item.href)).toEqual([
+			'/(app)/settings/notifications/channels',
+			'/(app)/settings/notifications/rules'
 		]);
 		expect(settingsGroupsForRole('operator')).toEqual([]);
 	});

@@ -56,7 +56,10 @@ test('a created registration appears pending and a cancel removes it', async ({ 
 test('an Admin renames a host', async ({ page }) => {
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
 	await signIn(page);
-	await page.getByRole('link', { name: 'Hosts' }).click();
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Hosts', exact: true })
+		.click();
 	await page.getByText('win-fs01').waitFor();
 
 	await page.getByRole('button', { name: 'More actions for win-fs01' }).click();

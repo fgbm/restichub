@@ -73,6 +73,17 @@ export function tErrorCode(code: string | undefined): string | undefined {
 }
 
 /**
+ * Translate the failure code of a notification send. If the catalog has no message for the code,
+ * the caller shows the code itself.
+ */
+export function tChannelError(code: string | undefined): string | undefined {
+	if (!code) return undefined;
+	const key = `channels.error.${code}` as MessageKey;
+	if (key in en) return t(key);
+	return undefined;
+}
+
+/**
  * Translate a validation reason code. If the catalog has no message for the
  * code, the caller shows a generic message for the field.
  */
