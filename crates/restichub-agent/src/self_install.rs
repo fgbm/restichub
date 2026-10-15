@@ -44,7 +44,6 @@ impl Placement {
     }
 }
 
-/// What the preparation changed.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
     pub copied_agent: bool,
@@ -120,25 +119,80 @@ fn same_content(source: &Path, target: &Path) -> Result<bool> {
     Ok(digest(source)? == digest(target)?)
 }
 
+/// A path in a user folder can be swapped by another process between the start and the copy, and
+/// the service would run the swapped file as an administrator (T20). On Linux this path names the
+/// running image itself.
+///
+/// # Errors
+///
+/// Returns an error when the platform does not tell the path of the executable.
+pub fn running_image() -> Result<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(PathBuf::from("/proc/self/exe"))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::env::current_exe().context("cannot find the agent executable")
+    }
+}
+
 fn digest(path: &Path) -> Result<Vec<u8>> {
-    let bytes = std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
-    Ok(Sha256::digest(bytes).to_vec())
+    Ok(Sha256::digest(read_source(path)?).to_vec())
+}
+
+/// Reads a file. On Windows the file stays open without write and delete sharing while it is read,
+/// so no other process changes it during the copy.
+fn read_source(path: &Path) -> Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        const FILE_SHARE_READ: u32 = 1;
+        options.share_mode(FILE_SHARE_READ);
+    }
+    let mut bytes = Vec::new();
+    options
+        .open(path)
+        .and_then(|mut file| file.read_to_end(&mut bytes))
+        .with_context(|| format!("cannot read {}", path.display()))?;
+    Ok(bytes)
 }
 
 /// Writes `target` with one rename, so a reader sees the old or the new file (FR-IN-07).
 fn copy_file(source: &Path, target: &Path) -> Result<()> {
-    let bytes =
-        std::fs::read(source).with_context(|| format!("cannot read {}", source.display()))?;
+    let bytes = read_source(source)?;
     let staging = staging_path(target);
+    // A killed earlier run leaves its staging file behind, and `create_new` refuses it.
+    let _ = std::fs::remove_file(&staging);
     crate::paths::create_protected_file(&staging, &bytes)?;
     make_executable(&staging)
-        .and_then(|()| {
-            std::fs::rename(&staging, target)
-                .with_context(|| format!("cannot replace {}", target.display()))
-        })
+        .and_then(|()| rename_with_retry(&staging, target))
         .inspect_err(|_| {
             let _ = std::fs::remove_file(&staging);
         })
+}
+
+/// The image of a service that just stopped can stay mapped for a moment, so a rename on Windows
+/// can fail with an access error.
+fn rename_with_retry(from: &Path, to: &Path) -> Result<()> {
+    const ATTEMPTS: u32 = 20;
+    let mut attempt = 1;
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error) if cfg!(windows) && attempt < ATTEMPTS => {
+                tracing::debug!(%error, attempt, "the rename failed; trying again");
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                attempt += 1;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("cannot replace {}", to.display()));
+            }
+        }
+    }
 }
 
 /// Copies a file into the program directory, then removes the old one.
@@ -258,6 +312,22 @@ mod tests {
             assert_eq!(mode(&placement.program_dir), 0o755);
             assert_eq!(mode(&placement.restic_dir), 0o755);
         }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_in_07_a_stale_staging_file_does_not_block_the_install() {
+        let base = temp_dir("stale");
+        let source = base.join("agent-download");
+        std::fs::write(&source, b"agent v2").expect("source");
+        let placement = Placement::under(&base.join("program"), base.join("old-bin"));
+        crate::paths::ensure_program_dir(&placement.restic_dir).expect("tree");
+        std::fs::write(staging_path(&placement.exe), b"half").expect("stale file");
+
+        prepare(&placement, &source, &Fake::new(false)).expect("prepare");
+
+        assert_eq!(std::fs::read(&placement.exe).expect("copy"), b"agent v2");
+        assert!(!staging_path(&placement.exe).exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 

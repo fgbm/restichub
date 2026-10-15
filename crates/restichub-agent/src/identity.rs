@@ -320,16 +320,17 @@ fn swap(dir: &Path, staging: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Moves what the old directory holds besides the identity files (the restic record, the journal,
-/// the cache, mode files) into the new directory, so a registration does not lose them (FR-IN-07).
+/// The entries of the old directory that survive a new registration. Everything else is tied to the
+/// old identity (key updates, job journal, status) and would break or mislead the new one.
+const KEPT_ENTRIES: [&str; 1] = ["restic.json"];
+
+/// Moves the entries of [`KEPT_ENTRIES`] into the new directory, so a registration does not lose
+/// the restic record (FR-IN-07).
 fn keep_other_entries(old: &Path, new: &Path) {
-    let Ok(entries) = std::fs::read_dir(old) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let target = new.join(entry.file_name());
+    for name in KEPT_ENTRIES {
+        let target = new.join(name);
         if !target.exists() {
-            let _ = std::fs::rename(entry.path(), target);
+            let _ = std::fs::rename(old.join(name), target);
         }
     }
 }
@@ -428,6 +429,18 @@ mod tests {
         sample().save(&dir).expect("cannot save the identity");
         assert!(dir.join("restic.json").is_file());
         assert!(StoredIdentity::exists(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_in_07_a_save_drops_the_state_of_the_old_identity() {
+        let dir = temp_dir("drops-old-state");
+        crate::paths::ensure_config_dir(&dir).expect("cannot create the directory");
+        std::fs::write(dir.join("signing-key-updates.json"), b"{}").expect("write");
+        std::fs::write(dir.join("status.json"), b"{}").expect("write");
+        sample().save(&dir).expect("cannot save the identity");
+        assert!(!dir.join("signing-key-updates.json").exists());
+        assert!(!dir.join("status.json").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

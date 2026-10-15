@@ -53,6 +53,9 @@ impl std::error::Error for NoIdentity {}
 /// service cannot be installed, or when the agent does not connect.
 pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     crate::preflight::ensure_elevated()?;
+    // The tree check runs first: the move of an old restic reads from it, so a directory that
+    // another account can write must be refused before anything leaves it (T20, FR-IN-07).
+    crate::preflight::prepare_directories(dir, &crate::paths::cache_dir())?;
     place_program()?;
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -130,7 +133,7 @@ pub fn start_after_register(
 
 /// Copies the running agent into the program directory and moves an old restic there (FR-IN-07).
 fn place_program() -> Result<()> {
-    let source = std::env::current_exe().context("cannot find the agent executable")?;
+    let source = crate::self_install::running_image()?;
     let outcome = crate::self_install::prepare(
         &crate::self_install::Placement::host(),
         &source,
@@ -180,8 +183,8 @@ pub fn install_service(options: &ResticFileOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     let dir = crate::paths::config_dir();
     crate::setup::require_identity(&dir)?;
-    place_program()?;
     crate::preflight::prepare_directories(&dir, &crate::paths::cache_dir())?;
+    place_program()?;
     let restic = ensure_restic(options)?;
     let report =
         crate::setup::install_and_wait(&HostService, &dir, restic.path(), WaitOptions::default())?;
@@ -352,6 +355,9 @@ pub fn status(dir: &Path) -> Result<()> {
 /// cannot start.
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let identity = StoredIdentity::load(dir).map_err(|error| {
+        if !is_missing_or_damaged(&error) {
+            return error;
+        }
         let no_identity = NoIdentity {
             dir: dir.to_path_buf(),
             cause: format!("{error:#}"),
@@ -394,6 +400,15 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
         &jobs,
         shutdown,
     ))
+}
+
+/// A transient read error must not stop the service for good: exit code 78 tells systemd not to
+/// restart it (FR-AG-01).
+fn is_missing_or_damaged(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .is_none_or(|io| io.kind() == std::io::ErrorKind::NotFound)
 }
 
 fn restic_version(restic: &dyn Restic) -> Result<String> {
@@ -465,6 +480,18 @@ mod tests {
             ..RegisterOptions::default()
         };
         assert!(resolve_token(&options).is_err());
+    }
+
+    #[test]
+    fn fr_ag_01_only_a_missing_or_damaged_identity_is_a_no_identity_error() {
+        let missing = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound))
+            .context("cannot read identity.json");
+        let denied = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            .context("cannot read identity.json");
+        let damaged = anyhow::anyhow!("bad identity.json");
+        assert!(is_missing_or_damaged(&missing));
+        assert!(is_missing_or_damaged(&damaged));
+        assert!(!is_missing_or_damaged(&denied));
     }
 
     #[test]

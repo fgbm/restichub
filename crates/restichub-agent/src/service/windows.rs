@@ -138,7 +138,11 @@ pub fn install(restic: &Path) -> Result<()> {
         account_name: None,
         account_password: None,
     };
-    let access = ServiceAccess::QUERY_STATUS | ServiceAccess::CHANGE_CONFIG | ServiceAccess::START;
+    // STOP is needed because a reinstall restarts a running service.
+    let access = ServiceAccess::QUERY_STATUS
+        | ServiceAccess::CHANGE_CONFIG
+        | ServiceAccess::START
+        | ServiceAccess::STOP;
     let service = match manager.create_service(&info, access) {
         Ok(service) => service,
         Err(error) => {
@@ -180,7 +184,6 @@ pub fn install(restic: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Stops the service when it runs and waits until it is stopped.
 fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
     if service.query_status()?.current_state == ServiceState::Stopped {
         return Ok(());
@@ -198,8 +201,6 @@ fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
     Ok(())
 }
 
-/// Asks the service control manager for the state of the service.
-///
 /// # Errors
 ///
 /// Returns an error when the manager cannot be opened or queried.
@@ -231,8 +232,6 @@ pub fn state() -> Result<super::ServiceState> {
     })
 }
 
-/// Stops the service when it runs and waits until it is stopped.
-///
 /// # Errors
 ///
 /// Returns an error when the service exists and does not stop.

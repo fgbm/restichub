@@ -180,6 +180,15 @@ jobs:
           Restart-Service restichub-agent
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           bash scripts/install-smoke.sh connected $since 60
+      - name: A second install-service works while the service runs (FR-IN-08)
+        shell: pwsh
+        run: |
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $agent = Join-Path $env:ProgramFiles 'ResticHub\Agent\restichub-agent.exe'
+          & $agent install-service
+          if ($LASTEXITCODE -ne 0) { throw "install-service exit code $LASTEXITCODE" }
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          bash scripts/install-smoke.sh connected $since 60
       - name: Diagnostics
         if: failure()
         shell: pwsh

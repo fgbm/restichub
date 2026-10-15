@@ -374,7 +374,6 @@ pub async fn connect_once(
         Err(status) if refused(status.code()) => return Ok(Disconnect::Refused),
         Err(status) => return Err(anyhow::anyhow!("the stream did not open: {status}")),
     };
-    crate::connection::record_connected(dir, &identity.cp_url);
     let mut inbound = response.into_inner();
     send_hello(
         &tx,
@@ -607,6 +606,9 @@ async fn handle_control(
                 control_plane_version = %hello.control_plane_version,
                 "the control plane greeted the agent"
             );
+            // Only the greeting proves that the control plane accepts the protocol version, so
+            // `register` does not report a connection before it (FR-IN-07).
+            crate::connection::record_connected(dir, &identity.cp_url);
         }
         Some(control_message::Payload::VersionRejected(rejected)) => {
             let reason = VersionRejectReason::try_from(rejected.reason).unwrap_or_default();

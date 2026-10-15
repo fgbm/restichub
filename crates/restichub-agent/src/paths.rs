@@ -179,12 +179,32 @@ pub fn ensure_program_dir(dir: &Path) -> Result<()> {
     }
     #[cfg(not(windows))]
     {
-        use std::os::unix::fs::PermissionsExt as _;
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
         let mut missing = Vec::new();
         let mut level = Some(dir);
         while let Some(current) = level {
-            if current.exists() {
-                break;
+            match std::fs::symlink_metadata(current) {
+                Ok(meta) => {
+                    // An existing level is checked before anything is written below it. The
+                    // check follows no link, so a link cannot stand in for a root-owned level.
+                    // Only a root-owned level is judged by its mode: a level of another owner is
+                    // already refused, and a non-root run exists only in tests.
+                    let shared =
+                        meta.uid() == 0 && meta.mode() & 0o022 != 0 && meta.mode() & 0o1000 == 0;
+                    let foreign_owner = meta.uid() != 0 && meta.uid() != current_uid();
+                    if !meta.is_dir() || foreign_owner || shared {
+                        anyhow::bail!(
+                            "{} must be a directory that root owns and that no other account can write; remove it and run the command again",
+                            current.display()
+                        );
+                    }
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("cannot inspect {}", current.display()));
+                }
             }
             missing.push(current);
             level = current.parent();
@@ -197,6 +217,18 @@ pub fn ensure_program_dir(dir: &Path) -> Result<()> {
         }
         Ok(())
     }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn current_uid() -> u32 {
+    // SAFETY: `geteuid` takes no argument and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn current_uid() -> u32 {
+    0
 }
 
 /// Writes a file that only the service account can read (FR-AG-04).
@@ -311,6 +343,24 @@ mod tests {
             & 0o777;
         assert_eq!(mode, 0o700);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_in_07_a_linked_program_level_is_refused() {
+        let base = temp_dir("program-level");
+        std::fs::create_dir_all(&base).expect("base");
+        let real = base.join("real");
+        std::fs::create_dir(&real).expect("real");
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("link");
+        let error = ensure_program_dir(&link.join("bin")).expect_err("a linked level");
+        assert!(
+            format!("{error:#}").contains("must be a directory"),
+            "{error:#}"
+        );
+        assert!(!real.join("bin").exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[cfg(unix)]
