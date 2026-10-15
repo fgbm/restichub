@@ -454,7 +454,7 @@ mod tests {
                 .append("job-1", &chunk(LogStream::Stdout, sequence, "line\n"))
                 .expect("append");
         }
-        spool.acknowledge(&ack(1));
+        spool.acknowledge(&ack(2));
         drop(spool);
 
         let reopened = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
@@ -463,7 +463,7 @@ mod tests {
             .iter()
             .map(|chunk| chunk.sequence)
             .collect();
-        assert_eq!(sequences, [2, 3]);
+        assert_eq!(sequences, [3]);
         let _ = std::fs::remove_dir_all(dir);
     }
 
