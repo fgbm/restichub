@@ -89,7 +89,7 @@ To check the connection:
 4. Read the "Last seen" time. The control plane writes this time while the stream is open. A time within the last minute shows a live connection.
 5. Read the column "Agent version". The mark "Update available" shows an agent package that is older than the control plane (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)).
 
-The control plane marks an agent offline after a grace period of 300 seconds without a heartbeat. A short network failure therefore does not change the status.
+The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. The Overview counts a host as online when the control plane heard from it in the last 90 seconds. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/operations/alerts/)).
 
 The agent writes one line when the control plane greets it:
 
