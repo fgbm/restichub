@@ -723,6 +723,7 @@ impl AgentService for SilentService {
 }
 
 pub mod api;
+pub mod hooks;
 pub mod jobs;
 pub mod steps;
 

@@ -244,6 +244,63 @@ pub(crate) fn spawn_job_restic(
     JobChild::new(child)
 }
 
+/// Starts one hook child with piped output (FR-HK-03, FR-HK-05, ADR-0004).
+///
+/// The program, the arguments and the environment come from [`crate::hooks::Invocation`], which
+/// the allow-list built. The child has no shell, no standard input and a cleared environment: it
+/// gets a fixed search path, the variables of the allow-list and the variables that the schema
+/// names. Nothing of the agent environment reaches it. It runs in its own process group, so the
+/// agent stops its whole tree (FR-AG-10).
+///
+/// # Errors
+///
+/// Returns an error when the operating system refuses to start the process.
+pub(crate) fn spawn_job_hook(
+    invocation: &crate::hooks::Invocation,
+    scratch: &Path,
+) -> Result<JobChild> {
+    let mut command = Command::new(&invocation.program);
+    command.env_clear();
+    #[cfg(windows)]
+    {
+        let system_root = std::env::var_os("SystemRoot")
+            .unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
+        let mut search_path = PathBuf::from(&system_root);
+        search_path.push("System32");
+        command.env("PATH", search_path);
+        command.env("SystemRoot", system_root);
+        command.env("TEMP", scratch);
+        command.env("TMP", scratch);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = scratch;
+        command.env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        );
+    }
+    for (name, value) in &invocation.env {
+        command.env(name, value.as_str());
+    }
+    command
+        .args(&invocation.args)
+        .current_dir(&invocation.working_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_process_group(&mut command);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+        // The child joins the job object before it runs, so no grandchild escapes (FR-AG-10).
+        command.creation_flags(windows_job::process_flags() | CREATE_SUSPENDED);
+    }
+    let child = command.spawn().context("cannot start the hook")?;
+    JobChild::new(child)
+}
+
 /// Lowers the process and I/O priority of the child when the step asks for it (FR-AG-15).
 ///
 /// On Linux the child gets a nice value 10 above the agent, capped at 19, and the best-effort I/O

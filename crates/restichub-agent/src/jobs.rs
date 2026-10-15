@@ -14,9 +14,10 @@
 //! the result, so the agent sends every stored result at each connection until the journal entry
 //! expires (ADR-0020, FR-AG-12). The control plane ignores a result for a terminal job.
 //!
-//! The agent refuses a job with a `hook` step with [`RejectReason::UnsupportedStep`]: that step
-//! kind belongs to a later epic. The agent starts no job on its own and holds no timer that starts
-//! one (ADR-0002).
+//! A `hook` step runs a program from the hook allow-list ([`crate::hooks`], ADR-0004). The agent
+//! checks the hook and its parameters before it acknowledges the job and again before it starts
+//! the hook ([`hooks`]). The agent starts no job on its own and holds no timer that starts one
+//! (ADR-0002).
 //!
 //! While a step runs, the agent sends progress and scrubbed log chunks. The result of the job holds
 //! the typed result of every step and a bounded tail of the log. Both stay in the journal, so a
@@ -39,21 +40,26 @@ use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{
-    AgentMessage, ErrorDetail, JobAck, JobRejected, JobResult, JobStatus, RejectReason, SignedJob,
-    Step, StepResult, StepStatus, agent_message, step, step_result,
+    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, RejectReason, SignedJob, Step,
+    StepResult, StepStatus, agent_message, step, step_result,
 };
 use restichub_proto::signing::{
     Admission, Expected, JobJournal as _, JournalState, KeyRing, Rejection, admit, verify_job,
 };
 use tokio::sync::mpsc;
 
+use crate::hooks::HookStore;
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
 use crate::restore_roots::RestoreAccess;
 
+mod hooks;
 mod log;
+mod outcome;
 mod runner;
 
+use hooks::{HookFailure, PhaseMode, Phased, Sink};
 use log::JobLog;
+use outcome::{Progress, job_error, job_outcome};
 use runner::{CancelHandle, StepError, StepOutcome};
 
 /// The grace period between the graceful stop signal and the forced kill of the process tree
@@ -106,6 +112,9 @@ pub struct Jobs {
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
+    /// Place and trust rule of the allow-list file. The agent reads the file again at each job
+    /// (FR-HK-01).
+    hooks: Arc<HookStore>,
 }
 
 impl Jobs {
@@ -136,7 +145,41 @@ impl Jobs {
             resent: Arc::new(Mutex::new(HashSet::new())),
             stop_grace: STOP_GRACE,
             restore: Arc::new(restore),
+            hooks: Arc::new(HookStore::for_config_dir(dir)),
         })
+    }
+
+    /// Replaces the place and the trust rule of the hook allow-list (FR-HK-01).
+    #[must_use]
+    pub fn with_hook_store(mut self, store: HookStore) -> Self {
+        self.hooks = Arc::new(store);
+        self
+    }
+
+    /// The state and the public metadata of the hook allow-list for `AgentHello` (FR-HK-04). A
+    /// file that the agent does not trust gives no hook (AC-HK-01).
+    pub async fn hook_report(
+        &self,
+    ) -> (
+        restichub_proto::agent::v1::HookAllowListState,
+        Vec<restichub_proto::agent::v1::HookMetadata>,
+    ) {
+        let store = Arc::clone(&self.hooks);
+        let loaded = tokio::task::spawn_blocking(move || {
+            let list = store.load();
+            (list.state(), list.report())
+        })
+        .await;
+        match loaded {
+            Ok((state, report)) => (state.to_proto(), report),
+            Err(error) => {
+                tracing::warn!(%error, "the hook allow-list check stopped");
+                (
+                    restichub_proto::agent::v1::HookAllowListState::Unspecified,
+                    Vec::new(),
+                )
+            }
+        }
     }
 
     /// Replaces the restore roots and the protected paths (FR-RS-03).
@@ -197,6 +240,10 @@ impl Jobs {
                 .await;
             return;
         }
+        if let Some(reason) = self.hook_refusal(&validated).await {
+            let _ = self.send(rejected(job_id, reason)).await;
+            return;
+        }
         match self.dispatch(&validated, expected.now) {
             Dispatch::Rejected(reason) => {
                 let _ = self.send(rejected(job_id, reason)).await;
@@ -230,6 +277,33 @@ impl Jobs {
                 }
             }
         }
+    }
+
+    /// The reason to refuse a job whose hook is unknown or whose parameters do not obey the
+    /// schema, or `None` (FR-HK-03, AC-HK-01, AC-HK-03).
+    async fn hook_refusal(&self, validated: &ValidatedJob) -> Option<RejectReason> {
+        let hooks: Vec<_> = validated
+            .job()
+            .steps
+            .iter()
+            .filter_map(|step| match step.kind.as_ref() {
+                Some(step::Kind::Hook(hook)) => Some(hook.clone()),
+                _ => None,
+            })
+            .collect();
+        if hooks.is_empty() {
+            return None;
+        }
+        let store = Arc::clone(&self.hooks);
+        let checked = tokio::task::spawn_blocking(move || {
+            let list = store.load();
+            hooks
+                .iter()
+                .find_map(|hook| list.prepare(hook).err())
+                .map(|refusal| refusal.reject_reason())
+        })
+        .await;
+        checked.unwrap_or(Some(RejectReason::Internal))
     }
 
     /// Decides what to do with a verified job: the stored result first, then a running job, then
@@ -395,11 +469,52 @@ impl Jobs {
         };
         // The status of a step that stopped the job outside the missing-repository probe.
         let mut stopped_status: Option<StepStatus> = None;
+        let phased = Phased::new(&job.steps);
+        let deadline = job_deadline;
         // The repository of the test_access step. The init step runs only when its own repository
         // matches (FR-RP-02, AC-RP-01).
         let mut probe_repository: Option<String> = None;
 
-        for step in &job.steps {
+        // The `before` hooks run first. A failed one stops the sequence (AC-HK-06).
+        let before = self
+            .run_hook_steps(
+                &phased.before,
+                PhaseMode {
+                    stop_on_failure: true,
+                    honor_cancel: true,
+                    honor_deadline: true,
+                },
+                &cancel,
+                deadline,
+                &mut Sink {
+                    job_id: &job_id,
+                    results: &mut step_results,
+                    succeeded: &mut succeeded,
+                    failed: &mut failed,
+                    log: &mut log,
+                },
+            )
+            .await;
+        progress.cancelled |= before.cancelled;
+        let mut hook_failure: Option<HookFailure> = before.failure;
+        let before_ok = hook_failure.is_none() && !progress.cancelled;
+        if !before_ok {
+            let mut sink = Sink {
+                job_id: &job_id,
+                results: &mut step_results,
+                succeeded: &mut succeeded,
+                failed: &mut failed,
+                log: &mut log,
+            };
+            self.skip_steps(&phased.main, &mut sink).await;
+        }
+
+        let main = if before_ok {
+            phased.main.as_slice()
+        } else {
+            &[]
+        };
+        for step in main.iter().copied() {
             // A cancel that arrived between two steps stops the job before the next step starts
             // (FR-AG-10).
             if cancel.is_cancelled() {
@@ -521,6 +636,73 @@ impl Jobs {
             }
         }
 
+        // The remaining phases (FR-HK-05). A cancel leaves the `finally` hooks only.
+        macro_rules! sink {
+            () => {
+                &mut Sink {
+                    job_id: &job_id,
+                    results: &mut step_results,
+                    succeeded: &mut succeeded,
+                    failed: &mut failed,
+                    log: &mut log,
+                }
+            };
+        }
+        let cleanup = PhaseMode {
+            stop_on_failure: false,
+            honor_cancel: true,
+            honor_deadline: false,
+        };
+        let main_ok = before_ok
+            && progress.stopped_code.is_none()
+            && !progress.init_invalid
+            && !progress.cancelled;
+        if before_ok && !progress.cancelled {
+            let report = self
+                .run_hook_steps(&phased.after, cleanup, &cancel, deadline, sink!())
+                .await;
+            progress.cancelled |= report.cancelled;
+            hook_failure = hook_failure.or(report.failure);
+        } else {
+            self.skip_steps(&phased.after, sink!()).await;
+        }
+        let succeeded_so_far = main_ok && hook_failure.is_none() && !progress.cancelled;
+        let (run_success, run_error) = if progress.cancelled {
+            (false, false)
+        } else if succeeded_so_far {
+            (true, false)
+        } else {
+            (false, true)
+        };
+        for (steps, run) in [
+            (&phased.on_success, run_success),
+            (&phased.on_error, run_error),
+        ] {
+            if run {
+                let report = self
+                    .run_hook_steps(steps, cleanup, &cancel, deadline, sink!())
+                    .await;
+                progress.cancelled |= report.cancelled;
+                hook_failure = hook_failure.or(report.failure);
+            } else {
+                self.skip_steps(steps, sink!()).await;
+            }
+        }
+        let report = self
+            .run_hook_steps(
+                &phased.finally,
+                PhaseMode {
+                    honor_cancel: false,
+                    ..cleanup
+                },
+                &cancel,
+                deadline,
+                sink!(),
+            )
+            .await;
+        hook_failure = hook_failure.or(report.failure);
+        progress.hook_failure = hook_failure;
+
         self.send_log(&mut log).await;
         let outcome = job_outcome(&progress);
         let status = stopped_status.unwrap_or(match outcome {
@@ -540,7 +722,7 @@ impl Jobs {
             steps_succeeded: succeeded,
             steps_failed: failed,
             outcome: outcome as i32,
-            error: job_error(outcome),
+            error: job_error(outcome, &progress),
             steps: step_results.iter().map(compact).collect(),
             log_tail: log.tail(),
         };
@@ -572,7 +754,8 @@ impl Jobs {
         let Some(step::Kind::Restore(restore)) = step.kind.as_ref() else {
             return false;
         };
-        match self.restore.check(&restore.target) {
+        let hook_files = self.hooks.load().executables();
+        match self.restore.check_against(&restore.target, &hook_files) {
             Ok(()) => false,
             Err(reason) => {
                 tracing::warn!(%reason, "a restore target is refused");
@@ -641,27 +824,10 @@ fn verify_and_validate(
 ) -> Result<ValidatedJob, Rejection> {
     let job = verify_job(signed, ring, expected)?;
     let job_id = job.job_id.clone();
-    let validated = ValidatedJob::new(job).map_err(|rejection| Rejection {
+    ValidatedJob::new(job).map_err(|rejection| Rejection {
         job_id: rejection.job_id.or_else(|| Some(job_id.clone())),
         reason: rejection.reason,
-    })?;
-    if validated
-        .job()
-        .steps
-        .iter()
-        .any(|step| !step.kind.as_ref().is_some_and(is_supported))
-    {
-        return Err(Rejection {
-            job_id: Some(job_id),
-            reason: RejectReason::UnsupportedStep,
-        });
-    }
-    Ok(validated)
-}
-
-/// The step kinds that the agent runs (FR-PR-02). The `hook` step belongs to the hook epic.
-fn is_supported(kind: &step::Kind) -> bool {
-    !matches!(kind, step::Kind::Hook(_))
+    })
 }
 
 /// True for a job that only lists snapshots or the files of one (ADR-0035).
@@ -695,84 +861,6 @@ fn step_timeout(step_seconds: u32, job_seconds: u32) -> Duration {
     } else {
         DEFAULT_STEP_TIMEOUT
     }
-}
-
-/// What the steps of one job did, as input of [`job_outcome`].
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Default)]
-struct Progress {
-    cancelled: bool,
-    /// The exit code of the step that stopped the job, outside the missing-repository probe.
-    stopped_code: Option<i32>,
-    probe_missing: bool,
-    had_init: bool,
-    init_ran: bool,
-    init_succeeded: bool,
-    init_invalid: bool,
-    /// Exit code 3 of a step: restic finished but could not read some files.
-    warned: bool,
-}
-
-/// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
-///
-/// The init chain: the agent runs init only after a `test_access` of the same repository exited with
-/// code 10 (a missing repository). A successful init after that probe is a successful job. A
-/// test_access that failed with any other code (1, 12, a timeout, access denied) stops the job,
-/// and a standalone test_access with exit code 10 is the normal `NOT_INITIALIZED` result. An init
-/// without a matching test_access is an invalid sequence and fails the job. Exit code 11 gives
-/// `REPOSITORY_LOCKED` and exit code 3 gives `SUCCEEDED_WITH_WARNINGS`, so neither hides behind a
-/// plain failure or a plain success.
-fn job_outcome(progress: &Progress) -> JobStatus {
-    if progress.cancelled {
-        return JobStatus::Cancelled;
-    }
-    if let Some(code) = progress.stopped_code {
-        // restic exit code 12 is a wrong password or wrong credentials (AC-RP-01).
-        return match code {
-            12 => JobStatus::ConfigError,
-            11 => JobStatus::RepositoryLocked,
-            _ => JobStatus::Failed,
-        };
-    }
-    if progress.init_invalid {
-        return JobStatus::Failed;
-    }
-    if progress.had_init && progress.init_ran {
-        return if progress.init_succeeded {
-            succeeded(progress)
-        } else {
-            JobStatus::Failed
-        };
-    }
-    if !progress.had_init && progress.probe_missing {
-        return JobStatus::NotInitialized;
-    }
-    succeeded(progress)
-}
-
-fn succeeded(progress: &Progress) -> JobStatus {
-    if progress.warned {
-        JobStatus::SucceededWithWarnings
-    } else {
-        JobStatus::Succeeded
-    }
-}
-
-/// The stable code that explains a failed or cancelled outcome (NFR-DOC-04). It holds no secret.
-fn job_error(outcome: JobStatus) -> Option<ErrorDetail> {
-    let code = match outcome {
-        JobStatus::ConfigError => "wrong_password",
-        JobStatus::NotInitialized => "repository_missing",
-        JobStatus::Failed => "step_failed",
-        JobStatus::Cancelled => "cancelled",
-        JobStatus::RepositoryLocked => "repository_locked",
-        JobStatus::SucceededWithWarnings => "succeeded_with_warnings",
-        JobStatus::Succeeded | JobStatus::Unspecified => return None,
-    };
-    Some(ErrorDetail {
-        code: code.to_owned(),
-        params: Vec::new(),
-    })
 }
 
 /// Reads the wall clock as a protocol timestamp.

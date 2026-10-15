@@ -23,10 +23,10 @@ pub const DEFAULT_MAX_LENGTH: u32 = 256;
 /// The largest length that a schema may set (FR-HK-02).
 pub const MAX_STRING_LENGTH: u32 = 4096;
 
-/// The most parameters of one hook (FR-HK-02).
+/// Upper bound of the parameters, so reported metadata cannot grow without limit (FR-HK-02).
 pub const MAX_PARAMETERS: usize = 32;
 
-/// The most values of one enumeration.
+/// Upper bound of the values in one enumeration.
 pub const MAX_ENUM_VALUES: usize = 64;
 
 /// The longest identifier of a hook or a parameter.
@@ -70,7 +70,7 @@ pub enum ParameterKind {
         max_length: u32,
         pattern: Option<String>,
     },
-    /// An integer inside the limits.
+    /// A whole number between `minimum` and `maximum` when they are set.
     Integer {
         minimum: Option<i64>,
         maximum: Option<i64>,
@@ -105,7 +105,7 @@ impl HookParameterSpec {
 pub struct AllowListedHook {
     /// Accepted arguments, by name (FR-HK-02).
     pub parameters: BTreeMap<String, HookParameterSpec>,
-    /// The phases in which the hook may run. An empty list means every phase.
+    /// Where the hook may run. An empty list allows every phase.
     pub phases: Vec<HookPhase>,
 }
 
@@ -139,7 +139,7 @@ impl std::fmt::Debug for HookValue {
 }
 
 impl HookValue {
-    /// The value of a protocol parameter.
+    /// Reads the oneof of a protocol parameter.
     #[must_use]
     pub fn from_proto(typed: &Typed) -> Self {
         match typed {
@@ -183,11 +183,11 @@ pub enum ValueError {
 }
 
 impl HookParameterSpec {
-    /// Checks a typed value against the schema of the parameter.
+    /// Compares a typed value with the schema of the parameter.
     ///
     /// # Errors
     ///
-    /// Returns the first rule that the value breaks.
+    /// Returns the first rule that the value breaks, as a [`ValueError`].
     pub fn check(&self, value: &HookValue) -> Result<(), ValueError> {
         match (&self.kind, value) {
             (
@@ -241,7 +241,7 @@ impl HookParameterSpec {
     ///
     /// # Errors
     ///
-    /// Returns the first rule that the value breaks.
+    /// Returns the first rule that the value breaks, as a [`ValueError`].
     pub fn parse_text(&self, text: &str) -> Result<HookValue, ValueError> {
         let value = match &self.kind {
             ParameterKind::String { .. } | ParameterKind::Enum { .. } => {
@@ -313,7 +313,7 @@ impl AllowListedHook {
     ///
     /// # Errors
     ///
-    /// Returns the rule that the metadata breaks.
+    /// Returns the rule that the metadata breaks, as a [`MetadataError`].
     pub fn from_proto(metadata: &HookMetadata) -> Result<(String, Self), MetadataError> {
         if !is_valid_hook_id(&metadata.hook_id) {
             return Err(MetadataError::HookId);
@@ -444,7 +444,7 @@ fn phase_from_proto(value: i32) -> Option<HookPhase> {
     }
 }
 
-/// The protocol value of a phase.
+/// Maps a phase to its protocol value.
 #[must_use]
 pub fn phase_to_proto(phase: HookPhase) -> ProtoPhase {
     match phase {

@@ -22,8 +22,9 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use hyper::Uri;
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, ControlMessage, KeyUpdateAck, Ping, Pong, SigningKeyUpdate,
-    agent_message, agent_service_client::AgentServiceClient, control_message,
+    AgentHello, AgentMessage, ControlMessage, HookAllowListState, HookMetadata, KeyUpdateAck, Ping,
+    Pong, SigningKeyUpdate, agent_message, agent_service_client::AgentServiceClient,
+    control_message,
 };
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
@@ -295,7 +296,13 @@ pub async fn connect_once(
         Err(status) => return Err(anyhow::anyhow!("the stream did not open: {status}")),
     };
     let mut inbound = response.into_inner();
-    send_hello(&tx, restic_version, jobs.restore_roots()).await?;
+    send_hello(
+        &tx,
+        restic_version,
+        jobs.restore_roots(),
+        jobs.hook_report().await,
+    )
+    .await?;
     // The results go through this stream now, and a result that a dropped stream lost reaches the
     // control plane (ADR-0020).
     jobs.attach(&tx);
@@ -524,6 +531,7 @@ async fn send_hello(
     tx: &mpsc::Sender<AgentMessage>,
     restic_version: &str,
     restore_roots: Vec<String>,
+    (hook_allow_list_state, hooks): (HookAllowListState, Vec<HookMetadata>),
 ) -> Result<()> {
     let hello = AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
@@ -538,6 +546,8 @@ async fn send_hello(
                 .map(|capability| capability.as_str().to_owned())
                 .collect(),
             restore_roots,
+            hooks,
+            hook_allow_list_state: hook_allow_list_state as i32,
             ..AgentHello::default()
         })),
     };
@@ -550,7 +560,7 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::{Backoff, endpoint_host, next_attempt, pong, refused, send_hello};
-    use restichub_proto::agent::v1::{Ping, agent_message};
+    use restichub_proto::agent::v1::{HookAllowListState, Ping, agent_message};
 
     #[test]
     fn m2_a_stream_that_closes_at_once_grows_the_delay() {
@@ -607,9 +617,14 @@ mod tests {
     #[tokio::test]
     async fn fr_pr_09_the_hello_announces_the_forget_all_tags_capability() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        send_hello(&tx, "0.19.0", vec!["/var/lib/restichub-restore".to_owned()])
-            .await
-            .expect("the hello is sent");
+        send_hello(
+            &tx,
+            "0.19.0",
+            vec!["/var/lib/restichub-restore".to_owned()],
+            (HookAllowListState::Absent, Vec::new()),
+        )
+        .await
+        .expect("the hello is sent");
         let message = rx.recv().await.expect("a message");
         let Some(agent_message::Payload::AgentHello(hello)) = message.payload else {
             panic!("the first message must be an AgentHello");
@@ -620,9 +635,14 @@ mod tests {
     #[tokio::test]
     async fn fr_rs_03_the_hello_reports_the_restore_roots() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        send_hello(&tx, "0.19.0", vec!["/srv/restore".to_owned()])
-            .await
-            .expect("the hello is sent");
+        send_hello(
+            &tx,
+            "0.19.0",
+            vec!["/srv/restore".to_owned()],
+            (HookAllowListState::Absent, Vec::new()),
+        )
+        .await
+        .expect("the hello is sent");
         let message = rx.recv().await.expect("a message");
         let Some(agent_message::Payload::AgentHello(hello)) = message.payload else {
             panic!("the first message must be an AgentHello");

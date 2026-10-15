@@ -9,6 +9,7 @@ pub mod cli;
 pub mod commands;
 pub mod enroll;
 pub mod exec;
+pub mod hooks;
 pub mod identity;
 pub mod jobs;
 pub mod journal;
