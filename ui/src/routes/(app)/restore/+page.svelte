@@ -18,8 +18,7 @@
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { formatBytes, formatLocalTime, relativeTime } from '#lib/format.ts';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import type { MessageKey } from '#lib/i18n/index.ts';
+	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import { includePaths } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -60,6 +59,7 @@
 		},
 		{
 			key: 'time',
+			nowrap: true,
 			header: t('restore.time'),
 			value: (row) => row.time ?? '',
 			render: timeCell
@@ -88,9 +88,7 @@
 
 	function reasonOf(code: string | null | undefined): string {
 		if (!code) return '';
-		const key = `jobs.reason.${code}` as MessageKey;
-		const text = t(key);
-		return text === key ? code : text;
+		return tOr(`jobs.reason.${code}`, code);
 	}
 
 	// The date inputs hold a day. The range covers the whole local day.

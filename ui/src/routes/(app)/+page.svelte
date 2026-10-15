@@ -633,6 +633,15 @@
 		text-decoration: underline;
 	}
 
+	.list td time {
+		white-space: nowrap;
+	}
+
+	.row time {
+		flex: none;
+		white-space: nowrap;
+	}
+
 	.cell__meta {
 		display: block;
 		color: var(--rh-color-text-muted);

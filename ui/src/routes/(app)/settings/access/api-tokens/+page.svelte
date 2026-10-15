@@ -77,15 +77,17 @@
 			cell: (row) => roleKeys[row.role],
 			badge: () => 'neutral'
 		},
-		{ key: 'created_at', header: t('common.createdAt'), render: createdCell },
+		{ key: 'created_at', header: t('common.createdAt'), nowrap: true, render: createdCell },
 		{
 			key: 'expires_at',
+			nowrap: true,
 			header: t('tokens.expiresAt'),
 			value: (row) => row.expires_at ?? '',
 			render: expiresCell
 		},
 		{
 			key: 'last_used_at',
+			nowrap: true,
 			header: t('tokens.lastUsed'),
 			value: (row) => row.last_used_at ?? '',
 			render: lastUsedCell

@@ -340,6 +340,8 @@ function plannedStepsOf(job: Job): PlannedStep[] {
 	return plain(['backup', 'forget']);
 }
 
+const MOCK_SIGNING_KEY_ID = '3f9c2a71-5b4e-4d08-9a6c-1e7d0b8f42ac';
+
 /** The detail of a job at the time `now`: steps, summary, progress and the state of the log. */
 export function detailOf(job: Job, now: number): JobDetail {
 	const steps: JobStep[] = stepsOf(job).map((step) => ({
@@ -357,6 +359,7 @@ export function detailOf(job: Job, now: number): JobDetail {
 		steps,
 		summary,
 		progress: progressOf(job, now),
+		signing_key_id: job.status === 'queued' ? null : MOCK_SIGNING_KEY_ID,
 		log: { lines: logLinesOf(job, now).length, truncated: false, purged: false },
 		limits: {
 			max_duration_seconds: 48 * 3600,

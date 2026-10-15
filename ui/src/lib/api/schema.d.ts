@@ -2327,6 +2327,11 @@ export interface components {
              */
             planned_steps: string[];
             progress?: components["schemas"]["ProgressView"] | null;
+            /**
+             * @description The identifier of the job signing key that signed the job. Null until the control plane sent
+             *     the job, and for a job that it sent before it recorded the key.
+             */
+            signing_key_id?: string | null;
             /** @description Ordered by first arrival from the agent. */
             steps: components["schemas"]["StepView"][];
             summary?: components["schemas"]["StepOutput"] | null;

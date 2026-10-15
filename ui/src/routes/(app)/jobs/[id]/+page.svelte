@@ -29,13 +29,14 @@
 	import {
 		isLive,
 		limitLines,
+		shortKeyId,
 		markerOf,
 		statsOf,
 		stepProgress,
 		stepRows
 	} from '#lib/job-detail.ts';
 	import type { StepRow } from '#lib/job-detail.ts';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -74,6 +75,7 @@
 	let cancelOpen = $state(false);
 	let cancelling = $state(false);
 	let rerunning = $state(false);
+	let keyCopied = $state(false);
 	let busy = false;
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
@@ -134,9 +136,19 @@
 			current.result_message ??
 			(current.result_code === 'repository_locked' ? current.result_code : null);
 		if (!code) return null;
-		const key = `jobs.reason.${code}` as MessageKey;
-		const text = t(key);
-		return text === key ? code : text;
+		return tOr(`jobs.reason.${code}`, code);
+	}
+
+	async function copyKeyId(keyId: string): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(keyId);
+			keyCopied = true;
+			setTimeout(() => {
+				keyCopied = false;
+			}, 1500);
+		} catch {
+			keyCopied = false;
+		}
 	}
 
 	function stepTitle(stepId: string): string {
@@ -536,18 +548,18 @@
 					<dt>{t('jobDetail.trigger')}</dt>
 					<dd>{t(`jobDetail.trigger.${job.trigger}` as MessageKey)}</dd>
 					<dt>{t('jobDetail.queuedAt')}</dt>
-					<dd>{formatLocalTime(job.created_at)}</dd>
+					<dd class="about__time">{formatLocalTime(job.created_at)}</dd>
 					{#if job.started_at}
 						<dt>{t('jobDetail.startedAt')}</dt>
-						<dd>{formatLocalTime(job.started_at)}</dd>
+						<dd class="about__time">{formatLocalTime(job.started_at)}</dd>
 					{/if}
 					{#if job.finished_at}
 						<dt>{t('jobDetail.finishedAt')}</dt>
-						<dd>{formatLocalTime(job.finished_at)}</dd>
+						<dd class="about__time">{formatLocalTime(job.finished_at)}</dd>
 					{/if}
 					{#if job.expires_at && (job.status === 'queued' || job.status === 'sent')}
 						<dt>{t('jobDetail.acceptUntil')}</dt>
-						<dd>{formatLocalTime(job.expires_at)}</dd>
+						<dd class="about__time">{formatLocalTime(job.expires_at)}</dd>
 					{/if}
 					{#if limitLines(job)}
 						<dt>{t('jobDetail.limit')}</dt>
@@ -560,6 +572,18 @@
 					{#if job.attempt > 0}
 						<dt>{t('jobDetail.attempt')}</dt>
 						<dd>{job.attempt + 1}</dd>
+					{/if}
+					{#if job.signing_key_id}
+						<dt>{t('jobDetail.signingKey')}</dt>
+						<dd class="about__key">
+							<span class="mono" title={job.signing_key_id}>{shortKeyId(job.signing_key_id)}</span>
+							<Button
+								size="sm"
+								icon={keyCopied ? 'check' : 'copy'}
+								aria-label={keyCopied ? t('common.copied') : t('jobDetail.signingKey.copy')}
+								onclick={() => copyKeyId(job?.signing_key_id ?? '')}
+							/>
+						</dd>
 					{/if}
 				</dl>
 			</Panel>
@@ -846,12 +870,22 @@
 
 	.about {
 		display: grid;
-		grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+		grid-template-columns: minmax(80px, 1fr) fit-content(65%);
 		margin: 0;
 	}
 
 	.about__line {
 		display: block;
+	}
+
+	.about__time {
+		white-space: nowrap;
+	}
+
+	.about__key {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
 	}
 
 	.about dt,

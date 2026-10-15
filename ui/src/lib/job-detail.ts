@@ -35,6 +35,11 @@ export function formatFiles(count: number): string {
 	return t(`jobDetail.files.${rule}` as MessageKey, { count: formatCount(count) });
 }
 
+/** The first part of a signing key identifier; the full value stays in the title and the copy. */
+export function shortKeyId(keyId: string): string {
+	return keyId.slice(0, 8);
+}
+
 /** One step of the list: the result of a step, the running step or a step that did not start. */
 export interface StepRow {
 	id: string;
