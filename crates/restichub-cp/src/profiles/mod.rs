@@ -15,7 +15,7 @@
 //!
 //! The schedule is not a profile field: it belongs to the plan (FR-SC-01).
 
-mod script_secrets;
+pub(crate) mod script_secrets;
 mod settings;
 
 use std::collections::BTreeMap;

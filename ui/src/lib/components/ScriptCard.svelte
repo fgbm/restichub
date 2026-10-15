@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import type { ScriptEnvKind, Secret } from '#lib/api/index.ts';
 	import { Badge, Button, Select, TextField } from '#lib/components/ui/index.ts';
 	import type { SelectOption } from '#lib/components/ui/index.ts';
@@ -221,6 +222,14 @@
 									<Button variant="ghost" icon="plus" onclick={() => onNewSecret(index)}>
 										{t('scripts.secret.new')}
 									</Button>
+									<a
+										class="param__manage"
+										href={resolve('/(app)/settings/access/secrets')}
+										target="_blank"
+										rel="noopener"
+									>
+										{t('secrets.manage')}
+									</a>
 								{/if}
 							</div>
 						{:else}
@@ -334,6 +343,11 @@
 		grid-template-columns: minmax(0, 1.2fr) 110px minmax(0, 1.6fr) auto;
 		align-items: end;
 		gap: var(--rh-space-2);
+	}
+
+	.param__manage {
+		white-space: nowrap;
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.param__secret {

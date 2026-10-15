@@ -1731,6 +1731,14 @@ export class MockApiService {
 		return this.scriptMock.createSecret(request);
 	}
 
+	async replaceSecretValue(id: string): Promise<void> {
+		this.scriptMock.replaceSecretValue(id);
+	}
+
+	async deleteSecret(id: string): Promise<void> {
+		this.scriptMock.deleteSecret(id);
+	}
+
 	async listScriptTemplates(): Promise<ScriptTemplate[]> {
 		return this.scriptMock.listScriptTemplates();
 	}

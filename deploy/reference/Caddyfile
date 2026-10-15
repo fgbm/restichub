@@ -1,0 +1,40 @@
+# The reverse proxy of the reference deployment.
+#
+# Caddy gets the TLS certificate for the domain automatically. The control plane
+# listens on the private network only, so Caddy is the only service that
+# publishes a port. Caddy adds the `X-Forwarded-For` header, and the control
+# plane trusts that header from the Caddy network alone.
+#
+# The agent listener is not proxied here. It is published directly on the control
+# plane, because the mTLS of the agents has to reach the control plane and a proxy
+# would terminate it (ADR-0026).
+
+{
+	email {$RESTICHUB_ACME_EMAIL}
+}
+
+{$RESTICHUB_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# The enrollment endpoint is served on the public origin too (ADR-0033). The
+	# agent reaches it with the publicly trusted certificate of this proxy and then
+	# pins the installation root CA for the stream.
+	@enroll {
+		method POST
+		path /agent/v1/enroll
+	}
+	handle @enroll {
+		reverse_proxy cp:8080
+	}
+
+	handle {
+		reverse_proxy cp:8080
+	}
+}

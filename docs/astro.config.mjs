@@ -56,6 +56,7 @@ export default defineConfig({
 					'operations/root-ca-rotation',
 					'operations/enrollment-rate-limit',
 					'operations/security-for-operators',
+					'operations/verify-a-release',
 				]),
 				group('Reference', 'Справочник', [
 					'concepts/overview',

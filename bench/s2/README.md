@@ -1,0 +1,97 @@
+# Bench S2: load bench for 500 agents
+
+Bench S2 checks AC-NFR-01 and the restart part of AC-ID-06. The control plane runs in a container that has the limits of a 2 vCPU, 4 GB RAM virtual machine. The agent emulator runs 500 agents on the same host. A script creates one plan for each agent, so the control plane starts one job each 15 minutes for each agent (ADR-0002: the agent has no scheduling logic).
+
+## What the run checks
+
+| Check | Target | Source |
+|---|---|---|
+| CPU of the control plane | 95th percentile below 70 % of 2 vCPU | `docker stats`, sample each 5 s |
+| RAM of the control plane | maximum below 3072 MiB | `docker stats`, sample each 5 s |
+| Dispatch delay | 95th percentile below 3 s | histogram `restichub_job_dispatch_delay_seconds` |
+| Reconnect after a restart | all agents back in 300 s or less, no `agent_offline` alert | `restart-test` |
+
+The samples of the first 300 s after the plans exist are not part of the CPU and RAM figures. In this time the agents connect and the first jobs start.
+
+## Requirements
+
+- A host with Docker and Docker Compose v2. The reference host is a Windows machine with Docker and 128 GB RAM.
+- A Bash shell with `curl`, `jq`, `openssl` and `awk`. On Windows use Git Bash.
+- The emulator binary `restichub-emulator`. Build it with `cargo build --release -p restichub-emulator`, or copy it from a build machine. The default path is `target/release/restichub-emulator`; set `EMULATOR` for another path.
+- Open the ports 8080 and 8443 on the loopback address.
+
+## The whole run
+
+```sh
+cd bench/s2
+AGENTS=500 DURATION=14400 ./s2.sh run
+```
+
+This command does these steps:
+
+1. `up` builds the control plane image and starts PostgreSQL and the control plane with the limits `cpus: 2` and `mem_limit: 4g`.
+2. `setup` makes the administrator, an API token and the file `out/ca.pem` with the installation CA.
+3. `enroll` enrolls 500 agents with enrollment tokens. The control plane accepts 10 enrollments each minute from one address (FR-ID-05), and all emulated agents share the address of the host. The enrollment takes about 56 minutes. It runs once: the identities stay in `out/identities`, and the next run enrolls only the missing agents.
+4. `collect` samples the CPU and RAM and reads the metrics each 60 s.
+5. `emulate` connects the 500 agents. The simulated executor runs each job in about 6 s.
+6. `load` creates 500 repositories, profiles and plans. The plan of agent *n* runs at the minutes *n* mod 15, +15, +30 and +45 of each hour, so the 500 jobs spread over the 15 minutes. Set `LOAD_BURST=1` to start all plans in the same minute.
+7. `report` writes `out/report.md` and exits with status 1 when a target fails.
+
+Run the steps one by one for a long enrollment or for a rerun: `./s2.sh up`, `./s2.sh setup`, `./s2.sh enroll`, then `./s2.sh collect &`, `./s2.sh emulate &`, `./s2.sh load`. After the run, stop the collector with `touch out/collect.stop` and run `./s2.sh report`.
+
+The 4-hour command for the reference host:
+
+```sh
+cd bench/s2 && AGENTS=500 DURATION=14400 OUT=$PWD/out-500-4h ./s2.sh run 2>&1 | tee run-500-4h.log
+```
+
+The run takes 56 minutes of enrollment plus 4 hours of load. Keep the host awake, and do not start other heavy work on it.
+
+## Restart test (AC-ID-06)
+
+With the 500 agents connected, run:
+
+```sh
+./s2.sh restart-test
+```
+
+The script restarts the control plane container, counts the agents that hold a stream through `restichub_agent_up`, and stops the clock when all agents are back. It then checks the alert list for `agent_offline`. The result is in `out/restart-report.md`.
+
+## Settings
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AGENTS` | 500 | Number of emulated agents |
+| `DURATION` | 14400 | Seconds that the emulator runs after the enrollment |
+| `INTERVAL_MIN` | 15 | Minutes between the jobs of one agent (a divisor of 60) |
+| `OUT` | `bench/s2/out` | Directory for the logs, the CSV files and the report |
+| `IDENTITIES` | `$OUT/identities` | Store of the enrolled identities |
+| `EMULATOR` | `target/release/restichub-emulator` | Path of the emulator |
+| `STEP_SECONDS` | 2 | Wall time of one simulated step |
+| `RAMP_PER_SECOND` | 20 | Agents that connect each second at the start |
+| `WARMUP_SECONDS` | 300 | Seconds of the load that the report skips |
+| `CP_CPUS` | 2 | CPU share for the percentage (matches `cpus` in `compose.yaml`) |
+| `CPU_LIMIT_PCT`, `RAM_LIMIT_MB`, `DELAY_LIMIT_SECONDS` | 70, 3072, 3 | Targets |
+| `CP_MODE` | `compose` | `native` runs a local `restichub-cp` binary (`CP_BIN`) for a smoke run on a developer machine |
+
+The native mode needs a PostgreSQL administrator (`psql`, or the container name in `PG_CONTAINER`). Its figures do not count for AC-NFR-01: the process is not limited to 2 vCPU.
+
+## Files in the output directory
+
+| File | Content |
+|---|---|
+| `resources.csv` | `epoch,cpu_pct,rss_mb` each 5 s |
+| `metrics.csv` | `epoch,agents_up,dispatch_count,dispatch_le_limit,jobs_succeeded,jobs_failed` each 60 s |
+| `metrics-last.txt` | The last `/metrics` text |
+| `report.md` | The checked result, in the layout of `report-template.md` |
+| `emulator.log`, `emulator-summary.json` | Output and summary of the emulator (connects, reconnects, results) |
+
+## Manual part on the Windows host
+
+These steps need a person; the script cannot do them.
+
+1. Install Docker Desktop with the WSL 2 backend, or Docker Engine, on the Windows host. Give Docker at least 8 CPUs and 16 GB RAM, so that the emulator and the 2 vCPU container do not compete.
+2. Install Git for Windows (Git Bash), `jq` and a Rust toolchain, or copy a built `restichub-emulator.exe` and set `EMULATOR`.
+3. Run `./s2.sh run` as shown above in a Git Bash window. Do not let the host sleep.
+4. For the check with a real Windows agent, create a Hyper-V virtual machine, install the agent there with `restichub-agent register`, and point it to `https://<host>:8443`. This check is outside the default load run.
+5. When the run ends, copy `out/report.md`, `out/resources.csv` and `out/metrics.csv` and add the report to the issue for the acceptance.

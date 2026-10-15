@@ -1,0 +1,91 @@
+# Bench S2: the control plane on a 2 vCPU, 4 GB RAM virtual machine (design/acceptance-criteria.md,
+# section 1.3). The limits of the `cp` service stand for that machine. Development use only: the
+# values are for a throw-away control plane.
+#
+# `s2.sh up` writes `.env` and starts this stack. The emulator runs outside the stack.
+
+name: restichub-bench-s2
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  db-bootstrap:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE: ${POSTGRES_DB}
+      OWNER_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+      RUNTIME_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+    volumes:
+      - ../../crates/restichub-db/sql/bootstrap-roles.sql:/bootstrap-roles.sql:ro
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=1 -d postgres \
+          -v app_role=restichub_app -v auth_role=restichub_auth \
+          -v owner_role=restichub_owner -v runtime_role=restichub_runtime \
+          -f /bootstrap-roles.sql
+        psql -v ON_ERROR_STOP=1 -d postgres <<'SQL'
+        \getenv owner_password OWNER_PASSWORD
+        \getenv runtime_password RUNTIME_PASSWORD
+        \getenv database DATABASE
+        ALTER ROLE restichub_owner PASSWORD :'owner_password';
+        ALTER ROLE restichub_runtime PASSWORD :'runtime_password';
+        ALTER DATABASE :"database" OWNER TO restichub_owner;
+        SQL
+
+  migrate:
+    build:
+      context: ../..
+    image: restichub-cp
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_DATABASE_MIGRATION_URL: postgres://restichub_owner@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_MIGRATION_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+    command: ['migrate']
+
+  cp:
+    image: restichub-cp
+    container_name: restichub-bench-s2-cp
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    cpus: 2
+    mem_limit: 4g
+    environment:
+      RESTICHUB_LISTEN_ADDR: 0.0.0.0:8080
+      RESTICHUB_DATABASE_URL: postgres://restichub_runtime@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+      RESTICHUB_SERVER_INSECURE_COOKIES: 'true'
+      RESTICHUB_KEK: ${RESTICHUB_KEK}
+      RESTICHUB_TENANCY_MODE: single
+      RESTICHUB_AGENT_LISTEN: 0.0.0.0:8443
+      RESTICHUB_AGENT_ENDPOINT: https://localhost:8443
+      # Same defaults as a production install; the bench does not raise any limit.
+      NO_COLOR: '1'
+    ports:
+      - '127.0.0.1:8080:8080'
+      - '127.0.0.1:8443:8443'
+
+volumes:
+  pgdata:
