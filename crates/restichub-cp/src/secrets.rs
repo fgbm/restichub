@@ -167,6 +167,10 @@ pub async fn create_secret(
     context.authorize(Operation::SecretsWrite)?;
     let name = validation::validate_secret_name("name", &body.name)?;
     let purpose = body.purpose;
+    // The control plane makes the secrets of a webhook channel itself (ADR-0036).
+    if purpose.is_internal() {
+        return Err(ApiError::invalid_field("purpose", Reason::Unsupported));
+    }
     validation::validate_secret_value("value", body.value.expose_secret())?;
     let provider = state
         .kek()
@@ -290,6 +294,9 @@ pub async fn replace_secret_value(
     let purpose = SecretPurpose::parse(&metadata.purpose).ok_or_else(|| {
         ApiError::internal(format!("the secret {} holds an unknown purpose", secret_id))
     })?;
+    if purpose.is_internal() {
+        return Err(ApiError::conflict());
+    }
     let encrypted = encrypt_for_tenant(&mut tx, provider, secret_id, purpose, &plaintext).await?;
     repo::replace(
         &mut tx,

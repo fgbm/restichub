@@ -1,5 +1,5 @@
 use super::*;
-use crate::alerts::{self, AlertKind, DeliveryEvent, DeliveryStatus, NewAlert};
+use crate::alerts::{self, AlertKind, AlertParams, DeliveryEvent, DeliveryStatus, NewAlert};
 use crate::channels::{self, ChannelKind, NewChannel};
 use crate::test_util::test_database;
 use crate::{AlertId, ChannelId};
@@ -18,8 +18,9 @@ async fn email_channel(
             kind: ChannelKind::Email,
             enabled: true,
             recipients: &["ops@example.com".to_owned()],
-            url: None,
+            url_origin: None,
             secret_id: None,
+            url_secret_id: None,
             created_by: None,
         },
     )
@@ -33,6 +34,7 @@ async fn open_alert(
     now: OffsetDateTime,
 ) -> Result<AlertId, crate::DbError> {
     let id = AlertId::new();
+    let params = AlertParams::default();
     alerts::insert_open(
         tx,
         &NewAlert {
@@ -46,7 +48,8 @@ async fn open_alert(
             agent_hostname: None,
             plan_name: None,
             repository_name: None,
-            detail: "silent",
+            params: &params,
+            detail: "",
         },
         now,
     )
@@ -64,15 +67,30 @@ async fn ac_mn_07_db_an_open_alert_is_unique_for_its_key() -> TestResult {
     let now = OffsetDateTime::now_utc();
     let mut tx = db.database().begin_tenant(tenant).await?;
     let first = open_alert(&mut tx, "agent:1", now).await?;
-    tx.savepoint("second").await?;
-    let second = open_alert(&mut tx, "agent:1", now).await;
+    let params = AlertParams::default();
+    let second = alerts::insert_open(
+        &mut tx,
+        &NewAlert {
+            id: AlertId::new(),
+            kind: AlertKind::AgentOffline,
+            dedupe_key: "agent:1",
+            agent_id: None,
+            plan_id: None,
+            repository_id: None,
+            job_id: None,
+            agent_hostname: None,
+            plan_name: None,
+            repository_name: None,
+            params: &params,
+            detail: "",
+        },
+        now,
+    )
+    .await?;
     assert!(
-        second
-            .as_ref()
-            .is_err_and(crate::DbError::is_unique_violation),
-        "a second open alert with the same key is refused"
+        !second,
+        "a second open alert with the same key changes nothing"
     );
-    tx.rollback_to_savepoint("second").await?;
     assert!(alerts::resolve(&mut tx, first, now).await?);
     assert!(
         !alerts::resolve(&mut tx, first, now).await?,
@@ -162,7 +180,7 @@ async fn ac_mn_07_db_the_outbox_is_bounded() -> TestResult {
     Ok(())
 }
 
-/// The channel row keeps its kind rules: a webhook needs a URL and a secret, an email needs
+/// The channel row keeps its kind rules: a webhook needs an origin and two secrets, an email needs
 /// recipients.
 #[tokio::test]
 async fn db_a_channel_row_keeps_its_kind_rules() -> TestResult {
@@ -172,8 +190,8 @@ async fn db_a_channel_row_keeps_its_kind_rules() -> TestResult {
     let (tenant, _) = two_tenants(db.database()).await?;
     let mut tx = db.database().begin_tenant(tenant).await?;
     let write = sqlx::query(
-        "INSERT INTO notification_channels (id, tenant_id, name, kind, url) \
-         VALUES ($1, $2, 'hook', 'webhook', 'https://hooks.example.com/x')",
+        "INSERT INTO notification_channels (id, tenant_id, name, kind, url_origin) \
+         VALUES ($1, $2, 'hook', 'webhook', 'https://hooks.example.com')",
     )
     .bind(ChannelId::new())
     .bind(tenant)
@@ -193,6 +211,93 @@ async fn db_a_channel_row_keeps_its_kind_rules() -> TestResult {
     .await;
     assert_code(write, "23514");
     drop(tx);
+    db.cleanup().await;
+    Ok(())
+}
+
+/// AC-MN-07: a write of a holder whose lease ended, and whose row another sender claimed since,
+/// changes nothing.
+#[tokio::test]
+async fn ac_mn_07_db_a_late_write_after_a_second_claim_changes_nothing() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, _) = two_tenants(db.database()).await?;
+    let now = OffsetDateTime::now_utc();
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    email_channel(&mut tx, "mail").await?;
+    let alert = open_alert(&mut tx, "agent:1", now).await?;
+    alerts::enqueue(&mut tx, alert, DeliveryEvent::Opened, now).await?;
+    tx.commit().await?;
+
+    let lease = now + Duration::minutes(2);
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let slow = alerts::claim_due(&mut tx, now, lease, 10).await?;
+    tx.commit().await?;
+    assert_eq!(slow.len(), 1);
+    assert_eq!(slow[0].attempt, 1);
+
+    // The lease ends while the first holder still sends. A second holder claims the row.
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let second = alerts::claim_due(&mut tx, lease, lease + Duration::minutes(2), 10).await?;
+    tx.commit().await?;
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].attempt, 2);
+
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let id = slow[0].id;
+    assert!(!alerts::mark_sent(&mut tx, id, 1, lease, None).await?);
+    assert!(!alerts::mark_attempt_failed(&mut tx, id, 1, "late", None).await?);
+    assert!(
+        !alerts::extend_lease(&mut tx, id, 1, lease + Duration::hours(1)).await?,
+        "the old holder cannot extend the lease of the new one"
+    );
+    let counts = alerts::delivery_counts(&mut tx).await?;
+    assert_eq!(
+        counts,
+        vec![(DeliveryStatus::Pending, 1)],
+        "the row is unchanged"
+    );
+    assert!(alerts::mark_sent(&mut tx, id, 2, lease, None).await?);
+    assert!(
+        !alerts::mark_sent(&mut tx, id, 2, lease, None).await?,
+        "a sent row is final"
+    );
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+/// AC-MN-07: the evaluation reads every open alert, not the first thousands.
+#[tokio::test]
+async fn ac_mn_07_db_open_alerts_have_no_hard_limit() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, _) = two_tenants(db.database()).await?;
+    let now = OffsetDateTime::now_utc();
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    sqlx::query(
+        "INSERT INTO alert_state (id, tenant_id, kind, dedupe_key, status, opened_at) \
+         SELECT gen_random_uuid(), $1, 'agent_offline', 'agent:' || n, 'open', \
+                $2 + n * interval '1 millisecond' \
+         FROM generate_series(1, 5001) AS n",
+    )
+    .bind(tenant)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await?;
+    let all = alerts::open_alerts(&mut tx).await?;
+    assert_eq!(all.len(), 5001);
+    let mut keys: Vec<&str> = all.iter().map(|alert| alert.dedupe_key.as_str()).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    assert_eq!(keys.len(), 5001, "no row repeats between the pages");
+    assert_eq!(alerts::count_open(&mut tx).await?, 5001);
+    let newest = alerts::newest_open(&mut tx, 3).await?;
+    assert_eq!(newest.len(), 3);
+    assert_eq!(newest[0].dedupe_key, "agent:5001");
+    tx.commit().await?;
     db.cleanup().await;
     Ok(())
 }

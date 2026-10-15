@@ -1,4 +1,4 @@
-//! The sender: it delivers one message through a channel (ADR-0035).
+//! The sender: it delivers one message through a channel (ADR-0036).
 
 use std::sync::Arc;
 
@@ -56,7 +56,7 @@ impl Sender {
         &self,
         recipients: &[String],
         message: &Message,
-    ) -> Result<(), SendError> {
+    ) -> Result<Option<String>, SendError> {
         let smtp = self
             .settings
             .smtp

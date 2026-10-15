@@ -1,5 +1,5 @@
 //! The alert evaluation and the delivery of the messages (FR-MN-03, FR-MN-04, AC-MN-01, AC-MN-02,
-//! AC-MN-07, ADR-0035).
+//! AC-MN-07, ADR-0036).
 //!
 //! The tests drive the loop with explicit times, so no test sleeps. The channels point to a local
 //! SMTP sink and a local webhook sink.
@@ -134,7 +134,8 @@ impl Fixture {
 
     async fn run_with(&self, sender: &Sender, now: OffsetDateTime) {
         let kek = test_kek();
-        restichub_cp::alerts::run_once(self.db.database(), sender, kek.as_ref(), now)
+        let clock = restichub_cp::clock::ManualClock::new(now).shared();
+        restichub_cp::alerts::run_once(self.db.database(), sender, kek, clock)
             .await
             .expect("the alert pass works");
     }
@@ -349,7 +350,7 @@ async fn ac_mn_02_job_failure_and_offline_agent_alert() {
     assert_eq!(body["alert"]["agent"]["name"], "alert-host");
     assert_eq!(body["alert"]["plan"]["name"], "nightly");
     assert_eq!(body["alert"]["repository"]["name"], "alert-repo");
-    let message = body["alert"]["message"].as_str().expect("message");
+    let message = body["alert"]["error_text"].as_str().expect("error text");
     assert!(
         message.contains("rejected"),
         "the error text is in the alert: {message}"
@@ -358,6 +359,11 @@ async fn ac_mn_02_job_failure_and_offline_agent_alert() {
         !message.contains("hunter2"),
         "the scrub hides the password: {message}"
     );
+    assert_eq!(
+        body["alert"]["message"], "The backup job failed (failed).",
+        "the sentence comes from the typed values"
+    );
+    assert_eq!(body["alert"]["params"]["error_code"], "failed");
     assert_eq!(
         body["alert"]["url"],
         format!("{}/jobs/{job}", alert_support::ORIGIN)
@@ -755,4 +761,45 @@ async fn ac_mn_06_webhook_signature_verifies() {
         request.json()["id"].as_str()
     );
     let _ = Arc::strong_count(&fx.hook.requests);
+}
+
+/// FR-MN-04: the language setting of the installation selects the text of an email and of a
+/// webhook message. The error text stays a separate field.
+#[tokio::test]
+async fn ac_mn_02_messages_follow_the_notification_language() {
+    let Some(fx) = fixture("ac-mn-02-ru").await else {
+        return;
+    };
+    let t0 = fx.t0;
+    let failed_at = t0 + Duration::minutes(30);
+    fx.finished_job(
+        fx.plan,
+        t0 + Duration::minutes(10),
+        "failed",
+        "failed",
+        Some("restic exited with 1"),
+        failed_at,
+    )
+    .await;
+    let mut settings = alert_support::local_settings(
+        Some(fx.smtp.port),
+        restichub_cp::alerts::settings::SmtpSecurity::None,
+    );
+    settings.language = restichub_cp::alerts::text::Language::Ru;
+    let russian = Sender::new(Arc::new(settings)).expect("sender");
+    fx.run_with(&russian, failed_at + Duration::minutes(1))
+        .await;
+
+    let body = fx.hooks()[0].json();
+    assert_eq!(
+        body["alert"]["message"],
+        "Задача «резервное копирование» завершилась ошибкой (failed)."
+    );
+    assert_eq!(body["alert"]["error_text"], "restic exited with 1");
+    let mails = fx.smtp.received();
+    let subject = mails[0].header("subject").expect("subject");
+    assert!(subject.starts_with("=?UTF-8?B?"), "{subject}");
+    let text = mails[0].text();
+    assert!(text.contains("Хост: alert-host"), "{text}");
+    assert!(text.contains("Ошибка: restic exited with 1"), "{text}");
 }

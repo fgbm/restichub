@@ -1,5 +1,5 @@
 //! The notification channel API: validation, the secret handling, the address policy, the roles and
-//! the tenant isolation (FR-MN-04, AC-MN-05, AC-MN-06, AC-MN-08, AC-TN-01, ADR-0035).
+//! the tenant isolation (FR-MN-04, AC-MN-05, AC-MN-06, AC-MN-08, AC-TN-01, ADR-0036).
 
 #![allow(clippy::expect_used)]
 
@@ -16,8 +16,8 @@ use axum::Router;
 use axum::http::StatusCode;
 use restichub_cp::alerts::sender::Sender;
 use restichub_cp::alerts::settings::{AlertsSettings, SmtpSecurity};
-use restichub_cp::config::TenancyConfig;
-use restichub_cp::server::{AppState, router};
+use restichub_cp::config::{AuthConfig, TenancyConfig};
+use restichub_cp::server::{AppState, AuthState, router};
 use restichub_db::test_util::TestDatabase;
 use serde_json::{Value, json};
 
@@ -236,7 +236,7 @@ async fn ac_mn_06_webhook_over_tls() {
     ));
 }
 
-/// A redirect is a failure, not a hop (ADR-0035).
+/// A redirect is a failure, not a hop (ADR-0036).
 #[tokio::test]
 async fn ac_mn_05_a_redirect_is_not_followed() {
     let Some(db) = common::test_db().await else {
@@ -344,7 +344,8 @@ async fn ac_mn_08_secrets_stay_out_of_the_api_and_the_audit() {
     );
     assert_eq!(
         common::count(db.database(), tenant, "secrets").await,
-        secrets_before + 1
+        secrets_before + 2,
+        "the signing secret and the URL path are two rows"
     );
 
     let (_, _, rotated) = send(
@@ -417,8 +418,8 @@ async fn ac_mn_08_secrets_stay_out_of_the_api_and_the_audit() {
         }
     }
     tx.commit().await.expect("commit");
-    for secret in [&first, &second] {
-        assert!(!everything.contains(secret.as_str()), "a secret leaked");
+    for secret in [first.as_str(), second.as_str(), path_token] {
+        assert!(!everything.contains(secret), "a secret leaked");
     }
     // The path of the URL is write-only, in the reads and in the audit records.
     let audit_only: String = {
@@ -778,4 +779,148 @@ async fn ac_mn_08_smtp_credentials_travel_over_tls_only() {
     assert_eq!(result["error"], "smtp_unsupported_auth_without_tls");
     assert!(plain.credentials.lock().expect("lock").is_empty());
     assert!(plain.received().is_empty());
+}
+
+fn app_with_limits(
+    db: &TestDatabase,
+    sender: Sender,
+    actor: u32,
+    tenant: u32,
+    slots: usize,
+) -> Router {
+    router(
+        AppState::with_auth(
+            db.database().clone(),
+            AuthState::new(AuthConfig::default()).with_test_send_limits(actor, tenant, slots),
+        )
+        .with_kek(test_kek())
+        .with_tenancy(TenancyConfig::multi())
+        .with_sender(sender),
+    )
+}
+
+/// FR-MN-04: the test button is limited for each actor and for each tenant, and the number of
+/// tests that run at once is bounded.
+#[tokio::test]
+async fn ac_mn_05_the_test_send_is_rate_limited() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "test-send-limit").await;
+    let app = app_with_limits(&db, local_sender(None), 2, 100, 8);
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let (status, created) = create_channel(
+        &app,
+        &cookie,
+        json!({"name": "mail", "kind": "email", "recipients": ["ops@example.com"]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["channel"]["id"].as_str().expect("id").to_owned();
+    let uri = format!("/api/v1/notification-channels/{id}/test");
+    for _ in 0..2 {
+        let (status, _, _) = send(&app, request("POST", &uri, Some(&cookie), None)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, _, body) = send(&app, request("POST", &uri, Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+
+    // The tenant bucket counts the tests of every actor.
+    let tenant_app = app_with_limits(&db, local_sender(None), 100, 1, 8);
+    let (status, _, _) = send(&tenant_app, request("POST", &uri, Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = send(&tenant_app, request("POST", &uri, Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+
+    // No free slot: the server answers HTTP 503 and sends nothing.
+    let busy_app = app_with_limits(&db, local_sender(None), 100, 100, 0);
+    let (status, _, _) = send(&busy_app, request("POST", &uri, Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    db.cleanup().await;
+}
+
+/// AC-MN-08: the generic secret API neither creates nor changes the secrets of a webhook channel.
+#[tokio::test]
+async fn ac_mn_08_the_secret_api_refuses_the_webhook_purposes() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "secret-api-purpose").await;
+    let hook = WebhookSink::start().await;
+    let app = app_with(&db, local_sender(None));
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    for purpose in ["webhook_secret", "webhook_url"] {
+        let (status, _, body) = send(
+            &app,
+            request(
+                "POST",
+                "/api/v1/secrets",
+                Some(&cookie),
+                Some(json!({"name": "x", "purpose": purpose, "value": "some-value"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{purpose}: {body}");
+    }
+    let (status, created) = create_channel(
+        &app,
+        &cookie,
+        json!({"name": "hook", "kind": "webhook", "url": format!("http://127.0.0.1:{}/h", hook.port)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let (_, _, list) = send(&app, request("GET", "/api/v1/secrets", Some(&cookie), None)).await;
+    let items = list["items"].as_array().cloned().unwrap_or_default();
+    assert!(!items.is_empty(), "{list}");
+    for item in items {
+        let (status, _, body) = send(
+            &app,
+            request(
+                "PUT",
+                &format!("/api/v1/secrets/{}/value", item["id"].as_str().expect("id")),
+                Some(&cookie),
+                Some(json!({"value": "other"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    }
+    db.cleanup().await;
+}
+
+/// FR-MN-04: a server that refuses a part of the recipients still gets the message for the rest,
+/// and the send reports the refusal.
+#[tokio::test]
+async fn ac_mn_01_a_partial_refusal_of_recipients_is_reported() {
+    let sink = SmtpSink::start().await;
+    let sender = local_sender(Some(sink.port));
+    let message = restichub_cp::alerts::message::Message {
+        delivery_id: restichub_db::DeliveryId::new(),
+        event: restichub_cp::alerts::message::MessageEvent::Test,
+        sent_at: time::OffsetDateTime::now_utc(),
+        tenant_id: restichub_db::TenantId::new(),
+        tenant_name: "acme".to_owned(),
+        alert: None,
+        public_origin: None,
+        language: restichub_cp::alerts::text::Language::default(),
+    };
+    let recipients = vec![
+        "ops@example.com".to_owned(),
+        "reject@example.com".to_owned(),
+    ];
+    let note = sender
+        .send_email(&recipients, &message)
+        .await
+        .expect("one recipient accepts")
+        .expect("the refusal is reported");
+    assert!(note.contains("1 of 2 refused"), "{note}");
+    assert!(note.contains("550"), "{note}");
+    assert_eq!(sink.received()[0].to, vec!["ops@example.com".to_owned()]);
+
+    let all_refused = vec!["reject@example.com".to_owned()];
+    let error = sender
+        .send_email(&all_refused, &message)
+        .await
+        .expect_err("no recipient accepts");
+    assert!(error.code().starts_with("smtp_550"));
 }

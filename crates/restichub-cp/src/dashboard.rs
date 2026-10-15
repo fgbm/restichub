@@ -1,4 +1,4 @@
-//! Dashboard overview (FR-MN-01, ADR-0035).
+//! Dashboard overview (FR-MN-01, ADR-0036).
 //!
 //! One read gives the overview of the tenant: the hosts that are online and offline, each plan with
 //! the time of its last successful backup and its RPO state, the repositories with the state of
@@ -7,11 +7,14 @@
 //! A host counts as online when the control plane saw it within [`ONLINE_WINDOW`]. The test reads
 //! `agents.last_seen_at`, not the stream registry of one instance, so each instance answers alike.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use axum::Json;
 use axum::extract::State;
 use restichub_db::alerts as alerts_repo;
 use restichub_db::dashboard as repo;
-use restichub_db::{AgentStatus, JobKind, JobStatus};
+use restichub_db::{AgentStatus, JobKind, JobStatus, TenantId};
 use serde::Serialize;
 use time::{Duration, OffsetDateTime};
 use utoipa::ToSchema;
@@ -28,6 +31,10 @@ pub const ONLINE_WINDOW: Duration = Duration::seconds(90);
 
 /// Failed jobs older than this stay out of the list.
 const FAILED_WINDOW: Duration = Duration::days(7);
+
+/// The time for which the database facts of a tenant are reused. A page that refreshes often
+/// then costs one read of the plans and jobs for each period, not for each request.
+pub const FACTS_TTL: Duration = Duration::seconds(15);
 
 const FAILED_JOBS: i64 = 10;
 const OPEN_ALERTS: usize = 10;
@@ -120,6 +127,56 @@ pub struct DashboardResponse {
     pub alerts: DashboardAlerts,
 }
 
+/// What the overview reads from the database.
+struct Facts {
+    agents: Vec<repo::AgentFacts>,
+    plans: Vec<repo::RpoPlan>,
+    repositories: Vec<repo::RepositoryLockFacts>,
+    failed: Vec<repo::FailedJob>,
+    open_total: i64,
+    newest: Vec<restichub_db::alerts::Alert>,
+}
+
+/// The last facts of each tenant. The cache keeps one entry for each tenant; a request after the
+/// time-to-live replaces it.
+#[derive(Debug)]
+pub struct DashboardCache {
+    ttl: Duration,
+    entries: Mutex<HashMap<TenantId, (OffsetDateTime, Arc<Facts>)>>,
+}
+
+impl std::fmt::Debug for Facts {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("Facts").finish_non_exhaustive()
+    }
+}
+
+impl DashboardCache {
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get(&self, tenant: TenantId, now: OffsetDateTime) -> Option<Arc<Facts>> {
+        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        let (taken, facts) = entries.get(&tenant)?;
+        (now >= *taken && now - *taken < self.ttl).then(|| Arc::clone(facts))
+    }
+
+    fn put(&self, tenant: TenantId, now: OffsetDateTime, facts: Arc<Facts>) {
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries.insert(tenant, (now, facts));
+    }
+}
+
+impl Default for DashboardCache {
+    fn default() -> Self {
+        Self::new(FACTS_TTL)
+    }
+}
+
 /// Reads the overview of the tenant.
 #[utoipa::path(
     get,
@@ -136,17 +193,38 @@ pub async fn dashboard(
 ) -> Result<Json<DashboardResponse>, ApiError> {
     context.authorize(Operation::DashboardRead)?;
     let now = state.auth().clock.now();
-    let (agents, plans, repositories, failed, open) = context
-        .tenant_tx(&state, async |tx| {
-            Ok((
-                repo::agent_facts(tx).await?,
-                repo::rpo_plans(tx).await?,
-                repo::repository_locks(tx).await?,
-                repo::recent_failed_jobs(tx, now - FAILED_WINDOW, FAILED_JOBS).await?,
-                alerts_repo::open_alerts(tx).await?,
-            ))
-        })
-        .await?;
+    let facts = match state.dashboard_cache().get(context.tenant_id, now) {
+        Some(facts) => facts,
+        None => {
+            let fresh = Arc::new(
+                context
+                    .tenant_tx(&state, async |tx| {
+                        Ok(Facts {
+                            agents: repo::agent_facts(tx).await?,
+                            plans: repo::rpo_plans(tx).await?,
+                            repositories: repo::repository_locks(tx).await?,
+                            failed: repo::recent_failed_jobs(tx, now - FAILED_WINDOW, FAILED_JOBS)
+                                .await?,
+                            open_total: alerts_repo::count_open(tx).await?,
+                            newest: alerts_repo::newest_open(tx, OPEN_ALERTS as i64).await?,
+                        })
+                    })
+                    .await?,
+            );
+            state
+                .dashboard_cache()
+                .put(context.tenant_id, now, Arc::clone(&fresh));
+            fresh
+        }
+    };
+    let Facts {
+        agents,
+        plans,
+        repositories,
+        failed,
+        open_total,
+        newest,
+    } = &*facts;
 
     let mut hosts: Vec<DashboardHost> = agents
         .iter()
@@ -228,9 +306,6 @@ pub async fn dashboard(
     });
     dashboard_repositories.truncate(LIST_LIMIT);
 
-    let alert_total = open.len();
-    let newest: Vec<_> = open.into_iter().rev().take(OPEN_ALERTS).collect();
-
     Ok(Json(DashboardResponse {
         generated_at: format_time(now),
         hosts: DashboardHosts {
@@ -260,8 +335,8 @@ pub async fn dashboard(
             })
             .collect(),
         alerts: DashboardAlerts {
-            total: alert_total,
-            items: views(&state, &newest),
+            total: usize::try_from(*open_total).unwrap_or(usize::MAX),
+            items: views(&state, newest),
         },
     }))
 }

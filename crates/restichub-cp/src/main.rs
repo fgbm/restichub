@@ -159,7 +159,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     // The dispatcher sends the queued jobs to the online agents (FR-SC-03, ADR-0010). It runs in the
     // control plane; the agent holds no schedule (ADR-0002).
     restichub_cp::queue::spawn(state.clone(), state.auth().clock.clone());
-    // The alert loop evaluates the rules and sends the messages (FR-MN-03, FR-MN-04, ADR-0035). It
+    // The alert loop evaluates the rules and sends the messages (FR-MN-03, FR-MN-04, ADR-0036). It
     // is a control plane task, not job scheduling (ADR-0002).
     restichub_cp::alerts::spawn(
         state.db().clone(),

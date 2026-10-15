@@ -46,7 +46,7 @@ pub struct Plan {
     pub agent_hostname: String,
     /// The repository of the bound profile (display only).
     pub repository_id: RepositoryId,
-    /// The recovery point objective in seconds. `None` means the default of the schedule (ADR-0035).
+    /// The recovery point objective in seconds. `None` means the default of the schedule (ADR-0036).
     pub rpo_seconds: Option<i32>,
 }
 

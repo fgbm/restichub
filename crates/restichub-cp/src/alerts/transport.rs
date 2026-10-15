@@ -1,5 +1,5 @@
 //! The parts that the email and webhook senders share: the stream type, the error code, the TLS
-//! client configuration and the host name resolver (ADR-0035).
+//! client configuration and the host name resolver (ADR-0036).
 
 use std::future::Future;
 use std::io;
@@ -22,6 +22,15 @@ pub type BoxIo = Box<dyn Io>;
 
 /// Why a send failed. The text of [`SendError::code`] is stored in the delivery row and shown to
 /// an Admin, so it holds no secret and no response body of a target.
+/// Maps a lower-level error to `value` and keeps the cause in the debug log. The cause stays out
+/// of the stored error, because it can hold a host name or an address of the target.
+pub(super) fn because<E: std::fmt::Display, T>(value: T) -> impl FnOnce(E) -> T {
+    move |error| {
+        tracing::debug!(%error, "an alert send step failed");
+        value
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SendError {
     #[error("the installation has no SMTP server")]

@@ -1,11 +1,13 @@
 //! The message that a channel sends: the typed webhook payload and the text of an email
-//! (FR-MN-03, AC-MN-02, ADR-0035).
+//! (FR-MN-03, AC-MN-02, ADR-0036).
 
-use restichub_db::alerts::{Alert, AlertKind, DeliveryEvent};
+use restichub_db::alerts::{Alert, AlertKind, AlertParams, DeliveryEvent};
 use restichub_db::{DeliveryId, TenantId};
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+
+use super::text::{self, Language};
 
 /// The version of the webhook payload. A change that breaks a receiver raises it.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -68,8 +70,11 @@ pub struct AlertPayload {
     pub plan: Option<Reference>,
     pub repository: Option<Reference>,
     pub job: Option<JobReference>,
-    /// Scrubbed and bounded.
+    /// The sentence that tells why the alert exists, in the language of the installation.
     pub message: String,
+    /// The typed values behind `message`, for a receiver that builds its own text.
+    pub params: AlertParams,
+    pub error_text: Option<String>,
     pub url: Option<String>,
 }
 
@@ -96,6 +101,7 @@ pub struct Message {
     pub alert: Option<Alert>,
     /// Base URL from the installation setting. Links are absent without it.
     pub public_origin: Option<String>,
+    pub language: Language,
 }
 
 fn rfc3339(time: OffsetDateTime) -> String {
@@ -140,7 +146,9 @@ impl Message {
                     },
                 ),
                 job: alert.job_id.map(|id| JobReference { id: id.to_string() }),
-                message: scrub(&alert.detail, MAX_TEXT_CHARS),
+                message: text::condition(self.language, alert),
+                params: alert.params.0.clone(),
+                error_text: error_text(alert),
                 url: link(self.public_origin.as_deref(), alert),
             }),
         }
@@ -152,56 +160,81 @@ impl Message {
 
     /// One line only, so no header can be injected.
     pub fn subject(&self) -> String {
+        let labels = text::labels(self.language);
         let tenant = scrub(&self.tenant_name, 60);
         match (&self.alert, self.event) {
-            (None, _) => format!("[ResticHub] Test message ({tenant})"),
+            (None, _) => format!("[ResticHub] {} ({tenant})", labels.test_subject),
             (Some(alert), MessageEvent::Resolved) => format!(
-                "[ResticHub] Resolved: {} - {} ({tenant})",
-                kind_title(alert.kind),
+                "[ResticHub] {}: {} - {} ({tenant})",
+                labels.resolved_headline,
+                text::kind_title(self.language, alert.kind),
                 subject_name(alert)
             ),
             (Some(alert), _) => format!(
                 "[ResticHub] {} - {} ({tenant})",
-                kind_title(alert.kind),
+                text::kind_title(self.language, alert.kind),
                 subject_name(alert)
             ),
         }
     }
 
     pub fn text(&self) -> String {
+        let labels = text::labels(self.language);
         let mut lines = Vec::new();
         let Some(alert) = &self.alert else {
-            lines.push("This is a test message from ResticHub.".to_owned());
-            lines.push(format!("Tenant: {}", scrub(&self.tenant_name, 120)));
+            lines.push(labels.test_body.to_owned());
+            lines.push(format!(
+                "{}: {}",
+                labels.tenant,
+                scrub(&self.tenant_name, 120)
+            ));
             return lines.join("\n") + "\n";
         };
+        let title = text::kind_title(self.language, alert.kind);
         let headline = if self.event == MessageEvent::Resolved {
-            format!("Resolved: {}", kind_title(alert.kind))
+            format!("{}: {title}", labels.resolved_headline)
         } else {
-            kind_title(alert.kind).to_owned()
+            title.to_owned()
         };
         lines.push(headline);
         lines.push(String::new());
-        lines.push(format!("Tenant: {}", scrub(&self.tenant_name, 120)));
+        lines.push(format!(
+            "{}: {}",
+            labels.tenant,
+            scrub(&self.tenant_name, 120)
+        ));
         if let Some(name) = &alert.agent_hostname {
-            lines.push(format!("Host: {}", scrub(name, 120)));
+            lines.push(format!("{}: {}", labels.host, scrub(name, 120)));
         }
         if let Some(name) = &alert.plan_name {
-            lines.push(format!("Plan: {}", scrub(name, 120)));
+            lines.push(format!("{}: {}", labels.plan, scrub(name, 120)));
         }
         if let Some(name) = &alert.repository_name {
-            lines.push(format!("Repository: {}", scrub(name, 120)));
+            lines.push(format!("{}: {}", labels.repository, scrub(name, 120)));
         }
-        lines.push(format!("Details: {}", scrub(&alert.detail, MAX_TEXT_CHARS)));
-        lines.push(format!("Opened: {}", rfc3339(alert.opened_at)));
+        lines.push(format!(
+            "{}: {}",
+            labels.details,
+            text::condition(self.language, alert)
+        ));
+        if let Some(error) = error_text(alert) {
+            lines.push(format!("{}: {error}", labels.error));
+        }
+        lines.push(format!("{}: {}", labels.opened, rfc3339(alert.opened_at)));
         if let Some(resolved) = alert.resolved_at {
-            lines.push(format!("Resolved: {}", rfc3339(resolved)));
+            lines.push(format!("{}: {}", labels.resolved, rfc3339(resolved)));
         }
         if let Some(url) = link(self.public_origin.as_deref(), alert) {
-            lines.push(format!("Link: {url}"));
+            lines.push(format!("{}: {url}", labels.link));
         }
         lines.join("\n") + "\n"
     }
+}
+
+/// The error text of a job, scrubbed again at the point of use. `None` when the alert has none.
+pub fn error_text(alert: &Alert) -> Option<String> {
+    let text = scrub(&alert.detail, MAX_TEXT_CHARS);
+    (!text.is_empty()).then_some(text)
 }
 
 fn subject_name(alert: &Alert) -> String {
@@ -212,17 +245,6 @@ fn subject_name(alert: &Alert) -> String {
         .or(alert.agent_hostname.as_deref())
         .unwrap_or("-");
     scrub(name, 80)
-}
-
-pub fn kind_title(kind: AlertKind) -> &'static str {
-    match kind {
-        AlertKind::RpoViolated => "Backup is overdue",
-        AlertKind::JobFailed => "Job failed",
-        AlertKind::JobDeadLetter => "Job gave up after lock retries",
-        AlertKind::JobWarnings => "Job finished with warnings",
-        AlertKind::AgentOffline => "Host is offline",
-        AlertKind::StaleLock => "Repository lock is stale",
-    }
 }
 
 /// The link of an alert: the job when the alert names one, else the page of the subject.
@@ -262,6 +284,11 @@ pub fn scrub(text: &str, max_chars: usize) -> String {
             out.push(token.to_owned());
             continue;
         }
+        if is_bare_flag(token, &lower) {
+            hide_next = true;
+            out.push(token.to_owned());
+            continue;
+        }
         out.push(scrub_token(token, &lower, &mut hide_next));
     }
     let joined = out.join(" ");
@@ -286,6 +313,17 @@ const SENSITIVE: [&str; 8] = [
 
 fn is_sensitive(lower: &str) -> bool {
     SENSITIVE.iter().any(|word| lower.contains(word)) || lower.ends_with("key")
+}
+
+/// A word or a command line flag that names a credential and holds no value itself, such as
+/// `password` in `password hunter2`, `--password` in `--password hunter2` and `-p`. The next word
+/// is the value.
+fn is_bare_flag(token: &str, lower: &str) -> bool {
+    if token.contains(['=', ':']) {
+        return false;
+    }
+    let word = lower.trim_start_matches('-');
+    token == "-p" || SENSITIVE.contains(&word) || (token.starts_with('-') && is_sensitive(word))
 }
 
 fn scrub_token(token: &str, lower: &str, hide_next: &mut bool) -> String {
@@ -339,5 +377,29 @@ mod tests {
         );
         let long = "x".repeat(2000);
         assert_eq!(scrub(&long, 50).chars().count(), 50);
+    }
+
+    /// AC-MN-02: a value that follows a credential word without a separator is hidden.
+    #[test]
+    fn ac_mn_02_scrub_hides_the_value_after_a_bare_word() {
+        for (input, expected) in [
+            (
+                "restic --password hunter2 backup",
+                "restic --password <redacted> backup",
+            ),
+            (
+                "bad password hunter2 for user",
+                "bad password <redacted> for user",
+            ),
+            ("restic -p hunter2 backup", "restic -p <redacted> backup"),
+            (
+                "run --repository-password hunter2",
+                "run --repository-password <redacted>",
+            ),
+        ] {
+            let out = scrub(input, 500);
+            assert_eq!(out, expected);
+            assert!(!out.contains("hunter2"));
+        }
     }
 }

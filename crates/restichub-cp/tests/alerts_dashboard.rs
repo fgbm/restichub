@@ -1,4 +1,4 @@
-//! The dashboard and the RPO field of the plan API (FR-MN-01, AC-MN-09, ADR-0035).
+//! The dashboard and the RPO field of the plan API (FR-MN-01, AC-MN-09, ADR-0036).
 
 #![allow(clippy::expect_used)]
 
@@ -138,7 +138,8 @@ async fn ac_mn_09_dashboard_overview() {
 
     // Open the alerts with a pass at the current time.
     let kek = test_kek();
-    restichub_cp::alerts::run_once(db.database(), &sender, kek.as_ref(), now)
+    let clock = restichub_cp::clock::ManualClock::new(now).shared();
+    restichub_cp::alerts::run_once(db.database(), &sender, kek, clock)
         .await
         .expect("pass");
 
@@ -206,7 +207,7 @@ async fn ac_mn_09_dashboard_overview() {
     assert_eq!(empty["alerts"]["total"], 0);
 }
 
-/// The plan API stores and validates the recovery point objective (ADR-0035).
+/// The plan API stores and validates the recovery point objective (ADR-0036).
 #[tokio::test]
 async fn ac_mn_01_plan_api_rpo_field() {
     let Some(db) = common::test_db().await else {
@@ -273,4 +274,51 @@ async fn ac_mn_01_plan_api_rpo_field() {
     assert_eq!(status, StatusCode::OK, "{updated}");
     assert!(updated["plan"]["rpo_seconds"].is_null());
     assert_eq!(updated["plan"]["effective_rpo_seconds"], 26 * 3600);
+}
+
+/// FR-MN-01: the dashboard reuses its database facts for a short time, so a page that refreshes
+/// often does not read the plans and jobs on every request.
+#[tokio::test]
+async fn ac_mn_09_dashboard_facts_are_cached_for_a_short_time() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "ac-mn-09-cache").await;
+    let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
+    let now = OffsetDateTime::now_utc();
+    let first = seed_agent(db.database(), tenant, "host-one").await;
+    let second = seed_agent(db.database(), tenant, "host-two").await;
+    set_last_seen(&db, tenant, first, Some(now)).await;
+    set_last_seen(&db, tenant, second, Some(now - Duration::hours(1))).await;
+
+    let state = || {
+        AppState::new(db.database().clone())
+            .with_kek(test_kek())
+            .with_tenancy(TenancyConfig::multi())
+            .with_sender(local_sender(None))
+    };
+    let cached = router(state());
+    let fresh = router(state().with_dashboard_ttl(Duration::ZERO));
+    let online = |body: &serde_json::Value| body["hosts"]["online"].as_u64().expect("count");
+
+    let (_, _, body) = send(
+        &cached,
+        request("GET", "/api/v1/dashboard", Some(&viewer), None),
+    )
+    .await;
+    assert_eq!(online(&body), 1);
+    set_last_seen(&db, tenant, second, Some(OffsetDateTime::now_utc())).await;
+    let (_, _, body) = send(
+        &cached,
+        request("GET", "/api/v1/dashboard", Some(&viewer), None),
+    )
+    .await;
+    assert_eq!(online(&body), 1, "the second read uses the cached facts");
+    let (_, _, body) = send(
+        &fresh,
+        request("GET", "/api/v1/dashboard", Some(&viewer), None),
+    )
+    .await;
+    assert_eq!(online(&body), 2, "a zero time-to-live reads again");
+    db.cleanup().await;
 }

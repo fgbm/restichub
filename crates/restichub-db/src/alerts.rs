@@ -1,4 +1,4 @@
-//! The alert rules, the alert state and the delivery outbox (FR-MN-03, FR-MN-04, ADR-0035).
+//! The alert rules, the alert state and the delivery outbox (FR-MN-03, FR-MN-04, ADR-0036).
 //!
 //! Every function runs under the tenant policy, so a transaction sees the rows of its own tenant
 //! only. The partial unique index on `alert_state` makes the open of an alert idempotent. The
@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 
 use crate::DbError;
 use crate::channels::{self, Channel};
+use crate::enums::JobKind;
 use crate::ids::{AgentId, AlertId, ChannelId, DeliveryId, JobId, PlanId, RepositoryId};
 use crate::tx::TenantTx;
 
@@ -18,11 +19,11 @@ pub const DEFAULT_PAGE_LIMIT: i64 = 50;
 
 pub const MAX_PAGE_LIMIT: i64 = 200;
 
-/// The largest number of open alerts that one evaluation reads for a tenant.
-pub const MAX_OPEN_ALERTS: i64 = 5000;
+/// The rows that one read of the open alerts takes at a time.
+const OPEN_PAGE: i64 = 1000;
 
 /// The largest number of pending deliveries of a tenant. A newer delivery beyond it is stored as
-/// failed with the error `queue_full`, so the outbox stays bounded (ADR-0035).
+/// failed with the error `queue_full`, so the outbox stays bounded (ADR-0036).
 pub const MAX_PENDING_DELIVERIES: i64 = 1000;
 
 /// The kind of an alert. The string value of each variant is stored: do not change a string.
@@ -129,7 +130,7 @@ impl DeliveryStatus {
     }
 }
 
-/// The setting of one alert kind for a tenant (ADR-0035).
+/// The setting of one alert kind for a tenant (ADR-0036).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlertRule {
     pub kind: AlertKind,
@@ -203,6 +204,30 @@ pub async fn upsert_rule(tx: &mut TenantTx<'_>, rule: &AlertRule) -> Result<(), 
     Ok(())
 }
 
+/// The typed values of an alert condition. The interface and the messages build the text of the
+/// condition from them, in the language of the reader, so the stored alert holds no sentence.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AlertParams {
+    /// Seconds since the last success of a plan, since the last contact with an agent, or since
+    /// a repository lock became stale. For a plan that never succeeded: since its creation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_seconds: Option<i64>,
+    /// The recovery point objective of a plan, in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpo_seconds: Option<i64>,
+    /// The finish time of the last succeeded backup, in RFC 3339. Absent when the plan never
+    /// succeeded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_at: Option<String>,
+    /// The threshold of the rule at the time of the alert, in minutes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_minutes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_kind: Option<JobKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+}
+
 /// Row of `alert_state`. The display names are copies.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Alert {
@@ -217,14 +242,16 @@ pub struct Alert {
     pub agent_hostname: Option<String>,
     pub plan_name: Option<String>,
     pub repository_name: Option<String>,
+    pub params: sqlx::types::Json<AlertParams>,
+    /// The scrubbed and bounded error text of a job. Empty when the condition has none.
     pub detail: String,
     pub opened_at: OffsetDateTime,
     pub resolved_at: Option<OffsetDateTime>,
 }
 
 const ALERT_COLUMNS: &str = "id, kind, dedupe_key, status, agent_id, plan_id, repository_id, \
-                             job_id, agent_hostname, plan_name, repository_name, detail, \
-                             opened_at, resolved_at";
+                             job_id, agent_hostname, plan_name, repository_name, params, \
+                             detail, opened_at, resolved_at";
 
 #[derive(Debug, Clone)]
 pub struct NewAlert<'a> {
@@ -238,6 +265,7 @@ pub struct NewAlert<'a> {
     pub agent_hostname: Option<&'a str>,
     pub plan_name: Option<&'a str>,
     pub repository_name: Option<&'a str>,
+    pub params: &'a AlertParams,
     pub detail: &'a str,
 }
 
@@ -253,28 +281,80 @@ pub async fn try_lock_tenant(tx: &mut TenantTx<'_>) -> Result<bool, DbError> {
     Ok(locked)
 }
 
-/// Feeds the evaluation pass: at most [`MAX_OPEN_ALERTS`] rows.
-pub async fn open_alerts(tx: &mut TenantTx<'_>) -> Result<Vec<Alert>, DbError> {
+/// Reads one page of the open alerts in the order `(opened_at, id)`. `after` is the last row of the
+/// previous page.
+pub async fn open_alerts_page(
+    tx: &mut TenantTx<'_>,
+    after: Option<AlertCursor>,
+    limit: i64,
+) -> Result<Vec<Alert>, DbError> {
+    let (cursor_time, cursor_id) = match after {
+        Some(cursor) => (Some(cursor.opened_at), Some(cursor.id)),
+        None => (None, None),
+    };
     sqlx::query_as::<_, Alert>(sqlx::AssertSqlSafe(format!(
         "SELECT {ALERT_COLUMNS} FROM alert_state WHERE status = 'open' \
-         ORDER BY opened_at, id LIMIT {MAX_OPEN_ALERTS}"
+           AND ($1::timestamptz IS NULL OR (opened_at, id) > ($1::timestamptz, $2::uuid)) \
+         ORDER BY opened_at, id LIMIT $3"
     )))
+    .bind(cursor_time)
+    .bind(cursor_id)
+    .bind(limit)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)
 }
 
-/// Opens an alert. A second open alert with the same kind and key is a unique violation.
+/// The evaluation needs the whole set, not a page: a missing alert would open a second one.
+pub async fn open_alerts(tx: &mut TenantTx<'_>) -> Result<Vec<Alert>, DbError> {
+    let mut all = Vec::new();
+    let mut after = None;
+    loop {
+        let page = open_alerts_page(tx, after, OPEN_PAGE).await?;
+        let full = page.len() as i64 == OPEN_PAGE;
+        after = page.last().map(|alert| AlertCursor {
+            opened_at: alert.opened_at,
+            id: alert.id,
+        });
+        all.extend(page);
+        if !full {
+            return Ok(all);
+        }
+    }
+}
+
+pub async fn count_open(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM alert_state WHERE status = 'open'")
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(count)
+}
+
+pub async fn newest_open(tx: &mut TenantTx<'_>, limit: i64) -> Result<Vec<Alert>, DbError> {
+    sqlx::query_as::<_, Alert>(sqlx::AssertSqlSafe(format!(
+        "SELECT {ALERT_COLUMNS} FROM alert_state WHERE status = 'open' \
+         ORDER BY opened_at DESC, id DESC LIMIT $1"
+    )))
+    .bind(limit)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)
+}
+
+/// Opens an alert. `false` means an open alert with the same kind and key exists, so the call
+/// changed nothing.
 pub async fn insert_open(
     tx: &mut TenantTx<'_>,
     new: &NewAlert<'_>,
     now: OffsetDateTime,
-) -> Result<(), DbError> {
-    sqlx::query(
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
         "INSERT INTO alert_state \
          (id, tenant_id, kind, dedupe_key, status, agent_id, plan_id, repository_id, job_id, \
-          agent_hostname, plan_name, repository_name, detail, opened_at) \
-         VALUES ($1, $2, $3, $4, 'open', $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+          agent_hostname, plan_name, repository_name, params, detail, opened_at) \
+         VALUES ($1, $2, $3, $4, 'open', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) \
+         ON CONFLICT (tenant_id, kind, dedupe_key) WHERE status = 'open' DO NOTHING",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -287,12 +367,13 @@ pub async fn insert_open(
     .bind(new.agent_hostname)
     .bind(new.plan_name)
     .bind(new.repository_name)
+    .bind(sqlx::types::Json(new.params))
     .bind(new.detail)
     .bind(now)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 /// Resolves an open alert. `false` means the alert was not open.
@@ -449,7 +530,9 @@ struct ClaimRow {
 /// Claims the due deliveries of the tenant and moves their next attempt to `lease_until`.
 ///
 /// The claim is a lease: a sender that crashes before it reports the result leaves the row due
-/// again at `lease_until`, so a delivery is at-least-once (ADR-0035).
+/// again at `lease_until`, so a delivery is at-least-once (ADR-0036). The number of the attempt
+/// is the token of the claim: a later claim raises it, and every write of the earlier holder
+/// then changes nothing.
 pub async fn claim_due(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
@@ -488,44 +571,73 @@ pub async fn claim_due(
     Ok(claimed)
 }
 
-pub async fn mark_sent(
+/// Moves the lease of a claim to `lease_until`. `false` means the claim is no longer the current
+/// one, so the caller must not send.
+pub async fn extend_lease(
     tx: &mut TenantTx<'_>,
     id: DeliveryId,
-    now: OffsetDateTime,
-) -> Result<(), DbError> {
-    sqlx::query(
-        "UPDATE alert_deliveries SET status = 'sent', sent_at = $2, last_error = NULL \
-         WHERE id = $1",
+    attempt: i32,
+    lease_until: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE alert_deliveries SET next_attempt_at = $3 \
+         WHERE id = $1 AND attempts = $2 AND status = 'pending'",
     )
     .bind(id)
-    .bind(now)
+    .bind(attempt)
+    .bind(lease_until)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
+}
+
+/// Records a sent delivery. `false` means the claim with this attempt number is no longer the
+/// current one, and the row stays as it is.
+pub async fn mark_sent(
+    tx: &mut TenantTx<'_>,
+    id: DeliveryId,
+    attempt: i32,
+    now: OffsetDateTime,
+    note: Option<&str>,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE alert_deliveries SET status = 'sent', sent_at = $3, last_error = $4 \
+         WHERE id = $1 AND attempts = $2 AND status = 'pending'",
+    )
+    .bind(id)
+    .bind(attempt)
+    .bind(now)
+    .bind(note)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
 }
 
 /// Records a failed attempt. `retry_at` set keeps the delivery pending for that time; `None` ends
-/// it as failed.
+/// it as failed. `false` means the claim is no longer the current one.
 pub async fn mark_attempt_failed(
     tx: &mut TenantTx<'_>,
     id: DeliveryId,
+    attempt: i32,
     error: &str,
     retry_at: Option<OffsetDateTime>,
-) -> Result<(), DbError> {
-    sqlx::query(
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
         "UPDATE alert_deliveries \
-         SET status = CASE WHEN $3::timestamptz IS NULL THEN 'failed' ELSE 'pending' END, \
-             next_attempt_at = COALESCE($3, next_attempt_at), last_error = $2 \
-         WHERE id = $1",
+         SET status = CASE WHEN $4::timestamptz IS NULL THEN 'failed' ELSE 'pending' END, \
+             next_attempt_at = COALESCE($4, next_attempt_at), last_error = $3 \
+         WHERE id = $1 AND attempts = $2 AND status = 'pending'",
     )
     .bind(id)
+    .bind(attempt)
     .bind(error)
     .bind(retry_at)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 /// Removes the finished deliveries that were created before `before`.

@@ -1,4 +1,4 @@
-//! The recovery point objective of a plan (FR-MN-01, FR-MN-03, ADR-0035).
+//! The recovery point objective of a plan (FR-MN-01, FR-MN-03, ADR-0036).
 
 use restichub_db::dashboard::RpoPlan;
 use serde::Serialize;
@@ -81,16 +81,6 @@ pub fn evaluate(plan: &RpoPlan, now: OffsetDateTime) -> RpoStatus {
         has_success: plan.last_success_at.is_some(),
         age,
         rpo,
-    }
-}
-
-/// A short text for hours and minutes, such as `26 h` or `45 min`.
-pub fn human(duration: Duration) -> String {
-    let minutes = duration.whole_minutes();
-    if minutes >= 120 {
-        format!("{} h", minutes / 60)
-    } else {
-        format!("{minutes} min")
     }
 }
 

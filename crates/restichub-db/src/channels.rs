@@ -1,7 +1,9 @@
-//! The notification channels of a tenant (FR-MN-04, ADR-0035).
+//! The notification channels of a tenant (FR-MN-04, ADR-0036).
 //!
-//! A channel is an email recipient list or a webhook URL. The signing secret of a webhook is a row
-//! of `secrets` that the channel names through `secret_id`; this module never holds its value.
+//! A channel is an email recipient list or a webhook URL. The table keeps the origin of a webhook
+//! URL. The path and the query, which often hold a token, and the signing secret are rows of
+//! `secrets` that the channel names through `url_secret_id` and `secret_id`; this module never
+//! holds their values.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -39,13 +41,17 @@ pub struct Channel {
     pub kind: ChannelKind,
     pub enabled: bool,
     pub recipients: Vec<String>,
-    pub url: Option<String>,
+    /// The scheme, the host and the port of a webhook URL.
+    pub url_origin: Option<String>,
     pub secret_id: Option<SecretId>,
+    /// The encrypted path and query of a webhook URL.
+    pub url_secret_id: Option<SecretId>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
 
-const COLUMNS: &str = "id, name, kind, enabled, recipients, url, secret_id, created_at, updated_at";
+const COLUMNS: &str = "id, name, kind, enabled, recipients, url_origin, secret_id, url_secret_id, \
+                       created_at, updated_at";
 
 #[derive(Debug, Clone)]
 pub struct NewChannel<'a> {
@@ -54,8 +60,9 @@ pub struct NewChannel<'a> {
     pub kind: ChannelKind,
     pub enabled: bool,
     pub recipients: &'a [String],
-    pub url: Option<&'a str>,
+    pub url_origin: Option<&'a str>,
     pub secret_id: Option<SecretId>,
+    pub url_secret_id: Option<SecretId>,
     pub created_by: Option<UserId>,
 }
 
@@ -64,14 +71,15 @@ pub struct ChannelUpdate<'a> {
     pub name: &'a str,
     pub enabled: bool,
     pub recipients: &'a [String],
-    pub url: Option<&'a str>,
+    pub url_origin: Option<&'a str>,
 }
 
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewChannel<'_>) -> Result<(), DbError> {
     sqlx::query(
         "INSERT INTO notification_channels \
-         (id, tenant_id, name, kind, enabled, recipients, url, secret_id, created_by) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+         (id, tenant_id, name, kind, enabled, recipients, url_origin, secret_id, url_secret_id, \
+          created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -79,8 +87,9 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewChannel<'_>) -> Result<(), D
     .bind(new.kind.as_str())
     .bind(new.enabled)
     .bind(new.recipients)
-    .bind(new.url)
+    .bind(new.url_origin)
     .bind(new.secret_id)
+    .bind(new.url_secret_id)
     .bind(new.created_by)
     .execute(tx.as_conn())
     .await
@@ -146,14 +155,14 @@ pub async fn update(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE notification_channels \
-         SET name = $2, enabled = $3, recipients = $4, url = $5, updated_at = now() \
+         SET name = $2, enabled = $3, recipients = $4, url_origin = $5, updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
     .bind(patch.name)
     .bind(patch.enabled)
     .bind(patch.recipients)
-    .bind(patch.url)
+    .bind(patch.url_origin)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

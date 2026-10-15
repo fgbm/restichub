@@ -1,13 +1,14 @@
 -- The alerts, the notification channels and the recovery point objective (FR-MN-01, FR-MN-03,
--- FR-MN-04, AC-MN-01, AC-MN-02, ADR-0035, ADR-0006, ADR-0017).
+-- FR-MN-04, AC-MN-01, AC-MN-02, ADR-0036, ADR-0006, ADR-0017).
 --
 -- `plans.rpo_seconds` holds the recovery point objective of a plan. Null means the default that
--- the control plane derives from the schedule (ADR-0035).
+-- the control plane derives from the schedule (ADR-0036).
 --
 -- `alert_rules` holds the settings of the alert kinds of a tenant. A missing row means the default.
 --
--- `notification_channels` holds the email and webhook targets. The signing secret of a webhook is
--- a row of `secrets`; it is never part of this table in clear text (ADR-0017).
+-- `notification_channels` holds the email and webhook targets. The signing secret of a webhook and
+-- the path and the query of its URL are rows of `secrets`; they are never part of this table in
+-- clear text (ADR-0017). The table keeps the scheme, the host and the port of the URL only.
 --
 -- `alert_state` is the idempotent state of the alerts. The partial unique index allows one open
 -- row for each `(kind, dedupe_key)` pair, so a repeated evaluation cannot open a second alert.
@@ -45,8 +46,9 @@ CREATE TABLE notification_channels (
     kind text NOT NULL,
     enabled boolean NOT NULL DEFAULT true,
     recipients text[] NOT NULL DEFAULT '{}',
-    url text,
+    url_origin text,
     secret_id uuid,
+    url_secret_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     created_by uuid,
@@ -55,12 +57,14 @@ CREATE TABLE notification_channels (
     CONSTRAINT notification_channels_name_unique UNIQUE (tenant_id, name),
     CONSTRAINT notification_channels_secret_fk FOREIGN KEY (tenant_id, secret_id)
         REFERENCES secrets (tenant_id, id),
+    CONSTRAINT notification_channels_url_secret_fk FOREIGN KEY (tenant_id, url_secret_id)
+        REFERENCES secrets (tenant_id, id),
     CONSTRAINT notification_channels_created_by_fk FOREIGN KEY (created_by) REFERENCES users (id),
     CONSTRAINT notification_channels_kind_check CHECK (
         (kind = 'email' AND cardinality(recipients) BETWEEN 1 AND 20
-            AND url IS NULL AND secret_id IS NULL)
+            AND url_origin IS NULL AND secret_id IS NULL AND url_secret_id IS NULL)
         OR (kind = 'webhook' AND cardinality(recipients) = 0
-            AND url IS NOT NULL AND secret_id IS NOT NULL)
+            AND url_origin IS NOT NULL AND secret_id IS NOT NULL AND url_secret_id IS NOT NULL)
     )
 );
 
@@ -84,8 +88,11 @@ CREATE TABLE alert_state (
     agent_hostname text,
     plan_name text,
     repository_name text,
-    -- The scrubbed and bounded text of the condition.
-    detail text NOT NULL,
+    -- The typed values of the condition: the numbers, the codes and the times. The interface and
+    -- the messages build the text from them in the language of the reader.
+    params jsonb NOT NULL DEFAULT '{}'::jsonb,
+    -- The scrubbed and bounded error text of a job. Empty when the condition has none.
+    detail text NOT NULL DEFAULT '',
     opened_at timestamptz NOT NULL,
     resolved_at timestamptz,
     CONSTRAINT alert_state_tenant_id_fk FOREIGN KEY (tenant_id) REFERENCES tenants (id),
@@ -140,6 +147,14 @@ CREATE TABLE alert_deliveries (
 CREATE INDEX alert_deliveries_due_idx ON alert_deliveries (tenant_id, next_attempt_at)
     WHERE status = 'pending';
 CREATE INDEX alert_deliveries_created_idx ON alert_deliveries (created_at) WHERE status <> 'pending';
+
+-- The RPO evaluation reads the newest succeeded backup of each plan.
+CREATE INDEX jobs_plan_last_success_idx ON jobs (tenant_id, plan_id, finished_at DESC)
+    WHERE kind = 'backup' AND status = 'succeeded';
+-- The alert evaluation reads the newest finished job of each subject inside a time window.
+CREATE INDEX jobs_finished_window_idx
+    ON jobs (tenant_id, (COALESCE(finished_at, updated_at)) DESC)
+    WHERE status IN ('succeeded', 'failed', 'dead_letter');
 
 ALTER TABLE alert_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alert_rules FORCE ROW LEVEL SECURITY;

@@ -78,7 +78,7 @@ impl<'a> SecretReader<'a> {
     }
 
     /// Reads the value of a secret that the control plane itself uses, such as the signing key of
-    /// a webhook channel (ADR-0035). The call writes no `secret_delivered` record, because no
+    /// a webhook channel (ADR-0036). The call writes no `secret_delivered` record, because no
     /// value goes to an agent.
     pub async fn read_for_control_plane(
         &self,

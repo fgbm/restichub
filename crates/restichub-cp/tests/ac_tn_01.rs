@@ -584,8 +584,9 @@ async fn seed_channel(db: &TestDatabase, tenant: TenantId, name: &str) -> restic
             kind: restichub_db::channels::ChannelKind::Email,
             enabled: true,
             recipients: &["canary@example.com".to_owned()],
-            url: None,
+            url_origin: None,
             secret_id: None,
+            url_secret_id: None,
             created_by: None,
         },
     )

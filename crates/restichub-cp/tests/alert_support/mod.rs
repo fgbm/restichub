@@ -1,5 +1,5 @@
 //! Shared helpers of the alert tests: a local SMTP sink, a local webhook sink, a fixed resolver and
-//! the seeding of jobs (AC-MN-01, AC-MN-02, ADR-0035).
+//! the seeding of jobs (AC-MN-01, AC-MN-02, ADR-0036).
 
 #![allow(dead_code)]
 #![allow(clippy::expect_used)]
@@ -186,8 +186,13 @@ async fn serve_smtp(
             from = between_angles(&line);
             b"250 ok\r\n".to_vec()
         } else if upper.starts_with("RCPT TO:") {
-            to.push(between_angles(&line));
-            b"250 ok\r\n".to_vec()
+            let recipient = between_angles(&line);
+            if recipient.starts_with("reject") {
+                b"550 no such user\r\n".to_vec()
+            } else {
+                to.push(recipient);
+                b"250 ok\r\n".to_vec()
+            }
         } else if upper.starts_with("DATA") {
             if reader.get_mut().write_all(b"354 go\r\n").await.is_err() {
                 return;
@@ -372,6 +377,7 @@ pub fn local_settings(smtp_port: Option<u16>, security: SmtpSecurity) -> AlertsS
             allow_http: true,
             allow_networks: restichub_cp::alerts::ssrf::networks(&["127.0.0.0/8"]),
         },
+        language: restichub_cp::alerts::text::Language::default(),
     }
 }
 

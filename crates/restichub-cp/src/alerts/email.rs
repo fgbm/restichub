@@ -1,4 +1,4 @@
-//! A small SMTP client for the email channels (FR-MN-04, ADR-0035).
+//! A small SMTP client for the email channels (FR-MN-04, ADR-0036).
 //!
 //! The client sends one plain text message to a list of recipients. It supports implicit TLS,
 //! `STARTTLS` and a plain connection, and `AUTH PLAIN`. It never sends the credentials over a
@@ -18,7 +18,7 @@ use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::pki_types::ServerName;
 
 use super::settings::{SmtpSecurity, SmtpSettings};
-use super::transport::{BoxIo, SendError};
+use super::transport::{BoxIo, SendError, because};
 
 /// Limit for the whole send, so a stuck server cannot hold a pass.
 pub const SEND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -41,16 +41,17 @@ pub struct Mail {
     pub id: String,
 }
 
-/// Sends the message to the recipients through the server of the installation.
+/// Sends the message to the recipients through the server of the installation. `Some` is the note
+/// about recipients that the server refused while it accepted others.
 pub async fn send(
     settings: &SmtpSettings,
     tls: &Arc<ClientConfig>,
     recipients: &[String],
     mail: &Mail,
-) -> Result<(), SendError> {
+) -> Result<Option<String>, SendError> {
     tokio::time::timeout(SEND_TIMEOUT, send_inner(settings, tls, recipients, mail))
         .await
-        .map_err(|_| SendError::Timeout)?
+        .map_err(because(SendError::Timeout))?
 }
 
 async fn send_inner(
@@ -58,24 +59,24 @@ async fn send_inner(
     tls: &Arc<ClientConfig>,
     recipients: &[String],
     mail: &Mail,
-) -> Result<(), SendError> {
+) -> Result<Option<String>, SendError> {
     let tcp = tokio::time::timeout(
         CONNECT_TIMEOUT,
         TcpStream::connect((settings.host.as_str(), settings.port)),
     )
     .await
-    .map_err(|_| SendError::Timeout)?
-    .map_err(|_| SendError::ConnectFailed)?;
+    .map_err(because(SendError::Timeout))?
+    .map_err(because(SendError::ConnectFailed))?;
     let connector = TlsConnector::from(tls.clone());
     let server_name =
-        ServerName::try_from(settings.host.clone()).map_err(|_| SendError::TlsFailed)?;
+        ServerName::try_from(settings.host.clone()).map_err(because(SendError::TlsFailed))?;
 
     let mut stream: BoxIo = match settings.security {
         SmtpSecurity::Tls => Box::new(
             connector
                 .connect(server_name.clone(), tcp)
                 .await
-                .map_err(|_| SendError::TlsFailed)?,
+                .map_err(because(SendError::TlsFailed))?,
         ),
         _ => Box::new(tcp),
     };
@@ -97,7 +98,7 @@ async fn send_inner(
             connector
                 .connect(server_name, stream)
                 .await
-                .map_err(|_| SendError::TlsFailed)?,
+                .map_err(because(SendError::TlsFailed))?,
         );
         session = Session::new(stream);
         capabilities = session.ehlo().await?;
@@ -122,21 +123,32 @@ async fn send_inner(
     session
         .command(&format!("MAIL FROM:<{}>", settings.from), &[250])
         .await?;
-    let mut accepted = 0;
+    let mut accepted = Vec::new();
+    let mut refused = 0_usize;
     let mut last_rejection = None;
     for recipient in recipients {
         match session
             .command(&format!("RCPT TO:<{recipient}>"), &[250, 251])
             .await
         {
-            Ok(_) => accepted += 1,
-            Err(error @ SendError::Smtp { .. }) => last_rejection = Some(error),
+            Ok(_) => accepted.push(recipient.clone()),
+            Err(error @ SendError::Smtp { .. }) => {
+                refused += 1;
+                last_rejection = Some(error);
+            }
             Err(error) => return Err(error),
         }
     }
-    if accepted == 0 {
+    if accepted.is_empty() {
         return Err(last_rejection.unwrap_or(SendError::BadResponse));
     }
+    let note = last_rejection.map(|error| {
+        format!(
+            "partial_recipients: {refused} of {} refused, last {}",
+            recipients.len(),
+            error.code()
+        )
+    });
     session.command("DATA", &[354]).await?;
     session
         .write_raw(&render(&settings.from, recipients, mail))
@@ -144,7 +156,7 @@ async fn send_inner(
     session.expect(&[250]).await?;
     // The server may close at once after QUIT; the message is already accepted.
     let _ = session.command("QUIT", &[221]).await;
-    Ok(())
+    Ok(note)
 }
 
 /// Builds the message with CRLF line ends and dot stuffing, ending with the lone dot line.
@@ -183,14 +195,33 @@ fn render(from: &str, recipients: &[String], mail: &Mail) -> Vec<u8> {
     out
 }
 
-/// An ASCII subject goes as it is; any other goes as an RFC 2047 encoded word.
+/// The most bytes of text in one encoded word: 45 bytes give 60 base64 characters, and with the
+/// 12 characters of `=?UTF-8?B?` and `?=` the word is 72 characters, under the 75 of RFC 2047.
+const ENCODED_WORD_BYTES: usize = 45;
+
+/// An ASCII subject goes as it is; any other goes as RFC 2047 encoded words of at most 75
+/// characters, folded on a space. No word splits a character.
 fn encode_subject(subject: &str) -> String {
     let clean: String = subject.chars().filter(|c| !c.is_control()).collect();
     if clean.is_ascii() {
-        clean
-    } else {
-        format!("=?UTF-8?B?{}?=", STANDARD.encode(clean.as_bytes()))
+        return clean;
     }
+    let mut words = Vec::new();
+    let mut current = String::new();
+    for character in clean.chars() {
+        if current.len() + character.len_utf8() > ENCODED_WORD_BYTES {
+            words.push(std::mem::take(&mut current));
+        }
+        current.push(character);
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+        .iter()
+        .map(|word| format!("=?UTF-8?B?{}?=", STANDARD.encode(word.as_bytes())))
+        .collect::<Vec<_>>()
+        .join("\r\n ")
 }
 
 struct Session {
@@ -256,5 +287,32 @@ impl Session {
     async fn ehlo(&mut self) -> Result<Vec<String>, SendError> {
         let lines = self.command("EHLO restichub", &[250]).await?;
         Ok(lines.into_iter().skip(1).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FR-MN-04: an encoded word is at most 75 characters and holds whole characters.
+    #[test]
+    fn a_non_ascii_subject_goes_as_short_encoded_words() {
+        let subject =
+            "Резервная копия не выполнена на хосте очень-длинное-имя-сервера-для-проверки";
+        let encoded = encode_subject(subject);
+        let words: Vec<&str> = encoded.split("\r\n ").collect();
+        assert!(words.len() > 1);
+        let mut decoded = String::new();
+        for word in words {
+            assert!(word.len() <= 75, "{word}");
+            let inner = word
+                .strip_prefix("=?UTF-8?B?")
+                .and_then(|rest| rest.strip_suffix("?="))
+                .expect("an encoded word");
+            let bytes = STANDARD.decode(inner).expect("base64");
+            decoded.push_str(std::str::from_utf8(&bytes).expect("whole characters"));
+        }
+        assert_eq!(decoded, subject);
+        assert_eq!(encode_subject("Plain subject"), "Plain subject");
     }
 }

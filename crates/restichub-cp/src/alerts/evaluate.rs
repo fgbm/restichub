@@ -1,4 +1,4 @@
-//! The evaluation of the alert rules (FR-MN-03, AC-MN-01, AC-MN-02, ADR-0035).
+//! The evaluation of the alert rules (FR-MN-03, AC-MN-01, AC-MN-02, ADR-0036).
 //!
 //! One pass reads the state of a tenant, builds the list of the conditions that hold, and compares
 //! it with the open alerts. A new condition opens an alert; a cleared condition resolves it. Each
@@ -7,7 +7,8 @@
 use std::collections::HashSet;
 
 use restichub_db::alerts::{
-    self, AlertKind, AlertRule, DeliveryEvent, NewAlert, purge_finished_deliveries, purge_resolved,
+    self, AlertKind, AlertParams, AlertRule, DeliveryEvent, NewAlert, purge_finished_deliveries,
+    purge_resolved,
 };
 use restichub_db::dashboard::{self, AgentFacts, LatestJob, RepositoryLockFacts, RpoPlan};
 use restichub_db::{
@@ -18,6 +19,7 @@ use time::{Duration, OffsetDateTime};
 
 use super::message::{MAX_TEXT_CHARS, scrub};
 use super::rpo::{self, RpoState};
+use time::format_description::well_known::Rfc3339;
 
 /// A job failure older than this at the first look raises no alert.
 const NEW_JOB_WINDOW: Duration = Duration::hours(24);
@@ -51,6 +53,7 @@ struct Candidate {
     agent_hostname: Option<String>,
     plan_name: Option<String>,
     repository_name: Option<String>,
+    params: AlertParams,
     detail: String,
 }
 
@@ -131,7 +134,7 @@ pub async fn evaluate_tenant(
             continue;
         }
         let id = AlertId::new();
-        alerts::insert_open(
+        let inserted = alerts::insert_open(
             &mut tx,
             &NewAlert {
                 id,
@@ -144,13 +147,17 @@ pub async fn evaluate_tenant(
                 agent_hostname: candidate.agent_hostname.as_deref(),
                 plan_name: candidate.plan_name.as_deref(),
                 repository_name: candidate.repository_name.as_deref(),
+                params: &candidate.params,
                 detail: &candidate.detail,
             },
             now,
         )
         .await?;
-        alerts::enqueue(&mut tx, id, DeliveryEvent::Opened, now).await?;
-        report.opened += 1;
+        // A conflict means that an alert of the same kind and key is open already.
+        if inserted {
+            alerts::enqueue(&mut tx, id, DeliveryEvent::Opened, now).await?;
+            report.opened += 1;
+        }
     }
 
     purge_resolved(&mut tx, now - RESOLVED_RETENTION).await?;
@@ -177,7 +184,7 @@ fn threshold(rules: &[AlertRule], kind: AlertKind) -> Option<i64> {
 
 fn rpo_findings(plans: &[RpoPlan], now: OffsetDateTime, findings: &mut Findings) {
     for plan in plans {
-        // A disabled plan and a plan of a revoked agent raise no alert (ADR-0035).
+        // A disabled plan and a plan of a revoked agent raise no alert (ADR-0036).
         if !plan.enabled || plan.agent_status != AgentStatus::Active {
             continue;
         }
@@ -187,21 +194,13 @@ fn rpo_findings(plans: &[RpoPlan], now: OffsetDateTime, findings: &mut Findings)
             findings.cleared.insert((AlertKind::RpoViolated, key));
             continue;
         }
-        let detail = if status.has_success {
-            format!(
-                "No successful backup for {} (last success at {}, objective {}).",
-                rpo::human(status.age),
-                status
-                    .reference
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .unwrap_or_default(),
-                rpo::human(status.rpo)
-            )
-        } else {
-            format!(
-                "No successful backup since the plan was created (objective {}).",
-                rpo::human(status.rpo)
-            )
+        let params = AlertParams {
+            elapsed_seconds: Some(status.age.whole_seconds()),
+            rpo_seconds: Some(status.rpo.whole_seconds()),
+            last_success_at: status
+                .has_success
+                .then(|| status.reference.format(&Rfc3339).unwrap_or_default()),
+            ..AlertParams::default()
         };
         findings.active.push(Candidate {
             kind: AlertKind::RpoViolated,
@@ -213,7 +212,8 @@ fn rpo_findings(plans: &[RpoPlan], now: OffsetDateTime, findings: &mut Findings)
             agent_hostname: Some(plan.agent_hostname.clone()),
             plan_name: Some(plan.name.clone()),
             repository_name: Some(plan.repository_name.clone()),
-            detail,
+            params,
+            detail: String::new(),
         });
     }
 }
@@ -245,11 +245,12 @@ fn agent_findings(
             agent_hostname: Some(agent.hostname.clone()),
             plan_name: None,
             repository_name: None,
-            detail: format!(
-                "The agent was not seen for {} (threshold {} min).",
-                rpo::human(silent),
-                minutes
-            ),
+            params: AlertParams {
+                elapsed_seconds: Some(silent.whole_seconds()),
+                threshold_minutes: Some(minutes),
+                ..AlertParams::default()
+            },
+            detail: String::new(),
         });
     }
 }
@@ -278,11 +279,12 @@ fn lock_findings(
             agent_hostname: repository.stale_agent_hostname.clone(),
             plan_name: None,
             repository_name: Some(repository.name.clone()),
-            detail: format!(
-                "A repository lock has been stale for {} (threshold {} min).",
-                rpo::human(now - since),
-                minutes
-            ),
+            params: AlertParams {
+                elapsed_seconds: Some((now - since).whole_seconds()),
+                threshold_minutes: Some(minutes),
+                ..AlertParams::default()
+            },
+            detail: String::new(),
         });
     }
 }
@@ -335,29 +337,27 @@ fn job_findings(
             agent_hostname: Some(job.agent_hostname.clone()),
             plan_name: job.plan_name.clone(),
             repository_name: job.repository_name.clone(),
+            params: AlertParams {
+                job_kind: Some(job.kind),
+                error_code: (kind == AlertKind::JobFailed).then(|| {
+                    job.result_code
+                        .clone()
+                        .unwrap_or_else(|| "failed".to_owned())
+                }),
+                ..AlertParams::default()
+            },
             detail: job_detail(job, kind),
         });
     }
 }
 
+/// The scrubbed error text of a failed job. Other kinds carry none.
 fn job_detail(job: &LatestJob, kind: AlertKind) -> String {
-    let what = job.kind.as_str();
-    let text = match kind {
-        AlertKind::JobDeadLetter => {
-            format!("The {what} job gave up after repeated repository lock retries.")
-        }
-        AlertKind::JobWarnings => format!("The {what} job finished with warnings."),
-        _ => {
-            let code = job.result_code.as_deref().unwrap_or("failed");
-            match job
-                .result_message
-                .as_deref()
-                .filter(|text| !text.is_empty())
-            {
-                Some(message) => format!("The {what} job failed ({code}): {message}"),
-                None => format!("The {what} job failed ({code})."),
-            }
-        }
-    };
-    scrub(&text, MAX_TEXT_CHARS)
+    if kind != AlertKind::JobFailed {
+        return String::new();
+    }
+    job.result_message
+        .as_deref()
+        .map(|message| scrub(message, MAX_TEXT_CHARS))
+        .unwrap_or_default()
 }

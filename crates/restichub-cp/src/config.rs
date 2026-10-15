@@ -16,7 +16,7 @@ use utoipa::ToSchema;
 
 use axum::http::Uri;
 
-use crate::alerts::settings::{AlertsSettings, SmtpSection, WebhookSection};
+use crate::alerts::settings::{AlertsSettings, NotificationsSection, SmtpSection, WebhookSection};
 use crate::client_ip::TrustedProxies;
 use crate::queue::QueueConfig;
 
@@ -280,7 +280,7 @@ pub struct Config {
     pub queue: QueueConfig,
     /// The days for which the control plane keeps the text of a job log. At least one.
     pub log_retention_days: u32,
-    /// The public origin, the SMTP server and the webhook policy (ADR-0035).
+    /// The public origin, the SMTP server and the webhook policy (ADR-0036).
     pub alerts: Arc<AlertsSettings>,
 }
 
@@ -403,6 +403,7 @@ impl Config {
             file.public_origin,
             file.smtp.as_ref(),
             file.webhook.as_ref(),
+            file.notifications.as_ref(),
         )?);
 
         let database_url = env
@@ -538,6 +539,7 @@ struct FileConfig {
     public_origin: Option<String>,
     smtp: Option<SmtpSection>,
     webhook: Option<WebhookSection>,
+    notifications: Option<NotificationsSection>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]

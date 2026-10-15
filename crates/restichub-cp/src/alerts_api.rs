@@ -1,4 +1,4 @@
-//! The alert endpoints (FR-MN-03, AC-MN-02, ADR-0035).
+//! The alert endpoints (FR-MN-03, AC-MN-02, ADR-0036).
 //!
 //! A Viewer reads the alerts and the rules of the tenant. An Admin changes the rules. The alerts
 //! come from the evaluation loop of [`crate::alerts`]; no endpoint creates or resolves one.
@@ -7,7 +7,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use restichub_db::AlertId;
 use restichub_db::alerts::{
-    self as repo, Alert, AlertCursor, AlertKind, AlertPage, AlertRule, AlertStatus,
+    self as repo, Alert, AlertCursor, AlertKind, AlertPage, AlertParams, AlertRule, AlertStatus,
 };
 use restichub_db::audit::{AuditAction, diff};
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use serde_json::json;
 use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::alerts::message::link;
+use crate::alerts::message::{error_text, link};
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
@@ -56,8 +56,10 @@ pub struct AlertView {
     pub repository_id: Option<String>,
     pub repository_name: Option<String>,
     pub job_id: Option<String>,
-    /// The scrubbed and bounded text of the condition.
-    pub message: String,
+    /// The typed values of the condition. A client builds the sentence from them in the language of
+    /// the reader.
+    pub params: AlertParams,
+    pub error_text: Option<String>,
     /// The link of the alert. Absent when the installation sets no public origin.
     pub url: Option<String>,
     pub opened_at: String,
@@ -76,7 +78,8 @@ fn alert_view(alert: &Alert, origin: Option<&str>) -> AlertView {
         repository_id: alert.repository_id.map(|id| id.to_string()),
         repository_name: alert.repository_name.clone(),
         job_id: alert.job_id.map(|id| id.to_string()),
-        message: alert.detail.clone(),
+        params: alert.params.0.clone(),
+        error_text: error_text(alert),
         url: link(origin, alert),
         opened_at: format_time(alert.opened_at),
         resolved_at: alert.resolved_at.map(format_time),

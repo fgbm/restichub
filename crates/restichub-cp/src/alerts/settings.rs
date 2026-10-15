@@ -1,5 +1,5 @@
 //! The installation settings of the alerts: the public origin, the SMTP server and the webhook
-//! policy (ADR-0035). The settings never live in the database.
+//! policy (ADR-0036). The settings never live in the database.
 
 use std::path::PathBuf;
 
@@ -10,6 +10,8 @@ use serde::Deserialize;
 
 use crate::config::ConfigError;
 
+use super::text::Language;
+
 pub const PUBLIC_ORIGIN_ENV: &str = "RESTICHUB_PUBLIC_ORIGIN";
 pub const SMTP_HOST_ENV: &str = "RESTICHUB_SMTP_HOST";
 pub const SMTP_PORT_ENV: &str = "RESTICHUB_SMTP_PORT";
@@ -18,6 +20,7 @@ pub const SMTP_USERNAME_ENV: &str = "RESTICHUB_SMTP_USERNAME";
 pub const SMTP_PASSWORD_FILE_ENV: &str = "RESTICHUB_SMTP_PASSWORD_FILE";
 pub const SMTP_PASSWORD_ENV: &str = "RESTICHUB_SMTP_PASSWORD";
 pub const SMTP_FROM_ENV: &str = "RESTICHUB_SMTP_FROM";
+pub const NOTIFICATIONS_LANGUAGE_ENV: &str = "RESTICHUB_NOTIFICATIONS_LANGUAGE";
 pub const WEBHOOK_ALLOW_HTTP_ENV: &str = "RESTICHUB_WEBHOOK_ALLOW_HTTP";
 pub const WEBHOOK_ALLOW_NETWORKS_ENV: &str = "RESTICHUB_WEBHOOK_ALLOW_NETWORKS";
 
@@ -63,7 +66,7 @@ pub struct SmtpSettings {
     pub from: String,
 }
 
-/// The webhook policy of the installation (ADR-0035).
+/// The webhook policy of the installation (ADR-0036).
 #[derive(Debug, Clone, Default)]
 pub struct WebhookSettings {
     /// Plain HTTP targets. The default is HTTPS only.
@@ -78,6 +81,13 @@ pub struct AlertsSettings {
     pub public_origin: Option<String>,
     pub smtp: Option<SmtpSettings>,
     pub webhook: WebhookSettings,
+    pub language: Language,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationsSection {
+    language: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -105,6 +115,7 @@ impl AlertsSettings {
         public_origin: Option<String>,
         smtp: Option<&SmtpSection>,
         webhook: Option<&WebhookSection>,
+        notifications: Option<&NotificationsSection>,
     ) -> Result<Self, ConfigError> {
         let public_origin = env
             .get(PUBLIC_ORIGIN_ENV)
@@ -115,7 +126,24 @@ impl AlertsSettings {
             public_origin,
             smtp: smtp_settings(env, smtp)?,
             webhook: webhook_settings(env, webhook)?,
+            language: language_setting(env, notifications)?,
         })
+    }
+}
+
+fn language_setting(
+    env: &dyn EnvReader,
+    section: Option<&NotificationsSection>,
+) -> Result<Language, ConfigError> {
+    let value = env
+        .get(NOTIFICATIONS_LANGUAGE_ENV)
+        .or_else(|| section.and_then(|section| section.language.clone()));
+    match value {
+        None => Ok(Language::default()),
+        Some(value) => Language::parse(&value).ok_or_else(|| ConfigError::Invalid {
+            name: "notifications.language",
+            reason: format!("`{value}` is not `en` or `ru`"),
+        }),
     }
 }
 
@@ -126,7 +154,9 @@ fn public_origin_value(value: &str) -> Result<String, ConfigError> {
         reason: reason.to_owned(),
     };
     let trimmed = value.trim().trim_end_matches('/');
-    let uri: Uri = trimmed.parse().map_err(|_| invalid("it is not a URL"))?;
+    let uri: Uri = trimmed
+        .parse()
+        .map_err(|error| invalid(&format!("it is not a URL: {error}")))?;
     if !matches!(uri.scheme_str(), Some("https" | "http")) {
         return Err(invalid("it must use the scheme `https` or `http`"));
     }
@@ -163,10 +193,12 @@ fn smtp_settings(
         None => SmtpSecurity::default(),
     };
     let port = match env.get(SMTP_PORT_ENV) {
-        Some(value) => value
-            .trim()
-            .parse::<u16>()
-            .map_err(|_| invalid("smtp.port", format!("`{value}` is not a port number")))?,
+        Some(value) => value.trim().parse::<u16>().map_err(|error| {
+            invalid(
+                "smtp.port",
+                format!("`{value}` is not a port number: {error}"),
+            )
+        })?,
         None => section.port.unwrap_or(security.default_port()),
     };
     let username = env.get(SMTP_USERNAME_ENV).or(section.username);
@@ -187,6 +219,14 @@ fn smtp_settings(
         return Err(invalid(
             "smtp.username",
             "a password is set without a user name".to_owned(),
+        ));
+    }
+    // A password over a plain connection would travel in the clear (ADR-0036).
+    if password.is_some() && security == SmtpSecurity::None {
+        return Err(invalid(
+            "smtp.security",
+            "a password needs `starttls` or `tls`, because `none` would send it in the clear"
+                .to_owned(),
         ));
     }
     let from = env
@@ -231,10 +271,12 @@ fn webhook_settings(
     let allow_networks = entries
         .iter()
         .map(|entry| {
-            entry.parse::<IpNet>().map_err(|_| ConfigError::Invalid {
-                name: "webhook.allow_networks",
-                reason: format!("`{entry}` is not a network in CIDR form"),
-            })
+            entry
+                .parse::<IpNet>()
+                .map_err(|error| ConfigError::Invalid {
+                    name: "webhook.allow_networks",
+                    reason: format!("`{entry}` is not a network in CIDR form: {error}"),
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(WebhookSettings {
@@ -269,7 +311,7 @@ mod tests {
     }
 
     fn load(pairs: &[(&str, &str)]) -> Result<AlertsSettings, ConfigError> {
-        AlertsSettings::load(&env(pairs), None, None, None)
+        AlertsSettings::load(&env(pairs), None, None, None, None)
     }
 
     /// AC-MN-05: the allow-list and the scheme rule come from the environment.
@@ -339,6 +381,53 @@ mod tests {
         ])
         .expect("tls");
         assert_eq!(tls.smtp.expect("smtp").port, 465);
+    }
+
+    /// AC-MN-08: a password with `security = none` is a configuration error.
+    #[test]
+    fn ac_mn_08_smtp_password_needs_tls() {
+        let base = [
+            ("RESTICHUB_SMTP_HOST", "smtp.example.com"),
+            ("RESTICHUB_SMTP_FROM", "restichub@example.com"),
+            ("RESTICHUB_SMTP_USERNAME", "restichub"),
+            ("RESTICHUB_SMTP_PASSWORD", "hunter2-canary"),
+        ];
+        let mut plain = base.to_vec();
+        plain.push(("RESTICHUB_SMTP_SECURITY", "none"));
+        assert!(matches!(
+            load(&plain),
+            Err(ConfigError::Invalid {
+                name: "smtp.security",
+                ..
+            })
+        ));
+        let mut tls = base.to_vec();
+        tls.push(("RESTICHUB_SMTP_SECURITY", "tls"));
+        assert!(load(&tls).is_ok());
+        let mut no_password = vec![
+            ("RESTICHUB_SMTP_HOST", "smtp.example.com"),
+            ("RESTICHUB_SMTP_FROM", "restichub@example.com"),
+        ];
+        no_password.push(("RESTICHUB_SMTP_SECURITY", "none"));
+        assert!(load(&no_password).is_ok(), "no password, no problem");
+    }
+
+    #[test]
+    fn the_notification_language_is_en_or_ru() {
+        assert_eq!(load(&[]).expect("default").language, Language::En);
+        assert_eq!(
+            load(&[("RESTICHUB_NOTIFICATIONS_LANGUAGE", "ru")])
+                .expect("ru")
+                .language,
+            Language::Ru
+        );
+        assert!(matches!(
+            load(&[("RESTICHUB_NOTIFICATIONS_LANGUAGE", "fr")]),
+            Err(ConfigError::Invalid {
+                name: "notifications.language",
+                ..
+            })
+        ));
     }
 
     /// AC-MN-08: the password comes from the environment or a file, needs a user, and stays out

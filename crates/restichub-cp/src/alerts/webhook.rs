@@ -1,4 +1,4 @@
-//! A small HTTP client for the webhook channels (FR-MN-04, ADR-0035).
+//! A small HTTP client for the webhook channels (FR-MN-04, ADR-0036).
 //!
 //! The client sends one signed `POST`. It resolves the host name, applies the address policy to
 //! every answer, and connects to the approved address itself, so a second DNS answer cannot change
@@ -17,7 +17,7 @@ use tokio_rustls::rustls::pki_types::ServerName;
 use super::settings::WebhookSettings;
 use super::signature::{DELIVERY_HEADER, SIGNATURE_HEADER, TIMESTAMP_HEADER, signature_header};
 use super::ssrf::{Target, choose_address};
-use super::transport::{BoxIo, Resolver, SendError};
+use super::transport::{BoxIo, Resolver, SendError, because};
 
 /// Limit for connect, handshake and answer together.
 pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -43,7 +43,7 @@ pub async fn send(
 ) -> Result<(), SendError> {
     tokio::time::timeout(SEND_TIMEOUT, send_inner(policy, resolver, tls, request))
         .await
-        .map_err(|_| SendError::Timeout)?
+        .map_err(because(SendError::Timeout))?
 }
 
 async fn send_inner(
@@ -58,19 +58,20 @@ async fn send_inner(
         Err(_) => resolver
             .resolve(&target.host, target.port)
             .await
-            .map_err(|_| SendError::DnsFailed)?,
+            .map_err(because(SendError::DnsFailed))?,
     };
     let address = choose_address(&addresses, target.port, policy)?;
     let tcp = TcpStream::connect(address)
         .await
-        .map_err(|_| SendError::ConnectFailed)?;
+        .map_err(because(SendError::ConnectFailed))?;
     let mut stream: BoxIo = if target.tls {
-        let name = ServerName::try_from(target.host.clone()).map_err(|_| SendError::TlsFailed)?;
+        let name =
+            ServerName::try_from(target.host.clone()).map_err(because(SendError::TlsFailed))?;
         Box::new(
             TlsConnector::from(tls.clone())
                 .connect(name, tcp)
                 .await
-                .map_err(|_| SendError::TlsFailed)?,
+                .map_err(because(SendError::TlsFailed))?,
         )
     } else {
         Box::new(tcp)
@@ -129,4 +130,42 @@ fn parse_status(buffer: &[u8]) -> Option<Result<u16, SendError>> {
         Some(code) if version.starts_with("HTTP/1.") && (100..600).contains(&code) => Ok(code),
         _ => Err(SendError::BadResponse),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::pending;
+
+    use super::*;
+    use crate::alerts::transport::{ResolveFuture, tls_config_with_roots};
+    use tokio_rustls::rustls::RootCertStore;
+
+    struct Hanging;
+
+    impl Resolver for Hanging {
+        fn resolve(&self, _host: &str, _port: u16) -> ResolveFuture {
+            Box::pin(pending())
+        }
+    }
+
+    /// AC-MN-05: a name server that never answers ends the send at the time limit.
+    #[tokio::test(start_paused = true)]
+    async fn ac_mn_05_a_lookup_that_never_ends_times_out() {
+        let target = Target {
+            tls: false,
+            host: "hooks.example.com".to_owned(),
+            port: 80,
+            request_uri: "/".to_owned(),
+        };
+        let tls = tls_config_with_roots(RootCertStore::empty()).expect("client config");
+        let request = Request {
+            target: &target,
+            body: b"{}",
+            secret: b"key",
+            timestamp: 0,
+            delivery_id: "id",
+        };
+        let result = send(&WebhookSettings::default(), &Hanging, &tls, &request).await;
+        assert!(matches!(result, Err(SendError::Timeout)));
+    }
 }

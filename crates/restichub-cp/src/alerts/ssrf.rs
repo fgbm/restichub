@@ -1,4 +1,4 @@
-//! The address policy of the webhook channels (ADR-0035, threat model section Webhook targets).
+//! The address policy of the webhook channels (ADR-0036, threat model section Webhook targets).
 //!
 //! The control plane connects to the address that this check approved, never to a second DNS
 //! answer, so a rebinding host name cannot reach a private network.
@@ -62,7 +62,9 @@ pub fn parse_target(url: &str, policy: &WebhookSettings) -> Result<Target, UrlEr
     if url.contains('#') {
         return Err(UrlError::Parts);
     }
-    let uri: Uri = url.parse().map_err(|_| UrlError::Invalid)?;
+    let uri: Uri = url
+        .parse()
+        .map_err(super::transport::because(UrlError::Invalid))?;
     let tls = match uri.scheme_str() {
         Some("https") => true,
         Some("http") if policy.allow_http => false,
@@ -180,6 +182,8 @@ fn forbidden_v4(ip: Ipv4Addr) -> bool {
         || a == 0
         || (a == 100 && (64..128).contains(&b))
         || (a == 192 && b == 0 && c == 0)
+        // The deprecated 6to4 relay anycast 192.88.99.0/24.
+        || (a == 192 && b == 88 && c == 99)
         || (a == 198 && (b == 18 || b == 19))
         || a >= 240
 }
@@ -196,6 +200,10 @@ fn forbidden_v6(ip: Ipv6Addr) -> bool {
         // Documentation 2001:db8::/32 and the discard prefix 100::/64.
         || (first == 0x2001 && ip.segments()[1] == 0x0db8)
         || (first == 0x0100 && ip.segments()[1..4] == [0, 0, 0])
+        // IETF protocol assignments 2001::/23 (Teredo 2001::/32 is inside) and the local-use
+        // NAT64 prefix 64:ff9b:1::/48.
+        || (first == 0x2001 && ip.segments()[1] < 0x0200)
+        || ip.segments()[..3] == [0x64, 0xff9b, 1]
 }
 
 /// For the tests: builds the allow-list from CIDR strings.
@@ -247,6 +255,12 @@ mod tests {
             "64:ff9b::7f00:1",
             "2002:7f00:1::",
             "2001:db8::1",
+            "64:ff9b:1::1",
+            "64:ff9b:1:ffff::1",
+            "2001::1",
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+            "2001:1ff::1",
+            "192.88.99.1",
         ] {
             assert!(!allowed(address), "{address} must be refused");
         }
@@ -260,6 +274,8 @@ mod tests {
             "8.8.8.8",
             "2606:4700:4700::1111",
             "172.32.0.1",
+            "2001:200::1",
+            "192.88.98.1",
         ] {
             assert!(allowed(address), "{address} must pass");
         }

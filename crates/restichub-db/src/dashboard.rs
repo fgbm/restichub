@@ -1,4 +1,4 @@
-//! The read queries behind the alert evaluation and the dashboard (FR-MN-01, FR-MN-03, ADR-0035).
+//! The read queries behind the alert evaluation and the dashboard (FR-MN-01, FR-MN-03, ADR-0036).
 //!
 //! Every query runs under the tenant policy, so a transaction sees the rows of its own tenant only.
 
@@ -9,8 +9,9 @@ use crate::enums::{AgentStatus, JobKind, JobStatus};
 use crate::ids::{AgentId, JobId, PlanId, RepositoryId};
 use crate::tx::TenantTx;
 
-/// The largest number of rows that one query of this module returns.
-pub const MAX_ROWS: i64 = 2000;
+/// The rows that one query of this module takes at a time. The public functions read every row,
+/// page by page, so a tenant with many rows is evaluated completely.
+const PAGE: i64 = 500;
 
 /// A plan with the facts that the recovery point objective needs.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -34,7 +35,23 @@ pub struct RpoPlan {
 
 /// Lists the plans of the tenant with the time of the last successful backup.
 pub async fn rpo_plans(tx: &mut TenantTx<'_>) -> Result<Vec<RpoPlan>, DbError> {
-    sqlx::query_as::<_, RpoPlan>(sqlx::AssertSqlSafe(format!(
+    let mut all = Vec::new();
+    loop {
+        let after = all.last().map(|plan: &RpoPlan| (plan.created_at, plan.id));
+        let page = rpo_plans_page(tx, after).await?;
+        let full = page.len() as i64 == PAGE;
+        all.extend(page);
+        if !full {
+            return Ok(all);
+        }
+    }
+}
+
+async fn rpo_plans_page(
+    tx: &mut TenantTx<'_>,
+    after: Option<(OffsetDateTime, PlanId)>,
+) -> Result<Vec<RpoPlan>, DbError> {
+    sqlx::query_as::<_, RpoPlan>(
         "SELECT p.id, p.name, p.cron, p.time_zone, p.enabled, p.rpo_seconds, p.created_at, \
                 p.agent_id, a.hostname AS agent_hostname, a.status AS agent_status, \
                 pr.repository_id, r.name AS repository_name, s.finished_at AS last_success_at, \
@@ -48,8 +65,12 @@ pub async fn rpo_plans(tx: &mut TenantTx<'_>) -> Result<Vec<RpoPlan>, DbError> {
              WHERE j.plan_id = p.id AND j.kind = 'backup' AND j.status = 'succeeded' \
                AND j.finished_at IS NOT NULL \
              ORDER BY j.finished_at DESC LIMIT 1) s ON true \
-         ORDER BY p.created_at, p.id LIMIT {MAX_ROWS}"
-    )))
+         WHERE ($1::timestamptz IS NULL OR (p.created_at, p.id) > ($1::timestamptz, $2::uuid)) \
+         ORDER BY p.created_at, p.id LIMIT $3",
+    )
+    .bind(after.map(|(time, _)| time))
+    .bind(after.map(|(_, id)| id))
+    .bind(PAGE)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)
@@ -73,10 +94,32 @@ impl AgentFacts {
 }
 
 pub async fn agent_facts(tx: &mut TenantTx<'_>) -> Result<Vec<AgentFacts>, DbError> {
-    sqlx::query_as::<_, AgentFacts>(sqlx::AssertSqlSafe(format!(
+    let mut all = Vec::new();
+    loop {
+        let after = all
+            .last()
+            .map(|agent: &AgentFacts| (agent.hostname.clone(), agent.id));
+        let page = agent_facts_page(tx, after).await?;
+        let full = page.len() as i64 == PAGE;
+        all.extend(page);
+        if !full {
+            return Ok(all);
+        }
+    }
+}
+
+async fn agent_facts_page(
+    tx: &mut TenantTx<'_>,
+    after: Option<(String, AgentId)>,
+) -> Result<Vec<AgentFacts>, DbError> {
+    sqlx::query_as::<_, AgentFacts>(
         "SELECT id, hostname, status, last_seen_at, created_at FROM agents \
-         ORDER BY hostname, id LIMIT {MAX_ROWS}"
-    )))
+         WHERE ($1::text IS NULL OR (hostname, id) > ($1::text, $2::uuid)) \
+         ORDER BY hostname, id LIMIT $3",
+    )
+    .bind(after.as_ref().map(|(name, _)| name.as_str()))
+    .bind(after.as_ref().map(|(_, id)| *id))
+    .bind(PAGE)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)
@@ -96,7 +139,25 @@ pub struct RepositoryLockFacts {
 }
 
 pub async fn repository_locks(tx: &mut TenantTx<'_>) -> Result<Vec<RepositoryLockFacts>, DbError> {
-    sqlx::query_as::<_, RepositoryLockFacts>(sqlx::AssertSqlSafe(format!(
+    let mut all = Vec::new();
+    loop {
+        let after = all
+            .last()
+            .map(|repository: &RepositoryLockFacts| (repository.name.clone(), repository.id));
+        let page = repository_locks_page(tx, after).await?;
+        let full = page.len() as i64 == PAGE;
+        all.extend(page);
+        if !full {
+            return Ok(all);
+        }
+    }
+}
+
+async fn repository_locks_page(
+    tx: &mut TenantTx<'_>,
+    after: Option<(String, RepositoryId)>,
+) -> Result<Vec<RepositoryLockFacts>, DbError> {
+    sqlx::query_as::<_, RepositoryLockFacts>(
         "SELECT r.id, r.name, \
                 EXISTS (SELECT 1 FROM jobs j WHERE j.repository_id = r.id \
                           AND j.status IN ('queued', 'sent', 'running') \
@@ -111,8 +172,12 @@ pub async fn repository_locks(tx: &mut TenantTx<'_>) -> Result<Vec<RepositoryLoc
                AND j.status IN ('queued', 'sent', 'running') \
              ORDER BY j.stale_lock_since, j.id LIMIT 1) s ON true \
          LEFT JOIN agents a ON a.tenant_id = r.tenant_id AND a.id = s.agent_id \
-         ORDER BY r.name, r.id LIMIT {MAX_ROWS}"
-    )))
+         WHERE ($1::text IS NULL OR (r.name, r.id) > ($1::text, $2::uuid)) \
+         ORDER BY r.name, r.id LIMIT $3",
+    )
+    .bind(after.as_ref().map(|(name, _)| name.as_str()))
+    .bind(after.as_ref().map(|(_, id)| *id))
+    .bind(PAGE)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)
@@ -142,12 +207,31 @@ pub async fn latest_jobs(
     tx: &mut TenantTx<'_>,
     since: OffsetDateTime,
 ) -> Result<Vec<LatestJob>, DbError> {
+    let mut all = Vec::new();
+    loop {
+        let after = all.last().map(|job: &LatestJob| job.subject.clone());
+        let page = latest_jobs_page(tx, since, after).await?;
+        let full = page.len() as i64 == PAGE;
+        all.extend(page);
+        if !full {
+            return Ok(all);
+        }
+    }
+}
+
+const SUBJECT_EXPR: &str = "COALESCE('plan:' || j.plan_id::text, \
+                                    'repo:' || j.repository_id::text || ':' || j.kind, \
+                                    'agent:' || j.agent_id::text || ':' || j.kind)";
+
+async fn latest_jobs_page(
+    tx: &mut TenantTx<'_>,
+    since: OffsetDateTime,
+    after: Option<String>,
+) -> Result<Vec<LatestJob>, DbError> {
     sqlx::query_as::<_, LatestJob>(sqlx::AssertSqlSafe(format!(
         "SELECT * FROM ( \
              SELECT DISTINCT ON (subject) \
-                    COALESCE('plan:' || j.plan_id::text, \
-                             'repo:' || j.repository_id::text || ':' || j.kind, \
-                             'agent:' || j.agent_id::text || ':' || j.kind) AS subject, \
+                    {SUBJECT_EXPR} AS subject, \
                     j.id, j.kind, j.status, j.result_code, j.result_message, j.agent_id, \
                     a.hostname AS agent_hostname, j.plan_id, p.name AS plan_name, \
                     j.repository_id, r.name AS repository_name, \
@@ -159,10 +243,13 @@ pub async fn latest_jobs(
              WHERE j.status IN ('succeeded', 'failed', 'dead_letter') \
                AND j.result_code IS DISTINCT FROM 'cancelled' \
                AND COALESCE(j.finished_at, j.updated_at) > $1 \
+               AND ($2::text IS NULL OR {SUBJECT_EXPR} > $2) \
              ORDER BY subject, COALESCE(j.finished_at, j.updated_at) DESC, j.id DESC) latest \
-         LIMIT {MAX_ROWS}"
+         ORDER BY subject LIMIT $3"
     )))
     .bind(since)
+    .bind(after)
+    .bind(PAGE)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)

@@ -1,4 +1,4 @@
-//! The notification channel endpoints (FR-MN-04, AC-MN-01, ADR-0035, ADR-0017).
+//! The notification channel endpoints (FR-MN-04, AC-MN-01, ADR-0036, ADR-0017).
 //!
 //! An Admin manages the channels of the tenant. A channel is an email recipient list or a webhook.
 //! The control plane generates the signing secret of a webhook and returns it once, in the create
@@ -14,6 +14,7 @@ use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, REDACTED, diff};
 use restichub_db::channels::{self as repo, Channel, ChannelKind, MAX_CHANNELS};
 use restichub_db::{ChannelId, DeliveryId};
+use restichub_secrets::SecretString;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::OffsetDateTime;
@@ -61,7 +62,8 @@ pub struct UpdateChannelRequest {
     /// The full new address list of an email channel.
     #[serde(default)]
     pub recipients: Option<Vec<String>>,
-    /// The full new target of a webhook. The path and the query stay write-only.
+    /// The full new target of a webhook. The path and the query stay write-only: the control plane
+    /// stores them encrypted.
     #[serde(default)]
     pub url: Option<String>,
     /// Generates a new signing secret for a webhook. The response returns it once.
@@ -91,7 +93,7 @@ impl From<&Channel> for ChannelView {
             kind: channel.kind,
             enabled: channel.enabled,
             recipients: channel.recipients.clone(),
-            url_origin: channel.url.as_deref().map(url_origin),
+            url_origin: channel.url_origin.clone(),
             created_at: format_time(channel.created_at),
             updated_at: format_time(channel.updated_at),
         }
@@ -210,7 +212,7 @@ pub async fn create_channel(
                 .url
                 .as_deref()
                 .ok_or_else(|| ApiError::invalid_field("url", Reason::Empty))?;
-            (Vec::new(), Some(validate_url(&state, url)?))
+            (Vec::new(), Some(split_url(&validate_url(&state, url)?)))
         }
     };
 
@@ -222,14 +224,18 @@ pub async fn create_channel(
     }
     let mut signing_secret = None;
     let mut secret_id = None;
-    if body.kind == ChannelKind::Webhook {
+    let mut url_secret_id = None;
+    if let Some((_, tail)) = &url {
         let provider = state
             .kek()
             .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
         let value = secret::generate()?;
         secret_id = Some(secret::store(&mut tx, provider, channel_id, &value, created_by).await?);
+        url_secret_id =
+            Some(secret::store_url_tail(&mut tx, provider, channel_id, tail, created_by).await?);
         signing_secret = Some(value);
     }
+    let url_origin = url.as_ref().map(|(origin, _)| origin.as_str());
     repo::create(
         &mut tx,
         &repo::NewChannel {
@@ -238,8 +244,9 @@ pub async fn create_channel(
             kind: body.kind,
             enabled: body.enabled,
             recipients: &recipients,
-            url: url.as_deref(),
+            url_origin,
             secret_id,
+            url_secret_id,
             created_by,
         },
     )
@@ -255,7 +262,7 @@ pub async fn create_channel(
             body.kind,
             body.enabled,
             &recipients,
-            url.as_deref(),
+            url_origin,
         )),
         &[],
     ));
@@ -330,12 +337,16 @@ pub async fn update_channel(
             if body.recipients.is_some() {
                 return Err(ApiError::invalid_field("recipients", Reason::Unsupported));
             }
-            let url = match &body.url {
-                Some(url) => validate_url(&state, url)?,
-                None => current.url.clone().unwrap_or_default(),
+            let new_url = match &body.url {
+                Some(url) => Some(split_url(&validate_url(&state, url)?)),
+                None => None,
             };
-            (Vec::new(), Some(url))
+            (Vec::new(), new_url)
         }
+    };
+    let url_origin = match &url {
+        Some((origin, _)) => Some(origin.clone()),
+        None => current.url_origin.clone(),
     };
 
     repo::update(
@@ -345,11 +356,18 @@ pub async fn update_channel(
             name: &name,
             enabled,
             recipients: &recipients,
-            url: url.as_deref(),
+            url_origin: url_origin.as_deref(),
         },
     )
     .await
     .map_err(map_write_error)?;
+
+    if let (Some((_, tail)), Some(url_secret_id)) = (&url, current.url_secret_id) {
+        let provider = state
+            .kek()
+            .ok_or_else(|| ApiError::internal("the server holds no key encryption key provider"))?;
+        secret::replace_url_tail(&mut tx, provider, url_secret_id, tail).await?;
+    }
 
     let mut signing_secret = None;
     if body.rotate_secret == Some(true)
@@ -363,7 +381,13 @@ pub async fn update_channel(
         signing_secret = Some(value);
     }
 
-    let mut after = audit_value(&name, current.kind, enabled, &recipients, url.as_deref());
+    let mut after = audit_value(
+        &name,
+        current.kind,
+        enabled,
+        &recipients,
+        url_origin.as_deref(),
+    );
     if signing_secret.is_some() {
         after["signing_secret"] = json!(REDACTED);
     }
@@ -375,7 +399,7 @@ pub async fn update_channel(
             current.kind,
             current.enabled,
             &current.recipients,
-            current.url.as_deref(),
+            current.url_origin.as_deref(),
         )),
         Some(&after),
         &[],
@@ -419,7 +443,10 @@ pub async fn delete_channel(
     };
     repo::delete(&mut tx, channel_id).await?;
     // The secret row goes with the channel, so no key outlives its channel.
-    if let Some(secret_id) = current.secret_id {
+    for secret_id in [current.secret_id, current.url_secret_id]
+        .into_iter()
+        .flatten()
+    {
         restichub_db::secrets::delete(&mut tx, secret_id).await?;
     }
     let mut event =
@@ -430,7 +457,7 @@ pub async fn delete_channel(
             current.kind,
             current.enabled,
             &current.recipients,
-            current.url.as_deref(),
+            current.url_origin.as_deref(),
         )),
         None,
         &[],
@@ -449,7 +476,9 @@ pub async fn delete_channel(
     responses(
         (status = 200, description = "The result of the send.", body = TestResponse),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody),
+        (status = 429, description = "The actor or the tenant sent too many tests.", body = crate::error::ProblemBody),
+        (status = 503, description = "The server runs the most tests that it allows.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn test_channel(
@@ -459,6 +488,16 @@ pub async fn test_channel(
 ) -> Result<Json<TestResponse>, ApiError> {
     context.authorize(Operation::ChannelsWrite)?;
     let channel_id = parse_channel_id(&id)?;
+    check_test_limit(&state, &context)?;
+    let _slot = state
+        .auth()
+        .test_send_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|error| {
+            tracing::debug!(%error, "no free slot for a test send");
+            ApiError::busy(5)
+        })?;
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     // The read comes first: a channel of another tenant gives HTTP 404 (AC-TN-01).
     let Some(channel) = repo::get(&mut tx, channel_id).await? else {
@@ -474,9 +513,9 @@ pub async fn test_channel(
         .await?
         .map(|tenant| tenant.name)
         .unwrap_or_default();
-    let secret_value = match channel.secret_id {
-        Some(secret_id) => secret::read(&mut tx, provider, secret_id).await.ok(),
-        None => None,
+    let credentials = match channel.kind {
+        ChannelKind::Webhook => secret::read_webhook(&mut tx, provider, &channel).await.ok(),
+        ChannelKind::Email => None,
     };
     tx.commit().await?;
 
@@ -488,8 +527,9 @@ pub async fn test_channel(
         tenant_name,
         alert: None,
         public_origin: sender.settings().public_origin.clone(),
+        language: sender.settings().language,
     };
-    let result = send_message(sender, &channel, secret_value.as_ref(), &message).await;
+    let result = send_message(sender, &channel, credentials.as_ref(), &message).await;
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let mut event = context.audit_event(AuditAction::AlertSent, "channel", channel_id.as_uuid());
@@ -510,6 +550,25 @@ pub async fn test_channel(
         ok: result.is_ok(),
         error: result.err().map(|error| error.code()),
     }))
+}
+
+/// A test connects to a target that the tenant chose, so the actor and the tenant have a bucket.
+fn check_test_limit(state: &AppState, context: &RequestContext) -> Result<(), ApiError> {
+    let actor = crate::rate_limit::actor_label(&context.actor);
+    let now = std::time::Instant::now();
+    let key = crate::rate_limit::test_send_key(context.tenant_id, &actor);
+    if let Err(wait) = state.auth().test_send_limiter.check(&key, now) {
+        return Err(ApiError::rate_limited(wait.as_secs().max(1)));
+    }
+    let tenant_key = crate::rate_limit::test_send_tenant_key(context.tenant_id);
+    if let Err(wait) = state
+        .auth()
+        .test_send_tenant_limiter
+        .check(&tenant_key, now)
+    {
+        return Err(ApiError::rate_limited(wait.as_secs().max(1)));
+    }
+    Ok(())
 }
 
 /// Trims, lowercases and checks the addresses, and removes duplicates.
@@ -556,9 +615,12 @@ fn validate_url(state: &AppState, url: &str) -> Result<String, ApiError> {
     Ok(url.to_owned())
 }
 
-fn url_origin(url: &str) -> String {
-    url.parse::<axum::http::Uri>()
-        .ok()
+/// Splits a checked URL into the origin and the path with the query. The origin stays in the
+/// channel row; the control plane stores the rest encrypted.
+fn split_url(url: &str) -> (String, SecretString) {
+    let uri = url.parse::<axum::http::Uri>().ok();
+    let origin = uri
+        .as_ref()
         .and_then(|uri| {
             Some(format!(
                 "{}://{}",
@@ -566,7 +628,13 @@ fn url_origin(url: &str) -> String {
                 uri.authority()?.as_str()
             ))
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let tail = uri
+        .as_ref()
+        .and_then(|uri| uri.path_and_query().map(|value| value.as_str().to_owned()))
+        .filter(|value| value.starts_with('/'))
+        .unwrap_or_else(|| "/".to_owned());
+    (origin, SecretString::new(tail))
 }
 
 /// A webhook shows its origin, never the path or the query.
@@ -575,14 +643,14 @@ fn audit_value(
     kind: ChannelKind,
     enabled: bool,
     recipients: &[String],
-    url: Option<&str>,
+    url_origin: Option<&str>,
 ) -> serde_json::Value {
     json!({
         "name": name,
         "kind": kind.as_str(),
         "enabled": enabled,
         "recipients": recipients,
-        "url_origin": url.map(url_origin),
+        "url_origin": url_origin,
     })
 }
 

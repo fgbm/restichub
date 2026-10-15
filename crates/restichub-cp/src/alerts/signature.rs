@@ -1,4 +1,4 @@
-//! The HMAC-SHA256 signature of a webhook payload (ADR-0035).
+//! The HMAC-SHA256 signature of a webhook payload (ADR-0036).
 //!
 //! The receiver recomputes `HMAC-SHA256(secret, timestamp + "." + body)` and compares it with the
 //! header `X-ResticHub-Signature: sha256=<hex>`. The timestamp is the header

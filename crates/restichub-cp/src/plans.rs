@@ -66,7 +66,7 @@ pub struct CreatePlanRequest {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     /// The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
-    /// default of the schedule (ADR-0035).
+    /// default of the schedule (ADR-0036).
     #[serde(default)]
     pub rpo_seconds: Option<i32>,
 }
@@ -109,7 +109,7 @@ pub struct PlanView {
     pub enabled: bool,
     /// The stored recovery point objective in seconds. Null means the default of the schedule.
     pub rpo_seconds: Option<i32>,
-    /// The objective that the control plane applies, in seconds (ADR-0035).
+    /// The objective that the control plane applies, in seconds (ADR-0036).
     pub effective_rpo_seconds: i64,
     /// In UTC, in RFC 3339. Null when the plan is disabled.
     pub next_run_at: Option<String>,
@@ -567,7 +567,7 @@ struct PlanInput {
     rpo_seconds: Option<i32>,
 }
 
-/// The smallest and the largest recovery point objective, in seconds (ADR-0035).
+/// The smallest and the largest recovery point objective, in seconds (ADR-0036).
 const MIN_RPO_SECONDS: i32 = 900;
 const MAX_RPO_SECONDS: i32 = 34_560_000;
 
