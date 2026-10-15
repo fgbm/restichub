@@ -308,7 +308,7 @@ pub async fn consume_for_enrollment(
     tx: &mut EnrollmentTx<'_>,
     token_hash: &[u8],
 ) -> Result<EnrollmentConsume, DbError> {
-    let row: Option<(String, Uuid, Uuid, Vec<String>, Option<Uuid>)> = sqlx::query_as(
+    let row: Option<ConsumeRow> = sqlx::query_as(
         "SELECT outcome, tenant_id, token_id, labels, replaces_agent_id \
          FROM enroll_consume_token($1)",
     )
@@ -367,6 +367,8 @@ impl Refusal for EnrollmentTokenState {
         }
     }
 }
+
+type ConsumeRow = (String, Uuid, Uuid, Vec<String>, Option<Uuid>);
 
 type EnrollmentTokenRow = (
     Uuid,

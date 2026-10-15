@@ -26,6 +26,7 @@ prost-types = "0.14"
 rcgen = { workspace = true }
 restichub-compiler = { workspace = true }
 restichub-db = { workspace = true }
+restichub-common = { path = "../restichub-common" }
 restichub-proto = { workspace = true }
 restichub-secrets = { workspace = true, features = ["serde"] }
 rust-embed = { workspace = true }

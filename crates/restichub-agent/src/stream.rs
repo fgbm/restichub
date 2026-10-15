@@ -793,7 +793,7 @@ async fn send_hello(
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
             protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
-            agent_version: env!("CARGO_PKG_VERSION").to_owned(),
+            agent_version: restichub_common::BUILD_VERSION.to_owned(),
             restic_version: restic_version.to_owned(),
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),

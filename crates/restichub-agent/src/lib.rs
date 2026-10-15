@@ -14,6 +14,7 @@ pub mod identity;
 pub mod jobs;
 pub mod journal;
 pub mod keys;
+pub mod machine_id;
 pub mod openpgp;
 mod output;
 pub mod paths;

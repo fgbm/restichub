@@ -18,7 +18,7 @@ pub enum AgentVersionStatus {
     Unknown,
 }
 
-pub const CONTROL_PLANE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CONTROL_PLANE_VERSION: &str = restichub_common::BUILD_VERSION;
 
 /// Compares the package version and the protocol version of an agent with this build.
 ///

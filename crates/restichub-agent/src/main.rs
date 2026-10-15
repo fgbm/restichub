@@ -24,7 +24,7 @@ fn run() -> anyhow::Result<()> {
         Command::Version => {
             println!(
                 "restichub-agent {} (protocol {}.{})",
-                env!("CARGO_PKG_VERSION"),
+                restichub_common::BUILD_VERSION,
                 restichub_proto::PROTOCOL_VERSION_MAJOR,
                 restichub_proto::PROTOCOL_VERSION_MINOR
             );

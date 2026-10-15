@@ -212,6 +212,36 @@ pub fn is_elevated_administrator() -> Result<bool> {
     Ok(member != 0)
 }
 
+/// The `MachineGuid` of this computer from the 64-bit view of the registry (FR-ID-01).
+pub fn machine_guid() -> Option<String> {
+    use windows_sys::Win32::System::Registry::{
+        HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+    };
+    let subkey: Vec<u16> = "SOFTWARE\\Microsoft\\Cryptography\0"
+        .encode_utf16()
+        .collect();
+    let value: Vec<u16> = "MachineGuid\0".encode_utf16().collect();
+    let mut buffer = [0u16; 128];
+    let mut size = std::mem::size_of_val(&buffer) as u32;
+    // SAFETY: both names end with a NUL, and `size` is the byte length of `buffer`.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return None;
+    }
+    let units = (size as usize / 2).saturating_sub(1).min(buffer.len());
+    String::from_utf16(&buffer[..units]).ok()
+}
+
 /// Makes `dir` with a protected DACL, or refuses an existing `dir` (FR-AG-04).
 ///
 /// # Errors
