@@ -1,0 +1,70 @@
+name: UI smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Playwright drives the built UI against the real control plane and a PostgreSQL server
+  # (issue #26): setup, sign in, create an organization, read its audit record, open the event
+  # stream. The mock service of the other UI jobs cannot show a break between the UI and the API.
+  smoke:
+    name: Real control plane smoke (ubuntu-latest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: restichub
+          POSTGRES_PASSWORD: restichub
+          POSTGRES_DB: restichub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restichub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      # The action reads rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the UI without the mock service
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      # The control plane embeds the built UI at compile time.
+      - name: Build the control plane
+        run: cargo build -p restichub-cp
+      - name: Install the PostgreSQL client
+        run: |
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          fi
+      - name: Install the browser
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
+      - name: Run the smoke test
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: restichub
+          PGPASSWORD: restichub
+        run: bash scripts/ui-smoke.sh

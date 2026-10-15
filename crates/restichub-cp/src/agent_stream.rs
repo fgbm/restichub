@@ -872,6 +872,7 @@ async fn run_stream(
     ) {
         return;
     }
+    state.events().host(identity.tenant, agent, true);
     // An older agent sends no list, so its silence says nothing about its jobs (ADR-0039).
     if AgentCapability::JobLimitsV1.is_listed(&hello.capabilities) {
         crate::queue::stale::fail_unlisted_running(
@@ -959,6 +960,7 @@ async fn run_stream(
     crate::refusal_audit::flush_summaries(&state, identity.tenant, agent).await;
     // The removal drops the last outbound sender, so the response stream ends (FR-ID-04).
     state.agent_registry().remove(agent, generation);
+    state.events().host(identity.tenant, agent, false);
 }
 
 /// Waits for a rotation event. It never resolves when the task is not subscribed or the sender

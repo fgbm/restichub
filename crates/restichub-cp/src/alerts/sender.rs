@@ -15,6 +15,7 @@ pub struct Sender {
     settings: Arc<AlertsSettings>,
     tls: Arc<ClientConfig>,
     resolver: Arc<dyn Resolver>,
+    events: Option<Arc<crate::events::EventBus>>,
 }
 
 impl std::fmt::Debug for Sender {
@@ -29,6 +30,7 @@ impl Sender {
             settings,
             tls: default_tls_config()?,
             resolver: Arc::new(SystemResolver),
+            events: None,
         })
     }
 
@@ -42,6 +44,16 @@ impl Sender {
     pub fn with_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
         self.resolver = resolver;
         self
+    }
+
+    /// Sets the bus that announces an opened or a resolved alert to the web UI.
+    pub fn with_events(mut self, events: Arc<crate::events::EventBus>) -> Self {
+        self.events = Some(events);
+        self
+    }
+
+    pub fn events(&self) -> Option<&crate::events::EventBus> {
+        self.events.as_deref()
     }
 
     pub fn settings(&self) -> &AlertsSettings {

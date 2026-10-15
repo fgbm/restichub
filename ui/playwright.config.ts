@@ -6,6 +6,8 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
 	testDir: './e2e',
+	// The smoke test needs a real control plane: playwright.smoke.config.ts runs it.
+	testIgnore: /smoke.*\.spec\.ts/,
 	timeout: 30_000,
 	fullyParallel: true,
 	use: {

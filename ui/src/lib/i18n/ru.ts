@@ -74,6 +74,7 @@ export const ru: Record<MessageKey, string> = {
 	'common.retry': 'Повторить',
 	'common.save': 'Сохранить',
 	'common.search': 'Поиск',
+	'common.showOptions': 'Показать варианты',
 	'common.show': 'Показать',
 	'common.hide': 'Скрыть',
 	'common.required': 'Обязательно',

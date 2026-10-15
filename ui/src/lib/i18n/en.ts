@@ -73,6 +73,7 @@ export const en = {
 	'common.retry': 'Retry',
 	'common.save': 'Save',
 	'common.search': 'Search',
+	'common.showOptions': 'Show options',
 	'common.show': 'Show',
 	'common.hide': 'Hide',
 	'common.required': 'Required',

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { coalesce } from '#lib/events.ts';
+	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -45,17 +47,21 @@
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	const POLL_MS = 2000;
+	// The stream pushes the changes, so a connected page polls only as a safety net.
+	const STREAM_POLL_MS = 30_000;
+	const EVENT_WAIT_MS = 150;
 	const LOG_PAGE = 1000;
 	const DOWNLOAD_PAGE = 2000;
 	// The viewer holds this many lines at most. A bigger log shows its first lines.
 	const MAX_LINES = 10_000;
 
 	const MARKER_ICONS = {
-		success: 'check',
+		success: 'check-circle',
 		warning: 'alert',
-		failed: 'x',
-		idle: 'pause',
-		running: 'dot'
+		failed: 'x-circle',
+		skipped: 'circle-slash',
+		idle: 'clock',
+		running: 'loader-circle'
 	} as const;
 
 	const id = $derived(page.params.id ?? '');
@@ -275,9 +281,22 @@
 
 	$effect(() => {
 		if (!live) return;
-		const timer = setInterval(() => void refresh(), POLL_MS);
+		const timer = setInterval(() => void refresh(), isStreamConnected() ? STREAM_POLL_MS : POLL_MS);
 		return () => clearInterval(timer);
 	});
+
+	// A step that ends or a log chunk arrives in a burst, so one read serves the burst. A read that
+	// is busy runs again after it ends.
+	const refreshSoon = coalesce(async () => {
+		while (busy) await new Promise((resolve) => setTimeout(resolve, 50));
+		await refresh();
+	}, EVENT_WAIT_MS);
+
+	onMount(() =>
+		onEvent((event) => {
+			if (event.type === 'resync' || event.job_id === id) refreshSoon();
+		})
+	);
 
 	async function copyLog(shown: JobLogLine[]): Promise<void> {
 		try {
@@ -441,15 +460,12 @@
 					{/if}
 					<ol class="timeline">
 						{#each rows as row (row.id)}
+							{@const marker =
+								row.state === 'running' ? 'running' : row.step ? markerOf(row.step.status) : 'idle'}
 							<li class="timeline__item">
-								{#if row.state === 'running'}
-									<span class="timeline__marker timeline__marker--running"></span>
-								{:else}
-									{@const marker = row.step ? markerOf(row.step.status) : 'idle'}
-									<span class="timeline__marker timeline__marker--{marker}">
-										<Icon name={MARKER_ICONS[marker]} size="xs" />
-									</span>
-								{/if}
+								<span class="timeline__marker timeline__marker--{marker}">
+									<Icon name={MARKER_ICONS[marker]} size="lg" spin={marker === 'running'} />
+								</span>
 								{#if hasLog(row)}
 									<button
 										type="button"
@@ -812,30 +828,24 @@
 		justify-content: center;
 		width: 18px;
 		height: 18px;
-		box-sizing: border-box;
-		border: 2px solid var(--rh-color-border-strong);
-		border-radius: 50%;
 		background-color: var(--rh-color-canvas);
 		color: var(--rh-color-text-muted);
 	}
 
 	.timeline__marker--success {
-		border-color: var(--rh-color-success);
 		color: var(--rh-color-success);
 	}
 
 	.timeline__marker--warning {
-		border-color: var(--rh-color-warning);
 		color: var(--rh-color-warning);
 	}
 
 	.timeline__marker--failed {
-		border-color: var(--rh-color-danger);
 		color: var(--rh-color-danger);
 	}
 
 	.timeline__marker--running {
-		border-color: var(--rh-color-running);
+		color: var(--rh-color-running);
 	}
 
 	.timeline__head {

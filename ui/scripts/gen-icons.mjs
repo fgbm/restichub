@@ -61,6 +61,8 @@ export const mapping = {
 	dot: 'circle-small',
 	stop: 'square',
 	pause: 'pause',
+	'loader-circle': 'loader-circle',
+	'circle-slash': 'circle-slash',
 	cloud: 'cloud',
 	activity: 'activity',
 	tag: 'tag',

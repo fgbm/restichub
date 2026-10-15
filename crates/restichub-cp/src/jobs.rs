@@ -381,6 +381,15 @@ async fn create_repository_job(
     let job = job_repo::get(&mut tx, job_id).await?;
     tx.commit().await?;
 
+    state.events().job_status(
+        context.tenant_id,
+        job_id,
+        if sent {
+            JobStatus::Sent
+        } else {
+            JobStatus::Failed
+        },
+    );
     if !sent {
         return Err(ApiError::agent_offline());
     }
@@ -444,6 +453,9 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
         tracing::warn!(job = %job_id, %error, "the acknowledgement could not commit");
         return;
     }
+    state
+        .events()
+        .job_status(tenant, job_id, JobStatus::Running);
     // A cancel that raced the dispatch reached the agent before the job did, so the agent ignored
     // it. The acknowledgement of the flagged job gets the cancel again, also when the job already
     // ended: the agent runs it until it gets the cancel.
@@ -552,6 +564,7 @@ pub async fn handle_job_rejected(
         tracing::warn!(job = %job_id, %error, "the rejection could not commit");
         return;
     }
+    state.events().job_status(tenant, job_id, JobStatus::Failed);
     state.wake_dispatcher();
 }
 
@@ -721,6 +734,7 @@ pub async fn handle_job_result(
             tracing::warn!(job = %job_id, %error, "the lock result could not commit");
             return;
         }
+        state.events().job_status(tenant, job_id, JobStatus::Queued);
         state.wake_dispatcher();
         return;
     }
@@ -787,6 +801,7 @@ pub async fn handle_job_result(
         tracing::warn!(job = %job_id, %error, "the job result could not commit");
         return;
     }
+    state.events().job_status(tenant, job_id, outcome.status);
     // A finished job frees its slot, so the queue may start the next job.
     state.wake_dispatcher();
 }
