@@ -52,6 +52,12 @@ pub enum CompileError {
     UnknownHookParameter { field: FieldPath, name: String },
     #[error("hook parameter {name:?} is duplicated ({field})")]
     DuplicateHookParameter { field: FieldPath, name: String },
+    #[error("hook parameter {name:?} does not obey the hook schema ({field})")]
+    InvalidHookParameter { field: FieldPath, name: String },
+    #[error("hook parameter {name:?} is required ({field})")]
+    MissingHookParameter { field: FieldPath, name: String },
+    #[error("hook {hook_id:?} does not run in this phase ({field})")]
+    HookPhaseNotAllowed { field: FieldPath, hook_id: String },
     #[error("option {option} is not available on {os} ({field})")]
     UnsupportedOs {
         field: FieldPath,

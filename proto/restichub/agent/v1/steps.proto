@@ -296,12 +296,29 @@ message HookStep {
   repeated HookParameter parameters = 3;
 }
 
-// HookParameter is one named parameter of a hook (FR-HK-03).
+// HookParameter is one named parameter of a hook (FR-HK-03). The value is a
+// closed set of types, not free text. The agent checks the value against the
+// type of the parameter in its allow-list and rejects a mismatch.
 message HookParameter {
   // Name of the parameter.
   string name = 1;
-  // Value of the parameter.
+  // Field 2 held an untyped text value. The agent rejects a parameter that
+  // sets it (REJECT_REASON_INVALID_HOOK_PARAMETERS).
   string value = 2;
+  // Value of the parameter. The set field must agree with the type in the
+  // allow-list.
+  oneof typed {
+    // Value of a string or an enumeration parameter.
+    string string_value = 3;
+    // Value of an integer parameter.
+    int64 integer_value = 4;
+    // Value of a boolean parameter.
+    bool boolean_value = 5;
+    // Value of a secret reference parameter. The control plane resolves the
+    // reference when it sends the job (ADR-0017). The agent gives it to the
+    // hook in an environment variable, never in an argument or a log.
+    string secret_value = 6;
+  }
 }
 
 // HookPhase is the position of a hook in a job (FR-HK-05).

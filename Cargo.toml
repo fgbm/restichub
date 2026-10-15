@@ -21,6 +21,7 @@ getrandom = "0.4"
 http-body-util = "0.1"
 libc = "0.2"
 rcgen = { version = "0.14", features = ["x509-parser"] }
+regex = "1.12"
 restichub-common = { path = "crates/restichub-common" }
 restichub-compiler = { path = "crates/restichub-compiler" }
 restichub-db = { path = "crates/restichub-db" }

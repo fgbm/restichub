@@ -386,6 +386,15 @@ fn classify_save_error(error: CompileError) -> SaveOutcome {
         | CompileError::DuplicateHookParameter { field, .. } => {
             SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unknown))
         }
+        CompileError::InvalidHookParameter { field, .. } => SaveOutcome::Refusal(
+            ApiError::invalid_field(field.as_str(), Reason::InvalidFormat),
+        ),
+        CompileError::MissingHookParameter { field, .. } => {
+            SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Empty))
+        }
+        CompileError::HookPhaseNotAllowed { field, .. } => {
+            SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unsupported))
+        }
         CompileError::StepsRejected { .. } => {
             SaveOutcome::Refusal(ApiError::invalid_field("steps", Reason::InvalidFormat))
         }

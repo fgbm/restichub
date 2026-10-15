@@ -5,11 +5,14 @@ pub enum AgentCapability {
     ForgetAllTags,
     /// The agent runs the `ls` and `restore` steps. An older agent rejects both (FR-RS-02, FR-RS-03).
     RestoreV1,
+    /// The agent runs the `hook` step from its allow-list and reads the typed hook parameters
+    /// (FR-HK-03). An older agent rejects the step.
+    HooksV1,
 }
 
 impl AgentCapability {
     /// Every capability that this build supports.
-    pub const ALL: [Self; 2] = [Self::ForgetAllTags, Self::RestoreV1];
+    pub const ALL: [Self; 3] = [Self::ForgetAllTags, Self::RestoreV1, Self::HooksV1];
 
     /// The wire name in `AgentHello.capabilities`.
     #[must_use]
@@ -17,6 +20,7 @@ impl AgentCapability {
         match self {
             Self::ForgetAllTags => "forget-all-tags",
             Self::RestoreV1 => "restore-v1",
+            Self::HooksV1 => "hooks-v1",
         }
     }
 
@@ -61,9 +65,14 @@ mod tests {
         names.push("forget-all-tags".to_owned());
         names.push("forget-all-tags".to_owned());
         names.push("restore-v1".to_owned());
+        names.push("hooks-v1".to_owned());
         assert_eq!(
             AgentCapability::parse_list(&names),
-            [AgentCapability::ForgetAllTags, AgentCapability::RestoreV1]
+            [
+                AgentCapability::ForgetAllTags,
+                AgentCapability::RestoreV1,
+                AgentCapability::HooksV1
+            ]
         );
         assert!(AgentCapability::parse_list(&names[..10_000]).is_empty());
     }

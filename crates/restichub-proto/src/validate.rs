@@ -25,9 +25,12 @@ use std::collections::HashSet;
 
 use crate::agent::v1::{
     HookStep, Job, OverwriteMode, RejectReason, RepositoryAccess, SnapshotsFilter, Step,
-    repository_access::BackendCredentials, step,
+    hook_parameter::Typed, repository_access::BackendCredentials, step,
 };
 use crate::signing::Rejection;
+
+/// The most parameters that one hook step carries (FR-HK-02).
+pub const MAX_HOOK_PARAMETERS: usize = 32;
 
 /// The most nodes that one `ls` step returns. The result of a step must fit in a protocol message
 /// (AC-RS-02).
@@ -187,9 +190,23 @@ fn check_hook(job: &Job, hook: &HookStep) -> Result<(), Rejection> {
         return Err(reject(job, RejectReason::Malformed));
     }
 
+    if hook.parameters.len() > MAX_HOOK_PARAMETERS {
+        return Err(reject(job, RejectReason::InvalidHookParameters));
+    }
     let mut names = HashSet::new();
     for parameter in &hook.parameters {
-        if has_forbidden(&parameter.name) || has_forbidden(&parameter.value) {
+        if has_forbidden(&parameter.name) {
+            return Err(reject(job, RejectReason::Malformed));
+        }
+        // Field 2 held an untyped value. A value must have a type (FR-HK-03).
+        if !parameter.value.is_empty() || parameter.typed.is_none() {
+            return Err(reject(job, RejectReason::InvalidHookParameters));
+        }
+        let text = match &parameter.typed {
+            Some(Typed::StringValue(value) | Typed::SecretValue(value)) => Some(value),
+            Some(Typed::IntegerValue(_) | Typed::BooleanValue(_)) | None => None,
+        };
+        if text.is_some_and(|value| has_forbidden(value)) {
             return Err(reject(job, RejectReason::Malformed));
         }
         if !names.insert(parameter.name.as_str()) {
@@ -536,6 +553,92 @@ mod tests {
         SftpCredentials, SnapshotsStep, StatsStep, UnlockAllStep, UnlockStep,
     };
 
+    fn hook_job(parameter: HookParameter) -> Job {
+        job_with(vec![step(step::Kind::Hook(HookStep {
+            hook_id: string("pg_dump"),
+            parameters: vec![parameter],
+            ..HookStep::default()
+        }))])
+    }
+
+    #[test]
+    fn fr_hk_03_rejects_an_untyped_hook_parameter() {
+        let untyped = hook_job(HookParameter {
+            name: string("database"),
+            value: string("app"),
+            typed: None,
+        });
+        assert_eq!(
+            validate_job(&untyped),
+            Err(reject(&untyped, RejectReason::InvalidHookParameters))
+        );
+        let both = hook_job(HookParameter {
+            name: string("database"),
+            value: string("app"),
+            typed: Some(Typed::StringValue(string("app"))),
+        });
+        assert_eq!(
+            validate_job(&both),
+            Err(reject(&both, RejectReason::InvalidHookParameters))
+        );
+        let none = hook_job(HookParameter {
+            name: string("database"),
+            ..HookParameter::default()
+        });
+        assert_eq!(
+            validate_job(&none),
+            Err(reject(&none, RejectReason::InvalidHookParameters))
+        );
+    }
+
+    #[test]
+    fn fr_hk_03_accepts_every_hook_value_type_and_rejects_a_control_character() {
+        for typed in [
+            Typed::StringValue(string("app")),
+            Typed::IntegerValue(-7),
+            Typed::BooleanValue(true),
+            Typed::SecretValue(string("s3cret")),
+        ] {
+            let job = hook_job(HookParameter {
+                name: string("p"),
+                typed: Some(typed),
+                ..HookParameter::default()
+            });
+            assert_eq!(validate_job(&job), Ok(()));
+        }
+        for typed in [
+            Typed::StringValue(string("a\nb")),
+            Typed::SecretValue(string("a\u{0}b")),
+        ] {
+            let job = hook_job(HookParameter {
+                name: string("p"),
+                typed: Some(typed),
+                ..HookParameter::default()
+            });
+            assert!(malformed(&job));
+        }
+    }
+
+    #[test]
+    fn fr_hk_02_rejects_too_many_hook_parameters() {
+        let parameters = (0..=MAX_HOOK_PARAMETERS)
+            .map(|index| HookParameter {
+                name: format!("p{index}"),
+                typed: Some(Typed::BooleanValue(true)),
+                ..HookParameter::default()
+            })
+            .collect();
+        let job = job_with(vec![step(step::Kind::Hook(HookStep {
+            hook_id: string("pg_dump"),
+            parameters,
+            ..HookStep::default()
+        }))]);
+        assert_eq!(
+            validate_job(&job),
+            Err(reject(&job, RejectReason::InvalidHookParameters))
+        );
+    }
+
     const BAD_OPTION: &str = "--password-command=cmd /c calc";
     const BAD_SHORT: &str = "-x";
 
@@ -645,7 +748,8 @@ mod tests {
                 hook_id: string("pg_dump"),
                 parameters: vec![HookParameter {
                     name: string("database"),
-                    value: string("app"),
+                    typed: Some(Typed::StringValue(string("app"))),
+                    ..HookParameter::default()
                 }],
                 ..HookStep::default()
             })),
@@ -792,7 +896,8 @@ mod tests {
                 hook_id: string("pg_dump"),
                 parameters: vec![HookParameter {
                     name: string("database"),
-                    value: string(BAD_OPTION),
+                    typed: Some(Typed::StringValue(string(BAD_OPTION))),
+                    ..HookParameter::default()
                 }],
                 ..HookStep::default()
             })),
@@ -832,7 +937,8 @@ mod tests {
                 hook_id: string("pg_dump"),
                 parameters: vec![HookParameter {
                     name: string("database"),
-                    value: string(newline),
+                    typed: Some(Typed::StringValue(string(newline))),
+                    ..HookParameter::default()
                 }],
                 ..HookStep::default()
             }))]),
@@ -962,11 +1068,13 @@ mod tests {
             parameters: vec![
                 HookParameter {
                     name: string("database"),
-                    value: string("app"),
+                    typed: Some(Typed::StringValue(string("app"))),
+                    ..HookParameter::default()
                 },
                 HookParameter {
                     name: string("database"),
-                    value: string("other"),
+                    typed: Some(Typed::StringValue(string("other"))),
+                    ..HookParameter::default()
                 },
             ],
             ..HookStep::default()

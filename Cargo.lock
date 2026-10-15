@@ -2066,7 +2066,9 @@ name = "restichub-compiler"
 version = "0.0.0"
 dependencies = [
  "proptest",
+ "regex",
  "restichub-proto",
+ "serde",
  "thiserror",
  "time",
  "zeroize",

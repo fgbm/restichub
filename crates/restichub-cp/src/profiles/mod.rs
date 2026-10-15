@@ -581,6 +581,11 @@ fn compile_error_parts(error: &CompileError) -> (String, Reason) {
         | CompileError::DuplicateHookParameter { field, .. } => {
             (field.to_string(), Reason::Unknown)
         }
+        CompileError::InvalidHookParameter { field, .. } => {
+            (field.to_string(), Reason::InvalidFormat)
+        }
+        CompileError::MissingHookParameter { field, .. } => (field.to_string(), Reason::Empty),
+        CompileError::HookPhaseNotAllowed { field, .. } => (field.to_string(), Reason::Unsupported),
         CompileError::UnsupportedOs { field, .. } => (field.to_string(), Reason::Unsupported),
         CompileError::IncompatibleOption { field, .. } => (field.to_string(), Reason::Incompatible),
         CompileError::UnsupportedRestic { .. } => ("agent_id".to_owned(), Reason::Incompatible),

@@ -7,6 +7,7 @@ use time::{Date, Month, OffsetDateTime};
 use super::{Plan, compile};
 use crate::arg;
 use crate::error::CompileError;
+use crate::hook::{AllowListedHook, HookParameterSpec, ParameterKind};
 use crate::job::ValidatedJob;
 use crate::option::ResticOption;
 use crate::preview::preview;
@@ -14,9 +15,7 @@ use crate::profile::{
     BackupOptions, CheckOptions, HookParameter, HookPhase, HookRef, Profile, ProfilePaths,
     Retention, SnapshotFilter,
 };
-use crate::target::{
-    AllowListedHook, Architecture, HookParameterSpec, OperatingSystem, ResticVersion, TargetFacts,
-};
+use crate::target::{Architecture, OperatingSystem, ResticVersion, TargetFacts};
 
 const BAD_OPTION: &str = "--password-command=cmd /c calc";
 const BAD_SHORT: &str = "-x";
@@ -37,8 +36,15 @@ fn allow_list() -> BTreeMap<String, AllowListedHook> {
         AllowListedHook {
             parameters: BTreeMap::from([(
                 "database".to_owned(),
-                HookParameterSpec { secret: false },
+                HookParameterSpec {
+                    kind: ParameterKind::String {
+                        max_length: 64,
+                        pattern: None,
+                    },
+                    required: false,
+                },
             )]),
+            phases: Vec::new(),
         },
     );
     allow_list.insert(
@@ -46,8 +52,46 @@ fn allow_list() -> BTreeMap<String, AllowListedHook> {
         AllowListedHook {
             parameters: BTreeMap::from([(
                 "password".to_owned(),
-                HookParameterSpec { secret: true },
+                HookParameterSpec {
+                    kind: ParameterKind::SecretRef,
+                    required: false,
+                },
             )]),
+            phases: Vec::new(),
+        },
+    );
+    allow_list.insert(
+        "strict".to_owned(),
+        AllowListedHook {
+            parameters: BTreeMap::from([
+                (
+                    "mode".to_owned(),
+                    HookParameterSpec {
+                        kind: ParameterKind::Enum {
+                            values: vec!["full".to_owned(), "fast".to_owned()],
+                        },
+                        required: true,
+                    },
+                ),
+                (
+                    "jobs".to_owned(),
+                    HookParameterSpec {
+                        kind: ParameterKind::Integer {
+                            minimum: Some(1),
+                            maximum: Some(8),
+                        },
+                        required: false,
+                    },
+                ),
+                (
+                    "verbose".to_owned(),
+                    HookParameterSpec {
+                        kind: ParameterKind::Boolean,
+                        required: false,
+                    },
+                ),
+            ]),
+            phases: vec![HookPhase::Before, HookPhase::Finally],
         },
     );
     allow_list
@@ -347,6 +391,100 @@ fn ac_pf_02_missing_hook_is_rejected() {
         error,
         CompileError::UnknownHook { hook_id, .. } if hook_id == "missing"
     ));
+}
+
+#[test]
+fn fr_hk_03_typed_hook_parameters_reach_the_step() {
+    use restichub_proto::agent::v1::hook_parameter::Typed;
+    let mut profile = profile();
+    profile.hooks = vec![hook(
+        "strict",
+        HookPhase::Before,
+        &[("mode", "full"), ("jobs", "4"), ("verbose", "true")],
+    )];
+    let plan = plan(&profile, &target());
+    let Some(step::Kind::Hook(step)) = &plan.steps[0].step.kind else {
+        panic!("the first step is not a hook");
+    };
+    let typed: Vec<_> = step.parameters.iter().map(|p| p.typed.clone()).collect();
+    assert_eq!(
+        typed,
+        vec![
+            Some(Typed::StringValue("full".to_owned())),
+            Some(Typed::IntegerValue(4)),
+            Some(Typed::BooleanValue(true)),
+        ]
+    );
+}
+
+#[test]
+fn fr_hk_03_a_value_outside_the_schema_is_rejected() {
+    for (name, value) in [
+        ("mode", "slow"),
+        ("jobs", "9"),
+        ("jobs", "4; id"),
+        ("verbose", "1"),
+    ] {
+        let mut profile = profile();
+        let mut parameters = vec![("mode", "full")];
+        parameters.retain(|(known, _)| *known != name);
+        parameters.push((name, value));
+        profile.hooks = vec![hook("strict", HookPhase::Before, &parameters)];
+        assert!(
+            matches!(
+                compile(&profile, &target()),
+                Err(CompileError::InvalidHookParameter { name: ref bad, .. }) if bad == name
+            ),
+            "{name}={value}"
+        );
+    }
+}
+
+#[test]
+fn fr_hk_02_a_required_parameter_must_be_set() {
+    let mut profile = profile();
+    profile.hooks = vec![hook("strict", HookPhase::Before, &[])];
+    assert!(matches!(
+        compile(&profile, &target()),
+        Err(CompileError::MissingHookParameter { name, .. }) if name == "mode"
+    ));
+}
+
+#[test]
+fn fr_hk_05_a_hook_runs_only_in_its_phases() {
+    let mut profile = profile();
+    profile.hooks = vec![hook("strict", HookPhase::OnError, &[("mode", "full")])];
+    assert!(matches!(
+        compile(&profile, &target()),
+        Err(CompileError::HookPhaseNotAllowed { hook_id, .. }) if hook_id == "strict"
+    ));
+}
+
+#[test]
+fn fr_hk_05_the_hooks_follow_the_phase_order() {
+    let mut profile = profile();
+    profile.hooks = vec![
+        hook("pg_dump", HookPhase::Finally, &[]),
+        hook("pg_dump", HookPhase::OnError, &[]),
+        hook("pg_dump", HookPhase::After, &[]),
+        hook("pg_dump", HookPhase::Before, &[]),
+        hook("pg_dump", HookPhase::OnSuccess, &[]),
+    ];
+    let plan = plan(&profile, &target());
+    let order: Vec<String> = plan
+        .steps
+        .iter()
+        .map(|planned| match &planned.step.kind {
+            Some(step::Kind::Hook(hook)) => format!("hook-{}", hook.phase),
+            Some(step::Kind::Backup(_)) => "backup".to_owned(),
+            _ => "other".to_owned(),
+        })
+        .collect();
+    // before=1, after=2, on_success=3, on_error=4, finally=5 in the protocol.
+    assert_eq!(
+        order,
+        ["hook-1", "backup", "hook-2", "hook-3", "hook-4", "hook-5"]
+    );
 }
 
 #[test]

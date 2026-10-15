@@ -8,6 +8,7 @@ package restichub.agent.v1;
 import "google/protobuf/timestamp.proto";
 import "restichub/agent/v1/job.proto";
 import "restichub/agent/v1/results.proto";
+import "restichub/agent/v1/steps.proto";
 
 // AgentService is the bidirectional stream between the agent and the control
 // plane. The agent opens the stream (ADR-0008).
@@ -167,14 +168,35 @@ message AgentHello {
   // uses them to suggest a target and to refuse early. The agent checks the
   // target again.
   repeated string restore_roots = 11;
+  // State of the hook allow-list file at the time of the connection
+  // (FR-HK-01, AC-HK-01). An agent that does not know the field leaves it
+  // unspecified.
+  HookAllowListState hook_allow_list_state = 12;
 }
 
-// HookMetadata is the public part of one allow-list hook (FR-HK-04).
+// HookAllowListState tells whether the agent trusts its hook allow-list file.
+enum HookAllowListState {
+  HOOK_ALLOW_LIST_STATE_UNSPECIFIED = 0;
+  // The host has no allow-list file. No hook runs.
+  HOOK_ALLOW_LIST_STATE_ABSENT = 1;
+  // The agent loaded the file. The hooks field lists its hooks.
+  HOOK_ALLOW_LIST_STATE_LOADED = 2;
+  // A user other than root or Administrators can change the file or its
+  // directory. No hook runs.
+  HOOK_ALLOW_LIST_STATE_INSECURE = 3;
+  // The file does not obey the format. No hook runs.
+  HOOK_ALLOW_LIST_STATE_INVALID = 4;
+}
+
+// HookMetadata is the public part of one allow-list hook (FR-HK-04). It holds
+// no executable path, no fixed argument and no environment.
 message HookMetadata {
   // Identifier of the hook (FR-HK-02).
   string hook_id = 1;
   // Name and type of each hook parameter. Values are not present.
   repeated HookParameterSpec parameters = 2;
+  // Phases in which the hook may run. An empty list means every phase.
+  repeated HookPhase phases = 3;
 }
 
 // HookParameterSpec describes one hook parameter (FR-HK-02).
@@ -183,6 +205,18 @@ message HookParameterSpec {
   string name = 1;
   // Type of the parameter.
   HookParameterType type = 2;
+  // Longest string in bytes. Zero for a type that has no length.
+  uint32 max_length = 3;
+  // Regular expression that the whole string must match. Empty for none.
+  string pattern = 4;
+  // Smallest integer. Absent for a type that is not an integer.
+  optional int64 minimum = 5;
+  // Largest integer. Absent for a type that is not an integer.
+  optional int64 maximum = 6;
+  // Allowed values of an enumeration.
+  repeated string enum_values = 7;
+  // True when every use of the hook must set the parameter.
+  bool required = 8;
 }
 
 // HookParameterType is the type of a hook parameter.
@@ -191,6 +225,10 @@ enum HookParameterType {
   HOOK_PARAMETER_TYPE_STRING = 1;
   HOOK_PARAMETER_TYPE_INTEGER = 2;
   HOOK_PARAMETER_TYPE_BOOLEAN = 3;
+  // One value of a closed list.
+  HOOK_PARAMETER_TYPE_ENUM = 4;
+  // Reference to a secret of the control plane (ADR-0017).
+  HOOK_PARAMETER_TYPE_SECRET_REF = 5;
 }
 
 // JobAck acknowledges a job and starts the lease (FR-PR-06).

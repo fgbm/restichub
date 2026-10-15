@@ -18,6 +18,7 @@ const SECRET_MESSAGES: &[&str] = &[
     ".restichub.agent.v1.S3Credentials",
     ".restichub.agent.v1.RestCredentials",
     ".restichub.agent.v1.SftpCredentials",
+    ".restichub.agent.v1.HookParameter",
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

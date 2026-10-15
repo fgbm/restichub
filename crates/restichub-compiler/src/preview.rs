@@ -3,13 +3,15 @@
 
 use std::collections::BTreeMap;
 
-use restichub_proto::agent::v1::{HookPhase, HookStep, Job, RepositoryAccess, Step, step};
+use restichub_proto::agent::v1::{
+    HookPhase, HookStep, Job, RepositoryAccess, Step, hook_parameter::Typed, step,
+};
 use restichub_proto::signing::Rejection;
 
 use crate::arg::{self, ArgError, MASK};
 use crate::compile::{Plan, PlannedStep};
+use crate::hook::{AllowListedHook, HookParameterSpec};
 use crate::job::ValidatedJob;
-use crate::target::AllowListedHook;
 
 /// Why a plan cannot be rendered.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -97,13 +99,16 @@ fn hook_command(hook: &HookStep, allow_list: &BTreeMap<String, AllowListedHook>)
         format!("phase={}", phase_name(hook.phase)),
     ];
     for parameter in &hook.parameters {
-        let secret = schema
-            .and_then(|hook| hook.parameters.get(&parameter.name))
-            .is_some_and(|spec| spec.secret);
-        let value = if secret {
-            MASK.to_owned()
-        } else {
-            quote(&parameter.value)
+        let secret = matches!(parameter.typed, Some(Typed::SecretValue(_)))
+            || schema
+                .and_then(|hook| hook.parameters.get(&parameter.name))
+                .is_some_and(HookParameterSpec::secret);
+        let value = match &parameter.typed {
+            _ if secret => MASK.to_owned(),
+            Some(Typed::StringValue(value)) => quote(value),
+            Some(Typed::IntegerValue(value)) => value.to_string(),
+            Some(Typed::BooleanValue(value)) => value.to_string(),
+            Some(Typed::SecretValue(_)) | None => MASK.to_owned(),
         };
         parts.push(format!("{}={}", parameter.name, value));
     }
