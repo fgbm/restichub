@@ -236,7 +236,7 @@ async fn setup_single(
     // connection while it waits for another. The tenant is absent before the setup and present
     // after it, so the cheap check is monotonic in the safe direction.
     if tenant_exists(state, &tenancy.default_tenant).await? {
-        return Err(ApiError::conflict());
+        return Err(ApiError::setup_already_done());
     }
     let token_id = claim_setup_token(state, setup_token, now).await?;
 
@@ -294,12 +294,12 @@ async fn setup_multi(
     let mut tx = state.db().begin_tenant(PLATFORM_TENANT_ID).await?;
     tx.lock(SETUP_LOCK).await?;
     if users::platform_admin_count(&mut tx).await? > 0 {
-        return Err(ApiError::conflict());
+        return Err(ApiError::setup_already_done());
     }
     let hash = token::hash_token(setup_token);
     let token_id = setup::find_valid(&mut tx, &hash, now).await?;
     let Some(token_id) = token_id else {
-        return Err(ApiError::invalid_credentials());
+        return Err(ApiError::invalid_setup_token());
     };
     let password_hash =
         password::hash_password_limited(&state.auth().hash_semaphore, password.to_owned()).await?;
@@ -316,11 +316,11 @@ async fn setup_multi(
     )
     .await?;
     if !created {
-        return Err(ApiError::conflict());
+        return Err(ApiError::setup_already_done());
     }
     let marked = setup::mark_used(&mut tx, token_id, now).await?;
     if !marked {
-        return Err(ApiError::conflict());
+        return Err(ApiError::setup_already_done());
     }
     // Every other unused token becomes used too, so no old token can run the setup again.
     setup::mark_all_used(&mut tx, now).await?;
@@ -364,7 +364,7 @@ async fn claim_setup_token(
     tx.lock(SETUP_LOCK).await?;
     let token_id = setup::find_valid(&mut tx, &hash, now).await?;
     tx.commit().await?;
-    token_id.ok_or_else(ApiError::invalid_credentials)
+    token_id.ok_or_else(ApiError::invalid_setup_token)
 }
 
 /// Marks the token and every other unused token of the platform tenant as used.
@@ -379,7 +379,7 @@ async fn consume_setup_token(
     tx.lock(SETUP_LOCK).await?;
     let marked = setup::mark_used(&mut tx, token_id, now).await?;
     if !marked {
-        return Err(ApiError::conflict());
+        return Err(ApiError::setup_already_done());
     }
     setup::mark_all_used(&mut tx, now).await?;
     tx.commit().await?;

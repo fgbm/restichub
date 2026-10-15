@@ -85,6 +85,8 @@ pub const QUEUE_LOCK_RETRY_LIMIT_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_LIMIT";
 pub const QUEUE_LOCK_RETRY_BASE_SECS_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_BASE_SECS";
 /// The days for which the control plane keeps the text of a job log (FR-LG-02).
 pub const LOG_RETENTION_DAYS_ENV: &str = "RESTICHUB_LOG_RETENTION_DAYS";
+/// The audit records per minute that the refusals of one agent for one reason can write.
+pub const AUDIT_REFUSAL_LIMIT_ENV: &str = "RESTICHUB_AUDIT_REFUSAL_LIMIT";
 /// The tenancy mode: `single` or `multi` (ADR-0024).
 pub const TENANCY_MODE_ENV: &str = "RESTICHUB_TENANCY_MODE";
 /// The tenant that single mode uses and that the switch from multi mode expects.
@@ -302,6 +304,9 @@ pub struct Config {
     pub queue: QueueConfig,
     /// The days for which the control plane keeps the text of a job log. At least one.
     pub log_retention_days: u32,
+    /// The audit records per minute that the refusals of one agent for one reason can write. At
+    /// least one.
+    pub audit_refusal_limit: u32,
     /// The public origin, the SMTP server and the webhook policy (ADR-0036).
     pub alerts: Arc<AlertsSettings>,
 }
@@ -445,6 +450,10 @@ impl Config {
             });
         }
 
+        let audit_refusal_limit = number(env, AUDIT_REFUSAL_LIMIT_ENV, file.audit_refusal_limit)?
+            .unwrap_or(crate::audit_limit::DEFAULT_LIMIT)
+            .max(1);
+
         let alerts = Arc::new(AlertsSettings::load(
             env,
             file.public_origin,
@@ -518,6 +527,7 @@ impl Config {
             agent_cert_lifetime,
             queue,
             log_retention_days,
+            audit_refusal_limit,
             alerts,
         })
     }
@@ -610,6 +620,7 @@ struct FileConfig {
     agent_cert_lifetime_secs: Option<u64>,
     queue: Option<QueueSection>,
     log_retention_days: Option<u32>,
+    audit_refusal_limit: Option<u32>,
     public_origin: Option<String>,
     smtp: Option<SmtpSection>,
     webhook: Option<WebhookSection>,

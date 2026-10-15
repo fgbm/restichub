@@ -21,6 +21,7 @@ use restichub_proto::agent::v1::{
 use time::OffsetDateTime;
 
 use crate::delivery::DeliveryError;
+use crate::job_result_params::IncompatibleParams;
 use crate::jobs::{delivered_secrets, repository_access, timestamp};
 use crate::profiles::{compiler_profile_from_row, target_facts};
 use crate::server::AppState;
@@ -105,6 +106,8 @@ impl Refusal {
 pub enum BuildError {
     /// The job can never be sent as it is, so it fails with the typed reason.
     Refused(Refusal),
+    /// An option needs a newer restic than the agent has (AC-AG-09).
+    Incompatible(IncompatibleParams),
     /// A database or a key error. The job stays queued and the next pass tries again.
     Transient(String),
 }
@@ -375,7 +378,9 @@ async fn plan_steps(
     })?;
     let compiled = compile(&compiler_profile, &target).map_err(|error| {
         tracing::warn!(job = %job.id, cause = ?error, "the stored profile does not compile");
-        if error.is_script() {
+        if let Some(params) = IncompatibleParams::of(&error) {
+            BuildError::Incompatible(params)
+        } else if error.is_script() {
             BuildError::Refused(Refusal::ServerScriptsDisabled)
         } else {
             BuildError::Refused(Refusal::CompileFailed)

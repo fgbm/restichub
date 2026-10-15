@@ -19,6 +19,7 @@ Set the variables in the environment of the control plane process. For the Docke
 | `RESTICHUB_TENANCY_MODE` | `single` | `single` or `multi`. |
 | `RESTICHUB_TENANCY_DEFAULT_TENANT` | `default` | The name of the organization that the single mode uses. |
 | `RESTICHUB_LOG_RETENTION_DAYS` | `30` | The number of days that the control plane keeps the text of job logs. The smallest value is 1. The largest value is 36500. See [Jobs](/restichub/concepts/jobs/#log-retention). |
+| `RESTICHUB_AUDIT_REFUSAL_LIMIT` | `10` | The number of audit records each minute that the refused messages of one agent can write for one reason. The control plane counts the other refusals and writes one summary record when the minute ends or the connection closes. The smallest value is 1. |
 
 ## Control plane: database and secrets
 

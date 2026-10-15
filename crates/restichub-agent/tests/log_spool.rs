@@ -16,8 +16,13 @@ fn numbered(prefix: &str, range: std::ops::RangeInclusive<usize>) -> Vec<String>
     range.map(|n| format!("{prefix}-{n:04}")).collect()
 }
 
+/// The lines of the test, without the command line that opens the log of a step.
 fn owned(lines: Vec<&str>) -> Vec<String> {
-    lines.into_iter().map(str::to_owned).collect()
+    lines
+        .into_iter()
+        .filter(|line| !line.starts_with("$ "))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Starts a job while a stream is open, then drops the stream: the control plane goes away.
@@ -89,14 +94,15 @@ async fn ac_lg_05_a_restart_sends_the_unacknowledged_spool() {
     let (_tx, mut rx) = connect(&restarted, 4096).await;
     restarted.greeted(true);
     let mut stored = StoredLog::default();
-    collect_lines(&mut rx, &mut stored, 40).await;
-    assert_eq!(stored.lines()[0], "line-0001");
-    assert_eq!(stored.lines()[39], "line-0040");
+    collect_lines(&mut rx, &mut stored, 41).await;
+    let received = owned(stored.lines());
+    assert_eq!(received[0], "line-0001");
+    assert_eq!(received[39], "line-0040");
     // A second connection sends the same chunks again until the control plane acknowledges them.
     let (_tx2, mut rx2) = connect(&restarted, 4096).await;
     restarted.greeted(true);
     let mut again = StoredLog::default();
-    collect_lines(&mut rx2, &mut again, 40).await;
+    collect_lines(&mut rx2, &mut again, 41).await;
 
     restarted.log_ack(&stored.ack("job-restart"));
     wait_for_spool_files(&dir, 0).await;

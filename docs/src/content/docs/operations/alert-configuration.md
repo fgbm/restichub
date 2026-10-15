@@ -23,7 +23,7 @@ The emails and the webhook messages use one language for the whole installation.
 |---|---|---|
 | `notifications.language` | `RESTICHUB_NOTIFICATIONS_LANGUAGE` | `en` (the default) or `ru`. |
 
-A webhook message also holds two fields for a receiver that builds its own text. The field `params` holds the typed values. The field `error_text` holds the scrubbed error text of a job.
+A webhook message also holds fields for a receiver that builds its own text. The field `params` holds the typed values. The field `error_text` holds the stable error code of a job, or the scrubbed error text when the job has no code. The field `error_label` holds the words for a known code in the language of the installation. The field `error_text` never changes with the language. An email shows the words of the language.
 
 ## SMTP server
 

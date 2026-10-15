@@ -98,5 +98,6 @@ async fn ac_in_02_a_small_skew_lets_the_enrollment_request_go_out() {
         .to_string();
 
     assert!(error.contains("refused the enrollment"), "{error}");
+    assert!(error.contains("register again"), "{error}");
     assert_eq!(enrolls.load(Ordering::SeqCst), 1);
 }

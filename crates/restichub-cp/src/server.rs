@@ -227,6 +227,7 @@ pub struct AppState {
     queue: QueueConfig,
     dispatch_wake: Arc<Notify>,
     log_retention_days: u32,
+    audit_limiter: Arc<crate::audit_limit::AuditLimiter>,
     metrics_cache: Arc<SnapshotCache>,
     dashboard_cache: Arc<crate::dashboard::DashboardCache>,
     sender: Option<crate::alerts::sender::Sender>,
@@ -254,6 +255,9 @@ impl AppState {
             queue: QueueConfig::default(),
             dispatch_wake: Arc::new(Notify::new()),
             log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
+            audit_limiter: Arc::new(crate::audit_limit::AuditLimiter::new(
+                crate::audit_limit::DEFAULT_LIMIT,
+            )),
             metrics_cache: Arc::new(SnapshotCache::default()),
             dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
             sender: None,
@@ -275,6 +279,9 @@ impl AppState {
             queue: QueueConfig::default(),
             dispatch_wake: Arc::new(Notify::new()),
             log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
+            audit_limiter: Arc::new(crate::audit_limit::AuditLimiter::new(
+                crate::audit_limit::DEFAULT_LIMIT,
+            )),
             metrics_cache: Arc::new(SnapshotCache::default()),
             dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
             sender: None,
@@ -343,6 +350,17 @@ impl AppState {
     pub fn with_log_retention_days(mut self, days: u32) -> Self {
         self.log_retention_days = days;
         self
+    }
+
+    /// The server passes the audit records per minute that the refusals of one agent for one
+    /// reason can write.
+    pub fn with_audit_refusal_limit(mut self, limit: u32) -> Self {
+        self.audit_limiter = Arc::new(crate::audit_limit::AuditLimiter::new(limit));
+        self
+    }
+
+    pub fn audit_limiter(&self) -> &crate::audit_limit::AuditLimiter {
+        &self.audit_limiter
     }
 
     /// The server passes the alert sender here. It serves the test button of a channel and the

@@ -1679,6 +1679,8 @@ export interface components {
          * @example job_template_delete
          * @example script_run
          * @example profile_hooks_removed
+         * @example job_rejected
+         * @example agent_message_refused
          */
         AuditAction: string;
         AuditItem: {
@@ -2182,7 +2184,7 @@ export interface components {
         /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token";
         /**
          * @description What a failed script does to the job.
          * @enum {string}
@@ -2209,6 +2211,14 @@ export interface components {
          * @enum {string}
          */
         HookPhase: "before" | "after" | "on_success" | "on_error" | "finally";
+        IncompatibleParams: {
+            /** @description The restic version of the agent, such as `0.18.1`. */
+            installed_version: string;
+            /** @description The flag that needs a newer version. Null when the whole restic version is too old. */
+            option?: string | null;
+            /** @description The version that the option needs, such as `0.19.0`. */
+            required_version: string;
+        };
         /** @description The mode and the setup state of the installation. */
         InstanceResponse: {
             /** @description True while the installation has no administrator. */
@@ -2276,7 +2286,7 @@ export interface components {
          *     `result_code` column holds one of these strings. It is stable: do not change a string.
          * @enum {string}
          */
-        JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "access_error" | "cancelled" | "succeeded_with_warnings" | "repository_locked";
+        JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "access_error" | "cancelled" | "succeeded_with_warnings" | "repository_locked" | "incompatible";
         /**
          * @description The lifecycle status of a job (FR-SC-03, FR-SC-07).
          *
@@ -2342,6 +2352,7 @@ export interface components {
              *     It never holds a secret.
              */
             result_message?: string | null;
+            result_params?: components["schemas"]["IncompatibleParams"] | null;
             /** @description In RFC 3339. The earliest time at which the queue sends the job. */
             run_at: string;
             /** @description In RFC 3339. Null until the agent starts the job. */
