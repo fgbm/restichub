@@ -36,6 +36,7 @@
 
 	let query = $state('');
 	let touched = $state(false);
+	let open = $state(false);
 
 	const selectedLabel = $derived(options.find((option) => option.value === value)?.label ?? '');
 	const shown = $derived(
@@ -56,6 +57,7 @@
 	<Primitive.Root
 		type="single"
 		bind:value
+		bind:open
 		items={options}
 		{disabled}
 		{onOpenChange}
@@ -69,6 +71,7 @@
 				aria-invalid={error ? 'true' : undefined}
 				aria-describedby={describedBy}
 				aria-required={required ? 'true' : undefined}
+				onclick={() => (open = true)}
 				oninput={(event) => {
 					touched = true;
 					query = event.currentTarget.value;

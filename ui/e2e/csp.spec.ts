@@ -169,3 +169,24 @@ test('the old users and API tokens addresses open the settings screens', async (
 	await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
 	await expect(page).toHaveTitle('Users · ResticHub');
 });
+
+test('the combobox, the popover and the tooltip need no inline style', async ({ page }) => {
+	const consoleViolations = await watch(page);
+	await page.goto('/components');
+	await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+	const combobox = page.getByRole('combobox', { name: 'Host' });
+	await combobox.click();
+	await page.getByRole('option', { name: 'win-fs01' }).click();
+	await expect(combobox).toHaveValue('win-fs01');
+
+	await page.getByRole('button', { name: 'Retention' }).click();
+	await expect(page.getByText('Keeps 7 daily and 4 weekly snapshots.')).toBeVisible();
+	await page.keyboard.press('Escape');
+
+	await page.locator('.rh-tooltip__trigger').hover();
+	await expect(page.getByText('Copy snapshot ID')).toBeVisible();
+
+	expect(await pageViolations(page)).toEqual([]);
+	expect(consoleViolations).toEqual([]);
+});
