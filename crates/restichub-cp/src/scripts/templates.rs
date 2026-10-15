@@ -708,6 +708,7 @@ pub async fn create_job_template(
     if repo::count_job_templates(&mut tx).await? >= MAX_TEMPLATES {
         return Err(ApiError::conflict());
     }
+    crate::profiles::script_secrets::check_script_secrets(&mut tx, &scripts).await?;
     repo::create_job_template(
         &mut tx,
         &NewJobTemplate {
@@ -774,7 +775,11 @@ pub async fn update_job_template(
         None => current.description.clone(),
     };
     let scripts = match body.scripts {
-        Some(scripts) => validate_template_scripts(scripts)?,
+        Some(scripts) => {
+            let checked = validate_template_scripts(scripts)?;
+            crate::profiles::script_secrets::check_script_secrets(&mut tx, &checked).await?;
+            checked
+        }
         None => current.scripts.clone(),
     };
     let scripts_value = serde_json::to_value(&scripts)

@@ -288,6 +288,7 @@ async fn ac_mn_03_the_metrics_endpoint_passes_a_strict_format_check() {
     for family in [
         "restichub_last_success_timestamp_seconds",
         "restichub_job_duration_seconds",
+        "restichub_job_dispatch_delay_seconds",
         "restichub_agent_up",
         "restichub_repo_lock_held",
         "restichub_jobs_total",
@@ -304,6 +305,11 @@ async fn ac_mn_03_the_metrics_endpoint_passes_a_strict_format_check() {
         );
     }
     check_histograms(&exposition, "restichub_job_duration_seconds");
+    check_histograms(&exposition, "restichub_job_dispatch_delay_seconds");
+    let sent = labelled(&exposition, "restichub_job_dispatch_delay_seconds_count")
+        .next()
+        .expect("the dispatch delay count");
+    assert_eq!(sent.value, 1.0);
 
     let last = labelled(&exposition, "restichub_last_success_timestamp_seconds")
         .next()

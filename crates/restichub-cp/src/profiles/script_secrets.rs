@@ -10,13 +10,13 @@ use crate::validation::Reason;
 /// Refuses a script variable that names a secret which is not a hook secret of the tenant. A
 /// script receives the secret only through its environment, so it may not hand the script a
 /// repository password (ADR-0017, FR-HK-09).
-pub(super) async fn check_script_secrets(
+pub(crate) async fn check_script_secrets(
     tx: &mut TenantTx<'_>,
     scripts: &[crate::scripts::ScriptDef],
 ) -> Result<(), ApiError> {
     for (script, definition) in scripts.iter().enumerate() {
         for (variable, entry) in definition.env.iter().enumerate() {
-            if entry.kind == crate::scripts::EnvKind::SecretRef {
+            if entry.kind == crate::scripts::EnvKind::SecretRef && !entry.value.is_empty() {
                 let field = format!("scripts[{script}].env[{variable}].value");
                 ensure_hook_secret(tx, &entry.value, field).await?;
             }
@@ -34,7 +34,7 @@ async fn ensure_hook_secret(
     let Ok(id) = Uuid::parse_str(value) else {
         return Err(ApiError::invalid_field(field, Reason::InvalidFormat));
     };
-    let metadata = restichub_db::secrets::get(tx, SecretId::from_uuid(id)).await?;
+    let metadata = restichub_db::secrets::get_for_key_share(tx, SecretId::from_uuid(id)).await?;
     match metadata {
         Some(metadata) if metadata.purpose == SecretPurpose::HookSecret.as_str() => Ok(()),
         _ => Err(ApiError::invalid_field(field, Reason::Unknown)),

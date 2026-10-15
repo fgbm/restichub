@@ -1,0 +1,201 @@
+# A reference deployment of ResticHub: one host, Docker Compose, Caddy for TLS.
+#
+# Create the environment file first with `./init-env.sh`. It holds random passwords
+# and the key encryption key. Run this file from the `deploy/reference` directory of
+# a checkout of the release tag.
+
+name: restichub
+
+services:
+  postgres:
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # The small settings suit a host with 2 GB of memory. Raise them on a larger host.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=40
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Creates the cluster roles once and sets the installation passwords. Each `\password`
+  # hashes its password on the client (SCRAM), as `bootstrap-roles.sql` asks, so the server
+  # and its log never see a password in clear text. The shell built-in `printf` passes the
+  # passwords on stdin, so they never appear in the process arguments. `psql` reads a
+  # password from `/dev/tty` when it has one, so `setsid -w` starts it with no controlling
+  # terminal: `docker compose run` with a terminal then reads stdin like `up` does.
+  db-bootstrap:
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE: ${POSTGRES_DB}
+      OWNER_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+      RUNTIME_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+    volumes:
+      - ../../crates/restichub-db/sql/bootstrap-roles.sql:/bootstrap-roles.sql:ro
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=1 -d postgres \
+          -v app_role=restichub_app -v auth_role=restichub_auth \
+          -v owner_role=restichub_owner -v runtime_role=restichub_runtime \
+          -f /bootstrap-roles.sql
+        printf '%s\n' '\password restichub_owner' "$$OWNER_PASSWORD" "$$OWNER_PASSWORD" \
+          '\password restichub_runtime' "$$RUNTIME_PASSWORD" "$$RUNTIME_PASSWORD" \
+          | setsid -w psql -v ON_ERROR_STOP=1 -d postgres >/dev/null
+        psql -v ON_ERROR_STOP=1 -d postgres -v database="$$DATABASE" <<'SQL'
+        ALTER DATABASE :"database" OWNER TO restichub_owner;
+        SQL
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Applies the migrations as the owner login and stops.
+  migrate:
+    image: ${RESTICHUB_IMAGE:?set RESTICHUB_IMAGE in the environment file}
+    restart: 'no'
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_DATABASE_MIGRATION_URL: postgres://restichub_owner@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_MIGRATION_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+    command: ['migrate']
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # Serves the control plane and the embedded web UI.
+  cp:
+    image: ${RESTICHUB_IMAGE:?set RESTICHUB_IMAGE in the environment file}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_LISTEN_ADDR: 0.0.0.0:8080
+      RESTICHUB_DATABASE_URL: postgres://restichub_runtime@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+      # The key encryption key. The control plane verifies it against the stored check at start.
+      RESTICHUB_KEK: ${RESTICHUB_KEK}
+      # The tenancy mode: `single` or `multi`. See ADR-0024.
+      RESTICHUB_TENANCY_MODE: ${RESTICHUB_TENANCY_MODE:-single}
+      # The control plane reads the client address from `X-Forwarded-For` only
+      # when the socket peer is in this list. The list holds the Caddy network.
+      RESTICHUB_TRUSTED_PROXIES: ${RESTICHUB_TRUSTED_PROXIES:-172.28.0.0/24}
+      # The agent listener: gRPC with mTLS and the enrollment endpoint (ADR-0026).
+      RESTICHUB_AGENT_LISTEN: 0.0.0.0:8443
+      # The public address of the listener that an agent reports at enrollment. Set
+      # the host and the port that the agents dial. The placeholder is not a real host.
+      RESTICHUB_AGENT_ENDPOINT: ${RESTICHUB_AGENT_ENDPOINT:-https://agents.example.com:8443}
+      # The alert settings (ADR-0036). A key with no value passes the variable on only when
+      # the environment file sets it, because the control plane reads an empty value as set.
+      RESTICHUB_PUBLIC_ORIGIN:
+      RESTICHUB_NOTIFICATIONS_LANGUAGE:
+      RESTICHUB_SMTP_HOST:
+      RESTICHUB_SMTP_PORT:
+      RESTICHUB_SMTP_SECURITY:
+      RESTICHUB_SMTP_USERNAME:
+      RESTICHUB_SMTP_PASSWORD:
+      RESTICHUB_SMTP_FROM:
+      RESTICHUB_WEBHOOK_ALLOW_HTTP:
+      RESTICHUB_WEBHOOK_ALLOW_NETWORKS:
+    # The control plane is not published on 8080. Caddy reaches it on this network.
+    expose:
+      - '8080'
+    # The agent listener is published directly. The proxy must not terminate its TLS:
+    # the client certificate has to reach the control plane (ADR-0026).
+    ports:
+      - '${RESTICHUB_AGENT_PORT:-8443}:8443'
+    healthcheck:
+      # The runtime image holds no HTTP client. Bash opens a socket and reads the
+      # status line of `/healthz`.
+      test:
+        - CMD-SHELL
+        - bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /healthz HTTP/1.0\r\n\r\n" >&3 && head -n1 <&3 | grep -q 200'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    # The agent listener (gRPC with mTLS and the enrollment endpoint) is published
+    # directly on the control plane. It is not behind Caddy, because the proxy must
+    # not terminate the mTLS of the agents (ADR-0026). See the `ports` above.
+
+  # The reverse proxy. It gets the certificate for the domain automatically.
+  caddy:
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    restart: unless-stopped
+    depends_on:
+      cp:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      RESTICHUB_DOMAIN: ${RESTICHUB_DOMAIN:?set RESTICHUB_DOMAIN in the environment file}
+      RESTICHUB_ACME_EMAIL: ${RESTICHUB_ACME_EMAIL:?set RESTICHUB_ACME_EMAIL in the environment file}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
