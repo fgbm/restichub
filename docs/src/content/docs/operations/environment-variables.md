@@ -54,6 +54,7 @@ Set the variables in the environment of the control plane process. For the Docke
 | `RESTICHUB_AGENT_TLS_CERT_FILE` | none | path | The server certificate of the agent listener. Without it the listener uses a certificate from the installation CA. |
 | `RESTICHUB_AGENT_TLS_KEY_FILE` | none | path | The private key of that certificate. |
 | `RESTICHUB_AGENT_MAX_CONNECTIONS` | `2200` | count | The largest number of open connections on the agent listener. |
+| `RESTICHUB_EVENTS_MAX_STREAMS` | `2000` | count | The largest number of open event streams of the web UI on the server. A browser tab holds one stream. |
 | `RESTICHUB_AGENT_CERT_LIFETIME_SECS` | `2592000` (30 days) | seconds | The lifetime of an agent certificate. From 600 (10 minutes) to 7776000 (90 days). The agent rotates the certificate after two thirds of the lifetime. See [Agent certificate rotation](/restichub/operations/certificate-rotation/). |
 | `RESTICHUB_REENROLL_TOKEN_MAX_TTL_SECS` | `3600` | seconds | The longest life of a token that is bound to a host. See [Enroll a host again](/restichub/operations/enroll-a-host-again/). |
 | `RESTICHUB_REPLACE_ONLINE_WINDOW_SECS` | `300` | seconds | An old host record with a sign of life inside this window is not replaced. |

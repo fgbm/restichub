@@ -156,6 +156,10 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .with_tenancy(config.tenancy.clone())
         .with_queue(config.queue.clone())
         .with_log_retention_days(config.log_retention_days)
+        .with_event_limits(restichub_cp::events::EventLimits {
+            global: config.events_max_streams,
+            ..Default::default()
+        })
         .with_audit_refusal_limit(config.audit_refusal_limit)
         .with_agent_cert_lifetime(config.agent_cert_lifetime)
         .with_pki(
@@ -170,7 +174,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     // is a control plane task, not job scheduling (ADR-0002).
     restichub_cp::alerts::spawn(
         state.db().clone(),
-        alert_sender,
+        alert_sender.with_events(state.events_shared()),
         kek,
         state.auth().clock.clone(),
         restichub_cp::alerts::INTERVAL,
@@ -244,12 +248,15 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     tracing::info!("the control plane is ready");
 
     let mut web_shutdown = shutdown_rx;
+    let events = state.events_shared();
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
         let _ = web_shutdown.changed().await;
+        // An open event stream would hold the graceful shutdown.
+        events.close();
     })
     .await
     .context("the server stopped with an error")

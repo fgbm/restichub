@@ -503,7 +503,9 @@ async fn send(state: &AppState, tenant: TenantId, item: Outgoing) {
     // The agent left between the select and the send, or it came back with fewer capabilities. A
     // first send returns to the queue and the next pass builds it again; a redelivery keeps its
     // lease and the next lease expiry checks it again.
-    if sent != JobSend::Sent && !item.redelivery {
+    if sent == JobSend::Sent {
+        state.events().job_status(tenant, item.id, JobStatus::Sent);
+    } else if !item.redelivery {
         revert(state, tenant, item.id).await;
     }
 }

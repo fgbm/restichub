@@ -60,6 +60,8 @@ pub const AGENT_TLS_KEY_FILE_ENV: &str = "RESTICHUB_AGENT_TLS_KEY_FILE";
 ///
 /// Covers 2000 agents and a margin.
 pub const AGENT_MAX_CONNECTIONS_ENV: &str = "RESTICHUB_AGENT_MAX_CONNECTIONS";
+/// The largest number of open event streams of the web UI on the whole server (FR-UI-02).
+pub const EVENTS_MAX_STREAMS_ENV: &str = "RESTICHUB_EVENTS_MAX_STREAMS";
 /// The lifetime of an agent certificate in seconds (FR-ID-03). The agent rotates it at two thirds
 /// of the lifetime.
 pub const AGENT_CERT_LIFETIME_SECS_ENV: &str = "RESTICHUB_AGENT_CERT_LIFETIME_SECS";
@@ -103,6 +105,7 @@ const DEFAULT_SIGN_IN_IP_RATE: u32 = 30;
 const DEFAULT_TENANT_NAME: &str = "default";
 /// Covers 2000 agents and a margin (ADR-0026).
 const DEFAULT_AGENT_MAX_CONNECTIONS: usize = 2200;
+const DEFAULT_EVENTS_MAX_STREAMS: usize = 2000;
 
 /// The tenancy mode of the installation (ADR-0024).
 ///
@@ -298,6 +301,8 @@ pub struct Config {
     pub agent_tls_key_file: Option<PathBuf>,
     /// The largest number of established connections on the agent listener (ADR-0026).
     pub agent_max_connections: usize,
+    /// The largest number of open event streams of the web UI (FR-UI-02).
+    pub events_max_streams: usize,
     /// The lifetime of an agent certificate (FR-ID-03).
     pub agent_cert_lifetime: Duration,
     /// The limits and the retry settings of the job queue (FR-SC-08).
@@ -433,6 +438,9 @@ impl Config {
             number(env, AGENT_MAX_CONNECTIONS_ENV, file.agent_max_connections)?
                 .unwrap_or(DEFAULT_AGENT_MAX_CONNECTIONS)
                 .max(1);
+        let events_max_streams = number(env, EVENTS_MAX_STREAMS_ENV, file.events_max_streams)?
+            .unwrap_or(DEFAULT_EVENTS_MAX_STREAMS)
+            .max(1);
 
         let agent_cert_lifetime = agent_cert_lifetime(env, file.agent_cert_lifetime_secs)?;
 
@@ -524,6 +532,7 @@ impl Config {
             agent_tls_cert_file,
             agent_tls_key_file,
             agent_max_connections,
+            events_max_streams,
             agent_cert_lifetime,
             queue,
             log_retention_days,
@@ -617,6 +626,7 @@ struct FileConfig {
     agent_tls_cert_file: Option<PathBuf>,
     agent_tls_key_file: Option<PathBuf>,
     agent_max_connections: Option<usize>,
+    events_max_streams: Option<usize>,
     agent_cert_lifetime_secs: Option<u64>,
     queue: Option<QueueSection>,
     log_retention_days: Option<u32>,

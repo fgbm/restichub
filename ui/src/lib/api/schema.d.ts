@@ -399,6 +399,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Streams the events of the tenant of the session.
+         * @description The stream sends a `resync` event first, then one event for each change that the role of the
+         *     reader may see. A comment line keeps the connection alive. The stream ends after a fixed
+         *     lifetime; the browser reconnects with its cookie.
+         */
+        get: operations["events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instance": {
         parameters: {
             query?: never;
@@ -4638,6 +4660,53 @@ export interface operations {
             };
             /** @description The token is used (`token_used`), already revoked (`token_already_revoked`) or expired (`token_expired`). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A `text/event-stream` body. The events are `resync`, `job.progress`, `job.status`, `job.log`, `host.online`, `host.offline` and `alert.changed`. The data of an event holds identifiers and a status only; the client reads the REST API for the rest. The stream ends after at most 15 minutes, and earlier when the session, the token, the account, the role or the tenant no longer gives the access. The client reconnects and reads the state again after the first `resync` event. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The session, the token, the address, the tenant or the server has too many open streams. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Combobox as Primitive } from 'bits-ui';
+	import { t } from '#lib/i18n/index.ts';
 	import Field from './Field.svelte';
 	import Icon from './Icon.svelte';
 	import type { SelectOption } from './types';
@@ -77,7 +78,11 @@
 					query = event.currentTarget.value;
 				}}
 			/>
-			<Primitive.Trigger class="rh-combobox__trigger" aria-label="Show options" tabindex={-1}>
+			<Primitive.Trigger
+				class="rh-combobox__trigger"
+				aria-label={t('common.showOptions')}
+				tabindex={-1}
+			>
 				<Icon name="chevron-down" />
 			</Primitive.Trigger>
 		</div>

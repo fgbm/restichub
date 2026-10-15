@@ -741,6 +741,12 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/api/v1/events",
+        access: Access::Protected(Operation::EventsRead),
+        handler: || routes!(crate::events::events),
+    },
+    Route {
+        method: "get",
         path: "/api/v1/dashboard",
         access: Access::Protected(Operation::DashboardRead),
         handler: || routes!(crate::dashboard::dashboard),
