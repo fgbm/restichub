@@ -102,6 +102,10 @@ pub struct Invocation {
     pub timeout: Duration,
     /// Secret values that the scrubber must remove from the hook output.
     pub secrets: Vec<Zeroizing<String>>,
+    /// The process keeps the environment of the agent, without the restic and ResticHub
+    /// variables. Only a server script sets it: the host trusts its code and the code needs the
+    /// search path of the host (ADR-0037). An allow-list hook never inherits.
+    pub inherit_environment: bool,
 }
 
 impl std::fmt::Debug for Invocation {
@@ -239,6 +243,7 @@ impl Hook {
             working_dir: self.working_dir.clone(),
             timeout: self.timeout,
             secrets,
+            inherit_environment: false,
         })
     }
 }

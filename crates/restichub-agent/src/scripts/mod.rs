@@ -170,6 +170,7 @@ impl ScriptStore {
                 working_dir: scratch.path().to_path_buf(),
                 timeout,
                 secrets,
+                inherit_environment: true,
             },
             scratch: ScratchGuard { _scratch: scratch },
         })
