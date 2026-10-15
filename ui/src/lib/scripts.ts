@@ -2,6 +2,7 @@
  * Pure helpers of the script editor: the form draft of a script, the conversion to the API shape
  * and the rules that the form can check before it sends (FR-HK-09, FR-HK-12, ADR-0037).
  */
+import { getLocale, tOr } from '#lib/i18n/index.ts';
 import type {
 	Agent,
 	HookPhase,
@@ -89,11 +90,38 @@ export function draftOf(script: ScriptDef, open = false): ScriptDraft {
 	};
 }
 
+type TemplateKind = 'script' | 'job';
+interface TemplateText {
+	id: string;
+	builtin: boolean;
+	name: string;
+	description: string;
+}
+
+function builtinText(
+	kind: TemplateKind,
+	template: TemplateText,
+	field: 'name' | 'description'
+): string {
+	if (!template.builtin || getLocale() === 'en') return template[field];
+	const slug = template.id.replace(/^builtin:/, '');
+	return tOr(`builtin.${kind}.${slug}.${field}`, template[field]);
+}
+
+/** The name in the current language. A user-created template keeps its own text, and so does a built-in template without a translation. */
+export function templateName(template: TemplateText, kind: TemplateKind = 'script'): string {
+	return builtinText(kind, template, 'name');
+}
+
+export function templateDescription(template: TemplateText, kind: TemplateKind = 'script'): string {
+	return builtinText(kind, template, 'description');
+}
+
 /** A new script from a template. The parameters become variables with their defaults. */
 export function draftFromTemplate(template: ScriptTemplate): ScriptDraft {
 	return {
 		key: newKey(),
-		name: template.name,
+		name: templateName(template),
 		interpreter: template.interpreter,
 		phase: template.phase,
 		body: template.body,

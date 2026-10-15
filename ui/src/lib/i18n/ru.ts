@@ -1572,5 +1572,54 @@ export const ru: Record<MessageKey, string> = {
 	'pe.sum.maxDefault': 'не дольше {count} (по умолчанию)',
 	'pe.sum.maxNone': 'без ограничения',
 	'pe.sum.maxServer': 'предельное время: по умолчанию сервера',
-	'pe.sum.stallServer': 'без прогресса: по умолчанию сервера'
+	'pe.sum.stallServer': 'без прогресса: по умолчанию сервера',
+	// Built-in script and job templates, keyed by slug
+	'builtin.script.postgres-dump-bash.name': 'Дамп PostgreSQL через pg_dump (Linux)',
+	'builtin.script.postgres-dump-bash.description':
+		'Перед резервным копированием пишет дамп одной базы в пользовательском формате. Нужен pg_dump на хосте.',
+	'builtin.script.postgres-dump-powershell.name': 'Дамп PostgreSQL через pg_dump (Windows)',
+	'builtin.script.postgres-dump-powershell.description':
+		'Перед резервным копированием пишет дамп одной базы в пользовательском формате. Нужен pg_dump.exe в PATH агента.',
+	'builtin.script.mysql-dump-bash.name': 'Дамп MySQL через mysqldump (Linux)',
+	'builtin.script.mysql-dump-bash.description':
+		'Перед резервным копированием пишет согласованный дамп одной базы InnoDB. Нужен mysqldump на хосте.',
+	'builtin.script.mssql-backup-powershell.name': 'Резервная копия MSSQL через sqlcmd (Windows)',
+	'builtin.script.mssql-backup-powershell.description':
+		'Перед копированием файлов выполняет BACKUP DATABASE в файл .bak. Нужен sqlcmd.exe в PATH агента.',
+	'builtin.script.windows-vss-note-powershell.name': 'Заметка о Windows VSS (Windows)',
+	'builtin.script.windows-vss-note-powershell.description':
+		'Перед резервным копированием выводит список записывающих VSS. Сам снимок создаёт параметр профиля для снимка файловой системы.',
+	'builtin.script.service-stop-bash.name': 'Остановка службы (Linux)',
+	'builtin.script.service-stop-bash.description':
+		'Перед резервным копированием останавливает службу systemd. Используйте вместе с шаблоном запуска в фазе finally.',
+	'builtin.script.service-start-bash.name': 'Запуск службы (Linux)',
+	'builtin.script.service-start-bash.description':
+		'Запускает службу systemd. Используйте в фазе finally, чтобы служба запустилась снова, даже если копирование завершилось ошибкой.',
+	'builtin.script.service-stop-powershell.name': 'Остановка службы (Windows)',
+	'builtin.script.service-stop-powershell.description':
+		'Перед резервным копированием останавливает службу Windows. Используйте вместе с шаблоном запуска в фазе finally.',
+	'builtin.script.service-start-powershell.name': 'Запуск службы (Windows)',
+	'builtin.script.service-start-powershell.description':
+		'Запускает службу Windows. Используйте в фазе finally, чтобы служба запустилась снова, даже если копирование завершилось ошибкой.',
+	'builtin.script.disk-space-check-bash.name': 'Проверка свободного места на диске (Linux)',
+	'builtin.script.disk-space-check-bash.description':
+		'Завершается ошибкой, если на пути свободно меньше заданного предела.',
+	'builtin.script.disk-space-check-powershell.name': 'Проверка свободного места на диске (Windows)',
+	'builtin.script.disk-space-check-powershell.description':
+		'Завершается ошибкой, если на диске пути свободно меньше заданного предела.',
+	'builtin.script.run-command-bash.name': 'Выполнить команду (Linux)',
+	'builtin.script.run-command-bash.description':
+		'Выполняет одну командную строку через bash. Для всего, что требует экранирования, используйте отдельный шаблон.',
+	'builtin.script.run-command-powershell.name': 'Выполнить команду (Windows)',
+	'builtin.script.run-command-powershell.description':
+		'Выполняет одну командную строку через PowerShell.',
+	'builtin.job.postgres-linux.name': 'Сервер PostgreSQL (Linux)',
+	'builtin.job.postgres-linux.description':
+		'Проверяет свободное место и перед копированием пишет дамп одной базы. После копирования ничего не удаляет.',
+	'builtin.job.mssql-windows.name': 'Microsoft SQL Server (Windows)',
+	'builtin.job.mssql-windows.description':
+		'Выводит список записывающих VSS и перед копированием файлов сохраняет одну базу в файл .bak.',
+	'builtin.job.stop-start-service-linux.name': 'Приложение со службой (Linux)',
+	'builtin.job.stop-start-service-linux.description':
+		'Останавливает службу перед копированием и запускает её снова в фазе finally.'
 };

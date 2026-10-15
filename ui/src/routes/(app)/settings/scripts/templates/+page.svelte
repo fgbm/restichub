@@ -27,7 +27,7 @@
 	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { INTERPRETERS, PHASES } from '#lib/scripts.ts';
+	import { INTERPRETERS, PHASES, templateDescription, templateName } from '#lib/scripts.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	type ParameterDraft = {
@@ -86,7 +86,12 @@
 	);
 
 	const columns = $derived<TableColumn<ScriptTemplate>[]>([
-		{ key: 'name', header: t('scriptTemplates.name'), value: (row) => row.name, render: nameCell },
+		{
+			key: 'name',
+			header: t('scriptTemplates.name'),
+			value: (row) => templateName(row),
+			render: nameCell
+		},
 		{
 			key: 'interpreter',
 			header: t('scriptTemplates.interpreter'),
@@ -155,8 +160,8 @@
 	}
 
 	function fill(template: ScriptTemplate): void {
-		name = template.name;
-		description = template.description;
+		name = templateName(template);
+		description = templateDescription(template);
 		interpreter = template.interpreter;
 		phase = template.phase;
 		body = template.body;
@@ -190,7 +195,7 @@
 		viewing = false;
 		resetForm();
 		fill(template);
-		name = t('scriptTemplates.copyName', { name: template.name });
+		name = t('scriptTemplates.copyName', { name: templateName(template) });
 		formOpen = true;
 	}
 
@@ -299,8 +304,8 @@
 
 {#snippet nameCell(template: ScriptTemplate)}
 	<span class="template">
-		<span class="template__name">{template.name}</span>
-		<span class="template__meta">{template.description}</span>
+		<span class="template__name">{templateName(template)}</span>
+		<span class="template__meta">{templateDescription(template)}</span>
 	</span>
 {/snippet}
 
@@ -347,7 +352,7 @@
 				<DropdownMenu
 					icon="more"
 					align="end"
-					label={t('scriptTemplates.moreActions', { name: template.name })}
+					label={t('scriptTemplates.moreActions', { name: templateName(template) })}
 					items={actionsFor(template)}
 				/>
 			{/snippet}
@@ -498,7 +503,9 @@
 <ConfirmDialog
 	bind:open={deleteOpen}
 	title={t('scriptTemplates.deleteTitle')}
-	message={t('scriptTemplates.deleteBody', { name: deleteTarget?.name ?? '' })}
+	message={t('scriptTemplates.deleteBody', {
+		name: deleteTarget ? templateName(deleteTarget) : ''
+	})}
 	confirmLabel={t('scriptTemplates.delete')}
 	tone="danger"
 	loading={deleting}

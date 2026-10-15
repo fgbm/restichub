@@ -300,9 +300,11 @@
 				rowKey={(row) => row.id}
 				loading={loading || (pending && snapshots.length === 0)}
 				filterable={false}
+				flush
 				pageSize={6}
 				onRowClick={choose}
 				emptyTitle={view?.state === 'empty' ? t('restore.listNone') : t('restore.listEmpty')}
+				emptyDescription=""
 			/>
 		</Panel>
 
