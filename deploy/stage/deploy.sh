@@ -42,7 +42,9 @@ echo "== create the environment file if it is missing =="
 ssh "$host" "cd '$dir' && { [ -e .env ] || ./bootstrap.sh .env '$domain' '$acme_email'; }"
 
 # The alert settings go to the environment file on the server when the local environment sets
-# them. The values travel on standard input, so no password shows in a process list.
+# them. The values travel on standard input, so no password shows in a process list. Compose reads
+# a single-quoted value as it is, so `$` and `#` in a password stay as typed. Compose has no
+# escape for a single quote inside single quotes, so such a value is refused.
 alert_vars="RESTICHUB_PUBLIC_ORIGIN RESTICHUB_NOTIFICATIONS_LANGUAGE RESTICHUB_SMTP_HOST RESTICHUB_SMTP_PORT RESTICHUB_SMTP_SECURITY RESTICHUB_SMTP_USERNAME RESTICHUB_SMTP_PASSWORD RESTICHUB_SMTP_FROM RESTICHUB_WEBHOOK_ALLOW_HTTP RESTICHUB_WEBHOOK_ALLOW_NETWORKS"
 alert_lines="$(mktemp)"
 trap 'rm -f "$alert_lines"' EXIT
@@ -55,8 +57,12 @@ for name in $alert_vars; do
 		echo "$name holds a line break" >&2
 		exit 1
 		;;
+	*"'"*)
+		echo "$name holds a single quote, which the environment file cannot hold" >&2
+		exit 1
+		;;
 	esac
-	printf '%s=%s\n' "$name" "$value" >>"$alert_lines"
+	printf "%s='%s'\n" "$name" "$value" >>"$alert_lines"
 	alert_names="${alert_names:+$alert_names|}$name"
 done
 if [ -n "$alert_names" ]; then
