@@ -136,7 +136,7 @@ The command downloads the latest release and verifies it. It runs the new binary
 
 The command refuses a release that is older than the installed one. Use `--allow-downgrade` to install it.
 
-If the latest release fails the checks (for example a new major version, a changed signature format or a GitHub rate limit), the command takes the newest supported release of the last ten GitHub releases. If that also fails, it uses the release that this agent build pins. If no release installs, the message lists each failure. Then use the offline files.
+The latest release can fail the checks. Examples are a new major version, a changed signature format or a GitHub rate limit. Then the command takes the newest supported release of the last ten GitHub releases. If that also fails, it uses the release that this agent build pins. If no release installs, the message lists each failure. Then use the offline files.
 
 ### An offline host
 
