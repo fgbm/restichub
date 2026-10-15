@@ -108,8 +108,8 @@ pub struct Timeouts {
     pub keepalive_timeout: Duration,
     /// Idle time before the first probe of a silent connection.
     pub tcp_keepalive: Duration,
-    /// The wait before the agent asks again after the control plane refused a rotation request
-    /// or did not answer it (FR-ID-03).
+    /// The longest wait before the agent asks again after the control plane refused a rotation
+    /// request or did not answer it. A short certificate lifetime shortens it (FR-ID-03).
     pub rotation_retry: Duration,
     /// The upper bound of a random delay before a request that is already due when the stream
     /// opens, so reconnects do not ask for a certificate each time (FR-ID-03).
@@ -487,7 +487,7 @@ impl Upkeep {
         self.pending = None;
         self.timer
             .as_mut()
-            .reset(tokio::time::Instant::now() + timeouts.rotation_retry);
+            .reset(tokio::time::Instant::now() + retry_pause(self.validity, timeouts));
         self.armed = true;
     }
 
@@ -519,9 +519,23 @@ impl Upkeep {
     fn arm_retry_keep_pending(&mut self, timeouts: Timeouts) {
         self.timer
             .as_mut()
-            .reset(tokio::time::Instant::now() + timeouts.rotation_retry);
+            .reset(tokio::time::Instant::now() + retry_pause(self.validity, timeouts));
         self.armed = true;
     }
+}
+
+/// The wait before the next rotation request. A quarter of the lifetime and one minute bound it,
+/// so a lost answer leaves time for a retry before a short-lived certificate expires (FR-ID-03).
+fn retry_pause(validity: Option<(OffsetDateTime, OffsetDateTime)>, timeouts: Timeouts) -> Duration {
+    let Some((not_before, not_after)) = validity else {
+        return timeouts.rotation_retry;
+    };
+    let lifetime: Duration = (not_after - not_before)
+        .try_into()
+        .unwrap_or(Duration::ZERO);
+    timeouts
+        .rotation_retry
+        .min(lifetime / 4 + Duration::from_secs(60))
 }
 
 /// A random duration below `max`. Zero when `max` is zero or the random source fails.
@@ -799,9 +813,14 @@ async fn send_hello(
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use super::{Backoff, endpoint_host, jitter_below, next_attempt, pong, refused, send_hello};
+    use super::{
+        Backoff, Timeouts, endpoint_host, jitter_below, next_attempt, pong, refused, retry_pause,
+        send_hello,
+    };
+    use crate::rotation::rotation_due;
     use restichub_proto::agent::v1::{Ping, agent_message};
     use std::time::Duration;
+    use time::OffsetDateTime;
 
     #[test]
     fn m2_a_stream_that_closes_at_once_grows_the_delay() {
@@ -824,6 +843,27 @@ mod tests {
         for _ in 0..50 {
             assert!(jitter_below(max) < max);
         }
+    }
+
+    #[test]
+    fn fr_id_03_the_retry_after_a_lost_answer_lands_by_the_expiry_of_a_short_certificate() {
+        let not_before = OffsetDateTime::UNIX_EPOCH;
+        let not_after = not_before + time::Duration::minutes(12);
+        let timeouts = Timeouts::default();
+
+        let pause = retry_pause(Some((not_before, not_after)), timeouts);
+
+        assert_eq!(pause, Duration::from_secs(4 * 60));
+        let retry_at =
+            rotation_due(not_before, not_after) + time::Duration::try_from(pause).expect("a pause");
+        assert!(retry_at <= not_after);
+        // The cap holds for a long lifetime and when the validity is unknown.
+        let long = not_before + time::Duration::days(30);
+        assert_eq!(
+            retry_pause(Some((not_before, long)), timeouts),
+            timeouts.rotation_retry
+        );
+        assert_eq!(retry_pause(None, timeouts), timeouts.rotation_retry);
     }
 
     #[test]
