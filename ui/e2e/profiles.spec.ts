@@ -126,9 +126,9 @@ test('the limits section saves the stall timeout and the maximum duration', asyn
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Edit the profile' });
 	await expect(dialog.getByRole('heading', { name: 'Limits' })).toBeVisible();
-	// A backup has no fixed time limit: the stall timeout is 60 minutes and no maximum is set.
+	// A backup has no short fixed limit: the stall timeout is 60 minutes and the maximum is 48 hours.
 	await expect(page.locator('#profile-stall-timeout')).toHaveValue('60');
-	await expect(page.locator('#profile-max-duration')).toHaveValue('');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('2880');
 	await page.locator('#profile-stall-timeout').fill('90');
 	await page.locator('#profile-max-duration').fill('720');
 	await dialog.getByRole('button', { name: 'Save' }).click();
