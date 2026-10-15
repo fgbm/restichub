@@ -69,9 +69,9 @@ The agent runs as root on Linux and as LocalSystem on Windows. It restores only 
 
 To add a root, write one absolute path on each line of the file `/etc/restichub-agent-restore-roots.txt` (Windows: `C:\ProgramData\ResticHub\Agent-restore-roots.txt`). A line that starts with `#` is a comment. Only root or Administrators can own and write the file. The agent ignores a file that another account can change. Create each root directory, then run `restichub-agent install-service` again. The command adds the roots to `ReadWritePaths` of the systemd unit. Without this step, systemd keeps the root read-only and the restore fails.
 
-A root must be writable only by root or Administrators. The root and each existing parent directory must belong to root or Administrators, and no group or other account may write there. The agent ignores a root that does not follow this rule and logs a warning, and `install-service` refuses it. Such an account could replace a directory with a link and lead a restore out of the root.
+A root must be writable only by root or Administrators. The root and each existing parent directory must belong to root or Administrators. No group or other account may write there. The agent ignores a root that does not follow this rule and logs a warning, and `install-service` refuses it. Such an account could replace a directory with a link and lead a restore out of the root.
 
-A root of `/` allows a restore to any directory that is not equal to, a parent of or inside a file of the agent, for example `/srv/data`. The target `/` is not possible, because it holds the files of the agent. Set the root `/` only when you want this. The screen shows a warning for a system path such as `/etc`.
+A root of `/` allows a restore to any other directory, for example `/srv/data`. A file of the agent, a parent of one and a path inside one stay refused. The target `/` is not possible, because it holds the files of the agent. Set the root `/` only when you want this. The screen shows a warning for a system path such as `/etc`.
 
 The agent always refuses a target that is, holds or lies inside its own files. These are the configuration directory, the cache directory, the directory of the agent and restic binaries, and the allow-list. It follows symbolic links first. A root of `/` does not change this rule.
 
