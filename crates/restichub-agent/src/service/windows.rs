@@ -1,6 +1,7 @@
 //! The Windows service of the agent (FR-AG-01, FR-IN-08, AC-IN-03).
 
 use std::ffi::{OsStr, OsString};
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result};

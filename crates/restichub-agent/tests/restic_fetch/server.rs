@@ -29,6 +29,7 @@ impl Reply {
         }
     }
 
+    #[cfg(unix)]
     pub fn status(status: u16) -> Self {
         Self {
             status,

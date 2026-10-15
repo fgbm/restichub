@@ -65,3 +65,7 @@ jobs:
         run: >-
           cargo test -p restichub-agent
           --test restic_jobs --test restic_steps --test restore_real
+      # The agent downloads the latest release itself. This run checks the whole
+      # download chain against the real GitHub release.
+      - name: Test the agent download of the latest restic
+        run: cargo test -p restichub-agent --test restic_fetch -- --ignored

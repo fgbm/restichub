@@ -5,4 +5,6 @@
 mod http;
 #[cfg(unix)]
 mod install;
+#[cfg(unix)]
+mod real_download;
 mod server;

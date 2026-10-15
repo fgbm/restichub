@@ -226,10 +226,17 @@ fn make_executable(_path: &Path) -> Result<()> {
 ///
 /// Returns an error when the binary does not run or prints no version.
 pub fn probe_version(path: &Path) -> Result<String> {
-    let output = std::process::Command::new(path)
+    let mut command = std::process::Command::new(path);
+    command
         .arg("version")
         .env_clear()
-        .stdin(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null());
+    // A Go program on Windows needs the system root to start.
+    #[cfg(windows)]
+    if let Some(root) = std::env::var_os("SystemRoot") {
+        command.env("SystemRoot", root);
+    }
+    let output = command
         .output()
         .with_context(|| format!("cannot run {}", path.display()))?;
     if !output.status.success() {
