@@ -13,7 +13,7 @@ pub const INCOMPATIBLE_CODE: &str = "incompatible";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct IncompatibleParams {
-    /// The restic option that needs a newer version. Null when the whole restic version is too old.
+    /// The flag that needs a newer version. Null when the whole restic version is too old.
     pub option: Option<String>,
     /// The version that the option needs, such as `0.19.0`.
     pub required_version: String,

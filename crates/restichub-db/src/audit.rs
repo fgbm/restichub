@@ -160,9 +160,10 @@ pub enum AuditAction {
     ScriptRun,
     /// A migration dropped the hooks of a profile (ADR-0040).
     ProfileHooksRemoved,
+    /// The agent refused a signed job. The record holds the typed reason (AC-PR-01).
     JobRejected,
-    /// An agent sent a message for a job of another agent or for a job that it cannot hold
-    /// (AC-PR-05).
+    /// An agent sent a message for a job of another agent, for an unknown job or for a job that it
+    /// cannot hold (AC-PR-05).
     AgentMessageRefused,
     /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),

@@ -1,6 +1,6 @@
 //! The audit records of the messages that the control plane refuses (AC-PR-01, AC-PR-05).
 //!
-//! The audit log only grows, so every record passes the [`AuditLimiter`] of the state. A record
+//! The audit log only grows, so every record passes the [`crate::audit_limit::AuditLimiter`] of the state. A record
 //! holds the message kind and the claimed job, never the payload.
 
 use std::time::Instant;

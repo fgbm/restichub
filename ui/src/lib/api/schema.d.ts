@@ -2214,7 +2214,7 @@ export interface components {
         IncompatibleParams: {
             /** @description The restic version of the agent, such as `0.18.1`. */
             installed_version: string;
-            /** @description The restic option that needs a newer version. Null when the whole restic version is too old. */
+            /** @description The flag that needs a newer version. Null when the whole restic version is too old. */
             option?: string | null;
             /** @description The version that the option needs, such as `0.19.0`. */
             required_version: string;

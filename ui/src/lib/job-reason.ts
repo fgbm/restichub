@@ -15,12 +15,12 @@ export function jobReason(job: ReasonSource): string | null {
 	const params = job.result_params;
 	if (code === 'incompatible' && params) {
 		return params.option
-			? t('jobs.reason.incompatibleOption', {
+			? t('jobs.incompatible.option', {
 					option: params.option,
 					required: params.required_version,
 					installed: params.installed_version
 				})
-			: t('jobs.reason.incompatibleVersion', {
+			: t('jobs.incompatible.version', {
 					required: params.required_version,
 					installed: params.installed_version
 				});

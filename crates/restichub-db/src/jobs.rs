@@ -165,7 +165,6 @@ pub struct JobOutcome {
     pub result_code: JobResultCode,
     /// A machine-readable error code from the agent. Never a secret.
     pub result_message: Option<String>,
-    /// The typed values behind `result_message`.
     pub result_params: Option<serde_json::Value>,
 }
 

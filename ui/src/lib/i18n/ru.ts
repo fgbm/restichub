@@ -735,9 +735,12 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.errorCode.job_invalid': 'задание некорректно',
 	'jobs.errorCode.unsupported_kind': 'неподдерживаемый вид задания',
 	'jobs.errorCode.incompatible': 'restic агента не поддерживает опцию',
-	'jobs.reason.incompatible': 'Версия restic на агенте не подходит для этого задания. Обновите restic на хосте.',
-	'jobs.reason.incompatibleOption': 'Параметру {option} нужен restic {required}. На агенте restic {installed}.',
-	'jobs.reason.incompatibleVersion': 'На агенте restic {installed}. ResticHub нужен restic {required} или новее.',
+	'jobs.reason.incompatible':
+		'Версия restic на агенте не подходит для этого задания. Обновите restic на хосте.',
+	'jobs.incompatible.option':
+		'Параметру {option} нужен restic {required}. На агенте restic {installed}.',
+	'jobs.incompatible.version':
+		'На агенте restic {installed}. ResticHub нужен restic {required} или новее.',
 	'jobs.reason.interrupted': 'Прервано: агент перезапустился во время скриптов',
 	'jobs.reason.timed_out': 'Задание выполнялось дольше предельной длительности.',
 	'jobs.reason.stalled':

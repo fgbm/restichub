@@ -79,7 +79,6 @@ pub trait ServiceManager {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostService;
 
-/// The service manager supports Linux and Windows only.
 #[cfg(not(any(target_os = "linux", windows)))]
 const UNSUPPORTED_SERVICE: &str = "this operating system has no service support; run the agent in the foreground with: restichub-agent run";
 
