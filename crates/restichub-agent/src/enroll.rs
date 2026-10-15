@@ -19,6 +19,8 @@ use hyper_util::rt::TokioIo;
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pki_types::{CertificateDer, ServerName};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc2822;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
@@ -118,7 +120,7 @@ impl Client {
             restic_version: &facts.restic_version,
         };
         let body = serde_json::to_vec(&request).context("cannot serialize the request")?;
-        let response = self.post(&origin, body).await?;
+        let response = self.post(&origin, hyper::Method::POST, body).await?;
         match response.status {
             201 => parse_response(&response.body),
             429 => bail!(
@@ -132,13 +134,37 @@ impl Client {
         }
     }
 
-    async fn post(&self, origin: &Origin, body: Vec<u8>) -> Result<HttpResponse> {
-        tokio::time::timeout(REQUEST_TIMEOUT, self.request(origin, body))
+    /// Reads the clock of the control plane from the `Date` header of an unauthenticated request.
+    ///
+    /// The request is a `GET` on the enrollment route. The route answers it with a refusal, never
+    /// with an enrollment, so no token is used. The answer is `None` when the request fails or the
+    /// header is absent or unreadable; the enrollment itself reports a network failure.
+    pub async fn server_time(&self, url: &str) -> Option<OffsetDateTime> {
+        let origin = Origin::parse(url).ok()?;
+        let response = self
+            .post(&origin, hyper::Method::GET, Vec::new())
+            .await
+            .ok()?;
+        OffsetDateTime::parse(response.date.as_deref()?, &Rfc2822).ok()
+    }
+
+    async fn post(
+        &self,
+        origin: &Origin,
+        method: hyper::Method,
+        body: Vec<u8>,
+    ) -> Result<HttpResponse> {
+        tokio::time::timeout(REQUEST_TIMEOUT, self.request(origin, method, body))
             .await
             .map_err(|_| anyhow::anyhow!("the enrollment request timed out"))?
     }
 
-    async fn request(&self, origin: &Origin, body: Vec<u8>) -> Result<HttpResponse> {
+    async fn request(
+        &self,
+        origin: &Origin,
+        method: hyper::Method,
+        body: Vec<u8>,
+    ) -> Result<HttpResponse> {
         let tcp = tokio::time::timeout(
             CONNECT_TIMEOUT,
             TcpStream::connect((origin.host.as_str(), origin.port)),
@@ -161,7 +187,7 @@ impl Client {
             let _ = connection.await;
         });
         let request = hyper::Request::builder()
-            .method(hyper::Method::POST)
+            .method(method)
             .uri(ENROLL_PATH)
             .header(header::HOST, &origin.authority)
             .header(header::CONTENT_TYPE, "application/json")
@@ -178,6 +204,11 @@ impl Client {
             .get(header::RETRY_AFTER)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<u64>().ok());
+        let date = response
+            .headers()
+            .get(header::DATE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
         let body = Limited::new(response.into_body(), MAX_RESPONSE_BYTES)
             .collect()
             .await
@@ -192,6 +223,7 @@ impl Client {
         Ok(HttpResponse {
             status,
             retry_after,
+            date,
             body,
         })
     }
@@ -200,6 +232,7 @@ impl Client {
 struct HttpResponse {
     status: u16,
     retry_after: Option<u64>,
+    date: Option<String>,
     body: Vec<u8>,
 }
 
