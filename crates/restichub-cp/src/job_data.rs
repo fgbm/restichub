@@ -9,6 +9,7 @@
 //! again after a restart (AC-PR-07). All writes are idempotent.
 
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 use restichub_db::job_logs::NewChunk;
 use restichub_db::job_steps::{
@@ -26,6 +27,7 @@ use time::OffsetDateTime;
 use crate::browse;
 use crate::jobs::parse_job_id_value;
 use crate::log_store::{DatabaseLogStore, LogStore, MAX_CHUNK_BYTES, lines_of};
+use crate::progress_throttle::Admit;
 use crate::server::AppState;
 
 const MAX_STEP_ID_LEN: usize = 64;
@@ -66,20 +68,51 @@ pub async fn handle_progress(
             .collect(),
         updated_at: now,
     };
+    let update = ProgressUpdate { tenant, agent, row };
+    match state
+        .progress_throttle()
+        .admit(job_id, update, Instant::now())
+    {
+        Admit::WriteNow(update) => write_progress(state, job_id, &update).await,
+        Admit::Held => {}
+        Admit::FlushAfter(delay) => {
+            let state = state.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                let held = state
+                    .progress_throttle()
+                    .take_pending(job_id, Instant::now());
+                if let Some(update) = held {
+                    write_progress(&state, job_id, &update).await;
+                }
+            });
+        }
+    }
+}
+
+/// A progress message that waits for its write.
+#[derive(Debug)]
+pub struct ProgressUpdate {
+    tenant: TenantId,
+    agent: AgentId,
+    row: JobProgress,
+}
+
+async fn write_progress(state: &AppState, job_id: JobId, update: &ProgressUpdate) {
     let cutoff = write_cutoff(state);
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+    let Ok(mut tx) = state.db().begin_tenant(update.tenant).await else {
         tracing::warn!(job = %job_id, "the progress could not open a transaction");
         return;
     };
     let result = async {
-        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
+        let Some(job) = owned_job(&mut tx, job_id, update.agent, cutoff).await? else {
             return Ok(());
         };
         // A job that is not running shows no progress.
         if !matches!(job.status, JobStatus::Sent | JobStatus::Running) {
             return Ok(());
         }
-        job_steps::upsert_progress(&mut tx, job_id, &row).await
+        job_steps::upsert_progress(&mut tx, job_id, &update.row).await
     }
     .await;
     finish(tx, result, job_id, "progress").await;
