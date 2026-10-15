@@ -308,15 +308,40 @@ impl StreamRegistry {
             .unwrap_or(false)
     }
 
-    /// Closes the open streams of the given agents. The batch flush calls it for a revoked or an
-    /// expired row (FR-ID-04, FR-ID-07).
-    fn close_many(&self, agents: &[AgentId]) {
+    /// Closes the open streams that still hold the serial of the snapshot. The batch flush calls it
+    /// for a revoked or an expired row (FR-ID-04, FR-ID-07). A confirmation that changed the serial
+    /// after the snapshot keeps its stream, because the registry query saw the old serial.
+    fn close_many_with_serial(&self, streams: &[(AgentId, String)]) {
         let inner = self.lock();
-        for agent in agents {
-            if let Some(entry) = inner.streams.get(agent) {
+        for (agent, serial) in streams {
+            if let Some(entry) = inner.streams.get(agent)
+                && entry.serial_hex == *serial
+            {
                 let _ = entry.close.send(true);
             }
         }
+    }
+
+    /// Like [`cancel_jobs_and_close`], for a stream that still holds the serial of the snapshot.
+    /// The check and the sends share one lock, so a confirmation cannot slip in between and the
+    /// agent gets no cancellation on a stream that stays (FR-ID-03, FR-ID-04).
+    fn cancel_jobs_and_close_with_serial(
+        &self,
+        agent: AgentId,
+        serial: &str,
+        jobs: &[JobId],
+    ) -> bool {
+        let inner = self.lock();
+        let Some(entry) = inner.streams.get(&agent) else {
+            return false;
+        };
+        if entry.serial_hex != serial {
+            return false;
+        }
+        for job in jobs {
+            let _ = entry.out.try_send(cancel_message(*job));
+        }
+        entry.close.send(true).is_ok()
     }
 
     /// Sends a control message to the open stream of an agent. False when the agent is offline.
@@ -1135,15 +1160,18 @@ impl AgentStreamService {
 /// ends, so the agent gets the cancellations first. True when a stream was open.
 pub fn cancel_jobs_and_close(registry: &StreamRegistry, agent: AgentId, jobs: &[JobId]) -> bool {
     for job in jobs {
-        let message = ControlMessage {
-            payload: Some(control_message::Payload::CancelJob(CancelJob {
-                job_id: job.to_string(),
-                grace_period_seconds: crate::job_api::CANCEL_GRACE_SECONDS,
-            })),
-        };
-        let _ = registry.send_to_agent(agent, message);
+        let _ = registry.send_to_agent(agent, cancel_message(*job));
     }
     registry.close_by_agent(agent)
+}
+
+fn cancel_message(job: JobId) -> ControlMessage {
+    ControlMessage {
+        payload: Some(control_message::Payload::CancelJob(CancelJob {
+            job_id: job.to_string(),
+            grace_period_seconds: crate::job_api::CANCEL_GRACE_SECONDS,
+        })),
+    }
 }
 
 /// Closes the open streams that the registry no longer allows (FR-ID-04).
@@ -1177,7 +1205,12 @@ pub async fn sweep_revoked(state: &AppState) {
         match result {
             Ok(closing) => {
                 for (agent, jobs) in closing {
-                    cancel_jobs_and_close(state.agent_registry(), agent, &jobs);
+                    let Some((_, serial)) = streams.iter().find(|(id, _)| *id == agent) else {
+                        continue;
+                    };
+                    state
+                        .agent_registry()
+                        .cancel_jobs_and_close_with_serial(agent, serial, &jobs);
                 }
             }
             Err(error) => tracing::warn!(cause = ?error, "the revocation sweep failed"),
@@ -1217,13 +1250,12 @@ pub async fn flush_last_seen(db: &Database, registry: &StreamRegistry, now: time
             Ok(updated) => {
                 let _ = tx.commit().await;
                 let updated: HashSet<Uuid> = updated.into_iter().collect();
-                let stale: Vec<AgentId> = entries
-                    .iter()
-                    .map(|(agent, _)| *agent)
-                    .filter(|agent| !updated.contains(&agent.as_uuid()))
+                let stale: Vec<(AgentId, String)> = entries
+                    .into_iter()
+                    .filter(|(agent, _)| !updated.contains(&agent.as_uuid()))
                     .collect();
                 if !stale.is_empty() {
-                    registry.close_many(&stale);
+                    registry.close_many_with_serial(&stale);
                 }
             }
             Err(error) => {
@@ -1270,7 +1302,7 @@ pub fn agent_service(state: AppState) -> AgentServiceServer<AgentStreamService> 
 #[cfg(test)]
 mod tests {
     use super::{StreamRegistry, hex, normalise_serial, parse_identity_uri};
-    use restichub_db::{AgentId, TenantId};
+    use restichub_db::{AgentId, JobId, TenantId};
     use uuid::Uuid;
 
     #[test]
@@ -1307,6 +1339,33 @@ mod tests {
         assert!(registry.set_hello(agent, generation, Vec::new(), Vec::new()));
         assert_eq!(registry.online_agents(), vec![agent]);
         assert!(registry.close_by_agent(agent));
+    }
+
+    /// FR-ID-03: a confirmation that lands between the snapshot and the registry query keeps the
+    /// stream alive and sends no cancellation.
+    #[test]
+    fn fr_id_03_a_confirmation_after_the_snapshot_keeps_the_stream() {
+        let registry = StreamRegistry::new();
+        let agent = AgentId::new();
+        let (close, mut closed) = tokio::sync::watch::channel(false);
+        let (tx, mut out) = tokio::sync::mpsc::channel(4);
+        let generation = registry.open(agent, TenantId::new(), "aa".to_owned(), close, tx);
+        let snapshot = registry.open_streams();
+        assert_eq!(snapshot[0].2, "aa");
+
+        registry.set_serial(agent, generation, "bb".to_owned());
+        let jobs = [JobId::new()];
+        assert!(!registry.cancel_jobs_and_close_with_serial(agent, "aa", &jobs));
+        registry.close_many_with_serial(&[(agent, "aa".to_owned())]);
+        assert!(!*closed.borrow_and_update(), "the stream must stay open");
+        assert!(out.try_recv().is_err(), "no cancellation may be sent");
+
+        assert!(registry.cancel_jobs_and_close_with_serial(agent, "bb", &jobs));
+        assert!(*closed.borrow_and_update());
+        assert!(
+            out.try_recv().is_ok(),
+            "the cancellation precedes the close"
+        );
     }
 
     #[test]
