@@ -33,6 +33,8 @@ pub(crate) struct HelloHooks {
     /// A JSON object that maps a hook identifier to its schema.
     pub(crate) hooks: Value,
     pub(crate) state: HookAllowListState,
+    /// The trust mode for server scripts and the interpreters of the host (FR-HK-08).
+    pub(crate) scripts: crate::scripts::HelloScripts,
 }
 
 /// Reads the hook report of a hello. An agent without the capability `hooks-v1` reports none.
@@ -40,10 +42,12 @@ pub(crate) struct HelloHooks {
 /// A hook with metadata that the control plane cannot use is dropped and logged, so one broken
 /// entry does not hide the others.
 pub(crate) fn from_hello(hello: &AgentHello, capabilities: &[AgentCapability]) -> HelloHooks {
+    let scripts = crate::scripts::from_hello(hello, capabilities);
     if !capabilities.contains(&AgentCapability::HooksV1) {
         return HelloHooks {
             hooks: Value::Object(serde_json::Map::new()),
             state: HookAllowListState::Unknown,
+            scripts,
         };
     }
     let state = match ProtoState::try_from(hello.hook_allow_list_state) {
@@ -72,6 +76,7 @@ pub(crate) fn from_hello(hello: &AgentHello, capabilities: &[AgentCapability]) -
     HelloHooks {
         hooks: Value::Object(hooks),
         state,
+        scripts,
     }
 }
 

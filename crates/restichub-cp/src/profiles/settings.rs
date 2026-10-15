@@ -28,6 +28,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
+use crate::scripts::ScriptDef;
 use crate::validation::{self, Reason};
 
 /// Limit in characters of a profile name. The derived value stays within the column.
@@ -197,6 +198,10 @@ pub struct CreateProfileRequest {
     pub options: BackupOptions,
     #[serde(default)]
     pub hooks: Vec<HookRef>,
+    /// Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
+    /// Admin can set them.
+    #[serde(default)]
+    pub scripts: Vec<ScriptDef>,
     /// Absent when the profile keeps every snapshot.
     #[serde(default)]
     pub retention: Option<Retention>,
@@ -224,6 +229,9 @@ pub struct UpdateProfileRequest {
     pub options: BackupOptions,
     #[serde(default)]
     pub hooks: Vec<HookRef>,
+    /// The full new script list. Only an Admin can change it (FR-HK-12).
+    #[serde(default)]
+    pub scripts: Vec<ScriptDef>,
     #[serde(default)]
     pub retention: Option<Retention>,
     #[serde(default)]
@@ -242,6 +250,7 @@ pub struct ProfileView {
     pub tags: Vec<String>,
     pub options: BackupOptions,
     pub hooks: Vec<HookRef>,
+    pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
     /// In RFC 3339.
@@ -318,6 +327,8 @@ pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, 
     // apart from this one (AC-HK-05).
     let mut compiler_profile = profile.to_compiler_profile();
     compiler_profile.hooks.clear();
+    // Scripts depend on the trust mode of the target agents, which the synthetic target lacks.
+    compiler_profile.scripts.clear();
     let allow_list: BTreeMap<String, AllowListedHook> = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -366,6 +377,7 @@ fn synthetic_target(
         },
         now: time::OffsetDateTime::now_utc(),
         allow_list: allow_list.clone(),
+        server_scripts: restichub_compiler::ServerScripts::default(),
     }
 }
 
@@ -398,6 +410,10 @@ fn classify_save_error(error: CompileError) -> SaveOutcome {
         }
         CompileError::HookPhaseNotAllowed { field, .. } => {
             SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unsupported))
+        }
+        CompileError::ServerScriptsDisabled { field }
+        | CompileError::InterpreterUnavailable { field, .. } => {
+            SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unavailable))
         }
         CompileError::StepsRejected { .. } => {
             SaveOutcome::Refusal(ApiError::invalid_field("steps", Reason::InvalidFormat))
@@ -472,6 +488,7 @@ impl TryFrom<&Profile> for ProfileView {
                 limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
             },
             hooks: hooks_from_row(profile)?,
+            scripts: crate::scripts::from_row(&profile.scripts)?,
             retention: retention_from_row(profile)?,
             check: check_from_row(profile)?,
             created_at: format_time(profile.created_at),
@@ -528,6 +545,7 @@ pub struct ValidatedProfile {
     pub tags: Vec<String>,
     pub options: BackupOptions,
     pub hooks: Vec<HookRef>,
+    pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
 }
@@ -553,6 +571,7 @@ impl ValidatedProfile {
             retention: self.retention_value(),
             check_options: self.check_value(),
             hooks: self.hooks_value(),
+            scripts: self.scripts_value(),
             created_by,
         }
     }
@@ -576,6 +595,7 @@ impl ValidatedProfile {
             retention: self.retention_value(),
             check_options: self.check_value(),
             hooks: self.hooks_value(),
+            scripts: self.scripts_value(),
         }
     }
 
@@ -593,6 +613,10 @@ impl ValidatedProfile {
 
     fn hooks_value(&self) -> Value {
         serde_json::to_value(&self.hooks).unwrap_or_else(|_| json!([]))
+    }
+
+    fn scripts_value(&self) -> Value {
+        serde_json::to_value(&self.scripts).unwrap_or_else(|_| json!([]))
     }
 
     /// The profile as the compiler input (FR-PF-04).
@@ -627,6 +651,11 @@ impl ValidatedProfile {
                 limit_download_kib: self.options.limit_download_kib,
             },
             hooks: self.hooks.iter().map(compiler_hook).collect(),
+            scripts: self
+                .scripts
+                .iter()
+                .map(crate::scripts::compiler_script)
+                .collect(),
             retention: self.retention.as_ref().map(compiler_retention),
             check: self.check.as_ref().map(|check| CompilerCheckOptions {
                 read_data_subset: check.read_data_subset.clone(),
@@ -664,6 +693,7 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
             limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
         },
         hooks: hooks_from_row(profile)?,
+        scripts: crate::scripts::from_row(&profile.scripts)?,
         retention: retention_from_row(profile)?,
         check: check_from_row(profile)?,
     };
@@ -731,6 +761,7 @@ pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, A
         body.tags,
         body.options,
         body.hooks,
+        body.scripts,
         body.retention,
         body.check,
     )
@@ -751,6 +782,7 @@ pub fn validate_update(
         body.tags,
         body.options,
         body.hooks,
+        body.scripts,
         body.retention,
         body.check,
     )
@@ -766,6 +798,7 @@ fn validate_profile(
     tags: Vec<String>,
     options: BackupOptions,
     hooks: Vec<HookRef>,
+    scripts: Vec<ScriptDef>,
     retention: Option<Retention>,
     check: Option<CheckOptions>,
 ) -> Result<ValidatedProfile, ApiError> {
@@ -779,6 +812,7 @@ fn validate_profile(
     let tags = validate_tags("tags", tags)?;
     ensure_count("tags", tags.len(), MAX_TAGS)?;
     let hooks = validate_hooks(hooks)?;
+    let scripts = crate::scripts::validate_scripts(scripts, "scripts")?;
     let retention = match retention {
         Some(retention) => Some(validate_retention(retention)?),
         None => None,
@@ -796,6 +830,7 @@ fn validate_profile(
         tags,
         options,
         hooks,
+        scripts,
         retention,
         check,
     })
@@ -1116,6 +1151,7 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
             "limit_download_kib": profile.options.limit_download_kib,
         },
         "hooks": profile.hooks,
+        "scripts": crate::scripts::audit_value(&profile.scripts),
         "retention": profile.retention,
         "check": profile.check,
     })
@@ -1143,9 +1179,16 @@ pub fn stored_value(profile: &Profile) -> Value {
             "limit_download_kib": profile.limit_download_kib,
         },
         "hooks": profile.hooks,
+        "scripts": stored_scripts_value(&profile.scripts),
         "retention": profile.retention,
         "check": profile.check_options,
     })
+}
+
+/// The stored scripts as the audit diff shows them. A row that does not parse shows as null.
+fn stored_scripts_value(scripts: &Value) -> Value {
+    crate::scripts::from_row(scripts)
+        .map_or(Value::Null, |scripts| crate::scripts::audit_value(&scripts))
 }
 
 fn format_time(value: time::OffsetDateTime) -> String {

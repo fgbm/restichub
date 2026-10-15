@@ -29,6 +29,13 @@ const DEFAULT_LOG_LIMIT: i64 = 500;
 #[derive(Debug, Serialize, ToSchema)]
 pub struct StepView {
     pub step_id: String,
+    /// The kind of the step, such as `backup`, `hook` or `script`. Empty for a job from an older
+    /// version.
+    pub kind: String,
+    /// The name of a script or the identifier of a hook, or empty.
+    pub name: String,
+    /// The phase of a hook or a script, or empty.
+    pub phase: String,
     pub status: StepStatus,
     /// The exit code of restic, or -1 when no process ran.
     pub exit_code: i32,
@@ -44,10 +51,26 @@ pub struct StepView {
     pub output: StepOutput,
 }
 
+impl StepView {
+    fn new(step: &JobStep, planned: &[job_steps::PlannedStep]) -> Self {
+        let described = planned.iter().find(|entry| entry.step_id == step.step_id);
+        let mut view = Self::from(step);
+        if let Some(entry) = described {
+            view.kind.clone_from(&entry.kind);
+            view.name.clone_from(&entry.name);
+            view.phase.clone_from(&entry.phase);
+        }
+        view
+    }
+}
+
 impl From<&JobStep> for StepView {
     fn from(step: &JobStep) -> Self {
         Self {
             step_id: step.step_id.clone(),
+            kind: String::new(),
+            name: String::new(),
+            phase: String::new(),
             status: step.status,
             exit_code: step.exit_code,
             started_at: step.started_at.map(format_time),
@@ -58,6 +81,18 @@ impl From<&JobStep> for StepView {
             output: step.output.clone(),
         }
     }
+}
+
+/// One planned step of a job (FR-HK-11).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlannedStepView {
+    pub step_id: String,
+    /// The kind of the step, such as `backup`, `hook` or `script`. Empty for an older job.
+    pub kind: String,
+    /// The name of a script or the identifier of a hook, or empty.
+    pub name: String,
+    /// The phase of a hook or a script, or empty.
+    pub phase: String,
 }
 
 /// Last progress of the running step. It holds no value once the job ends.
@@ -138,6 +173,9 @@ pub struct JobDetailView {
     /// The identifiers of all steps that the control plane signed into the job, in run order. Empty
     /// before the control plane sent the job. A step that did not start has no entry in `steps`.
     pub planned_steps: Vec<String>,
+    /// The same steps with their kind, name and phase, so the job detail shows every script and
+    /// hook in order before it runs (FR-HK-11).
+    pub planned: Vec<PlannedStepView>,
     /// Ordered by first arrival from the agent.
     pub steps: Vec<StepView>,
     /// Taken from the first step that carries a typed output. Null when no step has one.
@@ -177,7 +215,7 @@ pub async fn get_job(
                 return Ok(None);
             };
             let steps = job_steps::list(tx, job_id).await?;
-            let planned = job_steps::list_planned(tx, job_id).await?;
+            let planned = job_steps::list_planned_described(tx, job_id).await?;
             let progress = job_steps::get_progress(tx, job_id).await?;
             let log = job_logs::state(tx, job_id).await?;
             Ok(Some((detail, steps, planned, progress, log)))
@@ -195,8 +233,20 @@ pub async fn get_job(
     Ok(Json(JobDetailView {
         job: JobView::from(&detail),
         trigger: JobTrigger::of(&detail.job),
-        planned_steps: planned,
-        steps: steps.iter().map(StepView::from).collect(),
+        planned_steps: planned.iter().map(|step| step.step_id.clone()).collect(),
+        steps: steps
+            .iter()
+            .map(|step| StepView::new(step, &planned))
+            .collect(),
+        planned: planned
+            .iter()
+            .map(|step| PlannedStepView {
+                step_id: step.step_id.clone(),
+                kind: step.kind.clone(),
+                name: step.name.clone(),
+                phase: step.phase.clone(),
+            })
+            .collect(),
         summary,
         progress: progress
             .filter(|_| running)
@@ -219,6 +269,9 @@ pub struct LogQuery {
     pub after_seq: Option<i64>,
     /// The most lines in the page, from 1 to 2000. The default is 500.
     pub limit: Option<i64>,
+    /// Reads the lines of one step only, for example `script-0` (FR-HK-11). The default is every
+    /// line of the job. Use an empty value for the lines of the job itself.
+    pub step_id: Option<String>,
 }
 
 /// One line of a job log.
@@ -283,8 +336,17 @@ pub async fn get_job_logs(
     if !exists {
         return Err(ApiError::not_found());
     }
+    if query.step_id.as_deref().is_some_and(|step| step.len() > 64) {
+        return Err(ApiError::invalid_field("step_id", Reason::TooLong));
+    }
     let page = DatabaseLogStore::new(state.db().clone())
-        .read(context.tenant_id, job_id, after_seq, limit)
+        .read(
+            context.tenant_id,
+            job_id,
+            query.step_id.as_deref(),
+            after_seq,
+            limit,
+        )
         .await?;
     let has_more = i64::try_from(page.lines.len()).unwrap_or(i64::MAX) >= limit;
     Ok(Json(LogPageView {

@@ -30,6 +30,13 @@ pub(super) fn fit_steps(
         {
             return Err(Refusal::AgentCapabilityMissing);
         }
+        // An agent that does not know the step would reject it, and the control plane never relies
+        // on that (FR-HK-10).
+        if matches!(step.kind, Some(step::Kind::Script(_)))
+            && !capabilities.contains(&AgentCapability::ScriptsV1)
+        {
+            return Err(Refusal::ServerScriptsDisabled);
+        }
         let Some(step::Kind::Forget(forget)) = step.kind.as_mut() else {
             continue;
         };
@@ -66,7 +73,13 @@ pub(super) fn required_capabilities(steps: &[Step]) -> Vec<AgentCapability> {
     let needs_hooks = steps
         .iter()
         .any(|step| matches!(step.kind, Some(step::Kind::Hook(_))));
+    let needs_scripts = steps
+        .iter()
+        .any(|step| matches!(step.kind, Some(step::Kind::Script(_))));
     let mut required = Vec::new();
+    if needs_scripts {
+        required.push(AgentCapability::ScriptsV1);
+    }
     if needs_hooks {
         required.push(AgentCapability::HooksV1);
     }

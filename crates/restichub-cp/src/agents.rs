@@ -47,6 +47,8 @@ pub(crate) async fn record_hello_facts(
             restore_roots,
             hooks: &hooks.hooks,
             hook_allow_list: hooks.state,
+            server_scripts: hooks.scripts.state,
+            script_interpreters: &hooks.scripts.interpreters,
         };
         repo::set_hello_facts(&mut tx, agent, &facts).await?;
         tx.commit().await
@@ -74,6 +76,11 @@ pub struct AgentView {
     /// The hooks from the allow-list of the host, as the agent reported them (FR-HK-04). The list
     /// holds no path. The control plane cannot change it.
     pub hooks: Vec<crate::hooks::HookView>,
+    /// Whether the host trusts scripts from the control plane (FR-HK-08, ADR-0037). The host
+    /// administrator changes it with `restichub-agent trust-server-scripts`.
+    pub server_scripts: restichub_db::ServerScriptsState,
+    /// The interpreters the agent found, for example `bash`. Empty unless the mode is enabled.
+    pub script_interpreters: Vec<String>,
     /// Lower-case hexadecimal.
     pub certificate_serial: String,
     /// In RFC 3339.
@@ -98,6 +105,8 @@ impl From<&repo::Agent> for AgentView {
             restore_roots: agent.restore_roots.clone(),
             hook_allow_list: agent.hook_allow_list,
             hooks: crate::hooks::views_of(agent),
+            server_scripts: agent.server_scripts,
+            script_interpreters: agent.script_interpreters.clone(),
             certificate_serial: to_hex(&agent.certificate_serial),
             certificate_expires_at: format_time(agent.certificate_expires_at),
             status: agent.status,

@@ -326,13 +326,12 @@ async fn create_repository_job(
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
-    let step_ids: Vec<String> = validated
-        .job()
-        .steps
-        .iter()
-        .map(|step| step.step_id.clone())
-        .collect();
-    restichub_db::job_steps::plan(&mut tx, job_id, &step_ids).await?;
+    restichub_db::job_steps::plan_described(
+        &mut tx,
+        job_id,
+        &planned_steps(&validated.job().steps),
+    )
+    .await?;
     tx.commit().await?;
 
     let signing = state
@@ -511,8 +510,46 @@ fn reject_reason_code(reason: i32) -> &'static str {
         Ok(RejectReason::Busy) => "busy",
         Ok(RejectReason::Internal) => "internal_error",
         Ok(RejectReason::RestoreTargetDenied) => "restore_target_denied",
+        Ok(RejectReason::ServerScriptsDisabled) => "server_scripts_disabled",
+        Ok(RejectReason::InvalidScript) => "invalid_script",
         Ok(RejectReason::Unspecified) | Err(_) => "rejected",
     }
+}
+
+/// The steps of a signed job with their kind, name and phase, for the job detail (FR-HK-11). The
+/// name of a script is the name its author gave; no body and no value leaves with it.
+pub(crate) fn planned_steps(
+    steps: &[restichub_proto::agent::v1::Step],
+) -> Vec<restichub_db::job_steps::PlannedStep> {
+    use restichub_proto::agent::v1::{HookPhase, step};
+    let phase = |wire: i32| match HookPhase::try_from(wire) {
+        Ok(HookPhase::Before) => "before",
+        Ok(HookPhase::After) => "after",
+        Ok(HookPhase::OnSuccess) => "on_success",
+        Ok(HookPhase::OnError) => "on_error",
+        Ok(HookPhase::Finally) => "finally",
+        _ => "",
+    };
+    steps
+        .iter()
+        .map(|planned| {
+            let (kind, name, step_phase) = match planned.kind.as_ref() {
+                Some(step::Kind::Backup(_)) => ("backup", String::new(), ""),
+                Some(step::Kind::Hook(hook)) => ("hook", hook.hook_id.clone(), phase(hook.phase)),
+                Some(step::Kind::Script(script)) => {
+                    ("script", script.name.clone(), phase(script.phase))
+                }
+                Some(_) => ("other", String::new(), ""),
+                None => ("", String::new(), ""),
+            };
+            restichub_db::job_steps::PlannedStep {
+                step_id: planned.step_id.clone(),
+                kind: kind.to_owned(),
+                name,
+                phase: step_phase.to_owned(),
+            }
+        })
+        .collect()
 }
 
 /// Records a `JobResult` from the stream: it updates the job and the repository state (FR-RP-02).

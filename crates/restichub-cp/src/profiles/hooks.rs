@@ -129,6 +129,7 @@ fn hook_target_facts(agent: &Agent, now: OffsetDateTime) -> TargetFacts {
             .unwrap_or(ResticVersion::MIN_SUPPORTED),
         now,
         allow_list: crate::hooks::allow_list_of(agent),
+        server_scripts: crate::scripts::server_scripts_of(agent),
     }
 }
 
@@ -158,6 +159,24 @@ pub(super) fn hook_of<'a>(
     let rest = field.strip_prefix("hooks[")?;
     let (index, _) = rest.split_once(']')?;
     hooks.get(index.parse::<usize>().ok()?)
+}
+
+/// Refuses a script variable that names a secret which is not a hook secret of the tenant. A
+/// script receives the secret only through its environment, so it may not hand the script a
+/// repository password (ADR-0017, FR-HK-09).
+pub(super) async fn check_script_secrets(
+    tx: &mut TenantTx<'_>,
+    scripts: &[crate::scripts::ScriptDef],
+) -> Result<(), ApiError> {
+    for (script, definition) in scripts.iter().enumerate() {
+        for (variable, entry) in definition.env.iter().enumerate() {
+            if entry.kind == crate::scripts::EnvKind::SecretRef {
+                let field = format!("scripts[{script}].env[{variable}].value");
+                ensure_hook_secret(tx, &entry.value, field).await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Refuses a value that is not the identifier of a hook secret of the tenant.

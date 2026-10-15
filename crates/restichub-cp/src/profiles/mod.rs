@@ -169,12 +169,17 @@ pub async fn create_profile(
 ) -> Result<(StatusCode, Json<ProfileResponse>), ApiError> {
     context.authorize(Operation::ProfilesWrite)?;
     let validated = validate_create(body)?;
+    // Code that runs on a host needs the Admin role (FR-HK-12, threat T33).
+    if !validated.scripts.is_empty() {
+        context.authorize(Operation::ScriptsWrite)?;
+    }
     let warnings = save_warnings(&validated)?;
     let profile_id = ProfileId::new();
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     ensure_repository(&mut tx, validated.repository_id).await?;
     hooks::check_profile_hooks(&mut tx, &validated.hooks, None, now).await?;
+    hooks::check_script_secrets(&mut tx, &validated.scripts).await?;
     repo::create(
         &mut tx,
         &validated.new_profile(profile_id, actor_user(&context.actor)),
@@ -233,9 +238,15 @@ pub async fn update_profile(
         return Err(ApiError::not_found());
     };
     let validated = validate_update(body, &current.name)?;
+    // A change of the scripts needs the Admin role. An Operator can still save the other settings
+    // of a profile that holds scripts, when the scripts stay as they are (FR-HK-12).
+    if serde_json::to_value(&validated.scripts).ok().as_ref() != Some(&current.scripts) {
+        context.authorize(Operation::ScriptsWrite)?;
+    }
     let warnings = save_warnings(&validated)?;
     ensure_repository(&mut tx, validated.repository_id).await?;
     hooks::check_profile_hooks(&mut tx, &validated.hooks, Some(profile_id), now).await?;
+    hooks::check_script_secrets(&mut tx, &validated.scripts).await?;
     repo::update(&mut tx, profile_id, &validated.update())
         .await
         .map_err(map_write_error)?;
@@ -444,6 +455,7 @@ pub(crate) fn target_facts(
         restic_version,
         now,
         allow_list: crate::hooks::allow_list_of(agent),
+        server_scripts: crate::scripts::server_scripts_of(agent),
     })
 }
 
@@ -594,6 +606,12 @@ fn compile_error_parts(error: &CompileError) -> (String, Reason) {
         }
         CompileError::MissingHookParameter { field, .. } => (field.to_string(), Reason::Empty),
         CompileError::HookPhaseNotAllowed { field, .. } => (field.to_string(), Reason::Unsupported),
+        CompileError::ServerScriptsDisabled { field } => {
+            (field.to_string(), Reason::ServerScriptsDisabled)
+        }
+        CompileError::InterpreterUnavailable { field, .. } => {
+            (field.to_string(), Reason::Unavailable)
+        }
         CompileError::UnsupportedOs { field, .. } => (field.to_string(), Reason::Unsupported),
         CompileError::IncompatibleOption { field, .. } => (field.to_string(), Reason::Incompatible),
         CompileError::UnsupportedRestic { .. } => ("agent_id".to_owned(), Reason::Incompatible),
