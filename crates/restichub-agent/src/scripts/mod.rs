@@ -3,7 +3,7 @@
 //!
 //! The agent runs the code of a script step as root or LocalSystem, so only the host administrator
 //! decides whether it does. The decision is a small file next to the configuration directory, with
-//! the same ownership rule as the hook allow-list ([`crate::hooks::trust`], AC-HK-08). Without the
+//! the same ownership rule as the other trusted paths ([`crate::trust`], AC-HK-08). Without the
 //! file, or when another account can write it, the mode is off. A job, the control plane and a
 //! self-update cannot change the file.
 //!
@@ -27,9 +27,10 @@ use restichub_proto::agent::v1::{
 };
 use zeroize::Zeroizing;
 
-use crate::hooks::{Invocation, Trust};
+use crate::exec::Invocation;
+use crate::trust::Trust;
 
-pub use setting::{ScriptMode, mode_file, mode_file_for, set_mode};
+pub use setting::{ScriptMode, mode_file, mode_file_for, removed_allow_list_file, set_mode};
 
 /// The time limit of a script whose step names none.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3600);
@@ -199,7 +200,6 @@ impl ScriptStore {
                 working_dir: scratch.path().to_path_buf(),
                 timeout,
                 secrets,
-                inherit_environment: true,
                 search_path: Some(search.value),
             },
             scratch: ScratchGuard { _scratch: scratch },

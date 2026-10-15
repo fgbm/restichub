@@ -34,7 +34,6 @@ function stored(overrides: Partial<Profile> = {}): Profile {
 			limit_upload_kib: 0,
 			limit_download_kib: 0
 		},
-		hooks: [],
 		scripts: [],
 		retention: null,
 		check: null,
@@ -134,12 +133,21 @@ describe('summarize', () => {
 		const sums = summarize(emptyDraft(), '', none);
 		expect(sums.basics.state).toBe('warn');
 		expect(sums.paths).toEqual({ state: 'warn', text: 'No paths set' });
-		expect(sums.excludes).toEqual({ state: 'off', text: 'Off' });
+		expect(sums.excludes).toEqual({ state: 'on', text: '1 pattern' });
 		expect(sums.limits.text).toBe('no progress: server default · longest time: server default');
 		expect(
 			summarize(emptyDraft(), '', none, { stall_timeout_minutes: 30, max_duration_minutes: 90 })
 				.limits.text
 		).toBe('no progress 30m (default) · at most 1h 30m (default)');
+	});
+
+	it('starts a new profile with the WindowsApps exclusion and leaves a stored profile alone', () => {
+		const fresh = emptyDraft();
+		expect(fresh.enabled.excludes).toBe(true);
+		expect(fresh.excludes).toBe('C:\\Users\\*\\AppData\\Local\\Microsoft\\WindowsApps');
+		const old = draftFromProfile(stored({ excludes: [] }));
+		expect(old.excludes).toBe('');
+		expect(old.enabled.excludes).toBe(false);
 	});
 
 	it('sums up a stored profile', () => {
@@ -206,16 +214,14 @@ describe('settingsOf', () => {
 		expect(settingsOf(draft, context).options.max_duration_minutes).toBe(0);
 	});
 
-	it('keeps the stored hooks and the stored scripts of an Operator', () => {
+	it('keeps the stored scripts of an Operator', () => {
 		const existing = stored({
-			hooks: [{ hook_id: 'h', phase: 'before', parameters: [] }],
 			scripts: [{ name: 'S' } as never]
 		});
 		const settings = settingsOf(draftFromProfile(existing), {
 			canEditScripts: false,
 			existing
 		});
-		expect(settings.hooks).toEqual(existing.hooks);
 		expect(settings.scripts).toEqual(existing.scripts);
 	});
 

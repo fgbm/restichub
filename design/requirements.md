@@ -17,8 +17,8 @@ Each requirement has an ID. Acceptance criteria refer to these IDs. See [accepta
 | D1 | ResticHub is a separate open source product under the Apache License 2.0. The main repository is on GitHub. | Documentation, easy installation, signed releases, no telemetry by default, English and Russian user interface. | [0014](adr/0014-license-and-hosting.md) |
 | D2 | Agents access repositories directly. The control plane sends secrets for the duration of one job. The agent does not store them in any form. | An agent that has a password during a job can delete the repository. ResticHub accepts this risk, documents it and decreases it with storage-side controls (NFR-SEC-08). | [0003](adr/0003-direct-repository-access.md) |
 | D3 | High availability is not in the MVP. | The MVP is one control plane instance and PostgreSQL. The design must not block high availability later. | [0018](adr/0018-high-availability-deferred.md) |
-| D4 | ResticHub replaces other file-level backup tools. | Windows and VSS are primary use cases. Application consistency comes from allow-listed hooks. Native database steps are out of scope (see section 5). | [0016](adr/0016-native-database-steps-deferred.md) |
-| D5 | Hooks run from an allow-list on the agent. A script from the control plane runs only on a host with the local trust mode. | The control plane cannot change the allow-list or the trust mode. They are local configuration that the agent keeps on purpose. | [0004](adr/0004-hook-allow-list.md), [0037](adr/0037-server-scripts-on-trusted-hosts.md) |
+| D4 | ResticHub replaces other file-level backup tools. | Windows and VSS are primary use cases. Application consistency comes from scripts on trusted hosts. Native database steps are out of scope (see section 5). | [0016](adr/0016-native-database-steps-deferred.md) |
+| D5 | A script from the control plane runs only on a host with the local trust mode. | The control plane cannot change the trust mode. It is local configuration that the agent keeps on purpose. | [0037](adr/0037-server-scripts-on-trusted-hosts.md), [0040](adr/0040-remove-allow-list-hooks.md) |
 | D6 | Multi-tenancy is mandatory from the first release. | Each object belongs to a tenant. The database schema and the protocol contain the tenant from the first migration. | [0006](adr/0006-multi-tenancy.md) |
 | D7 | One certificate authority and one job signing key serve all tenants. | The agent certificate contains the tenant ID. | [0006](adr/0006-multi-tenancy.md) |
 | D8 | If a scheduled time falls in a DST gap, the job runs once, immediately after the clock change. | Scheduler behavior is deterministic and documented. | [0010](adr/0010-queue-and-scheduler-on-postgresql.md) |
@@ -43,12 +43,12 @@ Each requirement has an ID. Acceptance criteria refer to these IDs. See [accepta
 | Job | One run of a plan. |
 | Step | One atomic command for an agent in a job. |
 | Maintenance agent | The agent that runs `forget`, `prune` and `check` for a repository. |
-| Hook | An allow-listed command on the agent that runs before or after restic. |
+| Script | A command text that the control plane sends to run before or after restic, only on a host with the trust mode. |
 
 **Out of scope:**
 
 - Bare-metal recovery and hypervisor-level virtual machine backup.
-- Native database backup steps (MSSQL, PostgreSQL and others). Use hooks.
+- Native database backup steps (MSSQL, PostgreSQL and others). Use scripts.
 - Own deduplication, encryption or storage format. restic does these tasks.
 - Mount and FUSE.
 
@@ -72,7 +72,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-AG-01 | The agent runs as an operating system service: Windows service as LocalSystem, systemd unit, launchd daemon. | M (Windows, Linux), 1.0 (macOS) |
 | FR-AG-02 | The agent starts no action itself. The only exceptions are the connection to the CP, the heartbeat and the delivery of results. | M |
 | FR-AG-03 | The agent does not store schedules, profiles, repository secrets or job history. | M |
-| FR-AG-04 | The agent stores only the CP address, its private key and certificate, the CP root certificate and the public job signing key. It also stores the hook allow-list and an outbox of results that it did not send yet. The outbox contains no secrets. It also stores a job journal with accepted `job_id` values and their results (ADR-0020). The journal contains no secrets. | M |
+| FR-AG-04 | The agent stores only the CP address, its private key and certificate, the CP root certificate and the public job signing key. It also stores the trust mode file and an outbox of results that it did not send yet. The outbox contains no secrets. It also stores a job journal with accepted `job_id` values and their results (ADR-0020). The journal contains no secrets. | M |
 | FR-AG-05 | The agent executes steps in the specified sequence. A step has no fixed wall-clock limit. The agent stops a step that makes no progress for the stall timeout (default 60 minutes). A profile can set an optional maximum duration for a job (ADR-0039). | M |
 | FR-AG-06 | The agent starts restic as a child process. Secrets go to the child process only through environment variables or a pipe. Secrets never go into command-line arguments. | M |
 | FR-AG-07 | The agent erases secrets from memory after each step. The agent disables crash dumps during a job where the operating system permits it. | 1.0 |
@@ -106,7 +106,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-PR-01 | Steps are typed: one Protocol Buffers message for each step type in a `oneof`. The protocol has no free-form maps or raw restic argument strings. | M |
-| FR-PR-02 | Step types in the MVP: `backup`, `check`, `snapshots`, `ls`, `restore`, `unlock` (stale locks only), `unlock_all` (repository ID only, only from an Admin action with confirmation, FR-SC-06), `forget`, `prune`, `stats`, `hook`. In 1.0: `find`, `dump`, `copy`, `init`, `key_add`, `key_remove`. | M, 1.0 |
+| FR-PR-02 | Step types in the MVP: `backup`, `check`, `snapshots`, `ls`, `restore`, `unlock` (stale locks only), `unlock_all` (repository ID only, only from an Admin action with confirmation, FR-SC-06), `forget`, `prune`, `stats`, `script`. In 1.0: `find`, `dump`, `copy`, `init`, `key_add`, `key_remove`. | M, 1.0 |
 | FR-PR-03 | The CP signs each job with the job signing key (Ed25519). The signature covers `job_id`, `agent_id`, `tenant_id`, `issued_at` and `expires_at`. The signature input has the domain prefix `restichub-job-v1\0` before the serialized `Job` bytes. The agent rejects a job with a bad signature, a different addressee or a lifetime longer than 24 h. The agent also rejects a job with an `issued_at` more than 5 minutes in the future or an expired time. The agent keeps a job journal and returns the stored result of a known `job_id` (ADR-0020). | M |
 | FR-PR-04 | The job signing key is separate from the TLS key and from the database. It is in a file in the MVP and in an HSM or KMS later. | M (file), L (KMS) |
 | FR-PR-05 | Secrets go with the job, protected by mTLS. The agent gets only the secrets of the repositories in that job. | M |
@@ -114,24 +114,20 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-PR-07 | The agent keeps an outbox of results and sends them after it reconnects. | M |
 | FR-PR-08 | The CP does not trust any message from an agent. The agent and tenant identity come only from the mTLS certificate, never from the payload. | M |
 | FR-PR-09 | The protocol has a version. At connection time the agent and the CP agree on capabilities: agent version, restic version, supported step types. | M |
-| FR-PR-10 | The agent puts all positional restic arguments after `--`. The agent passes each option value in the attached form `--flag=value`, never as a separate argument. The CP validates the formats before it signs the job and the agent validates them before execution (ADR-0021). A duplicate or unknown hook parameter name causes `INVALID_HOOK_PARAMETERS`. A step without a known kind causes `UNSUPPORTED_STEP`. The agent never sets an option or environment variable that executes a program from job data. | M |
+| FR-PR-10 | The agent puts all positional restic arguments after `--`. The agent passes each option value in the attached form `--flag=value`, never as a separate argument. The CP validates the formats before it signs the job and the agent validates them before execution (ADR-0021). A step without a known kind causes `UNSUPPORTED_STEP`. The agent never sets an option or environment variable that executes a program from job data. | M |
 | FR-PR-11 | A `KeyUpdate` message contains `key_id`, the public key, the signer key ID, `issued_at` and the revoked key IDs. The current key signs the message with the domain prefix `restichub-key-update-v1\0`. The agent never replaces an existing `key_id` and never adds a revoked key again. A revoked key cannot sign. | M |
 
 ### 3.4. Hooks
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-HK-01 | The allow-list is a file on the agent. Only root or Administrators can write it. The CP, self-update and jobs cannot change it. | M |
-| FR-HK-02 | Each hook has: ID, executable, argument template, parameter schema (type, regular expression, enumeration), timeout, working directory, user account where the operating system permits it. | M |
-| FR-HK-03 | The CP refers to a hook by ID and sends parameters. The agent validates the parameters against the schema and starts the hook without a shell. | M |
-| FR-HK-04 | The agent reports the metadata of its allow-list to the CP. In a profile, the UI lets the user select only hooks that all target agents have. | M |
-| FR-HK-05 | Hook phases: `before`, `after`, `on_success`, `on_error`, `finally`. | M |
-| FR-HK-06 | The package contains example hooks: `pg_dump`, `mysqldump`, service stop and start. They are disabled by default. A host administrator enables them. | 1.0 |
-| FR-HK-07 | A hook can send its output directly to restic without a temporary file (`backup --stdin-from-command`). | 1.0 |
+| FR-HK-01 | The trust mode setting is a file on the agent. Only root or Administrators can write it. The CP, self-update and jobs cannot change it. | M |
+| FR-HK-05 | Script phases: `before`, `after`, `on_success`, `on_error`, `finally`. | M |
+| FR-HK-02 to FR-HK-04, FR-HK-06, FR-HK-07 | Removed by [ADR-0040](adr/0040-remove-allow-list-hooks.md). The allow-list hooks no longer exist. | - |
 | FR-HK-08 | The local trust mode `server_scripts` is off by default. A host administrator turns it on and off with an elevated agent command. The setting file follows the ownership rule of FR-HK-01. The agent reports the mode and its interpreters to the CP. | M |
 | FR-HK-09 | A typed script step has an interpreter, a name, a phase, an order and a timeout. It also has a body of 64 KiB at most, a failure policy and typed environment parameters. A parameter value is a plain string or a secret reference. The agent gives the values to the script as environment variables only. The job signature covers the body. | M |
 | FR-HK-10 | The CP and the agent refuse a script step for a host without the trust mode. The job has a typed reason. | M |
-| FR-HK-11 | Each script and each hook is a job step with its own status, start time, duration, exit code and log. The job detail shows the steps in order. | M |
+| FR-HK-11 | Each script is a job step with its own status, start time, duration, exit code and log. The job detail shows the steps in order. | M |
 | FR-HK-12 | An Admin edits scripts, script templates and job templates. Each change and each run is in the audit log with the SHA-256 hash of the script. The CP ships read-only built-in templates. | M |
 
 ### 3.5. Repositories and secrets
@@ -152,11 +148,11 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-PF-01 | A profile contains the repository, paths for each operating system, excludes, exclude files and tags. It also contains backup options (VSS, one file system, exclude caches, rate limits), job limits (stall timeout, maximum duration), hooks, retention and check options (`read-data-subset`). | M |
+| FR-PF-01 | A profile contains the repository, paths for each operating system, excludes, exclude files and tags. It also contains backup options (VSS, one file system, exclude caches, rate limits), job limits (stall timeout, maximum duration), scripts, retention and check options (`read-data-subset`). | M |
 | FR-PF-02 | Inheritance with `extends`: deep merge, cycle detection, explicit merge rules for lists (replace or append). | 1.0 |
 | FR-PF-03 | Variables: host name, operating system, agent name, agent labels, date. | M |
 | FR-PF-04 | The compiler converts a profile to a sequence of steps. The UI shows a preview: the steps and the equivalent restic command line with masked secrets. | M |
-| FR-PF-05 | Validation before save: references, hooks on the target agents, cron expressions, options against the operating system and the restic version. | M |
+| FR-PF-05 | Validation before save: references, scripts on the target agents (trust mode), cron expressions, options against the operating system and the restic version. | M |
 | FR-PF-06 | Profile revisions with diff and rollback. Each job refers to the revision that the compiler used. | 1.0 |
 | FR-PF-07 | Import and export of profiles in YAML. Import of a subset of resticprofile configuration for migration. | 1.0 (YAML), L (resticprofile) |
 | FR-PF-08 | Profile groups with sequential or parallel run. | 1.0 |
@@ -260,9 +256,9 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 |---|---|
 | NFR-SEC-01 | mTLS (TLS 1.3, rustls) between the agent and the CP. HTTPS for the UI and the API. |
 | NFR-SEC-02 | The threat model is in the repository. The maintainers review it before each release. |
-| NFR-SEC-03 | A compromised CP cannot execute arbitrary code on agents, because of the allow-list and the separate job signing key. |
+| NFR-SEC-03 | A compromised CP cannot execute arbitrary code on agents, because of the local trust mode and the separate job signing key. |
 | NFR-SEC-04 | A compromised CP database without the KEK does not disclose secrets. Without the job signing key it does not let an attacker forge jobs. |
-| NFR-SEC-05 | The agent does not write secrets to logs, files or process arguments. The agent masks secrets in restic and hook logs. |
+| NFR-SEC-05 | The agent does not write secrets to logs, files or process arguments. The agent masks secrets in restic and script logs. |
 | NFR-SEC-06 | Releases are signed (cosign or minisign, Authenticode for Windows, notarization for macOS). Builds are reproducible. Each release has an SBOM. |
 | NFR-SEC-07 | CI checks dependencies with `cargo deny` and `npm audit`. |
 | NFR-SEC-08 | The documentation describes the residual risk of D2 and the controls. The controls are bucket versioning, lifecycle rules, separate backend credentials for each host group and a dedicated maintenance agent. Another control is a secondary copy (`copy`) to a repository that agents cannot access. |

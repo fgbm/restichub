@@ -16,7 +16,7 @@ use restichub_db::{
 };
 use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{
-    Job as ProtoJob, Step, UnlockAllStep, UnlockStep, hook_parameter::Typed, script_env, step,
+    Job as ProtoJob, Step, UnlockAllStep, UnlockStep, script_env, step,
 };
 use time::OffsetDateTime;
 
@@ -56,8 +56,6 @@ pub enum Refusal {
     UnsupportedKind,
     SecretUnavailable,
     JobInvalid,
-    /// The agent no longer reports a hook of the profile, or reports another schema (AC-HK-05).
-    HookUnavailable,
     /// The host of the agent did not turn on the trust mode for server scripts, or lacks the
     /// interpreter (AC-HK-07).
     ServerScriptsDisabled,
@@ -82,7 +80,6 @@ impl Refusal {
             Self::UnsupportedKind => "unsupported_kind",
             Self::SecretUnavailable => "secret_unavailable",
             Self::JobInvalid => "job_invalid",
-            Self::HookUnavailable => "hook_unavailable",
             Self::ServerScriptsDisabled => "server_scripts_disabled",
         }
     }
@@ -97,7 +94,6 @@ impl Refusal {
             | Self::StepMissing
             | Self::RequestMissing
             | Self::SecretUnavailable
-            | Self::HookUnavailable
             | Self::ServerScriptsDisabled => JobResultCode::ConfigError,
             _ => JobResultCode::Failed,
         }
@@ -241,8 +237,8 @@ pub async fn build(
     Ok(Built { job, secrets })
 }
 
-/// Replaces the secret reference of each hook parameter with the value of the secret and returns
-/// the secrets it read (FR-HK-03, ADR-0017).
+/// Replaces the secret reference of each script variable with the value of the secret and returns
+/// the secrets it read (FR-HK-09, ADR-0017).
 ///
 /// The compiler leaves the identifier of the secret in the step. Only a secret of the purpose
 /// `hook_secret` passes, and each read writes a `secret_delivered` record in the transaction of the
@@ -259,23 +255,12 @@ async fn resolve_hook_secrets(
     let mut read = Vec::new();
     for step in steps {
         let mut references: Vec<&mut String> = Vec::new();
-        match step.kind.as_mut() {
-            Some(step::Kind::Hook(hook)) => {
-                for parameter in &mut hook.parameters {
-                    if let Some(Typed::SecretValue(reference)) = &mut parameter.typed {
-                        references.push(reference);
-                    }
+        if let Some(step::Kind::Script(script)) = step.kind.as_mut() {
+            for variable in &mut script.env {
+                if let Some(script_env::Value::SecretValue(reference)) = &mut variable.value {
+                    references.push(reference);
                 }
             }
-            // A script variable follows the rule of a hook parameter (FR-HK-09).
-            Some(step::Kind::Script(script)) => {
-                for variable in &mut script.env {
-                    if let Some(script_env::Value::SecretValue(reference)) = &mut variable.value {
-                        references.push(reference);
-                    }
-                }
-            }
-            _ => {}
         }
         for reference in references {
             let id = uuid::Uuid::parse_str(reference)
@@ -390,9 +375,7 @@ async fn plan_steps(
     })?;
     let compiled = compile(&compiler_profile, &target).map_err(|error| {
         tracing::warn!(job = %job.id, cause = ?error, "the stored profile does not compile");
-        if error.is_hook() {
-            BuildError::Refused(Refusal::HookUnavailable)
-        } else if error.is_script() {
+        if error.is_script() {
             BuildError::Refused(Refusal::ServerScriptsDisabled)
         } else {
             BuildError::Refused(Refusal::CompileFailed)

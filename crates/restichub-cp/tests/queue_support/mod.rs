@@ -302,8 +302,12 @@ impl Env {
             .await
     }
 
-    /// Like [`Env::connect_agent`], for an agent that reports a hook allow-list (FR-HK-04).
-    pub async fn connect_agent_reporting(&self, hostname: &str, report: HookReport) -> FakeAgent {
+    /// Like [`Env::connect_agent`], for an agent that reports the trust mode for scripts (FR-HK-08).
+    pub async fn connect_agent_reporting(
+        &self,
+        hostname: &str,
+        report: ScriptsReport,
+    ) -> FakeAgent {
         let capabilities = restichub_proto::AgentCapability::ALL
             .iter()
             .map(|capability| capability.as_str().to_owned())
@@ -318,13 +322,13 @@ impl Env {
         .await
     }
 
-    /// Opens a new stream of an enrolled identity with another hook report, as a restart after a
-    /// change of the allow-list does.
+    /// Opens a new stream of an enrolled identity with another trust mode report, as a restart
+    /// after a change of the trust mode does.
     pub async fn reconnect_agent_reporting(
         &self,
         agent: &FakeAgent,
         capabilities: Vec<String>,
-        report: HookReport,
+        report: ScriptsReport,
     ) -> FakeAgent {
         self.open_agent_stream(
             agent.identity.clone(),
@@ -363,7 +367,7 @@ impl Env {
         identity: EnrolledIdentity,
         capabilities: Vec<String>,
         roots: Vec<String>,
-        report: Option<HookReport>,
+        report: Option<ScriptsReport>,
     ) -> FakeAgent {
         open_stream_on(
             &self.listener,
@@ -720,7 +724,7 @@ async fn open_stream_on(
     identity: EnrolledIdentity,
     capabilities: Vec<String>,
     roots: Vec<String>,
-    report: Option<HookReport>,
+    report: Option<ScriptsReport>,
     held: Vec<String>,
 ) -> FakeAgent {
     let (tx, mut inbound) = raw_stream(listener, &identity)
@@ -762,52 +766,43 @@ pub fn default_restore_roots() -> Vec<String> {
     vec![std::env::temp_dir().to_string_lossy().into_owned()]
 }
 
-/// The hook allow-list that a fake agent reports in its hello (FR-HK-04).
+/// The trust mode and the interpreters that a fake agent reports in its hello (FR-HK-08).
 #[derive(Clone)]
-pub struct HookReport {
-    pub state: restichub_proto::agent::v1::HookAllowListState,
-    pub hooks: Vec<restichub_proto::agent::v1::HookMetadata>,
-    /// Trust mode and interpreters (FR-HK-08).
-    pub scripts: Option<(
-        restichub_proto::agent::v1::ServerScriptsState,
-        Vec<restichub_proto::agent::v1::ScriptInterpreter>,
-    )>,
+pub struct ScriptsReport {
+    pub state: restichub_proto::agent::v1::ServerScriptsState,
+    pub interpreters: Vec<restichub_proto::agent::v1::ScriptInterpreter>,
 }
 
-/// The report of a host without a hook allow-list and with the trust mode on or off (FR-HK-08).
+/// The report of a host with the trust mode on or off (FR-HK-08).
 pub fn scripts_report(
     enabled: bool,
     interpreters: Vec<restichub_proto::agent::v1::ScriptInterpreter>,
-) -> HookReport {
-    use restichub_proto::agent::v1::{HookAllowListState, ServerScriptsState};
-    HookReport {
-        state: HookAllowListState::Absent,
-        hooks: Vec::new(),
-        scripts: Some((
-            if enabled {
-                ServerScriptsState::Enabled
-            } else {
-                ServerScriptsState::Disabled
-            },
-            interpreters,
-        )),
+) -> ScriptsReport {
+    use restichub_proto::agent::v1::ServerScriptsState;
+    ScriptsReport {
+        state: if enabled {
+            ServerScriptsState::Enabled
+        } else {
+            ServerScriptsState::Disabled
+        },
+        interpreters,
     }
 }
 
 fn hello(
     capabilities: Vec<String>,
     restore_roots: Vec<String>,
-    report: Option<HookReport>,
+    report: Option<ScriptsReport>,
     held_job_ids: Vec<String>,
 ) -> AgentMessage {
-    let (hook_allow_list_state, hooks, scripts) = match report {
-        Some(report) => (report.state as i32, report.hooks, report.scripts),
-        None => (0, Vec::new(), None),
-    };
-    let (server_scripts_state, script_interpreters) = scripts.map_or((0, Vec::new()), |scripts| {
+    let (server_scripts_state, script_interpreters) = report.map_or((0, Vec::new()), |report| {
         (
-            scripts.0 as i32,
-            scripts.1.into_iter().map(|kind| kind as i32).collect(),
+            report.state as i32,
+            report
+                .interpreters
+                .into_iter()
+                .map(|kind| kind as i32)
+                .collect(),
         )
     });
     AgentMessage {
@@ -818,8 +813,6 @@ fn hello(
             capabilities,
             restore_roots,
             held_job_ids,
-            hooks,
-            hook_allow_list_state,
             server_scripts_state,
             script_interpreters,
             ..AgentHello::default()

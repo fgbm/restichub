@@ -403,6 +403,7 @@
 				bind:open={open.excludes}
 			>
 				<p class="lead"><RichText text={t('pe.excludes.lead')} /></p>
+				<p class="lead">{t('pe.excludes.windowsHint')}</p>
 				<div class="grid2">
 					<Field
 						label={t('profiles.excludes')}

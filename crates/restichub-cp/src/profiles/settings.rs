@@ -5,18 +5,14 @@
 //! parent module.
 //!
 //! The profile holds no secret. The repository password and the backend credentials stay in the
-//! `secrets` table (ADR-0017). A hook parameter of the type `secret_ref` holds the identifier of a
-//! secret, never the value (FR-HK-03); the job builder resolves it at dispatch time. The shape of
-//! the other parameters follows the schema that the target agents report (FR-HK-04), so the check
-//! against the schema runs in [`super::hooks`].
+//! `secrets` table (ADR-0017). A script variable of the kind `secret_ref` holds the identifier of a
+//! secret, never the value (FR-HK-09); the job builder resolves it at dispatch time.
 
 use std::collections::BTreeMap;
 
 use restichub_compiler::{
-    AllowListedHook, Architecture, BackupOptions as CompilerBackupOptions,
-    CheckOptions as CompilerCheckOptions, CompileError, GroupBy as CompilerGroupBy,
-    HookParameter as CompilerHookParameter, HookPhase as CompilerHookPhase,
-    HookRef as CompilerHookRef, JobLimits as CompilerJobLimits, OperatingSystem,
+    Architecture, BackupOptions as CompilerBackupOptions, CheckOptions as CompilerCheckOptions,
+    CompileError, GroupBy as CompilerGroupBy, JobLimits as CompilerJobLimits, OperatingSystem,
     Profile as CompilerProfile, ProfilePaths as CompilerProfilePaths, ResticVersion,
     Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
 };
@@ -33,12 +29,6 @@ use crate::validation::{self, Reason};
 
 /// Limit in characters of a profile name. The derived value stays within the column.
 pub const MAX_PROFILE_NAME: usize = 48;
-/// Limit in characters of a hook identifier or a hook parameter name.
-pub const MAX_HOOK_ID: usize = 64;
-/// Limit in bytes of the text of one hook parameter value.
-pub const MAX_HOOK_VALUE: usize = 4096;
-/// Limit of the parameters of one hook.
-pub const MAX_HOOK_PARAMETERS: usize = restichub_compiler::hook::MAX_PARAMETERS;
 /// Limit in characters of one exclude, exclude file or tag.
 pub const MAX_PATTERN: usize = 4096;
 /// Limit in characters of one path entry. A Windows path is longer than a Unix path.
@@ -51,8 +41,6 @@ pub const MAX_EXCLUDES: usize = 256;
 pub const MAX_EXCLUDE_FILES: usize = 32;
 /// Limit of the tags.
 pub const MAX_TAGS: usize = 64;
-/// Limit of the hooks.
-pub const MAX_HOOKS: usize = 32;
 /// Limit of the retention lists: the keep tags, the group-by keys and the snapshot filter.
 pub const MAX_RETENTION_LIST: usize = 64;
 
@@ -201,7 +189,7 @@ fn validate_limits(options: &BackupOptions) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Position of a hook in the job (FR-HK-05).
+/// Position of a script in the job (FR-HK-05).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {
@@ -210,24 +198,6 @@ pub enum HookPhase {
     OnSuccess,
     OnError,
     Finally,
-}
-
-/// One named hook parameter (FR-HK-03).
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct HookParameter {
-    pub name: String,
-    pub value: String,
-}
-
-/// A hook of the profile, by allow-list identifier (FR-HK-02).
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct HookRef {
-    pub hook_id: String,
-    pub phase: HookPhase,
-    #[serde(default)]
-    pub parameters: Vec<HookParameter>,
 }
 
 /// Grouping key of the retention rule.
@@ -305,8 +275,6 @@ pub struct CreateProfileRequest {
     pub tags: Vec<String>,
     #[serde(default)]
     pub options: BackupOptions,
-    #[serde(default)]
-    pub hooks: Vec<HookRef>,
     /// Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
     /// Admin can set them.
     #[serde(default)]
@@ -317,6 +285,11 @@ pub struct CreateProfileRequest {
     /// Absent when the profile runs no verification step.
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
+    /// (ADR-0040).
+    #[serde(default)]
+    #[schema(ignore)]
+    pub hooks: Option<Vec<serde_json::Value>>,
 }
 
 /// The body of a profile update. The body replaces the settings; an absent name keeps the name.
@@ -336,8 +309,6 @@ pub struct UpdateProfileRequest {
     pub tags: Vec<String>,
     #[serde(default)]
     pub options: BackupOptions,
-    #[serde(default)]
-    pub hooks: Vec<HookRef>,
     /// Replaces the whole list. Only an Admin can change it (FR-HK-12).
     #[serde(default)]
     pub scripts: Vec<ScriptDef>,
@@ -345,6 +316,11 @@ pub struct UpdateProfileRequest {
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
+    /// (ADR-0040).
+    #[serde(default)]
+    #[schema(ignore)]
+    pub hooks: Option<Vec<serde_json::Value>>,
 }
 
 /// One stored profile (FR-PF-01). It holds no secret.
@@ -358,7 +334,6 @@ pub struct ProfileView {
     pub exclude_files: Vec<String>,
     pub tags: Vec<String>,
     pub options: BackupOptions,
-    pub hooks: Vec<HookRef>,
     pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
@@ -425,20 +400,16 @@ enum SaveOutcome {
 ///
 /// A template error is wrong for every target, so it refuses the request. An operating-system or
 /// version mismatch is a warning, because a profile may target several operating systems. The
-/// synthetic target has no hooks: the hooks are checked against the report of the real agents
-/// (FR-HK-04).
+/// synthetic target has no scripts: the scripts are checked against the report of the real agents
+/// (FR-HK-10).
 ///
 /// # Errors
 ///
 /// Returns a field error for a defect that no target accepts.
 pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, ApiError> {
-    // The hooks depend on the allow-lists of the target agents, so the check against them runs
-    // apart from this one (AC-HK-05).
     let mut compiler_profile = profile.to_compiler_profile();
-    compiler_profile.hooks.clear();
     // Scripts depend on the trust mode of the target agents, which the synthetic target lacks.
     compiler_profile.scripts.clear();
-    let allow_list: BTreeMap<String, AllowListedHook> = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for os in [
@@ -446,7 +417,7 @@ pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, 
         OperatingSystem::Windows,
         OperatingSystem::Macos,
     ] {
-        let target = synthetic_target(os, &allow_list);
+        let target = synthetic_target(os);
         if let Err(error) = compile(&compiler_profile, &target) {
             match classify_save_error(error) {
                 SaveOutcome::Refusal(api) => return Err(api),
@@ -466,10 +437,7 @@ pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, 
     Ok(warnings)
 }
 
-fn synthetic_target(
-    os: OperatingSystem,
-    allow_list: &BTreeMap<String, AllowListedHook>,
-) -> TargetFacts {
+fn synthetic_target(os: OperatingSystem) -> TargetFacts {
     TargetFacts {
         agent_id: "synthetic".to_owned(),
         agent_name: "agent".to_owned(),
@@ -485,7 +453,6 @@ fn synthetic_target(
             patch: 0,
         },
         now: time::OffsetDateTime::now_utc(),
-        allow_list: allow_list.clone(),
         server_scripts: restichub_compiler::ServerScripts::default(),
     }
 }
@@ -506,20 +473,6 @@ fn classify_save_error(error: CompileError) -> SaveOutcome {
             field.as_str(),
             Reason::InvalidFormat,
         )),
-        CompileError::UnknownHook { field, .. }
-        | CompileError::UnknownHookParameter { field, .. }
-        | CompileError::DuplicateHookParameter { field, .. } => {
-            SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unknown))
-        }
-        CompileError::InvalidHookParameter { field, .. } => SaveOutcome::Refusal(
-            ApiError::invalid_field(field.as_str(), Reason::InvalidFormat),
-        ),
-        CompileError::MissingHookParameter { field, .. } => {
-            SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Empty))
-        }
-        CompileError::HookPhaseNotAllowed { field, .. } => {
-            SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unsupported))
-        }
         CompileError::ServerScriptsDisabled { field }
         | CompileError::InterpreterUnavailable { field, .. } => {
             SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unavailable))
@@ -559,7 +512,7 @@ pub struct PreviewEnvView {
 /// (FR-PF-04, AC-PF-01).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PreviewStepView {
-    /// The step kind, for example `backup`, `forget`, `prune`, `check` or `hook`.
+    /// The step kind, for example `backup`, `forget`, `prune`, `check` or `script`.
     pub kind: String,
     /// True for `forget`, `prune` and `check` (FR-RP-08).
     pub maintenance: bool,
@@ -603,7 +556,6 @@ impl TryFrom<&Profile> for ProfileView {
                     u32::try_from(profile.max_duration_minutes).unwrap_or(0),
                 ),
             },
-            hooks: hooks_from_row(profile)?,
             scripts: crate::scripts::from_row(&profile.scripts)?,
             retention: retention_from_row(profile)?,
             check: check_from_row(profile)?,
@@ -621,11 +573,6 @@ fn paths_from_row(profile: &Profile) -> ProfilePaths {
         linux: profile.paths_linux.clone(),
         macos: profile.paths_macos.clone(),
     }
-}
-
-fn hooks_from_row(profile: &Profile) -> Result<Vec<HookRef>, ApiError> {
-    serde_json::from_value(profile.hooks.clone())
-        .map_err(|error| ApiError::internal(format!("the stored hooks are not valid: {error}")))
 }
 
 fn retention_from_row(profile: &Profile) -> Result<Option<Retention>, ApiError> {
@@ -660,7 +607,6 @@ pub struct ValidatedProfile {
     pub exclude_files: Vec<String>,
     pub tags: Vec<String>,
     pub options: BackupOptions,
-    pub hooks: Vec<HookRef>,
     pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
@@ -688,7 +634,6 @@ impl ValidatedProfile {
             max_duration_minutes: i32::try_from(self.options.max_minutes()).unwrap_or(i32::MAX),
             retention: self.retention_value(),
             check_options: self.check_value(),
-            hooks: self.hooks_value(),
             scripts: self.scripts_value(),
             created_by,
         }
@@ -720,7 +665,6 @@ impl ValidatedProfile {
                 .map(|minutes| i32::try_from(minutes).unwrap_or(i32::MAX)),
             retention: self.retention_value(),
             check_options: self.check_value(),
-            hooks: self.hooks_value(),
             scripts: self.scripts_value(),
         }
     }
@@ -735,10 +679,6 @@ impl ValidatedProfile {
         self.check
             .as_ref()
             .and_then(|check| serde_json::to_value(check).ok())
-    }
-
-    fn hooks_value(&self) -> Value {
-        serde_json::to_value(&self.hooks).unwrap_or_else(|_| json!([]))
     }
 
     fn scripts_value(&self) -> Value {
@@ -780,7 +720,6 @@ impl ValidatedProfile {
                 stall_timeout_seconds: self.options.stall_minutes().saturating_mul(60),
                 max_duration_seconds: self.options.max_minutes().saturating_mul(60),
             },
-            hooks: self.hooks.iter().map(compiler_hook).collect(),
             scripts: self
                 .scripts
                 .iter()
@@ -827,7 +766,6 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
             ),
             max_duration_minutes: Some(u32::try_from(profile.max_duration_minutes).unwrap_or(0)),
         },
-        hooks: hooks_from_row(profile)?,
         scripts: crate::scripts::from_row(&profile.scripts)?,
         retention: retention_from_row(profile)?,
         check: check_from_row(profile)?,
@@ -835,27 +773,6 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
     let mut compiler_profile = validated.to_compiler_profile();
     compiler_profile.profile_tag = Some(profile_tag(profile.id));
     Ok(compiler_profile)
-}
-
-pub(super) fn compiler_hook(hook: &HookRef) -> CompilerHookRef {
-    CompilerHookRef {
-        hook_id: hook.hook_id.clone(),
-        phase: match hook.phase {
-            HookPhase::Before => CompilerHookPhase::Before,
-            HookPhase::After => CompilerHookPhase::After,
-            HookPhase::OnSuccess => CompilerHookPhase::OnSuccess,
-            HookPhase::OnError => CompilerHookPhase::OnError,
-            HookPhase::Finally => CompilerHookPhase::Finally,
-        },
-        parameters: hook
-            .parameters
-            .iter()
-            .map(|parameter| CompilerHookParameter {
-                name: parameter.name.clone(),
-                value: parameter.value.clone(),
-            })
-            .collect(),
-    }
 }
 
 fn compiler_retention(retention: &Retention) -> CompilerRetention {
@@ -887,6 +804,7 @@ fn compiler_retention(retention: &Retention) -> CompilerRetention {
 
 /// Validates a create request and returns the normalized settings (FR-PF-05).
 pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, ApiError> {
+    reject_hooks(body.hooks.as_deref())?;
     validate_profile(
         Some(body.name),
         body.repository_id,
@@ -895,7 +813,6 @@ pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, A
         body.exclude_files,
         body.tags,
         body.options,
-        body.hooks,
         body.scripts,
         body.retention,
         body.check,
@@ -907,6 +824,7 @@ pub fn validate_update(
     body: UpdateProfileRequest,
     current_name: &str,
 ) -> Result<ValidatedProfile, ApiError> {
+    reject_hooks(body.hooks.as_deref())?;
     let name = body.name.unwrap_or_else(|| current_name.to_owned());
     validate_profile(
         Some(name),
@@ -916,11 +834,17 @@ pub fn validate_update(
         body.exclude_files,
         body.tags,
         body.options,
-        body.hooks,
         body.scripts,
         body.retention,
         body.check,
     )
+}
+
+fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
+    match hooks {
+        Some([_, ..]) => Err(ApiError::invalid_field("hooks", Reason::Removed)),
+        _ => Ok(()),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -932,7 +856,6 @@ fn validate_profile(
     exclude_files: Vec<String>,
     tags: Vec<String>,
     options: BackupOptions,
-    hooks: Vec<HookRef>,
     scripts: Vec<ScriptDef>,
     retention: Option<Retention>,
     check: Option<CheckOptions>,
@@ -947,7 +870,6 @@ fn validate_profile(
     let tags = validate_tags("tags", tags)?;
     ensure_count("tags", tags.len(), MAX_TAGS)?;
     validate_limits(&options)?;
-    let hooks = validate_hooks(hooks)?;
     let scripts = crate::scripts::validate_scripts(scripts, "scripts")?;
     let retention = match retention {
         Some(retention) => Some(validate_retention(retention)?),
@@ -965,7 +887,6 @@ fn validate_profile(
         exclude_files,
         tags,
         options,
-        hooks,
         scripts,
         retention,
         check,
@@ -1095,72 +1016,6 @@ fn validate_tags(field: &'static str, values: Vec<String>) -> Result<Vec<String>
     Ok(result)
 }
 
-fn validate_hooks(hooks: Vec<HookRef>) -> Result<Vec<HookRef>, ApiError> {
-    ensure_count("hooks", hooks.len(), MAX_HOOKS)?;
-    let mut result = Vec::with_capacity(hooks.len());
-    for (index, hook) in hooks.into_iter().enumerate() {
-        let hook_id = validate_identifier("hooks.hook_id", &hook.hook_id)?;
-        if hook.parameters.len() > MAX_HOOK_PARAMETERS {
-            return Err(ApiError::invalid_field(
-                format!("hooks[{index}].parameters"),
-                Reason::TooLong,
-            ));
-        }
-        let mut parameters = Vec::with_capacity(hook.parameters.len());
-        for (position, parameter) in hook.parameters.into_iter().enumerate() {
-            let field = format!("hooks[{index}].parameters[{position}]");
-            if !restichub_compiler::hook::is_valid_parameter_name(&parameter.name) {
-                return Err(ApiError::invalid_field(
-                    format!("{field}.name"),
-                    Reason::InvalidCharacter,
-                ));
-            }
-            // The text form of a typed value: a number, a flag, an enumeration value, a string or
-            // the identifier of a secret. Control characters never belong to it (FR-PR-10).
-            if parameter.value.len() > MAX_HOOK_VALUE {
-                return Err(ApiError::invalid_field(
-                    format!("{field}.value"),
-                    Reason::TooLong,
-                ));
-            }
-            if restichub_proto::validate::has_forbidden(&parameter.value) {
-                return Err(ApiError::invalid_field(
-                    format!("{field}.value"),
-                    Reason::InvalidCharacter,
-                ));
-            }
-            parameters.push(parameter);
-        }
-        result.push(HookRef {
-            hook_id,
-            phase: hook.phase,
-            parameters,
-        });
-    }
-    Ok(result)
-}
-
-/// A hook identifier or a parameter name holds 1 to [`MAX_HOOK_ID`] characters from `a-z`, `0-9`,
-/// `.`, `_` and `-` (FR-HK-02).
-fn validate_identifier(field: &'static str, value: &str) -> Result<String, ApiError> {
-    let value = value.trim();
-    let count = value.chars().count();
-    if count == 0 {
-        return Err(ApiError::invalid_field(field, Reason::Empty));
-    }
-    if count > MAX_HOOK_ID {
-        return Err(ApiError::invalid_field(field, Reason::TooLong));
-    }
-    if !value.chars().all(|character| {
-        character.is_ascii_lowercase()
-            || character.is_ascii_digit()
-            || matches!(character, '.' | '_' | '-')
-    }) {
-        return Err(ApiError::invalid_field(field, Reason::InvalidCharacter));
-    }
-    Ok(value.to_owned())
-}
-
 fn validate_retention(retention: Retention) -> Result<Retention, ApiError> {
     if !retention.keep_within.is_empty() && !is_duration(&retention.keep_within) {
         return Err(ApiError::invalid_field(
@@ -1288,7 +1143,6 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
             "stall_timeout_minutes": profile.options.stall_timeout_minutes,
             "max_duration_minutes": profile.options.max_duration_minutes,
         },
-        "hooks": profile.hooks,
         "scripts": crate::scripts::audit_value(&profile.scripts),
         "retention": profile.retention,
         "check": profile.check,
@@ -1318,7 +1172,6 @@ pub fn stored_value(profile: &Profile) -> Value {
             "stall_timeout_minutes": profile.stall_timeout_minutes,
             "max_duration_minutes": profile.max_duration_minutes,
         },
-        "hooks": profile.hooks,
         "scripts": stored_scripts_value(&profile.scripts),
         "retention": profile.retention,
         "check": profile.check_options,

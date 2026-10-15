@@ -241,8 +241,10 @@ message AgentHello {
   string arch = 6;
   // Step types that the agent can run (FR-PR-02).
   repeated string supported_step_types = 7;
-  // Metadata of the hook allow-list (FR-HK-04). It has no secrets.
-  repeated HookMetadata hooks = 8;
+  // Field 8 held the metadata of the hook allow-list. The allow-list hooks
+  // do not exist (ADR-0040).
+  reserved 8;
+  reserved "hooks";
   // Field number 9 held the sequence number of the last accepted job. Replay
   // protection uses the job journal now (ADR-0020).
   reserved 9;
@@ -256,10 +258,9 @@ message AgentHello {
   // uses them to suggest a target and to refuse early. The agent checks the
   // target again.
   repeated string restore_roots = 11;
-  // State of the hook allow-list file at the time of the connection
-  // (FR-HK-01, AC-HK-01). An agent that does not know the field leaves it
-  // unspecified.
-  HookAllowListState hook_allow_list_state = 12;
+  // Field 12 held the state of the hook allow-list file (ADR-0040).
+  reserved 12;
+  reserved "hook_allow_list_state";
   // State of the local trust mode for scripts from the control plane (FR-HK-08,
   // ADR-0037). An agent that does not know the field leaves it unspecified,
   // and the control plane treats that as disabled.
@@ -285,63 +286,6 @@ enum ServerScriptsState {
   // Another account can change the setting file or a directory above it. The
   // mode is off.
   SERVER_SCRIPTS_STATE_INSECURE = 3;
-}
-
-// HookAllowListState tells whether the agent trusts its hook allow-list file.
-enum HookAllowListState {
-  HOOK_ALLOW_LIST_STATE_UNSPECIFIED = 0;
-  // The host has no allow-list file. No hook runs.
-  HOOK_ALLOW_LIST_STATE_ABSENT = 1;
-  // The agent loaded the file. The hooks field lists its hooks.
-  HOOK_ALLOW_LIST_STATE_LOADED = 2;
-  // A user other than root or Administrators can change the file or its
-  // directory. No hook runs.
-  HOOK_ALLOW_LIST_STATE_INSECURE = 3;
-  // The file does not obey the format. No hook runs.
-  HOOK_ALLOW_LIST_STATE_INVALID = 4;
-}
-
-// HookMetadata is the public part of one allow-list hook (FR-HK-04). It holds
-// no executable path, no fixed argument and no environment.
-message HookMetadata {
-  // Identifier of the hook (FR-HK-02).
-  string hook_id = 1;
-  // Name and type of each hook parameter. Values are not present.
-  repeated HookParameterSpec parameters = 2;
-  // Phases in which the hook may run. An empty list means every phase.
-  repeated HookPhase phases = 3;
-}
-
-// HookParameterSpec describes one hook parameter (FR-HK-02).
-message HookParameterSpec {
-  // Name of the parameter.
-  string name = 1;
-  // Type of the parameter.
-  HookParameterType type = 2;
-  // Longest string in bytes. Zero for a type that has no length.
-  uint32 max_length = 3;
-  // Regular expression that the whole string must match. Empty for none.
-  string pattern = 4;
-  // Smallest integer. Absent for a type that is not an integer.
-  optional int64 minimum = 5;
-  // Largest integer. Absent for a type that is not an integer.
-  optional int64 maximum = 6;
-  // Allowed values of an enumeration.
-  repeated string enum_values = 7;
-  // True when every use of the hook must set the parameter.
-  bool required = 8;
-}
-
-// HookParameterType is the type of a hook parameter.
-enum HookParameterType {
-  HOOK_PARAMETER_TYPE_UNSPECIFIED = 0;
-  HOOK_PARAMETER_TYPE_STRING = 1;
-  HOOK_PARAMETER_TYPE_INTEGER = 2;
-  HOOK_PARAMETER_TYPE_BOOLEAN = 3;
-  // One value of a closed list.
-  HOOK_PARAMETER_TYPE_ENUM = 4;
-  // Reference to a secret of the control plane (ADR-0017).
-  HOOK_PARAMETER_TYPE_SECRET_REF = 5;
 }
 
 // JobAck acknowledges a job and starts the lease (FR-PR-06).
@@ -384,12 +328,10 @@ enum RejectReason {
   REJECT_REASON_UNSUPPORTED_STEP = 7;
   // The restic version does not support the request.
   REJECT_REASON_UNSUPPORTED_RESTIC_VERSION = 8;
-  // The job uses a hook that the agent does not allow.
-  REJECT_REASON_UNKNOWN_HOOK = 9;
-  // A hook parameter does not obey the schema.
-  REJECT_REASON_INVALID_HOOK_PARAMETERS = 10;
-  // The hook allow-list is not secure (FR-HK-01).
-  REJECT_REASON_ALLOW_LIST_INSECURE = 11;
+  // Values 9, 10 and 11 were the refusals of the allow-list hooks (ADR-0040).
+  reserved 9, 10, 11;
+  reserved "REJECT_REASON_UNKNOWN_HOOK", "REJECT_REASON_INVALID_HOOK_PARAMETERS",
+      "REJECT_REASON_ALLOW_LIST_INSECURE";
   // The job bytes are not a valid Job message.
   REJECT_REASON_MALFORMED = 12;
   // The job lifetime is longer than the maximum (ADR-0020).

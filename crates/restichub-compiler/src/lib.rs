@@ -12,9 +12,9 @@
 pub mod arg;
 mod compile;
 mod error;
-pub mod hook;
 mod job;
 mod option;
+pub mod phase;
 mod preview;
 mod profile;
 pub mod script;
@@ -22,15 +22,14 @@ mod target;
 mod template;
 
 pub use arg::{ArgError, CommandLine};
-pub use compile::{Plan, PlannedStep, check_hook, compile};
+pub use compile::{Plan, PlannedStep, compile};
 pub use error::{CompileError, CronError, FieldPath, validate_cron};
-pub use hook::{AllowListedHook, HookParameterSpec, HookValue, ParameterKind, ValueError};
 pub use job::ValidatedJob;
 pub use option::ResticOption;
 pub use preview::{PreviewError, PreviewStep, preview};
 pub use profile::{
-    BackupOptions, CheckOptions, GroupBy, HookParameter, HookPhase, HookRef, JobLimits, Profile,
-    ProfilePaths, Retention, SnapshotFilter,
+    BackupOptions, CheckOptions, GroupBy, HookPhase, JobLimits, Profile, ProfilePaths, Retention,
+    SnapshotFilter,
 };
 pub use script::{
     FailurePolicy, ScriptEnvRef, ScriptEnvValue, ScriptInterpreter, ScriptRef, ServerScripts,

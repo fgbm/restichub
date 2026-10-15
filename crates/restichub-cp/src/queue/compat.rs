@@ -3,9 +3,7 @@
 //! An agent that does not know a field drops it without an error. A `forget` step that loses its
 //! tag filter this way reaches every profile of the repository, so the builder never sends such a
 //! step (FR-RP-08). An agent without [`AgentCapability::RestoreV1`] gets no `ls` and no `restore`
-//! step: an old agent rejects the kind, but the control plane never relies on that (FR-PR-09). An
-//! agent without [`AgentCapability::HooksV1`] gets no `hook` step, because it would drop the typed
-//! parameters (FR-HK-03).
+//! step: an old agent rejects the kind, but the control plane never relies on that (FR-PR-09).
 
 use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{Step, step};
@@ -21,12 +19,6 @@ pub(super) fn fit_steps(
     for step in steps {
         if matches!(step.kind, Some(step::Kind::Ls(_) | step::Kind::Restore(_)))
             && !capabilities.contains(&AgentCapability::RestoreV1)
-        {
-            return Err(Refusal::AgentCapabilityMissing);
-        }
-        // An agent that does not know the typed parameters would drop them (FR-HK-03).
-        if matches!(step.kind, Some(step::Kind::Hook(_)))
-            && !capabilities.contains(&AgentCapability::HooksV1)
         {
             return Err(Refusal::AgentCapabilityMissing);
         }
@@ -70,18 +62,12 @@ pub(super) fn required_capabilities(steps: &[Step]) -> Vec<AgentCapability> {
     let needs_restore = steps
         .iter()
         .any(|step| matches!(step.kind, Some(step::Kind::Ls(_) | step::Kind::Restore(_))));
-    let needs_hooks = steps
-        .iter()
-        .any(|step| matches!(step.kind, Some(step::Kind::Hook(_))));
     let needs_scripts = steps
         .iter()
         .any(|step| matches!(step.kind, Some(step::Kind::Script(_))));
     let mut required = Vec::new();
     if needs_scripts {
         required.push(AgentCapability::ScriptsV1);
-    }
-    if needs_hooks {
-        required.push(AgentCapability::HooksV1);
     }
     if needs_all_tags {
         required.push(AgentCapability::ForgetAllTags);

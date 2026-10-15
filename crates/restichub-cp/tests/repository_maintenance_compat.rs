@@ -135,7 +135,6 @@ async fn fr_pr_09_the_hello_stores_the_capabilities() {
             "forget-all-tags".to_owned(),
             "restore-v1".to_owned(),
             "job-limits-v1".to_owned(),
-            "hooks-v1".to_owned(),
             "scripts-v1".to_owned(),
             "log-ack-v1".to_owned()
         ]

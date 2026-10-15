@@ -5,7 +5,6 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { JobDetail, JobLogLine, JobStep } from '#lib/api/index.ts';
-	import LogViewer from '#lib/components/LogViewer.svelte';
 	import StepLog from '#lib/components/StepLog.svelte';
 	import {
 		Alert,
@@ -36,6 +35,9 @@
 		stepRows
 	} from '#lib/job-detail.ts';
 	import type { StepRow } from '#lib/job-detail.ts';
+	import { countLines, groupLines, logText } from '#lib/job-log.ts';
+	import type { LogCounts } from '#lib/job-log.ts';
+	import { plural } from '#lib/profile-form.ts';
 	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -43,6 +45,7 @@
 
 	const POLL_MS = 2000;
 	const LOG_PAGE = 1000;
+	const DOWNLOAD_PAGE = 2000;
 	// The viewer holds this many lines at most. A bigger log shows its first lines.
 	const MAX_LINES = 10_000;
 
@@ -65,12 +68,10 @@
 	let logTruncated = $state(false);
 	let logPurged = $state(false);
 	let logError = $state(false);
-	let following = $state(true);
+	let downloading = $state(false);
 
 	// A step opens its log on a click. A running step and a failed step open by themselves.
 	let openSteps = $state<Record<string, boolean>>({});
-	// Changes whenever the job was read, so an open log of a running step reads its new lines.
-	let logTick = $state(0);
 
 	let cancelOpen = $state(false);
 	let cancelling = $state(false);
@@ -87,6 +88,12 @@
 	const stats = $derived(statsOf(job?.summary));
 	const capped = $derived(lines.length >= MAX_LINES);
 	const rows = $derived(job ? stepRows(job) : []);
+	const groups = $derived(
+		groupLines(
+			lines,
+			rows.map((row) => row.id)
+		)
+	);
 	const progress = $derived(job ? stepProgress(job, rows) : null);
 	const runningProgress = $derived(
 		job?.progress &&
@@ -157,13 +164,24 @@
 		return text === key ? stepId : text;
 	}
 
-	// A script has the name that its author gave it, and a hook has its identifier.
+	// A script has the name that its author gave it.
 	function rowTitle(row: StepRow): string {
 		return row.name || stepTitle(row.id);
 	}
 
 	function hasLog(row: StepRow): boolean {
 		return row.step !== null || row.state === 'running';
+	}
+
+	function stepLines(row: StepRow): JobLogLine[] {
+		return groups.byStep.get(row.id) ?? [];
+	}
+
+	function countsText(counts: LogCounts): string {
+		const parts = [`${formatCount(counts.total)} ${plural('jobDetail.unit.line', counts.total)}`];
+		if (counts.warnings > 0) parts.push(`${counts.warnings} ${t('jobDetail.level.warn')}`);
+		if (counts.errors > 0) parts.push(`${counts.errors} ${t('jobDetail.level.error')}`);
+		return parts.join(' · ');
 	}
 
 	function isOpen(row: StepRow): boolean {
@@ -247,7 +265,6 @@
 			await loadJob();
 			if (job && !notFound) {
 				await loadLines();
-				logTick += 1;
 			}
 		} finally {
 			busy = false;
@@ -265,15 +282,40 @@
 		return () => clearInterval(timer);
 	});
 
-	async function copyLog(): Promise<void> {
-		const text = lines
-			.map((line) => `${line.ts} ${line.level.toUpperCase()} ${line.text}`)
-			.join('\n');
+	async function copyLog(shown: JobLogLine[]): Promise<void> {
 		try {
-			await navigator.clipboard.writeText(text);
+			await navigator.clipboard.writeText(logText(shown));
 			pushToast('success', t('jobDetail.logCopied'));
 		} catch {
 			pushToast('danger', t('jobDetail.logCopyFailed'));
+		}
+	}
+
+	// The file holds the whole log, not the lines that the view holds.
+	async function downloadLog(): Promise<void> {
+		if (downloading) return;
+		downloading = true;
+		try {
+			const all: JobLogLine[] = [];
+			for (;;) {
+				const after = all.length > 0 ? all[all.length - 1].seq : 0;
+				const result = await service.getJobLogs(id, { after_seq: after, limit: DOWNLOAD_PAGE });
+				const fresh = result.items.filter((item) => item.seq > after);
+				all.push(...fresh);
+				if (!result.has_more || fresh.length === 0) break;
+			}
+			const url = URL.createObjectURL(
+				new Blob([logText(all), '\n'], { type: 'text/plain;charset=utf-8' })
+			);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = `job-${id}-log.txt`;
+			link.click();
+			URL.revokeObjectURL(url);
+		} catch {
+			pushToast('danger', t('jobDetail.downloadFailed'));
+		} finally {
+			downloading = false;
 		}
 	}
 
@@ -350,6 +392,9 @@
 			{/if}
 		</div>
 		<div class="head__actions">
+			<Button icon="download" loading={downloading} onclick={downloadLog}>
+				{t('jobDetail.downloadLog')}
+			</Button>
 			{#if canWrite && job.plan_id}
 				<Button disabled={live} loading={rerunning} onclick={runAgain}>
 					{t('jobDetail.runAgain')}
@@ -430,6 +475,9 @@
 												>{t(`profiles.hooks.phase.${row.phase}` as MessageKey)}</Badge
 											>
 										{/if}
+										{#if !isOpen(row) && stepLines(row).length > 0}
+											<span class="timeline__counts">{countsText(countLines(stepLines(row)))}</span>
+										{/if}
 										<span class="timeline__meta">{rowMeta(row)}</span>
 									</button>
 								{:else}
@@ -494,7 +542,13 @@
 									{/if}
 								{/if}
 								{#if hasLog(row) && isOpen(row)}
-									<StepLog jobId={job.id} stepId={row.id} name={rowTitle(row)} tick={logTick} />
+									<StepLog
+										stepId={row.id}
+										name={rowTitle(row)}
+										lines={stepLines(row)}
+										live={row.state === 'running'}
+										onCopy={copyLog}
+									/>
 								{/if}
 							</li>
 						{/each}
@@ -507,14 +561,17 @@
 				<Alert tone="info" title={t('jobDetail.logPurged')}></Alert>
 				<div class="gap"></div>
 			{/if}
-			<LogViewer
-				title={live ? t('jobDetail.logLive') : t('jobDetail.log')}
-				{lines}
-				{live}
-				bind:following
-				emptyText={t('jobDetail.logEmpty')}
-				onCopy={copyLog}
-			/>
+			{#if groups.general.length > 0}
+				<div class="gap"></div>
+				<Panel title={t('jobDetail.generalLog')} subtitle={t('jobDetail.generalLogHint')}>
+					<StepLog
+						stepId="general"
+						name={t('jobDetail.generalLog')}
+						lines={groups.general}
+						onCopy={copyLog}
+					/>
+				</Panel>
+			{/if}
 			{#if logTruncated}
 				<p class="muted note">{t('jobDetail.logTruncated')}</p>
 			{/if}
@@ -808,6 +865,11 @@
 
 	.timeline__title {
 		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.timeline__counts {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.timeline__meta {

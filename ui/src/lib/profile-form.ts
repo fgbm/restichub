@@ -133,6 +133,9 @@ function joinLines(values: string[] | undefined): string {
 	return (values ?? []).join('\n');
 }
 
+// App execution aliases in this folder are reparse points that restic rejects as "irregular".
+export const WINDOWS_APPS_EXCLUDE = 'C:\\Users\\*\\AppData\\Local\\Microsoft\\WindowsApps';
+
 export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): ProfileDraft {
 	return {
 		name: '',
@@ -141,7 +144,7 @@ export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): Prof
 		pathsWindows: '',
 		pathsLinux: '',
 		pathsMacos: '',
-		excludes: '',
+		excludes: WINDOWS_APPS_EXCLUDE,
 		excludeFiles: '',
 		tags: [],
 		vss: false,
@@ -162,7 +165,7 @@ export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): Prof
 		stallMinutes: defaults ? String(defaults.stall_timeout_minutes) : '',
 		maxDurationHours: defaults ? minutesToHours(defaults.max_duration_minutes) : '',
 		enabled: {
-			excludes: false,
+			excludes: true,
 			tags: false,
 			options: false,
 			retention: true,
@@ -241,7 +244,7 @@ function groupByOf(draft: ProfileDraft): GroupBy[] {
 
 /**
  * The settings that a create or an update request carries. A switched-off section sends its
- * empty value. The hooks of a stored profile stay as they are: the form has no hook editor.
+ * empty value.
  */
 export function settingsOf(
 	draft: ProfileDraft,
@@ -267,7 +270,6 @@ export function settingsOf(
 			stall_timeout_minutes: optionalMinutes(draft.stallMinutes),
 			max_duration_minutes: optionalHoursAsMinutes(draft.maxDurationHours)
 		},
-		hooks: context.existing?.hooks ?? [],
 		// An Operator keeps the scripts as they are stored: only an Admin changes them.
 		scripts: context.canEditScripts
 			? on.scripts

@@ -88,7 +88,7 @@ impl Drop for CommandLine {
 pub enum ArgError {
     #[error("the step has no known kind")]
     UnknownStep,
-    #[error("a hook step is not a restic command")]
+    #[error("a script step is not a restic command")]
     NotRestic,
     #[error("the step refers to a repository that the job does not hold")]
     UnknownRepository,
@@ -102,7 +102,7 @@ pub enum ArgError {
 /// # Errors
 ///
 /// Returns [`ArgError::UnknownStep`] for a step without a kind,
-/// [`ArgError::NotRestic`] for a hook step and [`ArgError::UnknownRepository`]
+/// [`ArgError::NotRestic`] for a script step and [`ArgError::UnknownRepository`]
 /// for a step whose repository the job does not hold.
 pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLine, ArgError> {
     let kind = step.kind.as_ref().ok_or(ArgError::UnknownStep)?;
@@ -240,7 +240,7 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
                 args.push(attached("--mode", value));
             }
         }
-        step::Kind::Hook(_) | step::Kind::Script(_) => return Err(ArgError::NotRestic),
+        step::Kind::Script(_) => return Err(ArgError::NotRestic),
     }
 
     Ok(CommandLine {
@@ -289,7 +289,7 @@ fn mask_userinfo(value: &str) -> String {
     masked
 }
 
-/// The repository identifier of a step that runs restic, or `None` for a hook.
+/// The repository identifier of a step that runs restic, or `None` for a script.
 fn repository_id(kind: &step::Kind) -> Option<&str> {
     match kind {
         step::Kind::Backup(backup) => Some(&backup.repository_id),
@@ -304,7 +304,7 @@ fn repository_id(kind: &step::Kind) -> Option<&str> {
         step::Kind::Forget(forget) => Some(&forget.repository_id),
         step::Kind::Prune(prune) => Some(&prune.repository_id),
         step::Kind::Stats(stats) => Some(&stats.repository_id),
-        step::Kind::Hook(_) | step::Kind::Script(_) => None,
+        step::Kind::Script(_) => None,
     }
 }
 
@@ -414,8 +414,8 @@ fn overwrite_value(mode: OverwriteMode) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use restichub_proto::agent::v1::{
-        BackupStep, ForgetStep, HookStep, Job, RepositoryAccess, SnapshotsFilter, Step, UnlockStep,
-        step,
+        BackupStep, ForgetStep, HookPhase, Job, RepositoryAccess, ScriptFailurePolicy,
+        ScriptInterpreter, ScriptStep, SnapshotsFilter, Step, UnlockStep, step,
     };
 
     use super::{ArgError, MASK, build_command, is_safe_env, mask_secrets};
@@ -593,12 +593,16 @@ mod tests {
     }
 
     #[test]
-    fn hook_step_is_not_a_restic_command() {
+    fn script_step_is_not_a_restic_command() {
         let step = Step {
-            step_id: "hook-0".to_owned(),
-            kind: Some(step::Kind::Hook(HookStep {
-                hook_id: "pg_dump".to_owned(),
-                ..HookStep::default()
+            step_id: "script-0".to_owned(),
+            kind: Some(step::Kind::Script(ScriptStep {
+                name: "dump".to_owned(),
+                interpreter: ScriptInterpreter::Sh as i32,
+                phase: HookPhase::Before as i32,
+                body: "true".to_owned(),
+                failure_policy: ScriptFailurePolicy::AbortBackup as i32,
+                ..ScriptStep::default()
             })),
             ..Step::default()
         };

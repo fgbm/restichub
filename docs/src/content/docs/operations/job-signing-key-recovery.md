@@ -4,7 +4,7 @@ description: How an operator recovers a control plane start with every job signi
 ---
 
 :::caution
-ResticHub is in the design phase. This procedure is planned for 1.0. It is not implemented yet.
+No command does this procedure. Change the database by hand, and only when no key retired for a compromise.
 :::
 
 The control plane signs each job with the current job signing key. The key set holds a current key and a next key. The control plane retires an old key after all known online agents acknowledged the new set, or at most 7 days after the rotation starts.
