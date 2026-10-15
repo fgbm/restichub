@@ -430,7 +430,7 @@ enum Handled {
 
 /// The certificate rotation state of one connection (FR-ID-03).
 struct Upkeep {
-    /// The validity of the newest certificate that the agent holds. A rotation moves it, so the
+    /// The not-before and not-after times of the newest certificate. A rotation moves them, so the
     /// next request comes at two thirds of the new lifetime.
     validity: Option<(OffsetDateTime, OffsetDateTime)>,
     pending: Option<PendingRotation>,

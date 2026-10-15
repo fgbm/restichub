@@ -26,9 +26,8 @@ pub const MAX_CSR_BYTES: usize = 4096;
 /// The facts of the certificate that the agent presented in the TLS handshake of the stream.
 #[derive(Debug, Clone)]
 pub struct PresentedCertificate {
-    /// The serial without a leading zero byte.
+    /// Big-endian bytes without a leading zero.
     pub serial: Vec<u8>,
-    /// The raw public key.
     pub public_key: Vec<u8>,
     pub not_before: OffsetDateTime,
     pub not_after: OffsetDateTime,

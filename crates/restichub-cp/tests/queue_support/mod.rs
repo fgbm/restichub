@@ -602,7 +602,7 @@ impl Env {
     }
 }
 
-/// A second control plane instance (see [`Env::start_instance`]).
+/// A second control plane process on the same database; see [`Env::start_instance`].
 pub struct Instance {
     pub state: AppState,
     pub listener: Listener,

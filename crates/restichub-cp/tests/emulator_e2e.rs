@@ -24,7 +24,7 @@ use serde_json::json;
 
 use queue_support::{Emulator, Env, default_restore_roots, eventually, id_of, test_queue};
 
-/// The number of emulated agents of the first test.
+/// Size of the fleet in the first test.
 const AGENTS: usize = 6;
 
 /// Finishes each step after a short pause, as a fast host does.

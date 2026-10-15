@@ -33,7 +33,7 @@ pub fn stored_identity(identity: &EnrolledIdentity) -> StoredIdentity {
     }
 }
 
-/// The identity after the agent installed a rotated certificate.
+/// Identity the agent holds once it installed the new certificate.
 pub fn rotated_identity(identity: &EnrolledIdentity, rotated: &Rotated) -> EnrolledIdentity {
     EnrolledIdentity {
         certificate_der: rotated.certificate_der.clone(),
@@ -67,7 +67,7 @@ pub fn csr_with_uri(uri: &str) -> Vec<u8> {
         .to_vec()
 }
 
-/// The certificate columns of the registry row.
+/// Registry fields that a rotation changes.
 #[derive(Debug)]
 pub struct Row {
     pub serial: String,

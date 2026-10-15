@@ -20,7 +20,7 @@ use restichub_agent::restic::Restic;
 use restichub_agent::stream::{self, Backoff, StreamOptions, Timeouts};
 use tokio::sync::watch;
 
-/// The lifetime of a test certificate. The agent asks after six seconds; the control plane accepts
+/// How long a test certificate lives. The agent asks after six seconds; the control plane accepts
 /// a request after three.
 const LIFETIME: Duration = Duration::from_secs(9);
 

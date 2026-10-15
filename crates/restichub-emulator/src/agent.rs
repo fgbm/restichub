@@ -93,10 +93,9 @@ pub struct AgentLoad {
     pub ack_delay: Duration,
     /// Label that the agent reports in `AgentHello.os`. `None` uses the host OS.
     pub os_label: Option<String>,
-    /// The restore roots that the agent reports in `AgentHello` (FR-RS-03).
+    /// Sent in `AgentHello` (FR-RS-03).
     pub restore_roots: Vec<String>,
-    /// The capabilities that the agent reports in `AgentHello`. `None` reports every capability
-    /// that this build knows (FR-PR-09).
+    /// Sent in `AgentHello`. `None` sends every one that this build knows (FR-PR-09).
     pub capabilities: Option<Vec<String>>,
     /// The certificate rotation of the agent (FR-ID-03).
     pub renewal: crate::renewal::Renewal,

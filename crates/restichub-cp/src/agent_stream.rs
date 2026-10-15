@@ -102,7 +102,7 @@ struct PeerIdentity {
     agent: AgentId,
     /// The certificate serial without a leading zero, as the registry guard compares it.
     serial: Vec<u8>,
-    /// The certificate that the TLS handshake of this stream presented. A confirmed rotation
+    /// The certificate of the TLS handshake of this stream. A confirmed rotation
     /// replaces it, so the open stream can rotate again.
     presented: PresentedCertificate,
     /// The certificate of the last rotation that waits for its confirmation.

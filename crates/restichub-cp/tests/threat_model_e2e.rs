@@ -29,7 +29,7 @@ use restichub_proto::signing::{sign_job, sign_key_update};
 
 use queue_support::{Env, eventually, test_queue};
 
-/// Counts the steps that the emulated agent runs.
+/// Step handler that tallies each step the emulated agent runs.
 struct Counting(Arc<AtomicU32>);
 
 #[async_trait]
@@ -73,7 +73,7 @@ fn send_signed(env: &Env, agent: restichub_db::AgentId, signed: SignedJob) {
     assert!(sent, "the stream of the agent must be open");
 }
 
-/// Waits until a log line holds both texts.
+/// Waits until one line of the captured output has both texts.
 async fn log_holds(logs: &Arc<Mutex<Vec<u8>>>, first: &str, second: &str) {
     log_count(logs, first, second, 1).await;
 }
@@ -126,7 +126,6 @@ async fn t3_t13_a_forged_job_and_a_forged_key_update_are_refused_by_the_agent() 
     );
     log_holds(logs, &emulator.id.to_string(), "bad_signature").await;
 
-    // A key that the agent never received.
     send_signed(
         &env,
         emulator.id,
@@ -277,13 +276,12 @@ async fn t6_an_agent_cannot_act_for_another_agent() {
         restichub_proto::agent::v1::CertificateRejectReason::InvalidRequest
     );
 
-    // The genuine victim finishes its own job.
     victim.ack(&job).await;
     eventually(|| async { env.job_status(backup).await == "running" }).await;
     env.db.cleanup().await;
 }
 
-/// The log lines of the tests of this binary.
+/// Shared buffer for the tracing output of every test in this binary.
 fn captured_logs() -> &'static Arc<Mutex<Vec<u8>>> {
     static LOGS: OnceLock<Arc<Mutex<Vec<u8>>>> = OnceLock::new();
     LOGS.get_or_init(|| {

@@ -96,7 +96,7 @@ pub struct AgentView {
     pub certificate_expires_at: String,
     /// In RFC 3339. Null until the first rotation of the certificate.
     pub last_certificate_rotation_at: Option<String>,
-    /// The protocol version of the last hello, `major.minor`. Null before the first hello.
+    /// Reported in the last hello as `major.minor`. Null before the first hello.
     pub protocol_version: Option<String>,
     /// The package version of the control plane that serves the request.
     pub control_plane_version: String,

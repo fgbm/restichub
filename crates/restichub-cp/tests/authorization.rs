@@ -9,7 +9,7 @@ use restichub_cp::routes::ROUTES;
 use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens};
 use serde_json::Value;
 
-use common::{app, app_with_kek, create_tenant_with_key, create_user, request, seed_session, send};
+use common::{app, create_tenant_with_key, create_user, request, seed_session, send};
 
 /// The four roles in the order of the requirements section 2.
 const ROLES: [Role; 4] = [
@@ -124,8 +124,8 @@ async fn ac_au_02_role_operation_matrix() {
     };
     let tenant = create_tenant_with_key(db.database(), "matrix").await;
     // The matrix runs in multi mode: the helper sets it. Single mode covers the platform routes
-    // in ac_tn_06 (ADR-0024).
-    let app = app_with_kek(db.database());
+    // in ac_tn_06 (ADR-0024). The key compromise route needs the loaded job signing key set.
+    let app = common::app_with_pki(db.database()).await;
     let id = uuid::Uuid::now_v7().to_string();
 
     let mut index = 0;

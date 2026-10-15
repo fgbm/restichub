@@ -6,13 +6,13 @@ use crate::{PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VersionCheck {
     Compatible,
-    /// The agent speaks another major version.
+    /// Agent major differs from the control plane major.
     MajorMismatch,
     /// The agent minor version is older than the previous minor version of the control plane.
     MinorTooOld,
 }
 
-/// A protocol version: the major and the minor number.
+/// A major and minor number pair of the wire protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Version {
     pub major: u32,
@@ -20,7 +20,7 @@ pub struct Version {
 }
 
 impl Version {
-    /// The version of this build.
+    /// Protocol version this build speaks.
     pub const CURRENT: Self = Self {
         major: PROTOCOL_VERSION_MAJOR,
         minor: PROTOCOL_VERSION_MINOR,

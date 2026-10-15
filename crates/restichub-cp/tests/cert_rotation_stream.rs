@@ -21,7 +21,7 @@ use restichub_proto::agent::v1::{
 use queue_support::{Env, FakeAgent, eventually, next_message, test_queue};
 use rotation_support::{hex, rotated_identity, row, stored_identity};
 
-/// The lifetime of a test certificate. The control plane accepts a request at half of it.
+/// How long a test certificate lives. The control plane accepts a request at half of it.
 const LIFETIME: Duration = Duration::from_secs(6);
 
 async fn start() -> Option<Env> {
