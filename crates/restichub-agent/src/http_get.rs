@@ -129,18 +129,18 @@ impl Proxy {
         if host_port.is_empty() {
             bail!("HTTPS_PROXY holds no host");
         }
-        let (host, port) = match host_port.rsplit_once(':') {
-            Some((host, port)) if !host.contains(':') => (
-                host.to_owned(),
-                port.parse().context("the proxy port is not a number")?,
-            ),
-            _ => (host_port.to_owned(), 80),
-        };
+        let (host, port) = proxy_host_port(host_port)?;
+        let authorization = credentials
+            .map(|credentials| {
+                // The userinfo of a URL is percent-encoded, and the Basic scheme needs the raw bytes.
+                let decoded = percent_decode(credentials)?;
+                Ok::<_, anyhow::Error>(format!("Basic {}", STANDARD.encode(decoded)))
+            })
+            .transpose()?;
         Ok(Self {
             host,
             port,
-            authorization: credentials
-                .map(|credentials| format!("Basic {}", STANDARD.encode(credentials))),
+            authorization,
             bypass,
         })
     }
@@ -152,6 +152,54 @@ impl Proxy {
             .iter()
             .any(|entry| entry == "*" || host == *entry || host.ends_with(&format!(".{entry}")))
     }
+}
+
+/// Splits `host`, `host:port`, `[v6]` and `[v6]:port`. The default port is 80.
+fn proxy_host_port(host_port: &str) -> Result<(String, u16)> {
+    let parse_port = |port: &str| -> Result<u16> {
+        port.parse().context("the proxy port is not a number")
+    };
+    if let Some(rest) = host_port.strip_prefix('[') {
+        let (host, tail) = rest
+            .split_once(']')
+            .context("the proxy address has an open bracket")?;
+        if host.is_empty() {
+            bail!("HTTPS_PROXY holds no host");
+        }
+        let port = match tail {
+            "" => 80,
+            tail => parse_port(
+                tail.strip_prefix(':')
+                    .context("the proxy address has text after the bracket")?,
+            )?,
+        };
+        return Ok((host.to_owned(), port));
+    }
+    match host_port.rsplit_once(':') {
+        Some((host, port)) if !host.contains(':') => Ok((host.to_owned(), parse_port(port)?)),
+        _ => Ok((host_port.to_owned(), 80)),
+    }
+}
+
+fn percent_decode(text: &str) -> Result<Vec<u8>> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let digits = bytes
+                .get(index + 1..index + 3)
+                .and_then(|pair| std::str::from_utf8(pair).ok())
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                .context("the proxy credentials hold a bad percent escape")?;
+            out.push(digits);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    Ok(out)
 }
 
 /// The final answer after the redirects, with any status.
@@ -385,6 +433,25 @@ mod tests {
         assert!(proxy.applies_to("github.com"));
         assert!(!proxy.applies_to("localhost"));
         assert!(!proxy.applies_to("a.internal.example"));
+    }
+
+    #[test]
+    fn a_proxy_user_info_is_percent_decoded() {
+        let proxy = Proxy::parse("http://us%40er:p%3Aw%25@proxy.example:3128", Vec::new())
+            .expect("proxy");
+        let expected = format!("Basic {}", STANDARD.encode("us@er:p:w%"));
+        assert_eq!(proxy.authorization.as_deref(), Some(expected.as_str()));
+        assert!(Proxy::parse("http://u:%zz@proxy.example", Vec::new()).is_err());
+    }
+
+    #[test]
+    fn a_proxy_address_in_brackets_is_read() {
+        let proxy = Proxy::parse("http://[2001:db8::1]:3128", Vec::new()).expect("proxy");
+        assert_eq!((proxy.host.as_str(), proxy.port), ("2001:db8::1", 3128));
+        let default_port = Proxy::parse("http://[::1]", Vec::new()).expect("proxy");
+        assert_eq!((default_port.host.as_str(), default_port.port), ("::1", 80));
+        assert!(Proxy::parse("http://[::1", Vec::new()).is_err());
+        assert!(Proxy::parse("http://[::1]x", Vec::new()).is_err());
     }
 
     #[test]
