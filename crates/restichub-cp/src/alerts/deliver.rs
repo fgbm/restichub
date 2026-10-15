@@ -64,10 +64,10 @@ fn send_limit(kind: ChannelKind) -> std::time::Duration {
     }
 }
 
-/// A channel as the send sees it: read in the transaction that starts the send, so a channel that
-/// the operator disabled, changed or deleted since the claim never gets a send from the claim.
+// Read in the transaction that starts the send, so a channel that the operator disabled, changed
+// or deleted since the claim never gets a send from the claim.
 struct Target {
-    /// `None` when the operator deleted the channel since the claim.
+    /// `None` after the operator deleted it, between the claim and the send.
     channel: Option<Channel>,
     credentials: Option<WebhookCredentials>,
 }
@@ -100,9 +100,9 @@ async fn read_target(
     })
 }
 
-/// Sends the due deliveries of one tenant. Every time comes from `clock` at the moment of use, so
-/// a slow earlier send does not age the lease, the backoff or the signature of a later one. A send
-/// starts only while `deadline` leaves room for it; the claims after that go back unsent.
+/// Every time comes from `clock` at the moment of use, so a slow earlier send does not age the
+/// lease, the backoff or the signature of a later one. A send starts only while `deadline` leaves
+/// room for it; the claims after that go back unsent.
 pub async fn deliver_tenant(
     db: &Database,
     sender: &Sender,

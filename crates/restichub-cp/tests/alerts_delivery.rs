@@ -51,7 +51,7 @@ impl Resolver for GateResolver {
     }
 }
 
-/// A lookup that never ends.
+// Makes a webhook send run into its timeout.
 struct HangingResolver;
 
 impl Resolver for HangingResolver {
