@@ -119,9 +119,10 @@ pub async fn enroll_fleet(config: &FleetConfig) -> anyhow::Result<Fleet> {
                 shared = Some(shared_from(&entry));
                 store.write_shared(shared.as_ref())?;
             }
+            let cert_pem = chain_pem(&entry);
             identities.push(AgentIdentity {
                 agent_id: entry.agent_id,
-                cert_pem: der_to_pem(&entry.certificate_der),
+                cert_pem,
                 key_pem: entry.key_pem,
             });
         }
@@ -169,7 +170,7 @@ async fn enroll_missing(
                 os: "linux".to_owned(),
                 arch: "x86_64".to_owned(),
                 agent_version: env!("CARGO_PKG_VERSION").to_owned(),
-                restic_version: "0.18.0".to_owned(),
+                restic_version: "0.19.1".to_owned(),
             };
             let entry = enroll_with_retry(&config, token, &facts, &tls, gate.as_deref()).await?;
             store.append(&entry)?;
@@ -311,7 +312,7 @@ impl Store {
         std::fs::create_dir_all(&clients)?;
         std::fs::write(
             clients.join(format!("{}.pem", entry.agent_id)),
-            der_to_pem(&entry.certificate_der),
+            chain_pem(entry),
         )?;
         std::fs::write(
             clients.join(format!("{}.key", entry.agent_id)),
@@ -367,6 +368,17 @@ fn pem_to_der(pem: &str) -> anyhow::Result<Vec<u8>> {
     STANDARD
         .decode(body.trim())
         .context("the CA certificate is not base64")
+}
+
+/// The certificate of the agent followed by its issuing CAs. The root is the trust anchor of the
+/// control plane, so the chain leaves it out.
+fn chain_pem(entry: &EnrolledIdentity) -> String {
+    let intermediates = entry.ca_chain_der.len().saturating_sub(1);
+    let mut pem = der_to_pem(&entry.certificate_der);
+    for der in entry.ca_chain_der.iter().take(intermediates) {
+        pem.push_str(&der_to_pem(der));
+    }
+    pem
 }
 
 fn der_to_pem(der: &[u8]) -> String {

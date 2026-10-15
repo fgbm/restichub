@@ -89,9 +89,9 @@ pg() {
 	fi
 }
 
-# The native mode runs a release binary against a PostgreSQL server that the caller provides
-# (PGHOST and PGPORT for the control plane; psql, or PG_CONTAINER with an administrator inside). It is for smoke runs on a developer
-# machine; the numbers of a native run do not count for AC-NFR-01.
+# The native mode runs a local binary against a PostgreSQL server that the caller provides (PGHOST
+# and PGPORT for the control plane; psql, or PG_CONTAINER with an administrator inside). It is for
+# smoke runs on a developer machine; the numbers of a native run do not count for AC-NFR-01.
 up_native() {
 	: "${CP_BIN:?set CP_BIN to restichub-cp}"
 	local port="${PGPORT:-5432}" host="${PGHOST:-127.0.0.1}"
@@ -106,16 +106,22 @@ SQL
 	pg -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE restichub OWNER restichub_owner' >/dev/null
 	RESTICHUB_DATABASE_MIGRATION_URL="postgres://restichub_owner@$host:$port/restichub" \
 		RESTICHUB_DATABASE_MIGRATION_PASSWORD=owner "$CP_BIN" migrate
+	(umask 077 && random >"$OUT/kek")
+	serve_native
+}
+
+serve_native() {
+	local port="${PGPORT:-5432}" host="${PGHOST:-127.0.0.1}"
 	RESTICHUB_LISTEN_ADDR="127.0.0.1:8080" \
 		RESTICHUB_DATABASE_URL="postgres://restichub_runtime@$host:$port/restichub" \
 		RESTICHUB_DATABASE_PASSWORD=runtime \
-		RESTICHUB_KEK="$(random)" \
+		RESTICHUB_KEK="$(cat "$OUT/kek")" \
 		RESTICHUB_SERVER_INSECURE_COOKIES=true \
 		RESTICHUB_TENANCY_MODE=single \
 		RESTICHUB_AGENT_LISTEN="127.0.0.1:8443" \
 		RESTICHUB_AGENT_ENDPOINT="$listener" \
 		NO_COLOR=1 \
-		"$CP_BIN" serve >"$OUT/cp.log" 2>&1 &
+		"$CP_BIN" serve >>"$OUT/cp.log" 2>&1 &
 	echo $! >"$OUT/cp.pid"
 }
 
@@ -375,10 +381,12 @@ restart_test() {
 	log "agents connected before the restart: $before"
 	started="$(date +%s)"
 	if [ "$CP_MODE" = native ]; then
-		echo "restart-test needs CP_MODE=compose" >&2
-		return 2
+		kill "$(cat "$OUT/cp.pid")"
+		sleep 2
+		serve_native
+	else
+		"${compose[@]}" restart cp
 	fi
-	"${compose[@]}" restart cp
 	for _ in $(seq 1 120); do
 		curl -fsS "$web/readyz" >/dev/null 2>&1 && break
 		sleep 1
@@ -416,6 +424,8 @@ run() {
 	local collector=$!
 	"$0" emulate >"$OUT/emulator.log" 2>&1 &
 	local emulator=$!
+	# A failed step must not leave the emulator and the collector behind.
+	trap 'touch "$OUT/collect.stop"; kill "$emulator" 2>/dev/null || true' EXIT
 	load
 	log "load running; the emulator stops after $DURATION s"
 	local status=0

@@ -1,1 +1,0 @@
-restichub-emulator: the enrollment of emulator-00016 failed: the enrollment was refused with HTTP 429: {"type":"about:blank","title":"Too Many Requests","status":429,"code":"rate_limited","request_id":""}

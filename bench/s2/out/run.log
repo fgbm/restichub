@@ -1,0 +1,6 @@
+psql:<stdin>:113: NOTICE:  role "restichub_owner" has already been granted membership in role "restichub_app" by role "postgres"
+psql:<stdin>:114: NOTICE:  role "restichub_runtime" has already been granted membership in role "restichub_app" by role "postgres"
+psql:<stdin>:115: NOTICE:  role "restichub_owner" has already been granted membership in role "restichub_auth" by role "postgres"
+[2m2026-10-15T16:12:47.585991Z[0m [32m INFO[0m [2mrestichub_db[0m[2m:[0m database migrations applied [3mversion[0m[2m=[0mSome(44)
+16:12:49 the control plane is ready
+16:12:52 setup done
