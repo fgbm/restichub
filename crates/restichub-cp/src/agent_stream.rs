@@ -1217,9 +1217,6 @@ fn cancel_message(job: JobId) -> ControlMessage {
     }
 }
 
-/// How long after a revoke the sweep still cancels the jobs that the revoke failed.
-const REVOKED_JOB_WINDOW: time::Duration = time::Duration::minutes(2);
-
 /// Closes the open streams that the registry no longer allows (FR-ID-04).
 ///
 /// A revoke on another control plane instance reaches this instance only through the registry
@@ -1233,7 +1230,6 @@ pub async fn sweep_revoked(state: &AppState) {
     for (tenant, streams) in by_tenant {
         let ids: Vec<Uuid> = streams.iter().map(|(agent, _)| agent.as_uuid()).collect();
         let serials: Vec<String> = streams.iter().map(|(_, serial)| serial.clone()).collect();
-        let since = state.auth().clock.now() - REVOKED_JOB_WINDOW;
         let result = async {
             let mut tx = state.db().begin_tenant(tenant).await?;
             let stale = agent_repo::disallowed_streams(&mut tx, &ids, &serials).await?;
@@ -1242,7 +1238,7 @@ pub async fn sweep_revoked(state: &AppState) {
                 let agent = AgentId::from_uuid(id);
                 jobs.push((
                     agent,
-                    queue_repo::cancellable_job_ids_for_agent(&mut tx, agent, since).await?,
+                    queue_repo::cancellable_job_ids_for_agent(&mut tx, agent).await?,
                 ));
             }
             tx.commit().await?;

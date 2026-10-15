@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::enums::{AgentStatus, ServerScriptsState};
-use crate::ids::{AgentId, JobId, UserId};
+use crate::ids::{AgentId, UserId};
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -445,9 +445,6 @@ pub struct Replaced {
     pub plans: u64,
     pub repositories: u64,
     pub queued_jobs: u64,
-    /// The sent and running jobs of the old agent. The caller cancels them after the commit
-    /// (FR-ID-04, AC-ID-04).
-    pub active_jobs: Vec<JobId>,
 }
 
 /// How a replacement ended: done, or refused for a reason the caller maps to a status.
@@ -531,13 +528,11 @@ pub async fn replace(
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    let active_jobs = crate::queue::active_job_ids_for_agent(tx, old).await?;
     revoke(tx, old, actor, now).await?;
     Ok(ReplaceOutcome::Replaced(Replaced {
         plans,
         repositories,
         queued_jobs,
-        active_jobs,
     }))
 }
 

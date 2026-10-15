@@ -305,37 +305,21 @@ pub async fn signed_job(
     })
 }
 
-/// The identifiers of the `sent` and `running` jobs of one agent. A revoke cancels them before it
-/// closes the stream (FR-ID-04).
-pub async fn active_job_ids_for_agent(
-    tx: &mut TenantTx<'_>,
-    agent: AgentId,
-) -> Result<Vec<JobId>, DbError> {
-    let rows: Vec<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM jobs WHERE agent_id = $1 AND status IN ('sent', 'running') ORDER BY id",
-    )
-    .bind(agent)
-    .fetch_all(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
-    Ok(rows.into_iter().map(|(id,)| JobId::from_uuid(id)).collect())
-}
-
-/// The sent and running jobs of an agent, and the jobs that a revoke failed since `since`. The
-/// instance that holds the stream of a revoked agent still sends them a cancellation.
+/// The sent and running jobs of an agent, and the jobs that its revoke failed. The instance that
+/// holds the stream of a revoked agent still sends them a cancellation. The revoke and the failed
+/// jobs share one timestamp, so the comparison needs no clock of this instance.
 pub async fn cancellable_job_ids_for_agent(
     tx: &mut TenantTx<'_>,
     agent: AgentId,
-    since: OffsetDateTime,
 ) -> Result<Vec<JobId>, DbError> {
     let rows: Vec<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM jobs WHERE agent_id = $1 \
-           AND (status IN ('sent', 'running') \
-                OR (result_message = 'agent_revoked' AND finished_at >= $2)) \
-         ORDER BY id",
+        "SELECT j.id FROM jobs j JOIN agents a ON a.tenant_id = j.tenant_id AND a.id = j.agent_id \
+         WHERE j.agent_id = $1 \
+           AND (j.status IN ('sent', 'running') \
+                OR (j.result_message = 'agent_revoked' AND j.finished_at >= a.revoked_at)) \
+         ORDER BY j.id",
     )
     .bind(agent)
-    .bind(since)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -551,25 +535,54 @@ pub async fn fail_for_revoked_agents(
     Ok(result.rows_affected())
 }
 
-/// Fails the sent and running jobs of an agent that the control plane revokes or replaces, and marks
-/// their repository lock as possibly stale. The revoked agent can no longer report a result.
+/// Fails the sent and running jobs of an agent that the control plane revokes or replaces, and
+/// returns their identifiers for the cancellation. The revoked agent can no longer report a result.
+///
+/// Only a running job marks its repository lock as possibly stale: restic did not start for a job
+/// that was only sent.
 pub async fn fail_active_for_revoked_agent(
     tx: &mut TenantTx<'_>,
     agent: AgentId,
     now: OffsetDateTime,
-) -> Result<u64, DbError> {
-    let result = sqlx::query(
+) -> Result<Vec<JobId>, DbError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
         "UPDATE jobs SET status = 'failed', result_code = 'failed', \
-                result_message = 'agent_revoked', stale_lock_since = $2, finished_at = $2, \
+                result_message = 'agent_revoked', \
+                stale_lock_since = CASE WHEN status = 'running' THEN $2 END, finished_at = $2, \
                 lease_until = NULL, updated_at = now() \
-         WHERE agent_id = $1 AND status IN ('sent', 'running')",
+         WHERE agent_id = $1 AND status IN ('sent', 'running') \
+         RETURNING id",
     )
     .bind(agent)
     .bind(now)
-    .execute(tx.as_conn())
+    .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(result.rows_affected())
+    Ok(rows.into_iter().map(|(id,)| JobId::from_uuid(id)).collect())
+}
+
+/// The agent that runs an unlock for a repository whose own agent can no longer do it: an active
+/// agent of the tenant. Agents with a plan on the repository come first, then the agent seen
+/// last. A local repository has no such agent, because only its maintenance agent reaches the disk.
+pub async fn unlock_fallback_agent(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+) -> Result<Option<AgentId>, DbError> {
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT a.id FROM agents a \
+         WHERE a.status = 'active' \
+           AND NOT EXISTS (SELECT 1 FROM repositories r WHERE r.id = $1 AND r.backend = 'local') \
+         ORDER BY EXISTS (SELECT 1 FROM plans p \
+                          JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
+                          WHERE p.agent_id = a.id AND pr.repository_id = $1) DESC, \
+                  a.last_seen_at DESC NULLS LAST, a.id \
+         LIMIT 1",
+    )
+    .bind(repository_id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(|(id,)| AgentId::from_uuid(id)))
 }
 
 /// Marks the lock of a job as possibly stale from `since`, unless it is marked already.
@@ -629,26 +642,6 @@ pub async fn running_unlisted(
     .await
     .map_err(DbError::Query)?;
     Ok(rows.into_iter().map(JobId::from_uuid).collect())
-}
-
-/// Fails a running job that an agent restart interrupted, and marks the repository lock as
-/// possibly stale.
-pub async fn mark_interrupted(
-    tx: &mut TenantTx<'_>,
-    id: JobId,
-    now: OffsetDateTime,
-) -> Result<bool, DbError> {
-    let result = sqlx::query(
-        "UPDATE jobs SET status = 'failed', result_code = 'failed', result_message = 'interrupted', \
-                stale_lock_since = $2, finished_at = $2, lease_until = NULL, updated_at = now() \
-         WHERE id = $1 AND status = 'running'",
-    )
-    .bind(id)
-    .bind(now)
-    .execute(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
-    Ok(result.rows_affected() == 1)
 }
 
 /// Fails a running job because its agent is lost, and marks the repository lock as possibly stale.

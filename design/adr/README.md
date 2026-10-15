@@ -44,7 +44,8 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted |
 | [0037](0037-server-scripts-on-trusted-hosts.md) | Server scripts on trusted hosts | accepted |
 | [0038](0038-agent-downloads-restic.md) | The agent downloads restic | accepted |
-| [0039](0039-stall-watchdog-instead-of-job-time-limit.md) | A stall watchdog instead of a fixed job time limit | accepted |
+| [0039](0039-stall-watchdog-instead-of-job-time-limit.md) | A stall watchdog instead of a fixed job time limit | accepted, the grace for a fresh job superseded by ADR-0043 |
 | [0040](0040-remove-allow-list-hooks.md) | Remove the allow-list hooks | accepted |
 | [0041](0041-re-registration-and-duplicate-detection.md) | Re-registration that keeps the agent ID, and duplicate detection | accepted |
 | [0042](0042-agent-log-spool-and-acknowledgements.md) | The agent log spool and the log acknowledgements | accepted |
+| [0043](0043-no-grace-for-unlisted-running-jobs.md) | No grace for a running job that the hello omits | accepted |

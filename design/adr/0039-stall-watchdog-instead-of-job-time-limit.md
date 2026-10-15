@@ -1,6 +1,6 @@
 # ADR-0039: A stall watchdog instead of a fixed job time limit
 
-- Status: accepted
+- Status: accepted, the grace for a fresh job superseded by ADR-0043
 - Date: 2026-10-15
 - Requirements: FR-AG-05, FR-AG-10, FR-SC-06
 - Refines: ADR-0020, ADR-0021 (job fields), the queue decisions of ADR-0017
@@ -39,6 +39,10 @@ Each queued job carried `timeout_seconds` of 12 hours. The agent enforced it as 
 ### Display
 
 - The job detail shows the acceptance window only while the job is queued or sent ("Accept until"). A running job shows its limits: none, the stall timeout, or the maximum duration.
+
+## Note of 2026-10-16
+
+ADR-0043 removes the grace rule for a job that started a short time ago. The agent lists a job before it acknowledges it, so the CP fails each running job that the hello omits.
 
 ## Consequences
 

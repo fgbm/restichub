@@ -7,7 +7,7 @@ mod common;
 mod reenroll_support;
 
 use axum::http::StatusCode;
-use restichub_db::agents::{self as repo, ReplaceOutcome};
+use restichub_db::agents as repo;
 use serde_json::json;
 use time::{Duration, OffsetDateTime};
 
@@ -166,8 +166,31 @@ async fn ac_id_10_the_replacement_moves_queued_jobs_and_audits_the_revoke() {
     db.cleanup().await;
 }
 
+/// The status, the result message and the stale lock mark of a job.
+async fn job_row(
+    db: &restichub_db::test_util::TestDatabase,
+    env: &reenroll_support::Env,
+    id: restichub_db::JobId,
+) -> (String, Option<String>, bool) {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(env.tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    let row = sqlx::query_as(
+        "SELECT status, result_message, stale_lock_since IS NOT NULL FROM jobs WHERE id = $1",
+    )
+    .bind(id.as_uuid())
+    .fetch_one(&mut *tx)
+    .await
+    .expect("cannot read the job");
+    tx.commit().await.expect("cannot commit");
+    row
+}
+
 #[tokio::test]
-async fn ac_id_10_the_replacement_returns_the_running_jobs_to_cancel() {
+async fn ac_id_10_the_replacement_fails_the_active_jobs_of_the_old_record() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -175,8 +198,10 @@ async fn ac_id_10_the_replacement_returns_the_running_jobs_to_cancel() {
     let old = enroll_new(&db, &env, "MINDCORE", Some(MACHINE)).await;
     let new = enroll_new(&db, &env, "MINDCORE", Some(MACHINE)).await;
     let secret = seed_secret(db.database(), env.tenant, "plan.password").await;
-    let repository = seed_repository(db.database(), env.tenant, "repo", secret).await;
-    let running = seed_job(db.database(), env.tenant, old, repository).await;
+    let first = seed_repository(db.database(), env.tenant, "first", secret).await;
+    let second = seed_repository(db.database(), env.tenant, "second", secret).await;
+    let running = seed_job(db.database(), env.tenant, old, first).await;
+    let sent = seed_job(db.database(), env.tenant, old, second).await;
     exec(
         &db,
         &env,
@@ -184,28 +209,25 @@ async fn ac_id_10_the_replacement_returns_the_running_jobs_to_cancel() {
         running.as_uuid(),
     )
     .await;
-
-    let mut tx = db
-        .database()
-        .begin_tenant(env.tenant)
-        .await
-        .expect("cannot begin");
-    let outcome = repo::replace(
-        &mut tx,
-        new,
-        old,
-        env.creator,
-        OffsetDateTime::now_utc(),
-        Duration::minutes(5),
+    exec(
+        &db,
+        &env,
+        "UPDATE jobs SET status = 'sent' WHERE id = $1",
+        sent.as_uuid(),
     )
-    .await
-    .expect("cannot replace");
-    let ReplaceOutcome::Replaced(moved) = outcome else {
-        panic!("the pair qualifies: {outcome:?}");
-    };
-    assert_eq!(moved.active_jobs, vec![running]);
-    assert_eq!(moved.queued_jobs, 0);
-    tx.commit().await.expect("cannot commit");
+    .await;
+
+    let (status, body) = replace(&env, new, old).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (state, message, marked) = job_row(&db, &env, running).await;
+    assert_eq!(state, "failed");
+    assert_eq!(message.as_deref(), Some("agent_revoked"));
+    assert!(marked, "the lock of a running job is a suspect");
+    let (state, message, marked) = job_row(&db, &env, sent).await;
+    assert_eq!(state, "failed");
+    assert_eq!(message.as_deref(), Some("agent_revoked"));
+    assert!(!marked, "restic never started for a sent job");
     db.cleanup().await;
 }
 
