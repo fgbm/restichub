@@ -395,19 +395,52 @@ pub async fn list(tx: &mut TenantTx<'_>, job: JobId) -> Result<Vec<JobStep>, DbE
     rows.into_iter().map(StepRow::into_step).collect()
 }
 
+/// One step of the list that the control plane signed into a job (FR-HK-11).
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct PlannedStep {
+    pub step_id: String,
+    /// The kind of the step, such as `backup`, `hook` or `script`. Empty for an older job.
+    pub kind: String,
+    /// The display name: the name of a script or the identifier of a hook. Empty for the others.
+    pub name: String,
+    /// The phase of a hook or a script, or empty.
+    pub phase: String,
+}
+
 /// Stores the step list that the control plane signed into a job, in order.
 ///
 /// A second call changes nothing. At most [`MAX_STEPS_PER_JOB`] steps are kept.
 pub async fn plan(tx: &mut TenantTx<'_>, job: JobId, step_ids: &[String]) -> Result<(), DbError> {
-    for (position, step_id) in step_ids.iter().take(MAX_STEPS_PER_JOB as usize).enumerate() {
+    let steps: Vec<PlannedStep> = step_ids
+        .iter()
+        .map(|step_id| PlannedStep {
+            step_id: step_id.clone(),
+            kind: String::new(),
+            name: String::new(),
+            phase: String::new(),
+        })
+        .collect();
+    plan_described(tx, job, &steps).await
+}
+
+/// Stores the described step list of a job, in order. Same rules as [`plan`].
+pub async fn plan_described(
+    tx: &mut TenantTx<'_>,
+    job: JobId,
+    steps: &[PlannedStep],
+) -> Result<(), DbError> {
+    for (position, step) in steps.iter().take(MAX_STEPS_PER_JOB as usize).enumerate() {
         sqlx::query(
-            "INSERT INTO job_planned_steps (tenant_id, job_id, step_id, position) \
-             VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+            "INSERT INTO job_planned_steps (tenant_id, job_id, step_id, position, kind, name, phase) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING",
         )
         .bind(tx.tenant())
         .bind(job)
-        .bind(step_id)
+        .bind(&step.step_id)
         .bind(i32::try_from(position).unwrap_or(i32::MAX))
+        .bind(&step.kind)
+        .bind(step.name.chars().take(128).collect::<String>())
+        .bind(&step.phase)
         .execute(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
@@ -422,6 +455,21 @@ pub async fn list_planned(tx: &mut TenantTx<'_>, job: JobId) -> Result<Vec<Strin
         .fetch_all(tx.as_conn())
         .await
         .map_err(DbError::Query)
+}
+
+/// Lists the described steps that the control plane signed into a job, in order.
+pub async fn list_planned_described(
+    tx: &mut TenantTx<'_>,
+    job: JobId,
+) -> Result<Vec<PlannedStep>, DbError> {
+    sqlx::query_as::<_, PlannedStep>(
+        "SELECT step_id, kind, name, phase FROM job_planned_steps WHERE job_id = $1 \
+         ORDER BY position",
+    )
+    .bind(job)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)
 }
 
 /// Stores the last progress of a job. The write replaces the previous progress.

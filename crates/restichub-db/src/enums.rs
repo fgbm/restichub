@@ -159,6 +159,42 @@ impl HookAllowListState {
     }
 }
 
+/// Whether a host trusts scripts from the control plane (FR-HK-08, ADR-0037).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum ServerScriptsState {
+    /// The agent does not report the state. The control plane treats it as disabled.
+    Unknown,
+    /// The host administrator did not turn the mode on. This is the default.
+    Disabled,
+    Enabled,
+    /// Another account can change the setting file, so the mode is off.
+    Insecure,
+}
+
+impl ServerScriptsState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Disabled => "disabled",
+            Self::Enabled => "enabled",
+            Self::Insecure => "insecure",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unknown" => Some(Self::Unknown),
+            "disabled" => Some(Self::Disabled),
+            "enabled" => Some(Self::Enabled),
+            "insecure" => Some(Self::Insecure),
+            _ => None,
+        }
+    }
+}
+
 /// The derived administrator state of a tenant (ADR-0028).
 ///
 /// The control plane computes the state from the memberships: an active Admin count of zero gives

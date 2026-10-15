@@ -37,6 +37,7 @@ pub mod profiles;
 pub mod queue;
 pub mod repositories;
 pub mod restore;
+pub mod script_templates;
 pub mod secrets;
 pub mod sessions;
 pub mod setup;
@@ -51,12 +52,12 @@ pub mod test_util;
 pub use enums::{
     ActorType, AdminState, AgentStatus, BackendKind, CaRole, HookAllowListState, JobKind,
     JobResultCode, JobStatus, LogLevel, LogStream, MaintenanceTask, MissedRunPolicy, Role,
-    SigningKeyRole, StepStatus, TenantStatus,
+    ServerScriptsState, SigningKeyRole, StepStatus, TenantStatus,
 };
 pub use ids::{
     AgentId, AlertId, ApiTokenId, AuditLogId, ChannelId, DeliveryId, EnrollmentTokenId, JobId,
-    MaintenanceScheduleId, PLATFORM_TENANT_ID, PlanId, ProfileId, RepositoryId, SecretId,
-    SessionId, SetupTokenId, TenantId, UserId,
+    JobTemplateId, MaintenanceScheduleId, PLATFORM_TENANT_ID, PlanId, ProfileId, RepositoryId,
+    ScriptTemplateId, SecretId, SessionId, SetupTokenId, TenantId, UserId,
 };
 pub use tx::{EnrollmentTx, PlatformTx, TenantTx};
 

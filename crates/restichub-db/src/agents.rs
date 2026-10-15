@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::enums::{AgentStatus, HookAllowListState};
+use crate::enums::{AgentStatus, HookAllowListState, ServerScriptsState};
 use crate::ids::{AgentId, UserId};
 use crate::tx::TenantTx;
 
@@ -38,6 +38,11 @@ pub struct Agent {
     pub hooks: serde_json::Value,
     /// Whether the agent trusted its allow-list file at its last connection (AC-HK-01).
     pub hook_allow_list: HookAllowListState,
+    /// Whether the host trusts scripts from the control plane, from the last `AgentHello`
+    /// (FR-HK-08).
+    pub server_scripts: ServerScriptsState,
+    /// The interpreters the agent found, as wire names such as `bash` (FR-HK-08).
+    pub script_interpreters: Vec<String>,
     pub certificate_serial: Vec<u8>,
     pub certificate_expires_at: OffsetDateTime,
     pub status: AgentStatus,
@@ -132,7 +137,7 @@ pub async fn list(
     };
     let mut agents: Vec<Agent> = sqlx::query_as::<_, AgentRow>(
         "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
-                capabilities, restore_roots, hooks, hook_allow_list, certificate_serial, certificate_expires_at, status, \
+                capabilities, restore_roots, hooks, hook_allow_list, server_scripts, script_interpreters, certificate_serial, certificate_expires_at, status, \
                 last_seen_at, created_at, revoked_at, revoked_by_user_id \
          FROM agents \
          WHERE ($1::text IS NULL OR status = $1) \
@@ -159,7 +164,7 @@ pub async fn list(
 pub async fn get(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option<Agent>, DbError> {
     let row = sqlx::query_as::<_, AgentRow>(
         "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
-                capabilities, restore_roots, hooks, hook_allow_list, certificate_serial, certificate_expires_at, status, \
+                capabilities, restore_roots, hooks, hook_allow_list, server_scripts, script_interpreters, certificate_serial, certificate_expires_at, status, \
                 last_seen_at, created_at, revoked_at, revoked_by_user_id \
          FROM agents WHERE id = $1",
     )
@@ -233,6 +238,8 @@ pub struct HelloFacts<'a> {
     /// A JSON object that maps a hook identifier to its schema.
     pub hooks: &'a serde_json::Value,
     pub hook_allow_list: HookAllowListState,
+    pub server_scripts: ServerScriptsState,
+    pub script_interpreters: &'a [String],
 }
 
 /// Stores the facts of the last `AgentHello`.
@@ -242,15 +249,19 @@ pub async fn set_hello_facts(
     facts: &HelloFacts<'_>,
 ) -> Result<(), DbError> {
     sqlx::query(
-        "UPDATE agents SET capabilities = $2, restore_roots = $3, hooks = $4, hook_allow_list = $5 \
+        "UPDATE agents SET capabilities = $2, restore_roots = $3, hooks = $4, hook_allow_list = $5, \
+                server_scripts = $6, script_interpreters = $7 \
          WHERE id = $1 AND (capabilities <> $2 OR restore_roots <> $3 OR hooks <> $4 \
-                            OR hook_allow_list <> $5)",
+                            OR hook_allow_list <> $5 OR server_scripts <> $6 \
+                            OR script_interpreters <> $7)",
     )
     .bind(id)
     .bind(facts.capabilities)
     .bind(facts.restore_roots)
     .bind(facts.hooks)
     .bind(facts.hook_allow_list.as_str())
+    .bind(facts.server_scripts.as_str())
+    .bind(facts.script_interpreters)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -307,6 +318,8 @@ struct AgentRow {
     restore_roots: Vec<String>,
     hooks: serde_json::Value,
     hook_allow_list: String,
+    server_scripts: String,
+    script_interpreters: Vec<String>,
     certificate_serial: Vec<u8>,
     certificate_expires_at: OffsetDateTime,
     status: AgentStatus,
@@ -331,6 +344,9 @@ impl From<AgentRow> for Agent {
             hooks: row.hooks,
             hook_allow_list: HookAllowListState::parse(&row.hook_allow_list)
                 .unwrap_or(HookAllowListState::Unknown),
+            server_scripts: ServerScriptsState::parse(&row.server_scripts)
+                .unwrap_or(ServerScriptsState::Unknown),
+            script_interpreters: row.script_interpreters,
             certificate_serial: row.certificate_serial,
             certificate_expires_at: row.certificate_expires_at,
             status: row.status,
