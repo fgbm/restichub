@@ -18,6 +18,7 @@ use restichub_proto::agent::v1::{
 };
 use tokio::sync::mpsc;
 
+use super::command_text::command_line_text;
 use super::log::JobLog;
 use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
@@ -42,7 +43,7 @@ pub(super) const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long a log or progress message may wait for room in the stream buffer, so a slow control
 /// plane never blocks a cancel.
-const SEND_WAIT: Duration = Duration::from_millis(250);
+pub(super) const SEND_WAIT: Duration = Duration::from_millis(250);
 
 /// The lines that the agent takes before it looks at the child again.
 pub(super) const LINES_PER_TURN: usize = 256;
@@ -307,14 +308,20 @@ impl Jobs {
             return StepOutcome::cancelled(false);
         }
         let line = match build_command(validated, step) {
-            Ok(line) => line.with_json(),
+            Ok(line) => line,
             Err(error) => {
                 tracing::warn!(%error, "cannot build the restic command");
                 return StepOutcome::not_started();
             }
         };
         let step_id = step.step_id.as_str();
+        let line = line.with_json();
         let scrubber = Scrubber::for_command(&line);
+        log.push(
+            step_id,
+            LogStream::Agent,
+            &command_line_text(&scrubber, &line),
+        );
         // The hash check and the start share one opening of the binary (FR-AG-11, threat T20).
         let spawned = self.expected_sha256().and_then(|expected| {
             crate::exec::spawn_job_restic(
@@ -492,20 +499,6 @@ impl Jobs {
         {
             output.last_log = now;
             self.send_log(log).await;
-        }
-    }
-
-    /// Chunks that find no room in the stream buffer within a moment are lost; the journal tail
-    /// still keeps them (AC-PR-07).
-    pub(super) async fn send_log(&self, log: &mut JobLog) {
-        for chunk in log.take_pending() {
-            self.send_within(
-                AgentMessage {
-                    payload: Some(agent_message::Payload::LogChunk(chunk)),
-                },
-                SEND_WAIT,
-            )
-            .await;
         }
     }
 }

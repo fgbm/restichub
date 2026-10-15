@@ -400,6 +400,9 @@ async fn fr_ag_08_the_log_is_scrubbed_and_bounded() {
         .iter()
         .filter(|chunk| chunk.step_id == "backup")
         .collect();
-    assert_eq!(backup_logs[0].stream, LogStream::Stderr as i32);
-    assert_eq!(backup_logs[0].job_id, "job-log");
+    // AC-PF-01: the first line of a step is its masked command line.
+    assert_eq!(backup_logs[0].stream, LogStream::Agent as i32);
+    assert!(backup_logs[0].data.starts_with(b"$ "));
+    assert_eq!(backup_logs[1].stream, LogStream::Stderr as i32);
+    assert_eq!(backup_logs[1].job_id, "job-log");
 }

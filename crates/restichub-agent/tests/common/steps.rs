@@ -264,6 +264,7 @@ pub async fn collect(rx: &mut mpsc::Receiver<AgentMessage>) -> Collected {
 pub async fn run(jobs: &Jobs, job: &Job) -> Collected {
     let (tx, mut rx) = mpsc::channel(256);
     jobs.attach(&tx);
+    jobs.greeted(false);
     jobs.handle(signed(job), &ring(), AGENT, TENANT).await;
     collect(&mut rx).await
 }

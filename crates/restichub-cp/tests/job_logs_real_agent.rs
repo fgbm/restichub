@@ -64,6 +64,11 @@ fn sha256_hex(path: &Path) -> String {
 
 /// Runs the queued backup on the real runner and sends every message to the control plane.
 async fn run_backup(env: &Env, agent: &mut queue_support::FakeAgent) -> Uuid {
+    run_backup_of_profile(env, agent).await.0
+}
+
+/// Like [`run_backup`], and returns the profile that the job ran.
+async fn run_backup_of_profile(env: &Env, agent: &mut queue_support::FakeAgent) -> (Uuid, Uuid) {
     let ring = Env::key_ring(&agent.identity);
     let work = std::env::temp_dir().join(format!("restichub-logs-agent-{}", Uuid::now_v7()));
     std::fs::create_dir_all(&work).expect("cannot create the work directory");
@@ -84,6 +89,7 @@ async fn run_backup(env: &Env, agent: &mut queue_support::FakeAgent) -> Uuid {
     .expect("the job journal must open");
     let (captured_tx, mut captured) = tokio::sync::mpsc::channel(64);
     jobs.attach(&captured_tx);
+    jobs.greeted(false);
 
     let repository = env
         .create_repository_at(
@@ -118,7 +124,7 @@ async fn run_backup(env: &Env, agent: &mut queue_support::FakeAgent) -> Uuid {
             .expect("cannot send the message");
     }
     std::fs::remove_dir_all(&work).expect("cannot remove the work directory");
-    backup
+    (backup, profile)
 }
 
 async fn all_lines(env: &Env, job: Uuid) -> Vec<Value> {
@@ -220,5 +226,49 @@ async fn ac_lg_04_the_password_canary_appears_in_no_stored_log_line() {
     assert!(scanner.scan("job detail", detail.as_bytes()).is_empty());
     let logs = Value::Array(lines).to_string();
     assert!(scanner.scan("job log api", logs.as_bytes()).is_empty());
+    env.db.cleanup().await;
+}
+
+/// AC-PF-01: the command line in the step log is the command line of the preview, with the secrets
+/// masked.
+#[tokio::test]
+async fn ac_pf_01_the_step_log_holds_the_masked_command_line_of_the_preview() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("real-command-agent").await;
+
+    let (backup, profile) = run_backup_of_profile(&env, &mut agent).await;
+    eventually(|| async { env.job_status(backup).await == "succeeded" }).await;
+
+    let (status, preview) = env
+        .call(
+            &env.admin,
+            "POST",
+            &format!("/api/v1/profiles/{profile}/preview"),
+            Some(json!({"agent_id": agent.id.to_string()})),
+        )
+        .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{preview}");
+    let previewed = preview["steps"]
+        .as_array()
+        .and_then(|steps| steps.iter().find(|step| step["kind"] == "backup"))
+        .and_then(|step| step["command"].as_str())
+        .expect("the backup command of the preview");
+
+    let lines = all_lines(&env, backup).await;
+    let logged: Vec<&str> = lines
+        .iter()
+        .filter(|line| line["stream"] == "agent")
+        .filter_map(|line| line["text"].as_str())
+        .filter(|text| text.starts_with("$ "))
+        .collect();
+    assert_eq!(logged.len(), 1, "{lines:?}");
+    assert_eq!(logged[0], format!("$ {previewed}"));
+    assert!(
+        !logged[0].contains(CANARY),
+        "the command line holds no secret"
+    );
     env.db.cleanup().await;
 }

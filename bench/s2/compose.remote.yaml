@@ -1,0 +1,17 @@
+# Bench S2 on a remote host: overrides compose.yaml so that the stack uses a published image and
+# the agent listener is reachable from the emulator host. CP_IMAGE is a digest-pinned image.
+# The web port stays on the loopback address; reach it through an SSH tunnel. Limit the agent port
+# with the firewall of the host: Docker bypasses ufw, so use the DOCKER-USER chain.
+
+services:
+  migrate:
+    build: !reset null
+    image: ${CP_IMAGE}
+  cp:
+    build: !reset null
+    image: ${CP_IMAGE}
+    environment:
+      RESTICHUB_AGENT_ENDPOINT: ${RESTICHUB_AGENT_ENDPOINT}
+    ports: !override
+      - '127.0.0.1:8080:8080'
+      - '8443:8443'

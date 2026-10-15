@@ -16,6 +16,10 @@ pub const PROTOCOL_VERSION_MINOR: u32 = 1;
 /// [`MAX_STEP_RESULT_BYTES`], so it always fits with room for the other fields (FR-AG-08).
 pub const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 
+/// The most data bytes in one log chunk. The agent splits a longer text; the control plane refuses
+/// a longer chunk (FR-LG-07).
+pub const MAX_LOG_CHUNK_BYTES: usize = 64 * 1024;
+
 /// The largest encoded size of one step result that the agent sends (FR-AG-08).
 pub const MAX_STEP_RESULT_BYTES: usize = 3 * 1024 * 1024;
 

@@ -632,7 +632,14 @@ async fn handle_control(
             // Only the greeting proves that the control plane accepts the protocol version, so
             // `register` does not report a connection before it (FR-IN-07).
             crate::connection::record_connected(dir, &identity.cp_url);
+            // A control plane that lists the capability acknowledges log chunks, so the agent
+            // keeps the log in its spool until the acknowledgement (FR-LG-07). The drain task
+            // sends it, so this loop never waits for the log.
+            jobs.greeted(
+                restichub_proto::AgentCapability::LogAckV1.is_listed(&hello.accepted_capabilities),
+            );
         }
+        Some(control_message::Payload::LogAck(ack)) => jobs.log_ack(&ack),
         Some(control_message::Payload::VersionRejected(rejected)) => {
             let reason = VersionRejectReason::try_from(rejected.reason).unwrap_or_default();
             tracing::error!(

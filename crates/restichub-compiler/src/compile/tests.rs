@@ -171,7 +171,7 @@ fn fr_rp_08_the_forget_carries_the_profile_tag_and_the_filter_tags_as_one_and_li
     assert_eq!(filter.all_tags, [PROFILE_TAG, "daily"]);
     assert!(filter.tags.is_empty());
 
-    let preview = preview(&plan, &repository()).expect("the preview");
+    let preview = preview(&plan, &repository(), OperatingSystem::Linux).expect("the preview");
     let forget = preview
         .iter()
         .find(|step| matches!(step.step.kind, Some(step::Kind::Forget(_))))
@@ -183,6 +183,26 @@ fn fr_rp_08_the_forget_carries_the_profile_tag_and_the_filter_tags_as_one_and_li
         "{}",
         forget.command
     );
+}
+
+#[test]
+fn ac_pf_01_the_preview_shows_the_argv_that_the_agent_runs_in_the_quoting_of_the_os() {
+    let mut profile = profile();
+    profile.paths.all = vec!["C:\\My Data".to_owned()];
+    let plan = plan(&profile, &target());
+    let command_on = |os| {
+        preview(&plan, &repository(), os)
+            .expect("the preview")
+            .into_iter()
+            .find(|step| matches!(step.step.kind, Some(step::Kind::Backup(_))))
+            .expect("a backup step")
+            .command
+    };
+    let linux = command_on(OperatingSystem::Linux);
+    assert!(linux.starts_with("restic backup --json "), "{linux}");
+    assert!(linux.contains("'C:\\My Data'"), "{linux}");
+    let windows = command_on(OperatingSystem::Windows);
+    assert!(windows.contains("\"C:\\My Data\""), "{windows}");
 }
 
 #[test]
@@ -468,7 +488,7 @@ fn empty_paths_are_rejected() {
 #[test]
 fn ac_pf_01_preview_masks_secrets() {
     let plan = plan(&profile(), &target());
-    let previews = match preview(&plan, &repository()) {
+    let previews = match preview(&plan, &repository(), OperatingSystem::Linux) {
         Ok(value) => value,
         Err(error) => panic!("{error:?}"),
     };
@@ -671,7 +691,7 @@ fn ac_pf_01_the_preview_of_a_script_shows_no_body_and_no_value() {
     }];
     profile.scripts = vec![dump];
     let plan = plan(&profile, &trusting_target());
-    let lines = preview(&plan, &repository()).expect("preview");
+    let lines = preview(&plan, &repository(), OperatingSystem::Linux).expect("preview");
     let line = &lines[0].command;
     assert!(line.contains("script=dump"));
     assert!(line.contains("PGPASSWORD"));

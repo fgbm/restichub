@@ -194,8 +194,12 @@ async fn the_setup_creates_the_first_platform_admin_once() {
         "password": "a long enough password",
         "display_name": "Root Two",
     });
-    let (status, _, _) = send(&app, request("POST", "/api/v1/setup", None, Some(body))).await;
+    let (status, _, problem) = send(&app, request("POST", "/api/v1/setup", None, Some(body))).await;
     assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        problem.get("code").and_then(Value::as_str),
+        Some("setup_already_done")
+    );
 
     db.cleanup().await;
 }
@@ -266,7 +270,7 @@ async fn an_expired_setup_token_is_refused() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(
         problem.get("code").and_then(Value::as_str),
-        Some("invalid_credentials")
+        Some("invalid_setup_token")
     );
 
     db.cleanup().await;

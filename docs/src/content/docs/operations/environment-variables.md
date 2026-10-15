@@ -19,6 +19,7 @@ Set the variables in the environment of the control plane process. For the Docke
 | `RESTICHUB_TENANCY_MODE` | `single` | `single` or `multi`. |
 | `RESTICHUB_TENANCY_DEFAULT_TENANT` | `default` | The name of the organization that the single mode uses. |
 | `RESTICHUB_LOG_RETENTION_DAYS` | `30` | The number of days that the control plane keeps the text of job logs. The smallest value is 1. The largest value is 36500. See [Jobs](/restichub/concepts/jobs/#log-retention). |
+| `RESTICHUB_AUDIT_REFUSAL_LIMIT` | `10` | The number of audit records each minute that the refused messages of one agent can write for one reason. The control plane counts the other refusals and writes one summary record when the minute ends or the connection closes. The smallest value is 1. |
 
 ## Control plane: database and secrets
 
@@ -115,6 +116,7 @@ The file `.env` of the stack holds more values. The script `bootstrap.sh` writes
 | Variable | Default | Meaning |
 |---|---|---|
 | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | see "Job time limits" | The stall timeout of a job that carries none. |
+| `RESTICHUB_LOG_SPOOL_MAX_BYTES` | `67108864` (64 MiB) | The most bytes of unconfirmed job log that the agent keeps on disk for all jobs. See [Jobs](/restichub/concepts/jobs/#job-log). |
 
 The agent also honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. See [Register an agent](/restichub/operations/register-an-agent/#the-proxy-of-the-download). The agent has no other `RESTICHUB_` variable.
 

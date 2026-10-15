@@ -43,6 +43,7 @@ use uuid::Uuid;
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
 use crate::job_signing::{JobSigningService, RotationEvent};
+use crate::log_acks::LogAcks;
 use crate::rotation::PresentedCertificate;
 use crate::server::AppState;
 
@@ -57,6 +58,9 @@ pub const IDLE_CLOSE: Duration = Duration::from_secs(3 * HEARTBEAT_INTERVAL.as_s
 
 /// The agent must send its `AgentHello` within this time, or the stream closes (FR-PR-09).
 pub const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How often the stream sends the waiting log acknowledgements, one for each job (FR-LG-07).
+const LOG_ACK_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Control messages buffered for one agent.
 /// The buffer of the messages that the control plane sends to one agent.
@@ -722,7 +726,7 @@ impl AgentService for AgentStreamService {
             payload: Some(control_message::Payload::ServerHello(ServerHello {
                 protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
                 protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
-                accepted_capabilities: Vec::new(),
+                accepted_capabilities: vec![AgentCapability::LogAckV1.as_str().to_owned()],
                 control_plane_version: crate::agent_version::CONTROL_PLANE_VERSION.to_owned(),
             })),
         };
@@ -888,6 +892,9 @@ async fn run_stream(
     last_seen.tick().await;
     let mut last_activity = tokio::time::Instant::now();
     let mut last_request: Option<tokio::time::Instant> = None;
+    let mut log_acks = LogAcks::new(capabilities.contains(&AgentCapability::LogAckV1));
+    let mut ack_flush = tokio::time::interval(LOG_ACK_INTERVAL);
+    ack_flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut active = false;
 
     loop {
@@ -896,11 +903,25 @@ async fn run_stream(
                 Ok(Some(message)) => {
                     last_activity = tokio::time::Instant::now();
                     active = true;
-                    handle_message(&state, &mut identity, generation, &tx, &mut last_request, message)
-                        .await;
+                    handle_message(
+                        &state,
+                        &mut identity,
+                        generation,
+                        &tx,
+                        &mut last_request,
+                        &mut log_acks,
+                        message,
+                    )
+                    .await;
+                    if log_acks.take_reconnect() {
+                        break;
+                    }
                 }
                 Ok(None) | Err(_) => break,
             },
+            _ = ack_flush.tick(), if log_acks.has_waiting() => {
+                log_acks.flush(&tx);
+            }
             _ = heartbeat.tick() => {
                 if last_activity.elapsed() >= IDLE_CLOSE {
                     break;
@@ -935,6 +956,7 @@ async fn run_stream(
             }
         }
     }
+    crate::refusal_audit::flush_summaries(&state, identity.tenant, agent).await;
     // The removal drops the last outbound sender, so the response stream ends (FR-ID-04).
     state.agent_registry().remove(agent, generation);
 }
@@ -995,6 +1017,7 @@ async fn handle_message(
     generation: u64,
     tx: &mpsc::Sender<ControlMessage>,
     last_request: &mut Option<tokio::time::Instant>,
+    log_acks: &mut LogAcks,
     message: AgentMessage,
 ) {
     match message.payload {
@@ -1107,7 +1130,13 @@ async fn handle_message(
                 .await;
         }
         Some(agent_message::Payload::LogChunk(chunk)) => {
-            crate::job_data::handle_log_chunk(state, identity.tenant, identity.agent, &chunk).await;
+            if !log_acks.admits(&chunk.job_id) {
+                return;
+            }
+            let outcome =
+                crate::job_data::handle_log_chunk(state, identity.tenant, identity.agent, &chunk)
+                    .await;
+            log_acks.record(&chunk, outcome);
         }
         None => {}
     }

@@ -156,6 +156,7 @@ pub fn status_of(collected: &Collected, step_id: &str) -> StepStatus {
 pub async fn rejection(jobs: &Jobs, job: &restichub_proto::agent::v1::Job) -> Option<RejectReason> {
     let (tx, mut rx) = mpsc::channel(8);
     jobs.attach(&tx);
+    jobs.greeted(false);
     jobs.handle(signed(job), &ring(), AGENT, TENANT).await;
     let message = rx.recv().await.expect("the agent must answer");
     match message.payload {

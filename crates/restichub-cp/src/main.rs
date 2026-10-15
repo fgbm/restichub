@@ -156,6 +156,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .with_tenancy(config.tenancy.clone())
         .with_queue(config.queue.clone())
         .with_log_retention_days(config.log_retention_days)
+        .with_audit_refusal_limit(config.audit_refusal_limit)
         .with_agent_cert_lifetime(config.agent_cert_lifetime)
         .with_pki(
             ca_store.clone(),

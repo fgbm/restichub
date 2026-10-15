@@ -152,6 +152,7 @@ async fn adr_0020_a_running_job_is_not_started_twice() {
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         "job-1",
         vec![access("repo-1", &path)],
@@ -180,6 +181,7 @@ async fn fr_rp_02_an_init_without_a_test_access_fails() {
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         "job-2",
         vec![access("repo-1", &path)],
@@ -207,6 +209,7 @@ async fn fr_rp_02_an_init_of_another_repository_fails() {
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         "job-3",
         vec![access("repo-a", &path_a), access("repo-b", &path_b)],
@@ -235,6 +238,7 @@ async fn fr_ag_05_a_step_without_a_timeout_honours_the_job_timeout() {
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let mut job = job(
         "job-4",
         vec![access("repo-1", &path)],
@@ -266,6 +270,7 @@ async fn adr_0020_a_job_beyond_the_concurrency_cap_is_rejected_busy() {
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let mut ids = Vec::new();
     for index in 0..5 {
         let job_id = format!("job-{index}");
@@ -315,6 +320,7 @@ async fn adr_0020_a_journal_write_failure_refuses_a_new_job() {
 
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         "job-5",
         vec![access("repo-1", &path)],
@@ -348,6 +354,7 @@ async fn ac_ag_07_a_step_that_ignores_the_signal_is_killed_after_the_grace_perio
     let jobs = common::program_jobs_with_grace(&dir, Duration::from_millis(300));
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         "job-6",
         vec![access("repo-1", &path)],
@@ -419,6 +426,7 @@ async fn fr_ag_05_a_job_deadline_prevents_the_next_step() {
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let mut job = job(
         "job-deadline",
         vec![access("repo-a", &path_a), access("repo-b", &path_b)],
@@ -451,6 +459,7 @@ async fn fr_ag_10_a_timeout_with_a_forced_kill_reports_a_possible_stale_lock() {
     let jobs = common::program_jobs_with_grace(&dir, Duration::from_millis(300));
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let mut job = job(
         "job-timeout-kill",
         vec![access("repo-1", &path)],
@@ -483,6 +492,7 @@ async fn adr_0020_a_completed_job_is_answered_before_the_cap() {
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(64);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let done = signed(&job(
         "job-done",
         vec![access("repo-fast", &fast)],
@@ -536,6 +546,7 @@ async fn adr_0020_a_stored_result_is_sent_at_every_connection() {
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         "job-resend",
         vec![access("repo-1", &path)],
@@ -547,6 +558,7 @@ async fn adr_0020_a_stored_result_is_sent_at_every_connection() {
     for _ in 0..2 {
         let (next_tx, mut next_rx) = mpsc::channel(32);
         jobs.attach(&next_tx);
+        jobs.greeted(false);
         jobs.send_stored_results().await;
         assert_eq!(wait_result(&mut next_rx).await.job_id, "job-resend");
     }
@@ -567,6 +579,7 @@ async fn cancel_with_ctrl_break(name: &str) {
     let jobs = common::program_jobs_with_grace(&dir, Duration::from_secs(15));
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         name,
         vec![access("repo-1", &path)],

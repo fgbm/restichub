@@ -93,7 +93,8 @@ pub async fn row(env: &Env, agent: AgentId) -> Row {
         OffsetDateTime,
         Option<OffsetDateTime>,
     ) = sqlx::query_as(
-        "SELECT encode(certificate_serial, 'hex'), encode(pending_certificate_serial, 'hex'), \
+        "SELECT encode(ltrim(certificate_serial, '\\x00'::bytea), 'hex'), \
+                encode(ltrim(pending_certificate_serial, '\\x00'::bytea), 'hex'), \
                 certificate_expires_at, last_certificate_rotation_at \
          FROM agents WHERE id = $1",
     )

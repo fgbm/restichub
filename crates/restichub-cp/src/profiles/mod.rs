@@ -379,7 +379,7 @@ pub async fn preview_profile(
     let compiler_profile = compiler_profile_from_row(&profile)?;
     let plan = compile(&compiler_profile, &target).map_err(compile_error_to_api)?;
     let access = repository_access(&repository);
-    let steps = preview(&plan, &access).map_err(preview_error_to_api)?;
+    let steps = preview(&plan, &access, target.os).map_err(preview_error_to_api)?;
 
     Ok(Json(PreviewResponse {
         profile_id: profile_id.to_string(),
