@@ -313,3 +313,86 @@ async fn db_the_right_migration_skips_a_revoked_membership_and_revokes_the_token
     db.cleanup().await;
     Ok(())
 }
+
+/// The migration 0046 writes a `secret_ref` value in the canonical form and leaves every other
+/// value as it is.
+#[tokio::test]
+async fn db_the_canonical_secret_ref_migration_rewrites_the_references() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let admin = admin_pool(&db).await?;
+    let name = format!("restichub_mig_{}", uuid::Uuid::now_v7().simple());
+    admin_query(&admin, &format!("CREATE DATABASE \"{name}\"")).await?;
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(db.admin_options().database(name.as_str()))
+        .await?;
+
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 46)
+        .cloned()
+        .collect();
+    Migrator {
+        migrations: Cow::Owned(before),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+        table_name: Cow::Borrowed("_sqlx_migrations"),
+        create_schemas: Cow::Owned(Vec::new()),
+    }
+    .run(&pool)
+    .await?;
+
+    let tenant = "00000000-0000-7000-8000-000000000000";
+    let upper = "550E8400-E29B-41D4-A716-446655440000";
+    let canonical = "550e8400-e29b-41d4-a716-446655440000";
+    let scripts = serde_json::json!([{
+        "name": "dump",
+        "body": format!("echo {upper}"),
+        "env": [
+            {"name": "A", "kind": "secret_ref", "value": upper},
+            {"name": "B", "kind": "secret_ref", "value": "{550e8400e29b41d4a716446655440000}"},
+            {"name": "C", "kind": "string", "value": upper},
+            {"name": "D", "kind": "secret_ref", "value": ""},
+        ],
+    }]);
+    sqlx::query(
+        "INSERT INTO job_templates (id, tenant_id, name, scripts) VALUES ($1, $2, 'template', $3)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(tenant.parse::<uuid::Uuid>()?)
+    .bind(&scripts)
+    .execute(&pool)
+    .await?;
+
+    let sql = MIGRATOR
+        .iter()
+        .find(|migration| migration.version == 46)
+        .expect("the canonical reference migration is present")
+        .sql
+        .as_str()
+        .to_owned();
+    sqlx::raw_sql(AssertSqlSafe(sql)).execute(&pool).await?;
+
+    let (saved,): (serde_json::Value,) = sqlx::query_as("SELECT scripts FROM job_templates")
+        .fetch_one(&pool)
+        .await?;
+    let env = &saved[0]["env"];
+    assert_eq!(env[0]["value"], canonical);
+    assert_eq!(env[1]["value"], canonical);
+    assert_eq!(env[2]["value"], upper);
+    assert_eq!(env[3]["value"], "");
+    assert_eq!(saved[0]["body"], format!("echo {upper}"));
+
+    pool.close().await;
+    admin_query(
+        &admin,
+        &format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"),
+    )
+    .await?;
+    admin.close().await;
+    db.cleanup().await;
+    Ok(())
+}

@@ -21,7 +21,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{Actor, AuditAction, REDACTED, diff};
 use restichub_db::secrets::{self as repo, NewSecret};
-use restichub_db::{SecretId, UserId, kek};
+use restichub_db::{SecretId, SecretUsageKind, UserId, kek};
 use restichub_secrets::{
     KekId, KekProvider, NONCE_LEN, SecretPurpose, SecretString, WrappedDek, encrypt_secret,
     unwrap_dek,
@@ -138,11 +138,22 @@ pub async fn list_secrets(
     context: RequestContext,
 ) -> Result<Json<SecretListResponse>, ApiError> {
     context.authorize(Operation::SecretsRead)?;
-    let (list, usage) = context
+    let (list, mut usage) = context
         .tenant_tx(&state, async |tx| {
-            Ok((repo::list(tx).await?, repo::list_usage(tx).await?))
+            Ok((repo::list(tx).await?, repo::list_usage(tx, None).await?))
         })
         .await?;
+    // A reader sees only the kinds of object that the role may read.
+    usage.retain(|item| {
+        context
+            .authorize(match item.kind {
+                SecretUsageKind::Repository => Operation::RepositoriesRead,
+                SecretUsageKind::Channel => Operation::ChannelsRead,
+                SecretUsageKind::Profile => Operation::ProfilesRead,
+                SecretUsageKind::JobTemplate => Operation::ScriptsRead,
+            })
+            .is_ok()
+    });
     let items = list
         .iter()
         .map(|secret| SecretView::new(secret, &usage))
@@ -328,7 +339,8 @@ pub async fn replace_secret_value(
     responses(
         (status = 204, description = "The secret is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody),
+        (status = 409, description = "An object uses the secret.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn delete_secret(
@@ -344,11 +356,7 @@ pub async fn delete_secret(
         return Err(ApiError::not_found());
     };
     // A profile names a hook secret inside its JSON, so no foreign key refuses the delete.
-    if repo::list_usage(&mut tx)
-        .await?
-        .iter()
-        .any(|usage| usage.secret_id == secret_id)
-    {
+    if !repo::list_usage(&mut tx, Some(secret_id)).await?.is_empty() {
         return Err(ApiError::conflict());
     }
     repo::delete(&mut tx, secret_id).await.map_err(|error| {

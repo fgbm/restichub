@@ -951,4 +951,5 @@ pub enum SecretUsageKind {
     Repository,
     Channel,
     Profile,
+    JobTemplate,
 }
