@@ -53,6 +53,7 @@ export default defineConfig({
 					'operations/job-signing-key-recovery',
 					'operations/root-ca-rotation',
 					'operations/enrollment-rate-limit',
+					'operations/verify-a-release',
 				]),
 				group('Reference', 'Справочник', [
 					'concepts/overview',
