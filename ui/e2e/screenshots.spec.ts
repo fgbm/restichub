@@ -48,11 +48,16 @@ async function signIn(page: Page): Promise<void> {
 }
 
 async function openFromNav(page: Page, name: string): Promise<void> {
+	const heading = page.getByRole('heading', { level: 1 });
+	const before = await heading.first().textContent();
 	await page
 		.getByRole('navigation', { name: 'Primary navigation' })
 		.getByRole('link', { name, exact: true })
 		.click();
-	await page.getByRole('heading', { level: 1 }).waitFor();
+	// The previous screen keeps its level-1 heading until the route changes, and the router then
+	// detaches it. Measuring that stale element gives an empty computed style.
+	await expect(heading).not.toHaveText(before ?? '');
+	await expect(heading).toBeVisible();
 }
 
 // Both sides carry the same fields; `skip` lists a field that the design lets differ.

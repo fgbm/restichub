@@ -13,6 +13,7 @@
 		id,
 		required = false,
 		placeholder,
+		class: className,
 		...rest
 	}: {
 		value?: string;
@@ -37,7 +38,7 @@
 		<select
 			id={selectId}
 			bind:value
-			class="rh-select"
+			class={['rh-select', className]}
 			aria-invalid={error ? 'true' : undefined}
 			aria-describedby={describedBy}
 			{required}

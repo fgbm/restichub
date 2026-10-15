@@ -11,6 +11,7 @@
 		type = 'text',
 		mono = false,
 		required = false,
+		class: className,
 		...rest
 	}: {
 		value?: string;
@@ -35,7 +36,7 @@
 		id={inputId}
 		{type}
 		bind:value
-		class="rh-input"
+		class={['rh-input', className]}
 		class:rh-input--mono={mono}
 		aria-invalid={error ? 'true' : undefined}
 		aria-describedby={describedBy}
