@@ -221,6 +221,10 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
+        // The program directory check refuses a parent that another account can write.
+        #[cfg(windows)]
+        crate::paths::create_protected_dir(&dir).expect("cannot create the protected directory");
+        #[cfg(not(windows))]
         std::fs::create_dir_all(&dir).expect("cannot create the temp directory");
         dir
     }
