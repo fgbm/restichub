@@ -98,6 +98,8 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-ID-07 | The agent keeps a permanent outbound bidirectional gRPC stream to the CP, with an application-level heartbeat. | M |
 | FR-ID-08 | The agent reconnects with exponential backoff and jitter. After a CP restart, the CP waits for a grace period before it marks agents offline. | M |
 | FR-ID-09 | Fallback transport for networks with restrictive proxies. | L |
+| FR-ID-10 | An Admin can issue an enrollment token for an existing host. The enrollment with that token keeps the agent ID, the plans, the maintenance references and the labels, and replaces the certificate. The old certificate stops working at once. Such a token lives one hour at most, and a successful use revokes the other unused tokens of the host. | M |
+| FR-ID-11 | The CP warns when two active hosts of a tenant report the same machine identifier. An Admin can replace the old record with the new one: the plans, the maintenance references and the labels move, the old record is revoked as by FR-ID-04, and the old record must have been silent for the online window. The CP never decides on identity from the machine identifier alone. | S |
 
 ### 3.3. Protocol and job model
 

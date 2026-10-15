@@ -1,8 +1,8 @@
 //! The stable identifier of the computer (FR-ID-01).
 //!
-//! The enrollment sends it so the control plane can warn about a second record of one computer.
-//! The value is a hint, never a credential, and it never reaches a log: the type hides it from
-//! `Debug`.
+//! The enrollment sends an application-specific digest of it, never the raw value, so the control
+//! plane can warn about a second record of one computer. The value is a hint, never a credential,
+//! and it never reaches a log: the type hides it from `Debug`.
 
 use std::fmt;
 
@@ -24,9 +24,22 @@ impl MachineId {
         &self.0
     }
 
-    /// Reads the identifier of this computer, or `None` when the system has none.
+    /// Reads the identifier of this computer as the application-specific digest, or `None` when the
+    /// system has none.
     pub fn read() -> Option<Self> {
-        read_platform()
+        read_platform().map(|id| id.application_specific())
+    }
+
+    /// The HMAC-SHA256 of a fixed application name under the raw value, in hexadecimal. The raw
+    /// value stays on the host, as the systemd documentation advises.
+    fn application_specific(&self) -> Self {
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, self.0.as_bytes());
+        let tag = ring::hmac::sign(&key, b"restichub-agent-machine-id-v1");
+        let mut text = String::with_capacity(64);
+        for byte in tag.as_ref() {
+            text.push_str(&format!("{byte:02x}"));
+        }
+        Self(text)
     }
 }
 
@@ -62,6 +75,15 @@ mod tests {
     fn ac_id_01_an_empty_identifier_is_none() {
         assert!(MachineId::new("  \n").is_none());
         assert!(MachineId::new("00000000-0000-0000-0000-000000000000").is_none());
+    }
+
+    #[test]
+    fn ac_id_01_the_application_digest_hides_the_raw_value() {
+        let raw = MachineId::new("0123456789abcdef").expect("a value");
+        let digest = raw.application_specific();
+        assert_eq!(digest.as_str().len(), 64);
+        assert!(!digest.as_str().contains("0123456789abcdef"));
+        assert_eq!(digest, raw.application_specific());
     }
 
     #[test]
