@@ -158,6 +158,7 @@ impl Jobs {
         journal.prune(now_timestamp());
         journal.persist()?;
         let restore = RestoreAccess::for_host(dir, &cache, &program);
+        crate::service::warn_about_read_only_roots(restore.roots());
         let scripts = ScriptStore::for_config_dir(dir, &cache);
         scripts.clean_leftovers();
         Ok(Self {
