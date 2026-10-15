@@ -20,7 +20,8 @@ api GET '/api/v1/alerts?limit=200' >"$out/alerts.json" || echo '{}' >"$out/alert
 dc logs --no-color cp 2>/dev/null | grep -i -E '"level":"(WARN|ERROR)"|panic' | tail -n 200 >"$out/cp-warnings.log" || true
 
 jq -s '
-	def secs($a; $b): (($b | fromdateiso8601) - ($a | fromdateiso8601));
+	def ts: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
+	def secs($a; $b): (($b | ts) - ($a | ts));
 	def pct($p): (sort | if length == 0 then null else .[((length - 1) * $p) | floor] end);
 	{
 		jobs_total: length,
@@ -38,10 +39,9 @@ jq -s '
 		last_job_at: (map(.created_at) | max)
 	}' "$out/jobs.jsonl" >"$out/result.json"
 
-jq -r '
-	"id\tkind\tstatus\tresult_code\tagent\tmessage",
-	(select(.status == "failed" or .status == "dead_letter" or .status == "expired") |
-		[.id, .kind, .status, (.result_code // ""), (.agent_hostname // ""), (.result_message // "" | .[0:120])] | @tsv)' \
+jq -r -n '"id\tkind\tstatus\tresult_code\tagent\tmessage",
+	(inputs | select(.status == "failed" or .status == "dead_letter" or .status == "expired") |
+		[.id, .kind, .status, (.result_code // ""), (.agent_hostname // ""), ((.result_message // "") | .[0:120])] | @tsv)' \
 	"$out/jobs.jsonl" >"$out/failed-jobs.tsv"
 
 agents_total="$(jq '.items | length' "$out/agents.json")"

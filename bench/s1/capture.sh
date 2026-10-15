@@ -44,12 +44,13 @@ stop() {
 
 # Prints "direction source destination" for each distinct connection start of a side: a TCP SYN
 # without ACK or a UDP datagram, on a real interface (the loopback holds the DNS of Docker only).
+# Broadcast and multicast frames, such as the mDNS of the host, are not connections of the bench.
 destinations() {
 	local out="$1" side="$2" file
 	for file in "$out"/capture/"$side"-*.pcap; do
 		[ -e "$file" ] || continue
 		docker run --rm --entrypoint tcpdump -v "$out/capture:/cap:ro" "$image" 			-n -r "/cap/$(basename "$file")" -q 'ip and (udp or (tcp[tcpflags] & (tcp-syn|tcp-ack) = tcp-syn))' 2>/dev/null
-	done | awk '$2 != "lo" && $4 == "IP" {
+	done | awk '$2 != "lo" && $4 == "IP" && ($3 == "In" || $3 == "Out") {
 		dst=$7; sub(/:$/,"",dst);
 		n=split($5,s,"."); src=s[1]"."s[2]"."s[3]"."s[4];
 		m=split(dst,d,"."); dhost=d[1]"."d[2]"."d[3]"."d[4];
