@@ -701,7 +701,7 @@ mod tests {
         let root = base.join("ResticHub");
         let target = base.join("target");
         std::fs::create_dir_all(&target).expect("cannot create the target");
-        std::fs::create_dir_all(&root).expect("cannot create the root");
+        create_protected_dir(&root).expect("cannot create the protected root");
         let junction = root.join("Agent");
         let status = std::process::Command::new("cmd")
             .arg("/C")
