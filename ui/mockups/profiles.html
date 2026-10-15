@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Профили · ResticHub</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<link rel="stylesheet" href="profile-mock.css" />
+		<script src="mockups.js"></script>
+		<script src="profile-mock.js"></script>
+	</head>
+	<body>
+		<div data-shell="profile"></div>
+		<div class="pm-mock-bar"><b>Макет списка профилей.</b><span>Имя профиля и «Изменить» ведут в <a href="profile-a.html">редактор</a>.</span></div>
+		<main class="page">
+			<div class="page-header">
+				<div>
+					<h1 class="page-title">Профили <span class="counter">5</span></h1>
+					<p class="page-subtitle">Профиль определяет, что и как копировать. Нажмите на имя, чтобы открыть профиль.</p>
+				</div>
+				<div class="page-actions"><a class="btn btn--primary" href="profile-a.html"><svg class="icon"><use href="icons.svg#i-plus" /></svg> Добавить профиль</a></div>
+			</div>
+			<div class="table-wrap">
+				<div class="table-toolbar">
+					<label class="search"><svg class="icon"><use href="icons.svg#i-search" /></svg><input type="search" placeholder="Поиск профилей" aria-label="Поиск профилей" /><span class="kbd">/</span></label>
+				</div>
+				<table class="table">
+					<thead>
+						<tr><th>Профиль</th><th>Репозиторий</th><th>Хранение</th><th>Скрипты</th><th class="num">Планов</th><th class="cell-actions"><span class="subtle t-xs">Действия</span></th></tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td><a class="pm-link" href="profile-a.html">srv-web-nightly</a><div class="pm-chips"><span class="label">web</span><span class="label">nightly</span></div></td>
+							<td>s3-prod-primary</td>
+							<td class="pm-wrap-sum">последние 3 · по дням 5 · по неделям 4 · по месяцам 6</td>
+							<td>до: 1 · после: 1</td>
+							<td class="num tabular">3</td>
+							<td class="cell-actions"><span class="row-actions">
+																<a class="btn btn--icon btn--sm" href="profile-a.html" aria-label="Изменить профиль srv-web-nightly" title="Изменить"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg></a>
+								<button class="btn btn--icon btn--sm" aria-label="Другие действия для srv-web-nightly"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+							</span></td>
+						</tr>
+						<tr>
+							<td><a class="pm-link" href="profile-a.html">db-hourly</a><div class="pm-chips"><span class="label">db</span><span class="label">hourly</span></div></td>
+							<td>rest-main</td>
+							<td class="pm-wrap-sum">по часам 24 · по дням 7 · по месяцам 3</td>
+							<td>до: 1 · после: 1</td>
+							<td class="num tabular">1</td>
+							<td class="cell-actions"><span class="row-actions">
+																<a class="btn btn--icon btn--sm" href="profile-a.html" aria-label="Изменить профиль db-hourly" title="Изменить"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg></a>
+								<button class="btn btn--icon btn--sm" aria-label="Другие действия для db-hourly"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+							</span></td>
+						</tr>
+						<tr>
+							<td><a class="pm-link" href="profile-a.html">office-docs</a><div class="pm-chips"><span class="label">docs</span><span class="label">windows</span></div></td>
+							<td>nas-local</td>
+							<td class="pm-wrap-sum">последние 5 · по дням 14 · всё за 30d</td>
+							<td>нет</td>
+							<td class="num tabular">2</td>
+							<td class="cell-actions"><span class="row-actions">
+																<a class="btn btn--icon btn--sm" href="profile-a.html" aria-label="Изменить профиль office-docs" title="Изменить"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg></a>
+								<button class="btn btn--icon btn--sm" aria-label="Другие действия для office-docs"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+							</span></td>
+						</tr>
+						<tr>
+							<td><a class="pm-link" href="profile-a.html">mac-laptops</a><div class="pm-chips"><span class="label">laptop</span></div></td>
+							<td>azure-archive</td>
+							<td class="pm-wrap-sum">по неделям 8 · по месяцам 12 · по годам 3</td>
+							<td>нет</td>
+							<td class="num tabular">1</td>
+							<td class="cell-actions"><span class="row-actions">
+																<a class="btn btn--icon btn--sm" href="profile-a.html" aria-label="Изменить профиль mac-laptops" title="Изменить"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg></a>
+								<button class="btn btn--icon btn--sm" aria-label="Другие действия для mac-laptops"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+							</span></td>
+						</tr>
+						<tr>
+							<td><a class="pm-link" href="profile-a.html">nas-archive</a><div class="pm-chips"><span class="label">archive</span></div></td>
+							<td>azure-archive</td>
+							<td class="pm-wrap-sum">Не удалять (правил нет)</td>
+							<td>нет</td>
+							<td class="num tabular">0</td>
+							<td class="cell-actions"><span class="row-actions">
+																<a class="btn btn--icon btn--sm" href="profile-a.html" aria-label="Изменить профиль nas-archive" title="Изменить"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg></a>
+								<button class="btn btn--icon btn--sm" aria-label="Другие действия для nas-archive"><svg class="icon icon--xs"><use href="icons.svg#i-more" /></svg></button>
+							</span></td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+			<div class="alert" style="margin-top: var(--space-4)"><svg class="icon icon--xs"><use href="icons.svg#i-info" /></svg><span>Хранение читается так: «по дням 5» — из пяти последних дней, в которых были копии, остаётся по одному самому новому снимку. Это не «хранить пять дней».</span></div>
+		</main>
+	</body>
+</html>
