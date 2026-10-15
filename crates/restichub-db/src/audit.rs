@@ -160,7 +160,6 @@ pub enum AuditAction {
     ScriptRun,
     /// A migration dropped the hooks of a profile (ADR-0040).
     ProfileHooksRemoved,
-    /// An agent refused a signed job (AC-PR-01).
     JobRejected,
     /// An agent sent a message for a job of another agent or for a job that it cannot hold
     /// (AC-PR-05).
