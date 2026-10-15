@@ -133,10 +133,9 @@ setup() {
 	if [ -z "$repo_id" ]; then
 		repo_id="$(api POST /api/v1/repositories "$(jq -nc --arg a "$first" --arg p "$repo_password" \
 			'{name:"bench",backend:{kind:"rest",endpoint:"http://rest-server:8000/bench"},password:$p,maintenance_agent_id:$a}')" | jq -r '.id // .repository.id')"
-		api POST "/api/v1/repositories/$repo_id/init" >/dev/null
-		wait_for 120 "the repository init" bash -c "true"
-		sleep 10
 	fi
+	init_job="$(api POST "/api/v1/repositories/$repo_id/init" '{}' | jq -r .id)"
+	wait_for 180 "the repository init" bash -c "$(declare -f api); web='$web'; jar='$jar'; csrf=(-H 'x-restichub-csrf: 1'); [ \"\$(api GET /api/v1/jobs/$init_job | jq -r .status)\" = succeeded ]"
 	echo "$repo_id" >"$state_dir/repository-id"
 
 	i=0

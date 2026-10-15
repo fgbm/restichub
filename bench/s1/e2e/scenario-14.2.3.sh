@@ -21,8 +21,7 @@ step 1 "Start the bench with one agent" PASS "agent $agent"
 
 repo="$(api POST /api/v1/repositories "$(jq -nc --arg a "$agent" \
 	'{name:"lock",backend:{kind:"rest",endpoint:"http://rest-server:8000/bench"},password:"bench-repository-password",maintenance_agent_id:$a}')" | jq -r '.id // .repository.id')"
-api POST "/api/v1/repositories/$repo/init" >/dev/null
-init_job="$(all_jobs "repository_id=$repo" | jq -r 'select(.kind == "init") | .id' | head -n1)"
+init_job="$(api POST "/api/v1/repositories/$repo/init" '{}' | jq -r .id)"
 wait_job "$init_job" 120 >/dev/null || true
 profile="$(api POST /api/v1/profiles "$(jq -nc --arg r "$repo" \
 	'{name:"data",repository_id:$r,paths:{all:["/data"]},retention:{keep_last:6}}')" | jq -r '.profile.id')"

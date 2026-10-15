@@ -23,8 +23,7 @@ repo="$(api POST /api/v1/repositories "$(jq -nc --arg a "$agent" \
 	'{name:"first",backend:{kind:"rest",endpoint:"http://rest-server:8000/bench"},password:"bench-repository-password",maintenance_agent_id:$a}')" | jq -r '.id // .repository.id')"
 step 3 "Create the repository" PASS "repository $repo"
 
-api POST "/api/v1/repositories/$repo/init" >/dev/null
-init_job="$(all_jobs "repository_id=$repo" | jq -r 'select(.kind == "init") | .id' | head -n1)"
+init_job="$(api POST "/api/v1/repositories/$repo/init" '{}' | jq -r .id)"
 result="$(wait_job "$init_job" 120 || true)"
 case "$result" in succeeded*) v=PASS ;; *) v=FAIL ;; esac
 step 4 "Initialize the repository" "$v" "init job $init_job: $result"
