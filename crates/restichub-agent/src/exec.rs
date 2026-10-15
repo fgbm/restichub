@@ -12,11 +12,13 @@
 //! check and the spawn is therefore refused (threat T20).
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio};
 
 use anyhow::{Context, Result};
 use restichub_compiler::arg::CommandLine;
 use restichub_proto::agent::v1::ProcessPriority;
+use zeroize::Zeroizing;
 
 use crate::restic::ResticBinary;
 
@@ -244,58 +246,63 @@ pub(crate) fn spawn_job_restic(
     JobChild::new(child)
 }
 
-/// Starts one hook child with piped output (FR-HK-03, FR-HK-05, ADR-0004).
+/// Everything that the agent needs to start one server script. It holds the secret values, so it
+/// has no derived `Debug`.
+pub struct Invocation {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub env: Vec<(String, Zeroizing<String>)>,
+    pub working_dir: PathBuf,
+    pub timeout: Duration,
+    /// Secret values that the scrubber must remove from the script output.
+    pub secrets: Vec<Zeroizing<String>>,
+    /// The value of `PATH`. `None` keeps the value of the agent.
+    pub search_path: Option<std::ffi::OsString>,
+}
+
+impl std::fmt::Debug for Invocation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Invocation")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field(
+                "env",
+                &self.env.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+            )
+            .field("working_dir", &self.working_dir)
+            .field("timeout", &self.timeout)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Starts one server script child with piped output (FR-HK-09, ADR-0037).
 ///
-/// The program, the arguments and the environment come from [`crate::hooks::Invocation`], which
-/// the allow-list built. The child has no shell and no standard input. Its environment is cleared:
-/// it gets a fixed search path, the variables of the allow-list and the variables that the schema
-/// names. Nothing of the agent environment reaches it. A server script is the exception: the host
-/// trusts it, so it keeps the environment of the agent without the restic and ResticHub variables
-/// (ADR-0037). It runs in its own process group, so the
-/// agent stops its whole tree (FR-AG-10). The invocation can replace `PATH`, and on Windows the
-/// child gets a protected directory as `TEMP` and `TMP`.
+/// The child has no shell and no standard input. The host trusts the script, so it keeps the
+/// environment of the agent without the restic and ResticHub variables. It runs in its own
+/// process group, so the agent stops its whole tree (FR-AG-10). The invocation can replace
+/// `PATH`, and on Windows the child gets its working directory as `TEMP` and `TMP`.
 ///
 /// # Errors
 ///
 /// Returns an error when the operating system refuses to start the process.
-pub(crate) fn spawn_job_hook(
-    invocation: &crate::hooks::Invocation,
-    scratch: &Path,
-) -> Result<JobChild> {
+pub(crate) fn spawn_job_script(invocation: &Invocation) -> Result<JobChild> {
     let mut command = Command::new(&invocation.program);
-    if invocation.inherit_environment {
-        for (name, _) in std::env::vars_os() {
-            let upper = name.to_string_lossy().to_ascii_uppercase();
-            if upper.starts_with("RESTIC") {
-                command.env_remove(&name);
-            }
+    for (name, _) in std::env::vars_os() {
+        let upper = name.to_string_lossy().to_ascii_uppercase();
+        if upper.starts_with("RESTIC") {
+            command.env_remove(&name);
         }
-    } else {
-        command.env_clear();
     }
     #[cfg(windows)]
     {
-        if !invocation.inherit_environment {
-            let system_root = std::env::var_os("SystemRoot")
-                .unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
-            let mut search_path = PathBuf::from(&system_root);
-            search_path.push("System32");
-            command.env("PATH", search_path);
-            command.env("SystemRoot", system_root);
-        }
         // The service `TEMP` can be a directory that a user can write.
-        let temp = if invocation.inherit_environment {
-            &invocation.working_dir
-        } else {
-            scratch
-        };
-        command.env("TEMP", temp);
-        command.env("TMP", temp);
+        command.env("TEMP", &invocation.working_dir);
+        command.env("TMP", &invocation.working_dir);
     }
     #[cfg(not(windows))]
     {
-        let _ = scratch;
-        if !invocation.inherit_environment || std::env::var_os("PATH").is_none() {
+        if std::env::var_os("PATH").is_none() {
             command.env(
                 "PATH",
                 "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -322,7 +329,7 @@ pub(crate) fn spawn_job_hook(
         // The child joins the job object before it runs, so no grandchild escapes (FR-AG-10).
         command.creation_flags(windows_job::process_flags() | CREATE_SUSPENDED);
     }
-    let child = command.spawn().context("cannot start the hook")?;
+    let child = command.spawn().context("cannot start the script")?;
     JobChild::new(child)
 }
 
@@ -922,6 +929,7 @@ mod tests {
     #[test]
     fn fr_ag_11_an_update_takes_effect_for_the_next_spawn() {
         use restichub_proto::agent::v1::ProcessPriority;
+use zeroize::Zeroizing;
         use sha2::Digest as _;
 
         use crate::restic_release::VerifiedRelease;

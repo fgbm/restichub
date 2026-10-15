@@ -10,7 +10,7 @@ pub mod commands;
 pub mod connection;
 pub mod enroll;
 pub mod exec;
-pub mod hooks;
+pub mod trust;
 pub mod http_get;
 pub mod identity;
 pub mod jobs;

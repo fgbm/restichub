@@ -7,7 +7,7 @@
 //! steps ([`ValidatedJob`], FR-PR-01) and consults the job journal (ADR-0020). It then acknowledges
 //! the job (FR-PR-06) and runs it off the stream task, so the heartbeat and the key updates keep
 //! flowing. A job that the journal already completed is not run again; the stored result is re-sent,
-//! also when the host changed the trust mode since. A job with a script or hook step that a restart
+//! also when the host changed the trust mode since. A job with a script step that a restart
 //! interrupted is not run again either: it gets a final result with the error `interrupted`
 //! (ADR-0037).
 //!
@@ -17,10 +17,7 @@
 //! the result, so the agent sends every stored result at each connection until the journal entry
 //! expires (ADR-0020, FR-AG-12). The control plane ignores a result for a terminal job.
 //!
-//! A `hook` step runs a program from the hook allow-list ([`crate::hooks`], ADR-0004). The agent
-//! checks the hook and its parameters before it acknowledges the job and again before it starts
-//! the hook (`hooks`). The agent starts no job on its own and holds no timer that starts one
-//! (ADR-0002).
+//! The agent starts no job on its own and holds no timer that starts one (ADR-0002).
 //!
 //! While a step runs, the agent sends progress and scrubbed log chunks. The result of the job holds
 //! the typed result of every step and a bounded tail of the log. Both stay in the journal, so a
@@ -51,7 +48,6 @@ use restichub_proto::signing::{
 };
 use tokio::sync::mpsc;
 
-use crate::hooks::HookStore;
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
 use crate::restic_store::Layout;
 use crate::restore_roots::RestoreAccess;
@@ -73,7 +69,7 @@ use watchdog::StepLimits;
 /// (FR-AG-10, AC-AG-06).
 pub const STOP_GRACE: Duration = Duration::from_secs(30);
 
-/// How long past the job deadline the cleanup hooks (`after`, `on_*` and `finally`) may run
+/// How long past the job deadline the cleanup scripts (`after`, `on_*` and `finally`) may run
 /// (FR-HK-05).
 pub const CLEANUP_GRACE: Duration = Duration::from_secs(10 * 60);
 
@@ -126,14 +122,11 @@ pub struct Jobs {
     resent: Arc<Mutex<HashSet<String>>>,
     /// The grace period between the graceful stop and the forced kill (FR-AG-10).
     stop_grace: Duration,
-    /// How long past the job deadline the cleanup hooks may run (FR-HK-05).
+    /// How long past the job deadline the cleanup scripts may run (FR-HK-05).
     cleanup_grace: Duration,
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
-    /// Place and trust rule of the allow-list file. The agent reads the file again at each job
-    /// (FR-HK-01).
-    hooks: Arc<HookStore>,
     /// The agent reads it again at each job (FR-HK-08).
     scripts: Arc<ScriptStore>,
 }
@@ -170,16 +163,8 @@ impl Jobs {
             stop_grace: STOP_GRACE,
             cleanup_grace: CLEANUP_GRACE,
             restore: Arc::new(restore),
-            hooks: Arc::new(HookStore::for_config_dir(dir)),
             scripts: Arc::new(scripts),
         })
-    }
-
-    /// Replaces the place and the trust rule of the hook allow-list (FR-HK-01).
-    #[must_use]
-    pub fn with_hook_store(mut self, store: HookStore) -> Self {
-        self.hooks = Arc::new(store);
-        self
     }
 
     /// Replaces the place and the trust rule of the server scripts setting (FR-HK-08).
@@ -198,32 +183,6 @@ impl Jobs {
             Err(error) => {
                 tracing::warn!(%error, "the server scripts check stopped");
                 (ServerScriptsState::Unspecified, Vec::new())
-            }
-        }
-    }
-
-    /// The state and the public metadata of the hook allow-list for `AgentHello` (FR-HK-04). A
-    /// file that the agent does not trust gives no hook (AC-HK-01).
-    pub async fn hook_report(
-        &self,
-    ) -> (
-        restichub_proto::agent::v1::HookAllowListState,
-        Vec<restichub_proto::agent::v1::HookMetadata>,
-    ) {
-        let store = Arc::clone(&self.hooks);
-        let loaded = tokio::task::spawn_blocking(move || {
-            let list = store.load();
-            (list.state(), list.report())
-        })
-        .await;
-        match loaded {
-            Ok((state, report)) => (state.to_proto(), report),
-            Err(error) => {
-                tracing::warn!(%error, "the hook allow-list check stopped");
-                (
-                    restichub_proto::agent::v1::HookAllowListState::Unspecified,
-                    Vec::new(),
-                )
             }
         }
     }
@@ -278,7 +237,7 @@ impl Jobs {
         self
     }
 
-    /// Sets how long past the job deadline the cleanup hooks may run (FR-HK-05).
+    /// Sets how long past the job deadline the cleanup scripts may run (FR-HK-05).
     #[must_use]
     pub fn with_cleanup_grace(mut self, grace: Duration) -> Self {
         self.cleanup_grace = grace;
@@ -336,7 +295,7 @@ impl Jobs {
                 .await;
             return;
         }
-        if let Some(reason) = self.hook_refusal(&validated).await {
+        if let Some(reason) = self.script_refusal(&validated).await {
             let _ = self.send(rejected(job_id, reason)).await;
             return;
         }
@@ -380,7 +339,7 @@ impl Jobs {
     ///
     /// A job that the journal holds as accepted, without a result, and that runs in no task of this
     /// process was interrupted by a restart. The agent runs a job of restic steps again, but not a
-    /// job with a script or hook step: a program may have run, and it may not run twice. It stores
+    /// job with a script step: a program may have run, and it may not run twice. It stores
     /// and answers a final result instead (ADR-0037).
     async fn known(&self, validated: &ValidatedJob) -> Option<Known> {
         let job = validated.job();
@@ -405,9 +364,9 @@ impl Jobs {
         Some(Known::Stored(result))
     }
 
-    /// The reason to refuse a job whose hook is unknown or whose parameters do not obey the
-    /// schema, or `None` (FR-HK-03, AC-HK-01, AC-HK-03).
-    async fn hook_refusal(&self, validated: &ValidatedJob) -> Option<RejectReason> {
+    /// The reason to refuse a job whose script the host does not trust or whose values break a
+    /// rule, or `None` (FR-HK-08, AC-HK-07).
+    async fn script_refusal(&self, validated: &ValidatedJob) -> Option<RejectReason> {
         let scripts: Vec<_> = validated
             .job()
             .steps
@@ -417,39 +376,14 @@ impl Jobs {
                 _ => None,
             })
             .collect();
-        if !scripts.is_empty() {
-            let store = Arc::clone(&self.scripts);
-            let checked = tokio::task::spawn_blocking(move || {
-                scripts
-                    .iter()
-                    .find_map(|script| store.check(script).err())
-                    .map(|refusal| refusal.reject_reason())
-            })
-            .await;
-            match checked {
-                Ok(Some(reason)) => return Some(reason),
-                Ok(None) => {}
-                Err(_) => return Some(RejectReason::Internal),
-            }
-        }
-        let hooks: Vec<_> = validated
-            .job()
-            .steps
-            .iter()
-            .filter_map(|step| match step.kind.as_ref() {
-                Some(step::Kind::Hook(hook)) => Some(hook.clone()),
-                _ => None,
-            })
-            .collect();
-        if hooks.is_empty() {
+        if scripts.is_empty() {
             return None;
         }
-        let store = Arc::clone(&self.hooks);
+        let store = Arc::clone(&self.scripts);
         let checked = tokio::task::spawn_blocking(move || {
-            let list = store.load();
-            hooks
+            scripts
                 .iter()
-                .find_map(|hook| list.prepare(hook).err())
+                .find_map(|script| store.check(script).err())
                 .map(|refusal| refusal.reject_reason())
         })
         .await;
@@ -625,7 +559,7 @@ impl Jobs {
         // matches (FR-RP-02, AC-RP-01).
         let mut probe_repository: Option<String> = None;
 
-        // The `before` hooks run first. A failed one stops the sequence (AC-HK-06).
+        // The `before` scripts run first. A failed one stops the sequence (AC-HK-06).
         let before = self
             .run_hook_steps(
                 &phased.before,
@@ -800,7 +734,7 @@ impl Jobs {
             }
         }
 
-        // The remaining phases (FR-HK-05). A cancel leaves the `finally` hooks only.
+        // The remaining phases (FR-HK-05). A cancel leaves the `finally` scripts only.
         macro_rules! sink {
             () => {
                 &mut Sink {
@@ -933,8 +867,7 @@ impl Jobs {
         let Some(step::Kind::Restore(restore)) = step.kind.as_ref() else {
             return false;
         };
-        let hook_files = self.hooks.load().executables();
-        match self.restore.check_against(&restore.target, &hook_files) {
+        match self.restore.check(&restore.target) {
             Ok(()) => false,
             Err(reason) => {
                 tracing::warn!(%reason, "a restore target is refused");
@@ -1009,11 +942,11 @@ fn verify_and_validate(
     })
 }
 
-/// True for a job with a script or hook step.
+/// True for a job with a script step.
 fn runs_programs(job: &restichub_proto::agent::v1::Job) -> bool {
     job.steps
         .iter()
-        .any(|step| matches!(step.kind, Some(step::Kind::Script(_) | step::Kind::Hook(_))))
+        .any(|step| matches!(step.kind, Some(step::Kind::Script(_))))
 }
 
 /// A restart cut the job short, so no step result exists for it (ADR-0037).

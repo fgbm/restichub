@@ -10,7 +10,7 @@ use restichub_proto::agent::v1::{
 
 use super::setting::set_mode_at;
 use super::{ScriptMode, ScriptRefusal, ScriptStore};
-use crate::hooks::Trust;
+use crate::trust::Trust;
 
 const CANARY: &str = "CANARY-secret-7f3a";
 

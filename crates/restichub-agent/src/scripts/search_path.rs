@@ -8,7 +8,7 @@
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
-use crate::hooks::{Trust, trust};
+use crate::trust::{self, Trust};
 
 /// The search path that a script gets and the entries that the agent dropped from it.
 pub(super) struct SearchPath {

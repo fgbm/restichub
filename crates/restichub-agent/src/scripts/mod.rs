@@ -27,7 +27,8 @@ use restichub_proto::agent::v1::{
 };
 use zeroize::Zeroizing;
 
-use crate::hooks::{Invocation, Trust};
+use crate::exec::Invocation;
+use crate::trust::Trust;
 
 pub use setting::{ScriptMode, mode_file, mode_file_for, set_mode};
 
@@ -199,7 +200,6 @@ impl ScriptStore {
                 working_dir: scratch.path().to_path_buf(),
                 timeout,
                 secrets,
-                inherit_environment: true,
                 search_path: Some(search.value),
             },
             scratch: ScratchGuard { _scratch: scratch },

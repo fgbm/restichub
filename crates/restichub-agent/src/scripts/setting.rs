@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use restichub_proto::agent::v1::ServerScriptsState;
 
-use crate::hooks::{Trust, trust};
+use crate::trust::{self, Trust};
 
 /// The most bytes that the agent reads from the setting file.
 const MAX_BYTES: u64 = 4096;
