@@ -24,7 +24,7 @@
 .sl-markdown-content :not(a, strong, em, del, span, input, code, br) + :not(a, strong, em, del, span, input, code, br, :where(.not-content *)) { margin-top: .85rem; }
 
 /* Code. */
-.sl-markdown-content code { border-radius: 3px; background: var(--sl-color-gray-6); border: 0; padding: .05rem .2rem; margin: 0; }
+.sl-markdown-content code { border-radius: 3px; background: var(--sl-color-gray-6); border: 0; padding: 0 .12rem; margin: 0; }
 .sl-markdown-content pre code { padding: 0; }
 .sl-markdown-content pre { border-radius: 3px; }
 
