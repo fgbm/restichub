@@ -55,6 +55,8 @@ The stack reads one file, `.env`, next to `compose.yaml`. The script `bootstrap.
 | `RESTICHUB_AGENT_ENDPOINT` | The public address of the agent listener that an agent reports |
 | `RESTICHUB_AGENT_PORT` | The published port of the agent listener. The default is 8443 |
 
+The page [Environment variables](/restichub/operations/environment-variables/) lists every other setting of the control plane.
+
 The value `RESTICHUB_AGENT_ENDPOINT` holds the address that the agents dial, for example `https://agents.example.com:8443`. Set the host and the port of your installation.
 
 ## Install

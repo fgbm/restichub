@@ -18,13 +18,13 @@ The control plane creates the maintenance jobs from two schedules of the reposit
 | Retention | Every week, Sunday at 03:00 | One `forget` step for each profile and host, then one `prune` step. |
 | Check | Every month, on the first day at 04:00 | One `check` step. |
 
-Each schedule has a cron expression and an enabled flag. Both schedules use one time zone, UTC by default. The repository dialog previews the next fire times. A change of a schedule starts from the next fire time after the change.
+The section "Maintenance" of the repository dialog holds the two schedules "Retention" and "Check". Each schedule has a cron expression and the flag "Enabled". Both schedules use one "Time zone", an IANA name such as `Europe/Berlin`. The default is UTC. The dialog previews the "Next runs" and shows the "Last run". A change of a schedule starts from the next fire time after the change.
 
 The control plane creates a maintenance job only when the repository is initialized and no other exclusive job is waiting or running on it. If another exclusive job holds the repository, the schedule stays due and the control plane creates the job after that job ends. A missed fire time older than 24 hours is skipped.
 
 ### Run now
 
-An Operator or an Admin can run the retention or the check at once from the repository row. The job follows the same rules as a scheduled job. The retention needs a profile with a retention that a plan of an active agent runs.
+An Operator or an Admin can run the retention or the check at once from the menu of the repository row. Select "Run retention now" or "Run check now". The job follows the same rules as a scheduled job. The retention needs a profile with a retention that a plan of an active agent runs.
 
 ### Barriers
 
