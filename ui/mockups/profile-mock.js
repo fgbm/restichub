@@ -1,13 +1,14 @@
 /*
- * ResticHub mockups: the shared model of the profile editor variants.
+ * ResticHub mockups: the shared model of the profile editor.
  * It draws the field blocks, sums up each section, builds the command preview and
  * draws the retention timeline from static sample data. No network, no storage.
- * Pages: profile-a.html, profile-b.html, profile-c.html. Needs mockups.js for the theme.
+ * Page: profile-a.html. Needs mockups.js for the theme.
  */
 (function () {
 	'use strict';
 
 	var uid = 0;
+	var MAX_DURATION_DEFAULT = 48;
 
 	/* ------------------------------------------------------------- sample data */
 
@@ -34,8 +35,8 @@
 		keepYearly: '0',
 		keepWithin: '',
 		keepTags: 'before-upgrade',
-		gbHost: true,
-		gbPaths: true,
+		gbHost: false,
+		gbPaths: false,
 		gbTags: false,
 		fHosts: '',
 		fTags: '',
@@ -48,9 +49,7 @@
 		on_options: true,
 		on_retention: true,
 		on_check: true,
-		on_scripts: true,
-		on_hooks: false,
-		on_limits: false
+		on_scripts: true
 	};
 
 	var EMPTY = {
@@ -76,8 +75,8 @@
 		keepYearly: '0',
 		keepWithin: '',
 		keepTags: '',
-		gbHost: true,
-		gbPaths: true,
+		gbHost: false,
+		gbPaths: false,
 		gbTags: false,
 		fHosts: '',
 		fTags: '',
@@ -91,8 +90,6 @@
 		on_retention: true,
 		on_check: false,
 		on_scripts: false,
-		on_hooks: false,
-		on_limits: false
 	};
 
 	var REPOS = ['s3-prod-primary', 'rest-main', 'nas-local', 'azure-archive'];
@@ -243,6 +240,47 @@
 		);
 	}
 
+	function chips(k, label, value, hint) {
+		var id = 'f-' + k + '-' + uid++;
+		return (
+			'<div class="field"><label class="field-label" for="' + id + '">' + label + '</label>' +
+			'<div class="pm-chipbox" data-chipbox>' +
+			'<span class="pm-chiplist" data-chiplist></span>' +
+			'<input class="pm-chipinput" id="' + id + '" placeholder="Добавьте тег и нажмите Enter" autocomplete="off" />' +
+			'<input type="hidden" data-k="' + k + '" value="' + esc(lines(value).join('\n')) + '" />' +
+			'</div>' +
+			(hint ? '<div class="field-hint">' + hint + '</div>' : '') +
+			'</div>'
+		);
+	}
+
+	function drawChips(box) {
+		var hidden = box.querySelector('input[type="hidden"]');
+		var list = box.querySelector('[data-chiplist]');
+		list.innerHTML = lines(hidden.value).map(function (tag, i) {
+			return '<span class="pm-chip"><span>' + esc(tag) + '</span><button type="button" data-chip-remove="' + i + '" aria-label="Убрать тег ' + esc(tag) + '">' + icon('x', 'xs') + '</button></span>';
+		}).join('');
+	}
+
+	function setChips(box, values) {
+		var hidden = box.querySelector('input[type="hidden"]');
+		hidden.value = values.join('\n');
+		drawChips(box);
+		hidden.dispatchEvent(new Event('input', { bubbles: true }));
+	}
+
+	function commitChip(box) {
+		var input = box.querySelector('.pm-chipinput');
+		var parts = input.value.split(/[\s,]+/).filter(Boolean);
+		input.value = '';
+		if (!parts.length) return;
+		var current = lines(box.querySelector('input[type="hidden"]').value);
+		parts.forEach(function (part) {
+			if (current.indexOf(part) < 0) current.push(part);
+		});
+		setChips(box, current);
+	}
+
 	function check(k, label, checked, hint) {
 		return (
 			'<div class="pm-check">' +
@@ -302,7 +340,7 @@
 		tags: function (s) {
 			return (
 				'<p class="pm-lead">Метки снимков этого профиля. По ним снимки ищут и отбирают правила хранения.</p>' +
-				area('tags', 'Теги', s.tags, 'По одному тегу в строке.', 2)
+				chips('tags', 'Теги', s.tags, 'Через запятую, пробел или Enter. Каждый тег станет чипом.')
 			);
 		},
 		options: function (s) {
@@ -326,23 +364,15 @@
 		},
 		limits: function (s) {
 			return (
-				'<p class="pm-lead">Защита от зависших заданий. Пустое поле — лимита нет.</p>' +
+				'<p class="pm-lead">Защита от зависших и слишком долгих заданий. Лимиты действуют всегда: если поле пустое, берётся значение по умолчанию.</p>' +
 				'<div class="pm-grid2">' +
-				text('stall', 'Остановить, если нет прогресса, минут', s.stall, 'Если агент не сообщает о прогрессе дольше этого срока, задание останавливается как зависшее.', { placeholder: 'Без лимита', type: 'numeric' }) +
-				text('maxDur', 'Максимальная длительность, часов', s.maxDur, 'Задание, которое идёт дольше, останавливается, даже если прогресс есть.', { placeholder: 'Без лимита', type: 'numeric' }) +
+				text('stall', 'Остановить, если нет прогресса, минут', s.stall, 'Если агент не сообщает о прогрессе дольше этого срока, задание останавливается как зависшее. Пусто — без этого лимита.', { placeholder: 'Без лимита', type: 'numeric' }) +
+				text('maxDur', 'Максимальная длительность, часов', s.maxDur, 'Задание, которое идёт дольше, останавливается, даже если прогресс есть. По умолчанию <b>48 часов</b>; значение по умолчанию для всего стека задаёт переменная окружения <span class="code">RESTICHUB_JOB_MAX_DURATION_SECS</span>.', { placeholder: '48 (по умолчанию)', type: 'numeric' }) +
 				'</div>'
 			);
 		},
 		repo: function (s) {
 			return select('repo', 'Репозиторий<span class="req">*</span>', REPOS, s.repo);
-		},
-		hooks: function () {
-			return (
-				'<div class="alert pm-note">' + icon('lock', 'xs') +
-				'<span>Хуки — это команды из списка разрешённых на хосте. Свою команду здесь задать нельзя: для этого есть скрипты. Список приходит от хоста.</span></div>' +
-				'<div class="pm-hooks" data-hooks></div>' +
-				'<button class="btn btn--sm" type="button" data-hook-add>' + icon('plus', 'xs') + ' Добавить хук</button>'
-			);
 		},
 		scripts: function () {
 			return (
@@ -379,14 +409,14 @@
 			var tags =
 				'<div class="pm-rule pm-rule--wide">' +
 				'<div class="pm-rule-head"><span class="pm-rule-title">Теги, которые не удаляются</span><span class="code pm-flag">--keep-tag</span></div>' +
-				'<div class="pm-rule-text">Снимок с таким тегом остаётся всегда, что бы ни решили остальные правила. По одному тегу в строке; через запятую в одной строке снимок должен иметь все перечисленные теги.</div>' +
-				'<textarea class="textarea pm-mono" rows="2" data-k="keepTags" aria-label="Теги, которые не удаляются">' + esc(s.keepTags) + '</textarea>' +
+				'<div class="pm-rule-text">Снимок с любым из этих тегов остаётся всегда, что бы ни решили остальные правила. Вводите теги через запятую или пробел: каждый станет чипом.</div>' +
+				chips('keepTags', 'Теги', s.keepTags, '') +
 				'<div class="pm-rule-count" data-rule-count="tags"></div>' +
 				'</div>';
 			var group =
 				'<div class="pm-rule pm-rule--wide">' +
 				'<div class="pm-rule-head"><span class="pm-rule-title">Что считать одной группой</span><span class="code pm-flag">--group-by</span></div>' +
-				'<div class="pm-rule-text">Правила применяются к каждой группе снимков отдельно, поэтому копии разных хостов или путей не вытесняют друг друга. По умолчанию группа — это хост и пути.</div>' +
+				'<div class="pm-rule-text">Правила применяются к каждой группе снимков отдельно, поэтому копии разных хостов или путей не вытесняют друг друга. Если ничего не отмечено, используется группировка по умолчанию: хост и пути.</div>' +
 				'<div class="pm-inline-checks">' +
 				check('gbHost', 'Хост', s.gbHost) + check('gbPaths', 'Пути', s.gbPaths) + check('gbTags', 'Теги', s.gbTags) +
 				'</div></div>';
@@ -395,7 +425,7 @@
 				'<div class="pm-filter-body"><p class="pm-lead">Правила трогают только снимки, подходящие под фильтр. Остальные не удаляются. Пусто — подходят все.</p>' +
 				'<div class="pm-grid3">' +
 				area('fHosts', 'Хосты', s.fHosts, 'Один в строке.', 2) +
-				area('fTags', 'Теги', s.fTags, 'Один в строке.', 2) +
+				chips('fTags', 'Теги', s.fTags, '') +
 				area('fPaths', 'Пути', s.fPaths, 'Один в строке.', 2) +
 				'</div></div></details>';
 			var presets =
@@ -409,7 +439,7 @@
 			var intro =
 				'<div class="pm-howto"><div class="pm-howto-title">Как работают правила</div><ul>' +
 				'<li>Снимок остаётся, если его оставило <b>хотя бы одно</b> правило. Правила не вычитаются, а складываются.</li>' +
-				'<li><b>0 или пустое поле — правило выключено.</b> Если выключены все правила, ничего не удаляется.</li>' +
+				'<li><b>0 или пустое поле — правило выключено.</b> Если правил нет, ничего не удаляется и очистка (prune) не запускается.</li>' +
 				'<li>Правила по часам, дням, неделям, месяцам и годам считают только те интервалы, <b>в которых есть снимки</b>. «5 дней» — это пять дней с копиями, а не последние пять суток.</li>' +
 				'</ul></div>';
 			var preview =
@@ -434,8 +464,6 @@
 				addScript(root, script);
 			});
 		}
-		var hostsList = root.querySelector('[data-hooks]');
-		if (hostsList && state.on_hooks) addHook(root, 'notify-chat', 'on_error');
 	}
 
 	/* ---------------------------------------------------------------- scripts */
@@ -495,33 +523,6 @@
 		target.appendChild(wrap.firstChild);
 	}
 
-	function hookHtml(hookId, phase) {
-		var phases = [['before', 'До'], ['after', 'После'], ['on_success', 'При успехе'], ['on_error', 'При ошибке'], ['finally', 'В конце']];
-		return (
-			'<div class="pm-hook" data-hook>' +
-			'<div class="field"><label class="field-label">Хук</label><span class="select-wrap"><select class="select">' +
-			['notify-chat', 'snapshot-lvm', 'flush-cache'].map(function (h) {
-				return '<option' + (h === hookId ? ' selected' : '') + '>' + h + '</option>';
-			}).join('') +
-			'</select>' + icon('chevron-down') + '</span></div>' +
-			'<div class="field"><label class="field-label">Фаза</label><span class="select-wrap"><select class="select">' +
-			phases.map(function (p) {
-				return '<option value="' + p[0] + '"' + (p[0] === phase ? ' selected' : '') + '>' + p[1] + '</option>';
-			}).join('') +
-			'</select>' + icon('chevron-down') + '</span></div>' +
-			'<button type="button" class="btn btn--sm btn--ghost" data-hook-remove>' + icon('trash', 'xs') + ' Удалить хук</button>' +
-			'</div>'
-		);
-	}
-
-	function addHook(root, hookId, phase) {
-		var list = root.querySelector('[data-hooks]');
-		if (!list) return;
-		var wrap = document.createElement('div');
-		wrap.innerHTML = hookHtml(hookId || 'notify-chat', phase || 'before');
-		list.appendChild(wrap.firstChild);
-	}
-
 	/* ------------------------------------------------------------------ state */
 
 	function read(scope) {
@@ -533,7 +534,6 @@
 		}
 		state.scriptsBefore = scope.querySelectorAll('[data-script][data-phase="before"]').length;
 		state.scriptsAfter = scope.querySelectorAll('[data-script][data-phase="after"]').length;
-		state.hookCount = scope.querySelectorAll('[data-hook]').length;
 		return state;
 	}
 
@@ -766,12 +766,10 @@
 		var sc = state.scriptsBefore + state.scriptsAfter;
 		out.scripts = off(state, 'on_scripts', sc > 0, 'до: ' + state.scriptsBefore + ' · после: ' + state.scriptsAfter, 'Скриптов нет');
 
-		out.hooks = off(state, 'on_hooks', state.hookCount > 0, state.hookCount + ' ' + plural(state.hookCount, ['хук', 'хука', 'хуков']), 'Хуков нет');
-
 		var lim = [];
 		if (num(state.stall)) lim.push('без прогресса ' + num(state.stall) + ' мин');
-		if (num(state.maxDur)) lim.push('не дольше ' + num(state.maxDur) + ' ч');
-		out.limits = off(state, 'on_limits', lim.length > 0, lim.join(' · '), 'Без лимитов');
+		lim.push(num(state.maxDur) ? 'не дольше ' + num(state.maxDur) + ' ч' : 'не дольше ' + MAX_DURATION_DEFAULT + ' ч (по умолчанию)');
+		out.limits = { on: true, text: lim.join(' · ') };
 		return out;
 	}
 
@@ -855,10 +853,8 @@
 				return '<div class="pm-step"><div class="pm-step-title">' + step.title + '</div><pre class="pm-cmd' + (step.kind === 'script' ? ' pm-cmd--script' : '') + '">' + esc(step.cmd) + '</pre></div>';
 			}).join('');
 			var lim = [];
-			if (isOn(state, 'on_limits')) {
-				if (num(state.stall)) lim.push('нет прогресса ' + num(state.stall) + ' мин');
-				if (num(state.maxDur)) lim.push('всего ' + num(state.maxDur) + ' ч');
-			}
+			if (num(state.stall)) lim.push('нет прогресса ' + num(state.stall) + ' мин');
+			lim.push('всего ' + (num(state.maxDur) || MAX_DURATION_DEFAULT) + ' ч');
 			if (lim.length) html += '<div class="pm-step-note">' + icon('clock', 'xs') + ' Остановка задания: ' + lim.join(', ') + '</div>';
 			target.innerHTML = html;
 		}
@@ -886,7 +882,7 @@
 		});
 		if (String(state.keepWithin || '').trim()) s.push('<li>Остаются все снимки не старше <b>' + esc(String(state.keepWithin).trim()) + '</b> от самого нового.</li>');
 		if (lines(state.keepTags).length) s.push('<li>Снимки с тегами <b>' + lines(state.keepTags).map(esc).join(', ') + '</b> не удаляются никогда.</li>');
-		if (!s.length) return '<li>Правил нет: ничего не удаляется.</li>';
+		if (!s.length) return '<li>Правил нет: ничего не удаляется, очистка не запускается.</li>';
 		return s.join('');
 	}
 
@@ -930,7 +926,7 @@
 		}
 		var countOn = 0;
 		var countAll = 0;
-		['excludes', 'tags', 'options', 'retention', 'check', 'scripts', 'hooks', 'limits'].forEach(function (key) {
+		['excludes', 'tags', 'options', 'retention', 'check', 'scripts'].forEach(function (key) {
 			countAll++;
 			if (sums[key].on) countOn++;
 		});
@@ -956,7 +952,28 @@
 		var refresh = function () {
 			update(scope);
 		};
-		scope.addEventListener('input', refresh);
+		scope.addEventListener('input', function (event) {
+			var chipInput = event.target.closest && event.target.closest('.pm-chipinput');
+			if (chipInput && /[\s,]$/.test(chipInput.value)) commitChip(chipInput.closest('[data-chipbox]'));
+			refresh();
+		});
+		scope.addEventListener('keydown', function (event) {
+			var chipInput = event.target.closest && event.target.closest('.pm-chipinput');
+			if (!chipInput) return;
+			var box = chipInput.closest('[data-chipbox]');
+			if (event.key === 'Enter') {
+				event.preventDefault();
+				commitChip(box);
+			} else if (event.key === 'Backspace' && !chipInput.value) {
+				var current = lines(box.querySelector('input[type="hidden"]').value);
+				current.pop();
+				setChips(box, current);
+			}
+		});
+		scope.addEventListener('focusout', function (event) {
+			var chipInput = event.target.closest && event.target.closest('.pm-chipinput');
+			if (chipInput) commitChip(chipInput.closest('[data-chipbox]'));
+		});
 		scope.addEventListener('change', refresh);
 		
 		scope.addEventListener('click', function (event) {
@@ -973,15 +990,18 @@
 				script.closest('.pm-script').classList.toggle('is-open', open);
 				return;
 			}
+			var chipRemove = event.target.closest('[data-chip-remove]');
+			if (chipRemove) {
+				var chipBox = chipRemove.closest('[data-chipbox]');
+				var remaining = lines(chipBox.querySelector('input[type="hidden"]').value);
+				remaining.splice(+chipRemove.getAttribute('data-chip-remove'), 1);
+				setChips(chipBox, remaining);
+				return;
+			}
 			var jump = event.target.closest('a[href^="#sec-"]');
 			if (jump) {
 				var jumpButton = scope.querySelector('[data-sec-toggle][aria-controls="' + jump.getAttribute('href').slice(1) + '"]');
 				if (jumpButton) setExpanded(jumpButton, true);
-				return;
-			}
-			var go = event.target.closest('[data-step-go]');
-			if (go) {
-				showStep(scope, go.getAttribute('data-step-go'));
 				return;
 			}
 			var expand = event.target.closest('[data-expand-all]');
@@ -1002,16 +1022,6 @@
 				});
 				var rest = area.querySelectorAll('[data-k="keepHourly"], [data-k="keepWithin"]');
 				for (var r = 0; r < rest.length; r++) rest[r].value = rest[r].getAttribute('data-k') === 'keepHourly' ? '0' : '';
-				refresh();
-				return;
-			}
-			if (event.target.closest('[data-hook-add]')) {
-				addHook(scope, 'notify-chat', 'before');
-				refresh();
-				return;
-			}
-			if (event.target.closest('[data-hook-remove]')) {
-				event.target.closest('[data-hook]').remove();
 				refresh();
 				return;
 			}
@@ -1067,20 +1077,9 @@
 		});
 	}
 
-	function showStep(scope, step) {
-		var panes = scope.querySelectorAll('[data-step]');
-		for (var i = 0; i < panes.length; i++) panes[i].hidden = panes[i].getAttribute('data-step') !== String(step);
-		var marks = scope.querySelectorAll('[data-stepper]');
-		for (var j = 0; j < marks.length; j++) {
-			var n = +marks[j].getAttribute('data-stepper');
-			marks[j].classList.toggle('is-current', n === +step);
-			marks[j].classList.toggle('is-done', n < +step);
-		}
-	}
-
 	/* ----------------------------------------------------------------- shell */
 
-	function drawShell(active) {
+	function drawShell(active, crumb) {
 		var tabs = [
 			['overview', 'Обзор', 'empty-first-run.html'],
 			['host', 'Хосты', 'hosts-ru.html'],
@@ -1096,7 +1095,8 @@
 			'<header class="topbar"><div class="topbar-inner">' +
 			'<a class="brand" href="index.html"><span class="brandmark" aria-hidden="true"><svg viewBox="0 0 20 20"><path class="mark-solid" d="M10 2.5 2.5 6.4 10 10.3l7.5-3.9z" /><path d="M2.5 10.6 10 14.5l7.5-3.9" /></svg></span><span>ResticHub</span></a>' +
 			'<span class="topbar-divider"></span>' +
-			'<nav class="breadcrumb" aria-label="Путь"><span class="tenant-switch" style="cursor:default"><span>acme</span></span><span class="breadcrumb-sep">/</span><span aria-current="page">Профили</span></nav>' +
+			'<nav class="breadcrumb" aria-label="Путь"><span class="tenant-switch" style="cursor:default"><span>acme</span></span><span class="breadcrumb-sep">/</span>' +
+			(crumb ? '<a href="profiles.html">Профили</a><span class="breadcrumb-sep">/</span><span aria-current="page">' + esc(crumb) + '</span>' : '<span aria-current="page">Профили</span>') + '</nav>' +
 			'<div class="spacer"></div>' +
 			'<button class="btn btn--icon" data-theme-toggle aria-label="Сменить тему">' + icon('moon') + '</button>' +
 			'<span class="btn btn--ghost" style="cursor:default"><span class="avatar">АП</span><span>Анна Петрова</span></span>' +
@@ -1113,7 +1113,7 @@
 
 	function init() {
 		var shell = document.querySelector('[data-shell]');
-		if (shell) shell.outerHTML = drawShell(shell.getAttribute('data-shell'));
+		if (shell) shell.outerHTML = drawShell(shell.getAttribute('data-shell'), shell.getAttribute('data-crumb'));
 		var scopes = document.querySelectorAll('[data-scope]');
 		for (var i = 0; i < scopes.length; i++) {
 			var mode = scopes[i].getAttribute('data-scope');
@@ -1121,6 +1121,8 @@
 			drawBlocks(scopes[i], state);
 			var switches = scopes[i].querySelectorAll('[data-k^="on_"]');
 			for (var s = 0; s < switches.length; s++) switches[s].checked = !!state[switches[s].getAttribute('data-k')];
+			var boxes = scopes[i].querySelectorAll('[data-chipbox]');
+			for (var cb = 0; cb < boxes.length; cb++) drawChips(boxes[cb]);
 			bindEvents(scopes[i]);
 		}
 		var scopesNow = document.querySelectorAll('[data-scope]');
@@ -1133,37 +1135,6 @@
 				if (button) setExpanded(button, true);
 			});
 		}
-		var variantButtons = document.querySelectorAll('[data-variant]');
-		var targets = {
-			a: { open: 'profile-a.html', edit: 'profile-a.html', add: 'profile-a.html' },
-			b: { open: 'profile-b.html', edit: 'profile-b.html', add: 'profile-b.html' },
-			c: { open: 'profile-c.html', edit: 'profile-c.html', add: 'profile-c.html?mode=create' }
-		};
-		var chooseVariant = function (key) {
-			for (var b = 0; b < variantButtons.length; b++) variantButtons[b].setAttribute('aria-pressed', variantButtons[b].getAttribute('data-variant') === key ? 'true' : 'false');
-			var set = function (selector, href) {
-				var links = document.querySelectorAll(selector);
-				for (var l = 0; l < links.length; l++) links[l].setAttribute('href', href);
-			};
-			set('[data-profile-link]', targets[key].open);
-			set('[data-profile-edit]', targets[key].edit);
-			set('[data-profile-new]', targets[key].add);
-		};
-		for (var vb = 0; vb < variantButtons.length; vb++) {
-			variantButtons[vb].addEventListener('click', function () {
-				chooseVariant(this.getAttribute('data-variant'));
-			});
-		}
-		var queryVariant = /[?&]v=([abc])/.exec(window.location.search || '');
-		if (variantButtons.length) chooseVariant(queryVariant ? queryVariant[1] : 'c');
-		var query = window.location.search || '';
-		var modeMatch = /[?&]mode=(\w+)/.exec(query);
-		var mode = modeMatch ? modeMatch[1] : 'read';
-		var views = document.querySelectorAll('[data-view]');
-		for (var v = 0; v < views.length; v++) views[v].hidden = views[v].getAttribute('data-view') !== mode;
-		var stepMatch = /[?&]step=(\d)/.exec(query);
-		var wizard = document.querySelector('[data-view="create"]');
-		if (wizard) showStep(wizard, stepMatch ? stepMatch[1] : '1');
 		var hash = (window.location.hash || '').replace('#', '');
 		if (hash) {
 			var target = document.querySelector('[data-sec-toggle][aria-controls="sec-' + hash + '"]');

@@ -10,14 +10,13 @@
 		<script src="profile-mock.js"></script>
 	</head>
 	<body>
-		<div data-shell="profile"></div>
-		<div class="pm-mock-bar"><b>Макет профиля, вариант A: полная страница</b><span>Другие макеты: <a href="profile-variants.html">сравнение</a> · <a href="profile-b.html">B</a> · <a href="profile-c.html">C</a> · <a href="profiles.html">список</a></span></div>
+		<div data-shell="profile" data-crumb="srv-web-nightly"></div>
+		<div class="pm-mock-bar"><b>Макет редактора профиля: полная страница</b><span>Другие макеты: <a href="profiles.html">список</a></span></div>
 		<main class="page page--wide" data-scope="edit" data-open-sec="basics,paths">
 			<div class="page-header">
 				<div>
-					<div class="pm-crumbs"><a href="profiles.html">Профили</a><span>/</span><span>srv-web-nightly</span></div>
 					<h1 class="page-title">Изменить профиль</h1>
-					<p class="page-subtitle">Слева разделы с отметкой «включено» и кратким итогом, справа живая сводка и команды. Разделы раскрываются по одному.</p>
+					<p class="page-subtitle">Слева разделы с отметкой «включено» и итогом, справа живая сводка и команды. Разделы раскрываются по одному.</p>
 				</div>
 				<div class="page-actions"><button class="btn" type="button" data-expand-all="open"><svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg> Развернуть всё</button><button class="btn" type="button" data-expand-all="close"><svg class="icon icon--xs"><use href="icons.svg#i-chevron-up" /></svg> Свернуть всё</button></div>
 			</div>
@@ -33,7 +32,6 @@
 <a href="#sec-retention"><span class="pm-dot" data-dot="retention"></span><span class="t">Хранение</span><span class="s" data-sum="retention"></span></a>
 <a href="#sec-check"><span class="pm-dot" data-dot="check"></span><span class="t">Проверка репозитория</span><span class="s" data-sum="check"></span></a>
 <a href="#sec-scripts"><span class="pm-dot" data-dot="scripts"></span><span class="t">Скрипты на хосте</span><span class="s" data-sum="scripts"></span></a>
-<a href="#sec-hooks"><span class="pm-dot" data-dot="hooks"></span><span class="t">Хуки</span><span class="s" data-sum="hooks"></span></a>
 <a href="#sec-limits"><span class="pm-dot" data-dot="limits"></span><span class="t">Лимиты выполнения</span><span class="s" data-sum="limits"></span></a>
 				</nav>
 				<div class="pm-main">
@@ -157,21 +155,6 @@
 						<div class="pm-fields"><div data-block="scripts"></div></div>
 					</div>
 				</section>
-				<section class="pm-sec" data-section id="hooks">
-					<div class="pm-sec-head">
-						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-hooks">
-							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
-							<span class="pm-dot" data-dot="hooks"></span>
-							<span class="pm-sec-title">Хуки</span>
-							<span class="pm-sec-sum" data-sum="hooks"></span>
-						</button>
-						<label class="switch" title="Включить или выключить: Хуки"><input type="checkbox" data-k="on_hooks" aria-label="Включить: Хуки" /></label>
-					</div>
-					<div class="pm-sec-body" id="sec-hooks" data-sec-body="hooks" hidden>
-						<p class="pm-offnote">Раздел выключен. Значения ниже сохраняются в форме, но не применяются. Включите переключатель в заголовке.</p>
-						<div class="pm-fields"><div data-block="hooks"></div></div>
-					</div>
-				</section>
 				<section class="pm-sec" data-section id="limits">
 					<div class="pm-sec-head">
 						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-limits">
@@ -180,10 +163,10 @@
 							<span class="pm-sec-title">Лимиты выполнения <span class="pm-new">Новое</span></span>
 							<span class="pm-sec-sum" data-sum="limits"></span>
 						</button>
-						<label class="switch" title="Включить или выключить: Лимиты выполнения"><input type="checkbox" data-k="on_limits" aria-label="Включить: Лимиты выполнения" /></label>
+						
 					</div>
 					<div class="pm-sec-body" id="sec-limits" data-sec-body="limits" hidden>
-						<p class="pm-offnote">Раздел выключен. Значения ниже сохраняются в форме, но не применяются. Включите переключатель в заголовке.</p>
+						
 						<div class="pm-fields"><div data-block="limits"></div></div>
 					</div>
 				</section>
@@ -199,7 +182,6 @@
 <li><span class="pm-dot" data-dot="retention"></span><div><b>Хранение</b><span class="s" data-sum="retention"></span></div></li>
 <li><span class="pm-dot" data-dot="check"></span><div><b>Проверка репозитория</b><span class="s" data-sum="check"></span></div></li>
 <li><span class="pm-dot" data-dot="scripts"></span><div><b>Скрипты на хосте</b><span class="s" data-sum="scripts"></span></div></li>
-<li><span class="pm-dot" data-dot="hooks"></span><div><b>Хуки</b><span class="s" data-sum="hooks"></span></div></li>
 <li><span class="pm-dot" data-dot="limits"></span><div><b>Лимиты выполнения</b><span class="s" data-sum="limits"></span></div></li></ul></div>
 					</div>
 					<div class="pm-side-box">
