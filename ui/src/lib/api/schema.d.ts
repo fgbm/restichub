@@ -6818,7 +6818,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The profiles of the tenant. */
+            /** @description The profiles of the tenant. For a Viewer, each script has an empty body and empty values of string variables. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6966,7 +6966,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The profile. */
+            /** @description The profile. For a Viewer, each script has an empty body and empty values of string variables. */
             200: {
                 headers: {
                     [name: string]: unknown;

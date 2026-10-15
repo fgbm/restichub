@@ -81,6 +81,33 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -
     )
 }
 
+/// The restore roots that the installed unit cannot write, because the operator added them after
+/// `install-service` (FR-RS-03). Restic fails with `EROFS` on such a root.
+#[must_use]
+pub fn roots_missing_from_installed_unit(roots: &[PathBuf]) -> Vec<PathBuf> {
+    match std::fs::read_to_string(unit_path()) {
+        Ok(unit) => roots_missing_from_unit(&unit, roots),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn roots_missing_from_unit(unit: &str, roots: &[PathBuf]) -> Vec<PathBuf> {
+    let writable: Vec<&str> = unit
+        .lines()
+        .filter_map(|line| line.strip_prefix("ReadWritePaths="))
+        .flat_map(|paths| paths.split('"').skip(1).step_by(2))
+        .collect();
+    roots
+        .iter()
+        .filter(|root| {
+            !writable
+                .iter()
+                .any(|allowed| root.starts_with(Path::new(allowed)))
+        })
+        .cloned()
+        .collect()
+}
+
 /// Writes and enables the systemd unit (FR-IN-08, AC-IN-03).
 ///
 /// # Errors
@@ -293,5 +320,24 @@ mod tests {
             ],
         );
         assert!(unit.contains("ReadWritePaths=\"/etc/restichub-agent\" \"/var/lib/restichub-restore\" \"/srv/restore\"\n"));
+    }
+
+    #[test]
+    fn fr_rs_03_a_root_added_after_install_is_reported_as_read_only() {
+        let unit = unit_contents(
+            Path::new("/opt/restichub-agent/restichub-agent"),
+            Path::new("/etc/restichub-agent"),
+            &[PathBuf::from("/var/lib/restichub-restore")],
+        );
+        let roots = [
+            PathBuf::from("/var/lib/restichub-restore"),
+            PathBuf::from("/var/lib/restichub-restore/nested"),
+            PathBuf::from("/srv/restore"),
+        ];
+        assert_eq!(
+            roots_missing_from_unit(&unit, &roots),
+            vec![PathBuf::from("/srv/restore")]
+        );
+        assert!(roots_missing_from_unit(&unit, &roots[..2]).is_empty());
     }
 }

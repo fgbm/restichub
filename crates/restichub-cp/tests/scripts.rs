@@ -17,6 +17,7 @@ use queue_support::{Env, eventually, test_queue};
 
 const CANARY: &str = "CANARY-script-secret-90b2";
 const BODY_CANARY: &str = "CANARY-script-body-text";
+const ENV_CANARY: &str = "CANARY-script-env-value";
 
 fn bash() -> Vec<ScriptInterpreter> {
     vec![ScriptInterpreter::Bash, ScriptInterpreter::Sh]
@@ -159,7 +160,7 @@ async fn ac_hk_12_a_template_change_writes_the_hash_in_the_audit_log() {
     env.db.cleanup().await;
 }
 
-/// AC-HK-12: the roles. A Viewer and an Operator read the templates; only an Admin edits them.
+/// AC-HK-12: the roles. An Operator reads the templates and a Viewer does not; only an Admin edits them.
 #[tokio::test]
 async fn ac_hk_12_only_an_admin_edits_the_templates() {
     let Some(db) = common::test_db().await else {
@@ -176,10 +177,10 @@ async fn ac_hk_12_only_an_admin_edits_the_templates() {
         .await;
     let id = created["id"].as_str().expect("the id").to_owned();
     for path in ["/api/v1/script-templates", "/api/v1/job-templates"] {
-        for token in [&env.viewer, &env.operator] {
-            let (status, _) = env.call(token, "GET", path, None).await;
-            assert_eq!(status, StatusCode::OK, "{path}");
-        }
+        let (status, _) = env.call(&env.operator, "GET", path, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        let (status, _) = env.call(&env.viewer, "GET", path, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
         let (status, _) = env.call("not-a-token", "GET", path, None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
@@ -335,7 +336,7 @@ async fn fr_hk_12_a_job_template_keeps_the_ordered_scripts() {
 
 /// AC-HK-12: only an Admin changes the scripts of a profile; the audit holds the hash.
 #[tokio::test]
-async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile() {
+async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile_and_a_viewer_reads_no_body() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -384,13 +385,14 @@ async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile() {
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
+    let inline = json!([{"name": "PGPASSWORD", "kind": "string", "value": ENV_CANARY}]);
     let (status, created) = env
         .call(
             &env.admin,
             "POST",
             "/api/v1/profiles",
             Some(body(
-                json!([script("dump", "before", json!([]))]),
+                json!([script("dump", "before", inline.clone())]),
                 "with-script",
             )),
         )
@@ -401,8 +403,34 @@ async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile() {
         .as_str()
         .expect("the id")
         .to_owned();
+    // A Viewer reads the profile without the script bodies; an Operator reads them.
+    for uri in [
+        "/api/v1/profiles".to_owned(),
+        format!("/api/v1/profiles/{id}"),
+    ] {
+        let (status, as_viewer) = env.call(&env.viewer, "GET", &uri, None).await;
+        assert_eq!(status, StatusCode::OK, "{as_viewer}");
+        assert!(
+            !as_viewer.to_string().contains(BODY_CANARY),
+            "a Viewer reads a script body: {as_viewer}"
+        );
+        assert!(
+            !as_viewer.to_string().contains(ENV_CANARY),
+            "a Viewer reads a script variable: {as_viewer}"
+        );
+        assert!(as_viewer.to_string().contains("dump"), "{as_viewer}");
+        let (_, as_operator) = env.call(&env.operator, "GET", &uri, None).await;
+        assert!(
+            as_operator.to_string().contains(BODY_CANARY),
+            "{as_operator}"
+        );
+        assert!(
+            as_operator.to_string().contains(ENV_CANARY),
+            "{as_operator}"
+        );
+    }
     // An Operator can change another setting while the scripts stay as they are.
-    let unchanged = body(json!([script("dump", "before", json!([]))]), "with-script");
+    let unchanged = body(json!([script("dump", "before", inline)]), "with-script");
     let (status, saved) = env
         .call(
             &env.operator,

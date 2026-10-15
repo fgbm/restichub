@@ -76,7 +76,7 @@ pub struct ProfileListQuery {
     security(("cookie" = []), ("bearer" = [])),
     params(ProfileListQuery),
     responses(
-        (status = 200, description = "The profiles of the tenant.", body = ProfileListResponse),
+        (status = 200, description = "The profiles of the tenant. For a Viewer, each script has an empty body and empty values of string variables.", body = ProfileListResponse),
         (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
     )
@@ -111,11 +111,14 @@ pub async fn list_profiles(
     } else {
         None
     };
-    let items = result
+    let mut items = result
         .profiles
         .iter()
         .map(ProfileView::try_from)
         .collect::<Result<Vec<_>, _>>()?;
+    if context.authorize(Operation::ScriptsRead).is_err() {
+        items.iter_mut().for_each(ProfileView::hide_script_bodies);
+    }
     Ok(Json(ProfileListResponse { items, next_cursor }))
 }
 
@@ -143,7 +146,7 @@ pub async fn job_limit_defaults(
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the profile.")),
     responses(
-        (status = 200, description = "The profile.", body = ProfileView),
+        (status = 200, description = "The profile. For a Viewer, each script has an empty body and empty values of string variables.", body = ProfileView),
         crate::error::ProtectedResponses,
         (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
     )
@@ -159,7 +162,13 @@ pub async fn get_profile(
         .tenant_tx(&state, async |tx| Ok(repo::get(tx, profile_id).await?))
         .await?;
     match profile {
-        Some(profile) => Ok(Json(ProfileView::try_from(&profile)?)),
+        Some(profile) => {
+            let mut view = ProfileView::try_from(&profile)?;
+            if context.authorize(Operation::ScriptsRead).is_err() {
+                view.hide_script_bodies();
+            }
+            Ok(Json(view))
+        }
         None => Err(ApiError::not_found()),
     }
 }

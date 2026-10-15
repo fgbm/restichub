@@ -9,6 +9,7 @@
 //! again after a restart (AC-PR-07). All writes are idempotent.
 
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 use restichub_db::job_logs::NewChunk;
 use restichub_db::job_steps::{
@@ -26,6 +27,7 @@ use time::OffsetDateTime;
 use crate::browse;
 use crate::jobs::parse_job_id_value;
 use crate::log_store::{DatabaseLogStore, LogStore, MAX_CHUNK_BYTES, lines_of};
+use crate::progress_throttle::Admit;
 use crate::refusal_audit::{self, MessageRefusal};
 use crate::server::AppState;
 
@@ -67,24 +69,73 @@ pub async fn handle_progress(
             .collect(),
         updated_at: now,
     };
+    let key = (agent, job_id);
+    let update = ProgressUpdate { tenant, agent, row };
+    match state.progress_throttle().admit(key, update, Instant::now()) {
+        Admit::WriteNow(update) => {
+            if write_progress(state, job_id, &update).await {
+                state.progress_throttle().wrote(key, Instant::now());
+            }
+        }
+        Admit::Held => {}
+        Admit::FlushAfter(delay) => {
+            let state = state.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                let held = state.progress_throttle().take_pending(key, Instant::now());
+                if let Some(update) = held {
+                    write_progress(&state, job_id, &update).await;
+                }
+            });
+        }
+    }
+}
+
+/// A progress message that waits for its write.
+#[derive(Debug)]
+pub struct ProgressUpdate {
+    tenant: TenantId,
+    agent: AgentId,
+    row: JobProgress,
+}
+
+/// Whether the progress is now in the database.
+async fn write_progress(state: &AppState, job_id: JobId, update: &ProgressUpdate) -> bool {
     let cutoff = write_cutoff(state);
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+    let Ok(mut tx) = state.db().begin_tenant(update.tenant).await else {
         tracing::warn!(job = %job_id, "the progress could not open a transaction");
-        return;
+        return false;
     };
     let result = async {
-        let Some(job) = owned_job(state, &mut tx, job_id, agent, cutoff, "step_progress").await?
-        else {
-            return Ok(());
-        };
-        // A job that is not running shows no progress.
-        if !matches!(job.status, JobStatus::Sent | JobStatus::Running) {
-            return Ok(());
+        let owned = owned_job(
+            state,
+            &mut tx,
+            job_id,
+            update.agent,
+            cutoff,
+            "step_progress",
+        )
+        .await?;
+        if owned.is_none() {
+            return Ok(false);
         }
-        job_steps::upsert_progress(&mut tx, job_id, &row).await
+        job_steps::upsert_progress(&mut tx, job_id, &update.row).await
     }
     .await;
-    finish(tx, result, job_id, "progress").await;
+    // The commit below is where a live progress event for the write goes.
+    match result {
+        Ok(written) => match tx.commit().await {
+            Ok(()) => written,
+            Err(error) => {
+                tracing::warn!(job = %job_id, %error, "the progress could not commit");
+                false
+            }
+        },
+        Err(error) => {
+            tracing::warn!(job = %job_id, %error, "the progress could not be stored");
+            false
+        }
+    }
 }
 
 /// Records the result of one step.
@@ -192,6 +243,7 @@ pub async fn handle_job_result_data(
     if !job_is_owned(state, tenant, agent, job_id, "job_result").await {
         return;
     }
+    state.progress_throttle().forget((agent, job_id));
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         tracing::warn!(job = %job_id, "the job result data could not open a transaction");
         return;

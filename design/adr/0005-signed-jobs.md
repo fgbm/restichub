@@ -22,6 +22,16 @@ The signature covers the serialized bytes of the job. The agent verifies the byt
 - The backup of the control plane must include the signing key (NFR-REL-04).
 - Key rotation needs a protocol message that delivers the new public key, signed by the old key.
 
+## Amendment, 2026-10-15
+
+The implementation differs from the text above in three points. The decision is not rewritten. A later ADR records the change.
+
+- The CP signs a job at dispatch from the state of the database.
+- The signing key is not in a file. It is in the database, wrapped by the KEK (ADR-0026).
+- For this reason, "Database access without the signing key does not let an attacker forge jobs" is not true. An attacker who writes plans or profiles gets a job that the CP signs. An attacker who holds the KEK and a database dump also gets the key.
+
+Job signing protects against a network attacker, a replayed or altered job, and a CP without the key. It does not protect against write access to the database. Database permissions and the audit log are the controls. See T3 in the [threat model](../threat-model.md) and FR-PR-04. A separate signing service is a later option.
+
 ## Alternatives
 
 | Alternative | Why we did not select it |
