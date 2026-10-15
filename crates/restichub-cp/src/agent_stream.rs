@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use restichub_db::agents as agent_repo;
+use restichub_db::audit::{self, Actor, AuditAction, AuditEvent};
 use restichub_db::queue as queue_repo;
 use restichub_db::{AgentId, AgentStatus, Database, JobId, TenantId};
 use restichub_proto::AgentCapability;
@@ -69,8 +70,9 @@ const OUTBOUND_CHANNEL: usize = 128;
 /// AC-ID-04).
 pub const REVOCATION_SWEEP_INTERVAL: Duration = Duration::from_secs(2);
 
-/// The longest wait between two signed rotations of one stream. A stream cannot make the control
-/// plane sign in a loop (FR-ID-03). A short certificate lifetime shortens the wait.
+/// The wait between two requests of one stream, answered or refused. It spares the registry a
+/// query for a request flood; the limit that holds is in the registry row (FR-ID-03). A short
+/// certificate lifetime shortens the wait.
 const CERTIFICATE_REQUEST_COOLDOWN: Duration = Duration::from_secs(30);
 
 /// A quarter of the certificate lifetime, but not more than [`CERTIFICATE_REQUEST_COOLDOWN`].
@@ -549,6 +551,9 @@ async fn check_registry(
             .await
             .map_err(unavailable)?;
         if !promoted {
+            if report_superseded_use(&mut tx, identity, &agent, now).await {
+                let _ = tx.commit().await;
+            }
             return Err(Status::permission_denied(
                 "the certificate serial is not the enrolled one",
             ));
@@ -556,6 +561,50 @@ async fn check_registry(
     }
     tx.commit().await.map_err(unavailable)?;
     Ok(())
+}
+
+/// How long one superseded-certificate event silences the next one for the same agent.
+const SUPERSEDED_EVENT_QUIET: time::Duration = time::Duration::hours(1);
+
+/// Records a connection that presented the serial the last rotation replaced (T17).
+///
+/// The honest agent drops the old certificate after the confirmation, so this connection means a
+/// copy of the old key or an agent that lost its new identity. The refusal stays; the audit event
+/// and the Hosts mark tell the operator. `true` when the transaction holds a change to commit.
+async fn report_superseded_use(
+    tx: &mut restichub_db::TenantTx<'_>,
+    identity: &PeerIdentity,
+    agent: &agent_repo::Agent,
+    now: time::OffsetDateTime,
+) -> bool {
+    let marked = agent_repo::mark_superseded_certificate_used(
+        tx,
+        identity.agent,
+        &identity.serial,
+        now,
+        now - SUPERSEDED_EVENT_QUIET,
+    )
+    .await;
+    if !matches!(marked, Ok(true)) {
+        return false;
+    }
+    let mut event = AuditEvent::new(AuditAction::AgentSupersededCertificateUsed, "agent");
+    event.actor = Actor::Agent(identity.agent.as_uuid());
+    event.object_id = Some(identity.agent.as_uuid());
+    event.diff = Some(audit::diff(
+        None,
+        Some(&serde_json::json!({
+            "presented_certificate_serial": identity.serial_hex(),
+            "enrolled_certificate_serial": hex(&agent.certificate_serial),
+        })),
+        &[],
+    ));
+    if let Err(error) = audit::insert(tx, &event).await {
+        tracing::warn!(agent = %identity.agent, cause = ?error, "cannot write the superseded certificate event");
+        return false;
+    }
+    tracing::warn!(agent = %identity.agent, "a superseded agent certificate was presented");
+    true
 }
 
 /// Writes the first `last_seen_at` under the registry guard.
@@ -931,6 +980,7 @@ async fn handle_message(
                 reject_certificate(tx, CertificateRejectReason::TooEarly);
                 return;
             }
+            *last_request = Some(tokio::time::Instant::now());
             let now = state.auth().clock.now();
             let payload = match crate::rotation::issue(
                 state,
@@ -943,7 +993,6 @@ async fn handle_message(
             .await
             {
                 Ok((issued, next)) => {
-                    *last_request = Some(tokio::time::Instant::now());
                     identity.issued = Some(next);
                     control_message::Payload::CertificateIssued(issued)
                 }

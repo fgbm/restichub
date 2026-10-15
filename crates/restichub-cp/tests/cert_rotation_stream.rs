@@ -19,7 +19,9 @@ use restichub_proto::agent::v1::{
 };
 
 use queue_support::{Env, FakeAgent, eventually, next_message, test_queue};
-use rotation_support::{hex, rotated_identity, row, stored_identity};
+use rotation_support::{
+    audit_count, hex, rotated_identity, row, stored_identity, superseded_used_at,
+};
 
 /// How long a test certificate lives. The control plane accepts a request at half of it.
 const LIFETIME: Duration = Duration::from_secs(6);
@@ -190,5 +192,72 @@ async fn ac_id_03_a_connection_with_the_new_certificate_confirms_it() {
         .await
         .expect_err("the old serial is refused");
     assert_eq!(refused.code(), tonic::Code::PermissionDenied, "{refused}");
+    env.db.cleanup().await;
+}
+
+/// FR-ID-03: the rate limit survives a reconnect. Ten connections that each send a request give
+/// one issuance and one audit record; the others get `TooEarly`.
+#[tokio::test]
+async fn fr_id_03_ten_reconnects_with_a_request_give_one_issuance() {
+    let Some(env) = start().await else {
+        return;
+    };
+    let first = env.connect_agent("stream-reconnect-host").await;
+    let enrolled = first.identity.clone();
+    let id = first.id;
+    wait_for_half_of_the_lifetime(&env).await;
+
+    let mut issued_count = 0;
+    let mut agent = first;
+    for round in 0..10 {
+        if round > 0 {
+            agent = env.connect_enrolled(enrolled.clone()).await;
+        }
+        let (_, message) = ask(&mut agent).await;
+        match message.payload {
+            Some(control_message::Payload::CertificateIssued(_)) => issued_count += 1,
+            Some(control_message::Payload::CertificateRejected(rejected)) => assert_eq!(
+                rejected.reason,
+                restichub_proto::agent::v1::CertificateRejectReason::TooEarly as i32,
+                "round {round}"
+            ),
+            other => panic!("round {round}: {other:?}"),
+        }
+    }
+    assert_eq!(issued_count, 1);
+    assert_eq!(rotation_support::rotation_audit_count(&env).await, 1);
+    assert!(row(&env, id).await.pending_serial.is_some());
+    env.db.cleanup().await;
+}
+
+/// T17: a connection with the serial that a rotation replaced is refused, writes one audit event
+/// for the quiet period and marks the host.
+#[tokio::test]
+async fn t17_a_superseded_certificate_writes_an_audit_event_and_marks_the_host() {
+    let Some(env) = start().await else {
+        return;
+    };
+    let mut agent = env.connect_agent("stream-clone-host").await;
+    let enrolled = agent.identity.clone();
+    let id = agent.id;
+    wait_for_half_of_the_lifetime(&env).await;
+    let (renewed, serial) = issued(&enrolled, &mut agent).await;
+    let (_tx, mut inbound) = env.open_raw(&renewed).await.expect("the new certificate");
+    assert!(inbound.message().await.is_ok());
+    assert_eq!(row(&env, id).await.serial, hex(&serial));
+    assert!(superseded_used_at(&env, id).await.is_none());
+
+    for _ in 0..3 {
+        let refused = env
+            .open_raw(&enrolled)
+            .await
+            .expect_err("the old serial is refused");
+        assert_eq!(refused.code(), tonic::Code::PermissionDenied, "{refused}");
+    }
+    assert_eq!(
+        audit_count(&env, "agent_superseded_certificate_used").await,
+        1
+    );
+    assert!(superseded_used_at(&env, id).await.is_some());
     env.db.cleanup().await;
 }

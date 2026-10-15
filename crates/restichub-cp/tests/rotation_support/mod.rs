@@ -117,3 +117,23 @@ pub async fn rotation_audit_count(env: &Env) -> i64 {
         .await
         .expect("cannot count the audit records")
 }
+
+/// The number of audit records of an action in the tenant of the environment.
+pub async fn audit_count(env: &Env, action: &str) -> i64 {
+    let mut tx = env.scoped().await;
+    sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1")
+        .bind(action)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("cannot count the audit records")
+}
+
+/// The time of the last connection with a superseded certificate.
+pub async fn superseded_used_at(env: &Env, agent: AgentId) -> Option<OffsetDateTime> {
+    let mut tx = env.scoped().await;
+    sqlx::query_scalar("SELECT superseded_certificate_used_at FROM agents WHERE id = $1")
+        .bind(agent)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("cannot read the agent row")
+}

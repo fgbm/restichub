@@ -45,6 +45,13 @@ pub struct Agent {
     pub pending_certificate_serial: Option<Vec<u8>>,
     pub pending_certificate_expires_at: Option<OffsetDateTime>,
     pub last_certificate_rotation_at: Option<OffsetDateTime>,
+    /// The time of the last rotation request, answered or refused. The control plane refuses the
+    /// next request until the cooldown has passed (FR-ID-03).
+    pub last_rotation_request_at: Option<OffsetDateTime>,
+    /// The serial that the last rotation replaced.
+    pub previous_certificate_serial: Option<Vec<u8>>,
+    /// The last time a connection presented [`Self::previous_certificate_serial`] (T17).
+    pub superseded_certificate_used_at: Option<OffsetDateTime>,
     /// The protocol version of the last `AgentHello` (FR-PR-09).
     pub protocol_version_major: Option<u32>,
     pub protocol_version_minor: Option<u32>,
@@ -212,6 +219,49 @@ pub async fn set_pending_certificate(
     Ok(result.rows_affected() == 1)
 }
 
+/// Records a rotation request. The control plane refuses the next request until the cooldown has
+/// passed, whatever the stream or the instance (FR-ID-03).
+pub async fn arm_rotation_cooldown(
+    tx: &mut TenantTx<'_>,
+    id: AgentId,
+    now: OffsetDateTime,
+) -> Result<(), DbError> {
+    sqlx::query("UPDATE agents SET last_rotation_request_at = $2 WHERE id = $1")
+        .bind(id)
+        .bind(now)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(())
+}
+
+/// Marks a connection that presented the serial the last rotation replaced.
+///
+/// `true` when the mark is new: the serial matches the previous one and the last mark is older
+/// than `quiet_since` (or absent), so the caller writes one audit event for each quiet period.
+pub async fn mark_superseded_certificate_used(
+    tx: &mut TenantTx<'_>,
+    id: AgentId,
+    serial: &[u8],
+    now: OffsetDateTime,
+    quiet_since: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE agents SET superseded_certificate_used_at = $3 \
+         WHERE id = $1 AND status = 'active' \
+           AND encode(ltrim(previous_certificate_serial, '\\x00'::bytea), 'hex') = $2 \
+           AND (superseded_certificate_used_at IS NULL OR superseded_certificate_used_at < $4)",
+    )
+    .bind(id)
+    .bind(hex_serial(serial))
+    .bind(now)
+    .bind(quiet_since)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
 /// Makes the pending certificate the enrolled one and refuses the old serial from now on
 /// (ADR-0026).
 ///
@@ -224,7 +274,8 @@ pub async fn promote_pending_certificate(
     now: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE agents SET certificate_serial = pending_certificate_serial, \
+        "UPDATE agents SET previous_certificate_serial = certificate_serial, \
+                certificate_serial = pending_certificate_serial, \
                 certificate_expires_at = pending_certificate_expires_at, \
                 pending_certificate_serial = NULL, pending_certificate_expires_at = NULL, \
                 last_certificate_rotation_at = $3 \
@@ -402,7 +453,8 @@ pub async fn revoke(
 const COLUMNS: &str = "id, hostname, os, arch, agent_version, restic_version, labels, \
     capabilities, restore_roots, certificate_serial, certificate_expires_at, status, \
     last_seen_at, created_at, revoked_at, revoked_by_user_id, pending_certificate_serial, \
-    pending_certificate_expires_at, last_certificate_rotation_at, protocol_version_major, \
+    pending_certificate_expires_at, last_certificate_rotation_at, last_rotation_request_at, \
+    previous_certificate_serial, superseded_certificate_used_at, protocol_version_major, \
     protocol_version_minor";
 
 #[derive(sqlx::FromRow)]
@@ -426,6 +478,9 @@ struct AgentRow {
     pending_certificate_serial: Option<Vec<u8>>,
     pending_certificate_expires_at: Option<OffsetDateTime>,
     last_certificate_rotation_at: Option<OffsetDateTime>,
+    last_rotation_request_at: Option<OffsetDateTime>,
+    previous_certificate_serial: Option<Vec<u8>>,
+    superseded_certificate_used_at: Option<OffsetDateTime>,
     protocol_version_major: Option<i32>,
     protocol_version_minor: Option<i32>,
 }
@@ -452,6 +507,9 @@ impl From<AgentRow> for Agent {
             pending_certificate_serial: row.pending_certificate_serial,
             pending_certificate_expires_at: row.pending_certificate_expires_at,
             last_certificate_rotation_at: row.last_certificate_rotation_at,
+            last_rotation_request_at: row.last_rotation_request_at,
+            previous_certificate_serial: row.previous_certificate_serial,
+            superseded_certificate_used_at: row.superseded_certificate_used_at,
             protocol_version_major: row
                 .protocol_version_major
                 .and_then(|v| u32::try_from(v).ok()),

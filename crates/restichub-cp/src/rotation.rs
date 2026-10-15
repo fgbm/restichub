@@ -77,10 +77,6 @@ pub async fn issue(
     if now < presented.rotation_opens_at() {
         return Err(CertificateRejectReason::TooEarly);
     }
-    let new_key = crate::pki::csr_public_key(csr_der).map_err(refusal)?;
-    if new_key == presented.public_key {
-        return Err(CertificateRejectReason::SameKey);
-    }
     let store = state.ca().ok_or(CertificateRejectReason::Unavailable)?;
 
     let unavailable = |error: DbError| {
@@ -99,16 +95,27 @@ pub async fn issue(
     if strip(&row.certificate_serial) != presented.serial.as_slice() {
         return Err(CertificateRejectReason::InvalidRequest);
     }
+    // The limit lives in the registry row, so a reconnect or another instance cannot reset it. An
+    // unconfirmed rotation allows no second issuance within the cooldown (FR-ID-03).
+    if row
+        .last_rotation_request_at
+        .is_some_and(|at| now < at + state.rotation_cooldown())
+    {
+        return Err(CertificateRejectReason::TooEarly);
+    }
+    agent_repo::arm_rotation_cooldown(&mut tx, agent, now)
+        .await
+        .map_err(unavailable)?;
 
-    let issued = store
-        .issue_agent_certificate_at(
-            tenant.as_uuid(),
-            agent.as_uuid(),
-            csr_der,
-            now,
-            state.agent_cert_lifetime(),
-        )
-        .map_err(refusal)?;
+    // A refusal below commits the armed cooldown.
+    let signed = match sign_pending(state, store, tenant, agent, presented, csr_der, now).await {
+        Ok(issued) => issued,
+        Err(reason) => {
+            tx.commit().await.map_err(unavailable)?;
+            return Err(reason);
+        }
+    };
+    let issued = signed;
     agent_repo::set_pending_certificate(&mut tx, agent, &issued.serial, issued.not_after)
         .await
         .map_err(unavailable)?;
@@ -139,6 +146,30 @@ pub async fn issue(
         },
         next,
     ))
+}
+
+async fn sign_pending(
+    state: &AppState,
+    store: &crate::pki::CaStore,
+    tenant: TenantId,
+    agent: AgentId,
+    presented: &PresentedCertificate,
+    csr_der: &[u8],
+    now: OffsetDateTime,
+) -> Result<crate::pki::IssuedCertificate, CertificateRejectReason> {
+    let new_key = crate::pki::csr_public_key(csr_der).map_err(refusal)?;
+    if new_key == presented.public_key {
+        return Err(CertificateRejectReason::SameKey);
+    }
+    store
+        .issue_agent_certificate_at(
+            tenant.as_uuid(),
+            agent.as_uuid(),
+            csr_der,
+            now,
+            state.agent_cert_lifetime(),
+        )
+        .map_err(refusal)
 }
 
 /// Makes the pending certificate the enrolled one (ADR-0026).

@@ -152,13 +152,15 @@ async fn fr_id_03_a_bad_rotation_request_is_refused_and_changes_nothing() {
         uuid::Uuid::now_v7()
     );
     assert_eq!(
-        issue(&csr_with_uri(&foreign), due)
+        issue(&csr_with_uri(&foreign), due + Duration::minutes(11))
             .await
             .expect_err("a foreign identity"),
         CertificateRejectReason::InvalidRequest
     );
     assert_eq!(
-        issue(b"not a request", due).await.expect_err("garbage"),
+        issue(b"not a request", due + Duration::minutes(22))
+            .await
+            .expect_err("garbage"),
         CertificateRejectReason::InvalidRequest
     );
     assert_eq!(
@@ -178,6 +180,71 @@ async fn fr_id_03_a_bad_rotation_request_is_refused_and_changes_nothing() {
             .await
             .expect("the confirmation")
     );
+    env.db.cleanup().await;
+}
+
+/// FR-ID-03: the rate limit lives in the registry row. A second request within the cooldown gets
+/// `TooEarly` whatever the stream, an unconfirmed issuance blocks the next one, and a refusal
+/// arms the cooldown too.
+#[tokio::test]
+async fn fr_id_03_the_cooldown_holds_across_requests_and_refusals_arm_it() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let enrolled = env.enroll_agent("cooldown-host").await;
+    let agent = agent_of(&enrolled);
+    let presented = PresentedCertificate::from_der(&enrolled.certificate_der).expect("a cert");
+    let due = agent_rotation::rotation_due(presented.not_before, presented.not_after);
+    let issue = async |csr: &[u8], now| {
+        rotation::issue(&env.state, env.tenant, agent, &presented, csr, now).await
+    };
+    let (_, csr) = agent_rotation::begin().expect("a key pair");
+
+    assert_eq!(
+        issue(&csr_for_key(&enrolled.key_pem), due)
+            .await
+            .expect_err("the same key"),
+        CertificateRejectReason::SameKey
+    );
+    assert_eq!(
+        issue(&csr, due + Duration::minutes(1))
+            .await
+            .expect_err("the refusal armed the cooldown"),
+        CertificateRejectReason::TooEarly
+    );
+    issue(&csr, due + Duration::minutes(11))
+        .await
+        .expect("the cooldown has passed");
+    let (_, again) = agent_rotation::begin().expect("a key pair");
+    assert_eq!(
+        issue(&again, due + Duration::minutes(15))
+            .await
+            .expect_err("the first certificate is unconfirmed"),
+        CertificateRejectReason::TooEarly
+    );
+    assert_eq!(rotation_audit_count(&env).await, 1);
+    env.db.cleanup().await;
+}
+
+/// FR-ID-03: a new certificate starts five minutes before the issue time, so an agent with a slow
+/// clock accepts it, and the start never precedes the issuing CA.
+#[tokio::test]
+async fn fr_id_03_a_new_certificate_starts_five_minutes_before_the_issue_time() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let enrolled = env.enroll_agent("skew-host").await;
+    let agent = agent_of(&enrolled);
+    let presented = PresentedCertificate::from_der(&enrolled.certificate_der).expect("a cert");
+    let due = agent_rotation::rotation_due(presented.not_before, presented.not_after);
+    let (_, csr) = agent_rotation::begin().expect("a key pair");
+    let (_, next) = rotation::issue(&env.state, env.tenant, agent, &presented, &csr, due)
+        .await
+        .expect("the rotation must be signed");
+    assert_eq!(next.not_before, due - Duration::minutes(5));
+    assert_eq!(next.not_after, due + Duration::days(30));
     env.db.cleanup().await;
 }
 

@@ -5,12 +5,19 @@
 -- connects with it; the control plane then promotes it and refuses the old serial. The serial of a
 -- pending certificate is unique like the serial of an enrolled one.
 --
+-- The row keeps the time of the last rotation request, so the rate limit holds across streams and
+-- instances (FR-ID-03). It keeps the serial that the last rotation replaced, so the control plane
+-- sees a connection with a superseded certificate, and the time of the last such connection.
+--
 -- The row also records the last rotation and the protocol version of the last hello. The Hosts
 -- screen reads them.
 
 ALTER TABLE agents ADD COLUMN pending_certificate_serial bytea;
 ALTER TABLE agents ADD COLUMN pending_certificate_expires_at timestamptz;
 ALTER TABLE agents ADD COLUMN last_certificate_rotation_at timestamptz;
+ALTER TABLE agents ADD COLUMN last_rotation_request_at timestamptz;
+ALTER TABLE agents ADD COLUMN previous_certificate_serial bytea;
+ALTER TABLE agents ADD COLUMN superseded_certificate_used_at timestamptz;
 ALTER TABLE agents ADD COLUMN protocol_version_major integer;
 ALTER TABLE agents ADD COLUMN protocol_version_minor integer;
 

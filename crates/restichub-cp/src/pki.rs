@@ -399,6 +399,8 @@ impl CaStore {
         now: OffsetDateTime,
         lifetime: Duration,
     ) -> Result<IssuedCertificate, CaError> {
+        // A certificate holds whole seconds; the registry row stores the same expiry.
+        let now = now.replace_nanosecond(0).unwrap_or(now);
         let expected_uri = agent_san_uri(tenant, agent);
         let csr =
             CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(csr_der))
@@ -423,7 +425,7 @@ impl CaStore {
         let serial = random_serial()?;
         let serial_bytes = serial.to_bytes();
         params.serial_number = Some(serial);
-        params.not_before = now;
+        params.not_before = leaf_not_before(now, lifetime, issuing.not_before);
         let not_after = leaf_not_after(now, lifetime, issuing.not_after);
         params.not_after = not_after;
 
@@ -697,6 +699,20 @@ fn random_serial() -> Result<SerialNumber, CaError> {
         bytes[15] = 1;
     }
     Ok(SerialNumber::from_slice(&bytes))
+}
+
+/// How far an agent certificate starts before the issue time, so an agent with a clock that runs
+/// slow still accepts it.
+pub const AGENT_CERT_BACKDATE: Duration = Duration::minutes(5);
+
+/// The issue time minus [`AGENT_CERT_BACKDATE`], but not before the issuer starts. A short lifetime
+/// shortens the backdate to a quarter of it, so the half of the lifetime stays near the issue time.
+fn leaf_not_before(
+    now: OffsetDateTime,
+    lifetime: Duration,
+    issuer_not_before: OffsetDateTime,
+) -> OffsetDateTime {
+    (now - AGENT_CERT_BACKDATE.min(lifetime / 4)).max(issuer_not_before)
 }
 
 /// The earlier of the requested lifetime and the expiry of the issuer, so a leaf never outlives it.

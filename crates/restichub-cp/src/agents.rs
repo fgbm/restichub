@@ -96,6 +96,9 @@ pub struct AgentView {
     pub certificate_expires_at: String,
     /// In RFC 3339. Null until the first rotation of the certificate.
     pub last_certificate_rotation_at: Option<String>,
+    /// In RFC 3339. Null unless a connection presented the certificate that the last rotation
+    /// replaced. It can mean a copy of the old key (T17).
+    pub superseded_certificate_used_at: Option<String>,
     /// Reported in the last hello as `major.minor`. Null before the first hello.
     pub protocol_version: Option<String>,
     /// The package version of the control plane that serves the request.
@@ -122,6 +125,7 @@ impl From<&repo::Agent> for AgentView {
             certificate_serial: to_hex(&agent.certificate_serial),
             certificate_expires_at: format_time(agent.certificate_expires_at),
             last_certificate_rotation_at: agent.last_certificate_rotation_at.map(format_time),
+            superseded_certificate_used_at: agent.superseded_certificate_used_at.map(format_time),
             protocol_version: agent
                 .protocol_version_major
                 .zip(agent.protocol_version_minor)

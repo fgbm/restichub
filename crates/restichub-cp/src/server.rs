@@ -36,6 +36,8 @@ use crate::routes::ROUTES;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// The longest time between two rotation requests of one agent (FR-ID-03).
+pub const ROTATION_COOLDOWN: time::Duration = time::Duration::minutes(10);
 pub const BODY_LIMIT: usize = 16 * 1024;
 /// Largest request body of a secret route.
 ///
@@ -317,6 +319,12 @@ impl AppState {
     /// The lifetime of an agent certificate that the control plane issues (FR-ID-03).
     pub fn agent_cert_lifetime(&self) -> time::Duration {
         self.agent_cert_lifetime
+    }
+
+    /// The time between two rotation requests of one agent, answered or refused. A quarter of a
+    /// short certificate lifetime shortens it (FR-ID-03).
+    pub fn rotation_cooldown(&self) -> time::Duration {
+        std::cmp::min(self.agent_cert_lifetime / 4, ROTATION_COOLDOWN)
     }
 
     /// The server passes the settings of the job queue here (FR-SC-08).
