@@ -1,7 +1,8 @@
 //! Response schemas of the API (ADR-0009).
 
+use restichub_db::SecretUsageKind;
 use restichub_db::memberships::PlatformMembership;
-use restichub_db::secrets::SecretMetadata;
+use restichub_db::secrets::{SecretMetadata, SecretUsage};
 use restichub_db::tenants::TenantSummary;
 use restichub_db::users::PlatformAccount;
 use restichub_db::{AdminState, Role, TenantStatus};
@@ -154,6 +155,14 @@ fn format_time(value: OffsetDateTime) -> String {
 
 /// The metadata of a secret in a response (FR-RP-05).
 ///
+/// One object that references a secret.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SecretUsageView {
+    pub kind: SecretUsageKind,
+    pub id: String,
+    pub name: String,
+}
+
 /// The view never holds the value. The API cannot return a secret value after a user saves it
 /// (AC-RP-02).
 #[derive(Debug, Serialize, ToSchema)]
@@ -163,14 +172,16 @@ pub struct SecretView {
     pub purpose: String,
     /// In RFC 3339.
     pub created_at: String,
-    /// In RFC 3339.
+    /// The time of the last value replace. In RFC 3339.
     pub updated_at: String,
     /// Null for an API token actor.
     pub created_by: Option<String>,
+    /// The repositories, channels and profiles that use the secret.
+    pub used_by: Vec<SecretUsageView>,
 }
 
-impl From<&SecretMetadata> for SecretView {
-    fn from(secret: &SecretMetadata) -> Self {
+impl SecretView {
+    pub fn new(secret: &SecretMetadata, usage: &[SecretUsage]) -> Self {
         Self {
             id: secret.id.to_string(),
             name: secret.name.clone(),
@@ -178,6 +189,15 @@ impl From<&SecretMetadata> for SecretView {
             created_at: format_time(secret.created_at),
             updated_at: format_time(secret.updated_at),
             created_by: secret.created_by.map(|id| id.to_string()),
+            used_by: usage
+                .iter()
+                .filter(|item| item.secret_id == secret.id)
+                .map(|item| SecretUsageView {
+                    kind: item.kind,
+                    id: item.object_id.to_string(),
+                    name: item.object_name.clone(),
+                })
+                .collect(),
         }
     }
 }

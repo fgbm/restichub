@@ -273,6 +273,10 @@ export type PlannedStep = components['schemas']['PlannedStepView'];
 /** The metadata of a secret. It never holds the value. */
 export type Secret = components['schemas']['SecretView'];
 
+export type SecretUsage = components['schemas']['SecretUsageView'];
+
+export type SecretUsageKind = components['schemas']['SecretUsageKind'];
+
 export type SecretListResponse = components['schemas']['SecretListResponse'];
 
 export type CreateSecretRequest = components['schemas']['CreateSecretRequest'];

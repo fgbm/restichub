@@ -3142,8 +3142,21 @@ export interface components {
             id: string;
             name: string;
             purpose: string;
-            /** @description In RFC 3339. */
+            /** @description The time of the last value replace. In RFC 3339. */
             updated_at: string;
+            /** @description The repositories, channels and profiles that use the secret. */
+            used_by: components["schemas"]["SecretUsageView"][];
+        };
+        /**
+         * @description The kind of the object that references a secret.
+         * @enum {string}
+         */
+        SecretUsageKind: "repository" | "channel" | "profile";
+        /** @description One object that references a secret. */
+        SecretUsageView: {
+            id: string;
+            kind: components["schemas"]["SecretUsageKind"];
+            name: string;
         };
         /**
          * @description Whether a host trusts scripts from the control plane (FR-HK-08, ADR-0037).

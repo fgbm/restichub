@@ -52,7 +52,8 @@ pub mod test_util;
 pub use enums::{
     ActorType, AdminState, AgentStatus, BackendKind, CaRole, HookAllowListState, JobKind,
     JobResultCode, JobStatus, LogLevel, LogStream, MaintenanceTask, MissedRunPolicy, PlannedKind,
-    PlannedPhase, Role, ServerScriptsState, SigningKeyRole, StepStatus, TenantStatus,
+    PlannedPhase, Role, SecretUsageKind, ServerScriptsState, SigningKeyRole, StepStatus,
+    TenantStatus,
 };
 pub use ids::{
     AgentId, AlertId, ApiTokenId, AuditLogId, ChannelId, DeliveryId, EnrollmentTokenId, JobId,

@@ -138,10 +138,15 @@ pub async fn list_secrets(
     context: RequestContext,
 ) -> Result<Json<SecretListResponse>, ApiError> {
     context.authorize(Operation::SecretsRead)?;
-    let list = context
-        .tenant_tx(&state, async |tx| Ok(repo::list(tx).await?))
+    let (list, usage) = context
+        .tenant_tx(&state, async |tx| {
+            Ok((repo::list(tx).await?, repo::list_usage(tx).await?))
+        })
         .await?;
-    let items = list.iter().map(SecretView::from).collect();
+    let items = list
+        .iter()
+        .map(|secret| SecretView::new(secret, &usage))
+        .collect();
     Ok(Json(SecretListResponse { items }))
 }
 
@@ -215,7 +220,7 @@ pub async fn create_secret(
             "the created secret is not found after the read",
         ));
     };
-    Ok((StatusCode::CREATED, Json(SecretView::from(&metadata))))
+    Ok((StatusCode::CREATED, Json(SecretView::new(&metadata, &[]))))
 }
 
 /// Reads the metadata of one secret of the tenant.
@@ -338,6 +343,14 @@ pub async fn delete_secret(
     let Some(metadata) = metadata else {
         return Err(ApiError::not_found());
     };
+    // A profile names a hook secret inside its JSON, so no foreign key refuses the delete.
+    if repo::list_usage(&mut tx)
+        .await?
+        .iter()
+        .any(|usage| usage.secret_id == secret_id)
+    {
+        return Err(ApiError::conflict());
+    }
     repo::delete(&mut tx, secret_id).await.map_err(|error| {
         // A repository binds the secret, so the row cannot go. The foreign key refuses the delete.
         if error.is_foreign_key_violation() {

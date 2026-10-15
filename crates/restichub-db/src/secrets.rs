@@ -15,6 +15,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::enums::SecretUsageKind;
 use crate::ids::{SecretId, UserId};
 use crate::tx::TenantTx;
 
@@ -149,6 +150,47 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: SecretId) -> Result<bool, DbError
         .await
         .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
+}
+
+/// One object that references a secret.
+#[derive(Debug, Clone)]
+pub struct SecretUsage {
+    pub secret_id: SecretId,
+    pub kind: SecretUsageKind,
+    pub object_id: Uuid,
+    pub object_name: String,
+}
+
+/// Lists the references of the objects of the tenant to its secrets, ordered by object name.
+///
+/// A repository and a channel name a secret by a foreign key. A profile holds the identifier of a
+/// hook secret inside the JSON of its hooks and scripts, so the match is on the identifier text.
+pub async fn list_usage(tx: &mut TenantTx<'_>) -> Result<Vec<SecretUsage>, DbError> {
+    let rows = sqlx::query_as::<_, (Uuid, SecretUsageKind, Uuid, String)>(
+        "SELECT s.id, 'repository'::text, r.id, r.name FROM secrets s \
+           JOIN repositories r ON s.id IN (r.password_secret_id, r.s3_access_key_secret_id, \
+                                           r.s3_secret_key_secret_id, r.rest_password_secret_id) \
+         UNION ALL \
+         SELECT s.id, 'channel'::text, c.id, c.name FROM secrets s \
+           JOIN notification_channels c ON s.id IN (c.secret_id, c.url_secret_id) \
+         UNION ALL \
+         SELECT s.id, 'profile'::text, p.id, p.name FROM secrets s \
+           JOIN profiles p ON strpos(p.hooks::text, s.id::text) > 0 \
+                           OR strpos(p.scripts::text, s.id::text) > 0 \
+         ORDER BY 4, 3",
+    )
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows
+        .into_iter()
+        .map(|(secret_id, kind, object_id, object_name)| SecretUsage {
+            secret_id: SecretId::from_uuid(secret_id),
+            kind,
+            object_id,
+            object_name,
+        })
+        .collect())
 }
 
 type MetadataRow = (
