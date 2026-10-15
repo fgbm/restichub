@@ -13,8 +13,8 @@ use std::time::Duration;
 use restichub_compiler::ValidatedJob;
 use restichub_compiler::arg::build_command;
 use restichub_proto::agent::v1::{
-    AgentMessage, ErrorDetail, LogChunk, LogStream, ProcessPriority, Step, StepProgress,
-    StepStatus, agent_message, step, step_result,
+    AgentMessage, ErrorDetail, LogStream, ProcessPriority, Step, StepProgress, StepStatus,
+    agent_message, step, step_result,
 };
 use tokio::sync::mpsc;
 
@@ -22,7 +22,6 @@ use super::log::JobLog;
 use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
 use crate::exec::JobChild;
-use crate::log_spool::Stored;
 use crate::output::{Accepted, Collector, Line, OutputKind, Pipe, spawn_reader};
 use crate::scrub::Scrubber;
 
@@ -43,7 +42,7 @@ pub(super) const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long a log or progress message may wait for room in the stream buffer, so a slow control
 /// plane never blocks a cancel.
-const SEND_WAIT: Duration = Duration::from_millis(250);
+pub(super) const SEND_WAIT: Duration = Duration::from_millis(250);
 
 /// The lines that the agent takes before it looks at the child again.
 pub(super) const LINES_PER_TURN: usize = 256;
@@ -493,113 +492,6 @@ impl Jobs {
         {
             output.last_log = now;
             self.send_log(log).await;
-        }
-    }
-
-    /// A control plane that acknowledges chunks gets them through the spool: a chunk that finds no
-    /// room within a moment stays there and goes out again after the next connection (FR-LG-07).
-    /// Otherwise a chunk without room is lost; the journal tail still keeps the newest ones
-    /// (AC-PR-07).
-    pub(super) async fn send_log(&self, log: &mut JobLog) {
-        let chunks = log.take_pending();
-        if !self.log_acks.load(Ordering::SeqCst) {
-            for chunk in chunks {
-                self.send_within(
-                    AgentMessage {
-                        payload: Some(agent_message::Payload::LogChunk(chunk)),
-                    },
-                    SEND_WAIT,
-                )
-                .await;
-            }
-            return;
-        }
-        for chunk in chunks {
-            self.spool_chunk(log, chunk);
-        }
-        self.flush_log(log.job_id(), true).await;
-    }
-
-    /// When the cap is reached the agent drops the chunk and counts its lines. The next chunk that
-    /// fits follows one marker line with the count (FR-LG-07).
-    fn spool_chunk(&self, log: &mut JobLog, chunk: LogChunk) {
-        let lost = log.lost_lines();
-        if lost > 0 && !self.log_spool.fits_with_marker(&chunk) {
-            log.note_lost(crate::log_spool::line_count(&chunk));
-            return;
-        }
-        if let Some(marker) = log.take_loss_marker()
-            && !self.keep_in_spool(log.job_id(), &marker)
-        {
-            log.note_lost(lost);
-        }
-        if !self.keep_in_spool(log.job_id(), &chunk) {
-            log.note_lost(crate::log_spool::line_count(&chunk));
-        }
-    }
-
-    /// Ends the log of a job: reports the lines that the spool still owes and tells the spool that
-    /// nothing follows (FR-LG-07).
-    pub(super) async fn close_log(&self, log: &mut JobLog) {
-        if self.log_acks.load(Ordering::SeqCst)
-            && let Some(marker) = log.take_loss_marker()
-        {
-            if let Err(error) = self.log_spool.append_marker(log.job_id(), &marker) {
-                tracing::warn!(%error, "cannot write the log spool");
-            }
-            self.flush_log(log.job_id(), true).await;
-        }
-        self.log_spool.finish(log.job_id());
-    }
-
-    fn keep_in_spool(&self, job_id: &str, chunk: &LogChunk) -> bool {
-        match self.log_spool.append(job_id, chunk) {
-            Ok(Stored::Kept) => true,
-            Ok(Stored::Full) => false,
-            Err(error) => {
-                tracing::warn!(%error, "cannot write the log spool");
-                false
-            }
-        }
-    }
-
-    /// Sends the spooled chunks that the open stream did not get yet, in order (FR-LG-07).
-    ///
-    /// The live call never waits for the order lock or for room in the stream buffer, so a slow
-    /// control plane never blocks a cancel (FR-AG-10). A failed send leaves the chunk in the spool
-    /// for the next call.
-    pub(super) async fn flush_log(&self, job_id: &str, live: bool) {
-        let _order = if live {
-            match self.log_order.try_lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
-            }
-        } else {
-            self.log_order.lock().await
-        };
-        loop {
-            let batch = self.log_spool.claim_unsent(job_id);
-            if batch.is_empty() {
-                return;
-            }
-            let total = batch.len();
-            for (index, chunk) in batch.into_iter().enumerate() {
-                let message = AgentMessage {
-                    payload: Some(agent_message::Payload::LogChunk(chunk)),
-                };
-                let sent = if live {
-                    self.send_live(message, SEND_WAIT).await
-                } else {
-                    self.send(message).await
-                };
-                if !sent {
-                    self.log_spool.unclaim(job_id, total - index);
-                    return;
-                }
-            }
-            if live {
-                return;
-            }
         }
     }
 }

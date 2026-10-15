@@ -33,7 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -41,9 +41,8 @@ use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{
-    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, LogAck, RejectReason,
-    ScriptInterpreter, ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message,
-    step, step_result,
+    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, RejectReason, ScriptInterpreter,
+    ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message, step, step_result,
 };
 use restichub_proto::signing::{
     Admission, Expected, JobJournal as _, JournalState, KeyRing, Rejection, admit, verify_job,
@@ -60,12 +59,14 @@ mod log;
 mod outcome;
 mod phases;
 mod runner;
+mod spooling;
 mod watchdog;
 
 use log::JobLog;
 use outcome::{Progress, interrupted_error, job_error, job_outcome};
 use phases::{PhaseMode, Phased, ScriptFailure, Sink};
 use runner::{CancelHandle, StepError, StepOutcome};
+use spooling::LogMode;
 use watchdog::StepLimits;
 
 /// The grace period between the graceful stop signal and the forced kill of the process tree
@@ -134,11 +135,12 @@ pub struct Jobs {
     scripts: Arc<ScriptStore>,
     /// The log chunks that the control plane did not acknowledge yet (FR-LG-07).
     log_spool: Arc<LogSpool>,
-    /// True while the open stream belongs to a control plane that acknowledges log chunks. Without
-    /// it the agent keeps no spool and sends the log once, as before.
-    log_acks: Arc<AtomicBool>,
-    /// Serializes the sends of spooled chunks, so they reach the stream in order.
-    log_order: Arc<tokio::sync::Mutex<()>>,
+    /// The [`LogMode`] of the open stream, as a code.
+    log_mode: Arc<AtomicU8>,
+    /// Wakes the drain task when a chunk waits in the spool.
+    log_wake: Arc<tokio::sync::Notify>,
+    /// The drain task of the open stream.
+    log_drain: Arc<Mutex<Option<tokio::task::AbortHandle>>>,
 }
 
 impl Jobs {
@@ -175,41 +177,18 @@ impl Jobs {
             restore: Arc::new(restore),
             scripts: Arc::new(scripts),
             log_spool: Arc::new(LogSpool::open(dir, LogSpool::max_bytes_from_env())),
-            log_acks: Arc::new(AtomicBool::new(false)),
-            log_order: Arc::new(tokio::sync::Mutex::new(())),
+            log_mode: Arc::new(AtomicU8::new(LogMode::Direct as u8)),
+            log_wake: Arc::new(tokio::sync::Notify::new()),
+            log_drain: Arc::new(Mutex::new(None)),
         })
     }
 
     /// Replaces the log spool, for a test that needs a small cap (FR-LG-07).
+    #[cfg(feature = "test-util")]
     #[must_use]
     pub fn with_log_spool(mut self, spool: LogSpool) -> Self {
         self.log_spool = Arc::new(spool);
         self
-    }
-
-    /// Records whether the open stream belongs to a control plane that acknowledges log chunks
-    /// (FR-LG-07).
-    pub fn set_log_acks(&self, enabled: bool) {
-        self.log_acks.store(enabled, Ordering::SeqCst);
-    }
-
-    /// Removes the chunks that the control plane acknowledged (FR-LG-07).
-    pub fn log_ack(&self, ack: &LogAck) {
-        self.log_spool.acknowledge(ack);
-    }
-
-    /// Sends every unacknowledged log chunk again, in order (FR-LG-07, AC-PR-07).
-    ///
-    /// The agent calls it when a control plane that acknowledges chunks greets it. The control
-    /// plane stores a chunk once, so the chunks that it got before the drop do no harm.
-    pub async fn resend_logs(&self) {
-        let mut keep: HashSet<String> = lock(&self.running).keys().cloned().collect();
-        keep.extend(lock(&self.journal).job_ids());
-        self.log_spool.sweep(&keep);
-        self.log_spool.rewind_all();
-        for job_id in self.log_spool.pending_jobs() {
-            self.flush_log(&job_id, false).await;
-        }
     }
 
     /// Replaces the place and the trust rule of the server scripts setting (FR-HK-08).
@@ -291,9 +270,13 @@ impl Jobs {
 
     /// Sets the stream that carries the results (ADR-0020).
     ///
-    /// The connect loop calls it after the stream opens, before it sends the stored results.
+    /// The connect loop calls it after the stream opens, before it sends the stored results. Log
+    /// chunks wait in the spool until [`Self::greeted`] tells what the control plane accepts, so
+    /// they keep their order across the greeting (FR-LG-07).
     pub fn attach(&self, tx: &mpsc::Sender<AgentMessage>) {
+        self.set_log_mode(LogMode::Pending);
         *lock(&self.connection) = Some(tx.clone());
+        self.start_log_drain(tx.clone());
     }
 
     /// Verifies, admits and dispatches one signed job (FR-PR-03, FR-PR-06, ADR-0020).
@@ -567,18 +550,6 @@ impl Jobs {
         let tx = lock(&self.connection).clone();
         if let Some(tx) = tx {
             let _ = tokio::time::timeout(wait, tx.send(message)).await;
-        }
-    }
-
-    /// Like [`Self::send_within`], and tells whether the stream took the message.
-    async fn send_live(&self, message: AgentMessage, wait: Duration) -> bool {
-        let tx = lock(&self.connection).clone();
-        match tx {
-            Some(tx) => matches!(
-                tokio::time::timeout(wait, tx.send(message)).await,
-                Ok(Ok(()))
-            ),
-            None => false,
         }
     }
 
@@ -871,7 +842,7 @@ impl Jobs {
         progress.script_failure = script_failure;
 
         self.send_log(&mut log).await;
-        self.close_log(&mut log).await;
+        self.close_log(&mut log);
         let outcome = job_outcome(&progress);
         let status = stopped_status.unwrap_or(match outcome {
             JobStatus::SucceededWithWarnings => StepStatus::Warning,
@@ -914,6 +885,9 @@ impl Jobs {
             tracing::warn!(%error, "cannot write the job journal");
         }
         self.release(&job_id);
+        // The result follows the last lines of the log. The wait is bounded and holds no lock of
+        // the stream task, so a cancel and the pings do not wait for it.
+        self.wait_log_sent(&job_id).await;
         // The step results and the log went out while the job ran. The stored copy goes out at
         // every connection until the entry expires (ADR-0020, FR-AG-12).
         let _ = self

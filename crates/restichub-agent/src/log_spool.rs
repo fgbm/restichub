@@ -6,11 +6,14 @@
 //!
 //! Each job has one protected file in the `log-spool` directory of the configuration directory.
 //! The file is a sequence of records: a four-byte big-endian length and one encoded `LogChunk`.
+//! A write reaches the operating system before the call returns. The agent syncs the file when
+//! the job ends and when the spool closes, so a crash of the host can lose the newest records of a
+//! running job. A record that a crash tore is cut off when the spool opens.
 //! The chunks have passed the scrubber already, so the file holds no secret (NFR-SEC-05). The
 //! spool also keeps the chunks in memory for the send path; the memory use has the same bound as
 //! the disk use.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -19,7 +22,7 @@ use anyhow::{Context, Result};
 use prost::Message as _;
 use restichub_proto::agent::v1::{LogAck, LogChunk};
 
-use crate::paths::{create_protected_file, replace_file};
+use crate::paths::{create_protected_dir, create_protected_file, replace_file};
 
 /// The directory of the spool files, in the configuration directory.
 pub const SPOOL_DIR: &str = "log-spool";
@@ -73,14 +76,23 @@ fn record_size(chunk: &LogChunk) -> u64 {
     PREFIX + chunk.encoded_len() as u64
 }
 
-/// Only identifiers that cannot leave the directory give a file name.
+/// True for a name that Windows reserves for a device, with any extension.
+fn is_device_name(name: &str) -> bool {
+    let numbered = name.len() == 4
+        && (name.starts_with("com") || name.starts_with("lpt"))
+        && name.ends_with(|c: char| ('1'..='9').contains(&c));
+    matches!(name, "con" | "prn" | "aux" | "nul") || numbered
+}
+
+/// Only lower-case identifiers that cannot leave the directory give a file name. Upper-case
+/// letters could name one NTFS file twice, and a device name opens no file on Windows.
 fn file_name(job_id: &str) -> Option<String> {
     let plain = !job_id.is_empty()
         && job_id.len() <= 64
         && job_id
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
-    plain.then(|| format!("{job_id}.{FILE_EXTENSION}"))
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    (plain && !is_device_name(job_id)).then(|| format!("{job_id}.{FILE_EXTENSION}"))
 }
 
 fn encode(chunk: &LogChunk) -> Vec<u8> {
@@ -90,8 +102,8 @@ fn encode(chunk: &LogChunk) -> Vec<u8> {
     bytes
 }
 
-/// Reads the records of a spool file. A torn record at the end, left by a crash, ends the list.
-fn decode_all(bytes: &[u8]) -> Vec<LogChunk> {
+/// Reads the records of a spool file up to the first torn one, and tells how many bytes they take.
+fn decode_all(bytes: &[u8]) -> (Vec<LogChunk>, usize) {
     let mut chunks = Vec::new();
     let mut rest = bytes;
     while let Some((prefix, tail)) = rest.split_first_chunk::<4>() {
@@ -105,17 +117,14 @@ fn decode_all(bytes: &[u8]) -> Vec<LogChunk> {
         chunks.push(chunk);
         rest = &tail[length..];
     }
-    chunks
-}
-
-fn lines_in(chunk: &LogChunk) -> u64 {
-    chunk.data.iter().filter(|byte| **byte == b'\n').count() as u64
+    let valid = bytes.len() - rest.len();
+    (chunks, valid)
 }
 
 /// Number of log lines in `chunk`, for the loss marker.
 #[must_use]
 pub fn line_count(chunk: &LogChunk) -> u64 {
-    lines_in(chunk)
+    chunk.data.iter().filter(|byte| **byte == b'\n').count() as u64
 }
 
 impl LogSpool {
@@ -166,10 +175,14 @@ impl LogSpool {
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
             };
-            let chunks = decode_all(&bytes);
+            let (chunks, valid) = decode_all(&bytes);
             let live: u64 = chunks.iter().map(record_size).sum();
-            if state.total + live > self.max_bytes {
+            if chunks.is_empty() || state.total + live > self.max_bytes {
                 let _ = std::fs::remove_file(&path);
+                continue;
+            }
+            if valid < bytes.len() && cut_file(&path, valid as u64).is_err() {
+                tracing::warn!(path = %path.display(), "cannot cut off a torn log spool record");
                 continue;
             }
             state.total += live;
@@ -178,7 +191,7 @@ impl LogSpool {
                 JobSpool {
                     path,
                     chunks,
-                    file_bytes: bytes.len() as u64,
+                    file_bytes: valid as u64,
                     live_bytes: live,
                     sent: 0,
                     finished: true,
@@ -187,7 +200,8 @@ impl LogSpool {
         }
     }
 
-    /// Stores a chunk of a running job. The chunk is on disk when the call returns.
+    /// Stores a chunk of a running job. The chunk is in the file when the call returns; the file
+    /// reaches the disk when the job ends ([`Self::finish`]).
     ///
     /// # Errors
     ///
@@ -242,16 +256,46 @@ impl LogSpool {
         self.lock().total + record_size(chunk) + MARKER_RESERVE <= self.max_bytes
     }
 
-    /// The chunks that the current connection did not get yet. They count as sent from now on.
+    /// At most `limit` chunks that the current connection did not get yet. They count as sent from
+    /// now on.
     #[must_use]
-    pub fn claim_unsent(&self, job_id: &str) -> Vec<LogChunk> {
+    pub fn claim_unsent(&self, job_id: &str, limit: usize) -> Vec<LogChunk> {
         let mut state = self.lock();
         let Some(job) = state.jobs.get_mut(job_id) else {
             return Vec::new();
         };
-        let batch = job.chunks[job.sent.min(job.chunks.len())..].to_vec();
-        job.sent = job.chunks.len();
-        batch
+        let start = job.sent.min(job.chunks.len());
+        let end = job.chunks.len().min(start.saturating_add(limit));
+        job.sent = end;
+        job.chunks[start..end].to_vec()
+    }
+
+    /// True when the job has a chunk that the current connection did not get yet.
+    #[must_use]
+    pub fn has_unsent(&self, job_id: &str) -> bool {
+        self.lock()
+            .jobs
+            .get(job_id)
+            .is_some_and(|job| job.sent < job.chunks.len())
+    }
+
+    /// Drops the chunks that were sent. A control plane that sends no acknowledgement gets the log
+    /// once, as it did before the spool.
+    pub fn release_sent(&self, job_id: &str) {
+        let mut state = self.lock();
+        let state = &mut *state;
+        let Some(job) = state.jobs.get_mut(job_id) else {
+            return;
+        };
+        let count = job.sent.min(job.chunks.len());
+        let removed: u64 = job.chunks.drain(..count).map(|c| record_size(&c)).sum();
+        job.sent = 0;
+        job.live_bytes -= removed;
+        state.total -= removed;
+        compact(job);
+        if job.chunks.is_empty() && job.finished {
+            state.jobs.remove(job_id);
+        }
     }
 
     /// Takes `count` chunks back from the sent mark after a failed send.
@@ -287,7 +331,8 @@ impl LogSpool {
             .is_some_and(|job| !job.chunks.is_empty())
     }
 
-    /// Removes the chunks that the control plane acknowledged and shrinks the file.
+    /// Removes the chunks that the control plane acknowledged and shrinks the file. A chunk that
+    /// the connection did not send yet stays: an acknowledgement covers only what went out in order.
     pub fn acknowledge(&self, ack: &LogAck) {
         let mut state = self.lock();
         let state = &mut *state;
@@ -299,16 +344,15 @@ impl LogSpool {
                 .iter()
                 .any(|stream| stream.stream == chunk.stream && chunk.sequence <= stream.sequence)
         };
+        let sent = job.sent;
         let mut index = 0;
         let mut removed_sent = 0;
         let mut removed_bytes = 0;
         job.chunks.retain(|chunk| {
-            let drop = covered(chunk);
+            let drop = index < sent && covered(chunk);
             if drop {
                 removed_bytes += record_size(chunk);
-                if index < job.sent {
-                    removed_sent += 1;
-                }
+                removed_sent += 1;
             }
             index += 1;
             !drop
@@ -331,26 +375,16 @@ impl LogSpool {
             if job.chunks.is_empty() {
                 compact(job);
                 state.jobs.remove(job_id);
+            } else {
+                sync_file(&job.path);
             }
         }
     }
 
-    /// Removes the chunks of every job outside `keep`, and the files that no job owns.
-    pub fn sweep(&self, keep: &HashSet<String>) {
-        let mut state = self.lock();
-        let state = &mut *state;
-        let stale: Vec<String> = state
-            .jobs
-            .keys()
-            .filter(|id| !keep.contains(*id))
-            .cloned()
-            .collect();
-        for id in stale {
-            if let Some(job) = state.jobs.remove(&id) {
-                state.total -= job.live_bytes;
-                let _ = std::fs::remove_file(&job.path);
-            }
-        }
+    /// Removes the files that no job owns. A job keeps its chunks until the control plane
+    /// acknowledges them, however old they are (FR-LG-07).
+    pub fn sweep(&self) {
+        let state = self.lock();
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return;
         };
@@ -370,12 +404,37 @@ impl LogSpool {
     }
 }
 
+impl Drop for LogSpool {
+    fn drop(&mut self) {
+        let state = self.lock();
+        for job in state.jobs.values().filter(|job| !job.chunks.is_empty()) {
+            sync_file(&job.path);
+        }
+    }
+}
+
+fn sync_file(path: &Path) {
+    let synced = std::fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .and_then(|file| file.sync_all());
+    if let Err(error) = synced {
+        tracing::warn!(%error, "cannot sync the log spool file");
+    }
+}
+
+fn cut_file(path: &Path, length: u64) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)?
+        .set_len(length)
+}
+
 fn write_record(job: &mut JobSpool, chunk: &LogChunk) -> Result<()> {
     let record = encode(chunk);
     if job.file_bytes == 0 {
         if let Some(parent) = job.path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("cannot create {}", parent.display()))?;
+            create_protected_dir(parent)?;
         }
         let _ = std::fs::remove_file(&job.path);
         create_protected_file(&job.path, &record)?;
@@ -385,8 +444,14 @@ fn write_record(job: &mut JobSpool, chunk: &LogChunk) -> Result<()> {
         .append(true)
         .open(&job.path)
         .with_context(|| format!("cannot open {}", job.path.display()))?;
-    file.write_all(&record)
-        .with_context(|| format!("cannot write {}", job.path.display()))
+    if let Err(error) = file.write_all(&record) {
+        // A torn record in the middle would hide every record after it at the next open.
+        if let Err(cut) = file.set_len(job.file_bytes) {
+            tracing::warn!(error = %cut, "cannot cut off a torn log spool record");
+        }
+        return Err(error).with_context(|| format!("cannot write {}", job.path.display()));
+    }
+    Ok(())
 }
 
 /// Rewrites the file without the acknowledged records, or removes it when none is left. The
@@ -459,7 +524,7 @@ mod tests {
 
         let reopened = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
         let sequences: Vec<u64> = reopened
-            .claim_unsent("job-1")
+            .claim_unsent("job-1", usize::MAX)
             .iter()
             .map(|chunk| chunk.sequence)
             .collect();
@@ -477,7 +542,7 @@ mod tests {
         assert_eq!(spool.append("job-1", &two).expect("append"), Stored::Kept);
         let three = chunk(LogStream::Stdout, 3, "0123456789\n");
         assert_eq!(spool.append("job-1", &three).expect("append"), Stored::Full);
-        assert_eq!(spool.claim_unsent("job-1").len(), 2);
+        assert_eq!(spool.claim_unsent("job-1", usize::MAX).len(), 2);
         spool.acknowledge(&ack(2));
         assert_eq!(spool.append("job-1", &three).expect("append"), Stored::Kept);
         let _ = std::fs::remove_dir_all(dir);
@@ -511,8 +576,106 @@ mod tests {
     fn fr_lg_07_a_torn_record_at_the_end_is_ignored() {
         let mut bytes = encode(&chunk(LogStream::Stdout, 1, "one\n"));
         bytes.extend_from_slice(&encode(&chunk(LogStream::Stdout, 2, "two\n"))[..6]);
-        let chunks = decode_all(&bytes);
+        let (chunks, valid) = decode_all(&bytes);
         assert_eq!(chunks.len(), 1);
+        assert_eq!(valid, encode(&chunk(LogStream::Stdout, 1, "one\n")).len());
+    }
+
+    #[test]
+    fn fr_lg_07_a_torn_record_is_cut_off_and_appends_continue() {
+        let dir = dir("torn");
+        let spool = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
+        for sequence in 1..=2 {
+            spool
+                .append("job-1", &chunk(LogStream::Stdout, sequence, "line\n"))
+                .expect("append");
+        }
+        drop(spool);
+        let path = dir.join(SPOOL_DIR).join("job-1.spool");
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open");
+        file.write_all(&encode(&chunk(LogStream::Stdout, 3, "torn\n"))[..7])
+            .expect("tear");
+        drop(file);
+
+        let reopened = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
+        reopened
+            .append("job-1", &chunk(LogStream::Stdout, 3, "again\n"))
+            .expect("append");
+        drop(reopened);
+
+        let third = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
+        let sequences: Vec<u64> = third
+            .claim_unsent("job-1", usize::MAX)
+            .iter()
+            .map(|chunk| chunk.sequence)
+            .collect();
+        assert_eq!(sequences, [1, 2, 3]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fr_lg_07_an_acknowledgement_covers_only_the_chunks_that_went_out() {
+        let dir = dir("unsent");
+        let spool = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
+        for sequence in 1..=4 {
+            spool
+                .append("job-1", &chunk(LogStream::Stdout, sequence, "line\n"))
+                .expect("append");
+        }
+        assert_eq!(spool.claim_unsent("job-1", 2).len(), 2);
+        spool.acknowledge(&ack(4));
+        let rest: Vec<u64> = spool
+            .claim_unsent("job-1", usize::MAX)
+            .iter()
+            .map(|chunk| chunk.sequence)
+            .collect();
+        assert_eq!(rest, [3, 4]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fr_lg_07_release_sent_keeps_the_unsent_chunks() {
+        let dir = dir("release");
+        let spool = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
+        for sequence in 1..=3 {
+            spool
+                .append("job-1", &chunk(LogStream::Stdout, sequence, "line\n"))
+                .expect("append");
+        }
+        assert_eq!(spool.claim_unsent("job-1", 2).len(), 2);
+        spool.release_sent("job-1");
+        assert!(spool.has_unsent("job-1"));
+        assert_eq!(spool.claim_unsent("job-1", usize::MAX)[0].sequence, 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fr_lg_07_a_spool_of_an_old_job_stays_until_it_is_acknowledged() {
+        let dir = dir("old");
+        let spool = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
+        spool
+            .append("job-1", &chunk(LogStream::Stdout, 1, "line\n"))
+            .expect("append");
+        spool.finish("job-1");
+        spool.sweep();
+        assert!(spool.holds("job-1"));
+        assert!(dir.join(SPOOL_DIR).join("job-1.spool").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fr_lg_07_a_file_without_a_job_is_swept() {
+        let dir = dir("orphan");
+        let spool = LogSpool::open(&dir, DEFAULT_MAX_BYTES);
+        let orphan = dir.join(SPOOL_DIR).join("orphan.tmp");
+        std::fs::create_dir_all(dir.join(SPOOL_DIR)).expect("directory");
+        std::fs::write(&orphan, b"x").expect("write");
+        spool.sweep();
+        assert!(!orphan.exists());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -520,6 +683,15 @@ mod tests {
         assert!(file_name("../etc").is_none());
         assert!(file_name("").is_none());
         assert!(file_name("0b7c-12ab").is_some());
+    }
+
+    #[test]
+    fn fr_lg_07_a_job_identifier_cannot_name_a_windows_device_or_collide_by_case() {
+        for name in ["con", "nul", "aux", "prn", "com1", "lpt9", "COM1", "ABC"] {
+            assert!(file_name(name).is_none(), "{name}");
+        }
+        assert!(file_name("com0").is_some());
+        assert!(file_name("con-1").is_some());
     }
 
     #[cfg(unix)]
