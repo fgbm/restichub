@@ -26,7 +26,7 @@ The host shows "Waiting for connection" until the new agent connects. It raises 
 
 ## Possible duplicates
 
-The agent sends a digest of a stable identifier of the computer when it enrolls: the `MachineGuid` on Windows and the file `/etc/machine-id` on Linux. The raw identifier stays on the computer. The control plane keeps only a keyed hash of the digest. The key comes from the KEK and the tenant, so a tenant cannot learn that a computer is enrolled in another tenant, and a database dump does not confirm that a computer is enrolled. Virtual machines that were cloned from one image can share an identifier. The warning is a hint, and you decide.
+The agent sends a digest of a stable identifier of the computer when it enrolls: the `MachineGuid` on Windows and the file `/etc/machine-id` on Linux. The raw identifier stays on the computer. The control plane keeps only a keyed hash of the digest. The key comes from the KEK and the tenant. A tenant cannot learn that a computer is enrolled in another tenant. A database dump does not confirm that a computer is enrolled. Virtual machines that were cloned from one image can share an identifier. The warning is a hint, and you decide.
 
 When an enrollment token that is not bound to a host enrolls a computer with a known identifier, both records show "Possible duplicate of <hostname>".
 

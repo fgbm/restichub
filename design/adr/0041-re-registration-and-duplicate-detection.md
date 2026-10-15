@@ -26,8 +26,8 @@ ADR-0026 and ADR-0032 describe a registration as the creation of a new identity.
 
 ### Replacement of an old record
 
-- The Admin replaces the old record from the newer record. The CP requires that the new record is newer than the old one, that both are active and share the hash, and that the old record was silent for the online window (`RESTICHUB_REPLACE_ONLINE_WINDOW_SECS`, default 300). Otherwise the request is refused.
-- In one transaction the CP moves the plans, the maintenance references, the queued jobs and the labels to the new record, then revokes the old record.
+- The Admin replaces the old record from the newer record. The CP requires these conditions: both records are active and share the hash, and the new record is newer than the old one. The old record must also have been silent for the online window (`RESTICHUB_REPLACE_ONLINE_WINDOW_SECS`, default 300). Otherwise the CP refuses the request.
+- In one transaction, the CP moves the plans, the maintenance references, the queued jobs and the labels to the new record. Then it revokes the old record.
 - After the commit the CP cancels the running jobs of the old record and closes its stream, as for a revoke (FR-ID-04, AC-ID-04). The audit log has `agent_revoke` with the reason `replaced` and `agent_replace`.
 
 ## Consequences

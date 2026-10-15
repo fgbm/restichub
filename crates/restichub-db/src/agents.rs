@@ -458,7 +458,7 @@ pub struct Replaced {
     pub active_jobs: Vec<JobId>,
 }
 
-/// The result of [`replace`].
+/// How a replacement ended: done, or refused for a reason the caller maps to a status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplaceOutcome {
     Replaced(Replaced),

@@ -73,7 +73,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-ID-07 | FR-ID-10 | An Admin issues a token for a host with plans and registers a new certificate with it. **Expected:** the agent ID, the plans and the labels stay. The old certificate is refused. A second unused token of the same host is refused after the first use, and a token for a revoked host is refused and audited. | A |
 | AC-ID-08 | FR-ID-10 | An Admin issues a token for a host. **Expected:** the time to live is one hour at most. A new token for the same host revokes the earlier unused token. A host that waits for its first connection after the registration raises no "host unreachable" alert. | A |
 | AC-ID-09 | FR-ID-11 | Two hosts report the same machine identifier. **Expected:** both show the warning, and only the newer record offers the replacement. The replacement in the other direction is refused. The replacement of a record that was online in the online window is refused. | A |
-| AC-ID-10 | FR-ID-11, FR-ID-04 | An Admin replaces an old record that has a running job and a queued job. **Expected:** the running job is cancelled as in AC-ID-04, the queued job moves to the new record, the audit log has `agent_revoke` and `agent_replace`, and a hash of the machine identifier never shows the raw value. | A |
+| AC-ID-10 | FR-ID-11, FR-ID-04 | An Admin replaces an old record that has a running job and a queued job. **Expected:** the running job is cancelled as in AC-ID-04, the queued job moves to the new record, the audit log has `agent_revoke` and `agent_replace`. The hash of the machine identifier never shows the raw value. | A |
 
 ## 4. Protocol and job signatures
 
