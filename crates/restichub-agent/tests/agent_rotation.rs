@@ -44,7 +44,7 @@ async fn register(fixture: &common::StreamFixture, dir: &Path) -> StoredIdentity
         ca_file: Some(ca_file),
         ..RegisterOptions::default()
     };
-    commands::register_async(&options, dir, &FakeRestic)
+    commands::register_async(&options, dir, &dir.with_extension("cache"), &FakeRestic)
         .await
         .expect("the agent must register");
     StoredIdentity::load(dir).expect("the identity must load")
