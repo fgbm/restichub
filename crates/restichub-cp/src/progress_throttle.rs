@@ -28,7 +28,6 @@ struct Slot<T> {
 /// What the caller does with a progress message.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Admit<T> {
-    /// The caller writes the message now.
     WriteNow(T),
     /// The throttle keeps the message. The caller waits for this long, then calls
     /// [`ProgressThrottle::take_pending`].
