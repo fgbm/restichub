@@ -238,7 +238,7 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-UI-01 | UI sections: Dashboard, Agents, Repositories, Profiles, Plans, Jobs (live logs), Restore, Settings, Audit. Analytics in 1.0. | M |
-| FR-UI-02 | Real-time updates through Server-Sent Events. | M |
+| FR-UI-02 | Real-time updates. The MVP polls the REST API. Server-Sent Events come in 1.0. | M (polling), 1.0 (SSE) |
 | FR-UI-03 | Profile editor: form and YAML with validation. | M (form), 1.0 (YAML) |
 | FR-UI-04 | Dark and light themes. English and Russian languages. | M |
 | FR-API-01 | Public REST API with an OpenAPI specification that the CP generates from code. API tokens with limited permissions. The API can do all operations that the UI can do. | M |
