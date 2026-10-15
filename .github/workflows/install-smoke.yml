@@ -69,6 +69,8 @@ jobs:
         run: |
           sudo install -d -m 0755 -o root -g root /opt/restichub-agent
           sudo install -m 0755 -o root -g root target/debug/restichub-agent /opt/restichub-agent/restichub-agent
+          ls -ld /opt /opt/restichub-agent
+          getfacl -p /opt /opt/restichub-agent || true
       - name: Register the agent and install the service
         run: |
           set -euo pipefail
