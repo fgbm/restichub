@@ -94,14 +94,34 @@ fn check_chain(path: &Path, trust: Trust, leaf_is_file: bool) -> Result<()> {
         if std::fs::symlink_metadata(element).is_err() {
             continue;
         }
-        check_element(element, leaf_is_file && checked == 0, trust)?;
+        // The directory that holds the leaf file, or the leaf directory itself, decides which
+        // programs the agent runs, so no other account may add a file to it.
+        let role = if checked == 0 && leaf_is_file {
+            Role::File
+        } else if checked == usize::from(leaf_is_file) {
+            Role::Directory
+        } else {
+            Role::Ancestor
+        };
+        check_element(element, role, trust)?;
         checked += 1;
     }
     Ok(())
 }
 
+/// The place of one element in the chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    /// The file that the chain ends in.
+    File,
+    /// The directory that holds the file, or the leaf directory.
+    Directory,
+    /// A directory above that.
+    Ancestor,
+}
+
 #[cfg(unix)]
-fn check_element(path: &Path, _is_leaf: bool, trust: Trust) -> Result<()> {
+fn check_element(path: &Path, _role: Role, trust: Trust) -> Result<()> {
     use std::os::unix::fs::MetadataExt as _;
     let metadata =
         std::fs::metadata(path).with_context(|| format!("cannot read {}", path.display()))?;
@@ -130,19 +150,19 @@ fn current_uid() -> u32 {
 }
 
 #[cfg(windows)]
-fn check_element(path: &Path, is_leaf: bool, trust: Trust) -> Result<()> {
+fn check_element(path: &Path, role: Role, trust: Trust) -> Result<()> {
     if trust == Trust::CurrentUser {
         return Ok(());
     }
-    if is_leaf {
-        crate::winsec::check_admin_only(path)
-    } else {
-        crate::winsec::check_parent(path)
+    match role {
+        Role::File => crate::winsec::check_admin_only(path),
+        Role::Directory => crate::winsec::check_program_directory(path),
+        Role::Ancestor => crate::winsec::check_parent(path),
     }
 }
 
 #[cfg(not(any(unix, windows)))]
-fn check_element(_path: &Path, _is_leaf: bool, _trust: Trust) -> Result<()> {
+fn check_element(_path: &Path, _role: Role, _trust: Trust) -> Result<()> {
     Ok(())
 }
 
@@ -233,6 +253,51 @@ mod tests {
         assert!(check_executable(&good, Trust::CurrentUser).is_ok());
         assert!(check_executable(&bad, Trust::CurrentUser).is_err());
         assert!(check_executable(Path::new("relative"), Trust::CurrentUser).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    fn system_root() -> PathBuf {
+        std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+    }
+
+    #[test]
+    fn ac_hk_01_the_system_directories_of_the_search_path_stay_trusted() {
+        let system32 = system_root().join("System32");
+        let powershell = system32.join("WindowsPowerShell").join("v1.0");
+        for dir in [system32, powershell] {
+            check_directory(&dir, Trust::Host)
+                .unwrap_or_else(|error| panic!("{} must pass: {error:#}", dir.display()));
+        }
+    }
+
+    #[test]
+    fn ac_hk_01_a_search_path_directory_where_users_write_is_refused() {
+        let dir = std::env::temp_dir().join(format!(
+            "restichub-agent-trust-users-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::winsec::create_protected_dir(&dir).expect("cannot create the protected directory");
+        let icacls = system_root().join("System32").join("icacls.exe");
+        let status = std::process::Command::new(icacls)
+            .arg(&dir)
+            .args(["/grant", "*S-1-5-32-545:(W)"])
+            .status()
+            .expect("cannot run icacls");
+        assert!(status.success());
+        // The directory is the leaf, so the strict check applies to it and not the parent rule.
+        assert!(
+            crate::winsec::check_program_directory(&dir).is_err(),
+            "a directory where users add files must not pass"
+        );
+        assert!(check_directory(&dir, Trust::Host).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
