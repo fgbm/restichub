@@ -47,7 +47,7 @@ impl LogAcks {
         !self.enabled || !self.failed.contains(job_id)
     }
 
-    /// Records what became of a chunk.
+    /// A failed store stops its job on this connection; any other outcome makes the chunk ready to acknowledge.
     pub(crate) fn record(&mut self, chunk: &LogChunk, outcome: ChunkOutcome) {
         if !self.enabled {
             return;
@@ -87,7 +87,7 @@ impl LogAcks {
         !self.waiting.is_empty()
     }
 
-    /// True once when a store failure asks for a new connection.
+    /// Once after a store failure: the connection has to close, so the agent sends the job again.
     pub(crate) fn take_reconnect(&mut self) -> bool {
         std::mem::take(&mut self.reconnect)
     }

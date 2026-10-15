@@ -139,7 +139,6 @@ pub struct Jobs {
     log_mode: Arc<AtomicU8>,
     /// Wakes the drain task when a chunk waits in the spool.
     log_wake: Arc<tokio::sync::Notify>,
-    /// The drain task of the open stream.
     log_drain: Arc<Mutex<Option<tokio::task::AbortHandle>>>,
 }
 

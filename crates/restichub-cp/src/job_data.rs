@@ -121,7 +121,6 @@ pub async fn handle_step_result(
 /// Why the control plane never stores a log chunk (FR-LG-07).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChunkRefusal {
-    /// The data is longer than [`MAX_CHUNK_BYTES`].
     TooLarge,
     /// The chunk has no valid job, stream, step or sequence.
     Malformed,
@@ -132,7 +131,6 @@ pub enum ChunkRefusal {
 /// What became of a log chunk (FR-LG-07).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChunkOutcome {
-    /// The log holds the chunk.
     Stored,
     /// The chunk will never be stored, so the agent may drop it.
     Refused(ChunkRefusal),

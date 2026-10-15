@@ -519,6 +519,7 @@ mod tests {
                 .append("job-1", &chunk(LogStream::Stdout, sequence, "line\n"))
                 .expect("append");
         }
+        let _ = spool.claim_unsent("job-1", 2);
         spool.acknowledge(&ack(2));
         drop(spool);
 
@@ -559,6 +560,7 @@ mod tests {
         }
         let path = dir.join(SPOOL_DIR).join("job-1.spool");
         let full = std::fs::metadata(&path).expect("the file exists").len();
+        let _ = spool.claim_unsent("job-1", usize::MAX);
         spool.acknowledge(&ack(3));
         let smaller = std::fs::metadata(&path).expect("the file exists").len();
         assert!(smaller < full, "{smaller} < {full}");

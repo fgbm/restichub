@@ -146,7 +146,8 @@ async fn ac_lg_05_an_agent_without_the_capability_gets_no_acknowledgement() {
 }
 
 #[tokio::test]
-async fn ac_lg_05_a_chunk_larger_than_the_bound_is_refused_and_does_not_stop_the_acknowledgements() {
+async fn ac_lg_05_a_chunk_larger_than_the_bound_is_refused_and_does_not_stop_the_acknowledgements()
+{
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -169,7 +170,10 @@ async fn ac_lg_05_a_chunk_larger_than_the_bound_is_refused_and_does_not_stop_the
             newest = newest.max(stream.sequence);
         }
     }
-    assert_eq!(newest, 3, "the refused chunk does not hold back the next ones");
+    assert_eq!(
+        newest, 3,
+        "the refused chunk does not hold back the next ones"
+    );
     env.db.cleanup().await;
 }
 

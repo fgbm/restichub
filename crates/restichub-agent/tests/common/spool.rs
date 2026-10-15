@@ -13,9 +13,7 @@ use restichub_agent::log_spool::SPOOL_DIR;
 use restichub_proto::agent::v1::{AgentMessage, LogAck, LogChunk, LogStreamAck, agent_message};
 use tokio::sync::mpsc;
 
-use super::{
-    AGENT, TENANT, access, backup_step, job, ring, signed, temp_config_dir,
-};
+use super::{AGENT, TENANT, access, backup_step, job, ring, signed, temp_config_dir};
 
 /// A directory that the test removes at the end, with the files that the fake restic keeps next
 /// to a location.

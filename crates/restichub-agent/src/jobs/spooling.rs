@@ -38,7 +38,6 @@ pub(super) enum LogMode {
     Direct,
     /// A stream is open, and the greeting did not tell yet.
     Pending,
-    /// The control plane acknowledges chunks.
     Acked,
 }
 
