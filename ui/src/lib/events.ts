@@ -5,9 +5,9 @@
  * event. The control plane keeps no history, so the first event of every connection is `resync`
  * and a screen reads its data again.
  */
-import { API_PREFIX } from '#lib/api/endpoints.ts';
+import { API_PREFIX, endpoints } from '#lib/api/endpoints.ts';
 
-export const EVENTS_PATH = `${API_PREFIX}/events`;
+export const EVENTS_PATH = `${API_PREFIX}${endpoints.events}`;
 
 export const EVENT_TYPES = [
 	'resync',
