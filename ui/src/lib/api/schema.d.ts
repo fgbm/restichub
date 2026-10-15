@@ -2352,8 +2352,6 @@ export interface components {
              *     It never holds a secret.
              */
             result_message?: string | null;
-            /** @description The typed values behind `result_message`: the user interface builds its text from them.
-             *     Null when the message needs none. */
             result_params?: components["schemas"]["IncompatibleParams"] | null;
             /** @description In RFC 3339. The earliest time at which the queue sends the job. */
             run_at: string;
