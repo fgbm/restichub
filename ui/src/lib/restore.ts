@@ -69,3 +69,47 @@ export function escapeGlob(path: string): string {
 	const escaped = path.replace(/[*?[\\]/g, (char) => (char === '\\' ? '[\\\\]' : `[${char}]`));
 	return escaped.startsWith('!') ? `[!]${escaped.slice(1)}` : escaped;
 }
+
+function normalize(path: string, windows: boolean): string {
+	const unified = path.trim().replaceAll('\\', '/').replace(/\/+$/, '');
+	return windows ? unified.toLowerCase() : unified;
+}
+
+/**
+ * True when `target` is a restore root or lies inside one. The agent checks the path again and
+ * resolves links, so this is the early answer. A Windows path ignores case.
+ */
+export function isWithinRoots(target: string, roots: readonly string[], windows: boolean): boolean {
+	const path = normalize(target, windows);
+	// The agent refuses a `.` or `..` component, so the answer here is no.
+	if (path.split('/').some((part) => part === '.' || part === '..')) return false;
+	return roots.some((root) => {
+		const base = normalize(root, windows);
+		return path === base || path.startsWith(`${base}/`);
+	});
+}
+
+/** The target that the dialog suggests: a folder named after the snapshot inside the root. */
+export function suggestTarget(root: string | undefined, name: string, windows: boolean): string {
+	if (!root) return '';
+	const separator = windows ? '\\' : '/';
+	return `${root.replace(/[\\/]+$/, '')}${separator}${name}`;
+}
+
+/**
+ * True when the screen warns about the target. A target inside a narrow restore root is the
+ * choice of the administrator, even when the root lies below a system directory. A root that is a
+ * whole file system or drive keeps the warning.
+ */
+export function warnsSystemPath(
+	target: string,
+	roots: readonly string[],
+	windows: boolean
+): boolean {
+	if (!isSystemPath(target)) return false;
+	const narrow = roots.filter((root) => {
+		const path = normalize(root, windows);
+		return path !== '' && !/^[a-z]:$/i.test(path);
+	});
+	return !isWithinRoots(target, narrow, windows);
+}

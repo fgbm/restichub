@@ -651,6 +651,8 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.agent_facts_invalid': 'Сведения о хосте непригодны.',
 	'jobs.reason.forget_selected_nothing': 'forget не выбрал ни одного снимка',
 	'jobs.reason.agent_capability_missing': 'Агент слишком старый для этого задания. Обновите агент.',
+	'jobs.reason.restore_target_denied':
+		'Хост отклонил путь назначения. Он вне корней восстановления или содержит файл агента.',
 	'jobs.reason.forget_without_tags':
 		'У политики хранения нет фильтра по тегам. Задание не отправлено.',
 	'jobs.reason.step_missing': 'В профиле больше нет этого шага.',
@@ -857,6 +859,7 @@ export const ru: Record<MessageKey, string> = {
 	'audit.action.job_cancel': 'Отмена задания',
 	'audit.action.job_dead_letter': 'Остановка задания после повторов',
 	'audit.action.restore_start': 'Запуск восстановления',
+	'audit.action.browse_start': 'Запуск просмотра снимков',
 	'audit.action.secret_delivered': 'Передача секрета',
 	'audit.action.agent_enroll': 'Регистрация агента',
 	'audit.action.agent_revoke': 'Отзыв агента',
@@ -921,6 +924,8 @@ export const ru: Record<MessageKey, string> = {
 	'error.already_queued': 'Ручной запуск этого плана уже стоит в очереди.',
 	'error.agent_capability_missing':
 		'На хосте работает старый агент, он не умеет это делать. Обновите пакет агента и повторите.',
+	'error.restore_target_denied':
+		'Хост не восстанавливает в этот путь. Используйте корень восстановления хоста. Корень добавляет администратор на хосте.',
 	'error.internal_error': 'В сервере управления внутренняя проблема.',
 	'error.network': 'Сервер управления не ответил.',
 	'error.field': 'Исправьте это поле.',
@@ -986,6 +991,12 @@ export const ru: Record<MessageKey, string> = {
 	'restore.dialog.targetHelp': 'Абсолютный путь к каталогу на целевом хосте.',
 	'restore.dialog.targetPlaceholder': '/srv/restore',
 	'restore.dialog.targetRelative': 'Введите абсолютный путь.',
+	'restore.dialog.targetRoots': 'Внутри корня восстановления хоста: {roots}.',
+	'restore.dialog.targetOutside': 'Путь вне корней восстановления хоста.',
+	'restore.dialog.rootsNone': 'Хост не сообщил корень восстановления',
+	'restore.dialog.rootsNoneBody':
+		'Хост не сможет восстанавливать, пока администратор не настроит на нём корень восстановления. Обновите пакет агента или добавьте корень и заново установите службу.',
+	'restore.dialog.verifyDryRun': 'Пробный запуск не записывает файлы, проверять нечего.',
 	'restore.dialog.overwrite': 'Существующие файлы',
 	'restore.dialog.dryRun': 'Пробный запуск',
 	'restore.dialog.dryRunHelp': 'Проверить восстановление. Хост не записывает файлы.',

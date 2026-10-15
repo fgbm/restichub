@@ -646,6 +646,8 @@ export const en = {
 	'jobs.reason.agent_facts_invalid': 'The facts of the host are not usable.',
 	'jobs.reason.forget_selected_nothing': 'Forget selected no snapshots',
 	'jobs.reason.agent_capability_missing': 'The agent is too old for this job. Update the agent.',
+	'jobs.reason.restore_target_denied':
+		'The host refused the target path. It lies outside the restore roots or holds a file of the agent.',
 	'jobs.reason.forget_without_tags': 'The retention has no tag filter. The job was not sent.',
 	'jobs.reason.step_missing': 'The profile no longer holds this step.',
 	'jobs.reason.job_invalid': 'The job did not pass the validation.',
@@ -852,6 +854,7 @@ export const en = {
 	'audit.action.job_cancel': 'Cancel job',
 	'audit.action.job_dead_letter': 'Give up on job',
 	'audit.action.restore_start': 'Start restore',
+	'audit.action.browse_start': 'Start snapshot browsing',
 	'audit.action.secret_delivered': 'Deliver secret',
 	'audit.action.agent_enroll': 'Enroll agent',
 	'audit.action.agent_revoke': 'Revoke agent',
@@ -916,6 +919,8 @@ export const en = {
 	'error.already_queued': 'This plan already has a manual run in the queue.',
 	'error.agent_capability_missing':
 		'The host runs an older agent that cannot do this. Update the agent package and try again.',
+	'error.restore_target_denied':
+		'The host does not restore to this path. Use a restore root of the host. An administrator adds a root on the host.',
 	'error.internal_error': 'The control plane has an internal problem.',
 	'error.network': 'The control plane did not answer.',
 	'error.field': 'Correct this field.',
@@ -981,6 +986,12 @@ export const en = {
 	'restore.dialog.targetHelp': 'An absolute directory on the target host.',
 	'restore.dialog.targetPlaceholder': '/srv/restore',
 	'restore.dialog.targetRelative': 'Enter an absolute path.',
+	'restore.dialog.targetRoots': 'Inside a restore root of the host: {roots}.',
+	'restore.dialog.targetOutside': 'The target is outside the restore roots of the host.',
+	'restore.dialog.rootsNone': 'The host reports no restore root',
+	'restore.dialog.rootsNoneBody':
+		'The host cannot restore until an administrator configures a restore root on it. Update the agent package or add a root and install the service again.',
+	'restore.dialog.verifyDryRun': 'A dry run writes no file, so there is nothing to verify.',
 	'restore.dialog.overwrite': 'Existing files',
 	'restore.dialog.dryRun': 'Dry run',
 	'restore.dialog.dryRunHelp': 'Check the restore. The host writes no file.',

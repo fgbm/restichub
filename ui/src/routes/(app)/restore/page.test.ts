@@ -73,6 +73,7 @@ const agent = {
 	agent_version: '0.4.2',
 	restic_version: '0.19.0',
 	labels: [],
+	restore_roots: ['/var/lib/restichub-restore'],
 	status: 'active',
 	last_seen_at: '2026-10-15T00:00:00Z',
 	created_at: '2026-09-01T00:00:00Z',
@@ -223,12 +224,22 @@ describe('Restore screen', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Restore…' }));
 		const dialog = await screen.findByRole('dialog');
-		await user.type(within(dialog).getByLabelText(/Target path/), '/etc');
+		const field = within(dialog).getByLabelText(/Target path/);
+		// The target starts as a folder in the first restore root of the host.
+		expect(field).toHaveValue('/var/lib/restichub-restore/a1b2c3d4');
+		expect(within(dialog).queryByText('System path')).toBeNull();
+		await user.clear(field);
+		await user.type(field, '/etc');
 		expect(within(dialog).getByText('System path')).toBeVisible();
-		await user.clear(within(dialog).getByLabelText(/Target path/));
-		await user.type(within(dialog).getByLabelText(/Target path/), '/srv/restore');
+		expect(
+			within(dialog).getByText('The target is outside the restore roots of the host.')
+		).toBeVisible();
+		expect(within(dialog).getByRole('button', { name: 'Start restore' })).toBeDisabled();
+		await user.clear(field);
+		await user.type(field, '/var/lib/restichub-restore/out');
 		expect(within(dialog).queryByText('System path')).toBeNull();
 		await user.click(within(dialog).getByRole('checkbox', { name: /Dry run/ }));
+		expect(within(dialog).getByRole('checkbox', { name: /Verify after/ })).toBeDisabled();
 		await user.click(within(dialog).getByRole('button', { name: 'Start restore' }));
 
 		await waitFor(() =>
@@ -237,7 +248,7 @@ describe('Restore screen', () => {
 				snapshot_id: 'a1b2c3d4'.padEnd(64, '0'),
 				includes: ['/notes.txt'],
 				excludes: [],
-				target: '/srv/restore',
+				target: '/var/lib/restichub-restore/out',
 				overwrite: 'never',
 				dry_run: true,
 				verify: false
@@ -252,7 +263,9 @@ describe('Restore screen', () => {
 		await user.click(await screen.findByRole('button', { name: 'Open snapshot a1b2c3d4' }));
 		await user.click(screen.getByRole('button', { name: 'Restore…' }));
 		const dialog = await screen.findByRole('dialog');
-		await user.type(within(dialog).getByLabelText(/Target path/), 'restore');
+		const field = within(dialog).getByLabelText(/Target path/);
+		await user.clear(field);
+		await user.type(field, 'restore');
 		expect(within(dialog).getByText('Enter an absolute path.')).toBeVisible();
 		expect(within(dialog).getByRole('button', { name: 'Start restore' })).toBeDisabled();
 	});

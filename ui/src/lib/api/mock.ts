@@ -168,6 +168,12 @@ function makeAgents(): Agent[] {
 		agent_version: version,
 		restic_version: '0.19.0',
 		labels: [],
+		restore_roots:
+			os === 'windows'
+				? ['C:\\ProgramData\\ResticHub\\Restore']
+				: os === 'linux'
+					? ['/var/lib/restichub-restore']
+					: [],
 		status,
 		last_seen_at: iso(seen),
 		created_at: iso(60 * 24 * 30),
@@ -1179,6 +1185,9 @@ export class MockApiService {
 		this.browseRepository(id, request.agent_id);
 		if (request.includes?.length && request.excludes?.length) {
 			throw problemError('invalid_argument', 'excludes', 'invalid_body');
+		}
+		if (request.dry_run && request.verify) {
+			throw problemError('invalid_argument', 'verify', 'invalid_body');
 		}
 		return this.startJob(id, 'restore', { agent_id: request.agent_id }, false);
 	}

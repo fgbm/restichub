@@ -8,7 +8,14 @@
 	import type { SelectOption } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { OVERWRITE_MODES, escapeGlob, isAbsolutePath, isSystemPath } from '#lib/restore.ts';
+	import {
+		OVERWRITE_MODES,
+		escapeGlob,
+		isAbsolutePath,
+		isWithinRoots,
+		suggestTarget,
+		warnsSystemPath
+	} from '#lib/restore.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let {
@@ -55,8 +62,22 @@
 	);
 	const trimmed = $derived(target.trim());
 	const relative = $derived(trimmed !== '' && !isAbsolutePath(trimmed));
-	const system = $derived(trimmed !== '' && !relative && isSystemPath(trimmed));
-	const windows = $derived(candidates.find((agent) => agent.id === agentId)?.os === 'windows');
+	const selected = $derived(candidates.find((agent) => agent.id === agentId));
+	const windows = $derived(selected?.os === 'windows');
+	const roots = $derived(selected?.restore_roots ?? []);
+	const suggestion = $derived(suggestTarget(roots[0], snapshot.short_id, windows));
+	const system = $derived(trimmed !== '' && !relative && warnsSystemPath(trimmed, roots, windows));
+	const outside = $derived(
+		trimmed !== '' && !relative && roots.length > 0 && !isWithinRoots(trimmed, roots, windows)
+	);
+	const blocked = $derived(!agentId || trimmed === '' || relative || outside || roots.length === 0);
+	let suggested = '';
+
+	// The target follows the suggestion of the selected host until the person types another one.
+	$effect(() => {
+		if (open && target === suggested) target = suggestion;
+		suggested = suggestion;
+	});
 
 	$effect(() => {
 		if (!open) return;
@@ -66,6 +87,7 @@
 			candidates[0]?.id ??
 			'';
 		target = '';
+		suggested = '';
 		overwrite = 'never';
 		dryRun = false;
 		verify = false;
@@ -74,7 +96,7 @@
 	});
 
 	async function submit(): Promise<void> {
-		if (!agentId || trimmed === '' || relative) return;
+		if (blocked) return;
 		submitting = true;
 		problem = null;
 		failure = null;
@@ -135,14 +157,25 @@
 		<TextField
 			id="restore-target"
 			label={t('restore.dialog.target')}
-			help={t('restore.dialog.targetHelp')}
+			help={roots.length > 0
+				? t('restore.dialog.targetRoots', { roots: roots.join(', ') })
+				: t('restore.dialog.targetHelp')}
 			placeholder={windows ? 'D:\\restore' : t('restore.dialog.targetPlaceholder')}
-			error={relative ? t('restore.dialog.targetRelative') : fieldError(problem, 'target')}
+			error={relative
+				? t('restore.dialog.targetRelative')
+				: outside
+					? t('restore.dialog.targetOutside')
+					: fieldError(problem, 'target')}
 			mono
 			autocomplete="off"
 			bind:value={target}
 			required
 		/>
+		{#if agentId && roots.length === 0}
+			<Alert tone="attention" icon="alert" title={t('restore.dialog.rootsNone')}>
+				{t('restore.dialog.rootsNoneBody')}
+			</Alert>
+		{/if}
 		{#if system}
 			<Alert tone="attention" icon="alert" title={t('restore.dialog.systemPath')}>
 				{t('restore.dialog.systemPathBody')}
@@ -161,23 +194,20 @@
 				label={t('restore.dialog.dryRun')}
 				help={t('restore.dialog.dryRunHelp')}
 				bind:checked={dryRun}
+				disabled={verify}
 			/>
 			<Checkbox
 				id="restore-verify"
 				label={t('restore.dialog.verify')}
-				help={t('restore.dialog.verifyHelp')}
+				help={dryRun ? t('restore.dialog.verifyDryRun') : t('restore.dialog.verifyHelp')}
 				bind:checked={verify}
+				disabled={dryRun}
 			/>
 		</div>
 	</div>
 	{#snippet footer()}
 		<Button onclick={() => (open = false)}>{t('common.cancel')}</Button>
-		<Button
-			type="submit"
-			variant="primary"
-			loading={submitting}
-			disabled={!agentId || trimmed === '' || relative}
-		>
+		<Button type="submit" variant="primary" loading={submitting} disabled={blocked}>
 			{t('restore.dialog.submit')}
 		</Button>
 	{/snippet}

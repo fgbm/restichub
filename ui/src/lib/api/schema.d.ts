@@ -1232,6 +1232,11 @@ export interface components {
             last_seen_at?: string | null;
             os: string;
             restic_version: string;
+            /**
+             * @description Absolute directories where the agent restores files, from its last connection. A restore
+             *     target must lie inside one of them.
+             */
+            restore_roots: string[];
             revoked_at?: string | null;
             revoked_by_user_id?: string | null;
             status: components["schemas"]["AgentStatus"];
@@ -1261,6 +1266,7 @@ export interface components {
          * @example job_cancel
          * @example job_dead_letter
          * @example restore_start
+         * @example browse_start
          * @example secret_delivered
          * @example agent_enroll
          * @example agent_revoke
@@ -1609,7 +1615,7 @@ export interface components {
             used_at?: string | null;
         };
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied";
         /** @description Counts that `restic forget` reported, summed over the groups. */
         ForgetSummary: {
             /** Format: int64 */
@@ -1801,7 +1807,10 @@ export interface components {
             offset?: number;
             /** @description The directory in the snapshot. Empty or `/` means the root. */
             path?: string;
-            /** @description The identifier of the snapshot, `latest` or 8 to 64 lower-case hexadecimal characters. */
+            /**
+             * @description The identifier of one snapshot: 8 to 64 lower-case hexadecimal characters. `latest` moves
+             *     between two reads, so the call refuses it.
+             */
             snapshot_id: string;
         };
         /** @description Result of a tree page request, with the state of its job. */
@@ -2194,11 +2203,20 @@ export interface components {
             includes?: string[];
             /** @description What to do with a file that exists in the target. */
             overwrite: components["schemas"]["OverwriteMode"];
-            /** @description The identifier of the snapshot, `latest` or 8 to 64 lower-case hexadecimal characters. */
+            /**
+             * @description The identifier of one snapshot: 8 to 64 lower-case hexadecimal characters. `latest` moves
+             *     between two reads, so the call refuses it.
+             */
             snapshot_id: string;
-            /** @description An absolute directory on the target agent, such as `/srv/restore` or `D:\restore`. */
+            /**
+             * @description An absolute directory on the agent that writes the files. It must lie inside one of the
+             *     roots that the agent reports in its `restore_roots`, and the agent refuses its own files.
+             */
             target: string;
-            /** @description Read the restored files again and compare them with the snapshot. */
+            /**
+             * @description Read the restored files again and compare them with the snapshot. restic refuses it with
+             *     `dry_run`.
+             */
             verify?: boolean;
         };
         /** @description What `restic restore --json` reported (FR-RS-04). */

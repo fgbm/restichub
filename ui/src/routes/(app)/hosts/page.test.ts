@@ -79,6 +79,7 @@ function agent(overrides: Record<string, unknown> = {}) {
 		arch: 'amd64',
 		agent_version: '0.4.2',
 		restic_version: '0.17.0',
+		restore_roots: [],
 		labels: [],
 		certificate_serial: '0f01',
 		certificate_expires_at: FUTURE,
