@@ -84,6 +84,34 @@ curl -s "https://<control-plane>/api/v1/plans?limit=50" \
   -H "Authorization: Bearer rh_<token>"
 ```
 
+## Live events
+
+The route `GET /api/v1/events` sends Server-Sent Events. The web UI opens one stream for each session. The stream tells the UI when to read the data again. This way the UI does not poll.
+
+```sh
+curl -N "https://<control-plane>/api/v1/events" \
+  -H "Authorization: Bearer rh_<token>"
+```
+
+The stream shows only the events of your organization. Each event needs a read right. The role Viewer has all of them.
+
+| Event | Meaning |
+|---|---|
+| `resync` | The first event of each stream. Read the data again. |
+| `job.progress` | A step of a job made progress, or a step ended. |
+| `job.status` | A job changed its status. The field `status` holds the new status. |
+| `job.log` | The log of a job got new lines. |
+| `host.online`, `host.offline` | A host connected or left. The field `agent_id` names the host. |
+| `alert.changed` | An alert opened or resolved. |
+
+An event holds identifiers and a status only. It holds no secret and no log line. Read the REST API for the data.
+
+The control plane keeps no event history. After a reconnect, the stream sends `resync` first. Ignore `Last-Event-ID` and read the data again. A comment line every 15 seconds keeps the connection open. A stream ends after at most 15 minutes, or when the session ends. The client then connects again.
+
+A session can hold 4 streams at the same time, and an organization can hold 200. More requests get HTTP 429.
+
+A reverse proxy must not buffer the stream. The response sets `X-Accel-Buffering: no` for nginx. For another proxy, turn off the response buffering for this route and allow a read timeout above 30 seconds.
+
 ## Related pages
 
 - [Prometheus metrics](/restichub/operations/metrics/)
