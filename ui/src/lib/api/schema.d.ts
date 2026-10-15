@@ -1517,6 +1517,7 @@ export interface components {
          * @example signing_key_rotate
          * @example signing_key_retire
          * @example signing_key_compromise
+         * @example job_resigned
          * @example channel_create
          * @example channel_update
          * @example channel_delete

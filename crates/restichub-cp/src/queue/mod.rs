@@ -27,10 +27,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use prost::Message as _;
+use restichub_db::audit::{AuditAction, AuditEvent, diff};
 use restichub_db::jobs::{self as job_repo, Job, JobOutcome};
 use restichub_db::queue as queue_repo;
 use restichub_db::{AgentId, DbError, JobId, JobStatus, TenantId, TenantStatus, TenantTx, tenants};
 use restichub_proto::agent::v1::{ControlMessage, Job as ProtoJob, SignedJob, control_message};
+use serde_json::json;
 use time::OffsetDateTime;
 use zeroize::Zeroizing;
 
@@ -415,10 +417,7 @@ async fn resign_if_retired(
     if !retired.contains(&signed.signer_key_id) {
         return Ok(Resigned::Current(signed));
     }
-    let Ok(inner) = ProtoJob::decode(signed.job.as_slice()) else {
-        return Ok(Resigned::Fail(SIGNED_JOB_UNAVAILABLE));
-    };
-    let fresh = match signing.sign_job(state.db(), &inner).await {
+    let fresh = match signing.sign_job_bytes(state.db(), signed.job.clone()).await {
         Ok(fresh) => fresh,
         Err(error) => {
             tracing::warn!(job = %job.id, %error, "the queue could not sign a stored job again");
@@ -441,6 +440,18 @@ async fn resign_if_retired(
         secrets: stored.secrets.clone(),
     };
     queue_repo::replace_signed_job(tx, job.id, &replacement).await?;
+    let mut event = AuditEvent::new(AuditAction::JobResigned, "job");
+    event.object_id = Some(job.id.as_uuid());
+    // The audit diff masks a field name with "key"; a signer identifier is public.
+    event.diff = Some(diff(
+        None,
+        Some(&json!({
+            "old_signer": signed.signer_key_id,
+            "new_signer": fresh.signer_key_id,
+        })),
+        &[],
+    ));
+    restichub_db::audit::insert(tx, &event).await?;
     tracing::info!(job = %job.id, "the queue signed a stored job again with the current key");
     Ok(Resigned::Current(fresh))
 }

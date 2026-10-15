@@ -71,5 +71,22 @@ async fn adr_0030_a_redelivery_after_a_compromise_never_sends_the_old_blob() {
         "the same job"
     );
     assert_eq!(env.job_status(job).await, "sent");
+    assert_eq!(
+        second.job, first.job,
+        "the resigned message keeps the signed bytes"
+    );
+
+    let mut tx = env.scoped().await;
+    let rows: Vec<(String, serde_json::Value)> =
+        sqlx::query_as("SELECT object_id::text, diff FROM audit_log WHERE action = 'job_resigned'")
+            .fetch_all(&mut *tx)
+            .await
+            .expect("cannot read the audit log");
+    assert_eq!(rows.len(), 1, "one job_resigned record");
+    assert_eq!(rows[0].0, job.to_string());
+    let diff = rows[0].1.to_string();
+    assert!(diff.contains(&compromised), "the diff names the old key");
+    assert!(diff.contains(&current), "the diff names the new key");
+    drop(tx);
     env.db.cleanup().await;
 }

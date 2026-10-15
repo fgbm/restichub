@@ -25,7 +25,9 @@ use restichub_db::audit::{self, AuditAction, AuditEvent};
 use restichub_db::signing::{self, NewSigningKey, SigningKeyRow, Version};
 use restichub_db::{Database, DbError, PLATFORM_TENANT_ID, SigningKeyRole};
 use restichub_proto::agent::v1::{Job, KeyUpdate, SignedJob, SigningKeyUpdate};
-use restichub_proto::signing::{EnrollmentKey, sign_enrollment_keys, sign_job, sign_key_update};
+use restichub_proto::signing::{
+    EnrollmentKey, sign_enrollment_keys, sign_job, sign_job_bytes, sign_key_update,
+};
 use restichub_secrets::{
     CryptoError, KekError, KekId, KekProvider, WrappedSigningKey, unwrap_signing_key,
     wrap_signing_key,
@@ -171,6 +173,11 @@ impl KeySet {
     /// Makes the signature of a job with the current key (FR-PR-03). The job names its signer key.
     pub fn sign_job(&self, job: &Job) -> SignedJob {
         sign_job(job, self.current.id(), &self.current.key)
+    }
+
+    /// Makes the signature of serialized job bytes with the current key.
+    pub fn sign_job_bytes(&self, bytes: Vec<u8>) -> SignedJob {
+        sign_job_bytes(bytes, self.current.id(), &self.current.key)
     }
 
     /// The signed key set that the control plane sends to an agent over the stream (FR-PR-11).
@@ -328,6 +335,16 @@ impl JobSigningService {
     /// key (ADR-0026).
     pub async fn sign_job(&self, db: &Database, job: &Job) -> Result<SignedJob, JobSigningError> {
         Ok(self.current_set(db).await?.sign_job(job))
+    }
+
+    /// Signs serialized job bytes with the current key, with the same version check as
+    /// [`Self::sign_job`].
+    pub async fn sign_job_bytes(
+        &self,
+        db: &Database,
+        bytes: Vec<u8>,
+    ) -> Result<SignedJob, JobSigningError> {
+        Ok(self.current_set(db).await?.sign_job_bytes(bytes))
     }
 
     /// Builds the signed set update for an agent (FR-PR-11).
