@@ -905,3 +905,14 @@ pub enum PlannedPhase {
     OnError,
     Finally,
 }
+
+/// The kind of the object that references a secret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum SecretUsageKind {
+    Repository,
+    Channel,
+    Profile,
+    JobTemplate,
+}

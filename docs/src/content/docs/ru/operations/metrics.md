@@ -34,6 +34,7 @@ scrape_configs:
 |---|---|---|---|
 | `restichub_last_success_timestamp_seconds` | gauge | `tenant`, `plan` | Unix-время последней успешной резервной копии плана. Если у плана ещё не было успешной копии, значения нет. |
 | `restichub_job_duration_seconds` | histogram | `tenant`, `kind` | Длительность выполненных заданий. Границы: 1, 5, 15, 30, 60, 120, 300, 600, 1800 и 3600 секунд. |
+| `restichub_job_dispatch_delay_seconds` | histogram | `tenant` | Время от момента, когда задание может запуститься, до его первой отправки агенту. Границы: 0,05; 0,1; 0,25; 0,5; 1; 2; 3; 5; 10 и 30 секунд. |
 | `restichub_jobs_total` | counter | `tenant`, `status` | Задания, достигшие статуса `succeeded`, `failed`, `expired` или `dead_letter`. |
 | `restichub_agent_up` | gauge | `tenant`, `agent` | 1, если у агента открыто соединение, иначе 0. |
 | `restichub_repo_lock_held` | gauge | `tenant`, `repository` | 1, если ожидающее или выполняющееся задание репозитория сообщило о блокировке, иначе 0. |

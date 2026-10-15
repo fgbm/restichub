@@ -13,6 +13,7 @@ const SCREENS = [
 	'/alerts',
 	'/audit',
 	'/settings/access/api-tokens',
+	'/settings/access/secrets',
 	'/settings/notifications/channels'
 ];
 

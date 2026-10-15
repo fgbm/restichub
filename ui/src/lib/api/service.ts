@@ -206,6 +206,10 @@ export interface ApiService {
 	listSecrets(): Promise<Secret[]>;
 	/** Stores a secret. The value goes to the control plane once and never comes back. */
 	createSecret(request: CreateSecretRequest): Promise<Secret>;
+	/** Replaces the value of a secret. The old value stays hidden. */
+	replaceSecretValue(id: string, value: string): Promise<void>;
+	/** Removes a secret. The control plane refuses it while an object uses the secret. */
+	deleteSecret(id: string): Promise<void>;
 
 	/** The built-in and the own script templates (FR-HK-12). */
 	listScriptTemplates(): Promise<ScriptTemplate[]>;
@@ -354,6 +358,8 @@ const httpService: ApiService = {
 	listSecrets: () =>
 		api.get<SecretListResponse>(endpoints.secrets.list).then((response) => response.items),
 	createSecret: (request) => api.post<Secret>(endpoints.secrets.create, request),
+	replaceSecretValue: (id, value) => api.put<void>(endpoints.secrets.value(id), { value }),
+	deleteSecret: (id) => api.delete<void>(endpoints.secrets.byId(id)),
 
 	listScriptTemplates: () =>
 		api

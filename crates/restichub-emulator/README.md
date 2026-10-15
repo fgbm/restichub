@@ -151,3 +151,7 @@ The workspace has no argument parser. The crate reads its own arguments and prin
 | `fr_sc_09_cancel_stops_a_running_job` | FR-SC-09, FR-AG-10 |
 | `fr_id_08_agents_reconnect_after_a_disconnect` | FR-ID-08 |
 | `ac_nfr_01_short_load_run_reports_the_summary` | AC-NFR-01, NFR-PERF-04 |
+
+## Agents of a deployed control plane
+
+The option `--enroll-url` enrolls the agents at a running control plane instead of using test certificates. It needs `--ca FILE` with the installation root CA and one token source: `--token-file FILE` (one token on each line) or `--api-url URL` with `--api-token-file FILE` (the emulator creates one enrollment token for each agent). The control plane accepts 10 enrollments each minute from one address, so the emulator starts 9 each minute (`--enroll-per-minute`). `--identities DIR` keeps the enrolled identities, and a later run enrolls only the missing agents. `--enroll-only` ends the run after the enrollment. `--ramp-up N` starts N agents each second. The load runner of bench S2 is `bench/s2/s2.sh` (see `bench/s2/README.md`).
