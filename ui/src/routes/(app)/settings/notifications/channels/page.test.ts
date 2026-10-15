@@ -186,7 +186,7 @@ describe('the channel settings', () => {
 		await waitFor(() =>
 			expect(mocks.pushToast).toHaveBeenCalledWith(
 				'danger',
-				'The test message failed: The address is local or private.'
+				'The test message failed: The address is local or private. Use a public address.'
 			)
 		);
 	});

@@ -3,12 +3,12 @@
 //! The service runs as root or LocalSystem and inherits a `PATH` that often holds a directory which
 //! a normal user can write, mostly on Windows. A script that calls `pg_dump` would then run a file
 //! planted there with the rights of the service. The agent keeps a directory only when it passes
-//! the same chain check as a hook executable ([`trust::check_directory`], AC-HK-01).
+//! the same chain check as an interpreter ([`trust::check_directory`], AC-HK-08).
 
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
-use crate::hooks::{Trust, trust};
+use crate::trust::{self, Trust};
 
 /// The search path that a script gets and the entries that the agent dropped from it.
 pub(super) struct SearchPath {
@@ -106,7 +106,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ac_hk_01_the_verbatim_prefix_leaves_the_search_path() {
+    fn ac_hk_08_the_verbatim_prefix_leaves_the_search_path() {
         let cases = [
             (r"\\?\C:\Windows\System32", r"C:\Windows\System32"),
             (r"\\?\UNC\host\share\bin", r"\\host\share\bin"),

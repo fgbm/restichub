@@ -62,8 +62,7 @@ Write a warning or a caution as a short command, then the reason: "Do not run `u
 | plan | A profile assigned to agents, with a schedule | task, schedule (for this concept) |
 | job | One run of a plan or a manual operation | task, run (as a noun) |
 | step | One command in a job | action, stage |
-| hook | An allow-listed command before or after restic | script, trigger |
-| allow-list | The list of permitted hooks on a host | whitelist |
+| script | A command text that runs before or after restic on a host with the trust mode | hook, trigger |
 | maintenance agent | The agent that runs `forget`, `prune`, `check` | |
 | snapshot | A restic snapshot | backup (for this concept) |
 | enroll, enrollment | The first registration of an agent | register, onboard |

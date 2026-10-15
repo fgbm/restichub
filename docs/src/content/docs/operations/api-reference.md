@@ -1,0 +1,90 @@
+---
+title: API reference
+description: How to sign in to the API, which headers it needs, and how to read the OpenAPI document.
+---
+
+The control plane serves a REST API under `/api/v1`. The web UI uses the same API. This page shows how to authenticate. The OpenAPI document lists every route, field and error.
+
+## OpenAPI document
+
+The control plane serves the OpenAPI document at `GET /api/v1/openapi.json`. The route needs no credential.
+
+```sh
+curl -s https://<control-plane>/api/v1/openapi.json -o restichub-openapi.json
+```
+
+Load the file in an OpenAPI viewer or in a code generator. The document describes two security schemes: `cookie` for a session and `bearer` for an API token.
+
+## Sign in with an API token
+
+Use an API token for a script. A token belongs to one tenant and has one role.
+
+1. Open "API tokens" in the web UI.
+2. Select "Create token". Enter a name, a role and an optional expiry time.
+3. Copy the token value. The control plane shows it one time only.
+
+A token value starts with `rh_`. Send it in the `Authorization` header:
+
+```sh
+curl -s https://<control-plane>/api/v1/plans \
+  -H "Authorization: Bearer rh_<token>"
+```
+
+A request with a token needs no CSRF header. The role of the token limits the routes. A route that the role does not allow gives HTTP 403.
+
+Create a token in the API with a session or with a token that has the Admin role:
+
+```sh
+curl -s -X POST https://<control-plane>/api/v1/api-tokens \
+  -H "Authorization: Bearer rh_<admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "ci", "role": "viewer", "expires_at": "2027-01-01T00:00:00Z"}'
+```
+
+The response holds the field `token`. The control plane never returns it again.
+
+## Sign in with a session
+
+The web UI uses a session cookie. A script can do the same:
+
+```sh
+curl -s -c cookies.txt -X POST https://<control-plane>/api/v1/auth/sign-in \
+  -H "X-ResticHub-CSRF: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "<password>"}'
+```
+
+The control plane sets the cookie `__Host-restichub_session`. A request that changes data with this cookie must also send the header `X-ResticHub-CSRF: 1`. The sign-in request needs the header too. A request without the header gives HTTP 403.
+
+```sh
+curl -s -b cookies.txt -X POST https://<control-plane>/api/v1/plans/<plan-id>/run \
+  -H "X-ResticHub-CSRF: 1"
+```
+
+A request must not hold a cookie and a bearer token together. That request gives HTTP 400.
+
+## Errors
+
+An error response uses the media type of RFC 9457. The body holds these fields:
+
+| Field | Meaning |
+|---|---|
+| `status` | The HTTP status. |
+| `code` | A stable code in snake_case. The web UI translates it. |
+| `title` | A short English text. |
+| `request_id` | The identifier of the request. Give it to the operator of the control plane. |
+| `field`, `reason` | The wrong field and the reason. Only the code `invalid_argument` sets them. |
+
+## Lists
+
+A list route returns `items` and `next_cursor`. To read the next page, send the value of `next_cursor` as the parameter `cursor`. The parameter `limit` sets the page size.
+
+```sh
+curl -s "https://<control-plane>/api/v1/plans?limit=50" \
+  -H "Authorization: Bearer rh_<token>"
+```
+
+## Related pages
+
+- [Prometheus metrics](/restichub/operations/metrics/)
+- [Environment variables](/restichub/operations/environment-variables/)

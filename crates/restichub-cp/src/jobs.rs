@@ -511,9 +511,6 @@ fn reject_reason_code(reason: i32) -> &'static str {
         Ok(RejectReason::Replay) => "replay",
         Ok(RejectReason::UnsupportedStep) => "unsupported_step",
         Ok(RejectReason::UnsupportedResticVersion) => "unsupported_restic_version",
-        Ok(RejectReason::UnknownHook) => "unknown_hook",
-        Ok(RejectReason::InvalidHookParameters) => "invalid_hook_parameters",
-        Ok(RejectReason::AllowListInsecure) => "allow_list_insecure",
         Ok(RejectReason::Malformed) => "malformed",
         Ok(RejectReason::LifetimeTooLong) => "lifetime_too_long",
         Ok(RejectReason::NotYetValid) => "not_yet_valid",
@@ -548,12 +545,6 @@ pub(crate) fn planned_steps(
                 Some(step::Kind::Backup(_)) => {
                     (Some(PlannedKind::Backup), String::new(), None, None)
                 }
-                Some(step::Kind::Hook(hook)) => (
-                    Some(PlannedKind::Hook),
-                    hook.hook_id.clone(),
-                    phase(hook.phase),
-                    None,
-                ),
                 Some(step::Kind::Script(script)) => (
                     Some(PlannedKind::Script),
                     script.name.clone(),

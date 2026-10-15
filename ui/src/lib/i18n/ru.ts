@@ -676,19 +676,24 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.kind.other': 'Другое',
 	'jobs.kind.snapshots': 'Список снимков',
 	'jobs.kind.ls': 'Список файлов',
-	'jobs.reason.request_missing': 'У задания нет запроса.',
-	'jobs.reason.expired': 'Задание ждало слишком долго и истекло.',
-	'jobs.reason.listing_missing': 'Хост не прислал результат этого запроса.',
-	'jobs.reason.compile_failed': 'Профиль больше не подходит этому хосту.',
+	'jobs.reason.request_missing': 'У задания нет запроса. Запустите задание снова.',
+	'jobs.reason.expired':
+		'Задание ждало слишком долго и истекло. Проверьте, что хост в сети, и запустите задание снова.',
+	'jobs.reason.listing_missing': 'Хост не прислал результат этого запроса. Повторите.',
+	'jobs.reason.compile_failed':
+		'Профиль больше не подходит этому хосту. Исправьте профиль для системы хоста.',
 	'jobs.reason.lock_retries_exhausted':
 		'Репозиторий оставался заблокированным после всех повторов.',
-	'jobs.reason.repository_locked': 'Репозиторий заблокирован другим процессом.',
+	'jobs.reason.repository_locked':
+		'Репозиторий заблокирован другим процессом. Дождитесь его окончания и запустите задание снова.',
 	'jobs.reason.lock_retry': 'Репозиторий был заблокирован. Новая попытка стоит в очереди.',
-	'jobs.reason.signed_job_unavailable': 'Сохранённое задание нечитаемо.',
-	'jobs.reason.agent_lost': 'Хост отключился во время задания.',
-	'jobs.reason.wrong_password': 'Пароль репозитория или ключи доступа неверны.',
-	'jobs.reason.step_failed': 'restic остановился с ошибкой.',
-	'jobs.reason.hook_failed': 'Скрипт или хук завершился ошибкой.',
+	'jobs.reason.signed_job_unavailable': 'Сохранённое задание нечитаемо. Запустите задание снова.',
+	'jobs.reason.agent_lost':
+		'Хост отключился во время задания. Проверьте хост и запустите задание снова.',
+	'jobs.reason.wrong_password':
+		'Пароль репозитория или ключи доступа неверны. Исправьте их в настройках репозитория.',
+	'jobs.reason.step_failed': 'restic остановился с ошибкой. Прочитайте журнал задания.',
+	'jobs.reason.hook_failed': 'Скрипт завершился ошибкой. Прочитайте журнал скрипта.',
 	'jobs.reason.cancelled': 'Задание отменено.',
 	'jobs.reason.succeeded_with_warnings': 'Завершено с предупреждениями.',
 	'jobs.errorCode.interrupted': 'прервано перезапуском агента',
@@ -704,29 +709,36 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.errorCode.cancelled': 'отменено',
 	'jobs.reason.interrupted': 'Прервано: агент перезапустился во время скриптов',
 	'jobs.reason.timed_out': 'Задание выполнялось дольше предельной длительности.',
-	'jobs.reason.stalled': 'Задание остановлено: restic слишком долго не продвигался.',
+	'jobs.reason.stalled':
+		'Задание остановлено: restic слишком долго не продвигался. Проверьте хост или увеличьте лимит «Остановить, если нет прогресса» в профиле.',
 	'jobs.reason.max_duration_exceeded':
-		'Задание остановлено: оно шло дольше предельной длительности.',
-	'jobs.reason.unacknowledged_expired': 'Хост не подтвердил задание до его истечения.',
+		'Задание остановлено: оно шло дольше предельной длительности. Если заданию нужно больше времени, увеличьте лимит в профиле.',
+	'jobs.reason.unacknowledged_expired':
+		'Хост не подтвердил задание до его истечения. Проверьте, что агент работает.',
 	'jobs.reason.agent_revoked': 'Хост отозван.',
-	'jobs.reason.not_acknowledged': 'Хост не подтвердил получение задания.',
-	'jobs.reason.secret_unavailable': 'Секрет репозитория недоступен.',
-	'jobs.reason.signing_failed': 'Сервер управления не смог подписать задание.',
+	'jobs.reason.not_acknowledged':
+		'Хост не подтвердил получение задания. Проверьте, что агент работает.',
+	'jobs.reason.secret_unavailable':
+		'Секрет репозитория недоступен. Введите секрет в репозитории заново.',
+	'jobs.reason.signing_failed':
+		'Сервер управления не смог подписать задание. Попросите администратора проверить ключ подписи.',
 	'jobs.reason.plan_missing': 'План удалён.',
 	'jobs.reason.plan_changed': 'План перенесён на другой хост.',
 	'jobs.reason.profile_missing': 'Профиль удалён.',
 	'jobs.reason.repository_missing': 'Репозиторий удалён.',
 	'jobs.reason.repository_changed': 'Профиль теперь использует другой репозиторий.',
-	'jobs.reason.agent_facts_invalid': 'Сведения о хосте непригодны.',
+	'jobs.reason.agent_facts_invalid': 'Сведения о хосте непригодны. Перезапустите агент.',
 	'jobs.reason.forget_selected_nothing': 'forget не выбрал ни одного снимка',
 	'jobs.reason.agent_capability_missing': 'Агент слишком старый для этого задания. Обновите агент.',
 	'jobs.reason.restore_target_denied':
 		'Хост отклонил путь назначения. Он вне корней восстановления или содержит файл агента.',
 	'jobs.reason.forget_without_tags':
-		'У политики хранения нет фильтра по тегам. Задание не отправлено.',
+		'У политики хранения нет фильтра по тегам. Задание не отправлено. Добавьте фильтр по тегам в правила хранения.',
 	'jobs.reason.step_missing': 'В профиле больше нет этого шага.',
-	'jobs.reason.job_invalid': 'Задание не прошло проверку.',
-	'jobs.reason.unsupported_kind': 'Очередь не выполняет задания этого вида.',
+	'jobs.reason.job_invalid':
+		'Задание не прошло проверку. Сохраните профиль и план заново и запустите задание.',
+	'jobs.reason.unsupported_kind':
+		'Очередь не выполняет задания этого вида. Обновите сервер управления или агент.',
 	'jobDetail.openJob': 'Открыть задание {name}',
 	'jobDetail.notFound': 'Такого задания нет.',
 	'jobDetail.live': 'в реальном времени',
@@ -796,12 +808,12 @@ export const ru: Record<MessageKey, string> = {
 		'restic завершился с предупреждением. Данные есть в репозитории.',
 	'jobDetail.stepError.repository_locked': 'Другой процесс держит блокировку репозитория.',
 	'jobDetail.stepError.step_config_error': 'Пароль репозитория или ключи доступа неверны.',
-	'jobDetail.stepError.step_failed': 'restic остановился с ошибкой.',
+	'jobDetail.stepError.step_failed': 'restic остановился с ошибкой. Прочитайте журнал задания.',
 	'jobDetail.stepError.step_cancelled': 'Шаг отменён.',
 	'jobDetail.stepError.step_timeout': 'Шаг выполнялся дольше своего тайм-аута.',
 	'jobDetail.stepError.step_max_duration': 'Шаг шёл дольше предельной длительности.',
 	'jobDetail.stepError.step_stalled': 'Шаг остановлен: restic слишком долго не продвигался.',
-	'jobDetail.stepError.step_not_started': 'Шаг не начался.',
+	'jobDetail.stepError.step_not_started': 'Шаг не начался. Причину ищите в журнале задания.',
 	'jobDetail.progress': 'Ход выполнения',
 	'jobDetail.progressFiles': '{done} из {total} файлов',
 	'jobDetail.progressBytes': '{done} из {total}',
@@ -985,30 +997,43 @@ export const ru: Record<MessageKey, string> = {
 
 	// Errors from the API (problem codes)
 	'error.invalid_credentials': 'Имя пользователя или пароль указаны неверно.',
-	'error.unauthorized': 'Сеанс завершён. Войдите снова.',
-	'error.forbidden': 'У вас нет прав на эту операцию.',
-	'error.not_found': 'Запись не существует.',
-	'error.validation_failed': 'Данные указаны неверно. Исправьте поля и повторите.',
+	'error.unauthenticated': 'Сеанс завершён. Войдите снова.',
+	'error.forbidden':
+		'У вас нет прав на эту операцию. Попросите администратора выдать роль с этим правом.',
+	'error.not_found': 'Записи нет. Обновите список.',
+	'error.invalid_argument': 'Данные указаны неверно. Исправьте поля и повторите.',
 	'error.setup_already_done': 'Настройка уже выполнена.',
 	'error.invalid_setup_token': 'Токен настройки указан неверно.',
 	'error.rate_limited': 'Слишком много попыток. Подождите и повторите.',
-	'error.conflict': 'Запись уже существует.',
-	'error.token_used': 'Хост уже использовал этот токен регистрации. Отменить его нельзя.',
+	'error.conflict':
+		'Такая запись уже есть или её состояние изменилось. Обновите страницу и повторите.',
+	'error.token_used':
+		'Хост уже использовал этот токен регистрации. Отменить его нельзя. Если нужен токен, создайте новый.',
 	'error.token_already_revoked': 'Этот токен регистрации уже отменён.',
-	'error.token_expired': 'Срок действия этого токена регистрации истёк.',
+	'error.token_expired': 'Срок действия токена регистрации истёк. Создайте новый токен.',
 	'error.shared_account':
 		'Учётная запись принадлежит другим организациям. Пароль может сбросить пользователь или администратор платформы.',
 	'error.username_taken': 'Это имя пользователя занято.',
 	'error.email_taken': 'Этот адрес электронной почты занят.',
 	'error.agent_offline':
 		'Хост не в сети. Очереди заданий нет, поэтому сервер управления отклонил задание. Подключите хост и повторите.',
-	'error.already_queued': 'Ручной запуск этого плана уже стоит в очереди.',
+	'error.already_queued': 'Ручной запуск этого плана уже стоит в очереди. Дождитесь его начала.',
 	'error.agent_capability_missing':
 		'На хосте работает старый агент, он не умеет это делать. Обновите пакет агента и повторите.',
 	'error.restore_target_denied':
 		'Хост не восстанавливает в этот путь. Используйте корень восстановления хоста. Корень добавляет администратор на хосте.',
-	'error.internal_error': 'В сервере управления внутренняя проблема.',
-	'error.network': 'Сервер управления не ответил.',
+	'error.internal_error':
+		'В сервере управления внутренняя проблема. Повторите позже. Если проблема остаётся, попросите администратора прочитать журнал сервера.',
+	'error.network': 'Сервер управления не ответил. Проверьте сеть и повторите.',
+	'error.csrf_required': 'В запросе нет заголовка CSRF. Обновите страницу и повторите.',
+	'error.payload_too_large': 'Запрос слишком большой. Уменьшите объём данных и повторите.',
+	'error.tenant_key_missing':
+		'У организации нет ключа шифрования. Попросите администратора платформы проверить установку.',
+	'error.ambiguous_credentials': 'В запросе есть и сеанс, и токен. Передайте только одно из них.',
+	'error.busy': 'Сервер управления занят. Подождите несколько секунд и повторите.',
+	'error.service_unavailable': 'Сервер управления не готов. Подождите и повторите.',
+	'error.agent_recently_online':
+		'Старый хост был в сети совсем недавно. Остановите его агент, подождите минуту и повторите.',
 	'error.field': 'Исправьте это поле.',
 
 	// Восстановление (FR-RS-01 — FR-RS-04)
@@ -1250,12 +1275,13 @@ export const ru: Record<MessageKey, string> = {
 	'channels.secretBody': 'Скопируйте секрет сейчас. ResticHub показывает его только один раз.',
 	'channels.secretText': 'Получатель проверяет заголовок X-ResticHub-Signature с этим секретом.',
 	'channels.secretValue': 'Секрет подписи',
-	'channels.error.blocked_address': 'Адрес локальный или частный.',
-	'channels.error.smtp_not_configured': 'В установке нет сервера SMTP.',
-	'channels.error.dns_failed': 'Имя хоста не найдено.',
+	'channels.error.blocked_address': 'Адрес локальный или частный. Укажите публичный адрес.',
+	'channels.error.smtp_not_configured':
+		'В установке нет сервера SMTP. Попросите администратора настроить сервер SMTP.',
+	'channels.error.dns_failed': 'Имя хоста не найдено. Проверьте адрес.',
 	'channels.error.connect_failed': 'Сервер управления не может подключиться.',
 	'channels.error.tls_failed': 'Не удалось установить защищённое соединение.',
-	'channels.error.timeout': 'Адресат не ответил вовремя.',
+	'channels.error.timeout': 'Адресат не ответил вовремя. Проверьте адресата и повторите.',
 	'channels.error.secret_unavailable': 'Секрет подписи недоступен.',
 	'audit.action.channel_create': 'Создание канала',
 	'audit.action.channel_update': 'Изменение канала',

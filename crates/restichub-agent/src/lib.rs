@@ -10,7 +10,6 @@ pub mod commands;
 pub mod connection;
 pub mod enroll;
 pub mod exec;
-pub mod hooks;
 pub mod http_get;
 pub mod identity;
 pub mod jobs;
@@ -34,6 +33,7 @@ pub mod self_install;
 pub mod service;
 pub mod setup;
 pub mod stream;
+pub mod trust;
 pub mod verify;
 #[cfg(windows)]
 pub mod winsec;

@@ -220,12 +220,8 @@ export type ProfilePaths = components['schemas']['ProfilePaths'];
 /** The backup options of a profile (FR-PF-01). */
 export type ProfileBackupOptions = components['schemas']['BackupOptions'];
 
-/** Position of a hook in the job (FR-HK-05). */
+/** Position of a script in the job (FR-HK-05). */
 export type HookPhase = components['schemas']['HookPhase'];
-
-export type HookParameter = components['schemas']['HookParameter'];
-
-export type HookRef = components['schemas']['HookRef'];
 
 /** The program that runs a script (FR-HK-09). */
 export type ScriptInterpreter = components['schemas']['Interpreter'];

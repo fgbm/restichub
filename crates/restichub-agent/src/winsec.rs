@@ -677,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn ac_hk_01_a_program_directory_where_users_add_files_is_refused() {
+    fn ac_hk_08_a_program_directory_where_users_add_files_is_refused() {
         // `(W)` grants write data and attributes: the right to add a file, without a delete.
         for rights in ["(W)", "(OI)(CI)(WD)", "(AD)"] {
             let dir = temp("program-dir");

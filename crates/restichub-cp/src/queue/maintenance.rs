@@ -67,15 +67,13 @@ async fn forget_steps(
 ) -> Result<Vec<Step>, BuildError> {
     let mut steps = Vec::new();
     for profile in profiles_repo::list_for_repository(tx, repository_id).await? {
-        let mut compiler_profile = compiler_profile_from_row(&profile).map_err(|error| {
+        let compiler_profile = compiler_profile_from_row(&profile).map_err(|error| {
             tracing::warn!(job = %job.id, profile = %profile.id, cause = ?error, "the stored profile does not convert");
             BuildError::Refused(Refusal::CompileFailed)
         })?;
         if compiler_profile.retention.is_none() {
             continue;
         }
-        // The retention step needs no hook, so a hook of the profile never blocks it.
-        compiler_profile.hooks.clear();
 
         let mut seen: HashSet<AgentId> = HashSet::new();
         for plan in plans_repo::list_by_profile(tx, profile.id).await? {

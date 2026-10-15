@@ -87,7 +87,7 @@ To check the connection:
 2. Find the host by its name.
 3. Read the status. A host that enrolled but did not connect yet shows "Waiting for connection". The status is "Active" after the first connection.
 4. Read the "Last seen" time. The control plane writes this time while the stream is open. A time within the last minute shows a live connection.
-5. Read the column "Agent version". The mark "Update available" shows an agent package that is older than the control plane (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)).
+5. Read the column "Agent version". The mark "Update available" shows an agent package older than the control plane (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)).
 
 The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. The Overview counts a host as online when the control plane heard from it in the last 90 seconds. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/operations/alerts/)).
 
@@ -118,7 +118,7 @@ To initialize a repository:
 1. Open the "Repositories" screen in the Web UI.
 2. Find the repository.
 3. Start "Initialize". For a repository that exists, start "Test access" instead.
-4. Read the job result. "The repository is ready." means that restic initialized the repository, or that the access succeeded. "The repository password or the credentials are not correct." is the result `config_error`. "The repository does not exist yet. Initialize it." is the result `not_initialized`.
+4. Read the job result. "The repository is ready." means that restic initialized the repository or that the access worked. "The repository password or the credentials are not correct." is the result `config_error`. "The repository does not exist yet. Initialize it." is the result `not_initialized`.
 5. Read the repository state. The control plane sets `initialized` after a successful init or a successful test-access.
 
 An init and a local-path repository run on the maintenance agent of the repository only.

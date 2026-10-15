@@ -20,7 +20,7 @@ Each agent has a client certificate for the mTLS stream to the control plane. Th
 2. The agent sends a certificate signing request (CSR) over the open stream.
 3. The control plane checks the request. The agent must be active, and it must present its enrolled certificate. The request must hold a new public key. The control plane signs a certificate for the identity of the presented certificate, never for an identity in the request.
 4. The control plane keeps the new certificate as pending and writes the audit record `agent_certificate_rotate`.
-5. The agent checks the answer against the root CA that it pinned at enrollment. It stores the new key, the new certificate and the new chain in the protected configuration directory, and it sends the confirmation.
+5. The agent checks the answer against the root CA that it pinned at enrollment. It stores the new key, certificate and chain in the protected configuration directory. Then it sends the confirmation.
 6. The control plane makes the new certificate the enrolled one. It refuses the old certificate serial from this moment.
 
 The old certificate stays valid until step 6. An agent that connects with the new certificate before it sent the confirmation also makes the new certificate the enrolled one.
