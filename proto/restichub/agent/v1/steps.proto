@@ -50,6 +50,9 @@ message Step {
     TestAccessStep test_access = 15;
     // Field numbers 16 to 19 are reserved for the 1.0 step types of FR-PR-02:
     // find, dump, copy, key_add and key_remove.
+    // ScriptStep runs a script from the control plane on a host that turned
+    // on the local trust mode (FR-HK-09, ADR-0037).
+    ScriptStep script = 20;
   }
 }
 
@@ -329,4 +332,62 @@ enum HookPhase {
   HOOK_PHASE_ON_SUCCESS = 3;
   HOOK_PHASE_ON_ERROR = 4;
   HOOK_PHASE_FINALLY = 5;
+}
+
+// ScriptStep runs one script that the control plane sends (FR-HK-09, ADR-0037).
+// The agent runs it only when the host administrator turned on the local trust
+// mode. The job signature covers the body. Scripts of one phase run in the
+// order of the job steps. The timeout is Step.timeout_seconds.
+message ScriptStep {
+  // Display name of the script in the log and in the job detail. At most 128
+  // characters.
+  string name = 1;
+  // Program that runs the body.
+  ScriptInterpreter interpreter = 2;
+  // Phase of the script in the job. Same meaning as for a hook (FR-HK-05).
+  HookPhase phase = 3;
+  // Text of the script. At most 65536 bytes of UTF-8. The agent writes it to a
+  // protected temporary file and deletes the file after the run.
+  string body = 4;
+  // What a failure of the script does to the job.
+  ScriptFailurePolicy failure_policy = 5;
+  // Environment variables of the script. The agent gives these values to the
+  // script only as environment variables, never as arguments.
+  repeated ScriptEnv env = 6;
+}
+
+// ScriptEnv is one environment variable of a script.
+message ScriptEnv {
+  // Name of the variable. Letters, digits and underscore, not first a digit.
+  string name = 1;
+  oneof value {
+    // Plain text value.
+    string string_value = 2;
+    // Value of a secret reference. The control plane resolves the reference
+    // when it sends the job (ADR-0017). The agent masks it in the job log.
+    string secret_value = 3;
+  }
+}
+
+// ScriptInterpreter is the program that runs a script body.
+enum ScriptInterpreter {
+  SCRIPT_INTERPRETER_UNSPECIFIED = 0;
+  // Windows PowerShell with -NoProfile -NonInteractive -ExecutionPolicy Bypass.
+  SCRIPT_INTERPRETER_POWERSHELL = 1;
+  // cmd.exe batch file on Windows.
+  SCRIPT_INTERPRETER_CMD = 2;
+  // bash on Linux and macOS.
+  SCRIPT_INTERPRETER_BASH = 3;
+  // POSIX sh on Linux and macOS.
+  SCRIPT_INTERPRETER_SH = 4;
+}
+
+// ScriptFailurePolicy is what a failed script does to the job (FR-HK-09).
+enum ScriptFailurePolicy {
+  SCRIPT_FAILURE_POLICY_UNSPECIFIED = 0;
+  // A failed script of the before phase stops the backup. The on_error and
+  // finally scripts still run.
+  SCRIPT_FAILURE_POLICY_ABORT_BACKUP = 1;
+  // The job goes on. The job still ends as failed.
+  SCRIPT_FAILURE_POLICY_CONTINUE = 2;
 }

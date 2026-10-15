@@ -8,8 +8,9 @@
 use std::fmt;
 
 use crate::agent::v1::{
-    HookParameter, RepositoryAccess, RestCredentials, S3Credentials, SftpCredentials, SignedJob,
-    hook_parameter::Typed, repository_access::BackendCredentials,
+    HookParameter, RepositoryAccess, RestCredentials, S3Credentials, ScriptEnv, ScriptStep,
+    SftpCredentials, SignedJob, hook_parameter::Typed, repository_access::BackendCredentials,
+    script_env,
 };
 
 const MASK: &str = "***";
@@ -92,6 +93,36 @@ impl fmt::Debug for HookParameter {
     }
 }
 
+impl fmt::Debug for ScriptEnv {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match &self.value {
+            Some(script_env::Value::StringValue(value)) => value.as_str(),
+            Some(script_env::Value::SecretValue(_)) => MASK,
+            None => "",
+        };
+        formatter
+            .debug_struct("ScriptEnv")
+            .field("name", &self.name)
+            .field("value", &value)
+            .finish()
+    }
+}
+
+/// The body of a script can be long and can hold a pasted secret, so only its length is printed.
+impl fmt::Debug for ScriptStep {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ScriptStep")
+            .field("name", &self.name)
+            .field("interpreter", &self.interpreter)
+            .field("phase", &self.phase)
+            .field("body_bytes", &self.body.len())
+            .field("failure_policy", &self.failure_policy)
+            .field("env", &self.env)
+            .finish()
+    }
+}
+
 impl fmt::Debug for Typed {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -126,6 +157,29 @@ mod tests {
         let text = format!("{parameter:?}");
         assert!(!text.contains(CANARY));
         assert!(text.contains(MASK));
+    }
+
+    #[test]
+    fn fr_hk_09_debug_output_masks_a_secret_script_variable_and_hides_the_body() {
+        let step = ScriptStep {
+            name: "dump".to_owned(),
+            body: format!("echo {CANARY}"),
+            env: vec![
+                ScriptEnv {
+                    name: "PGPASSWORD".to_owned(),
+                    value: Some(script_env::Value::SecretValue(CANARY.to_owned())),
+                },
+                ScriptEnv {
+                    name: "PGHOST".to_owned(),
+                    value: Some(script_env::Value::StringValue("db1".to_owned())),
+                },
+            ],
+            ..ScriptStep::default()
+        };
+        let text = format!("{step:?}");
+        assert!(!text.contains(CANARY));
+        assert!(text.contains(MASK));
+        assert!(text.contains("db1"));
     }
 
     fn secret_repository() -> RepositoryAccess {

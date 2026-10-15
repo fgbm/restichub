@@ -8,11 +8,19 @@ pub enum AgentCapability {
     /// The agent runs the `hook` step from its allow-list and reads the typed hook parameters
     /// (FR-HK-03). An older agent rejects the step.
     HooksV1,
+    /// The agent runs the `script` step on a host with the local trust mode (FR-HK-09, ADR-0037).
+    /// An older agent rejects the step.
+    ScriptsV1,
 }
 
 impl AgentCapability {
     /// Every capability that this build supports.
-    pub const ALL: [Self; 3] = [Self::ForgetAllTags, Self::RestoreV1, Self::HooksV1];
+    pub const ALL: [Self; 4] = [
+        Self::ForgetAllTags,
+        Self::RestoreV1,
+        Self::HooksV1,
+        Self::ScriptsV1,
+    ];
 
     /// The wire name in `AgentHello.capabilities`.
     #[must_use]
@@ -21,6 +29,7 @@ impl AgentCapability {
             Self::ForgetAllTags => "forget-all-tags",
             Self::RestoreV1 => "restore-v1",
             Self::HooksV1 => "hooks-v1",
+            Self::ScriptsV1 => "scripts-v1",
         }
     }
 
@@ -66,12 +75,14 @@ mod tests {
         names.push("forget-all-tags".to_owned());
         names.push("restore-v1".to_owned());
         names.push("hooks-v1".to_owned());
+        names.push("scripts-v1".to_owned());
         assert_eq!(
             AgentCapability::parse_list(&names),
             [
                 AgentCapability::ForgetAllTags,
                 AgentCapability::RestoreV1,
-                AgentCapability::HooksV1
+                AgentCapability::HooksV1,
+                AgentCapability::ScriptsV1
             ]
         );
         assert!(AgentCapability::parse_list(&names[..10_000]).is_empty());
