@@ -401,7 +401,7 @@ pub struct PlannedStep {
     pub step_id: String,
     /// `None` for a job from an older version.
     pub kind: Option<PlannedKind>,
-    /// The display name: the name of a script or the identifier of a hook. Empty for the others.
+    /// The display name: the name of a script. Empty for the others.
     pub name: String,
     pub phase: Option<PlannedPhase>,
     /// The SHA-256 hash of a script body, in lowercase hex (ADR-0037).
