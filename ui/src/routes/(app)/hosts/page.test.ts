@@ -83,6 +83,10 @@ function agent(overrides: Record<string, unknown> = {}) {
 		labels: [],
 		certificate_serial: '0f01',
 		certificate_expires_at: FUTURE,
+		last_certificate_rotation_at: null,
+		protocol_version: '1.1',
+		control_plane_version: '0.4.2',
+		version_status: 'current',
 		status: 'active',
 		last_seen_at: PAST,
 		created_at: PAST,
@@ -174,5 +178,51 @@ describe('the Hosts screen', () => {
 		await user.click(within(dialog).getByRole('button', { name: 'Rename' }));
 
 		await waitFor(() => expect(mocks.renameAgent).toHaveBeenCalledWith('a_01', 'new-name'));
+	});
+
+	it('marks an agent that needs an update and an agent with an unsupported version (FR-PR-09)', async () => {
+		mocks.listAgents.mockResolvedValue([
+			agent({ id: 'a_01', hostname: 'host-current' }),
+			agent({
+				id: 'a_02',
+				hostname: 'host-old',
+				agent_version: '0.3.0',
+				version_status: 'update_available'
+			}),
+			agent({
+				id: 'a_03',
+				hostname: 'host-refused',
+				agent_version: '0.1.0',
+				protocol_version: '0.9',
+				version_status: 'unsupported'
+			})
+		]);
+		render(Hosts);
+
+		await screen.findByText('host-refused');
+		expect(screen.getAllByText('Update available')).toHaveLength(1);
+		expect(screen.getAllByText('Unsupported version')).toHaveLength(1);
+		expect(screen.getByText('0.1.0')).toHaveAttribute(
+			'title',
+			'Protocol 0.9 · control plane 0.4.2'
+		);
+	});
+
+	it('shows the certificate expiry, the last rotation and warns before the expiry (FR-ID-03)', async () => {
+		const soon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+		const rotated = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+		mocks.listAgents.mockResolvedValue([
+			agent({ id: 'a_01', hostname: 'host-fresh', last_certificate_rotation_at: rotated }),
+			agent({ id: 'a_02', hostname: 'host-soon', certificate_expires_at: soon })
+		]);
+		render(Hosts);
+
+		await screen.findByText('host-soon');
+		expect(screen.getAllByText(/^Expires /)).toHaveLength(2);
+		expect(screen.getAllByText('Not renewed yet')).toHaveLength(1);
+		expect(screen.getAllByText(/^Renewed /)).toHaveLength(1);
+		const [fresh, warn] = screen.getAllByText(/^Expires /);
+		expect(fresh.classList.contains('cert__expiry--warn')).toBe(false);
+		expect(warn.classList.contains('cert__expiry--warn')).toBe(true);
 	});
 });
