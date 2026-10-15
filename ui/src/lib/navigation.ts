@@ -12,6 +12,7 @@ const ADMIN_ROLES: Role[] = ['platform_admin', 'admin'];
 export type SettingsHref =
 	| '/(app)/settings/access/users'
 	| '/(app)/settings/access/api-tokens'
+	| '/(app)/settings/access/secrets'
 	| '/(app)/settings/notifications/channels'
 	| '/(app)/settings/notifications/rules'
 	| '/(app)/settings/scripts/templates'
@@ -152,6 +153,12 @@ export const settingsNavigation: SettingsGroup[] = [
 				href: '/(app)/settings/access/api-tokens',
 				labelKey: 'nav.apiTokens',
 				icon: 'key',
+				roles: ADMIN_ROLES
+			},
+			{
+				href: '/(app)/settings/access/secrets',
+				labelKey: 'nav.secrets',
+				icon: 'lock',
 				roles: ADMIN_ROLES
 			}
 		]
