@@ -96,8 +96,9 @@ pub(super) struct PhaseMode {
     pub(super) honor_cancel: bool,
     /// Do not start a hook after the deadline of the job.
     pub(super) honor_deadline: bool,
-    /// A cleanup hook runs after the deadline too, but only this long past it.
-    pub(super) deadline_grace: Option<Duration>,
+    /// A cleanup hook runs after the deadline too: the deadline passed to the phase is the end of
+    /// the cleanup budget and bounds the run time of the hook without blocking its start.
+    pub(super) clamp_to_deadline: bool,
 }
 
 /// What a phase did.
@@ -353,9 +354,10 @@ impl Jobs {
                 return StepOutcome::not_started();
             }
             limit = limit.min(remaining);
-        } else if let (Some(grace), Some(deadline)) = (mode.deadline_grace, deadline) {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            limit = limit.min(remaining.saturating_add(grace));
+        } else if mode.clamp_to_deadline
+            && let Some(deadline) = deadline
+        {
+            limit = limit.min(deadline.saturating_duration_since(tokio::time::Instant::now()));
         }
         let scrubber = Scrubber::for_secrets(&invocation.secrets);
         let mut child = match crate::exec::spawn_job_hook(&invocation, &self.cache) {

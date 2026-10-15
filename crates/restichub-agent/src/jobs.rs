@@ -618,7 +618,7 @@ impl Jobs {
                     stop_on_failure: true,
                     honor_cancel: true,
                     honor_deadline: true,
-                    deadline_grace: None,
+                    clamp_to_deadline: false,
                 },
                 &cancel,
                 deadline,
@@ -789,15 +789,17 @@ impl Jobs {
             stop_on_failure: false,
             honor_cancel: true,
             honor_deadline: false,
-            deadline_grace: Some(self.cleanup_grace),
+            clamp_to_deadline: true,
         };
+        // One budget for the whole cleanup of the job, not one grace for each step (FR-HK-05).
+        let cleanup_deadline = deadline.map(|deadline| deadline + self.cleanup_grace);
         let main_ok = before_ok
             && progress.stopped_code.is_none()
             && !progress.init_invalid
             && !progress.cancelled;
         if before_ok && !progress.cancelled {
             let report = self
-                .run_hook_steps(&phased.after, cleanup, &cancel, deadline, sink!())
+                .run_hook_steps(&phased.after, cleanup, &cancel, cleanup_deadline, sink!())
                 .await;
             progress.cancelled |= report.cancelled;
             progress.warned |= report.warned;
@@ -819,7 +821,7 @@ impl Jobs {
         ] {
             if run {
                 let report = self
-                    .run_hook_steps(steps, cleanup, &cancel, deadline, sink!())
+                    .run_hook_steps(steps, cleanup, &cancel, cleanup_deadline, sink!())
                     .await;
                 progress.cancelled |= report.cancelled;
                 progress.warned |= report.warned;
@@ -836,7 +838,7 @@ impl Jobs {
                     ..cleanup
                 },
                 &cancel,
-                deadline,
+                cleanup_deadline,
                 sink!(),
             )
             .await;

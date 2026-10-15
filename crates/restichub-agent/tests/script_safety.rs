@@ -226,6 +226,33 @@ async fn fr_hk_05_a_hanging_finally_script_ends_with_the_deadline_and_the_grace(
     assert!(host.leftovers().is_empty());
 }
 
+/// FR-HK-05: the cleanup scripts of one job share one grace, they do not get one each.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_hk_05_two_hanging_finally_scripts_end_within_one_grace() {
+    let host = Host::new("script-finally-budget");
+    host.enable();
+    let mut job = host.job(
+        "job-finally-budget",
+        vec![
+            backup_step("repo-1", &["/srv"]),
+            simple("script-0", HookPhase::Finally, "sleep 300\n", vec![]),
+            simple("script-1", HookPhase::Finally, "sleep 300\n", vec![]),
+        ],
+    );
+    job.timeout_seconds = 1;
+    let jobs = host
+        .jobs()
+        .with_cleanup_grace(std::time::Duration::from_secs(4));
+    let begin = std::time::Instant::now();
+    let collected = run(&jobs, &job).await;
+    // Two separate graces would take 1 + 4 + 4 seconds.
+    assert!(begin.elapsed() < std::time::Duration::from_secs(8));
+    for id in ["script-0", "script-1"] {
+        assert_eq!(status_of(&collected, id), StepStatus::Failed, "{id}");
+    }
+    assert!(host.leftovers().is_empty());
+}
+
 /// AC-HK-09: the agent removes the script directories of a crashed run when it starts.
 #[tokio::test(flavor = "multi_thread")]
 async fn ac_hk_09_the_agent_start_removes_a_stale_script_directory() {
