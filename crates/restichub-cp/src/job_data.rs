@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 
+use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
 use restichub_db::job_logs::NewChunk;
 use restichub_db::job_steps::{
     self, BackupSummary, CheckSummary, ForgetSummary, JobProgress, JobStep, MAX_CURRENT_FILES,
@@ -21,6 +22,7 @@ use restichub_proto::agent::v1::{
     ErrorDetail, JobResult, LogChunk, LogStream as ProtoLogStream, StepProgress, StepResult,
     StepStatus as ProtoStepStatus, step_result,
 };
+use serde_json::json;
 use time::OffsetDateTime;
 
 use crate::browse;
@@ -72,7 +74,7 @@ pub async fn handle_progress(
         return;
     };
     let result = async {
-        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
+        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff, "step_progress").await? else {
             return Ok(());
         };
         // A job that is not running shows no progress.
@@ -105,7 +107,7 @@ pub async fn handle_step_result(
         return;
     };
     let outcome = async {
-        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
+        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff, "step_result").await? else {
             return Ok(());
         };
         job_steps::upsert(&mut tx, job_id, &step).await?;
@@ -131,7 +133,7 @@ pub async fn handle_log_chunk(
     let Some(new_chunk) = chunk_of(chunk) else {
         return;
     };
-    if !job_is_owned(state, tenant, agent, job_id).await {
+    if !job_is_owned(state, tenant, agent, job_id, "log_chunk").await {
         return;
     }
     let store = DatabaseLogStore::new(state.db().clone());
@@ -156,7 +158,7 @@ pub async fn handle_job_result_data(
     let Some(job_id) = parse_job_id_value(&result.job_id) else {
         return;
     };
-    if !job_is_owned(state, tenant, agent, job_id).await {
+    if !job_is_owned(state, tenant, agent, job_id, "job_result_data").await {
         return;
     }
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
@@ -186,12 +188,21 @@ pub async fn handle_job_result_data(
     }
 }
 
-async fn job_is_owned(state: &AppState, tenant: TenantId, agent: AgentId, job: JobId) -> bool {
+async fn job_is_owned(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    job: JobId,
+    kind: &'static str,
+) -> bool {
     let cutoff = write_cutoff(state);
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         return false;
     };
-    let owned = matches!(owned_job(&mut tx, job, agent, cutoff).await, Ok(Some(_)));
+    let owned = matches!(
+        owned_job(&mut tx, job, agent, cutoff, kind).await,
+        Ok(Some(_))
+    );
     let _ = tx.commit().await;
     owned
 }
@@ -205,18 +216,65 @@ fn write_cutoff(state: &AppState) -> OffsetDateTime {
 }
 
 /// Reads the job when it belongs to the agent, has left the queue and takes writes.
+///
+/// A message for the job of another agent, or for a job that the control plane has not sent yet,
+/// changes no row and leaves an audit record (AC-PR-05). The record commits with the transaction
+/// of the caller.
 async fn owned_job(
     tx: &mut restichub_db::TenantTx<'_>,
     job: JobId,
     agent: AgentId,
     cutoff: OffsetDateTime,
+    kind: &'static str,
 ) -> Result<Option<Job>, restichub_db::DbError> {
-    let found = job_repo::get(tx, job).await?;
-    Ok(found.filter(|row| {
-        row.agent_id == agent
-            && row.status != JobStatus::Queued
-            && row.finished_at.is_none_or(|finished| finished >= cutoff)
-    }))
+    let Some(row) = job_repo::get(tx, job).await? else {
+        return Ok(None);
+    };
+    if row.agent_id != agent {
+        audit_refused_message(tx, agent, job, kind, MessageRefusal::ForeignJob).await?;
+        return Ok(None);
+    }
+    if row.status == JobStatus::Queued {
+        audit_refused_message(tx, agent, job, kind, MessageRefusal::JobNotSent).await?;
+        return Ok(None);
+    }
+    Ok(Some(row).filter(|row| row.finished_at.is_none_or(|finished| finished >= cutoff)))
+}
+
+/// Why the control plane ignores a message of an agent (AC-PR-05).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum MessageRefusal {
+    ForeignJob,
+    JobNotSent,
+}
+
+impl MessageRefusal {
+    fn code(self) -> &'static str {
+        match self {
+            Self::ForeignJob => "foreign_job",
+            Self::JobNotSent => "job_not_sent",
+        }
+    }
+}
+
+/// Writes the audit record of a message that the control plane ignores. The record holds the
+/// message kind and the claimed job, never the payload.
+pub(crate) async fn audit_refused_message(
+    tx: &mut restichub_db::TenantTx<'_>,
+    agent: AgentId,
+    job: JobId,
+    kind: &str,
+    refusal: MessageRefusal,
+) -> Result<(), restichub_db::DbError> {
+    let mut event = AuditEvent::new(AuditAction::AgentMessageRefused, "job");
+    event.actor = Actor::Agent(agent.as_uuid());
+    event.object_id = Some(job.as_uuid());
+    event.diff = Some(diff(
+        None,
+        Some(&json!({ "message": kind, "reason": refusal.code() })),
+        &[],
+    ));
+    restichub_db::audit::insert(tx, &event).await.map(|_| ())
 }
 
 async fn finish(

@@ -278,7 +278,7 @@ async fn two_dispatcher_instances_never_send_the_same_job_twice() {
 }
 
 #[tokio::test]
-async fn a_profile_that_no_longer_compiles_fails_the_job_with_a_typed_reason() {
+async fn ac_ag_09_an_agent_with_an_older_restic_gets_no_job_and_the_status_is_incompatible() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -301,8 +301,11 @@ async fn a_profile_that_no_longer_compiles_fails_the_job_with_a_typed_reason() {
 
     let body = env.job(job).await;
     assert_eq!(body["status"], "failed");
-    assert_eq!(body["result_code"], "config_error");
-    assert_eq!(body["result_message"], "compile_failed");
+    assert_eq!(body["result_code"], "incompatible");
+    assert_eq!(
+        body["result_message"],
+        "incompatible: restic 0.18.1 is the minimum, the agent has 0.1.0"
+    );
     assert!(agent.try_job(Duration::from_millis(300)).await.is_none());
     assert_eq!(
         delivered_count(&env).await,

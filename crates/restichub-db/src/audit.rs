@@ -160,6 +160,11 @@ pub enum AuditAction {
     ScriptRun,
     /// A migration dropped the hooks of a profile (ADR-0040).
     ProfileHooksRemoved,
+    /// An agent refused a signed job (AC-PR-01).
+    JobRejected,
+    /// An agent sent a message for a job of another agent or for a job that it cannot hold
+    /// (AC-PR-05).
+    AgentMessageRefused,
     /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),
 }
@@ -231,6 +236,8 @@ impl AuditAction {
             Self::JobTemplateDelete => "job_template_delete",
             Self::ScriptRun => "script_run",
             Self::ProfileHooksRemoved => "profile_hooks_removed",
+            Self::JobRejected => "job_rejected",
+            Self::AgentMessageRefused => "agent_message_refused",
             Self::Unknown(value) => value,
         }
     }
@@ -302,6 +309,8 @@ impl AuditAction {
             "job_template_delete" => Self::JobTemplateDelete,
             "script_run" => Self::ScriptRun,
             "profile_hooks_removed" => Self::ProfileHooksRemoved,
+            "job_rejected" => Self::JobRejected,
+            "agent_message_refused" => Self::AgentMessageRefused,
             _ => return None,
         };
         Some(action)
@@ -377,6 +386,8 @@ impl AuditAction {
             Self::JobTemplateDelete,
             Self::ScriptRun,
             Self::ProfileHooksRemoved,
+            Self::JobRejected,
+            Self::AgentMessageRefused,
         ]
     }
 }

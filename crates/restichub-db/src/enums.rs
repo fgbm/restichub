@@ -543,6 +543,8 @@ pub enum JobResultCode {
     SucceededWithWarnings,
     /// A lock on the repository stopped the job (restic exit code 11, FR-SC-05).
     RepositoryLocked,
+    /// An option of the profile needs a newer restic than the agent has (AC-AG-09).
+    Incompatible,
 }
 
 impl JobResultCode {
@@ -556,6 +558,7 @@ impl JobResultCode {
             Self::Cancelled => "cancelled",
             Self::SucceededWithWarnings => "succeeded_with_warnings",
             Self::RepositoryLocked => "repository_locked",
+            Self::Incompatible => "incompatible",
         }
     }
 
@@ -570,6 +573,7 @@ impl JobResultCode {
             "cancelled" => Some(Self::Cancelled),
             "succeeded_with_warnings" => Some(Self::SucceededWithWarnings),
             "repository_locked" => Some(Self::RepositoryLocked),
+            "incompatible" => Some(Self::Incompatible),
             _ => None,
         }
     }
@@ -852,6 +856,7 @@ mod tests {
             JobResultCode::Cancelled,
             JobResultCode::SucceededWithWarnings,
             JobResultCode::RepositoryLocked,
+            JobResultCode::Incompatible,
         ] {
             assert_eq!(JobResultCode::parse(code.as_str()), Some(code));
         }

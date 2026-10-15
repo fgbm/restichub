@@ -33,7 +33,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_compiler::ValidatedJob;
-use restichub_db::audit::{AuditAction, diff};
+use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
 use restichub_db::jobs::{self as job_repo, Job, JobOutcome, NewJob};
 use restichub_db::queue::{self as queue_repo, JobDetail};
 use restichub_db::repositories::{self as repo, Repository};
@@ -57,6 +57,7 @@ use uuid::Uuid;
 use crate::context::{Operation, RequestContext};
 use crate::delivery::{DeliveryError, SecretReader};
 use crate::error::{ApiError, map_write_error};
+use crate::job_data;
 use crate::json::ApiJson;
 use crate::queue::retry;
 use crate::repositories::stored_location;
@@ -403,6 +404,7 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
         }
     };
     if job.agent_id != agent {
+        audit_foreign_job(tx, agent, job_id, "job_ack").await;
         return;
     }
     if job.status == JobStatus::Sent
@@ -451,6 +453,14 @@ pub async fn handle_job_rejected(
             reason = reject_reason_code(rejected.reason),
             "the agent rejected a job that it could not identify"
         );
+        audit_rejection(
+            state,
+            tenant,
+            agent,
+            None,
+            reject_reason_code(rejected.reason),
+        )
+        .await;
         return;
     };
     let now = state.auth().clock.now();
@@ -466,7 +476,11 @@ pub async fn handle_job_rejected(
             return;
         }
     };
-    if job.agent_id != agent || job.status.is_terminal() {
+    if job.agent_id != agent {
+        audit_foreign_job(tx, agent, job_id, "job_rejected").await;
+        return;
+    }
+    if job.status.is_terminal() {
         return;
     }
     // A busy agent only defers the job: it stays `sent` and the control plane delivers it again
@@ -493,11 +507,74 @@ pub async fn handle_job_rejected(
         tracing::warn!(job = %job_id, %error, "the rejection could not update the job");
         return;
     }
+    if let Err(error) = insert_rejection_audit(&mut tx, agent, Some(job_id), reason).await {
+        tracing::warn!(job = %job_id, %error, "the rejection could not be audited");
+        return;
+    }
     if let Err(error) = tx.commit().await {
         tracing::warn!(job = %job_id, %error, "the rejection could not commit");
         return;
     }
     state.wake_dispatcher();
+}
+
+/// Audits and commits the message of an agent for the job of another agent (AC-PR-05).
+async fn audit_foreign_job(
+    mut tx: restichub_db::TenantTx<'_>,
+    agent: AgentId,
+    job: JobId,
+    kind: &str,
+) {
+    let audited = job_data::audit_refused_message(
+        &mut tx,
+        agent,
+        job,
+        kind,
+        job_data::MessageRefusal::ForeignJob,
+    )
+    .await;
+    match audited {
+        Ok(()) => {
+            if let Err(error) = tx.commit().await {
+                tracing::warn!(%job, %error, "the audit of a foreign message could not commit");
+            }
+        }
+        Err(error) => tracing::warn!(%job, %error, "a foreign message could not be audited"),
+    }
+}
+
+/// Audits a rejection that names no job of the agent (AC-PR-01).
+async fn audit_rejection(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    job: Option<JobId>,
+    reason: &str,
+) {
+    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+        tracing::warn!(%agent, "the rejection audit could not open a transaction");
+        return;
+    };
+    if let Err(error) = insert_rejection_audit(&mut tx, agent, job, reason).await {
+        tracing::warn!(%agent, %error, "the rejection could not be audited");
+        return;
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::warn!(%agent, %error, "the rejection audit could not commit");
+    }
+}
+
+async fn insert_rejection_audit(
+    tx: &mut restichub_db::TenantTx<'_>,
+    agent: AgentId,
+    job: Option<JobId>,
+    reason: &str,
+) -> Result<(), restichub_db::DbError> {
+    let mut event = AuditEvent::new(AuditAction::JobRejected, "job");
+    event.actor = Actor::Agent(agent.as_uuid());
+    event.object_id = job.map(|job| job.as_uuid());
+    event.diff = Some(diff(None, Some(&json!({ "reason": reason })), &[]));
+    restichub_db::audit::insert(tx, &event).await.map(|_| ())
 }
 
 /// The stable code of a `RejectReason`. The user interface translates it (NFR-DOC-04).
@@ -593,7 +670,11 @@ pub async fn handle_job_result(
             return;
         }
     };
-    if job.agent_id != agent || job.status.is_terminal() {
+    if job.agent_id != agent {
+        audit_foreign_job(tx, agent, job_id, "job_result").await;
+        return;
+    }
+    if job.status.is_terminal() {
         return;
     }
     let Some(outcome) = outcome_of(result) else {
@@ -942,6 +1023,7 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         | JobResultCode::ConfigError
         | JobResultCode::NotInitialized
         | JobResultCode::AccessError
+        | JobResultCode::Incompatible
         | JobResultCode::Cancelled => JobStatus::Failed,
     };
     // The typed code says all: the agent repeats it as the error code of the job.

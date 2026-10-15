@@ -219,6 +219,18 @@ async fn dispatch_tenant(
                 tracing::warn!(job = %job.id, reason = code, "the queue fails a job");
                 fail(&mut tx, &job, code, result_code, now).await?;
             }
+            Prepared::Incompatible(message) => {
+                tx.rollback_to_savepoint(SAVEPOINT).await?;
+                tracing::warn!(job = %job.id, reason = %message, "the queue fails an incompatible job");
+                fail(
+                    &mut tx,
+                    &job,
+                    &message,
+                    restichub_db::JobResultCode::Incompatible,
+                    now,
+                )
+                .await?;
+            }
             Prepared::Skip => {
                 tx.rollback_to_savepoint(SAVEPOINT).await?;
             }
@@ -237,6 +249,9 @@ async fn dispatch_tenant(
 enum Prepared {
     Send(SignedJob, Vec<restichub_proto::AgentCapability>),
     Fail(&'static str, restichub_db::JobResultCode),
+    /// An option of the profile needs a newer restic than the agent reports (AC-AG-09). The text
+    /// names the option and the needed version.
+    Incompatible(String),
     /// A database or a key error. The job stays as it is and the next pass tries again.
     Skip,
 }
@@ -254,6 +269,7 @@ async fn first_send(
         Err(BuildError::Refused(refusal)) => {
             return Ok(Prepared::Fail(refusal.code(), refusal.result_code()));
         }
+        Err(BuildError::Incompatible(message)) => return Ok(Prepared::Incompatible(message)),
         Err(BuildError::Transient(cause)) => {
             tracing::warn!(job = %job.id, %cause, "the queue could not build a job");
             return Ok(Prepared::Skip);
