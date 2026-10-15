@@ -941,7 +941,7 @@ fn runs_programs(job: &restichub_proto::agent::v1::Job) -> bool {
         .any(|step| matches!(step.kind, Some(step::Kind::Script(_) | step::Kind::Hook(_))))
 }
 
-/// The final result of a job that a restart interrupted. No step result exists for it (ADR-0037).
+/// A restart cut the job short, so no step result exists for it (ADR-0037).
 fn interrupted_result(job: &restichub_proto::agent::v1::Job) -> JobResult {
     JobResult {
         job_id: job.job_id.clone(),
