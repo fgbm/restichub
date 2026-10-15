@@ -13,7 +13,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::ids::{EnrollmentTokenId, TenantId, UserId};
+use crate::ids::{AgentId, EnrollmentTokenId, TenantId, UserId};
 use crate::tx::{EnrollmentTx, TenantTx};
 
 /// Default time to live of a token (ADR-0032: one hour).
@@ -34,6 +34,8 @@ pub struct NewEnrollmentToken<'a> {
     pub labels: &'a [String],
     pub expires_at: OffsetDateTime,
     pub created_by: UserId,
+    /// Binds the token to an existing host: the enrollment keeps that agent identifier.
+    pub replaces_agent_id: Option<AgentId>,
 }
 
 /// The metadata of one token. It holds no token value.
@@ -48,6 +50,9 @@ pub struct EnrollmentToken {
     pub revoked_by_user_id: Option<UserId>,
     pub created_by: UserId,
     pub created_at: OffsetDateTime,
+    pub replaces_agent_id: Option<AgentId>,
+    /// The host that the enrollment with this token created or replaced the identity of.
+    pub used_by_agent_id: Option<AgentId>,
 }
 
 /// The result of a token exchange (FR-ID-01, AC-ID-01).
@@ -100,8 +105,9 @@ pub async fn create(
     let id = EnrollmentTokenId::new();
     sqlx::query(
         "INSERT INTO enrollment_tokens \
-         (id, tenant_id, token_hash, display_prefix, labels, expires_at, created_by_user_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+         (id, tenant_id, token_hash, display_prefix, labels, expires_at, created_by_user_id, \
+          replaces_agent_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(id)
     .bind(tx.tenant())
@@ -110,6 +116,7 @@ pub async fn create(
     .bind(new.labels)
     .bind(new.expires_at)
     .bind(new.created_by)
+    .bind(new.replaces_agent_id)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -128,7 +135,7 @@ pub async fn list(
     };
     let mut tokens: Vec<EnrollmentToken> = sqlx::query_as::<_, EnrollmentTokenRow>(
         "SELECT id, display_prefix, labels, expires_at, used_at, revoked_at, revoked_by_user_id, \
-                created_by_user_id, created_at \
+                created_by_user_id, created_at, replaces_agent_id, used_by_agent_id \
          FROM enrollment_tokens \
          WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
          ORDER BY created_at DESC, id DESC \
@@ -155,7 +162,7 @@ pub async fn get(
 ) -> Result<Option<EnrollmentToken>, DbError> {
     let row = sqlx::query_as::<_, EnrollmentTokenRow>(
         "SELECT id, display_prefix, labels, expires_at, used_at, revoked_at, revoked_by_user_id, \
-                created_by_user_id, created_at \
+                created_by_user_id, created_at, replaces_agent_id, used_by_agent_id \
          FROM enrollment_tokens WHERE id = $1",
     )
     .bind(id)
@@ -168,8 +175,8 @@ pub async fn get(
 /// Revokes an unused token of the tenant (a soft change).
 ///
 /// Sets `revoked_at` and `revoked_by_user_id` in one conditional update. `true` when the row
-/// changed. A used or an already revoked token changes nothing (`false`); the caller reads the
-/// metadata to tell the cases apart.
+/// changed. A used, an already revoked or an expired token changes nothing (`false`); the caller
+/// reads the metadata to tell the cases apart.
 pub async fn revoke(
     tx: &mut TenantTx<'_>,
     id: EnrollmentTokenId,
@@ -178,7 +185,7 @@ pub async fn revoke(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE enrollment_tokens SET revoked_at = $2, revoked_by_user_id = $3 \
-         WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL",
+         WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > $2",
     )
     .bind(id)
     .bind(now)
@@ -187,6 +194,45 @@ pub async fn revoke(
     .await
     .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
+}
+
+/// Revokes the unused tokens that are bound to one host (FR-ID-10).
+///
+/// A new bound token and a successful re-registration call it, so at most one bound token of a host
+/// is spendable. `actor` is `None` when the enrollment itself revokes the rest. Returns the number
+/// of revoked tokens.
+pub async fn revoke_unused_for_agent(
+    tx: &mut TenantTx<'_>,
+    agent: AgentId,
+    actor: Option<UserId>,
+    now: OffsetDateTime,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE enrollment_tokens SET revoked_at = $2, revoked_by_user_id = $3 \
+         WHERE replaces_agent_id = $1 AND used_at IS NULL AND revoked_at IS NULL",
+    )
+    .bind(agent)
+    .bind(now)
+    .bind(actor)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
+}
+
+/// Records the host that a spent token enrolled, so the console can name it (FR-ID-01).
+pub async fn set_used_by(
+    tx: &mut TenantTx<'_>,
+    id: EnrollmentTokenId,
+    agent_id: AgentId,
+) -> Result<(), DbError> {
+    sqlx::query("UPDATE enrollment_tokens SET used_by_agent_id = $2 WHERE id = $1")
+        .bind(id)
+        .bind(agent_id)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(())
 }
 
 /// Spends a token (FR-ID-01, AC-ID-01).
@@ -247,6 +293,8 @@ pub enum EnrollmentRefusal {
     Used,
     Expired,
     Revoked,
+    /// A token bound to a host that is revoked or gone (FR-ID-10).
+    AgentNotActive,
 }
 
 impl EnrollmentRefusal {
@@ -256,6 +304,7 @@ impl EnrollmentRefusal {
             Self::Used => "used",
             Self::Expired => "expired",
             Self::Revoked => "revoked",
+            Self::AgentNotActive => "agent_not_active",
         }
     }
 
@@ -265,6 +314,7 @@ impl EnrollmentRefusal {
             "used" => Some(Self::Used),
             "expired" => Some(Self::Expired),
             "revoked" => Some(Self::Revoked),
+            "agent_not_active" => Some(Self::AgentNotActive),
             _ => None,
         }
     }
@@ -278,6 +328,7 @@ pub enum EnrollmentConsume {
         tenant_id: TenantId,
         token_id: EnrollmentTokenId,
         labels: Vec<String>,
+        replaces_agent_id: Option<AgentId>,
     },
     /// The token exists but is refused. The transaction is scoped to `tenant_id` for the audit.
     Refused {
@@ -292,8 +343,8 @@ pub enum EnrollmentConsume {
 /// Consumes a one-time token by its hash across the installation (FR-ID-01, FR-TN-03, AC-ID-01).
 ///
 /// The token belongs to one tenant, which the enrollment endpoint does not know before the lookup.
-/// The `SECURITY DEFINER` function `enroll_consume_token` of migration 0025 does the lookup and the
-/// atomic consume under one row lock. On a hit the function returns the tenant, so the caller
+/// The `SECURITY DEFINER` function `enroll_consume_token` of migrations 0025 and 0042 does the
+/// lookup and the atomic consume under one row lock. On a hit the function returns the tenant, so the caller
 /// continues in a tenant transaction and creates the agent row in the same transaction; a consumed
 /// token therefore never stays without an agent. The caller records the refusal reason in the
 /// tenant of the refused token. The function reads the time from the database server, so a clock of
@@ -302,13 +353,15 @@ pub async fn consume_for_enrollment(
     tx: &mut EnrollmentTx<'_>,
     token_hash: &[u8],
 ) -> Result<EnrollmentConsume, DbError> {
-    let row: Option<(String, Uuid, Uuid, Vec<String>)> =
-        sqlx::query_as("SELECT outcome, tenant_id, token_id, labels FROM enroll_consume_token($1)")
-            .bind(token_hash)
-            .fetch_optional(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
-    let Some((outcome, tenant_id, token_id, labels)) = row else {
+    let row: Option<ConsumeRow> = sqlx::query_as(
+        "SELECT outcome, tenant_id, token_id, labels, replaces_agent_id \
+         FROM enroll_consume_token($1)",
+    )
+    .bind(token_hash)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    let Some((outcome, tenant_id, token_id, labels, replaces_agent_id)) = row else {
         return Ok(EnrollmentConsume::Unknown);
     };
     let tenant_id = TenantId::from_uuid(tenant_id);
@@ -319,6 +372,7 @@ pub async fn consume_for_enrollment(
             tenant_id,
             token_id,
             labels,
+            replaces_agent_id: replaces_agent_id.map(AgentId::from_uuid),
         });
     }
     let Some(reason) = EnrollmentRefusal::parse(&outcome) else {
@@ -359,6 +413,8 @@ impl Refusal for EnrollmentTokenState {
     }
 }
 
+type ConsumeRow = (String, Uuid, Uuid, Vec<String>, Option<Uuid>);
+
 type EnrollmentTokenRow = (
     Uuid,
     String,
@@ -369,6 +425,8 @@ type EnrollmentTokenRow = (
     Option<Uuid>,
     Uuid,
     OffsetDateTime,
+    Option<Uuid>,
+    Option<Uuid>,
 );
 
 impl From<EnrollmentTokenRow> for EnrollmentToken {
@@ -383,6 +441,8 @@ impl From<EnrollmentTokenRow> for EnrollmentToken {
             revoked_by_user_id,
             created_by,
             created_at,
+            replaces_agent_id,
+            used_by_agent_id,
         ) = row;
         Self {
             id: EnrollmentTokenId::from_uuid(id),
@@ -394,6 +454,8 @@ impl From<EnrollmentTokenRow> for EnrollmentToken {
             revoked_by_user_id: revoked_by_user_id.map(UserId::from_uuid),
             created_by: UserId::from_uuid(created_by),
             created_at,
+            replaces_agent_id: replaces_agent_id.map(AgentId::from_uuid),
+            used_by_agent_id: used_by_agent_id.map(AgentId::from_uuid),
         }
     }
 }

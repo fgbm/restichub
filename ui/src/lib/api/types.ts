@@ -86,6 +86,8 @@ export type AgentListResponse = components['schemas']['AgentListResponse'];
 
 export type RenameAgentRequest = components['schemas']['RenameAgentRequest'];
 
+export type ReplaceAgentResponse = components['schemas']['ReplaceAgentResponse'];
+
 export type EnrollmentToken = components['schemas']['EnrollmentTokenView'];
 
 /** The value appears one time only. */

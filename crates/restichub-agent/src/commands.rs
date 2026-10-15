@@ -10,6 +10,7 @@ use time::OffsetDateTime;
 use crate::cli::{RegisterOptions, ResticFileOptions, UpdateOptions};
 use crate::enroll::{Client, Facts};
 use crate::identity::{StoredIdentity, StoredSigningKeys, generate_key_and_csr};
+use crate::machine_id::MachineId;
 use crate::restic::{Restic, ResticBinary};
 use crate::restic_install::Installer;
 use crate::restic_release::Supply;
@@ -263,8 +264,9 @@ pub async fn register_async(
         hostname: hostname()?,
         os: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),
-        agent_version: env!("CARGO_PKG_VERSION").to_owned(),
+        agent_version: restichub_common::BUILD_VERSION.to_owned(),
         restic_version: restic_version(restic)?,
+        machine_id: MachineId::read(),
     };
 
     let (generated, csr_der) = generate_key_and_csr()?;
@@ -274,6 +276,7 @@ pub async fn register_async(
     // The response is checked before any file is written (ADR-0026, FR-AG-04).
     crate::verify::check_enrollment(&generated.public_key, &enrolled, OffsetDateTime::now_utc())?;
 
+    let reenrolled = enrolled.reenrolled;
     let identity = StoredIdentity {
         agent_id: enrolled.agent_id,
         tenant_id: enrolled.tenant_id,
@@ -288,6 +291,9 @@ pub async fn register_async(
         },
     };
     identity.save(dir)?;
+    if reenrolled {
+        println!("the agent is registered and replaced the existing host record");
+    }
     Ok(())
 }
 

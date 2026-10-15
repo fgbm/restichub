@@ -45,6 +45,8 @@ pub struct DashboardHost {
     pub id: String,
     pub hostname: String,
     pub online: bool,
+    /// The host never opened a stream since its enrollment. It counts as neither online nor offline.
+    pub waiting: bool,
     pub last_seen_at: Option<String>,
 }
 
@@ -53,7 +55,9 @@ pub struct DashboardHosts {
     pub total: usize,
     pub online: usize,
     pub offline: usize,
-    /// The offline hosts first, then the others, at most 50.
+    /// Counted in neither `online` nor `offline`: the host never opened a stream.
+    pub waiting: usize,
+    /// The offline and waiting hosts first, then the others, at most 50.
     pub items: Vec<DashboardHost>,
 }
 
@@ -232,13 +236,16 @@ pub async fn dashboard(
         .map(|agent| DashboardHost {
             id: agent.id.to_string(),
             hostname: agent.hostname.clone(),
-            online: agent
-                .last_seen_at
-                .is_some_and(|seen| now - seen <= ONLINE_WINDOW),
+            online: agent.first_connected_at.is_some()
+                && agent
+                    .last_seen_at
+                    .is_some_and(|seen| now - seen <= ONLINE_WINDOW),
+            waiting: agent.first_connected_at.is_none(),
             last_seen_at: agent.last_seen_at.map(format_time),
         })
         .collect();
     let online = hosts.iter().filter(|host| host.online).count();
+    let waiting = hosts.iter().filter(|host| host.waiting).count();
     let total = hosts.len();
     hosts.sort_by(|a, b| {
         a.online
@@ -311,7 +318,8 @@ pub async fn dashboard(
         hosts: DashboardHosts {
             total,
             online,
-            offline: total - online,
+            offline: total - online - waiting,
+            waiting,
             items: hosts,
         },
         plans: DashboardPlans {

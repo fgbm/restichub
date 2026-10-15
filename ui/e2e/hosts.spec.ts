@@ -60,14 +60,31 @@ test('an Admin renames a host', async ({ page }) => {
 		.getByRole('navigation', { name: 'Primary navigation' })
 		.getByRole('link', { name: 'Hosts', exact: true })
 		.click();
-	await page.getByText('win-fs01').waitFor();
+	await page.getByText('win-fs01', { exact: true }).waitFor();
 
-	await page.getByRole('button', { name: 'More actions for win-fs01' }).click();
+	await page.getByRole('button', { name: 'More actions for win-fs01', exact: true }).click();
 	await page.getByRole('menuitem', { name: 'Rename' }).click();
 
 	const dialog = page.getByRole('dialog', { name: 'Rename the host' });
 	await dialog.locator('#host-rename').fill('win-fs01-renamed');
 	await dialog.getByRole('button', { name: 'Rename' }).click();
 
-	await expect(page.getByText('win-fs01-renamed')).toBeVisible();
+	await expect(page.getByText('win-fs01-renamed', { exact: true })).toBeVisible();
+});
+
+test('the hosts table fits 1440 px without a horizontal scroll (FR-ID-11)', async ({ page }) => {
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Hosts', exact: true })
+		.click();
+	await page.getByText('win-fs01', { exact: true }).waitFor();
+
+	const overflow = await page
+		.locator('.table-scroll')
+		.evaluate((element) => element.scrollWidth - element.clientWidth);
+	expect(overflow).toBeLessThanOrEqual(0);
+	await expect(page.getByText('Duplicate').first()).toBeVisible();
 });

@@ -43,6 +43,7 @@ pub mod platform_users;
 pub mod profiles;
 pub mod queue;
 pub mod rate_limit;
+pub mod reenroll_limits;
 pub mod repositories;
 pub mod repository_maintenance;
 pub mod restore;

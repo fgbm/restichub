@@ -2039,7 +2039,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "restichub-agent"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2057,6 +2057,7 @@ dependencies = [
  "prost-types",
  "rcgen",
  "restichub-canary-scan",
+ "restichub-common",
  "restichub-compiler",
  "restichub-cp",
  "restichub-db",
@@ -2069,7 +2070,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "sqlx",
  "thiserror",
  "time",
@@ -2091,18 +2092,18 @@ dependencies = [
 
 [[package]]
 name = "restichub-canary-scan"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
 ]
 
 [[package]]
 name = "restichub-common"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "restichub-compiler"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "proptest",
  "regex",
@@ -2115,7 +2116,7 @@ dependencies = [
 
 [[package]]
 name = "restichub-cp"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2135,6 +2136,7 @@ dependencies = [
  "rcgen",
  "restichub-agent",
  "restichub-canary-scan",
+ "restichub-common",
  "restichub-compiler",
  "restichub-db",
  "restichub-emulator",
@@ -2146,7 +2148,7 @@ dependencies = [
  "rustls-webpki",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "socket2",
  "sqlx",
  "thiserror",
@@ -2170,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "restichub-db"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "restichub-db",
  "serde",
@@ -2186,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "restichub-emulator"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2208,7 +2210,7 @@ dependencies = [
 
 [[package]]
 name = "restichub-fake-restic"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "ctrlc",
  "libc",
@@ -2219,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "restichub-proto"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "prost",
@@ -2232,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "restichub-secrets"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
@@ -2240,7 +2242,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror",
  "utoipa",
  "uuid",

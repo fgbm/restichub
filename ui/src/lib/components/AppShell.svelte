@@ -13,6 +13,7 @@
 		type NavHref
 	} from '#lib/navigation.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
+	import { getPageTitle } from '#lib/stores/page-title.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
 	import { getTheme, setTheme } from '#lib/stores/theme.svelte.ts';
 	import { Badge, DropdownMenu, Icon, ToastRegion } from './ui/index.ts';
@@ -89,6 +90,13 @@
 		// The job detail shows the job identifier after its list: "Jobs / j_4821".
 		if (page.route.id === '/(app)/jobs/[id]' && page.params.id) {
 			return [{ label: t(item.labelKey), href: item.href }, { label: page.params.id }];
+		}
+		// The profile editor shows the profile name, or "New profile", after the list.
+		if (page.route.id === '/(app)/profiles/[id]' || page.route.id === '/(app)/profiles/new') {
+			const title = page.route.id === '/(app)/profiles/new' ? t('pe.newTitle') : getPageTitle();
+			return title
+				? [{ label: t(item.labelKey), href: item.href }, { label: title }]
+				: [{ label: t(item.labelKey) }];
 		}
 		return [{ label: t(item.labelKey) }];
 	});
