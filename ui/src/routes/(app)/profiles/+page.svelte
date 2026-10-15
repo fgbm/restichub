@@ -76,6 +76,7 @@
 	let excludeCaches = $state(false);
 	let limitUpload = $state('');
 	let limitDownload = $state('');
+	let limitDefaults = $state({ stall: '60', max: '2880' });
 	let stallMinutes = $state('60');
 	let maxDurationMinutes = $state('2880');
 	let retentionEnabled = $state(false);
@@ -256,11 +257,19 @@
 			plans = planList;
 			// The templates and the secrets serve the script editor only. A failure leaves the
 			// editor without choices and does not block the list.
-			const [templateList, jobTemplateList, secretList] = await Promise.allSettled([
+			const [defaults, templateList, jobTemplateList, secretList] = await Promise.allSettled([
+				service.getJobLimitDefaults(),
 				service.listScriptTemplates(),
 				service.listJobTemplates(),
 				service.listSecrets()
 			]);
+			if (defaults.status === 'fulfilled') {
+				limitDefaults = {
+					stall: String(defaults.value.stall_timeout_minutes),
+					max: String(defaults.value.max_duration_minutes)
+				};
+				if (!formOpen) resetForm();
+			}
 			scriptTemplates = templateList.status === 'fulfilled' ? templateList.value : [];
 			jobTemplates = jobTemplateList.status === 'fulfilled' ? jobTemplateList.value : [];
 			secrets = secretList.status === 'fulfilled' ? secretList.value : [];
@@ -292,8 +301,8 @@
 		excludeCaches = false;
 		limitUpload = '';
 		limitDownload = '';
-		stallMinutes = '60';
-		maxDurationMinutes = '2880';
+		stallMinutes = limitDefaults.stall;
+		maxDurationMinutes = limitDefaults.max;
 		retentionEnabled = false;
 		keepLast = '0';
 		keepHourly = '0';
@@ -343,7 +352,7 @@
 		limitDownload = profile.options?.limit_download_kib
 			? String(profile.options.limit_download_kib)
 			: '';
-		stallMinutes = String(profile.options?.stall_timeout_minutes ?? 60);
+		stallMinutes = String(profile.options?.stall_timeout_minutes ?? limitDefaults.stall);
 		maxDurationMinutes = profile.options?.max_duration_minutes
 			? String(profile.options.max_duration_minutes)
 			: '';
@@ -396,6 +405,15 @@
 			.map((hook) => ({ hook_id: hook.hookId.trim(), phase: hook.phase, parameters: [] }));
 	}
 
+	/** An empty field leaves the value to the server. Zero goes to the server, which refuses it. */
+	function stallValue(): number | undefined {
+		// A number input binds a number, or null when the field is empty.
+		const text = String(stallMinutes ?? '').trim();
+		if (text === '') return undefined;
+		const parsed = Number.parseInt(text, 10);
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
+
 	function settings() {
 		return {
 			paths: {
@@ -413,7 +431,7 @@
 				exclude_caches: excludeCaches,
 				limit_upload_kib: numberOrZero(limitUpload),
 				limit_download_kib: numberOrZero(limitDownload),
-				stall_timeout_minutes: numberOrZero(stallMinutes) || 60,
+				stall_timeout_minutes: stallValue(),
 				max_duration_minutes: numberOrZero(maxDurationMinutes)
 			},
 			hooks: hookRefs(),
@@ -717,7 +735,6 @@
 				<TextField
 					id="profile-stall-timeout"
 					type="number"
-					min="5"
 					label={t('profiles.limits.stall')}
 					help={t('profiles.limits.stallHelp')}
 					error={fieldError(formProblem, 'options.stall_timeout_minutes')}

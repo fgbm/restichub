@@ -97,7 +97,8 @@ test('a running job shows its limit and no acceptance window', async ({ page }) 
 
 	// A run has no fixed time limit: the host stops a step that makes no progress (ADR-0039).
 	await expect(page.getByText('Limit', { exact: true })).toBeVisible();
-	await expect(page.getByText('none · stops after 1h without progress')).toBeVisible();
+	await expect(page.getByText('Maximum: 48h')).toBeVisible();
+	await expect(page.getByText('No progress: 1h')).toBeVisible();
 	await expect(page.getByText('Expires', { exact: true })).toHaveCount(0);
 	await expect(page.getByText('Accept until', { exact: true })).toHaveCount(0);
 

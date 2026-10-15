@@ -359,7 +359,7 @@ export function detailOf(job: Job, now: number): JobDetail {
 		progress: progressOf(job, now),
 		log: { lines: logLinesOf(job, now).length, truncated: false, purged: false },
 		limits: {
-			max_duration_seconds: null,
+			max_duration_seconds: 48 * 3600,
 			stall_timeout_seconds: job.status === 'queued' ? null : STALL_TIMEOUT_SECONDS
 		}
 	};

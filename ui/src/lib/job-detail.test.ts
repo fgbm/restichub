@@ -8,7 +8,7 @@ import { setLocale, t } from '#lib/i18n/index.ts';
 import {
 	formatFiles,
 	isLive,
-	limitText,
+	limitLines,
 	markerOf,
 	statsOf,
 	stepProgress,
@@ -198,35 +198,39 @@ describe('the step list', () => {
 	});
 });
 
-describe('limitText', () => {
+describe('limitLines', () => {
 	const limits = (max: number | null, stall: number | null) =>
 		({ max_duration_seconds: max, stall_timeout_seconds: stall }) as JobDetail['limits'];
 
-	it('ac_ag_12_says_that_a_running_job_has_no_time_limit_and_stops_without_progress', () => {
-		expect(limitText(detail({ limits: limits(null, 3600) }))).toBe(
-			'none · stops after 1h without progress'
-		);
-		expect(limitText(detail({ limits: limits(null, null) }))).toBe(
-			'none · stops when restic makes no progress'
-		);
+	it('ac_ag_12_says_that_a_running_job_has_no_maximum_and_stops_without_progress', () => {
+		expect(limitLines(detail({ limits: limits(null, 3600) }))).toEqual([
+			'No maximum',
+			'No progress: 1h'
+		]);
+		expect(limitLines(detail({ limits: limits(null, null) }))).toEqual([
+			'No maximum',
+			'Stops when restic makes no progress'
+		]);
 	});
 
-	it('ac_ag_13_shows_the_maximum_duration_when_the_profile_sets_one', () => {
-		expect(limitText(detail({ limits: limits(7200, null) }))).toBe('stops after 2h');
-		expect(limitText(detail({ limits: limits(7200, 3600) }))).toBe(
-			'stops after 2h · or after 1h without progress'
-		);
+	it('ac_ag_13_shows_the_maximum_duration_in_its_own_line', () => {
+		expect(limitLines(detail({ limits: limits(7200, null) }))).toEqual(['Maximum: 2h']);
+		expect(limitLines(detail({ limits: limits(7200, 3600) }))).toEqual([
+			'Maximum: 2h',
+			'No progress: 1h'
+		]);
 	});
 
 	it('ac_ag_12_shows_no_limit_for_a_job_that_does_not_run', () => {
-		expect(limitText(detail({ status: 'queued', limits: limits(null, 3600) }))).toBeNull();
-		expect(limitText(detail({ status: 'succeeded', limits: limits(null, 3600) }))).toBeNull();
+		expect(limitLines(detail({ status: 'queued', limits: limits(null, 3600) }))).toBeNull();
+		expect(limitLines(detail({ status: 'succeeded', limits: limits(null, 3600) }))).toBeNull();
 	});
 
 	it('ac_ag_12_speaks_russian', () => {
 		setLocale('ru');
-		expect(limitText(detail({ limits: limits(null, 3600) }))).toBe(
-			'нет · остановка после 1 ч без прогресса'
-		);
+		expect(limitLines(detail({ limits: limits(172800, 3600) }))).toEqual([
+			'Предел: 48 ч',
+			'Без прогресса: 1 ч'
+		]);
 	});
 });

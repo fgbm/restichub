@@ -373,7 +373,7 @@ describe('the job detail screen', () => {
 			(await screen.findByText('About this job')).closest('section') as HTMLElement
 		);
 		expect(await running.findByText('Limit')).toBeInTheDocument();
-		expect(running.getByText('none · stops after 1h without progress')).toBeInTheDocument();
+		expect(running.getByText('No progress: 1h')).toBeInTheDocument();
 		expect(running.queryByText('Accept until')).not.toBeInTheDocument();
 	});
 

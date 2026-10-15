@@ -41,6 +41,7 @@ import type {
 	JobActionRequest,
 	JobDetail,
 	JobListResponse,
+	JobLimitDefaults,
 	JobLogPage,
 	JobLogQuery,
 	JobQuery,
@@ -1517,6 +1518,10 @@ export class MockApiService {
 			}
 		];
 		return { ...job };
+	}
+
+	async getJobLimitDefaults(): Promise<JobLimitDefaults> {
+		return { stall_timeout_minutes: 60, max_duration_minutes: 2880 };
 	}
 
 	async listProfiles(): Promise<Profile[]> {

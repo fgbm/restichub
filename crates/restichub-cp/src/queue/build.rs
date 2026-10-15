@@ -226,7 +226,11 @@ pub async fn build(
             }
             seconds => seconds,
         },
-        stall_timeout_seconds: limits.stall_timeout_seconds,
+        stall_timeout_seconds: if capabilities.contains(&AgentCapability::JobLimitsV1) {
+            limits.stall_timeout_seconds
+        } else {
+            0
+        },
         repositories: vec![access],
         steps,
     };
