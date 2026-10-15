@@ -40,7 +40,7 @@ The agent maps the restic exit code to the status of the step.
 | 130 | `cancelled` |
 | Any other code | `failed` |
 
-A `warning` step does not stop the job. Any other status except `success` stops the job. The job result holds the status of the step that stopped the job. A job that you cancel or that exceeds its timeout stops the restic process in two stages. The agent sends a graceful stop first. After a grace period it kills the process tree and reports `possible_stale_lock`.
+A `warning` step does not stop the job. Any other status except `success` stops the job. The job result holds the status of the step that stopped the job. A job that you cancel, a step that makes no progress for the stall timeout, and a job that exceeds its maximum duration stop the restic process in two stages. The agent sends a graceful stop first. After a grace period it kills the process tree and reports `possible_stale_lock`.
 
 ## Progress and logs
 

@@ -102,6 +102,7 @@ function job(overrides: Record<string, unknown> = {}) {
 		summary: BACKUP,
 		progress: null,
 		log: { lines: 2, truncated: false, purged: false },
+		limits: { max_duration_seconds: null, stall_timeout_seconds: 3600 },
 		...overrides
 	};
 }
@@ -342,7 +343,34 @@ describe('the job detail screen', () => {
 		const about = within(screen.getByText('About this job').closest('section') as HTMLElement);
 		expect(about.getByText('Trigger')).toBeInTheDocument();
 		expect(about.getByText('Schedule')).toBeInTheDocument();
-		expect(about.getByText('Expires')).toBeInTheDocument();
+		// A finished job shows neither an acceptance window nor a limit.
+		expect(about.queryByText('Accept until')).not.toBeInTheDocument();
+		expect(about.queryByText('Limit')).not.toBeInTheDocument();
+	});
+
+	it('ac_ag_12_shows_the_acceptance_window_of_a_waiting_job_and_the_limit_of_a_running_job', async () => {
+		mocks.getJob.mockResolvedValue(
+			job({ status: 'queued', expires_at: '2026-10-14T12:00:00Z', planned_steps: [], steps: [] })
+		);
+		const queued = render(JobDetailPage);
+		const waiting = within(
+			(await screen.findByText('About this job')).closest('section') as HTMLElement
+		);
+		expect(waiting.getByText('Accept until')).toBeInTheDocument();
+		expect(waiting.queryByText('Expires')).not.toBeInTheDocument();
+		expect(waiting.queryByText('Limit')).not.toBeInTheDocument();
+		queued.unmount();
+
+		mocks.getJob.mockResolvedValue(
+			job({ status: 'running', expires_at: '2026-10-14T12:00:00Z', planned_steps: [], steps: [] })
+		);
+		render(JobDetailPage);
+		const running = within(
+			(await screen.findByText('About this job')).closest('section') as HTMLElement
+		);
+		expect(await running.findByText('Limit')).toBeInTheDocument();
+		expect(running.getByText('none · stops after 1h without progress')).toBeInTheDocument();
+		expect(running.queryByText('Accept until')).not.toBeInTheDocument();
 	});
 
 	it('shows the steps that did not run of a failed job as not run', async () => {

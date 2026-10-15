@@ -64,6 +64,10 @@
 	let excludeCaches = $state(false);
 	let limitUpload = $state('');
 	let limitDownload = $state('');
+	// New profiles skip the cloud-only placeholder files. The setting reaches Windows agents only.
+	let excludeCloudFiles = $state(true);
+	let stallMinutes = $state('60');
+	let maxDurationMinutes = $state('');
 	let retentionEnabled = $state(false);
 	let keepLast = $state('0');
 	let keepHourly = $state('0');
@@ -255,6 +259,9 @@
 		excludeCaches = false;
 		limitUpload = '';
 		limitDownload = '';
+		excludeCloudFiles = true;
+		stallMinutes = '60';
+		maxDurationMinutes = '';
 		retentionEnabled = false;
 		keepLast = '0';
 		keepHourly = '0';
@@ -302,6 +309,11 @@
 		limitUpload = profile.options?.limit_upload_kib ? String(profile.options.limit_upload_kib) : '';
 		limitDownload = profile.options?.limit_download_kib
 			? String(profile.options.limit_download_kib)
+			: '';
+		excludeCloudFiles = profile.options?.exclude_cloud_files ?? false;
+		stallMinutes = String(profile.options?.stall_timeout_minutes ?? 60);
+		maxDurationMinutes = profile.options?.max_duration_minutes
+			? String(profile.options.max_duration_minutes)
 			: '';
 		if (profile.retention) {
 			const retention = profile.retention;
@@ -367,7 +379,10 @@
 				one_file_system: oneFileSystem,
 				exclude_caches: excludeCaches,
 				limit_upload_kib: numberOrZero(limitUpload),
-				limit_download_kib: numberOrZero(limitDownload)
+				limit_download_kib: numberOrZero(limitDownload),
+				exclude_cloud_files: excludeCloudFiles,
+				stall_timeout_minutes: numberOrZero(stallMinutes) || 60,
+				max_duration_minutes: numberOrZero(maxDurationMinutes)
 			},
 			hooks: hookRefs(),
 			retention: retentionEnabled
@@ -643,6 +658,8 @@
 			<Checkbox label={t('profiles.options.vss')} bind:checked={vss} />
 			<Checkbox label={t('profiles.options.oneFileSystem')} bind:checked={oneFileSystem} />
 			<Checkbox label={t('profiles.options.excludeCaches')} bind:checked={excludeCaches} />
+			<Checkbox label={t('profiles.options.excludeCloudFiles')} bind:checked={excludeCloudFiles} />
+			<p class="hint">{t('profiles.options.excludeCloudFilesHint')}</p>
 			<div class="grid">
 				<TextField
 					id="profile-limit-upload"
@@ -657,6 +674,32 @@
 					label={t('profiles.options.limitDownload')}
 					placeholder={t('profiles.options.limitNone')}
 					bind:value={limitDownload}
+				/>
+			</div>
+		</section>
+
+		<section class="section">
+			<h3 class="section__title">{t('profiles.limits')}</h3>
+			<p class="hint">{t('profiles.limits.hint')}</p>
+			<div class="grid">
+				<TextField
+					id="profile-stall-timeout"
+					type="number"
+					min="5"
+					label={t('profiles.limits.stall')}
+					help={t('profiles.limits.stallHelp')}
+					error={fieldError(formProblem, 'options.stall_timeout_minutes')}
+					bind:value={stallMinutes}
+				/>
+				<TextField
+					id="profile-max-duration"
+					type="number"
+					min="0"
+					label={t('profiles.limits.maxDuration')}
+					help={t('profiles.limits.maxDurationHelp')}
+					placeholder={t('profiles.limits.none')}
+					error={fieldError(formProblem, 'options.max_duration_minutes')}
+					bind:value={maxDurationMinutes}
 				/>
 			</div>
 		</section>
@@ -903,6 +946,12 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-3);
+	}
+
+	.hint {
+		margin: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.section__title {

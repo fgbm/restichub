@@ -20,6 +20,7 @@ const RUNNING_FILES = 128_402;
 const RUNNING_BYTES = 1_400_000_000;
 const RUNNING_SECONDS = 180;
 const FORGET_SECONDS = 4;
+const STALL_TIMEOUT_SECONDS = 3600;
 
 type Level = JobLogLine['level'];
 type Stream = JobLogLine['stream'];
@@ -83,6 +84,11 @@ function openingLines(job: Job): Draft[] {
 		['info', 'using parent snapshot 7f3c9a10', 'stdout'],
 		['info', 'start scan on [C:\\Data]', 'stdout'],
 		['info', 'start backup on [C:\\Data]', 'stdout'],
+		[
+			'warn',
+			'error during archival of C:\\Data\\OneDrive\\a.docx: Access to the cloud file is denied',
+			'stderr'
+		],
 		['info', 'scan finished in 38.2s: 128402 files, 49.28 GiB', 'stdout']
 	];
 }
@@ -263,6 +269,10 @@ export function detailOf(job: Job, now: number): JobDetail {
 		steps,
 		summary,
 		progress: progressOf(job, now),
-		log: { lines: logLinesOf(job, now).length, truncated: false, purged: false }
+		log: { lines: logLinesOf(job, now).length, truncated: false, purged: false },
+		limits: {
+			max_duration_seconds: null,
+			stall_timeout_seconds: job.status === 'queued' ? null : STALL_TIMEOUT_SECONDS
+		}
 	};
 }

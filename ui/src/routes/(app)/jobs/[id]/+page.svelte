@@ -24,7 +24,7 @@
 		formatLocalTime,
 		formatSeconds
 	} from '#lib/format.ts';
-	import { isLive, markerOf, statsOf, stepProgress, stepRows } from '#lib/job-detail.ts';
+	import { isLive, limitText, markerOf, statsOf, stepProgress, stepRows } from '#lib/job-detail.ts';
 	import type { StepRow } from '#lib/job-detail.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -470,9 +470,13 @@
 						<dt>{t('jobDetail.finishedAt')}</dt>
 						<dd>{formatLocalTime(job.finished_at)}</dd>
 					{/if}
-					{#if job.expires_at}
-						<dt>{t('jobDetail.expiresAt')}</dt>
+					{#if job.expires_at && (job.status === 'queued' || job.status === 'sent')}
+						<dt>{t('jobDetail.acceptUntil')}</dt>
 						<dd>{formatLocalTime(job.expires_at)}</dd>
+					{/if}
+					{#if limitText(job)}
+						<dt>{t('jobDetail.limit')}</dt>
+						<dd>{limitText(job)}</dd>
 					{/if}
 					{#if job.attempt > 0}
 						<dt>{t('jobDetail.attempt')}</dt>

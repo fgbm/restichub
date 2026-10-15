@@ -5,7 +5,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { JobDetail, StepOutput } from '#lib/api/index.ts';
 import { setLocale, t } from '#lib/i18n/index.ts';
-import { formatFiles, isLive, markerOf, statsOf, stepProgress, stepRows } from './job-detail';
+import {
+	formatFiles,
+	isLive,
+	limitText,
+	markerOf,
+	statsOf,
+	stepProgress,
+	stepRows
+} from './job-detail';
 
 afterEach(() => setLocale('en'));
 
@@ -187,5 +195,38 @@ describe('the step list', () => {
 		const job = detail({ status: 'failed', steps: [done('backup')] });
 		expect(stepRows(job).map((row) => row.state)).toEqual(['done', 'pending', 'pending']);
 		expect(stepProgress(job).complete).toBe(1);
+	});
+});
+
+describe('limitText', () => {
+	const limits = (max: number | null, stall: number | null) =>
+		({ max_duration_seconds: max, stall_timeout_seconds: stall }) as JobDetail['limits'];
+
+	it('ac_ag_12_says_that_a_running_job_has_no_time_limit_and_stops_without_progress', () => {
+		expect(limitText(detail({ limits: limits(null, 3600) }))).toBe(
+			'none · stops after 1h without progress'
+		);
+		expect(limitText(detail({ limits: limits(null, null) }))).toBe(
+			'none · stops when restic makes no progress'
+		);
+	});
+
+	it('ac_ag_13_shows_the_maximum_duration_when_the_profile_sets_one', () => {
+		expect(limitText(detail({ limits: limits(7200, null) }))).toBe('stops after 2h');
+		expect(limitText(detail({ limits: limits(7200, 3600) }))).toBe(
+			'stops after 2h · or after 1h without progress'
+		);
+	});
+
+	it('ac_ag_12_shows_no_limit_for_a_job_that_does_not_run', () => {
+		expect(limitText(detail({ status: 'queued', limits: limits(null, 3600) }))).toBeNull();
+		expect(limitText(detail({ status: 'succeeded', limits: limits(null, 3600) }))).toBeNull();
+	});
+
+	it('ac_ag_12_speaks_russian', () => {
+		setLocale('ru');
+		expect(limitText(detail({ limits: limits(null, 3600) }))).toBe(
+			'нет · остановка после 1 ч без прогресса'
+		);
 	});
 });

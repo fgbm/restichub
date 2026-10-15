@@ -1569,6 +1569,11 @@ export interface components {
         BackupOptions: {
             exclude_caches?: boolean;
             /**
+             * @description Skip cloud-only placeholder files, for example OneDrive. Windows targets only
+             *     (restic `--exclude-cloud-files`).
+             */
+            exclude_cloud_files?: boolean;
+            /**
              * Format: int64
              * @description Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
              */
@@ -1578,7 +1583,18 @@ export interface components {
              * @description Upload limit in kibibytes each second. Zero means no limit (FR-AG-15).
              */
             limit_upload_kib?: number;
+            /**
+             * Format: int32
+             * @description Minutes after which the agent stops the job whatever its progress. Zero means no limit.
+             *     At most 43200 (ADR-0039).
+             */
+            max_duration_minutes?: number;
             one_file_system?: boolean;
+            /**
+             * Format: int32
+             * @description Minutes without progress after which the agent stops a step. From 5 to 10080 (ADR-0039).
+             */
+            stall_timeout_minutes?: number;
             /** @description Use a file system snapshot. VSS on Windows only (FR-PF-01). */
             use_fs_snapshot?: boolean;
         };
@@ -2010,6 +2026,8 @@ export interface components {
         };
         /** @description One job with its steps, its summary and its progress (FR-MN-02). */
         JobDetailView: components["schemas"]["JobView"] & {
+            /** @description The limits of the run (ADR-0039). */
+            limits: components["schemas"]["LimitsView"];
             log: components["schemas"]["LogInfo"];
             /**
              * @description The identifiers of all steps that the control plane signed into the job, in run order. Empty
@@ -2068,7 +2086,10 @@ export interface components {
             attempt: number;
             /** @description In RFC 3339. */
             created_at: string;
-            /** @description In RFC 3339. Null when the job holds no expiry. */
+            /**
+             * @description In RFC 3339. The end of the acceptance window of the signed job: the agent refuses the job
+             *     after this time. It is not a limit of the run. Null when the job holds no expiry.
+             */
             expires_at?: string | null;
             /** @description In RFC 3339. Null until the job finishes. */
             finished_at?: string | null;
@@ -2095,6 +2116,20 @@ export interface components {
             status: components["schemas"]["JobStatus"];
             /** @description In RFC 3339. */
             updated_at: string;
+        };
+        /** @description The limits of the run of a job (ADR-0039). */
+        LimitsView: {
+            /**
+             * Format: int32
+             * @description Seconds after which the agent stops the job whatever its progress. Null means no limit.
+             */
+            max_duration_seconds?: number | null;
+            /**
+             * Format: int32
+             * @description Seconds without progress after which the agent stops a step. Null when the control plane
+             *     did not set one and the agent uses the default of the step.
+             */
+            stall_timeout_seconds?: number | null;
         };
         /** @enum {string} */
         LockState: "free" | "held" | "stale";
