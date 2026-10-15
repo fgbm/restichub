@@ -33,7 +33,7 @@ pub struct StepView {
     pub step_id: String,
     /// Absent for a job from an older version.
     pub kind: Option<PlannedKind>,
-    /// The name of a script or the identifier of a hook, or empty.
+    /// Empty for a step that is not a script.
     pub name: String,
     pub phase: Option<PlannedPhase>,
     pub status: StepStatus,
@@ -89,7 +89,7 @@ pub struct PlannedStepView {
     pub step_id: String,
     /// Absent for a job from an older version.
     pub kind: Option<PlannedKind>,
-    /// The name of a script or the identifier of a hook, or empty.
+    /// Empty for a step that is not a script.
     pub name: String,
     pub phase: Option<PlannedPhase>,
     /// The SHA-256 hash of the script body, in lowercase hex. Present for a script step only.
@@ -174,8 +174,8 @@ pub struct JobDetailView {
     /// The identifiers of all steps that the control plane signed into the job, in run order. Empty
     /// before the control plane sent the job. A step that did not start has no entry in `steps`.
     pub planned_steps: Vec<String>,
-    /// The same steps with their kind, name and phase, so the job detail shows every script and
-    /// hook in order before it runs (FR-HK-11).
+    /// The same steps with their kind, name and phase, so the job detail shows every script in
+    /// order before it runs (FR-HK-11).
     pub planned: Vec<PlannedStepView>,
     /// Ordered by first arrival from the agent.
     pub steps: Vec<StepView>,

@@ -102,8 +102,6 @@ function agent(overrides: Record<string, unknown> = {}) {
 		created_at: PAST,
 		revoked_at: null,
 		revoked_by_user_id: null,
-		hook_allow_list: 'absent',
-		hooks: [],
 		server_scripts: 'disabled',
 		script_interpreters: [],
 		...overrides
@@ -408,7 +406,7 @@ describe('the Hosts screen', () => {
 		await waitFor(() =>
 			expect(mocks.pushToast).toHaveBeenCalledWith(
 				'danger',
-				'A host already used this enrollment token. It cannot be cancelled.'
+				'A host already used this enrollment token. You cannot cancel it. Create a new token if you need one.'
 			)
 		);
 		await waitFor(() =>

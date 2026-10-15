@@ -372,6 +372,12 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
         crate::connection::record_failure(dir, "", &no_identity.to_string());
         anyhow::Error::new(no_identity)
     })?;
+    if let Some(file) = crate::scripts::removed_allow_list_file(dir) {
+        tracing::warn!(
+            file = %file.display(),
+            "the hook allow-list file is no longer used; move its hooks to server scripts"
+        );
+    }
     // Rebuild the key ring, so a job that the current key signed verifies (ADR-0026, ADR-0030).
     let mut keys = crate::keys::KeyState::load(&identity, dir)?;
     let cache = crate::paths::cache_dir();

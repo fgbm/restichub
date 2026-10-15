@@ -158,6 +158,8 @@ pub enum AuditAction {
     JobTemplateDelete,
     /// A job left for a host with the hash of every script it carries (FR-HK-12).
     ScriptRun,
+    /// A migration dropped the hooks of a profile (ADR-0040).
+    ProfileHooksRemoved,
     /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),
 }
@@ -228,6 +230,7 @@ impl AuditAction {
             Self::JobTemplateUpdate => "job_template_update",
             Self::JobTemplateDelete => "job_template_delete",
             Self::ScriptRun => "script_run",
+            Self::ProfileHooksRemoved => "profile_hooks_removed",
             Self::Unknown(value) => value,
         }
     }
@@ -298,6 +301,7 @@ impl AuditAction {
             "job_template_update" => Self::JobTemplateUpdate,
             "job_template_delete" => Self::JobTemplateDelete,
             "script_run" => Self::ScriptRun,
+            "profile_hooks_removed" => Self::ProfileHooksRemoved,
             _ => return None,
         };
         Some(action)
@@ -372,6 +376,7 @@ impl AuditAction {
             Self::JobTemplateUpdate,
             Self::JobTemplateDelete,
             Self::ScriptRun,
+            Self::ProfileHooksRemoved,
         ]
     }
 }

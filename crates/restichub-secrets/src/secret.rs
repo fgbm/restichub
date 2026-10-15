@@ -38,8 +38,9 @@ pub enum SecretPurpose {
     WebhookSecret,
     /// The path and the query of a webhook URL, which often hold a token (ADR-0036).
     WebhookUrl,
-    /// A value that a profile hands to a hook through its environment (FR-HK-03, ADR-0017). No
-    /// other purpose can reach a hook.
+    /// A value that a profile hands to a script through its environment (FR-HK-09, ADR-0017). No
+    /// other purpose can reach a script. The wire name `hook_secret` stays from the allow-list
+    /// hooks.
     HookSecret,
 }
 

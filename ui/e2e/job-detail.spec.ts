@@ -49,9 +49,25 @@ test('a finished job shows its summary, its steps and its log', async ({ page })
 	await expect(page.getByText('2 of 2 complete')).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Run again' })).toBeEnabled();
 	await expect(page.getByRole('button', { name: 'Cancel job' })).toHaveCount(0);
-	const log = page.getByRole('log', { name: 'Job log' });
+	// One log per job, inside its step: the step is collapsed and shows the count of its lines.
+	await expect(page.getByText('Live log')).toHaveCount(0);
+	await expect(page.getByRole('log')).toHaveCount(0);
+	const toggle = page.getByRole('button', { name: /Show the log of/ }).first();
+	await expect(toggle).toContainText(/\d+ lines/);
+	await toggle.click();
+	const log = page.getByRole('log').first();
 	await expect(log.getByText('snapshot a1b2c3d4 saved')).toBeVisible();
 	await expect(log.getByText('INFO').first()).toBeVisible();
+
+	await page.getByRole('combobox', { name: 'Level' }).first().selectOption('problems');
+	await expect(log.getByText('snapshot a1b2c3d4 saved')).toHaveCount(0);
+	await page.getByRole('combobox', { name: 'Level' }).first().selectOption('all');
+	await page.getByRole('searchbox', { name: 'Search the log' }).first().fill('a1b2c3d4');
+	await expect(log.getByText('snapshot a1b2c3d4 saved')).toBeVisible();
+
+	const download = page.waitForEvent('download');
+	await page.getByRole('button', { name: 'Download log' }).click();
+	expect((await download).suggestedFilename()).toMatch(/^job-j_.*-log\.txt$/);
 });
 
 test('a running job shows its progress and the log follows the new lines', async ({ page }) => {
@@ -78,16 +94,23 @@ test('a running job shows its progress and the log follows the new lines', async
 	await dialog.getByRole('button', { name: 'Keep the job' }).click();
 	await expect(dialog).toBeHidden();
 
-	await expect(page.getByText('Live log')).toBeVisible();
-	await expect(page.getByText('following')).toBeVisible();
-	const lines = page.getByRole('log', { name: 'Job log' }).locator('.log__line');
+	// The running step is open and followed; the separate live panel is gone.
+	await expect(page.getByText('Live log')).toHaveCount(0);
+	const follow = page.getByRole('button', { name: 'Follow' });
+	await expect(follow).toHaveAttribute('aria-pressed', 'true');
+	const lines = page.getByRole('log').first().locator('.step-log__line');
 	const before = await lines.count();
 	// The mock adds a line every four seconds, and the screen polls every two seconds.
 	await expect.poll(async () => lines.count(), { timeout: 12_000 }).toBeGreaterThan(before);
 
-	// A person who scrolls up stops the following.
-	await page.getByRole('button', { name: 'Pause' }).click();
-	await expect(page.getByRole('button', { name: 'Follow' })).toBeVisible();
+	// A person who scrolls up stops the following; a click resumes it.
+	await page
+		.getByRole('log')
+		.first()
+		.evaluate((view) => (view.scrollTop = 0));
+	await expect(follow).toHaveAttribute('aria-pressed', 'false');
+	await follow.click();
+	await expect(follow).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('a running job shows its limit and no acceptance window', async ({ page }) => {
@@ -103,7 +126,7 @@ test('a running job shows its limit and no acceptance window', async ({ page }) 
 	await expect(page.getByText('Accept until', { exact: true })).toHaveCount(0);
 
 	// restic reports an unreadable file and goes on: the log shows it as a warning.
-	const log = page.getByRole('log', { name: 'Job log' });
+	const log = page.getByRole('log').first();
 	await expect(log.getByText('Access to the cloud file is denied')).toBeVisible();
 	await expect(log.getByText('WARN').first()).toBeVisible();
 });

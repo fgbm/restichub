@@ -241,7 +241,7 @@ function groupByOf(draft: ProfileDraft): GroupBy[] {
 
 /**
  * The settings that a create or an update request carries. A switched-off section sends its
- * empty value. The hooks of a stored profile stay as they are: the form has no hook editor.
+ * empty value.
  */
 export function settingsOf(
 	draft: ProfileDraft,
@@ -267,7 +267,6 @@ export function settingsOf(
 			stall_timeout_minutes: optionalMinutes(draft.stallMinutes),
 			max_duration_minutes: optionalHoursAsMinutes(draft.maxDurationHours)
 		},
-		hooks: context.existing?.hooks ?? [],
 		// An Operator keeps the scripts as they are stored: only an Admin changes them.
 		scripts: context.canEditScripts
 			? on.scripts
