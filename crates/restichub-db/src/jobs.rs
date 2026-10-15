@@ -132,7 +132,7 @@ pub struct Job {
     pub retry_of: Option<JobId>,
     /// The maximum duration of the signed job in seconds. Absent means no limit (ADR-0039).
     pub timeout_seconds: Option<i32>,
-    /// The stall timeout of the signed job in seconds. Absent when the job predates the setting.
+    /// Seconds without progress after which the agent stops a step. Absent when the job predates the setting.
     pub stall_timeout_seconds: Option<i32>,
 }
 

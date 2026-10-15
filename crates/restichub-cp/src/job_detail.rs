@@ -184,11 +184,9 @@ pub struct JobDetailView {
     /// Null unless the job is sent or running and the agent reported progress.
     pub progress: Option<ProgressView>,
     pub log: LogInfo,
-    /// The limits of the run (ADR-0039).
     pub limits: LimitsView,
 }
 
-/// The limits of the run of a job (ADR-0039).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LimitsView {
     /// Seconds after which the agent stops the job whatever its progress. Null means no limit.

@@ -21,7 +21,6 @@ pub(super) struct Progress {
     pub(super) warned: bool,
     /// Set by the first failed hook, so the job error names it (AC-HK-06).
     pub(super) hook_failure: Option<HookFailure>,
-    /// The limit that stopped a step (ADR-0039).
     pub(super) limit: Option<StepError>,
 }
 

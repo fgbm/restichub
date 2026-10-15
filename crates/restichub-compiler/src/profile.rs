@@ -20,7 +20,6 @@ pub struct Profile {
     /// the filter of the `forget` step. A user tag may not use its reserved prefix.
     pub profile_tag: Option<String>,
     pub options: BackupOptions,
-    /// The time limits of a job of this profile (ADR-0039).
     pub limits: JobLimits,
     pub hooks: Vec<HookRef>,
     /// Code that the control plane sends (FR-HK-09, ADR-0037).

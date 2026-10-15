@@ -132,7 +132,6 @@ async fn ac_sc_10_a_hello_that_does_not_list_a_running_job_fails_it() {
     env.pass().await;
     assert_eq!(env.job_status(job).await, "running");
 
-    // The agent restarted and lost the job.
     let _restarted = env.reconnect_agent_holding(&listed, Vec::new()).await;
     eventually(|| async { env.job_status(job).await == "failed" }).await;
     assert_eq!(env.job(job).await["result_message"], "agent_lost");

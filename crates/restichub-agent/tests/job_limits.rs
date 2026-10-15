@@ -45,7 +45,6 @@ fn directory(name: &str) -> PathBuf {
     path
 }
 
-/// A backup job whose limits the test sets.
 fn backup_job(job_id: &str, repository: &Path, stall_seconds: u32, max_seconds: u32) -> Job {
     Job {
         job_id: job_id.to_owned(),

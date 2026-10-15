@@ -21,7 +21,6 @@ const RESERVED_TAG_PREFIX: &str = "restichub-";
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     pub steps: Vec<PlannedStep>,
-    /// The limits for the signed job (ADR-0039).
     pub limits: JobLimits,
 }
 
