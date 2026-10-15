@@ -29,9 +29,9 @@ describe('Icon', () => {
 	it('draws the shapes of the symbol in the SVG namespace', () => {
 		const { container } = render(Icon, { props: { name: 'job' } });
 		const shapes = container.querySelectorAll('svg > *');
-		expect([...shapes].map((shape) => shape.tagName)).toEqual(['circle', 'path']);
-		expect(shapes[0].namespaceURI).toBe('http://www.w3.org/2000/svg');
-		expect(shapes[1]).toHaveAttribute('d', (icons.job[1][1] as { d: string }).d);
+		expect([...shapes].map((shape) => shape.tagName)).toEqual(['path', 'circle']);
+		expect(shapes[1].namespaceURI).toBe('http://www.w3.org/2000/svg');
+		expect(shapes[0]).toHaveAttribute('d', (icons.job[0][1] as { d: string }).d);
 	});
 
 	it('matches the mockup sprite', () => {
