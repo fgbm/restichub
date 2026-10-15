@@ -1,0 +1,58 @@
+/* Product palette Values come from ui/mockups/mockups.css. */
+:root {
+	--sl-color-accent-low: #12261e;
+	--sl-color-accent: #238636;
+	--sl-color-accent-high: #7ee2a0;
+	--sl-color-white: #e6edf3;
+	--sl-color-gray-1: #d7dee5;
+	--sl-color-gray-2: #b4bec8;
+	--sl-color-gray-3: #8a95a0;
+	--sl-color-gray-4: #5b6571;
+	--sl-color-gray-5: #2b313a;
+	--sl-color-gray-6: #161b22;
+	--sl-color-gray-7: #0f1216;
+	--sl-color-black: #0b0e12;
+	--sl-color-text-accent: #5fd08a;
+	--sl-font-system-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+:root[data-theme='light'] {
+	--sl-color-accent-low: #dafbe1;
+	--sl-color-accent: #1f883d;
+	--sl-color-accent-high: #116329;
+	--sl-color-white: #1f2328;
+	--sl-color-gray-1: #2d333b;
+	--sl-color-gray-2: #424a53;
+	--sl-color-gray-3: #59636e;
+	--sl-color-gray-4: #7d8590;
+	--sl-color-gray-5: #d0d7de;
+	--sl-color-gray-6: #eff2f5;
+	--sl-color-gray-7: #f6f8fa;
+	--sl-color-black: #ffffff;
+	--sl-color-text-accent: #1a7f37;
+}
+.site-title img { border-radius: 7px; }
+
+/* Landing page. */
+.rh-hero { margin: 1rem 0 2rem; }
+.rh-hero h2 { font-family: var(--sl-font-system-mono); border: 0; margin: 0 0 .5rem; font-size: 1.6rem; line-height: 1.2; }
+.rh-hero p { margin: 0 0 1.25rem; color: var(--sl-color-gray-2); font-size: 1.05rem; max-width: 40rem; }
+.rh-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; margin: 0 0 2.5rem; }
+.rh-card {
+	display: block; padding: 1rem 1.1rem; border: 1px solid var(--sl-color-gray-5);
+	border-radius: 6px; background: var(--sl-color-bg-nav); text-decoration: none !important;
+	transition: border-color .12s ease, background-color .12s ease;
+}
+.rh-card:hover { border-color: var(--sl-color-accent); }
+.rh-card strong { display: block; color: var(--sl-color-white); margin-bottom: .25rem; }
+.rh-card span { color: var(--sl-color-gray-3); font-size: .9rem; }
+.rh-card .rh-step { color: var(--sl-color-text-accent); font-size: .75rem; font-weight: 600; display: block; margin-bottom: .35rem; }
+.rh-how { margin: 0 0 2rem; }
+.rh-how svg { width: 100%; height: auto; max-width: 52rem; display: block; }
+.rh-how .box { fill: var(--sl-color-bg-nav); stroke: var(--sl-color-gray-5); stroke-width: 1.5; }
+.rh-how .lead { fill: var(--sl-color-accent-low); stroke: var(--sl-color-accent); stroke-width: 1.5; }
+.rh-how text { fill: var(--sl-color-white); font-size: 14px; font-family: var(--__sl-font); text-anchor: middle; }
+.rh-how text.sub { fill: var(--sl-color-gray-3); font-size: 11.5px; }
+.rh-how .arrow { stroke: var(--sl-color-gray-3); stroke-width: 1.6; fill: none; }
+.rh-how .head { fill: var(--sl-color-gray-3); }
+[data-has-hero] h1 { font-size: 1.6rem; line-height: 1.2; }
+.hero { padding-block: 2rem 1rem; }

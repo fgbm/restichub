@@ -1,20 +1,33 @@
 ---
 title: ResticHub
 description: Сервер управления резервным копированием restic на хостах Windows, Linux и macOS.
+template: splash
+hero:
+  title: "Одно место для планирования, запуска и контроля резервных копий restic"
+  tagline: "Сервер управления хранит профили, расписания и секреты. Лёгкий агент на каждом хосте запускает restic."
 ---
 
-ResticHub — сервер управления резервным копированием [restic](https://restic.net) на парке хостов.
+<div class="rh-cards">
+<a class="rh-card" href="operations/install-control-plane/"><span class="rh-step">1</span><strong>Установить сервер управления</strong><span>Запустите сервер и откройте веб-интерфейс.</span></a>
+<a class="rh-card" href="operations/register-an-agent/"><span class="rh-step">2</span><strong>Добавить хост</strong><span>Зарегистрируйте агент одноразовым токеном.</span></a>
+<a class="rh-card" href="concepts/plans/"><span class="rh-step">3</span><strong>Сделать первую копию</strong><span>Назначьте хосту профиль с помощью плана.</span></a>
+</div>
+
+## Как это работает
+
+<div class="rh-how">
+<svg viewBox="0 0 760 120" role="img" aria-label="Как работает ResticHub">
+<defs><marker id="rh-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" class="head"/></marker></defs>
+<rect class="lead" x="0" y="20" width="170" height="80" rx="8"/><text x="85" y="55">Сервер управления</text><text class="sub" x="85" y="76">расписания, секреты</text>
+<rect class="box" x="214" y="20" width="150" height="80" rx="8"/><text x="289" y="55">Агент</text><text class="sub" x="289" y="76">на каждом хосте</text>
+<rect class="box" x="394" y="20" width="150" height="80" rx="8"/><text x="469" y="55">restic</text><text class="sub" x="469" y="76">делает копию</text>
+<rect class="box" x="606" y="20" width="150" height="80" rx="8"/><text x="681" y="55">Репозиторий</text><text class="sub" x="681" y="76">хранит данные</text>
+<path class="arrow" d="M170 60H212" marker-end="url(#rh-ah)"/><path class="arrow" d="M364 60H392" marker-end="url(#rh-ah)"/><path class="arrow" d="M544 60H604" marker-end="url(#rh-ah)"/>
+</svg>
+</div>
 
 :::caution[Внимание]
 ResticHub на этапе проектирования. Готового релиза пока нет.
 :::
-
-## Что делает ResticHub
-
-- Сервер управления хранит все профили, расписания и секреты.
-- Сервер управления решает, когда запустить задание.
-- Агент на каждом хосте запускает restic и отправляет результаты на сервер управления.
-- Агент получает секреты репозитория только на одно задание.
-- Хуки запускаются только из списка разрешённых хуков на хосте.
 
 Основные термины описаны в разделе [Основные понятия](concepts/overview/).
