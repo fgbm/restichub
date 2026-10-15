@@ -530,6 +530,27 @@ pub async fn fail_for_revoked_agents(
     Ok(result.rows_affected())
 }
 
+/// Fails the sent and running jobs of an agent that the control plane revokes or replaces, and marks
+/// their repository lock as possibly stale. The revoked agent can no longer report a result.
+pub async fn fail_active_for_revoked_agent(
+    tx: &mut TenantTx<'_>,
+    agent: AgentId,
+    now: OffsetDateTime,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'failed', result_code = 'failed', \
+                result_message = 'agent_revoked', stale_lock_since = $2, finished_at = $2, \
+                lease_until = NULL, updated_at = now() \
+         WHERE agent_id = $1 AND status IN ('sent', 'running')",
+    )
+    .bind(agent)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
+}
+
 /// Marks the lock of a job as possibly stale from `since`, unless it is marked already.
 pub async fn note_stale_lock(
     tx: &mut TenantTx<'_>,

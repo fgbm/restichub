@@ -361,6 +361,8 @@ pub async fn revoke_agent(
     }
     let changed = repo::revoke(&mut tx, agent_id, actor, now).await?;
     let jobs = restichub_db::queue::active_job_ids_for_agent(&mut tx, agent_id).await?;
+    // The revoked agent cannot report, so the control plane ends its jobs itself (AC-ID-04).
+    restichub_db::queue::fail_active_for_revoked_agent(&mut tx, agent_id, now).await?;
     if changed {
         let mut event = context.audit_event(AuditAction::AgentRevoke, "agent", agent_id.as_uuid());
         event.diff = Some(diff(
@@ -508,6 +510,7 @@ pub async fn replace_agent(
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &revoke_event).await?;
+    restichub_db::queue::fail_active_for_revoked_agent(&mut tx, old_id, now).await?;
     let mut event = context.audit_event(AuditAction::AgentReplace, "agent", new_id.as_uuid());
     event.diff = Some(diff(
         None,

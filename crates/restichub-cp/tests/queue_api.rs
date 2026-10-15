@@ -413,3 +413,40 @@ async fn a_revoked_agent_fails_its_queued_jobs() {
     assert_eq!(body["result_message"], "agent_revoked");
     env.db.cleanup().await;
 }
+
+#[tokio::test]
+async fn ac_id_04_a_revoke_fails_the_running_job_and_marks_the_lock() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let mut w = world(db).await;
+    let env = &w.env;
+    let job = env.run_plan(w.plan).await;
+    env.pass().await;
+    let id = decode_job_id(&w.agent.job().await);
+    w.agent.start(env, &id).await;
+
+    let (status, body) = env
+        .call(
+            &env.admin,
+            "POST",
+            &format!("/api/v1/agents/{}/revoke", w.agent.id),
+            None,
+        )
+        .await;
+    assert!(status.is_success(), "{body}");
+
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["result_message"], "agent_revoked");
+    let mut tx = env.scoped().await;
+    let marked: bool =
+        sqlx::query_scalar("SELECT stale_lock_since IS NOT NULL FROM jobs WHERE id = $1")
+            .bind(job)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("cannot read the job");
+    tx.commit().await.expect("cannot end the read");
+    assert!(marked, "the lock of the lost job is a suspect");
+    env.db.cleanup().await;
+}
