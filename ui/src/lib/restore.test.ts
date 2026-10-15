@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { includePaths, isAbsolutePath, isCovered, isSystemPath } from './restore';
+import { escapeGlob, includePaths, isAbsolutePath, isCovered, isSystemPath } from './restore';
 
 describe('restore helpers (FR-RS-02, FR-RS-04)', () => {
 	it('fr_rs_04_warns_for_a_system_path_and_for_no_other', () => {
@@ -39,5 +39,21 @@ describe('restore helpers (FR-RS-02, FR-RS-04)', () => {
 		expect(isCovered('/srvx/a', new Set(['/srv']))).toBe(false);
 		expect(includePaths(selected)).toEqual(['/etc/hostname', '/srv/data', '/srvx']);
 		expect(includePaths(new Set())).toEqual([]);
+	});
+
+	it('fr_rs_04_escapes_the_wildcards_of_a_path_from_the_tree', () => {
+		// The Rust test `ac_rs_04_a_path_with_wildcard_characters_restores_only_itself` restores
+		// with exactly these patterns.
+		const table: [string, string][] = [
+			['/data/a.txt', '/data/a.txt'],
+			['/data/[ab].txt', '/data/[[]ab].txt'],
+			['/data/a*.txt', '/data/a[*].txt'],
+			['/data/what?.txt', '/data/what[?].txt'],
+			['/data/a].txt', '/data/a].txt'],
+			['/data/back\\slash', '/data/back[\\\\]slash'],
+			['!notes', '[!]notes'],
+			['/data/!notes', '/data/!notes']
+		];
+		for (const [path, pattern] of table) expect(escapeGlob(path), path).toBe(pattern);
 	});
 });

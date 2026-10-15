@@ -8,7 +8,7 @@
 	import type { SelectOption } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { OVERWRITE_MODES, isAbsolutePath, isSystemPath } from '#lib/restore.ts';
+	import { OVERWRITE_MODES, escapeGlob, isAbsolutePath, isSystemPath } from '#lib/restore.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let {
@@ -82,7 +82,7 @@
 			const job = await service.restoreSnapshot(repository.id, {
 				agent_id: agentId,
 				snapshot_id: snapshot.id,
-				includes: paths,
+				includes: paths.map(escapeGlob),
 				excludes: [],
 				target: trimmed,
 				overwrite,

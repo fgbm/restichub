@@ -58,3 +58,14 @@ export function isCovered(path: string, selected: ReadonlySet<string>): boolean 
 export function includePaths(selected: ReadonlySet<string>): string[] {
 	return [...selected].filter((path) => !isCovered(path, selected)).sort();
 }
+
+/**
+ * The restic pattern that matches one path only. A path from the tree is a literal name, but restic
+ * reads `*`, `?` and `[` as a wildcard and a leading `!` as a negation. A backslash cannot escape on
+ * Windows, where restic reads it as a separator, so each character stands in a one-character class.
+ * A `]` outside a class is already literal.
+ */
+export function escapeGlob(path: string): string {
+	const escaped = path.replace(/[*?[\\]/g, (char) => (char === '\\' ? '[\\\\]' : `[${char}]`));
+	return escaped.startsWith('!') ? `[!]${escaped.slice(1)}` : escaped;
+}
