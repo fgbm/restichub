@@ -49,7 +49,7 @@ A download must keep the integrity model of ADR-0031. The restic project signs t
 
 - `register` installs restic when no record exists. It does this after the preflight and before the enrollment request. A host without internet fails before the one-time token is spent.
 - `install-service` installs restic when no record exists.
-- `restichub-agent restic update` needs elevation. It fetches the latest release, verifies it, runs it as `restic version`, and only then replaces the installed binary with one rename. The previous binary stays as `restic-previous`. Any failure leaves the old binary and the old record in place. The operator restarts the service after an update.
+- `restichub-agent restic update` needs elevation. It fetches the latest release, verifies it, runs it as `restic version`, and only then replaces the installed binary with one rename. The previous binary stays as `restic-previous`. Any failure leaves the old binary and the old record in place. The service reads the record before each restic process, and the command restarts an installed service unless `--no-restart` is given. If the latest release fails the checks, the command takes the newest supported release of one bounded page of the release list, and then the release pinned in `packaging/restic.env`. The command refuses a release older than the installed one unless `--allow-downgrade` is given.
 - `run` never downloads. The service makes no network request for restic. If restic is absent, it refuses to start with a clear message.
 
 ### Package

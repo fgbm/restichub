@@ -132,7 +132,11 @@ Run the command as `root` or in an elevated PowerShell:
 restichub-agent restic update
 ```
 
-The command downloads the latest release and verifies it. It runs the new binary with `version`. Only then does it replace the old binary with one rename. The old binary stays in the same directory as `restic-previous`. If a step fails, the old binary and the old record stay as they were. Restart the agent service after an update, because the service reads the record at its start.
+The command downloads the latest release and verifies it. It runs the new binary with `version`. Only then does it replace the old binary with one rename. The old binary stays in the same directory as `restic-previous`. If a step fails, the old binary and the old record stay as they were. The service reads the record before each restic process, so the next job uses the new binary. If a service is installed, the command restarts it. Use `--no-restart` to restart it yourself later. On Windows the replacement fails while the service runs the binary. Then stop the service, run the command again and start the service.
+
+The command refuses a release that is older than the installed one. Use `--allow-downgrade` to install it.
+
+If the latest release fails the checks (for example a new major version, a changed signature format or a GitHub rate limit), the command takes the newest supported release of the last ten GitHub releases. If that also fails, it uses the release that this agent build pins. If no release installs, the message lists each failure. Then use the offline files.
 
 ### An offline host
 
@@ -155,7 +159,9 @@ The agent verifies these files in the same way as a download.
 
 ### The proxy of the download
 
-The download honours `HTTPS_PROXY` and `NO_PROXY` of the process that runs the command. The proxy must be an `http://` URL, for example `http://proxy.example:3128`. The agent opens a `CONNECT` tunnel through it, and the TLS session and all checks stay between the agent and GitHub. A proxy with a user name and a password uses `http://user:password@proxy.example:3128`.
+The download honours `HTTPS_PROXY` and `NO_PROXY` of the process that runs the command. The proxy must be an `http://` URL, for example `http://proxy.example:3128`. The agent opens a `CONNECT` tunnel through it, and the TLS session and all checks stay between the agent and GitHub. A proxy with a user name and a password uses `http://user:password@proxy.example:3128`. Write a special character of the user name or the password as a percent escape, for example `%40` for `@`. An IPv6 proxy address uses brackets, for example `http://[2001:db8::1]:3128`.
+
+`sudo` removes these variables. Keep them with `sudo --preserve-env=HTTPS_PROXY,NO_PROXY restichub-agent restic update`.
 
 GitHub limits the number of requests without a token. If GitHub answers with a rate limit, the agent says so. Try again later or use the offline files.
 
