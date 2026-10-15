@@ -231,6 +231,8 @@ pub struct AppState {
     metrics_cache: Arc<SnapshotCache>,
     dashboard_cache: Arc<crate::dashboard::DashboardCache>,
     sender: Option<crate::alerts::sender::Sender>,
+    progress_throttle:
+        Arc<crate::progress_throttle::ProgressThrottle<crate::job_data::ProgressUpdate>>,
 }
 
 impl AppState {
@@ -261,6 +263,7 @@ impl AppState {
             metrics_cache: Arc::new(SnapshotCache::default()),
             dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
             sender: None,
+            progress_throttle: Arc::default(),
         }
     }
 
@@ -285,6 +288,7 @@ impl AppState {
             metrics_cache: Arc::new(SnapshotCache::default()),
             dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
             sender: None,
+            progress_throttle: Arc::default(),
         }
     }
 
@@ -393,6 +397,12 @@ impl AppState {
 
     pub fn log_retention_days(&self) -> u32 {
         self.log_retention_days
+    }
+
+    pub fn progress_throttle(
+        &self,
+    ) -> &crate::progress_throttle::ProgressThrottle<crate::job_data::ProgressUpdate> {
+        &self.progress_throttle
     }
 
     pub fn metrics_cache(&self) -> &SnapshotCache {

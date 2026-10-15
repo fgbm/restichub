@@ -2,7 +2,7 @@
 
 ResticHub is a central control plane for [restic](https://restic.net) backups on a fleet of Windows, Linux and macOS hosts.
 
-> **Status:** design phase. There is no usable release yet. The requirements, acceptance criteria and architecture decisions are in [`design/`](design/).
+> **Status:** pre-release. The MVP is built and is in acceptance testing on real hosts. There is no stable release yet, and the interfaces can still change. The requirements, acceptance criteria and architecture decisions are in [`design/`](design/).
 
 ## What ResticHub does
 

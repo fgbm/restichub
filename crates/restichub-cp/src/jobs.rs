@@ -698,6 +698,12 @@ pub async fn handle_job_result(
         tracing::warn!(job = %job_id, "the job result holds an unknown outcome");
         return;
     };
+    // The row lock above waits for a progress write in flight. Deleting here, in the same
+    // transaction as the status change, leaves no progress on a job that is not running.
+    if let Err(error) = restichub_db::job_steps::delete_progress(&mut tx, job_id).await {
+        tracing::warn!(job = %job_id, %error, "the job result could not remove the progress");
+        return;
+    }
     // Restic exit code 11 is a held lock, not a failure: the job returns to the queue as a new job
     // or, after the last retry, to the dead-letter status (FR-SC-05). The agent reports the lock on
     // the step, and the job result of a stopped job has the status `failed`, so the step result

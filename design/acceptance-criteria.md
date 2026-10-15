@@ -101,7 +101,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-HK-09 | FR-HK-09 | A script has a secret parameter with a canary value. **Expected:** the script reads the canary from its environment. The canary is not in the arguments, the logs, the journal or a file after the run. The file with the body does not exist after the run. | S |
 | AC-HK-10 | FR-HK-09 | A script runs longer than its timeout, or the user cancels the job. **Expected:** the agent stops the script and its child processes. | A |
 | AC-HK-11 | FR-HK-11 | A job has scripts and a backup. **Expected:** the planned steps list all of them in order before they run. Each step has its own log. The API returns the lines of one step. | A |
-| AC-HK-12 | FR-HK-12 | An Operator edits a script or a template. **Expected:** the CP refuses it. An Admin edit writes an audit record with the hash of the script. A template of another organization returns 404. | A |
+| AC-HK-12 | FR-HK-12 | An Operator edits a script or a template. **Expected:** the CP refuses it. An Admin edit writes an audit record with the hash of the script. A template of another organization returns 404. A Viewer reads a profile with empty script bodies and empty string variables, and a template returns 403. | A |
 | AC-HK-13 | FR-HK-05, FR-HK-09 | A `before` script with the policy `abort_backup` fails. **Expected:** the backup does not run. `on_error` and `finally` scripts run. With the policy `continue`, the backup runs. | A |
 
 ## 6. Repositories and secrets
