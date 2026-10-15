@@ -169,3 +169,42 @@ test('the old users and API tokens addresses open the settings screens', async (
 	await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
 	await expect(page).toHaveTitle('Users · ResticHub');
 });
+
+test('the retention inputs keep the app input style under the policy', async ({ page }) => {
+	const consoleViolations = await watch(page);
+	await page.goto('/sign-in');
+	await page.locator('#signin-username').fill('admin');
+	await page.locator('#signin-password').fill('secret');
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+	const nav = page.getByRole('navigation', { name: 'Primary navigation' });
+	await expect(nav).toBeVisible();
+
+	await nav.getByRole('link', { name: 'Profiles', exact: true }).click();
+	await page.getByRole('button', { name: 'Add profile', exact: true }).first().click();
+	await page.locator('[data-section="retention"] .section__toggle').click();
+
+	const inputs = page.locator('[data-section="retention"] .rule__input input');
+	await expect(inputs).toHaveCount(7);
+	const boxes = [];
+	for (const input of await inputs.all()) {
+		await expect(input).toHaveClass(/rh-input/);
+		const style = await input.evaluate((element) => {
+			const computed = getComputedStyle(element);
+			return {
+				border: computed.borderTopColor,
+				padding: computed.paddingLeft,
+				radius: computed.borderTopLeftRadius
+			};
+		});
+		expect(style.padding).not.toBe('0px');
+		expect(style.radius).not.toBe('0px');
+		expect(style.border).not.toBe('rgb(0, 0, 0)');
+		boxes.push(await input.boundingBox());
+	}
+	// One width and one left edge for every rule input.
+	expect(new Set(boxes.map((box) => Math.round(box?.width ?? 0))).size).toBe(1);
+	expect(new Set(boxes.map((box) => Math.round(box?.x ?? 0))).size).toBe(1);
+
+	expect(await pageViolations(page)).toEqual([]);
+	expect(consoleViolations).toEqual([]);
+});
