@@ -12,6 +12,7 @@ mod common;
 
 use common::hooks::*;
 use common::*;
+#[cfg(unix)]
 use restichub_agent::hooks::Trust;
 use restichub_agent::jobs::Jobs;
 use restichub_proto::agent::v1::{

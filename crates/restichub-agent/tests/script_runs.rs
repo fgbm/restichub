@@ -9,13 +9,18 @@
 
 mod common;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 use common::scripts::*;
 use common::*;
+#[cfg(unix)]
+use restichub_proto::agent::v1::JobStatus;
 use restichub_proto::agent::v1::{
-    HookPhase, JobStatus, RejectReason, ScriptFailurePolicy, ScriptInterpreter, StepStatus,
+    HookPhase, RejectReason, ScriptFailurePolicy, ScriptInterpreter, StepStatus,
 };
+#[cfg(unix)]
 use tokio::sync::mpsc;
 
 const CANARY: &str = "CANARY-script-secret-4c1d";
