@@ -35,7 +35,7 @@ docker exec "$container" sh -c 'head -c 400000000 /dev/urandom > /data/big.bin'
 first="$(api POST "/api/v1/plans/$plan/run" | jq -r .id)"
 pid=""
 for _ in $(seq 1 600); do
-	pid="$(docker exec "$container" sh -c "ps -eo pid,comm | awk '\$2==\"restic\" {print \$1; exit}'" || true)"
+	pid="$(restic_pids "$container" | head -n1)"
 	[ -n "$pid" ] && break
 	sleep 0.2
 done

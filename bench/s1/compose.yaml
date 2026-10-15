@@ -66,6 +66,7 @@ services:
     image: ${RESTICHUB_CP_IMAGE:-restichub-cp}
     build:
       context: ../..
+      network: ${BUILD_NETWORK:-default}
       dockerfile: Dockerfile
     depends_on:
       db-bootstrap:
@@ -109,6 +110,7 @@ services:
     image: restichub-bench-agent:${RESTIC_A:-0.18.1}
     build:
       context: ../..
+      network: ${BUILD_NETWORK:-default}
       dockerfile: bench/s1/Dockerfile.agent
       args:
         RESTIC_VERSION: ${RESTIC_A:-0.18.1}
@@ -120,6 +122,7 @@ services:
     image: restichub-bench-agent:${RESTIC_B:-0.19.1}
     build:
       context: ../..
+      network: ${BUILD_NETWORK:-default}
       dockerfile: bench/s1/Dockerfile.agent
       args:
         RESTIC_VERSION: ${RESTIC_B:-0.19.1}

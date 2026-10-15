@@ -48,6 +48,7 @@ Set the environment variables before `bench.sh setup`:
 | `NO_PLANS` | 0 | 1: no repository and no plan (the idle hosts of AC-AG-02) |
 | `AGENT_MEM_LIMIT` | 128m | memory limit of each agent host |
 | `COMPOSE_PROJECT_NAME`, `CP_WEB_PORT`, `CP_AGENT_PORT` | `restichub-bench-s1`, 18080, 18443 | the project name and the published ports |
+| `BUILD_NETWORK` | `default` | the network of the image build; use `host` when the build containers have no DNS or no route to the internet |
 | `RESTICHUB_CP_IMAGE` | `restichub-cp` | use a prebuilt image of the control plane |
 
 ## Scenarios of section 14.2

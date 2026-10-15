@@ -57,3 +57,8 @@ wait_for() {
 	log "timeout after ${seconds}s: $what"
 	return 1
 }
+
+# The process identifiers of the restic processes in an agent host. The host image has no `ps`.
+restic_pids() {
+	docker exec "$1" sh -c 'for p in /proc/[0-9]*; do [ "$(cat "$p/comm" 2>/dev/null)" = restic ] && echo "${p#/proc/}"; done; true'
+}

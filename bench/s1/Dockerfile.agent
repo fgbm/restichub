@@ -9,7 +9,7 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 COPY proto ./proto
-# The workspace needs the embedded UI directory at compile time of the control plane only.
+COPY packaging ./packaging
 ARG CARGO_BUILD_JOBS=4
 ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -17,22 +17,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked -p restichub-agent \
     && cp target/release/restichub-agent /restichub-agent
 
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS restic
-ARG RESTIC_VERSION
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-WORKDIR /restic
-RUN base="https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}" \
-    && curl -fsSLO "$base/restic_${RESTIC_VERSION}_linux_amd64.bz2" \
-    && curl -fsSLO "$base/SHA256SUMS" \
-    && curl -fsSLO "$base/SHA256SUMS.asc"
-
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 ARG RESTIC_VERSION
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates procps \
-    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /restichub-agent /usr/local/bin/restichub-agent
-COPY --from=restic /restic /opt/restic-release
+# `bench.sh build` downloads the release files into this directory.
+COPY bench/s1/out/restic/${RESTIC_VERSION} /opt/restic-release
 ENV RESTIC_VERSION=${RESTIC_VERSION}
 COPY bench/s1/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]

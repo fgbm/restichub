@@ -35,7 +35,7 @@ while [ ! -e "$out/stop" ]; do
 	if [ "${RESTIC_PROBE:-0}" = 1 ]; then
 		procs=0
 		for c in $(dc ps -q agent-a agent-b); do
-			n="$(docker exec "$c" sh -c 'ps -eo comm | grep -c "^restic$"' 2>/dev/null || true)"
+			n="$(restic_pids "$c" 2>/dev/null | wc -l)"
 			procs=$((procs + ${n:-0}))
 		done
 	fi

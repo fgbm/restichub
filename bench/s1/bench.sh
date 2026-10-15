@@ -40,7 +40,18 @@ init() {
 	chmod 600 "$env_file"
 }
 
+fetch_restic() {
+	local version="$1" dir="$bench_dir/out/restic/$1" base file
+	base="https://github.com/restic/restic/releases/download/v$version"
+	mkdir -p "$dir"
+	for file in "restic_${version}_linux_amd64.bz2" SHA256SUMS SHA256SUMS.asc; do
+		[ -s "$dir/$file" ] || curl -fsSL -o "$dir/$file" "$base/$file"
+	done
+}
+
 build() {
+	fetch_restic "${RESTIC_A:-0.18.1}"
+	fetch_restic "${RESTIC_B:-0.19.1}"
 	export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 	DOCKER_BUILDKIT=1 dc build "$@"
 }
