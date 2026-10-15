@@ -84,6 +84,15 @@ fn preview_step(
     })
 }
 
+/// The command line as the preview shows it. The agent writes the same text into the step log, so
+/// the two agree (AC-PF-01).
+#[must_use]
+pub fn masked_command(line: &arg::CommandLine) -> String {
+    let mut masked = line.clone();
+    arg::mask_secrets(&mut masked);
+    render(&masked)
+}
+
 /// The line of a script in the preview: its name, interpreter and phase, never the body or a value.
 fn script_command(script: &ScriptStep) -> String {
     let interpreter = ScriptInterpreter::try_from(script.interpreter)
