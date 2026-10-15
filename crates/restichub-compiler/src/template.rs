@@ -129,6 +129,7 @@ mod tests {
             restic_version: ResticVersion::MIN_SUPPORTED,
             now: date(2026, 10, 13),
             allow_list: BTreeMap::new(),
+            server_scripts: crate::script::ServerScripts::default(),
         }
     }
 

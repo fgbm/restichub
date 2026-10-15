@@ -77,6 +77,29 @@ impl<'a> SecretReader<'a> {
         self.decrypt_row(tx, secret_id, row).await
     }
 
+    /// Reads the value of a secret that a profile hands to a hook and records the delivery
+    /// (FR-HK-03, ADR-0017).
+    ///
+    /// Only a secret of the purpose `hook_secret` passes: a profile cannot make the agent receive
+    /// a repository password through a hook.
+    pub async fn read_hook_secret_for_delivery(
+        &self,
+        tx: &mut TenantTx<'_>,
+        secret_id: SecretId,
+        agent_id: Uuid,
+        job_id: Uuid,
+        repository_id: Uuid,
+    ) -> Result<SecretString, DeliveryError> {
+        let metadata = restichub_db::secrets::get(tx, secret_id)
+            .await?
+            .ok_or(DeliveryError::NotFound)?;
+        if metadata.purpose != SecretPurpose::HookSecret.as_str() {
+            return Err(DeliveryError::BadPurpose);
+        }
+        self.read_for_delivery(tx, secret_id, agent_id, job_id, repository_id)
+            .await
+    }
+
     /// Reads the value of a secret that the control plane itself uses, such as the signing key of
     /// a webhook channel (ADR-0036). The call writes no `secret_delivered` record, because no
     /// value goes to an agent.

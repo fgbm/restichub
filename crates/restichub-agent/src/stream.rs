@@ -29,8 +29,9 @@ use anyhow::{Context, Result, bail};
 use hyper::Uri;
 use restichub_proto::agent::v1::{
     AgentHello, AgentMessage, CertificateInstalled, CertificateRejectReason,
-    CertificateSigningRequest, ControlMessage, KeyUpdateAck, Ping, Pong, SigningKeyUpdate,
-    VersionRejectReason, agent_message, agent_service_client::AgentServiceClient, control_message,
+    CertificateSigningRequest, ControlMessage, HookAllowListState, HookMetadata, KeyUpdateAck,
+    Ping, Pong, ScriptInterpreter, ServerScriptsState, SigningKeyUpdate, VersionRejectReason,
+    agent_message, agent_service_client::AgentServiceClient, control_message,
 };
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, watch};
@@ -360,6 +361,8 @@ pub async fn connect_once(
         restic_version,
         jobs.restore_roots(),
         jobs.held_job_ids(),
+        jobs.hook_report().await,
+        jobs.script_report().await,
     )
     .await?;
     // The results go through this stream now, and a result that a dropped stream lost reaches the
@@ -795,6 +798,8 @@ async fn send_hello(
     restic_version: &str,
     restore_roots: Vec<String>,
     held_job_ids: Vec<String>,
+    (hook_allow_list_state, hooks): (HookAllowListState, Vec<HookMetadata>),
+    (server_scripts_state, script_interpreters): (ServerScriptsState, Vec<ScriptInterpreter>),
 ) -> Result<()> {
     let hello = AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
@@ -810,6 +815,13 @@ async fn send_hello(
                 .collect(),
             restore_roots,
             held_job_ids,
+            hooks,
+            hook_allow_list_state: hook_allow_list_state as i32,
+            server_scripts_state: server_scripts_state as i32,
+            script_interpreters: script_interpreters
+                .into_iter()
+                .map(|kind| kind as i32)
+                .collect(),
             ..AgentHello::default()
         })),
     };
@@ -826,7 +838,7 @@ mod tests {
         send_hello,
     };
     use crate::rotation::rotation_due;
-    use restichub_proto::agent::v1::{Ping, agent_message};
+    use restichub_proto::agent::v1::{HookAllowListState, Ping, ServerScriptsState, agent_message};
     use std::time::Duration;
     use time::OffsetDateTime;
 
@@ -920,6 +932,8 @@ mod tests {
             "0.19.0",
             vec!["/var/lib/restichub-restore".to_owned()],
             Vec::new(),
+            (HookAllowListState::Absent, Vec::new()),
+            (ServerScriptsState::Disabled, Vec::new()),
         )
         .await
         .expect("the hello is sent");
@@ -933,9 +947,16 @@ mod tests {
     #[tokio::test]
     async fn fr_rs_03_the_hello_reports_the_restore_roots() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        send_hello(&tx, "0.19.0", vec!["/srv/restore".to_owned()], Vec::new())
-            .await
-            .expect("the hello is sent");
+        send_hello(
+            &tx,
+            "0.19.0",
+            vec!["/srv/restore".to_owned()],
+            Vec::new(),
+            (HookAllowListState::Absent, Vec::new()),
+            (ServerScriptsState::Disabled, Vec::new()),
+        )
+        .await
+        .expect("the hello is sent");
         let message = rx.recv().await.expect("a message");
         let Some(agent_message::Payload::AgentHello(hello)) = message.payload else {
             panic!("the first message must be an AgentHello");

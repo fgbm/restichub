@@ -6,8 +6,10 @@
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { JobDetail, JobLogLine, JobStep } from '#lib/api/index.ts';
 	import LogViewer from '#lib/components/LogViewer.svelte';
+	import StepLog from '#lib/components/StepLog.svelte';
 	import {
 		Alert,
+		Badge,
 		Button,
 		ConfirmDialog,
 		EmptyState,
@@ -56,6 +58,11 @@
 	let logPurged = $state(false);
 	let logError = $state(false);
 	let following = $state(true);
+
+	// A step opens its log on a click. A running step and a failed step open by themselves.
+	let openSteps = $state<Record<string, boolean>>({});
+	// Changes whenever the job was read, so an open log of a running step reads its new lines.
+	let logTick = $state(0);
 
 	let cancelOpen = $state(false);
 	let cancelling = $state(false);
@@ -131,6 +138,25 @@
 		return text === key ? stepId : text;
 	}
 
+	// A script has the name that its author gave it, and a hook has its identifier.
+	function rowTitle(row: StepRow): string {
+		return row.name || stepTitle(row.id);
+	}
+
+	function hasLog(row: StepRow): boolean {
+		return row.step !== null || row.state === 'running';
+	}
+
+	function isOpen(row: StepRow): boolean {
+		const chosen = openSteps[row.id];
+		if (chosen !== undefined) return chosen;
+		return row.state === 'running' || (row.step !== null && markerOf(row.step.status) === 'failed');
+	}
+
+	function toggle(row: StepRow): void {
+		openSteps[row.id] = !isOpen(row);
+	}
+
 	function stepError(step: JobStep): string | null {
 		if (!step.error_code) return null;
 		const key = `jobDetail.stepError.${step.error_code}` as MessageKey;
@@ -200,7 +226,10 @@
 		busy = true;
 		try {
 			await loadJob();
-			if (job && !notFound) await loadLines();
+			if (job && !notFound) {
+				await loadLines();
+				logTick += 1;
+			}
 		} finally {
 			busy = false;
 			loading = false;
@@ -360,10 +389,46 @@
 										<Icon name={MARKER_ICONS[marker]} size="xs" />
 									</span>
 								{/if}
-								<div class="timeline__head">
-									<span class="timeline__title">{stepTitle(row.id)}</span>
-									<span class="timeline__meta">{rowMeta(row)}</span>
-								</div>
+								{#if hasLog(row)}
+									<button
+										type="button"
+										class="timeline__head timeline__toggle"
+										aria-expanded={isOpen(row)}
+										aria-label={t(isOpen(row) ? 'jobDetail.hideStepLog' : 'jobDetail.showStepLog', {
+											name: rowTitle(row)
+										})}
+										onclick={() => toggle(row)}
+									>
+										<Icon name={isOpen(row) ? 'chevron-down' : 'chevron-right'} size="xs" />
+										<span class="timeline__title">{rowTitle(row)}</span>
+										{#if row.kind === 'script' || row.kind === 'hook'}
+											<Badge tone="neutral"
+												>{t(`jobDetail.stepKind.${row.kind}` as MessageKey)}</Badge
+											>
+										{/if}
+										{#if row.phase}
+											<Badge tone="info"
+												>{t(`profiles.hooks.phase.${row.phase}` as MessageKey)}</Badge
+											>
+										{/if}
+										<span class="timeline__meta">{rowMeta(row)}</span>
+									</button>
+								{:else}
+									<div class="timeline__head">
+										<span class="timeline__title">{rowTitle(row)}</span>
+										{#if row.kind === 'script' || row.kind === 'hook'}
+											<Badge tone="neutral"
+												>{t(`jobDetail.stepKind.${row.kind}` as MessageKey)}</Badge
+											>
+										{/if}
+										{#if row.phase}
+											<Badge tone="info"
+												>{t(`profiles.hooks.phase.${row.phase}` as MessageKey)}</Badge
+											>
+										{/if}
+										<span class="timeline__meta">{rowMeta(row)}</span>
+									</div>
+								{/if}
 								{#if row.step}
 									{#if stepError(row.step)}
 										<p class="timeline__body">{stepError(row.step)}</p>
@@ -408,6 +473,9 @@
 											{t('jobDetail.progressCurrent', { file: runningProgress.current_files[0] })}
 										</p>
 									{/if}
+								{/if}
+								{#if hasLog(row) && isOpen(row)}
+									<StepLog jobId={job.id} stepId={row.id} name={rowTitle(row)} tick={logTick} />
 								{/if}
 							</li>
 						{/each}
@@ -685,6 +753,22 @@
 		display: flex;
 		align-items: baseline;
 		gap: var(--rh-space-3);
+	}
+
+	.timeline__toggle {
+		align-items: center;
+		width: 100%;
+		padding: 0;
+		border: 0;
+		background: none;
+		color: inherit;
+		font: inherit;
+		text-align: start;
+		cursor: pointer;
+	}
+
+	.timeline__toggle:hover .timeline__title {
+		text-decoration: underline;
 	}
 
 	.timeline__title {

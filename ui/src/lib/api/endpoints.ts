@@ -74,6 +74,20 @@ export const endpoints = {
 		nextRuns: (id: string, count: number) =>
 			`/plans/${encodeURIComponent(id)}/next-runs?count=${count}`
 	},
+	secrets: {
+		list: '/secrets',
+		create: '/secrets'
+	},
+	scriptTemplates: {
+		list: '/script-templates',
+		create: '/script-templates',
+		byId: (id: string) => `/script-templates/${encodeURIComponent(id)}`
+	},
+	jobTemplates: {
+		list: '/job-templates',
+		create: '/job-templates',
+		byId: (id: string) => `/job-templates/${encodeURIComponent(id)}`
+	},
 	dashboard: '/dashboard',
 	alerts: {
 		list: '/alerts',

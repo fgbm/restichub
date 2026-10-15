@@ -6,7 +6,10 @@
 //! key ring and checks the addressee, the tenant and the time rules ([`verify_job`]), validates the
 //! steps ([`ValidatedJob`], FR-PR-01) and consults the job journal (ADR-0020). It then acknowledges
 //! the job (FR-PR-06) and runs it off the stream task, so the heartbeat and the key updates keep
-//! flowing. A job that the journal already completed is not run again; the stored result is re-sent.
+//! flowing. A job that the journal already completed is not run again; the stored result is re-sent,
+//! also when the host changed the trust mode since. A job with a script or hook step that a restart
+//! interrupted is not run again either: it gets a final result with the error `interrupted`
+//! (ADR-0037).
 //!
 //! The agent sends every result through the stream that is open at that moment, not through the
 //! stream that delivered the job: a job outlives one connection. The result is durable in the
@@ -14,9 +17,10 @@
 //! the result, so the agent sends every stored result at each connection until the journal entry
 //! expires (ADR-0020, FR-AG-12). The control plane ignores a result for a terminal job.
 //!
-//! The agent refuses a job with a `hook` step with [`RejectReason::UnsupportedStep`]: that step
-//! kind belongs to a later epic. The agent starts no job on its own and holds no timer that starts
-//! one (ADR-0002).
+//! A `hook` step runs a program from the hook allow-list ([`crate::hooks`], ADR-0004). The agent
+//! checks the hook and its parameters before it acknowledges the job and again before it starts
+//! the hook (`hooks`). The agent starts no job on its own and holds no timer that starts one
+//! (ADR-0002).
 //!
 //! While a step runs, the agent sends progress and scrubbed log chunks. The result of the job holds
 //! the typed result of every step and a bounded tail of the log. Both stay in the journal, so a
@@ -39,29 +43,39 @@ use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{
-    AgentMessage, ErrorDetail, JobAck, JobRejected, JobResult, JobStatus, RejectReason, SignedJob,
-    Step, StepResult, StepStatus, agent_message, step, step_result,
+    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, RejectReason, ScriptInterpreter,
+    ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message, step, step_result,
 };
 use restichub_proto::signing::{
     Admission, Expected, JobJournal as _, JournalState, KeyRing, Rejection, admit, verify_job,
 };
 use tokio::sync::mpsc;
 
+use crate::hooks::HookStore;
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
 use crate::restic_store::Layout;
 use crate::restore_roots::RestoreAccess;
+use crate::scripts::ScriptStore;
 
+mod hooks;
 mod log;
+mod outcome;
 mod runner;
 mod watchdog;
 
+use hooks::{HookFailure, PhaseMode, Phased, Sink};
 use log::JobLog;
+use outcome::{Progress, interrupted_error, job_error, job_outcome};
 use runner::{CancelHandle, StepError, StepOutcome};
 use watchdog::StepLimits;
 
 /// The grace period between the graceful stop signal and the forced kill of the process tree
 /// (FR-AG-10, AC-AG-06).
 pub const STOP_GRACE: Duration = Duration::from_secs(30);
+
+/// How long past the job deadline the cleanup hooks (`after`, `on_*` and `finally`) may run
+/// (FR-HK-05).
+pub const CLEANUP_GRACE: Duration = Duration::from_secs(10 * 60);
 
 /// The largest number of jobs that the agent runs at the same time (ADR-0020).
 const MAX_CONCURRENT_JOBS: usize = 4;
@@ -81,6 +95,12 @@ enum Dispatch {
         cancel: CancelHandle,
         snapshot: Option<JournalSnapshot>,
     },
+}
+
+/// What the journal and the running jobs already know about a redelivered job (ADR-0020).
+enum Known {
+    Stored(JobResult),
+    Running,
 }
 
 /// The running jobs of one agent and the journal that records them (ADR-0020).
@@ -106,9 +126,16 @@ pub struct Jobs {
     resent: Arc<Mutex<HashSet<String>>>,
     /// The grace period between the graceful stop and the forced kill (FR-AG-10).
     stop_grace: Duration,
+    /// How long past the job deadline the cleanup hooks may run (FR-HK-05).
+    cleanup_grace: Duration,
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
+    /// Place and trust rule of the allow-list file. The agent reads the file again at each job
+    /// (FR-HK-01).
+    hooks: Arc<HookStore>,
+    /// The agent reads it again at each job (FR-HK-08).
+    scripts: Arc<ScriptStore>,
 }
 
 impl Jobs {
@@ -127,6 +154,8 @@ impl Jobs {
         journal.prune(now_timestamp());
         journal.persist()?;
         let restore = RestoreAccess::for_host(dir, &cache, &program);
+        let scripts = ScriptStore::for_config_dir(dir, &cache);
+        scripts.clean_leftovers();
         Ok(Self {
             program,
             expected_sha256,
@@ -139,8 +168,64 @@ impl Jobs {
             written: Arc::new(Mutex::new(0)),
             resent: Arc::new(Mutex::new(HashSet::new())),
             stop_grace: STOP_GRACE,
+            cleanup_grace: CLEANUP_GRACE,
             restore: Arc::new(restore),
+            hooks: Arc::new(HookStore::for_config_dir(dir)),
+            scripts: Arc::new(scripts),
         })
+    }
+
+    /// Replaces the place and the trust rule of the hook allow-list (FR-HK-01).
+    #[must_use]
+    pub fn with_hook_store(mut self, store: HookStore) -> Self {
+        self.hooks = Arc::new(store);
+        self
+    }
+
+    /// Replaces the place and the trust rule of the server scripts setting (FR-HK-08).
+    #[must_use]
+    pub fn with_script_store(mut self, store: ScriptStore) -> Self {
+        store.clean_leftovers();
+        self.scripts = Arc::new(store);
+        self
+    }
+
+    /// The trust mode and the interpreters for `AgentHello` (FR-HK-08).
+    pub async fn script_report(&self) -> (ServerScriptsState, Vec<ScriptInterpreter>) {
+        let store = Arc::clone(&self.scripts);
+        match tokio::task::spawn_blocking(move || store.report()).await {
+            Ok(report) => report,
+            Err(error) => {
+                tracing::warn!(%error, "the server scripts check stopped");
+                (ServerScriptsState::Unspecified, Vec::new())
+            }
+        }
+    }
+
+    /// The state and the public metadata of the hook allow-list for `AgentHello` (FR-HK-04). A
+    /// file that the agent does not trust gives no hook (AC-HK-01).
+    pub async fn hook_report(
+        &self,
+    ) -> (
+        restichub_proto::agent::v1::HookAllowListState,
+        Vec<restichub_proto::agent::v1::HookMetadata>,
+    ) {
+        let store = Arc::clone(&self.hooks);
+        let loaded = tokio::task::spawn_blocking(move || {
+            let list = store.load();
+            (list.state(), list.report())
+        })
+        .await;
+        match loaded {
+            Ok((state, report)) => (state.to_proto(), report),
+            Err(error) => {
+                tracing::warn!(%error, "the hook allow-list check stopped");
+                (
+                    restichub_proto::agent::v1::HookAllowListState::Unspecified,
+                    Vec::new(),
+                )
+            }
+        }
     }
 
     /// Reads the expected hash from the protected record before every spawn (ADR-0038).
@@ -192,6 +277,13 @@ impl Jobs {
         self
     }
 
+    /// Sets how long past the job deadline the cleanup hooks may run (FR-HK-05).
+    #[must_use]
+    pub fn with_cleanup_grace(mut self, grace: Duration) -> Self {
+        self.cleanup_grace = grace;
+        self
+    }
+
     /// Sets the stream that carries the results (ADR-0020).
     ///
     /// The connect loop calls it after the stream opens, before it sends the stored results.
@@ -219,6 +311,19 @@ impl Jobs {
             }
         };
         let job_id = validated.job().job_id.clone();
+        // The journal answers a redelivery before the checks of the current host state: a job that
+        // finished is not judged again (ADR-0020).
+        match self.known(&validated).await {
+            Some(Known::Stored(result)) => {
+                self.send_result(result).await;
+                return;
+            }
+            Some(Known::Running) => {
+                let _ = self.send(ack(job_id)).await;
+                return;
+            }
+            None => {}
+        }
         if validated
             .job()
             .steps
@@ -228,6 +333,10 @@ impl Jobs {
             let _ = self
                 .send(rejected(job_id, RejectReason::RestoreTargetDenied))
                 .await;
+            return;
+        }
+        if let Some(reason) = self.hook_refusal(&validated).await {
+            let _ = self.send(rejected(job_id, reason)).await;
             return;
         }
         match self.dispatch(&validated, expected.now) {
@@ -263,6 +372,87 @@ impl Jobs {
                 }
             }
         }
+    }
+
+    /// The answer that the journal already holds for a redelivered job, or `None` for a job that
+    /// needs the checks and a run (ADR-0020).
+    ///
+    /// A job that the journal holds as accepted, without a result, and that runs in no task of this
+    /// process was interrupted by a restart. The agent runs a job of restic steps again, but not a
+    /// job with a script or hook step: a program may have run, and it may not run twice. It stores
+    /// and answers a final result instead (ADR-0037).
+    async fn known(&self, validated: &ValidatedJob) -> Option<Known> {
+        let job = validated.job();
+        let snapshot = {
+            let mut journal = lock(&self.journal);
+            let running = lock(&self.running);
+            match journal.lookup(&job.job_id) {
+                JournalState::Completed(result) => return Some(Known::Stored(result)),
+                _ if running.contains_key(&job.job_id) => return Some(Known::Running),
+                JournalState::InProgress if runs_programs(job) => {
+                    let result = interrupted_result(job);
+                    journal.record_completed(&job.job_id, result.clone());
+                    (result, journal.snapshot())
+                }
+                _ => return None,
+            }
+        };
+        let (result, snapshot) = snapshot;
+        if let Err(error) = self.write_journal(snapshot).await {
+            tracing::warn!(%error, "cannot write the job journal");
+        }
+        Some(Known::Stored(result))
+    }
+
+    /// The reason to refuse a job whose hook is unknown or whose parameters do not obey the
+    /// schema, or `None` (FR-HK-03, AC-HK-01, AC-HK-03).
+    async fn hook_refusal(&self, validated: &ValidatedJob) -> Option<RejectReason> {
+        let scripts: Vec<_> = validated
+            .job()
+            .steps
+            .iter()
+            .filter_map(|step| match step.kind.as_ref() {
+                Some(step::Kind::Script(script)) => Some(script.clone()),
+                _ => None,
+            })
+            .collect();
+        if !scripts.is_empty() {
+            let store = Arc::clone(&self.scripts);
+            let checked = tokio::task::spawn_blocking(move || {
+                scripts
+                    .iter()
+                    .find_map(|script| store.check(script).err())
+                    .map(|refusal| refusal.reject_reason())
+            })
+            .await;
+            match checked {
+                Ok(Some(reason)) => return Some(reason),
+                Ok(None) => {}
+                Err(_) => return Some(RejectReason::Internal),
+            }
+        }
+        let hooks: Vec<_> = validated
+            .job()
+            .steps
+            .iter()
+            .filter_map(|step| match step.kind.as_ref() {
+                Some(step::Kind::Hook(hook)) => Some(hook.clone()),
+                _ => None,
+            })
+            .collect();
+        if hooks.is_empty() {
+            return None;
+        }
+        let store = Arc::clone(&self.hooks);
+        let checked = tokio::task::spawn_blocking(move || {
+            let list = store.load();
+            hooks
+                .iter()
+                .find_map(|hook| list.prepare(hook).err())
+                .map(|refusal| refusal.reject_reason())
+        })
+        .await;
+        checked.unwrap_or(Some(RejectReason::Internal))
     }
 
     /// Decides what to do with a verified job: the stored result first, then a running job, then
@@ -428,11 +618,54 @@ impl Jobs {
         };
         // The status of a step that stopped the job outside the missing-repository probe.
         let mut stopped_status: Option<StepStatus> = None;
+        let phased = Phased::new(&job.steps);
+        let deadline = job_deadline;
         // The repository of the test_access step. The init step runs only when its own repository
         // matches (FR-RP-02, AC-RP-01).
         let mut probe_repository: Option<String> = None;
 
-        for step in &job.steps {
+        // The `before` hooks run first. A failed one stops the sequence (AC-HK-06).
+        let before = self
+            .run_hook_steps(
+                &phased.before,
+                PhaseMode {
+                    stop_on_failure: true,
+                    honor_cancel: true,
+                    honor_deadline: true,
+                    clamp_to_deadline: false,
+                },
+                &cancel,
+                deadline,
+                &mut Sink {
+                    job_id: &job_id,
+                    results: &mut step_results,
+                    succeeded: &mut succeeded,
+                    failed: &mut failed,
+                    log: &mut log,
+                },
+            )
+            .await;
+        progress.cancelled |= before.cancelled;
+        progress.warned |= before.warned;
+        let mut hook_failure: Option<HookFailure> = before.failure;
+        let before_ok = hook_failure.is_none() && !progress.cancelled;
+        if !before_ok {
+            let mut sink = Sink {
+                job_id: &job_id,
+                results: &mut step_results,
+                succeeded: &mut succeeded,
+                failed: &mut failed,
+                log: &mut log,
+            };
+            self.skip_steps(&phased.main, &mut sink).await;
+        }
+
+        let main = if before_ok {
+            phased.main.as_slice()
+        } else {
+            &[]
+        };
+        for step in main.iter().copied() {
             // A cancel that arrived between two steps stops the job before the next step starts
             // (FR-AG-10).
             if cancel.is_cancelled() {
@@ -566,6 +799,80 @@ impl Jobs {
             }
         }
 
+        // The remaining phases (FR-HK-05). A cancel leaves the `finally` hooks only.
+        macro_rules! sink {
+            () => {
+                &mut Sink {
+                    job_id: &job_id,
+                    results: &mut step_results,
+                    succeeded: &mut succeeded,
+                    failed: &mut failed,
+                    log: &mut log,
+                }
+            };
+        }
+        let cleanup = PhaseMode {
+            stop_on_failure: false,
+            honor_cancel: true,
+            honor_deadline: false,
+            clamp_to_deadline: true,
+        };
+        // One budget for the whole cleanup of the job, not one grace for each step (FR-HK-05).
+        let cleanup_deadline = deadline.map(|deadline| deadline + self.cleanup_grace);
+        let main_ok = before_ok
+            && progress.stopped_code.is_none()
+            && !progress.init_invalid
+            && !progress.cancelled;
+        if before_ok && !progress.cancelled {
+            let report = self
+                .run_hook_steps(&phased.after, cleanup, &cancel, cleanup_deadline, sink!())
+                .await;
+            progress.cancelled |= report.cancelled;
+            progress.warned |= report.warned;
+            hook_failure = hook_failure.or(report.failure);
+        } else {
+            self.skip_steps(&phased.after, sink!()).await;
+        }
+        let succeeded_so_far = main_ok && hook_failure.is_none() && !progress.cancelled;
+        let (run_success, run_error) = if progress.cancelled {
+            (false, false)
+        } else if succeeded_so_far {
+            (true, false)
+        } else {
+            (false, true)
+        };
+        for (steps, run) in [
+            (&phased.on_success, run_success),
+            (&phased.on_error, run_error),
+        ] {
+            if run {
+                let report = self
+                    .run_hook_steps(steps, cleanup, &cancel, cleanup_deadline, sink!())
+                    .await;
+                progress.cancelled |= report.cancelled;
+                progress.warned |= report.warned;
+                hook_failure = hook_failure.or(report.failure);
+            } else {
+                self.skip_steps(steps, sink!()).await;
+            }
+        }
+        let report = self
+            .run_hook_steps(
+                &phased.finally,
+                PhaseMode {
+                    honor_cancel: false,
+                    ..cleanup
+                },
+                &cancel,
+                cleanup_deadline,
+                sink!(),
+            )
+            .await;
+        progress.cancelled |= report.cancelled;
+        progress.warned |= report.warned;
+        hook_failure = hook_failure.or(report.failure);
+        progress.hook_failure = hook_failure;
+
         self.send_log(&mut log).await;
         let outcome = job_outcome(&progress);
         let status = stopped_status.unwrap_or(match outcome {
@@ -585,7 +892,7 @@ impl Jobs {
             steps_succeeded: succeeded,
             steps_failed: failed,
             outcome: outcome as i32,
-            error: job_error(outcome, progress.limit),
+            error: job_error(outcome, &progress),
             steps: step_results.iter().map(compact).collect(),
             log_tail: log.tail(),
         };
@@ -617,7 +924,8 @@ impl Jobs {
         let Some(step::Kind::Restore(restore)) = step.kind.as_ref() else {
             return false;
         };
-        match self.restore.check(&restore.target) {
+        let hook_files = self.hooks.load().executables();
+        match self.restore.check_against(&restore.target, &hook_files) {
             Ok(()) => false,
             Err(reason) => {
                 tracing::warn!(%reason, "a restore target is refused");
@@ -686,27 +994,32 @@ fn verify_and_validate(
 ) -> Result<ValidatedJob, Rejection> {
     let job = verify_job(signed, ring, expected)?;
     let job_id = job.job_id.clone();
-    let validated = ValidatedJob::new(job).map_err(|rejection| Rejection {
+    ValidatedJob::new(job).map_err(|rejection| Rejection {
         job_id: rejection.job_id.or_else(|| Some(job_id.clone())),
         reason: rejection.reason,
-    })?;
-    if validated
-        .job()
-        .steps
-        .iter()
-        .any(|step| !step.kind.as_ref().is_some_and(is_supported))
-    {
-        return Err(Rejection {
-            job_id: Some(job_id),
-            reason: RejectReason::UnsupportedStep,
-        });
-    }
-    Ok(validated)
+    })
 }
 
-/// The step kinds that the agent runs (FR-PR-02). The `hook` step belongs to the hook epic.
-fn is_supported(kind: &step::Kind) -> bool {
-    !matches!(kind, step::Kind::Hook(_))
+/// True for a job with a script or hook step.
+fn runs_programs(job: &restichub_proto::agent::v1::Job) -> bool {
+    job.steps
+        .iter()
+        .any(|step| matches!(step.kind, Some(step::Kind::Script(_) | step::Kind::Hook(_))))
+}
+
+/// A restart cut the job short, so no step result exists for it (ADR-0037).
+fn interrupted_result(job: &restichub_proto::agent::v1::Job) -> JobResult {
+    JobResult {
+        job_id: job.job_id.clone(),
+        status: StepStatus::Failed as i32,
+        steps_total: u32::try_from(job.steps.len()).unwrap_or(u32::MAX),
+        steps_succeeded: 0,
+        steps_failed: 0,
+        outcome: JobStatus::Failed as i32,
+        error: Some(interrupted_error()),
+        steps: Vec::new(),
+        log_tail: Vec::new(),
+    }
 }
 
 /// True for a job that only lists snapshots or the files of one (ADR-0035).
@@ -739,88 +1052,6 @@ fn step_timeout(step_seconds: u32, job_seconds: u32) -> Option<Duration> {
         job_seconds
     };
     (seconds > 0).then(|| Duration::from_secs(u64::from(seconds)))
-}
-
-/// What the steps of one job did, as input of [`job_outcome`].
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Default)]
-struct Progress {
-    cancelled: bool,
-    /// The exit code of the step that stopped the job, outside the missing-repository probe.
-    stopped_code: Option<i32>,
-    probe_missing: bool,
-    had_init: bool,
-    init_ran: bool,
-    init_succeeded: bool,
-    init_invalid: bool,
-    /// Exit code 3 of a step: restic finished but could not read some files.
-    warned: bool,
-    /// The limit that stopped a step (ADR-0039).
-    limit: Option<StepError>,
-}
-
-/// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
-///
-/// The init chain: the agent runs init only after a `test_access` of the same repository exited with
-/// code 10 (a missing repository). A successful init after that probe is a successful job. A
-/// test_access that failed with any other code (1, 12, a timeout, access denied) stops the job,
-/// and a standalone test_access with exit code 10 is the normal `NOT_INITIALIZED` result. An init
-/// without a matching test_access is an invalid sequence and fails the job. Exit code 11 gives
-/// `REPOSITORY_LOCKED` and exit code 3 gives `SUCCEEDED_WITH_WARNINGS`, so neither hides behind a
-/// plain failure or a plain success.
-fn job_outcome(progress: &Progress) -> JobStatus {
-    if progress.cancelled {
-        return JobStatus::Cancelled;
-    }
-    if let Some(code) = progress.stopped_code {
-        // restic exit code 12 is a wrong password or wrong credentials (AC-RP-01).
-        return match code {
-            12 => JobStatus::ConfigError,
-            11 => JobStatus::RepositoryLocked,
-            _ => JobStatus::Failed,
-        };
-    }
-    if progress.init_invalid {
-        return JobStatus::Failed;
-    }
-    if progress.had_init && progress.init_ran {
-        return if progress.init_succeeded {
-            succeeded(progress)
-        } else {
-            JobStatus::Failed
-        };
-    }
-    if !progress.had_init && progress.probe_missing {
-        return JobStatus::NotInitialized;
-    }
-    succeeded(progress)
-}
-
-fn succeeded(progress: &Progress) -> JobStatus {
-    if progress.warned {
-        JobStatus::SucceededWithWarnings
-    } else {
-        JobStatus::Succeeded
-    }
-}
-
-/// The stable code that explains a failed or cancelled outcome (NFR-DOC-04). It holds no secret.
-fn job_error(outcome: JobStatus, limit: Option<StepError>) -> Option<ErrorDetail> {
-    let code = match outcome {
-        JobStatus::Failed if limit == Some(StepError::Stalled) => "stalled",
-        JobStatus::Failed if limit == Some(StepError::MaxDuration) => "max_duration_exceeded",
-        JobStatus::ConfigError => "wrong_password",
-        JobStatus::NotInitialized => "repository_missing",
-        JobStatus::Failed => "step_failed",
-        JobStatus::Cancelled => "cancelled",
-        JobStatus::RepositoryLocked => "repository_locked",
-        JobStatus::SucceededWithWarnings => "succeeded_with_warnings",
-        JobStatus::Succeeded | JobStatus::Unspecified => return None,
-    };
-    Some(ErrorDetail {
-        code: code.to_owned(),
-        params: Vec::new(),
-    })
 }
 
 /// Reads the wall clock as a protocol timestamp.

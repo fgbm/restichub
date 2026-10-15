@@ -73,6 +73,14 @@ pub struct ChannelId(Uuid);
 #[sqlx(transparent)]
 pub struct DeliveryId(Uuid);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct ScriptTemplateId(Uuid);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct JobTemplateId(Uuid);
+
 /// The reserved platform tenant (ADR-0023, section Tenant isolation).
 ///
 /// The value is the constant `id` of the reserved row in the `tenants` table. The Platform Admin
@@ -148,3 +156,5 @@ id_type!(MaintenanceScheduleId);
 id_type!(AlertId);
 id_type!(ChannelId);
 id_type!(DeliveryId);
+id_type!(ScriptTemplateId);
+id_type!(JobTemplateId);

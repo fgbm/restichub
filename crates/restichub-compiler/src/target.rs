@@ -5,6 +5,8 @@ use std::fmt;
 
 use time::OffsetDateTime;
 
+use crate::hook::AllowListedHook;
+
 /// Operating system of a target agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OperatingSystem {
@@ -82,20 +84,6 @@ impl fmt::Display for ResticVersion {
     }
 }
 
-/// One parameter of a hook in the agent allow-list (FR-HK-02).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct HookParameterSpec {
-    /// True when the value is a secret, so the preview masks it (AC-PF-01).
-    pub secret: bool,
-}
-
-/// One hook of the agent allow-list that the agent reported (FR-HK-04).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AllowListedHook {
-    /// Accepted arguments, by name (FR-HK-02).
-    pub parameters: BTreeMap<String, HookParameterSpec>,
-}
-
 /// Facts that the compiler uses for one target agent (FR-PF-03).
 #[derive(Debug, Clone)]
 pub struct TargetFacts {
@@ -114,6 +102,8 @@ pub struct TargetFacts {
     pub now: OffsetDateTime,
     /// Hook allow-list metadata of this agent (FR-HK-04).
     pub allow_list: BTreeMap<String, AllowListedHook>,
+    /// Trust mode and interpreters of this agent (FR-HK-08).
+    pub server_scripts: crate::script::ServerScripts,
 }
 
 #[cfg(test)]

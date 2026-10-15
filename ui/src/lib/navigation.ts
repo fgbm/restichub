@@ -13,7 +13,9 @@ export type SettingsHref =
 	| '/(app)/settings/access/users'
 	| '/(app)/settings/access/api-tokens'
 	| '/(app)/settings/notifications/channels'
-	| '/(app)/settings/notifications/rules';
+	| '/(app)/settings/notifications/rules'
+	| '/(app)/settings/scripts/templates'
+	| '/(app)/settings/scripts/jobs';
 
 export type NavHref =
 	| '/(app)'
@@ -167,6 +169,23 @@ export const settingsNavigation: SettingsGroup[] = [
 				href: '/(app)/settings/notifications/rules',
 				labelKey: 'nav.alertRules',
 				icon: 'bell',
+				roles: ADMIN_ROLES
+			}
+		]
+	},
+	{
+		labelKey: 'settings.group.scripts',
+		items: [
+			{
+				href: '/(app)/settings/scripts/templates',
+				labelKey: 'nav.scriptTemplates',
+				icon: 'terminal',
+				roles: ADMIN_ROLES
+			},
+			{
+				href: '/(app)/settings/scripts/jobs',
+				labelKey: 'nav.jobTemplates',
+				icon: 'checklist',
 				roles: ADMIN_ROLES
 			}
 		]

@@ -129,7 +129,8 @@ describe('navigation', () => {
 		const groups = settingsGroupsForRole('admin');
 		expect(groups.map((group) => group.labelKey)).toEqual([
 			'settings.group.access',
-			'settings.group.notifications'
+			'settings.group.notifications',
+			'settings.group.scripts'
 		]);
 		expect(groups[0].items.map((item) => item.href)).toEqual([
 			'/(app)/settings/access/users',
@@ -138,6 +139,10 @@ describe('navigation', () => {
 		expect(groups[1].items.map((item) => item.href)).toEqual([
 			'/(app)/settings/notifications/channels',
 			'/(app)/settings/notifications/rules'
+		]);
+		expect(groups[2].items.map((item) => item.href)).toEqual([
+			'/(app)/settings/scripts/templates',
+			'/(app)/settings/scripts/jobs'
 		]);
 		expect(settingsGroupsForRole('operator')).toEqual([]);
 	});

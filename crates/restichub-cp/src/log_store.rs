@@ -59,6 +59,7 @@ pub trait LogStore: Send + Sync {
         &self,
         tenant: TenantId,
         job: JobId,
+        step_id: Option<&str>,
         after_seq: i64,
         limit: i64,
     ) -> impl Future<Output = Result<LogPage, DbError>> + Send;
@@ -102,11 +103,12 @@ impl LogStore for DatabaseLogStore {
         &self,
         tenant: TenantId,
         job: JobId,
+        step_id: Option<&str>,
         after_seq: i64,
         limit: i64,
     ) -> Result<LogPage, DbError> {
         let mut tx = self.db.begin_tenant(tenant).await?;
-        let lines = job_logs::read(&mut tx, job, after_seq, limit).await?;
+        let lines = job_logs::read_step(&mut tx, job, step_id, after_seq, limit).await?;
         let state = job_logs::state(&mut tx, job).await?;
         tx.commit().await?;
         Ok(LogPage { lines, state })

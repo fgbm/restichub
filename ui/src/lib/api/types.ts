@@ -156,6 +156,8 @@ export type JobLogPage = components['schemas']['LogPageView'];
 export interface JobLogQuery {
 	after_seq?: number;
 	limit?: number;
+	/** Reads the lines of one step only (FR-HK-11). */
+	step_id?: string;
 }
 
 /** One page of the job list, newest first (FR-SC-09). */
@@ -222,6 +224,56 @@ export type HookPhase = components['schemas']['HookPhase'];
 export type HookParameter = components['schemas']['HookParameter'];
 
 export type HookRef = components['schemas']['HookRef'];
+
+/** The program that runs a script (FR-HK-09). */
+export type ScriptInterpreter = components['schemas']['Interpreter'];
+
+/** What a failed script does to the job (FR-HK-09). */
+export type ScriptFailurePolicy = components['schemas']['FailurePolicy'];
+
+export type ScriptEnvKind = components['schemas']['EnvKind'];
+
+/** One environment variable of a script. A secret reference holds a secret identifier. */
+export type ScriptEnv = components['schemas']['ScriptEnvDef'];
+
+/** A script of a profile or of a job template (FR-HK-09). */
+export type ScriptDef = components['schemas']['ScriptDef'];
+
+export type ScriptParameterKind = components['schemas']['ParameterKind'];
+
+/** A declared parameter of a script template. It becomes an environment variable. */
+export type ScriptTemplateParameter = components['schemas']['ScriptTemplateParameter'];
+
+/** A script template of the tenant or a built-in one (FR-HK-12). */
+export type ScriptTemplate = components['schemas']['ScriptTemplateView'];
+
+export type ScriptTemplateListResponse = components['schemas']['ScriptTemplateListResponse'];
+
+export type CreateScriptTemplateRequest = components['schemas']['CreateScriptTemplateRequest'];
+
+export type UpdateScriptTemplateRequest = components['schemas']['UpdateScriptTemplateRequest'];
+
+/** A profile template: an ordered set of scripts (FR-HK-12). */
+export type JobTemplate = components['schemas']['JobTemplateView'];
+
+export type JobTemplateListResponse = components['schemas']['JobTemplateListResponse'];
+
+export type CreateJobTemplateRequest = components['schemas']['CreateJobTemplateRequest'];
+
+export type UpdateJobTemplateRequest = components['schemas']['UpdateJobTemplateRequest'];
+
+/** Whether a host trusts scripts from the control plane (FR-HK-08). */
+export type ServerScriptsState = components['schemas']['ServerScriptsState'];
+
+/** The planned step of a job with its kind, name and phase (FR-HK-11). */
+export type PlannedStep = components['schemas']['PlannedStepView'];
+
+/** The metadata of a secret. It never holds the value. */
+export type Secret = components['schemas']['SecretView'];
+
+export type SecretListResponse = components['schemas']['SecretListResponse'];
+
+export type CreateSecretRequest = components['schemas']['CreateSecretRequest'];
 
 export type GroupBy = components['schemas']['GroupBy'];
 

@@ -2,7 +2,7 @@
 
 use ed25519_dalek::SigningKey;
 use restichub_proto::agent::v1::{
-    BackupStep, CheckStep, ForgetStep, HookStep, InitStep, Job, LsStep, OverwriteMode, PruneStep,
+    BackupStep, CheckStep, ForgetStep, InitStep, Job, LsStep, OverwriteMode, PruneStep,
     RepositoryAccess, RestoreStep, SnapshotsFilter, SnapshotsStep, StatsStep, Step, TestAccessStep,
     UnlockAllStep, UnlockStep, step,
 };
@@ -252,29 +252,23 @@ fn ac_pr_01_a_replay_of_a_completed_job_returns_the_stored_result() {
 }
 
 #[test]
-fn fr_pr_01_rejects_the_step_kinds_of_later_epics() {
-    let steps = [step::Kind::Hook(HookStep {
-        hook_id: "pg_dump".to_owned(),
-        ..HookStep::default()
-    })];
-    for kind in steps {
-        let step = Step {
-            step_id: "later".to_owned(),
-            kind: Some(kind),
-            ..Step::default()
-        };
-        let signed = sign_job(
-            &job("agent-1", "tenant-1", 900, 2_000, vec![step]),
-            KEY_ID,
-            &signing_key(),
-        );
-        let mut journal = temp_journal("unsupported");
-        let decision = intake(&signed, &ring(), &expected(), &mut journal);
-        assert_eq!(
-            expected_reason(&decision).as_ref(),
-            Some(&RejectReason::UnsupportedStep)
-        );
-    }
+fn fr_pr_01_rejects_a_step_without_a_kind() {
+    let step = Step {
+        step_id: "empty".to_owned(),
+        kind: None,
+        ..Step::default()
+    };
+    let signed = sign_job(
+        &job("agent-1", "tenant-1", 900, 2_000, vec![step]),
+        KEY_ID,
+        &signing_key(),
+    );
+    let mut journal = temp_journal("unsupported");
+    let decision = intake(&signed, &ring(), &expected(), &mut journal);
+    assert_eq!(
+        expected_reason(&decision).as_ref(),
+        Some(&RejectReason::UnsupportedStep)
+    );
 }
 
 #[test]
@@ -398,11 +392,11 @@ fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
     // The control plane cancelled the job before any step finished.
     assert_eq!(progress(|p| p.cancelled = true), JobStatus::Cancelled);
     assert_eq!(
-        job_error(JobStatus::ConfigError, None).map(|error| error.code),
+        job_error(JobStatus::ConfigError, &Progress::default()).map(|error| error.code),
         Some("wrong_password".to_owned())
     );
     assert_eq!(
-        job_error(JobStatus::NotInitialized, None).map(|error| error.code),
+        job_error(JobStatus::NotInitialized, &Progress::default()).map(|error| error.code),
         Some("repository_missing".to_owned())
     );
 }
@@ -415,7 +409,7 @@ fn fr_ag_09_a_warning_and_a_lock_are_typed_at_the_job_level() {
         JobStatus::SucceededWithWarnings
     );
     assert_eq!(
-        job_error(JobStatus::SucceededWithWarnings, None).map(|error| error.code),
+        job_error(JobStatus::SucceededWithWarnings, &Progress::default()).map(|error| error.code),
         Some("succeeded_with_warnings".to_owned())
     );
     // A step with restic exit code 11 gives a locked repository, not a plain failure.
@@ -424,7 +418,7 @@ fn fr_ag_09_a_warning_and_a_lock_are_typed_at_the_job_level() {
         JobStatus::RepositoryLocked
     );
     assert_eq!(
-        job_error(JobStatus::RepositoryLocked, None).map(|error| error.code),
+        job_error(JobStatus::RepositoryLocked, &Progress::default()).map(|error| error.code),
         Some("repository_locked".to_owned())
     );
     // A later failure outweighs an earlier warning.

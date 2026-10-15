@@ -86,9 +86,13 @@ function job(overrides: Record<string, unknown> = {}) {
 		attempt: 0,
 		trigger: 'schedule',
 		planned_steps: ['backup'],
+		planned: [{ step_id: 'backup', kind: 'backup', name: '', phase: null }],
 		steps: [
 			{
 				step_id: 'backup',
+				kind: 'backup',
+				name: '',
+				phase: null,
 				status: 'success',
 				exit_code: 0,
 				started_at: '2026-10-14T10:01:00Z',
@@ -462,4 +466,148 @@ describe('the job detail screen', () => {
 		expect(mocks.getJobLogs).toHaveBeenCalledTimes(10);
 		for (const [, query] of mocks.getJobLogs.mock.calls) expect(query.limit).toBe(1000);
 	}, 60_000);
+
+	function scriptStep(
+		id: string,
+		name: string,
+		phase: string,
+		overrides: Record<string, unknown> = {}
+	) {
+		return {
+			step_id: id,
+			kind: 'script',
+			name,
+			phase,
+			status: 'success',
+			exit_code: 0,
+			started_at: '2026-10-14T10:01:00Z',
+			finished_at: '2026-10-14T10:01:42Z',
+			error_code: null,
+			error_params: {},
+			possible_stale_lock: false,
+			output: { kind: 'none' },
+			...overrides
+		};
+	}
+
+	function stepLine(seq: number, stepId: string, text: string) {
+		return { ...line(seq, text), step_id: stepId };
+	}
+
+	function scriptedJob(overrides: Record<string, unknown> = {}) {
+		const first = scriptStep('script-0', 'Dump the database', 'before');
+		const backup = { ...job().steps[0] };
+		const last = scriptStep('script-1', 'Remove old dumps', 'finally');
+		return job({
+			planned_steps: ['script-0', 'backup', 'script-1'],
+			planned: [
+				{ step_id: 'script-0', kind: 'script', name: 'Dump the database', phase: 'before' },
+				{ step_id: 'backup', kind: 'backup', name: '', phase: null },
+				{ step_id: 'script-1', kind: 'script', name: 'Remove old dumps', phase: 'finally' }
+			],
+			steps: [first, backup, last],
+			...overrides
+		});
+	}
+
+	// FR-HK-11: every script is a step with its own name, phase and log.
+	it('fr_hk_11_lists_each_script_as_a_step_with_its_name_and_phase', async () => {
+		mocks.getJob.mockResolvedValue(scriptedJob());
+		render(JobDetailPage);
+
+		const dump = await screen.findByRole('button', { name: 'Show the log of Dump the database' });
+		expect(dump).toHaveTextContent('Script');
+		expect(dump).toHaveTextContent('Before');
+		expect(dump).toHaveTextContent('Succeeded');
+		const cleanup = screen.getByRole('button', { name: 'Show the log of Remove old dumps' });
+		expect(cleanup).toHaveTextContent('Finally');
+	});
+
+	it('fr_hk_11_reads_the_log_of_one_step_when_the_step_opens', async () => {
+		const user = userEvent.setup();
+		mocks.getJob.mockResolvedValue(scriptedJob());
+		mocks.getJobLogs.mockImplementation(async (_id: string, query?: { step_id?: string }) =>
+			logPage(
+				query?.step_id === 'script-0'
+					? [stepLine(1, 'script-0', 'dump written: /var/backups/app.dump')]
+					: [
+							stepLine(1, 'script-0', 'dump written: /var/backups/app.dump'),
+							stepLine(2, 'backup', 'snapshot a1b2c3d4 saved')
+						]
+			)
+		);
+		render(JobDetailPage);
+
+		await user.click(
+			await screen.findByRole('button', { name: 'Show the log of Dump the database' })
+		);
+		const log = await screen.findByTestId('step-log-script-0');
+		expect(within(log).getByText('dump written: /var/backups/app.dump')).toBeInTheDocument();
+		expect(within(log).queryByText('snapshot a1b2c3d4 saved')).not.toBeInTheDocument();
+		await waitFor(() =>
+			expect(mocks.getJobLogs).toHaveBeenCalledWith('j_1', {
+				step_id: 'script-0',
+				after_seq: 0,
+				limit: 500
+			})
+		);
+		// The step closes again.
+		await user.click(screen.getByRole('button', { name: 'Hide the log of Dump the database' }));
+		expect(screen.queryByTestId('step-log-script-0')).not.toBeInTheDocument();
+	});
+
+	it('fr_hk_11_opens_a_failed_script_by_itself_and_shows_its_exit_code', async () => {
+		mocks.getJob.mockResolvedValue(
+			scriptedJob({
+				status: 'failed',
+				result_code: 'failed',
+				steps: [
+					scriptStep('script-0', 'Dump the database', 'before', {
+						status: 'failed',
+						exit_code: 7
+					})
+				]
+			})
+		);
+		mocks.getJobLogs.mockImplementation(async (_id: string, query?: { step_id?: string }) =>
+			logPage(
+				query?.step_id === 'script-0'
+					? [stepLine(1, 'script-0', 'pg_dump: connection refused')]
+					: []
+			)
+		);
+		render(JobDetailPage);
+
+		const log = await screen.findByTestId('step-log-script-0');
+		expect(await within(log).findByText('pg_dump: connection refused')).toBeInTheDocument();
+		const toggle = screen.getByRole('button', { name: 'Hide the log of Dump the database' });
+		expect(toggle).toHaveTextContent('Failed');
+		expect(toggle).toHaveTextContent('exit code 7');
+	});
+
+	it('fr_hk_11_says_that_a_step_wrote_no_log', async () => {
+		const user = userEvent.setup();
+		mocks.getJob.mockResolvedValue(scriptedJob());
+		mocks.getJobLogs.mockImplementation(async (_id: string, query?: { step_id?: string }) =>
+			logPage(query?.step_id ? [] : [line(1, 'x')])
+		);
+		render(JobDetailPage);
+
+		await user.click(
+			await screen.findByRole('button', { name: 'Show the log of Remove old dumps' })
+		);
+		expect(await screen.findByText('The step wrote no log line.')).toBeInTheDocument();
+	});
+
+	it('does not offer a log for a script that did not start', async () => {
+		mocks.getJob.mockResolvedValue(
+			scriptedJob({ status: 'failed', result_code: 'failed', steps: [] })
+		);
+		render(JobDetailPage);
+
+		expect(await screen.findByText('Dump the database')).toBeInTheDocument();
+		expect(
+			screen.queryByRole('button', { name: 'Show the log of Dump the database' })
+		).not.toBeInTheDocument();
+	});
 });

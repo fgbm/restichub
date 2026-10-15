@@ -2,16 +2,24 @@
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
+		Agent,
 		ApiProblem,
 		CreateProfileRequest,
 		GroupBy,
 		HookPhase,
 		HookRef,
+		JobTemplate,
+		Plan,
 		PreviewResponse,
 		Profile,
 		ProfileWarning,
+		ScriptTemplate,
+		Secret,
 		UpdateProfileRequest
 	} from '#lib/api/index.ts';
+	import ScriptsEditor from '#lib/components/ScriptsEditor.svelte';
+	import { draftOf, scriptOf } from '#lib/scripts.ts';
+	import type { ScriptDraft } from '#lib/scripts.ts';
 	import {
 		Alert,
 		Badge,
@@ -39,7 +47,11 @@
 
 	let profiles = $state<Profile[]>([]);
 	let repositories = $state<{ id: string; name: string }[]>([]);
-	let agents = $state<{ id: string; hostname: string; status: string }[]>([]);
+	let agents = $state<Agent[]>([]);
+	let plans = $state<Plan[]>([]);
+	let scriptTemplates = $state<ScriptTemplate[]>([]);
+	let jobTemplates = $state<JobTemplate[]>([]);
+	let secrets = $state<Secret[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let savedWarnings = $state<ProfileWarning[]>([]);
@@ -84,6 +96,7 @@
 	let checkEnabled = $state(false);
 	let readDataSubset = $state('');
 	let hooks = $state<HookDraft[]>([]);
+	let scripts = $state<ScriptDraft[]>([]);
 
 	let deleteTarget = $state<Profile | null>(null);
 	let deleteOpen = $state(false);
@@ -97,6 +110,16 @@
 	let previewProblem = $state<ApiProblem | null>(null);
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
+	// Code that runs on a host needs the Admin role (ADR-0037).
+	const canEditScripts = $derived(['admin', 'platform_admin'].includes(getSession()?.role ?? ''));
+	// The hosts that run the profile in the form: the hosts of its plans.
+	const scriptTargets = $derived.by(() => {
+		if (!editing) return [];
+		const ids = new Set(
+			plans.filter((plan) => plan.profile_id === editing?.id).map((plan) => plan.agent_id)
+		);
+		return agents.filter((agent) => ids.has(agent.id));
+	});
 	const repositoryNames = $derived(new Map(repositories.map((item) => [item.id, item.name])));
 
 	const repositoryOptions = $derived<SelectOption[]>(
@@ -221,14 +244,26 @@
 		loading = true;
 		error = null;
 		try {
-			const [profileList, repositoryList, agentList] = await Promise.all([
+			const [profileList, repositoryList, agentList, planList] = await Promise.all([
 				service.listProfiles(),
 				service.listRepositories(),
-				service.listAgents()
+				service.listAgents(),
+				service.listPlans()
 			]);
 			profiles = profileList;
 			repositories = repositoryList;
 			agents = agentList;
+			plans = planList;
+			// The templates and the secrets serve the script editor only. A failure leaves the
+			// editor without choices and does not block the list.
+			const [templateList, jobTemplateList, secretList] = await Promise.allSettled([
+				service.listScriptTemplates(),
+				service.listJobTemplates(),
+				service.listSecrets()
+			]);
+			scriptTemplates = templateList.status === 'fulfilled' ? templateList.value : [];
+			jobTemplates = jobTemplateList.status === 'fulfilled' ? jobTemplateList.value : [];
+			secrets = secretList.status === 'fulfilled' ? secretList.value : [];
 		} catch (problem) {
 			error = messageOf(problem);
 		} finally {
@@ -277,6 +312,7 @@
 		checkEnabled = false;
 		readDataSubset = '';
 		hooks = [];
+		scripts = [];
 		formError = null;
 		formProblem = null;
 	}
@@ -334,6 +370,7 @@
 			readDataSubset = profile.check.read_data_subset ?? '';
 		}
 		hooks = (profile.hooks ?? []).map((hook) => ({ hookId: hook.hook_id, phase: hook.phase }));
+		scripts = (profile.scripts ?? []).map((script) => draftOf(script));
 		formOpen = true;
 	}
 
@@ -380,6 +417,8 @@
 				max_duration_minutes: numberOrZero(maxDurationMinutes)
 			},
 			hooks: hookRefs(),
+			// An Operator keeps the scripts as they are stored: only an Admin changes them.
+			scripts: canEditScripts ? scripts.map(scriptOf) : (editing?.scripts ?? []),
 			retention: retentionEnabled
 				? {
 						keep_last: numberOrZero(keepLast),
@@ -809,6 +848,24 @@
 					bind:value={readDataSubset}
 				/>
 			{/if}
+		</section>
+
+		<section class="section">
+			<h3 class="section__title">{t('scripts.title')}</h3>
+			{#if formProblem?.field?.startsWith('scripts')}
+				<Alert tone="danger" title={tErrorCode(formProblem.code) ?? formProblem.title}>
+					{formProblem.field}{formProblem.reason ? `: ${formProblem.reason}` : ''}
+				</Alert>
+			{/if}
+			<ScriptsEditor
+				bind:scripts
+				bind:secrets
+				templates={scriptTemplates}
+				{jobTemplates}
+				targets={scriptTargets}
+				readonly={!canEditScripts}
+				problem={formProblem}
+			/>
 		</section>
 
 		<section class="section">
