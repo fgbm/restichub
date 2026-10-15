@@ -1452,8 +1452,6 @@ export const ru: Record<MessageKey, string> = {
 	'pe.excludes.lead':
 		'Что пропустить. Шаблоны вида <code>*.tmp</code> или пути. По одной записи в строке.',
 	'pe.excludes.filesHelp': 'Путь к файлу со списком шаблонов на хосте.',
-	'pe.excludes.windowsHint':
-		'Новый профиль пропускает папку WindowsApps на хостах Windows. В ней лежат псевдонимы запуска приложений, и restic падает на них с ошибкой.',
 	'pe.tags.lead': 'Метки снимков этого профиля. По ним снимки ищут и отбирают правила хранения.',
 	'pe.tags.help': 'Через запятую, пробел или Enter. Каждый тег станет чипом.',
 	'pe.tags.placeholder': 'Добавьте тег и нажмите Enter',

@@ -1444,8 +1444,6 @@ export const en = {
 	'pe.excludes.lead':
 		'What to skip. Patterns such as <code>*.tmp</code> or paths, one entry for each line.',
 	'pe.excludes.filesHelp': 'The path to a file with patterns on the host.',
-	'pe.excludes.windowsHint':
-		'A new profile skips the WindowsApps folder of Windows hosts. It holds app execution aliases, and restic fails on them.',
 	'pe.tags.lead':
 		'Labels of the snapshots of this profile. The retention rules and the searches use them.',
 	'pe.tags.help': 'Separate tags with a comma, a space or Enter. Each tag becomes a chip.',
