@@ -22,6 +22,10 @@
 //!   proves that the agent scrubs a secret that restic echoes.
 //! - `<location>.restichub-code-<command>` holds the exit code of that command and wins over the
 //!   codes of `<location>.restichub-fake`.
+//! - `<location>.restichub-ls-count` holds a number. The `ls` command then prints the `snapshot`
+//!   message, the listed directory and that many `node` messages, generated one by one. It stops
+//!   at the first write error, as restic does when the agent stops reading. A test streams a
+//!   million entries without a file of that size (AC-RS-02).
 //! - `<location>.restichub-state` receives the nice value and the I/O priority of the process, so
 //!   a test proves the priority of a step (FR-AG-15, Linux only).
 //!
@@ -38,6 +42,9 @@ fn main() {
     record(&format!("{repository}.restichub-argv"), &args);
     record_priority(&format!("{repository}.restichub-state"));
     ignore_interrupt(&format!("{repository}.restichub-ignore"));
+    if command == "ls" {
+        emit_listing(&format!("{repository}.restichub-ls-count"), &args);
+    }
     emit(
         &format!("{repository}.restichub-out-{command}"),
         &repository,
@@ -64,6 +71,43 @@ fn main() {
         .and_then(|value| value.trim().parse().ok());
     let code = scripted.unwrap_or(if command == "init" { init } else { test_access });
     std::process::exit(code);
+}
+
+/// Prints a generated `ls` listing of the directory in the last argument.
+fn emit_listing(path: &str, args: &[String]) {
+    let Some(count) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+    else {
+        return;
+    };
+    let directory = args
+        .last()
+        .map_or("/", String::as_str)
+        .trim_end_matches('/');
+    let mut out = std::io::BufWriter::with_capacity(64 * 1024, std::io::stdout().lock());
+    let snapshot = r#"{"time":"2026-01-01T00:00:00Z","tree":"5c1d","paths":["/data"],"hostname":"h","username":"u","id":"b2f8a1c94e7d60351a8f2b4c6d9e0f3a7c5b1d2e4f6089a3b7c1d5e9f2a406b8","short_id":"b2f8a1c9","message_type":"snapshot","struct_type":"snapshot"}"#;
+    if writeln!(out, "{snapshot}").is_err() {
+        return;
+    }
+    if !directory.is_empty()
+        && writeln!(
+            out,
+            r#"{{"name":"d","type":"dir","path":"{directory}","uid":1,"gid":1,"mode":2147484157,"permissions":"drwxr-xr-x","message_type":"node","struct_type":"node"}}"#
+        )
+        .is_err()
+    {
+        return;
+    }
+    for index in 0..count {
+        let line = format!(
+            r#"{{"name":"file-{index:07}","type":"file","path":"{directory}/file-{index:07}","uid":1,"gid":1,"size":{index},"mode":420,"permissions":"-rw-r--r--","mtime":"2026-01-01T00:00:00Z","message_type":"node","struct_type":"node"}}"#
+        );
+        if writeln!(out, "{line}").is_err() {
+            return;
+        }
+    }
+    let _ = out.flush();
 }
 
 /// Prints the scripted text of the file to the standard output or the standard error.

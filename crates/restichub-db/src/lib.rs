@@ -33,6 +33,7 @@ pub mod plans;
 pub mod profiles;
 pub mod queue;
 pub mod repositories;
+pub mod restore;
 pub mod secrets;
 pub mod sessions;
 pub mod setup;

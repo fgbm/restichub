@@ -18,6 +18,7 @@
 pub mod build;
 mod compat;
 pub mod maintenance;
+pub mod restore;
 pub mod retry;
 pub mod select;
 pub mod stale;

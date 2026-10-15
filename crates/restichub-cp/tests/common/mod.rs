@@ -152,6 +152,13 @@ pub fn write_body(
             "check": {"cron": "0 4 1 * *", "enabled": true},
         })),
         ("POST", "/api/v1/repositories/{id}/maintenance/run") => Some(json!({"task": "check"})),
+        ("POST", "/api/v1/repositories/{id}/snapshots") => Some(json!({})),
+        ("POST", "/api/v1/repositories/{id}/ls") => Some(json!({"snapshot_id": "latest"})),
+        ("POST", "/api/v1/repositories/{id}/restore") => Some(json!({
+            "snapshot_id": "latest",
+            "target": "/srv/restore",
+            "overwrite": "never"
+        })),
         ("POST", "/api/v1/profiles") => Some(json!({
             "name": format!("matrix-profile-{index}"),
             "repository_id": repository_id,

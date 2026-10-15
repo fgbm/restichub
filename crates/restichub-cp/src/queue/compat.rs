@@ -2,7 +2,8 @@
 //!
 //! An agent that does not know a field drops it without an error. A `forget` step that loses its
 //! tag filter this way reaches every profile of the repository, so the builder never sends such a
-//! step (FR-RP-08).
+//! step (FR-RP-08). An agent without [`AgentCapability::RestoreV1`] gets no `ls` and no `restore`
+//! step: an old agent rejects the kind, but the control plane never relies on that (FR-PR-09).
 
 use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{Step, step};
@@ -16,6 +17,11 @@ pub(super) fn fit_steps(
     capabilities: &[AgentCapability],
 ) -> Result<(), Refusal> {
     for step in steps {
+        if matches!(step.kind, Some(step::Kind::Ls(_) | step::Kind::Restore(_)))
+            && !capabilities.contains(&AgentCapability::RestoreV1)
+        {
+            return Err(Refusal::AgentCapabilityMissing);
+        }
         let Some(step::Kind::Forget(forget)) = step.kind.as_mut() else {
             continue;
         };
@@ -46,16 +52,22 @@ pub(super) fn required_capabilities(steps: &[Step]) -> Vec<AgentCapability> {
                 if forget.filter.as_ref().is_some_and(|filter| !filter.all_tags.is_empty())
         )
     });
+    let needs_restore = steps
+        .iter()
+        .any(|step| matches!(step.kind, Some(step::Kind::Ls(_) | step::Kind::Restore(_))));
+    let mut required = Vec::new();
     if needs_all_tags {
-        vec![AgentCapability::ForgetAllTags]
-    } else {
-        Vec::new()
+        required.push(AgentCapability::ForgetAllTags);
     }
+    if needs_restore {
+        required.push(AgentCapability::RestoreV1);
+    }
+    required
 }
 
 #[cfg(test)]
 mod tests {
-    use restichub_proto::agent::v1::{ForgetStep, SnapshotsFilter};
+    use restichub_proto::agent::v1::{ForgetStep, RestoreStep, SnapshotsFilter};
 
     use super::*;
 
@@ -78,6 +90,25 @@ mod tests {
             panic!("a forget step");
         };
         forget.filter.as_ref().expect("a filter")
+    }
+
+    fn restore_step() -> Step {
+        Step {
+            step_id: "restore".to_owned(),
+            timeout_seconds: 0,
+            kind: Some(step::Kind::Restore(RestoreStep::default())),
+        }
+    }
+
+    #[test]
+    fn fr_pr_09_an_agent_without_restore_v1_never_gets_an_ls_or_restore_step() {
+        let mut steps = [restore_step()];
+        assert_eq!(
+            fit_steps(&mut steps, &[AgentCapability::ForgetAllTags]),
+            Err(Refusal::AgentCapabilityMissing)
+        );
+        assert_eq!(required_capabilities(&steps), [AgentCapability::RestoreV1]);
+        fit_steps(&mut steps, &[AgentCapability::RestoreV1]).expect("a capable agent");
     }
 
     #[test]

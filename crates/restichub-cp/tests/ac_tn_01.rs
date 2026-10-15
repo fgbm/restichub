@@ -146,6 +146,18 @@ const FIXTURES: &[(&str, Fixture)] = &[
         "/api/v1/repositories/{id}/maintenance/run",
         Fixture::Object(Object::Repository),
     ),
+    (
+        "/api/v1/repositories/{id}/snapshots",
+        Fixture::Object(Object::Repository),
+    ),
+    (
+        "/api/v1/repositories/{id}/ls",
+        Fixture::Object(Object::Repository),
+    ),
+    (
+        "/api/v1/repositories/{id}/restore",
+        Fixture::Object(Object::Repository),
+    ),
     ("/api/v1/jobs", Fixture::Collection),
     ("/api/v1/jobs/{id}", Fixture::Object(Object::Job)),
     ("/api/v1/jobs/{id}/cancel", Fixture::Object(Object::Job)),

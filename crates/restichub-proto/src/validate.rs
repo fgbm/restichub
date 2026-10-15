@@ -24,10 +24,14 @@
 use std::collections::HashSet;
 
 use crate::agent::v1::{
-    HookStep, Job, RejectReason, RepositoryAccess, SnapshotsFilter, Step,
+    HookStep, Job, OverwriteMode, RejectReason, RepositoryAccess, SnapshotsFilter, Step,
     repository_access::BackendCredentials, step,
 };
 use crate::signing::Rejection;
+
+/// The most nodes that one `ls` step returns. The result of a step must fit in a protocol message
+/// (AC-RS-02).
+pub const MAX_LS_LIMIT: u64 = 5_000;
 
 /// Validates a job against the typed contract (FR-PR-10).
 ///
@@ -99,13 +103,26 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
             check_repository_id(job, repository_ids, &ls.repository_id)?;
             check_required_format(job, &ls.snapshot_id, is_snapshot_id)?;
             check_free(job, std::iter::once(&ls.path))?;
+            if ls.limit > MAX_LS_LIMIT {
+                return Err(reject(job, RejectReason::Malformed));
+            }
         }
         step::Kind::Restore(restore) => {
             check_repository_id(job, repository_ids, &restore.repository_id)?;
             check_required_format(job, &restore.snapshot_id, is_snapshot_id)?;
             check_required_free(job, &restore.target)?;
-            check_free(job, restore.includes.iter())?;
-            check_free(job, restore.excludes.iter())?;
+            if !is_absolute_path(&restore.target) {
+                return Err(reject(job, RejectReason::Malformed));
+            }
+            check_patterns(job, restore.includes.iter())?;
+            check_patterns(job, restore.excludes.iter())?;
+            // restic stops with "exclude and include patterns are mutually exclusive".
+            if !restore.includes.is_empty() && !restore.excludes.is_empty() {
+                return Err(reject(job, RejectReason::Malformed));
+            }
+            if OverwriteMode::try_from(restore.overwrite).is_err() {
+                return Err(reject(job, RejectReason::Malformed));
+            }
         }
         step::Kind::Unlock(unlock) => {
             check_repository_id(job, repository_ids, &unlock.repository_id)?;
@@ -241,6 +258,19 @@ fn check_free<'a>(
     Ok(())
 }
 
+/// Rejects an empty pattern: `--include=` would select nothing or everything, by restic version.
+fn check_patterns<'a>(
+    job: &Job,
+    values: impl IntoIterator<Item = &'a String>,
+) -> Result<(), Rejection> {
+    for value in values {
+        if value.is_empty() || has_forbidden(value) {
+            return Err(reject(job, RejectReason::Malformed));
+        }
+    }
+    Ok(())
+}
+
 /// Rejects an empty tag, a tag with a comma and a tag with surrounding space.
 /// restic splits a tag on commas and reads an empty tag as "untagged", so these
 /// forms would change the set of tags.
@@ -350,7 +380,8 @@ fn is_s3_location(rest: &str) -> bool {
     }
 }
 
-fn is_absolute_path(value: &str) -> bool {
+/// Returns true for a path that starts at a root: `/`, or a drive letter and a separator.
+pub fn is_absolute_path(value: &str) -> bool {
     if value.starts_with('/') {
         return true;
     }
@@ -1047,5 +1078,44 @@ mod tests {
             }))]);
             assert!(malformed(&job), "{value:?}");
         }
+    }
+    #[test]
+    fn ac_rs_03_rejects_a_restore_or_ls_step_outside_its_contract() {
+        let restore = |change: fn(&mut RestoreStep)| {
+            let mut restore = RestoreStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string("latest"),
+                target: string("/restore"),
+                ..RestoreStep::default()
+            };
+            change(&mut restore);
+            job_with(vec![step(step::Kind::Restore(restore))])
+        };
+        assert_eq!(validate_job(&restore(|_| {})), Ok(()));
+        assert!(malformed(&restore(|r| r.target = string("restore"))));
+        assert!(malformed(&restore(|r| r.target = string("../restore"))));
+        assert!(malformed(&restore(|r| r.includes = vec![string("")])));
+        assert!(malformed(&restore(|r| r.excludes = vec![string("")])));
+        assert!(malformed(&restore(|r| r.overwrite = 99)));
+        assert!(malformed(&restore(|r| {
+            r.includes = vec![string("/srv")];
+            r.excludes = vec![string("*.log")];
+        })));
+        assert_eq!(
+            validate_job(&restore(|r| r.target = string("C:\\restore"))),
+            Ok(())
+        );
+        let ls = |path: &str, limit: u64| {
+            job_with(vec![step(step::Kind::Ls(LsStep {
+                repository_id: string("repo-1"),
+                snapshot_id: string("latest"),
+                path: string(path),
+                limit,
+                ..LsStep::default()
+            }))])
+        };
+        assert_eq!(validate_job(&ls("", 0)), Ok(()));
+        assert_eq!(validate_job(&ls("/C/Users", MAX_LS_LIMIT)), Ok(()));
+        assert!(malformed(&ls("/etc", MAX_LS_LIMIT + 1)));
     }
 }

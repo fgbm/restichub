@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use restichub_db::job_logs::NewChunk;
 use restichub_db::job_steps::{
     self, BackupSummary, CheckSummary, ForgetSummary, JobProgress, JobStep, MAX_CURRENT_FILES,
-    SnapshotsSummary, StatsSummary, StepOutput,
+    RestoreSummary, SnapshotsSummary, StatsSummary, StepOutput,
 };
 use restichub_db::jobs::{self as job_repo, Job};
 use restichub_db::{AgentId, JobId, JobStatus, LogStream, StepStatus, TenantId};
@@ -23,6 +23,7 @@ use restichub_proto::agent::v1::{
 };
 use time::OffsetDateTime;
 
+use crate::browse;
 use crate::jobs::parse_job_id_value;
 use crate::log_store::{DatabaseLogStore, LogStore, MAX_CHUNK_BYTES, lines_of};
 use crate::server::AppState;
@@ -98,15 +99,20 @@ pub async fn handle_step_result(
         return;
     };
     let cutoff = write_cutoff(state);
+    let now = state.auth().clock.now();
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         tracing::warn!(job = %job_id, "the step result could not open a transaction");
         return;
     };
     let outcome = async {
-        if owned_job(&mut tx, job_id, agent, cutoff).await?.is_none() {
+        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
             return Ok(());
+        };
+        job_steps::upsert(&mut tx, job_id, &step).await?;
+        if step.status == StepStatus::Success {
+            browse::store_listing(&mut tx, &job, result.output.as_ref(), now).await?;
         }
-        job_steps::upsert(&mut tx, job_id, &step).await.map(|_| ())
+        Ok(())
     }
     .await;
     finish(tx, outcome, job_id, "step result").await;
@@ -325,6 +331,17 @@ fn output_of(output: Option<&step_result::Output>) -> StepOutput {
             truncated: list.truncated,
         }),
         Some(step_result::Output::LsPage(_)) => StepOutput::Ls,
+        Some(step_result::Output::RestoreSummary(restore)) => StepOutput::Restore(RestoreSummary {
+            total_files: count(restore.total_files),
+            files_restored: count(restore.files_restored),
+            files_skipped: count(restore.files_skipped),
+            files_deleted: count(restore.files_deleted),
+            total_bytes: count(restore.total_bytes),
+            bytes_restored: count(restore.bytes_restored),
+            bytes_skipped: count(restore.bytes_skipped),
+            seconds_elapsed: non_negative(restore.seconds_elapsed),
+            dry_run: restore.dry_run,
+        }),
         Some(step_result::Output::ForgetResult(forget)) => {
             let sum = |select: fn(&restichub_proto::agent::v1::ForgetGroup) -> usize| {
                 i64::try_from(forget.groups.iter().map(select).sum::<usize>()).unwrap_or(i64::MAX)
@@ -352,7 +369,7 @@ fn output_of(output: Option<&step_result::Output>) -> StepOutput {
     }
 }
 
-fn time_of(timestamp: &prost_types::Timestamp) -> Option<OffsetDateTime> {
+pub(crate) fn time_of(timestamp: &prost_types::Timestamp) -> Option<OffsetDateTime> {
     let base = OffsetDateTime::from_unix_timestamp(timestamp.seconds).ok()?;
     let nanos = u32::try_from(timestamp.nanos)
         .ok()
@@ -383,7 +400,7 @@ fn fraction(value: f64) -> f64 {
 }
 
 /// Cuts a text at a character bound and removes the control characters.
-fn clean(value: &str, max_chars: usize) -> String {
+pub(crate) fn clean(value: &str, max_chars: usize) -> String {
     value
         .chars()
         .filter(|character| !character.is_control())

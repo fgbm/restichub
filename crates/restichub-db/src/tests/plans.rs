@@ -73,10 +73,11 @@ async fn db_a_plan_refuses_a_foreign_tenant_profile_or_agent() -> TestResult {
 
 /// The `jobs_active_repository` index covers every kind except `backup` (FR-SC-04).
 ///
-/// A maintenance job already holds the seeded repository, so a second non-backup active job is
-/// refused. A backup job is not covered: several backup jobs may run on one repository.
+/// A maintenance job already holds the seeded repository, so a second maintenance job is
+/// refused. A backup, a restore and a browse job are not covered: several of them may run on one
+/// repository (FR-SC-04, FR-RS-01).
 #[tokio::test]
-async fn db_the_active_repository_index_covers_every_kind_except_backup() -> TestResult {
+async fn db_the_active_repository_index_covers_every_kind_except_the_shared_ones() -> TestResult {
     let Some(db) = test_database().await else {
         return Ok(());
     };
@@ -87,7 +88,7 @@ async fn db_the_active_repository_index_covers_every_kind_except_backup() -> Tes
         let mut tx = db.database().begin_tenant(tenant_a).await?;
         let restore = sqlx::query(
             "INSERT INTO jobs (id, tenant_id, kind, agent_id, repository_id, status) \
-             VALUES ($1, $2, 'restore', (SELECT id FROM agents WHERE tenant_id = $2), \
+             VALUES ($1, $2, 'prune', (SELECT id FROM agents WHERE tenant_id = $2), \
                      (SELECT id FROM repositories WHERE tenant_id = $2), 'queued')",
         )
         .bind(crate::JobId::new())
@@ -99,14 +100,23 @@ async fn db_the_active_repository_index_covers_every_kind_except_backup() -> Tes
 
     {
         let mut tx = db.database().begin_tenant(tenant_a).await?;
-        for _ in 0..2 {
+        for kind in [
+            "backup",
+            "backup",
+            "restore",
+            "restore",
+            "snapshots",
+            "ls",
+            "ls",
+        ] {
             sqlx::query(
                 "INSERT INTO jobs (id, tenant_id, kind, agent_id, repository_id, status) \
-                 VALUES ($1, $2, 'backup', (SELECT id FROM agents WHERE tenant_id = $2), \
+                 VALUES ($1, $2, $3, (SELECT id FROM agents WHERE tenant_id = $2), \
                          (SELECT id FROM repositories WHERE tenant_id = $2), 'queued')",
             )
             .bind(crate::JobId::new())
             .bind(tenant_a)
+            .bind(kind)
             .execute(tx.as_conn())
             .await?;
         }

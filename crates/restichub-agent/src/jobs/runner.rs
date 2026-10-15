@@ -185,6 +185,16 @@ pub(super) fn status_for_exit(code: i32) -> StepStatus {
     }
 }
 
+/// Starts the collector of a step with the parameters that shape its output (AC-RS-02, FR-RS-04).
+fn collector_for(step: &Step, kind: OutputKind, job_id: &str) -> Collector {
+    let collector = Collector::new(kind, job_id, &step.step_id);
+    match step.kind.as_ref() {
+        Some(step::Kind::Ls(ls)) => collector.with_window(&ls.path, ls.offset, ls.limit),
+        Some(step::Kind::Restore(restore)) => collector.with_dry_run(restore.dry_run),
+        _ => collector,
+    }
+}
+
 /// The priority that a step asks for (FR-AG-15).
 fn priority_of(step: &Step) -> ProcessPriority {
     let value = match step.kind.as_ref() {
@@ -293,7 +303,7 @@ impl Jobs {
         drop(tx);
         let mut output = StepOutput {
             step_id: step_id.to_owned(),
-            collector: Collector::new(kind, &validated.job().job_id, step_id),
+            collector: collector_for(step, kind, &validated.job().job_id),
             scrubber,
             progress: None,
             last_progress: None,
@@ -308,6 +318,8 @@ impl Jobs {
         // the grace period (FR-AG-10, AC-AG-07).
         let mut stopped_at: Option<tokio::time::Instant> = None;
         let mut hard_killed = false;
+        // An `ls` page that is full needs no more of the listing, so the agent stops restic.
+        let mut page_done = false;
         let code = loop {
             let reaped = {
                 let mut slot = lock(&cancel.child);
@@ -332,7 +344,11 @@ impl Jobs {
                 break code;
             }
             if stopped_at.is_none() {
-                if cancel.is_cancelled() {
+                if output.collector.page_complete() {
+                    page_done = true;
+                    interrupt(&cancel.child);
+                    stopped_at = Some(tokio::time::Instant::now());
+                } else if cancel.is_cancelled() {
                     interrupt(&cancel.child);
                     stopped_at = Some(tokio::time::Instant::now());
                 } else if limit.is_some_and(|limit| started.elapsed() >= limit) {
@@ -382,6 +398,11 @@ impl Jobs {
             StepOutcome::cancelled(hard_killed)
         } else if timed_out {
             StepOutcome::timed_out(hard_killed)
+        } else if page_done {
+            StepOutcome {
+                possible_stale_lock: hard_killed,
+                ..StepOutcome::new(StepStatus::Success, 0)
+            }
         } else {
             StepOutcome::from_exit(code)
         };

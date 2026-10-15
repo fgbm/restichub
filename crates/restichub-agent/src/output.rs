@@ -12,8 +12,8 @@ use std::io::Read;
 use prost::Message as _;
 use prost_types::Timestamp;
 use restichub_proto::agent::v1::{
-    BackupSummary, CheckSummary, ForgetGroup, ForgetResult, ForgetSnapshot, Snapshot, SnapshotList,
-    StatsSummary, StepProgress, step, step_result,
+    BackupSummary, CheckSummary, ForgetGroup, ForgetResult, ForgetSnapshot, LsPage, Node, NodeType,
+    RestoreSummary, Snapshot, SnapshotList, StatsSummary, StepProgress, step, step_result,
 };
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -33,6 +33,9 @@ pub(crate) const MAX_SNAPSHOTS: usize = 2_000;
 /// The encoded size that a snapshot list or a forget result may reach. The rest of the step result
 /// is small, so the whole message stays below [`restichub_proto::MAX_STEP_RESULT_BYTES`].
 const MAX_OUTPUT_BYTES: usize = restichub_proto::MAX_STEP_RESULT_BYTES - 64 * 1024;
+
+/// The nodes of one `ls` page when the step names no limit (AC-RS-02).
+pub(crate) const DEFAULT_LS_PAGE: u64 = 1_000;
 
 /// The depth of the line queue between the readers and the step loop for a text step.
 const TEXT_QUEUE: usize = 64;
@@ -127,6 +130,9 @@ pub(crate) enum OutputKind {
     Snapshots,
     Forget,
     Stats,
+    /// One JSON message for each node. The collector keeps one page of them (AC-RS-02).
+    Ls,
+    Restore,
     /// A command with text output only, such as `prune` or `unlock`.
     Plain,
 }
@@ -139,6 +145,8 @@ impl OutputKind {
             step::Kind::Snapshots(_) => Self::Snapshots,
             step::Kind::Forget(_) => Self::Forget,
             step::Kind::Stats(_) => Self::Stats,
+            step::Kind::Ls(_) => Self::Ls,
+            step::Kind::Restore(_) => Self::Restore,
             _ => Self::Plain,
         }
     }
@@ -177,6 +185,20 @@ pub(crate) struct Collector {
     output: Option<step_result::Output>,
     document: Vec<u8>,
     document_invalid: bool,
+    window: Option<LsWindow>,
+    nodes: Vec<Node>,
+    nodes_seen: u64,
+    nodes_bytes: usize,
+    more_nodes: bool,
+    dry_run: bool,
+}
+
+/// Nodes of the `ls` stream that a step returns: from `skip`, at most `limit` of them (AC-RS-02).
+struct LsWindow {
+    /// `ls` prints the listed directory as its first node, which is not an entry of itself.
+    directory: String,
+    skip: u64,
+    limit: u64,
 }
 
 impl Collector {
@@ -188,13 +210,48 @@ impl Collector {
             output: None,
             document: Vec::new(),
             document_invalid: false,
+            window: None,
+            nodes: Vec::new(),
+            nodes_seen: 0,
+            nodes_bytes: 0,
+            more_nodes: false,
+            dry_run: false,
         }
+    }
+
+    /// Selects the page of an `ls` listing: the nodes from `offset`, at most `limit` of them. A
+    /// zero limit gives [`DEFAULT_LS_PAGE`].
+    #[must_use]
+    pub(crate) fn with_window(mut self, directory: &str, offset: u64, limit: u64) -> Self {
+        let limit = if limit == 0 { DEFAULT_LS_PAGE } else { limit };
+        self.window = Some(LsWindow {
+            directory: directory.trim_end_matches('/').to_owned(),
+            skip: offset,
+            limit,
+        });
+        self
+    }
+
+    /// Marks the restore as a dry run: restic prints no flag for it in the summary.
+    #[must_use]
+    pub(crate) fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// True when the page is full and more nodes follow. The step loop then stops restic, because
+    /// the rest of the listing is not needed (AC-RS-02).
+    pub(crate) fn page_complete(&self) -> bool {
+        self.more_nodes
     }
 
     /// Takes one line of standard output.
     pub(crate) fn accept(&mut self, line: &str, truncated: bool) -> Accepted {
         match self.kind {
-            OutputKind::Backup | OutputKind::Check => self.accept_message(line, truncated),
+            OutputKind::Backup | OutputKind::Check | OutputKind::Restore => {
+                self.accept_message(line, truncated)
+            }
+            OutputKind::Ls => self.accept_node(line, truncated),
             OutputKind::Snapshots | OutputKind::Forget | OutputKind::Stats => {
                 if truncated || self.document.len() + line.len() + 1 > MAX_DOCUMENT {
                     self.document_invalid = true;
@@ -242,16 +299,70 @@ impl Collector {
                 }));
                 Accepted::Consumed
             }
-            (OutputKind::Backup, Some("error")) => Accepted::Log(backup_error(&message)),
+            (OutputKind::Restore, Some("status")) => {
+                Accepted::Progress(restore_progress(&message, &self.job_id, &self.step_id))
+            }
+            (OutputKind::Restore, Some("summary")) => {
+                self.output = Some(step_result::Output::RestoreSummary(restore_summary(
+                    &message,
+                    self.dry_run,
+                )));
+                Accepted::Consumed
+            }
+            (OutputKind::Backup | OutputKind::Restore, Some("error")) => {
+                Accepted::Log(backup_error(&message))
+            }
             // A status or an unknown message type carries no log text (ADR-0011).
             (_, Some("verbose_status" | "status")) => Accepted::Consumed,
             _ => Accepted::Log(line.to_owned()),
         }
     }
 
+    fn accept_node(&mut self, line: &str, truncated: bool) -> Accepted {
+        let message = if truncated {
+            None
+        } else {
+            serde_json::from_str::<Value>(line).ok()
+        };
+        let Some(message) = message else {
+            return Accepted::Log(line.to_owned());
+        };
+        let Some(window) = &self.window else {
+            return Accepted::Consumed;
+        };
+        if message.get("message_type").and_then(Value::as_str) != Some("node") {
+            return Accepted::Consumed;
+        }
+        let node = node(&message);
+        if node.path.trim_end_matches('/') == window.directory {
+            return Accepted::Consumed;
+        }
+        let index = self.nodes_seen;
+        self.nodes_seen += 1;
+        if index < window.skip || self.more_nodes {
+            return Accepted::Consumed;
+        }
+        let size = node.encoded_len() + 6;
+        if self.nodes.len() as u64 >= window.limit || self.nodes_bytes + size > MAX_OUTPUT_BYTES {
+            self.more_nodes = true;
+        } else {
+            self.nodes_bytes += size;
+            self.nodes.push(node);
+        }
+        Accepted::Consumed
+    }
+
     /// Ends the step and returns the typed output, or `None` when restic printed none or printed
     /// output that the agent cannot parse.
     pub(crate) fn finish(mut self) -> Option<step_result::Output> {
+        if self.kind == OutputKind::Ls {
+            return self.window.is_some().then(|| {
+                step_result::Output::LsPage(LsPage {
+                    nodes: std::mem::take(&mut self.nodes),
+                    last: !self.more_nodes,
+                })
+            });
+        }
         if self.output.is_some() || self.document_invalid || self.document.is_empty() {
             return self.output;
         }
@@ -307,6 +418,64 @@ fn progress(message: &Value, job_id: &str, step_id: &str) -> StepProgress {
         seconds_elapsed: float(message, "seconds_elapsed"),
         seconds_remaining: uint(message, "seconds_remaining"),
         current_files,
+    }
+}
+
+/// The progress of a restore: the `status` message names its fields in the restore way.
+fn restore_progress(message: &Value, job_id: &str, step_id: &str) -> StepProgress {
+    StepProgress {
+        job_id: job_id.to_owned(),
+        step_id: step_id.to_owned(),
+        bytes_done: uint(message, "bytes_restored"),
+        total_bytes: uint(message, "total_bytes"),
+        files_done: uint(message, "files_restored"),
+        total_files: uint(message, "total_files"),
+        percent_done: float(message, "percent_done"),
+        seconds_elapsed: float(message, "seconds_elapsed"),
+        seconds_remaining: 0,
+        current_files: Vec::new(),
+    }
+}
+
+fn restore_summary(message: &Value, dry_run: bool) -> RestoreSummary {
+    RestoreSummary {
+        total_files: uint(message, "total_files"),
+        files_restored: uint(message, "files_restored"),
+        files_skipped: uint(message, "files_skipped"),
+        files_deleted: uint(message, "files_deleted"),
+        total_bytes: uint(message, "total_bytes"),
+        bytes_restored: uint(message, "bytes_restored"),
+        bytes_skipped: uint(message, "bytes_skipped"),
+        seconds_elapsed: float(message, "seconds_elapsed"),
+        dry_run,
+    }
+}
+
+fn node(message: &Value) -> Node {
+    let node_type = match message.get("type").and_then(Value::as_str) {
+        Some("file") => NodeType::File,
+        Some("dir") => NodeType::Dir,
+        Some("symlink") => NodeType::Symlink,
+        Some("dev") => NodeType::Device,
+        Some("chardev") => NodeType::CharDevice,
+        Some("fifo") => NodeType::Fifo,
+        Some("socket") => NodeType::Socket,
+        Some("irregular") => NodeType::Irregular,
+        _ => NodeType::Unspecified,
+    };
+    Node {
+        name: text(message, "name"),
+        r#type: node_type as i32,
+        path: text(message, "path"),
+        uid: u32::try_from(uint(message, "uid")).unwrap_or(0),
+        gid: u32::try_from(uint(message, "gid")).unwrap_or(0),
+        size: i64::try_from(uint(message, "size")).unwrap_or(i64::MAX),
+        mode: u32::try_from(uint(message, "mode")).unwrap_or(0),
+        permissions: text(message, "permissions"),
+        mtime: timestamp(message, "mtime"),
+        atime: timestamp(message, "atime"),
+        ctime: timestamp(message, "ctime"),
+        link_target: text(message, "linktarget"),
     }
 }
 

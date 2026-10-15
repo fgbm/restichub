@@ -40,6 +40,7 @@ pub enum Refusal {
     RepositoryMissing,
     RepositoryChanged,
     NotMaintenanceAgent,
+    RequestMissing,
     AgentCapabilityMissing,
     ForgetWithoutTags,
     AgentFactsInvalid,
@@ -60,6 +61,7 @@ impl Refusal {
             Self::RepositoryMissing => "repository_missing",
             Self::RepositoryChanged => "repository_changed",
             Self::NotMaintenanceAgent => "not_maintenance_agent",
+            Self::RequestMissing => "request_missing",
             Self::AgentCapabilityMissing => "agent_capability_missing",
             Self::ForgetWithoutTags => "forget_without_tags",
             Self::AgentFactsInvalid => "agent_facts_invalid",
@@ -79,6 +81,7 @@ impl Refusal {
             | Self::ForgetWithoutTags
             | Self::CompileFailed
             | Self::StepMissing
+            | Self::RequestMissing
             | Self::SecretUnavailable => JobResultCode::ConfigError,
             _ => JobResultCode::Failed,
         }
@@ -148,7 +151,10 @@ pub async fn build(
                 repository_id: repository_id.to_string(),
             }),
         )],
-        JobKind::Init | JobKind::TestAccess | JobKind::Restore | JobKind::Other => {
+        JobKind::Snapshots | JobKind::Ls | JobKind::Restore => {
+            super::restore::steps(tx, job, repository_id).await?
+        }
+        JobKind::Init | JobKind::TestAccess | JobKind::Other => {
             return Err(BuildError::Refused(Refusal::UnsupportedKind));
         }
     };

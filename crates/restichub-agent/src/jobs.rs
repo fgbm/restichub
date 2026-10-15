@@ -1,5 +1,5 @@
 //! The agent-side execution of the jobs: repository init and test-access, backup, check,
-//! snapshots, forget, prune, unlock and stats (FR-PR-02, FR-PR-03, FR-PR-06, FR-RP-02, FR-AG-08,
+//! snapshots, ls, restore, forget, prune, unlock and stats (FR-PR-02, FR-PR-03, FR-PR-06, FR-RP-02, FR-AG-08,
 //! FR-AG-09, FR-AG-10, ADR-0020, ADR-0026).
 //!
 //! The control plane delivers a signed job on the stream. The agent verifies the signature with the
@@ -14,9 +14,9 @@
 //! the result, so the agent sends every stored result at each connection until the journal entry
 //! expires (ADR-0020, FR-AG-12). The control plane ignores a result for a terminal job.
 //!
-//! The agent refuses a job with a `ls`, `restore` or `hook` step with
-//! [`RejectReason::UnsupportedStep`]: those step kinds belong to later epics. The agent starts no
-//! job on its own and holds no timer that starts one (ADR-0002).
+//! The agent refuses a job with a `hook` step with [`RejectReason::UnsupportedStep`]: that step
+//! kind belongs to a later epic. The agent starts no job on its own and holds no timer that starts
+//! one (ADR-0002).
 //!
 //! While a step runs, the agent sends progress and scrubbed log chunks. The result of the job holds
 //! the typed result of every step and a bounded tail of the log. Both stay in the journal, so a
@@ -527,13 +527,18 @@ impl Jobs {
 
 /// The step result for the journal: the large outputs stay out (AC-PR-07).
 ///
-/// The journal keeps the small summaries of a backup, a check and the stats. The list of snapshots
-/// and the forget result can be large, and the control plane asks for them again when it needs them.
+/// The journal keeps the small summaries of a backup, a check, a restore and the stats. The list of
+/// snapshots, a page of files and the forget result can be large, and the control plane asks for
+/// them again when it needs them.
 fn compact(result: &StepResult) -> StepResult {
     let mut result = result.clone();
     if matches!(
         result.output,
-        Some(step_result::Output::SnapshotList(_) | step_result::Output::ForgetResult(_))
+        Some(
+            step_result::Output::SnapshotList(_)
+                | step_result::Output::LsPage(_)
+                | step_result::Output::ForgetResult(_)
+        )
     ) {
         result.output = None;
     }
@@ -569,13 +574,9 @@ fn verify_and_validate(
     Ok(validated)
 }
 
-/// The step kinds that the agent runs (FR-PR-02). The `ls` and `restore` steps belong to the
-/// restore epic and the `hook` step to the hook epic.
+/// The step kinds that the agent runs (FR-PR-02). The `hook` step belongs to the hook epic.
 fn is_supported(kind: &step::Kind) -> bool {
-    !matches!(
-        kind,
-        step::Kind::Ls(_) | step::Kind::Restore(_) | step::Kind::Hook(_)
-    )
+    !matches!(kind, step::Kind::Hook(_))
 }
 
 /// The repository that a step acts on (FR-RP-02).

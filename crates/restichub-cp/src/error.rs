@@ -47,6 +47,7 @@ pub enum ErrorCode {
     EmailTaken,
     AgentOffline,
     AlreadyQueued,
+    AgentCapabilityMissing,
 }
 
 impl ErrorCode {
@@ -72,6 +73,7 @@ impl ErrorCode {
             Self::EmailTaken => "email_taken",
             Self::AgentOffline => "agent_offline",
             Self::AlreadyQueued => "already_queued",
+            Self::AgentCapabilityMissing => "agent_capability_missing",
         }
     }
 }
@@ -284,6 +286,16 @@ impl ApiError {
     /// delivery. The user interface translates the code (NFR-DOC-04).
     pub fn agent_offline() -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::AgentOffline, "Conflict")
+    }
+
+    /// Creates a `409 agent_capability_missing` error: the agent is older than the step kind of
+    /// the job (FR-PR-09). The user interface translates the code (NFR-DOC-04).
+    pub fn agent_capability_missing() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::AgentCapabilityMissing,
+            "Conflict",
+        )
     }
 
     /// Creates a `409 already_queued` error: the plan already holds a queued manual run.

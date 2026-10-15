@@ -14,6 +14,7 @@ mod migrations;
 mod plans;
 mod profiles;
 mod repositories;
+mod restore;
 mod rls;
 mod roles;
 mod secrets;
@@ -67,7 +68,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 20] = [
+const TENANT_TABLES: [&str; 22] = [
     "users",
     "memberships",
     "sessions",
@@ -88,6 +89,8 @@ const TENANT_TABLES: [&str; 20] = [
     "job_log_state",
     "job_progress",
     "job_planned_steps",
+    "job_requests",
+    "job_listings",
 ];
 
 struct Seed {
@@ -286,6 +289,22 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     sqlx::query(
         "INSERT INTO job_planned_steps (tenant_id, job_id, step_id, position) \
          VALUES ($1, $2, 'backup', 0)",
+    )
+    .bind(tenant)
+    .bind(job_id)
+    .execute(tx.as_conn())
+    .await?;
+    sqlx::query(
+        "INSERT INTO job_requests (tenant_id, job_id, request) \
+         VALUES ($1, $2, '{\"kind\": \"snapshots\", \"hosts\": [], \"tags\": [], \"paths\": []}')",
+    )
+    .bind(tenant)
+    .bind(job_id)
+    .execute(tx.as_conn())
+    .await?;
+    sqlx::query(
+        "INSERT INTO job_listings (tenant_id, job_id, kind, payload, created_at) \
+         VALUES ($1, $2, 'snapshots', '{\"snapshots\": []}', now())",
     )
     .bind(tenant)
     .bind(job_id)

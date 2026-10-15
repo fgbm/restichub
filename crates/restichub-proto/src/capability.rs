@@ -3,17 +3,20 @@
 pub enum AgentCapability {
     /// The agent reads `SnapshotsFilter.all_tags`. An older agent drops that field.
     ForgetAllTags,
+    /// The agent runs the `ls` and `restore` steps. An older agent rejects both (FR-RS-02, FR-RS-03).
+    RestoreV1,
 }
 
 impl AgentCapability {
     /// Every capability that this build supports.
-    pub const ALL: [Self; 1] = [Self::ForgetAllTags];
+    pub const ALL: [Self; 2] = [Self::ForgetAllTags, Self::RestoreV1];
 
     /// The wire name in `AgentHello.capabilities`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ForgetAllTags => "forget-all-tags",
+            Self::RestoreV1 => "restore-v1",
         }
     }
 
@@ -57,9 +60,10 @@ mod tests {
         let mut names: Vec<String> = (0..10_000).map(|index| format!("junk-{index}")).collect();
         names.push("forget-all-tags".to_owned());
         names.push("forget-all-tags".to_owned());
+        names.push("restore-v1".to_owned());
         assert_eq!(
             AgentCapability::parse_list(&names),
-            [AgentCapability::ForgetAllTags]
+            [AgentCapability::ForgetAllTags, AgentCapability::RestoreV1]
         );
         assert!(AgentCapability::parse_list(&names[..10_000]).is_empty());
     }

@@ -253,23 +253,10 @@ fn ac_pr_01_a_replay_of_a_completed_job_returns_the_stored_result() {
 
 #[test]
 fn fr_pr_01_rejects_the_step_kinds_of_later_epics() {
-    let steps = [
-        step::Kind::Ls(LsStep {
-            repository_id: "repo-1".to_owned(),
-            snapshot_id: "latest".to_owned(),
-            ..LsStep::default()
-        }),
-        step::Kind::Restore(RestoreStep {
-            repository_id: "repo-1".to_owned(),
-            snapshot_id: "latest".to_owned(),
-            target: "/restore".to_owned(),
-            ..RestoreStep::default()
-        }),
-        step::Kind::Hook(HookStep {
-            hook_id: "pg_dump".to_owned(),
-            ..HookStep::default()
-        }),
-    ];
+    let steps = [step::Kind::Hook(HookStep {
+        hook_id: "pg_dump".to_owned(),
+        ..HookStep::default()
+    })];
     for kind in steps {
         let step = Step {
             step_id: "later".to_owned(),
@@ -314,6 +301,17 @@ fn fr_pr_02_accepts_the_step_kinds_of_the_agent_core() {
                 ..SnapshotsFilter::default()
             }),
             ..ForgetStep::default()
+        }),
+        step::Kind::Ls(LsStep {
+            repository_id: "repo-1".to_owned(),
+            snapshot_id: "latest".to_owned(),
+            ..LsStep::default()
+        }),
+        step::Kind::Restore(RestoreStep {
+            repository_id: "repo-1".to_owned(),
+            snapshot_id: "latest".to_owned(),
+            target: "/restore".to_owned(),
+            ..RestoreStep::default()
         }),
         step::Kind::Prune(PruneStep {
             repository_id: "repo-1".to_owned(),

@@ -826,6 +826,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/repositories/{id}/ls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reads a page of a snapshot tree.
+         * @description The call returns the state and the entries of the page job. Ask again while the state is `pending`.
+         */
+        get: operations["get_ls"];
+        put?: never;
+        /**
+         * Lists one directory of a snapshot.
+         * @description An agent with access to the repository runs `restic ls` for one directory and returns one page of its entries. A page that a job listed in the last ten minutes comes from the stored copy with HTTP 200 and starts no job. Ask `GET /api/v1/repositories/{id}/ls?job=` for the result of a new job.
+         */
+        post: operations["start_ls"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/repositories/{id}/maintenance": {
         parameters: {
             query?: never;
@@ -864,6 +888,50 @@ export interface paths {
          * @description The job runs on the maintenance agent and follows the barriers of the queue. The retention task needs a profile with a retention that a plan runs. A repository with an active exclusive job gives HTTP 409.
          */
         post: operations["run_maintenance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/repositories/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restores a snapshot.
+         * @description The target agent reads the repository directly and writes the files to the target directory. The data does not go through the control plane. The agent gets the secrets of this repository for this job only. An offline agent gives HTTP 409 `agent_offline`, and an agent without the capability `restore-v1` gives HTTP 409 `agent_capability_missing`.
+         */
+        post: operations["start_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/repositories/{id}/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reads a snapshot list.
+         * @description With `job` the call returns the state and the result of that job. Without it the call returns the newest stored list of the repository with its age. The dates `from` and `to` filter the list.
+         */
+        get: operations["get_snapshots"];
+        put?: never;
+        /**
+         * Lists the snapshots of a repository.
+         * @description An agent with access to the repository runs `restic snapshots` with the filters. Ask `GET /api/v1/repositories/{id}/snapshots?job=` for the result. An offline agent gives HTTP 409 `agent_offline`, and an agent without the capability gives HTTP 409 `agent_capability_missing`.
+         */
+        post: operations["start_snapshots"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1320,6 +1388,11 @@ export interface components {
             /** Format: int64 */
             tree_blobs: number;
         };
+        /**
+         * @description What a browse request returns at the moment of the read.
+         * @enum {string}
+         */
+        BrowseState: "empty" | "pending" | "done" | "failed";
         ChangePasswordRequest: {
             current_password: string;
             /** @description At least 12 characters. */
@@ -1536,7 +1609,7 @@ export interface components {
             used_at?: string | null;
         };
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing";
         /** @description Counts that `restic forget` reported, summed over the groups. */
         ForgetSummary: {
             /** Format: int64 */
@@ -1604,7 +1677,7 @@ export interface components {
          *     the `kind` column. It is stable: do not change a string.
          * @enum {string}
          */
-        JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "unlock_all" | "other";
+        JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "unlock_all" | "snapshots" | "ls" | "other";
         JobListResponse: {
             items: components["schemas"]["JobView"][];
             next_cursor?: string | null;
@@ -1712,6 +1785,51 @@ export interface components {
          * @enum {string}
          */
         LogStream: "stdout" | "stderr" | "agent";
+        /** @description The body of a tree page request. */
+        LsQueryRequest: {
+            /** @description The agent that reads the repository. An absent value uses the maintenance agent. */
+            agent_id?: string | null;
+            /**
+             * Format: int64
+             * @description The most entries in the page, up to 5000. Zero means 1000.
+             */
+            limit?: number;
+            /**
+             * Format: int64
+             * @description The number of entries to skip.
+             */
+            offset?: number;
+            /** @description The directory in the snapshot. Empty or `/` means the root. */
+            path?: string;
+            /** @description The identifier of the snapshot, `latest` or 8 to 64 lower-case hexadecimal characters. */
+            snapshot_id: string;
+        };
+        /** @description One page of the entries of a directory in a snapshot. */
+        LsView: {
+            /** @description True when a stored page answered the request and no job ran. */
+            cached: boolean;
+            /** @description A stable code that the user interface translates. Set when the state is `failed`. */
+            error_code?: string | null;
+            /** @description In RFC 3339. Null unless the state is `done`. */
+            fetched_at?: string | null;
+            job_id: string;
+            /** @description True when the directory has no entry after this page. */
+            last: boolean;
+            /** Format: int64 */
+            limit: number;
+            /**
+             * Format: int64
+             * @description The offset of the next page. Null on the last page.
+             */
+            next_offset?: number | null;
+            nodes: components["schemas"]["NodeItem"][];
+            /** Format: int64 */
+            offset: number;
+            /** @description The directory. Empty for the root. */
+            path: string;
+            snapshot_id: string;
+            state: components["schemas"]["BrowseState"];
+        };
         MaintenanceScheduleInput: {
             cron: string;
             enabled: boolean;
@@ -1783,6 +1901,33 @@ export interface components {
             /** @description The time zone of the plan; the user interface renders each run in it. */
             time_zone: string;
         };
+        /** @description One entry of a snapshot tree, as `restic ls --json` reports it. */
+        NodeItem: {
+            kind: components["schemas"]["NodeKind"];
+            /** @description Empty unless the entry is a symbolic link. */
+            link_target: string;
+            /** @description In RFC 3339. Null when restic gave no valid time. */
+            mtime?: string | null;
+            name: string;
+            /** @description The full path in the snapshot. */
+            path: string;
+            permissions: string;
+            /**
+             * Format: int64
+             * @description In bytes.
+             */
+            size: number;
+        };
+        /**
+         * @description The type of an entry in a snapshot tree.
+         * @enum {string}
+         */
+        NodeKind: "file" | "dir" | "symlink" | "other";
+        /**
+         * @description The policy for a file that exists in the restore target (FR-RS-04).
+         * @enum {string}
+         */
+        OverwriteMode: "always" | "if-changed" | "if-newer" | "never";
         PlanListResponse: {
             items: components["schemas"]["PlanView"][];
             next_cursor?: string | null;
@@ -2031,6 +2176,52 @@ export interface components {
             /** @description At least 12 characters. */
             new_password: string;
         };
+        /** @description The body of a restore request (FR-RS-03, FR-RS-04). */
+        RestoreBody: {
+            /**
+             * @description The agent that writes the files. An absent value uses the maintenance agent. A repository
+             *     with a local path needs its maintenance agent, because the data stays on that host.
+             */
+            agent_id?: string | null;
+            /** @description Check the restore and write no file. */
+            dry_run?: boolean;
+            /** @description Skip the paths that match. Not allowed together with `includes`. */
+            excludes?: string[];
+            /**
+             * @description Restore only the paths that match. Empty means the whole snapshot. restic accepts either
+             *     this list or `excludes`, not both.
+             */
+            includes?: string[];
+            /** @description What to do with a file that exists in the target. */
+            overwrite: components["schemas"]["OverwriteMode"];
+            /** @description The identifier of the snapshot, `latest` or 8 to 64 lower-case hexadecimal characters. */
+            snapshot_id: string;
+            /** @description An absolute directory on the target agent. */
+            target: string;
+            /** @description Read the restored files again and compare them with the snapshot. */
+            verify?: boolean;
+        };
+        /** @description What `restic restore --json` reported (FR-RS-04). */
+        RestoreSummary: {
+            /** Format: int64 */
+            bytes_restored: number;
+            /** Format: int64 */
+            bytes_skipped: number;
+            /** @description True when the run was a dry run: restic wrote nothing. */
+            dry_run: boolean;
+            /** Format: int64 */
+            files_deleted: number;
+            /** Format: int64 */
+            files_restored: number;
+            /** Format: int64 */
+            files_skipped: number;
+            /** Format: double */
+            seconds_elapsed: number;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            total_files: number;
+        };
         /** @description How long the snapshots stay (FR-PF-01). */
         Retention: {
             filter?: components["schemas"]["SnapshotFilter"];
@@ -2148,11 +2339,70 @@ export interface components {
             paths?: string[];
             tags?: string[];
         };
+        /** @description One snapshot of a repository, as `restic snapshots --json` reports it. */
+        SnapshotItem: {
+            hostname: string;
+            /** @description The full identifier. */
+            id: string;
+            /** @description The backed-up paths. */
+            paths: string[];
+            program_version: string;
+            short_id: string;
+            tags: string[];
+            /** @description In RFC 3339. Null when restic gave no valid time. */
+            time?: string | null;
+            /**
+             * Format: int64
+             * @description Null when restic gave no backup summary.
+             */
+            total_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Null when restic gave no backup summary.
+             */
+            total_files?: number | null;
+            username: string;
+        };
+        /** @description The body of a snapshot list request. */
+        SnapshotsQuery: {
+            /** @description The agent that reads the repository. An absent value uses the maintenance agent. */
+            agent_id?: string | null;
+            /** @description Keep the snapshots of these hosts. */
+            hosts?: string[];
+            /** @description Keep the snapshots of these backed-up paths. */
+            paths?: string[];
+            /** @description Keep the snapshots that carry these tags. */
+            tags?: string[];
+        };
         /** @description The snapshot count of a `restic snapshots` step. */
         SnapshotsSummary: {
             /** Format: int64 */
             count: number;
             /** @description True when the agent dropped snapshots to fit the size limit of a result. */
+            truncated: boolean;
+        };
+        /** @description A snapshot list. */
+        SnapshotsView: {
+            /**
+             * Format: int64
+             * @description The age of the list in seconds. Null unless the state is `done`.
+             */
+            age_seconds?: number | null;
+            /** @description The agent that read the repository. Null when the state is `empty`. */
+            agent_id?: string | null;
+            /** @description A stable code that the user interface translates. Set when the state is `failed`. */
+            error_code?: string | null;
+            /** @description In RFC 3339. Null unless the state is `done`. */
+            fetched_at?: string | null;
+            /** @description The filters that the job applied. */
+            hosts: string[];
+            /** @description Null when the state is `empty`. */
+            job_id?: string | null;
+            paths: string[];
+            snapshots: components["schemas"]["SnapshotItem"][];
+            state: components["schemas"]["BrowseState"];
+            tags: string[];
+            /** @description True when the agent dropped the oldest snapshots to fit a result. */
             truncated: boolean;
         };
         /** @description What `restic stats --json` reported. */
@@ -2187,6 +2437,9 @@ export interface components {
         }) | (components["schemas"]["StatsSummary"] & {
             /** @enum {string} */
             kind: "stats";
+        }) | (components["schemas"]["RestoreSummary"] & {
+            /** @enum {string} */
+            kind: "restore";
         }) | {
             /** @enum {string} */
             kind: "ls";
@@ -5408,6 +5661,148 @@ export interface operations {
             };
         };
     };
+    get_ls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+                /** @description The job of the page request. The call needs it. */
+                job: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LsView"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository or the job is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    start_ls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LsQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description A stored page answers the request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LsView"];
+                };
+            };
+            /** @description The job is queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LsView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not initialized, the agent is offline, or the agent is too old. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     get_maintenance: {
         parameters: {
             query?: never;
@@ -5583,6 +5978,215 @@ export interface operations {
                 };
             };
             /** @description The repository is not initialized, has nothing to forget, or holds an active exclusive job. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    start_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreBody"];
+            };
+        };
+        responses: {
+            /** @description The job is queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not initialized, the agent is offline, or the agent is too old. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_snapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+                /** @description The job of an earlier request. Without it the call returns the newest stored list. */
+                job: string | null;
+                /** @description Keep the snapshots made at this time or later, in RFC 3339. The control plane applies it. */
+                from: string | null;
+                /** @description Keep the snapshots made at this time or earlier, in RFC 3339. The control plane applies it. */
+                to: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The snapshot list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotsView"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository or the job is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    start_snapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SnapshotsQuery"];
+            };
+        };
+        responses: {
+            /** @description The job is queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotsView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not initialized, or the agent is offline. */
             409: {
                 headers: {
                     [name: string]: unknown;

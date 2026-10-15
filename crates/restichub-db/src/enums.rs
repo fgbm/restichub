@@ -277,6 +277,10 @@ pub enum JobKind {
     Unlock,
     /// Removes every lock of a repository. Only an Admin action starts it (FR-SC-06).
     UnlockAll,
+    /// Lists the snapshots of a repository for the Restore screen (FR-RS-01).
+    Snapshots,
+    /// Lists one directory of a snapshot for the Restore screen (FR-RS-02).
+    Ls,
     /// A job that does not fit any other kind of the closed set.
     Other,
 }
@@ -293,6 +297,8 @@ impl JobKind {
             Self::Restore => "restore",
             Self::Unlock => "unlock",
             Self::UnlockAll => "unlock_all",
+            Self::Snapshots => "snapshots",
+            Self::Ls => "ls",
             Self::Other => "other",
         }
     }
@@ -308,6 +314,12 @@ impl JobKind {
         )
     }
 
+    /// True for a job that answers a person who waits in the Restore screen. It does not wait
+    /// behind the jobs of its agent, because a long backup would hold the screen for hours.
+    pub fn is_interactive(self) -> bool {
+        matches!(self, Self::Snapshots | Self::Ls)
+    }
+
     /// `None` on an unknown string.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -320,6 +332,8 @@ impl JobKind {
             "restore" => Some(Self::Restore),
             "unlock" => Some(Self::Unlock),
             "unlock_all" => Some(Self::UnlockAll),
+            "snapshots" => Some(Self::Snapshots),
+            "ls" => Some(Self::Ls),
             "other" => Some(Self::Other),
             _ => None,
         }
@@ -759,6 +773,8 @@ mod tests {
             JobKind::Restore,
             JobKind::Unlock,
             JobKind::UnlockAll,
+            JobKind::Snapshots,
+            JobKind::Ls,
             JobKind::Other,
         ] {
             assert_eq!(JobKind::parse(kind.as_str()), Some(kind));

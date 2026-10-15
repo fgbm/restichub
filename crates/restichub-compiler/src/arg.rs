@@ -26,7 +26,15 @@ const RETRY_LOCK: &str = "--retry-lock=5m";
 const SAFE_ENV: &[&str] = &["AWS_DEFAULT_REGION"];
 
 /// The restic commands whose output the agent parses as JSON (ADR-0011).
-const JSON_COMMANDS: &[&str] = &["backup", "check", "snapshots", "forget", "stats", "ls"];
+const JSON_COMMANDS: &[&str] = &[
+    "backup",
+    "check",
+    "snapshots",
+    "forget",
+    "stats",
+    "ls",
+    "restore",
+];
 
 /// A restic command line. `args` holds no secret; `env` holds the secrets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,11 +156,9 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
         step::Kind::Ls(ls) => {
             args.push("ls".to_owned());
             push_flag(&mut args, ls.recursive, "--recursive");
-            let mut values = vec![ls.snapshot_id.clone()];
-            if !ls.path.is_empty() {
-                values.push(ls.path.clone());
-            }
-            positional(&mut args, &values);
+            // Without a directory restic lists the whole tree. The root is `/` (AC-RS-02).
+            let path = if ls.path.is_empty() { "/" } else { &ls.path };
+            positional(&mut args, &[ls.snapshot_id.clone(), path.to_owned()]);
         }
         step::Kind::Restore(restore) => {
             args.push("restore".to_owned());

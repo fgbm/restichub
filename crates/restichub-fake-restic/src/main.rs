@@ -7,6 +7,7 @@
 mod cancel;
 mod cli;
 mod lock;
+mod ls;
 mod output;
 mod password;
 mod scenario;

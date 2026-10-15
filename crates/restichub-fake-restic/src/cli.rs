@@ -12,6 +12,7 @@ pub enum Command {
     Snapshots,
     Unlock,
     Restore,
+    Ls,
     Init,
     Version,
     CatConfig,
@@ -27,6 +28,7 @@ impl Command {
             "snapshots" => Self::Snapshots,
             "unlock" => Self::Unlock,
             "restore" => Self::Restore,
+            "ls" => Self::Ls,
             "init" => Self::Init,
             "version" => Self::Version,
             _ => return None,
@@ -48,6 +50,7 @@ impl Command {
             Self::Snapshots => "snapshots",
             Self::Unlock => "unlock",
             Self::Restore => "restore",
+            Self::Ls => "ls",
             Self::Init => "init",
             Self::Version => "version",
             Self::CatConfig => "cat_config",
@@ -150,7 +153,7 @@ fn long_flag(name: &str) -> Option<FlagKind> {
         "read-data" | "with-cache" | "check-unused" => Bool,
         // restore
         "target" | "overwrite" | "include" => Value,
-        "sparse" | "verify" | "delete" => Bool,
+        "sparse" | "verify" | "delete" | "recursive" => Bool,
         // unlock and init
         "remove-all" | "copy-chunker-params" => Bool,
         "repository-version" => Value,

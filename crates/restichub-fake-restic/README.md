@@ -11,6 +11,7 @@ The recorded output follows restic 0.19.1. The message shapes come from the rest
 | `backup` | The `status` messages and the final `summary` message |
 | `restore` | The `status` messages and the final `summary` message |
 | `snapshots` | The array of snapshots |
+| `ls` | The `snapshot` message and one `node` message for each entry of the listed directory |
 | `forget` | The array of the forget groups |
 | `check` | The `summary` message |
 | `init` | The `initialized` message |
@@ -31,6 +32,7 @@ The options `backup`, `restore`, `snapshots`, `forget`, `check` and `init` write
 | `FAKE_RESTIC_PROGRESS_COUNT` | The number of `status` messages | `3` |
 | `FAKE_RESTIC_ARGV_FILE` | The file for the received argument vector | none |
 | `FAKE_RESTIC_SCENARIO` | The scenario file that the binary reads | none |
+| `FAKE_RESTIC_LS_COUNT` | The number of entries that `ls` prints | `3` |
 
 A rate of `0` writes the messages without a wait.
 

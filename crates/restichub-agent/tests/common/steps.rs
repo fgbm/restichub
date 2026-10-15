@@ -10,9 +10,9 @@ use ed25519_dalek::SigningKey;
 use restichub_agent::jobs::Jobs;
 use restichub_proto::agent::v1::{
     AgentMessage, BackupStep, CheckStep, ForgetStep, InitStep, Job, JobResult, LocalCredentials,
-    LogChunk, PruneStep, RepositoryAccess, SignedJob, SnapshotsFilter, SnapshotsStep, StatsStep,
-    Step, StepProgress, StepResult, TestAccessStep, UnlockAllStep, UnlockStep, agent_message,
-    repository_access::BackendCredentials, step,
+    LogChunk, LsStep, OverwriteMode, PruneStep, RepositoryAccess, RestoreStep, SignedJob,
+    SnapshotsFilter, SnapshotsStep, StatsStep, Step, StepProgress, StepResult, TestAccessStep,
+    UnlockAllStep, UnlockStep, agent_message, repository_access::BackendCredentials, step,
 };
 use restichub_proto::signing::{KeyRing, sign_job};
 use tokio::sync::mpsc;
@@ -108,6 +108,30 @@ pub fn snapshots_step(repository: &str) -> Step {
             ..SnapshotsStep::default()
         }),
     )
+}
+
+pub fn ls_step(repository: &str, snapshot: &str, path: &str, offset: u64, limit: u64) -> Step {
+    make_step(
+        "ls",
+        step::Kind::Ls(LsStep {
+            repository_id: repository.to_owned(),
+            snapshot_id: snapshot.to_owned(),
+            path: path.to_owned(),
+            recursive: false,
+            offset,
+            limit,
+        }),
+    )
+}
+
+pub fn restore_args(repository: &str, snapshot: &str, target: &Path) -> RestoreStep {
+    RestoreStep {
+        repository_id: repository.to_owned(),
+        snapshot_id: snapshot.to_owned(),
+        target: target.to_string_lossy().into_owned(),
+        overwrite: OverwriteMode::Always as i32,
+        ..RestoreStep::default()
+    }
 }
 
 pub fn forget_step(repository: &str, keep_last: u32) -> Step {

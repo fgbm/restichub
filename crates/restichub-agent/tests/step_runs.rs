@@ -245,29 +245,16 @@ async fn fr_pr_02_only_unlock_all_removes_live_locks() {
     assert_eq!(fixture.argv(), vec!["unlock", "unlock --remove-all"]);
 }
 
-/// FR-PR-02: the `ls`, `restore` and `hook` steps are refused until their epics.
+/// FR-PR-02: the `hook` step is refused until its epic.
 #[tokio::test(flavor = "multi_thread")]
 async fn fr_pr_02_the_later_step_kinds_are_rejected() {
-    use restichub_proto::agent::v1::{HookStep, LsStep, RestoreStep};
+    use restichub_proto::agent::v1::HookStep;
     let fixture = Fixture::new("step-unsupported");
     let jobs = fixture.jobs();
-    let kinds = [
-        step::Kind::Ls(LsStep {
-            repository_id: "repo-1".to_owned(),
-            snapshot_id: "latest".to_owned(),
-            ..LsStep::default()
-        }),
-        step::Kind::Restore(RestoreStep {
-            repository_id: "repo-1".to_owned(),
-            snapshot_id: "latest".to_owned(),
-            target: "/restore".to_owned(),
-            ..RestoreStep::default()
-        }),
-        step::Kind::Hook(HookStep {
-            hook_id: "pg_dump".to_owned(),
-            ..HookStep::default()
-        }),
-    ];
+    let kinds = [step::Kind::Hook(HookStep {
+        hook_id: "pg_dump".to_owned(),
+        ..HookStep::default()
+    })];
     for (index, kind) in kinds.into_iter().enumerate() {
         let (tx, mut rx) = mpsc::channel(8);
         jobs.attach(&tx);

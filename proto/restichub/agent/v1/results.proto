@@ -118,7 +118,30 @@ message StepResult {
     ForgetResult forget_result = 12;
     CheckSummary check_summary = 13;
     StatsSummary stats_summary = 14;
+    RestoreSummary restore_summary = 15;
   }
+}
+
+// RestoreSummary is the "summary" message of "restic restore" (FR-RS-04).
+message RestoreSummary {
+  // Files in the selected part of the snapshot.
+  uint64 total_files = 1;
+  // Files that restic wrote.
+  uint64 files_restored = 2;
+  // Files that restic left as they were.
+  uint64 files_skipped = 3;
+  // Files that restic deleted. Zero unless the restore deletes files.
+  uint64 files_deleted = 4;
+  // Bytes in the selected part of the snapshot.
+  uint64 total_bytes = 5;
+  // Bytes that restic wrote.
+  uint64 bytes_restored = 6;
+  // Bytes that restic left as they were.
+  uint64 bytes_skipped = 7;
+  // Duration of the restore in seconds.
+  double seconds_elapsed = 8;
+  // True when the run was a dry run. A dry run wrote nothing.
+  bool dry_run = 9;
 }
 
 // BackupSummary is the "summary" message of "restic backup" (FR-MN-02).

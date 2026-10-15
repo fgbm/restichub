@@ -1,13 +1,14 @@
 //! The periodic maintenance of the control plane.
 //!
-//! The task removes the sessions past the absolute lifetime and the expired and used setup tokens.
+//! The task removes the sessions past the absolute lifetime, the expired and used setup tokens and
+//! the old listings of the Restore screen.
 //! It is a maintenance task of the control plane, not job scheduling (ADR-0002). It runs in one
 //! process; two instances both run it and the operations are idempotent.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use restichub_db::{Database, DbError, PLATFORM_TENANT_ID, sessions, setup, tenants};
+use restichub_db::{Database, DbError, PLATFORM_TENANT_ID, restore, sessions, setup, tenants};
 use time::OffsetDateTime;
 
 use crate::clock::Clock;
@@ -23,6 +24,12 @@ pub const SIGNING_KEY_RETIRE_INTERVAL: Duration = Duration::from_secs(3600);
 /// The job expiry sweep runs often, so a poll sees a terminal status soon after the expiry
 /// ( ).
 pub const JOB_EXPIRY_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How long the control plane keeps the listing of one directory of a snapshot (AC-RS-02).
+pub const PAGE_RETENTION: time::Duration = time::Duration::hours(1);
+
+/// How long the control plane keeps a snapshot listing and the browse jobs (FR-RS-01).
+pub const SNAPSHOTS_RETENTION: time::Duration = time::Duration::days(7);
 
 /// Removes the expired sessions and the expired and used setup tokens.
 ///
@@ -54,6 +61,9 @@ async fn cleanup_tenant(
 ) -> Result<(), DbError> {
     let mut tx = db.begin_tenant(tenant).await?;
     sessions::delete_expired(&mut tx, now).await?;
+    restore::delete_expired_listings(&mut tx, now - PAGE_RETENTION, now - SNAPSHOTS_RETENTION)
+        .await?;
+    restore::delete_old_browse_jobs(&mut tx, now - SNAPSHOTS_RETENTION).await?;
     tx.commit().await?;
     Ok(())
 }

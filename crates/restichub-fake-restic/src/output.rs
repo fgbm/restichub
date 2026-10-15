@@ -50,6 +50,7 @@ pub fn emit(invocation: &Invocation, plan: &Resolved) -> io::Result<Outcome> {
         Command::Check => check(&mut out, invocation).map(|()| Outcome::Completed),
         Command::Snapshots => snapshots(&mut out, invocation).map(|()| Outcome::Completed),
         Command::Restore => restore(&mut out, invocation, plan),
+        Command::Ls => crate::ls::emit(&mut out, invocation).map(|()| Outcome::Completed),
         Command::Init => init(&mut out, invocation).map(|()| Outcome::Completed),
         Command::Version => version(&mut out, invocation).map(|()| Outcome::Completed),
         Command::CatConfig => cat_config(&mut out).map(|()| Outcome::Completed),

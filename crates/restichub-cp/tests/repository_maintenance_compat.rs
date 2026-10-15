@@ -131,7 +131,7 @@ async fn fr_pr_09_the_hello_stores_the_capabilities() {
     let agent = env.connect_agent("new-host").await;
     assert_eq!(
         env.stored_capabilities(agent.id).await,
-        ["forget-all-tags".to_owned()]
+        ["forget-all-tags".to_owned(), "restore-v1".to_owned()]
     );
     env.db.cleanup().await;
 }

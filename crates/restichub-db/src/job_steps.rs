@@ -88,6 +88,22 @@ pub struct StatsSummary {
     pub compression_ratio: f64,
 }
 
+/// What `restic restore --json` reported (FR-RS-04).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RestoreSummary {
+    pub total_files: i64,
+    pub files_restored: i64,
+    pub files_skipped: i64,
+    pub files_deleted: i64,
+    pub total_bytes: i64,
+    pub bytes_restored: i64,
+    pub bytes_skipped: i64,
+    pub seconds_elapsed: f64,
+    /// True when the run was a dry run: restic wrote nothing.
+    pub dry_run: bool,
+}
+
 /// The typed output of a step. A listing of files carries no stored summary.
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -98,6 +114,7 @@ pub enum StepOutput {
     Forget(ForgetSummary),
     Check(CheckSummary),
     Stats(StatsSummary),
+    Restore(RestoreSummary),
     Ls,
 }
 
@@ -110,6 +127,7 @@ impl StepOutput {
             Self::Forget(_) => "forget",
             Self::Check(_) => "check",
             Self::Stats(_) => "stats",
+            Self::Restore(_) => "restore",
             Self::Ls => "ls",
         }
     }
@@ -120,6 +138,7 @@ impl StepOutput {
             Self::Forget(summary) => serde_json::to_value(summary),
             Self::Check(summary) => serde_json::to_value(summary),
             Self::Stats(summary) => serde_json::to_value(summary),
+            Self::Restore(summary) => serde_json::to_value(summary),
             Self::None | Self::Backup(_) | Self::Ls => return Ok(None),
         };
         value.map(Some).map_err(decode_error)
@@ -237,6 +256,9 @@ impl StepRow {
             }
             "stats" => {
                 StepOutput::Stats(serde_json::from_value(summary(&self)?).map_err(decode_error)?)
+            }
+            "restore" => {
+                StepOutput::Restore(serde_json::from_value(summary(&self)?).map_err(decode_error)?)
             }
             other => return Err(decode_error(InvalidOutput(other.to_owned()))),
         };

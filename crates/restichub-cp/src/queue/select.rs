@@ -35,7 +35,10 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
     let mut per_agent: HashMap<AgentId, usize> = HashMap::new();
     let mut per_repository: HashMap<RepositoryId, RepositoryLoad> = HashMap::new();
     for flight in in_flight {
-        *per_agent.entry(flight.agent_id).or_default() += 1;
+        // A browse job answers a person who waits, so it holds no slot of its agent (FR-RS-02).
+        if !flight.kind.is_interactive() {
+            *per_agent.entry(flight.agent_id).or_default() += 1;
+        }
         if let Some(repository) = flight.repository_id {
             let load = per_repository.entry(repository).or_default();
             if flight.kind.is_exclusive() {
@@ -76,6 +79,8 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
             let load = per_repository.entry(repository).or_default();
             let repository_ready = if exclusive {
                 !load.exclusive && load.shared == 0 && !skipped.contains(&repository)
+            } else if job.kind.is_interactive() {
+                !load.exclusive
             } else {
                 !load.exclusive && load.shared < limits.repository
             };
@@ -88,7 +93,7 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
             }
         }
         let agent_count = per_agent.entry(job.agent_id).or_default();
-        if *agent_count >= limits.agent {
+        if *agent_count >= limits.agent && !job.kind.is_interactive() {
             if let Some(repository) = repository {
                 skipped.insert(repository);
                 if exclusive {
@@ -98,7 +103,9 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
             continue;
         }
 
-        *agent_count += 1;
+        if !job.kind.is_interactive() {
+            *agent_count += 1;
+        }
         total += 1;
         if let Some(repository) = repository {
             let load = per_repository.entry(repository).or_default();

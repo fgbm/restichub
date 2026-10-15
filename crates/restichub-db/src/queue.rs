@@ -138,7 +138,8 @@ pub async fn dispatchable(
                        OR (status = 'sent' AND lease_until IS NOT NULL AND lease_until <= $1)) \
                   AND NOT cancel_requested \
                   AND (expires_at IS NULL OR expires_at > $1) \
-                  AND kind IN ('backup', 'forget', 'prune', 'check', 'unlock', 'unlock_all') \
+                  AND kind IN ('backup', 'forget', 'prune', 'check', 'unlock', 'unlock_all', 'restore', \
+                              'snapshots', 'ls') \
                   AND agent_id = ANY($2)) ranked \
               WHERE rank <= $3) \
           ORDER BY created_at, id \
@@ -664,7 +665,8 @@ pub async fn has_active_exclusive_for_repository(
     repository_id: RepositoryId,
 ) -> Result<bool, DbError> {
     let (active,): (bool,) = sqlx::query_as(
-        "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 AND kind <> 'backup' \
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 \
+                        AND kind NOT IN ('backup', 'snapshots', 'ls', 'restore') \
                         AND status IN ('queued', 'sent', 'running'))",
     )
     .bind(repository_id)
@@ -714,6 +716,8 @@ pub async fn get_detail(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<JobDe
 }
 
 /// Lists the jobs of the tenant, newest first, with keyset pagination.
+///
+/// The browse jobs of the Restore screen (`snapshots` and `ls`) are internal and stay out.
 pub async fn list(
     tx: &mut TenantTx<'_>,
     filter: &JobFilter,
@@ -732,7 +736,8 @@ pub async fn list(
           LEFT JOIN plans p ON p.tenant_id = j.tenant_id AND p.id = j.plan_id \
           LEFT JOIN agents a ON a.tenant_id = j.tenant_id AND a.id = j.agent_id \
           LEFT JOIN repositories r ON r.tenant_id = j.tenant_id AND r.id = j.repository_id \
-          WHERE ($1::uuid IS NULL OR j.plan_id = $1) \
+          WHERE j.kind NOT IN ('snapshots', 'ls') \
+            AND ($1::uuid IS NULL OR j.plan_id = $1) \
             AND ($2::uuid IS NULL OR j.repository_id = $2) \
             AND ($3::uuid IS NULL OR j.agent_id = $3) \
             AND ($4::text IS NULL OR j.status = $4) \

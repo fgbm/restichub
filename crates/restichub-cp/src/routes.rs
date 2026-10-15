@@ -474,6 +474,45 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/api/v1/repositories/{id}/snapshots",
+        access: Access::Protected(Operation::JobsRead),
+        handler: || routes!(crate::restore::get_snapshots),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/snapshots",
+        access: Access::Protected(Operation::JobsWrite),
+        handler: || {
+            routes!(crate::restore::start_snapshots)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/repositories/{id}/ls",
+        access: Access::Protected(Operation::JobsWrite),
+        handler: || routes!(crate::restore::get_ls),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/ls",
+        access: Access::Protected(Operation::JobsWrite),
+        handler: || {
+            routes!(crate::restore::start_ls)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/repositories/{id}/restore",
+        access: Access::Protected(Operation::JobsWrite),
+        handler: || {
+            routes!(crate::restore::start_restore)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
         path: "/api/v1/jobs",
         access: Access::Protected(Operation::JobsRead),
         handler: || routes!(crate::job_api::list_jobs),
