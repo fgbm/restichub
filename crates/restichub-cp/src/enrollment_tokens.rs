@@ -10,7 +10,7 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use restichub_db::EnrollmentTokenId;
+use restichub_db::{AgentId, EnrollmentTokenId};
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::enrollment_tokens as repo;
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,8 @@ pub struct CreateEnrollmentTokenResponse {
     /// In RFC 3339.
     pub expires_at: String,
     pub created_at: String,
+    /// The host that the token re-registers. Null for a token of a new host.
+    pub replaces_agent_id: Option<String>,
 }
 
 /// The manual `Debug` hides the token value, so a log line cannot print it by accident.
@@ -62,6 +64,7 @@ impl std::fmt::Debug for CreateEnrollmentTokenResponse {
             .field("labels", &self.labels)
             .field("expires_at", &self.expires_at)
             .field("created_at", &self.created_at)
+            .field("replaces_agent_id", &self.replaces_agent_id)
             .finish()
     }
 }
@@ -79,6 +82,8 @@ pub struct EnrollmentTokenView {
     /// In RFC 3339.
     pub created_at: String,
     pub created_by: String,
+    /// The host that the token re-registers. Null for a token of a new host.
+    pub replaces_agent_id: Option<String>,
 }
 
 impl From<&repo::EnrollmentToken> for EnrollmentTokenView {
@@ -93,6 +98,7 @@ impl From<&repo::EnrollmentToken> for EnrollmentTokenView {
             revoked_by_user_id: entry.revoked_by_user_id.map(|id| id.to_string()),
             created_at: format_time(entry.created_at),
             created_by: entry.created_by.to_string(),
+            replaces_agent_id: entry.replaces_agent_id.map(|id| id.to_string()),
         }
     }
 }
@@ -132,7 +138,20 @@ pub async fn create_enrollment_token(
     context.authorize(Operation::EnrollmentTokensWrite)?;
     let labels = labels(&body.labels)?;
     let ttl = validate_ttl(body.ttl_seconds)?;
-    let created_by = context.actor_user(&state).await?;
+    let response = issue_token(&state, &context, labels, ttl, None).await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// Creates a token and its audit record in one transaction. `replaces` binds the token to an
+/// existing host (FR-ID-01).
+pub(crate) async fn issue_token(
+    state: &AppState,
+    context: &RequestContext,
+    labels: Vec<String>,
+    ttl: i64,
+    replaces: Option<AgentId>,
+) -> Result<CreateEnrollmentTokenResponse, ApiError> {
+    let created_by = context.actor_user(state).await?;
     let now = state.auth().clock.now();
     let expires_at = now + time::Duration::seconds(ttl);
     let (value, display_prefix) = token::random_enrollment_token()?;
@@ -146,9 +165,11 @@ pub async fn create_enrollment_token(
             labels: &labels,
             expires_at,
             created_by,
+            replaces_agent_id: replaces,
         },
     )
-    .await?;
+    .await
+    .map_err(crate::error::map_write_error)?;
     let mut event = context.audit_event(
         AuditAction::EnrollmentTokenCreate,
         "enrollment_token",
@@ -160,22 +181,21 @@ pub async fn create_enrollment_token(
             "display_prefix": display_prefix,
             "labels": labels,
             "expires_at": format_time(expires_at),
+            "replaces_agent_id": replaces.map(|agent| agent.to_string()),
         })),
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
     tx.commit().await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateEnrollmentTokenResponse {
-            id: id.to_string(),
-            token: value,
-            display_prefix,
-            labels,
-            expires_at: format_time(expires_at),
-            created_at: format_time(now),
-        }),
-    ))
+    Ok(CreateEnrollmentTokenResponse {
+        id: id.to_string(),
+        token: value,
+        display_prefix,
+        labels,
+        expires_at: format_time(expires_at),
+        created_at: format_time(now),
+        replaces_agent_id: replaces.map(|agent| agent.to_string()),
+    })
 }
 
 /// Lists the enrollment token metadata of the tenant.
@@ -232,8 +252,8 @@ pub async fn list_enrollment_tokens(
 
 /// Revokes an unused enrollment token of the tenant (a soft change).
 ///
-/// A used or an already revoked token gives HTTP 409 and changes nothing. An unknown token gives
-/// HTTP 404. The conditional update and the re-read answer without a time-of-check gap, and a
+/// A used, an already revoked or an expired token gives HTTP 409 with the code `token_used`,
+/// `token_already_revoked` or `token_expired` and changes nothing. An unknown token gives HTTP 404. The conditional update and the re-read answer without a time-of-check gap, and a
 /// failed revoke writes no audit record.
 #[utoipa::path(
     delete,
@@ -244,7 +264,7 @@ pub async fn list_enrollment_tokens(
         (status = 204, description = "The token is revoked."),
         crate::error::ProtectedResponses,
         (status = 404, description = "The token is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The token is used or already revoked.", body = crate::error::ProblemBody)
+        (status = 409, description = "The token is used (`token_used`), already revoked (`token_already_revoked`) or expired (`token_expired`).", body = crate::error::ProblemBody)
     )
 )]
 pub async fn revoke_enrollment_token(
@@ -263,7 +283,9 @@ pub async fn revoke_enrollment_token(
         let existing = repo::get(&mut tx, token_id).await?;
         return match existing {
             None => Err(ApiError::not_found()),
-            Some(_) => Err(ApiError::conflict()),
+            Some(entry) if entry.used_at.is_some() => Err(ApiError::token_used()),
+            Some(entry) if entry.revoked_at.is_some() => Err(ApiError::token_already_revoked()),
+            Some(_) => Err(ApiError::token_expired()),
         };
     }
     let existing = repo::get(&mut tx, token_id).await?;
@@ -296,7 +318,7 @@ fn labels(input: &Option<Vec<String>>) -> Result<Vec<String>, ApiError> {
     Ok(labels)
 }
 
-fn validate_ttl(input: Option<i64>) -> Result<i64, ApiError> {
+pub(crate) fn validate_ttl(input: Option<i64>) -> Result<i64, ApiError> {
     match input {
         None => Ok(repo::DEFAULT_TTL_SECONDS),
         Some(ttl) if (MIN_TTL_SECONDS..=repo::MAX_TTL_SECONDS).contains(&ttl) => Ok(ttl),

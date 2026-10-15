@@ -68,9 +68,19 @@ pub struct AgentView {
     pub certificate_expires_at: String,
     pub status: AgentStatus,
     pub last_seen_at: Option<String>,
+    /// The time of the first stream open. Null while an active host waits for its first connection.
+    pub first_connected_at: Option<String>,
     pub created_at: String,
     pub revoked_at: Option<String>,
     pub revoked_by_user_id: Option<String>,
+    /// Another active host of the tenant that reported the same machine identifier.
+    pub possible_duplicate_of: Option<DuplicateOfView>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DuplicateOfView {
+    pub id: String,
+    pub hostname: String,
 }
 
 impl From<&repo::Agent> for AgentView {
@@ -88,9 +98,16 @@ impl From<&repo::Agent> for AgentView {
             certificate_expires_at: format_time(agent.certificate_expires_at),
             status: agent.status,
             last_seen_at: agent.last_seen_at.map(format_time),
+            first_connected_at: agent.first_connected_at.map(format_time),
             created_at: format_time(agent.created_at),
             revoked_at: agent.revoked_at.map(format_time),
             revoked_by_user_id: agent.revoked_by_user_id.map(|id| id.to_string()),
+            possible_duplicate_of: agent.possible_duplicate_of.as_ref().map(|other| {
+                DuplicateOfView {
+                    id: other.id.to_string(),
+                    hostname: other.hostname.clone(),
+                }
+            }),
         }
     }
 }
@@ -291,6 +308,126 @@ pub async fn revoke_agent(
     // A revoke closes an open stream at once (FR-ID-04, AC-ID-04).
     state.agent_registry().close_by_agent(agent_id);
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReenrollAgentRequest {
+    /// The time to live in seconds. Between 60 and 86400. The default is 3600.
+    pub ttl_seconds: Option<i64>,
+}
+
+/// Issues an enrollment token bound to an existing host (FR-ID-01).
+///
+/// The enrollment with the token keeps the agent identifier, the plans, the repositories and the
+/// labels of the host and replaces its certificate. A revoked host gives HTTP 409.
+#[utoipa::path(
+    post,
+    path = "/api/v1/agents/{id}/reenroll",
+    summary = "Issues an enrollment token that re-registers an existing host.",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the agent.")),
+    request_body = ReenrollAgentRequest,
+    responses(
+        (status = 201, description = "The token is created. The value appears once.", body = crate::enrollment_tokens::CreateEnrollmentTokenResponse),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody),
+        (status = 409, description = "The agent is revoked.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn reenroll_agent(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<ReenrollAgentRequest>,
+) -> Result<(StatusCode, Json<crate::enrollment_tokens::CreateEnrollmentTokenResponse>), ApiError>
+{
+    context.authorize(Operation::AgentsWrite)?;
+    let agent_id = parse_agent_id(&id)?;
+    let ttl = crate::enrollment_tokens::validate_ttl(body.ttl_seconds)?;
+    let agent = context
+        .tenant_tx(&state, async |tx| Ok(repo::get(tx, agent_id).await?))
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    if agent.status != AgentStatus::Active {
+        return Err(ApiError::conflict());
+    }
+    let response =
+        crate::enrollment_tokens::issue_token(&state, &context, Vec::new(), ttl, Some(agent_id))
+            .await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceAgentRequest {
+    /// The identifier of the old record. It must be the possible duplicate of this host.
+    pub old_agent_id: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReplaceAgentResponse {
+    pub plans_moved: u64,
+    pub repositories_moved: u64,
+}
+
+/// Moves the plans, maintenance host references and labels of an old duplicate record to this host
+/// and revokes the old record (FR-ID-01).
+///
+/// Both records must be active and must report the same machine identifier. The move and the
+/// revoke commit in one transaction.
+#[utoipa::path(
+    post,
+    path = "/api/v1/agents/{id}/replace",
+    summary = "Replaces the old duplicate record of a host.",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the new agent record.")),
+    request_body = ReplaceAgentRequest,
+    responses(
+        (status = 200, description = "The old record is replaced.", body = ReplaceAgentResponse),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The pair is not a possible duplicate.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn replace_agent(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<ReplaceAgentRequest>,
+) -> Result<Json<ReplaceAgentResponse>, ApiError> {
+    context.authorize(Operation::AgentsWrite)?;
+    let new_id = parse_agent_id(&id)?;
+    let old_id = Uuid::parse_str(&body.old_agent_id)
+        .map(AgentId::from_uuid)
+        .map_err(|error| {
+            ApiError::invalid_field_cause("old_agent_id", Reason::InvalidFormat, error.to_string())
+        })?;
+    let actor = context.actor_user(&state).await?;
+    let now = state.auth().clock.now();
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    let Some(moved) = repo::replace(&mut tx, new_id, old_id, actor, now).await? else {
+        return Err(ApiError::not_found());
+    };
+    let mut event = context.audit_event(AuditAction::AgentReplace, "agent", new_id.as_uuid());
+    event.diff = Some(diff(
+        None,
+        Some(&serde_json::json!({
+            "new_agent_id": new_id.to_string(),
+            "old_agent_id": old_id.to_string(),
+            "plans_moved": moved.plans,
+            "repositories_moved": moved.repositories,
+        })),
+        &[],
+    ));
+    restichub_db::audit::insert(&mut tx, &event).await?;
+    tx.commit().await?;
+    state.agent_registry().close_by_agent(old_id);
+    Ok(Json(ReplaceAgentResponse {
+        plans_moved: moved.plans,
+        repositories_moved: moved.repositories,
+    }))
 }
 
 fn parse_agent_id(value: &str) -> Result<AgentId, ApiError> {

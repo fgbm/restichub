@@ -82,8 +82,8 @@ async fn an_admin_creates_lists_and_revokes_an_unused_token() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    // A second revoke finds the revoked row and gives HTTP 409.
-    let (status, _, _) = send(
+    // A second revoke finds the revoked row and gives HTTP 409 with its own code.
+    let (status, _, problem) = send(
         &app,
         request(
             "DELETE",
@@ -94,6 +94,7 @@ async fn an_admin_creates_lists_and_revokes_an_unused_token() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "token_already_revoked");
 
     // The audit log holds the create and the revoke.
     let (status, _, page) = send(
@@ -176,8 +177,8 @@ async fn ac_id_01_a_used_token_cannot_be_revoked() {
     );
     tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
 
-    // A used token gives HTTP 409 and changes nothing.
-    let (status, _, _) = send(
+    // A used token gives HTTP 409 with the code `token_used` and changes nothing.
+    let (status, _, problem) = send(
         &app,
         request(
             "DELETE",
@@ -188,6 +189,52 @@ async fn ac_id_01_a_used_token_cannot_be_revoked() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "token_used");
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_id_01_an_expired_token_gives_the_token_expired_code_on_revoke() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "enroll-expired").await;
+    let admin = common::create_user(db.database(), tenant, "admin", "phc", "admin").await;
+    let cookie = common::session_cookie(db.database(), tenant, admin).await;
+    let app = app(db.database());
+
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"));
+    let id = enrollment_tokens::create(
+        &mut tx,
+        &enrollment_tokens::NewEnrollmentToken {
+            token_hash: &[7u8; 32],
+            display_prefix: "expired0",
+            labels: &[],
+            expires_at: OffsetDateTime::now_utc() - time::Duration::hours(1),
+            created_by: admin,
+        },
+    )
+    .await
+    .unwrap_or_else(|e| panic!("{e}"));
+    tx.commit().await.unwrap_or_else(|e| panic!("{e}"));
+
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "DELETE",
+            &format!("/api/v1/enrollment-tokens/{id}"),
+            Some(&cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "token_expired");
 
     db.cleanup().await;
 }
