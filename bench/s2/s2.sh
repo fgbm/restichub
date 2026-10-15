@@ -3,7 +3,8 @@
 # agents, loads the control plane with one job each 15 minutes for every agent, samples the
 # control plane CPU and RAM, and checks the thresholds.
 #
-#   s2.sh up           start the control plane (compose by default; CP_MODE=native for a local binary)
+#   s2.sh up           start the control plane (compose by default; CP_MODE=native for a local binary,
+#                      CP_MODE=remote for a compose stack on another host over SSH)
 #   s2.sh setup        create the administrator, the API token and the installation CA file
 #   s2.sh run          up + setup + emulator + load + collector + wait + report (the whole run)
 #   s2.sh enroll       enroll AGENTS agents once and keep the identities (about an hour for 500)
@@ -40,12 +41,21 @@ RAM_LIMIT_MB="${RAM_LIMIT_MB:-3072}"
 DELAY_LIMIT_SECONDS="${DELAY_LIMIT_SECONDS:-3}"
 RECONNECT_LIMIT_SECONDS="${RECONNECT_LIMIT_SECONDS:-300}"
 
-web="http://127.0.0.1:8080"
-listener="https://localhost:8443"
+web="${CP_WEB_URL:-http://127.0.0.1:8080}"
+listener="${CP_AGENT_URL:-https://localhost:8443}"
 admin_password="bench-password-12345"
 csrf=(-H "x-restichub-csrf: 1")
 jar="$OUT/cookies.txt"
-compose=(docker compose -f "$here/compose.yaml" --env-file "$here/.env")
+CP_SSH="${CP_SSH:-}"
+CP_REMOTE_DIR="${CP_REMOTE_DIR:-/opt/restichub-s2}"
+ssh_opts=(-o BatchMode=yes -o ControlMaster=auto -o ControlPersist=600 -o "ControlPath=${TMPDIR:-/tmp}/s2-ssh-%C" -o ServerAliveInterval=30)
+if [ "$CP_MODE" = remote ]; then
+	: "${CP_SSH:?set CP_SSH to user@host of the control plane host}"
+	# The words after the host run in one remote shell, from the directory of the stack.
+	compose=(ssh "${ssh_opts[@]}" "$CP_SSH" "cd $CP_REMOTE_DIR/bench/s2 && docker compose -f compose.yaml -f compose.remote.yaml --env-file .env")
+else
+	compose=(docker compose -f "$here/compose.yaml" --env-file "$here/.env")
+fi
 
 mkdir -p "$OUT"
 
@@ -63,6 +73,22 @@ cp_logs() {
 }
 
 random() { head -c 32 /dev/urandom | base64; }
+
+# The remote stack lives in $CP_REMOTE_DIR/bench/s2 on the host (copy bench/s2 and
+# crates/restichub-db/sql there first). The image comes from CP_IMAGE, so nothing is built.
+up_remote() {
+	: "${CP_IMAGE:?set CP_IMAGE to the digest-pinned control plane image}"
+	ssh "${ssh_opts[@]}" "$CP_SSH" "cd $CP_REMOTE_DIR/bench/s2 && [ -e .env ] || (umask 077 && {
+		for name in POSTGRES_PASSWORD RESTICHUB_OWNER_PASSWORD RESTICHUB_RUNTIME_PASSWORD RESTICHUB_KEK; do
+			echo \"\$name=\$(openssl rand -base64 32)\"
+		done
+		echo POSTGRES_USER=restichub
+		echo POSTGRES_DB=restichub
+		echo CP_IMAGE=$CP_IMAGE
+		echo RESTICHUB_AGENT_ENDPOINT=$listener
+	} > .env)"
+	"${compose[@]}" up -d
+}
 
 up_compose() {
 	if [ ! -e "$here/.env" ]; then
@@ -127,7 +153,11 @@ serve_native() {
 }
 
 up() {
-	if [ "$CP_MODE" = native ]; then up_native; else up_compose; fi
+	case "$CP_MODE" in
+	native) up_native ;;
+	remote) up_remote ;;
+	*) up_compose ;;
+	esac
 	for _ in $(seq 1 120); do
 		if curl -fsS "$web/readyz" >/dev/null 2>&1; then
 			log "the control plane is ready"
@@ -169,7 +199,8 @@ setup() {
 # takes the CA from the first handshake of a throw-away installation.
 fetch_ca() {
 	rm -f "$OUT"/chain-*.pem
-	openssl s_client -showcerts -connect localhost:8443 -servername localhost </dev/null 2>/dev/null |
+	local hostport="${listener#https://}"
+	openssl s_client -showcerts -connect "$hostport" -servername "${hostport%:*}" </dev/null 2>/dev/null |
 		awk -v dir="$OUT" '/BEGIN CERTIFICATE/{n++} n>0{print > (dir "/chain-" n ".pem")}'
 	local count
 	count="$(ls "$OUT"/chain-*.pem | wc -l)"
@@ -270,7 +301,7 @@ collect() {
 			prev_ticks="$ticks"
 			prev_time="$now"
 		else
-			docker stats --no-stream --format '{{.CPUPerc}} {{.MemUsage}}' "$CP_CONTAINER" |
+			cp_stats |
 				awk -v n="$now" -v cpus="$CP_CPUS" '{
 					cpu=$1; sub("%","",cpu); mem=$2; v=mem+0
 					if (mem ~ /GiB/) v*=1024; else if (mem ~ /KiB/) v/=1024; else if (mem ~ /MiB/) v=v
@@ -283,6 +314,14 @@ collect() {
 		fi
 		sleep "$SAMPLE_SECONDS"
 	done
+}
+
+cp_stats() {
+	if [ "$CP_MODE" = remote ]; then
+		ssh "${ssh_opts[@]}" "$CP_SSH" "docker stats --no-stream --format '{{.CPUPerc}} {{.MemUsage}}' $CP_CONTAINER"
+	else
+		docker stats --no-stream --format '{{.CPUPerc}} {{.MemUsage}}' "$CP_CONTAINER"
+	fi
 }
 
 scrape_text() { api GET /metrics; }
