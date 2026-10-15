@@ -915,7 +915,7 @@ mod tests {
     fn restore(target: &str) -> RestoreBody {
         RestoreBody {
             agent_id: None,
-            snapshot_id: "latest".to_owned(),
+            snapshot_id: "0123abcd".to_owned(),
             includes: Vec::new(),
             excludes: Vec::new(),
             target: target.to_owned(),
@@ -936,15 +936,24 @@ mod tests {
         both.includes = vec!["/srv".to_owned()];
         both.excludes = vec!["*.log".to_owned()];
         assert!(checked_restore(&both).is_err(), "restic refuses both lists");
+        let mut both_modes = restore("/srv/restore");
+        both_modes.dry_run = true;
+        both_modes.verify = true;
+        assert!(
+            checked_restore(&both_modes).is_err(),
+            "restic refuses a dry run with verify"
+        );
     }
 
     #[test]
-    fn fr_pr_10_a_snapshot_identifier_is_latest_or_hexadecimal() {
-        for good in ["latest", "0123abcd", &"a".repeat(64)] {
+    fn fr_pr_10_a_snapshot_identifier_is_hexadecimal_and_never_latest() {
+        for good in ["0123abcd", &"a".repeat(64)] {
             assert!(checked_snapshot(good).is_ok(), "{good}");
         }
         for bad in [
             "",
+            "latest",
+            "0123abcd:/etc",
             "--dry-run",
             "ABCDEF12",
             "0123abc",
@@ -959,7 +968,7 @@ mod tests {
     fn ac_rs_02_a_page_names_a_bounded_window() {
         let body = |offset, limit| LsQueryRequest {
             agent_id: None,
-            snapshot_id: "latest".to_owned(),
+            snapshot_id: "0123abcd".to_owned(),
             path: "/".to_owned(),
             offset,
             limit,

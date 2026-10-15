@@ -30,7 +30,6 @@ pub mod signing;
 mod capability;
 pub use capability::AgentCapability;
 
-/// Lexical rules for the target of a restore (ADR-0035).
 pub mod restore_path;
 
 /// Argument validation of a job before signing and before execution (FR-PR-10).
