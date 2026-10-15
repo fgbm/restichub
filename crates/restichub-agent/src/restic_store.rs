@@ -5,7 +5,9 @@
 //! before every spawn, so a changed binary needs a changed record, and both need administrator
 //! rights.
 
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -14,6 +16,13 @@ use sha2::{Digest as _, Sha256};
 use crate::restic_release::{VerifiedRelease, check_supported, hex};
 
 const RECORD_FILE: &str = "restic.json";
+
+// Windows refuses to replace an executable that a process runs.
+#[cfg(windows)]
+const REPLACE_HINT: &str = "; stop the restichub-agent service, run the update again and start the service";
+
+#[cfg(not(windows))]
+const REPLACE_HINT: &str = "";
 
 /// Where the restic binary and its record live.
 #[derive(Debug, Clone)]
@@ -180,8 +189,13 @@ impl Layout {
             })?;
             make_executable(&previous)?;
         }
-        std::fs::rename(staging, &binary)
-            .with_context(|| format!("cannot replace {}", binary.display()))?;
+        if let Err(error) = std::fs::rename(staging, &binary) {
+            let _ = std::fs::remove_file(staging);
+            return Err(anyhow::Error::new(error).context(format!(
+                "cannot replace {}{REPLACE_HINT}",
+                binary.display()
+            )));
+        }
         let text = serde_json::to_vec_pretty(record).context("cannot write the record")?;
         let recorded = crate::paths::replace_file(&self.record_path(), &text)
             .and_then(|()| self.verify_installed().map(|_| ()));
@@ -217,32 +231,62 @@ fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// How long a staged restic may take to print its version.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Asks the binary for its version with a plain child process.
 ///
 /// This runs only on the staged file of an install, which lies in the protected directory and was
-/// just hashed. A job never takes this path (FR-AG-11).
+/// just hashed. A job never takes this path (FR-AG-11). A binary that does not answer within
+/// 30 seconds is killed, so a faulty release cannot hang the update.
 ///
 /// # Errors
 ///
-/// Returns an error when the binary does not run or prints no version.
+/// Returns an error when the binary does not run, does not answer in time or prints no version.
 pub fn probe_version(path: &Path) -> Result<String> {
+    probe_version_within(path, PROBE_TIMEOUT)
+}
+
+fn probe_version_within(path: &Path, timeout: Duration) -> Result<String> {
     let mut command = std::process::Command::new(path);
     command
         .arg("version")
         .env_clear()
-        .stdin(std::process::Stdio::null());
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
     // A Go program on Windows needs the system root to start.
     #[cfg(windows)]
     if let Some(root) = std::env::var_os("SystemRoot") {
         command.env("SystemRoot", root);
     }
-    let output = command
-        .output()
+    let mut child = command
+        .spawn()
         .with_context(|| format!("cannot run {}", path.display()))?;
-    if !output.status.success() {
-        bail!("`restic version` failed with {}", output.status);
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait().context("cannot wait for restic")? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!(
+                "`restic version` did not answer within {} seconds",
+                timeout.as_secs()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    if !status.success() {
+        bail!("`restic version` failed with {status}");
     }
-    crate::restic::parse_version(&String::from_utf8_lossy(&output.stdout))
+    let mut stdout = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut stdout)
+            .context("cannot read the restic version")?;
+    }
+    crate::restic::parse_version(&String::from_utf8_lossy(&stdout))
 }
 
 #[cfg(test)]
@@ -378,6 +422,38 @@ mod tests {
         assert!(error.to_string().contains("older than the minimum"));
         assert!(!layout.binary_path().exists());
         assert!(!layout.has_record());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_11_a_binary_that_does_not_answer_is_killed() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = temp("hang");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let script = dir.join("restic");
+        std::fs::write(&script, "#!/bin/sh\nexec sleep 30\n").expect("script");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).expect("mode");
+        let started = Instant::now();
+        let error = probe_version_within(&script, Duration::from_millis(300))
+            .expect_err("a hung binary");
+        assert!(error.to_string().contains("did not answer"), "{error:#}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_11_a_failed_swap_removes_the_staging_file() {
+        let (layout, base) = layout("swap");
+        // A directory with content at the binary path makes the rename fail.
+        std::fs::create_dir_all(layout.binary_path()).expect("dir");
+        std::fs::write(layout.binary_path().join("keep"), b"x").expect("file");
+        let error = layout
+            .install(&release("0.19.1", b"new"), &prints("0.19.1"))
+            .expect_err("the swap fails");
+        assert!(error.to_string().contains("cannot replace"), "{error:#}");
+        assert!(!layout.staging_path().exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 }
