@@ -34,7 +34,6 @@ function stored(overrides: Partial<Profile> = {}): Profile {
 			limit_upload_kib: 0,
 			limit_download_kib: 0
 		},
-		hooks: [],
 		scripts: [],
 		retention: null,
 		check: null,
@@ -206,16 +205,14 @@ describe('settingsOf', () => {
 		expect(settingsOf(draft, context).options.max_duration_minutes).toBe(0);
 	});
 
-	it('keeps the stored hooks and the stored scripts of an Operator', () => {
+	it('keeps the stored scripts of an Operator', () => {
 		const existing = stored({
-			hooks: [{ hook_id: 'h', phase: 'before', parameters: [] }],
 			scripts: [{ name: 'S' } as never]
 		});
 		const settings = settingsOf(draftFromProfile(existing), {
 			canEditScripts: false,
 			existing
 		});
-		expect(settings.hooks).toEqual(existing.hooks);
 		expect(settings.scripts).toEqual(existing.scripts);
 	});
 

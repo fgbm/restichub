@@ -31,7 +31,7 @@ The MVP contains all requirements with priority M. [Issue #14](https://github.co
 2. [#13 Test benches and release acceptance](https://github.com/fgbm/restichub/issues/13): benches S1 and S2, fake restic, agent emulator.
 3. [#1 Protocol and enrollment](https://github.com/fgbm/restichub/issues/1): Protocol Buffers contract, signatures, enrollment, CA.
 4. [#2 Agent core](https://github.com/fgbm/restichub/issues/2): service, step execution, restic runner, JSON parser, cancellation, outbox.
-5. [#3 Hook allow-list](https://github.com/fgbm/restichub/issues/3): allow-list file, parameter schemas, hook phases.
+5. [#3 Server scripts](https://github.com/fgbm/restichub/issues/3): trust mode, script steps, script phases.
 6. [#5 Repositories](https://github.com/fgbm/restichub/issues/5): repository management, init and access test, maintenance agent.
 7. [#6 Profiles and compiler](https://github.com/fgbm/restichub/issues/6): flat profiles, variables, validation, preview.
 8. [#7 Scheduler and queue](https://github.com/fgbm/restichub/issues/7): cron, repository barriers, retries, stale lock recovery.

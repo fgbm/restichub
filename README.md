@@ -10,7 +10,7 @@ ResticHub is a central control plane for [restic](https://restic.net) backups on
 - The control plane decides when a job starts. Agents do not keep schedules.
 - A thin agent on each host connects to the control plane, receives signed jobs, runs restic and sends back the results.
 - The agent gets repository secrets for the duration of one job only. The agent does not store them.
-- Hooks run only from an allow-list on the host. The control plane cannot change that list.
+- Scripts from the control plane run only on a host with the local trust mode. The control plane cannot change that mode.
 - One installation serves many tenants.
 
 ## Main parts

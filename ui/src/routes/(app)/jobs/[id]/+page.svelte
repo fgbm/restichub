@@ -157,7 +157,7 @@
 		return text === key ? stepId : text;
 	}
 
-	// A script has the name that its author gave it, and a hook has its identifier.
+	// A script has the name that its author gave it.
 	function rowTitle(row: StepRow): string {
 		return row.name || stepTitle(row.id);
 	}

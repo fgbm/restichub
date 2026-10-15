@@ -102,8 +102,6 @@ function agent(overrides: Record<string, unknown> = {}) {
 		created_at: PAST,
 		revoked_at: null,
 		revoked_by_user_id: null,
-		hook_allow_list: 'absent',
-		hooks: [],
 		server_scripts: 'disabled',
 		script_interpreters: [],
 		...overrides

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::target::OperatingSystem;
 
 /// A profile: the repository, the paths, the excludes, the tags, the options,
-/// the hooks and the retention (FR-PF-01).
+/// the scripts and the retention (FR-PF-01).
 #[derive(Debug, Clone, Default)]
 pub struct Profile {
     /// Identifier of the repository in the control plane.
@@ -21,7 +21,6 @@ pub struct Profile {
     pub profile_tag: Option<String>,
     pub options: BackupOptions,
     pub limits: JobLimits,
-    pub hooks: Vec<HookRef>,
     /// Code that the control plane sends (FR-HK-09, ADR-0037).
     pub scripts: Vec<crate::script::ScriptRef>,
     /// Policy that produces the `forget` and `prune` steps.
@@ -74,23 +73,7 @@ pub struct JobLimits {
     pub max_duration_seconds: u32,
 }
 
-/// A hook of the profile, by allow-list identifier (FR-HK-02, FR-HK-03).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HookRef {
-    /// Identifier of the hook in the agent allow-list.
-    pub hook_id: String,
-    pub phase: HookPhase,
-    pub parameters: Vec<HookParameter>,
-}
-
-/// One named hook parameter (FR-HK-03).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HookParameter {
-    pub name: String,
-    pub value: String,
-}
-
-/// Position of a hook in the job (FR-HK-05).
+/// Position of a script in the job (FR-HK-05).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {

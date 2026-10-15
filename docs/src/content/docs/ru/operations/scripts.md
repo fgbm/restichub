@@ -147,6 +147,7 @@ ReadWritePaths=/var/backups
 | `profile_create`, `profile_update` | Профиль изменился. В записи указаны название, фаза и хеш каждого скрипта, а также имена параметров. |
 | `script_template_create`, `script_template_update`, `script_template_delete` | Шаблон скрипта изменился. |
 | `job_template_create`, `job_template_update`, `job_template_delete` | Шаблон задания изменился. |
+| `profile_hooks_removed` | Миграция удаляет хуки профиля. В записи указаны имя профиля, идентификатор и фаза каждого хука. |
 | `script_run` | Сервер управления отправляет задание со скриптами. В записи указаны название, фаза и хеш каждого скрипта. |
 | `secret_delivered` | Сервер управления отправляет секрет агенту. |
 

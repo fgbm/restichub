@@ -147,6 +147,7 @@ The job detail lists every script in order before the job runs. Each step shows 
 | `profile_create`, `profile_update` | A profile changes. The record holds the name, the phase and the hash of each script, and the names of the parameters. |
 | `script_template_create`, `script_template_update`, `script_template_delete` | A script template changes. |
 | `job_template_create`, `job_template_update`, `job_template_delete` | A job template changes. |
+| `profile_hooks_removed` | A migration drops the hooks of a profile. The record holds the profile name, and the identifier and the phase of each hook. |
 | `script_run` | The control plane sends a job with scripts. The record holds the name, the phase and the hash of each script. |
 | `secret_delivered` | The control plane sends a secret to an agent. |
 
