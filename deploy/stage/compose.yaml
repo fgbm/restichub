@@ -121,6 +121,18 @@ services:
       # The public address of the listener that an agent reports at enrollment. Set
       # the host and the port that the agents dial. The placeholder is not a real host.
       RESTICHUB_AGENT_ENDPOINT: ${RESTICHUB_AGENT_ENDPOINT:-https://agents.example.com:8443}
+      # The alert settings (ADR-0036). A key with no value passes the variable on only when
+      # the environment file sets it, because the control plane reads an empty value as set.
+      RESTICHUB_PUBLIC_ORIGIN:
+      RESTICHUB_NOTIFICATIONS_LANGUAGE:
+      RESTICHUB_SMTP_HOST:
+      RESTICHUB_SMTP_PORT:
+      RESTICHUB_SMTP_SECURITY:
+      RESTICHUB_SMTP_USERNAME:
+      RESTICHUB_SMTP_PASSWORD:
+      RESTICHUB_SMTP_FROM:
+      RESTICHUB_WEBHOOK_ALLOW_HTTP:
+      RESTICHUB_WEBHOOK_ALLOW_NETWORKS:
     # The control plane is not published on 8080. Caddy reaches it on this network.
     expose:
       - '8080'

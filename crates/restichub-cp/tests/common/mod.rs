@@ -190,6 +190,13 @@ pub fn write_body(
             "time_zone": "UTC",
             "count": 3,
         })),
+        ("POST", "/api/v1/notification-channels") => Some(json!({
+            "name": format!("matrix-channel-{index}"),
+            "kind": "email",
+            "recipients": ["matrix@example.com"],
+        })),
+        ("PATCH", "/api/v1/notification-channels/{id}") => Some(json!({"enabled": true})),
+        ("PUT", "/api/v1/alert-rules") => Some(json!({"items": []})),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
@@ -727,6 +734,7 @@ pub async fn seed_scheduled_plan(
             time_zone,
             missed_run_policy,
             enabled: true,
+            rpo_seconds: None,
             next_run_at,
             created_by: None,
         },

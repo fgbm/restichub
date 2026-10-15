@@ -14,10 +14,13 @@ use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 
 pub mod agents;
+pub mod alerts;
 pub mod api_tokens;
 pub mod audit;
 pub mod auth;
 pub mod ca;
+pub mod channels;
+pub mod dashboard;
 pub mod delivery;
 pub mod enrollment_tokens;
 pub mod enums;
@@ -51,9 +54,9 @@ pub use enums::{
     TenantStatus,
 };
 pub use ids::{
-    AgentId, ApiTokenId, AuditLogId, EnrollmentTokenId, JobId, MaintenanceScheduleId,
-    PLATFORM_TENANT_ID, PlanId, ProfileId, RepositoryId, SecretId, SessionId, SetupTokenId,
-    TenantId, UserId,
+    AgentId, AlertId, ApiTokenId, AuditLogId, ChannelId, DeliveryId, EnrollmentTokenId, JobId,
+    MaintenanceScheduleId, PLATFORM_TENANT_ID, PlanId, ProfileId, RepositoryId, SecretId,
+    SessionId, SetupTokenId, TenantId, UserId,
 };
 pub use tx::{EnrollmentTx, PlatformTx, TenantTx};
 

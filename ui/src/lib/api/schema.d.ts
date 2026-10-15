@@ -82,6 +82,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/alert-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads the alert rules of the tenant, one for each kind. */
+        get: operations["get_rules"];
+        /** Changes the alert rules of the tenant. */
+        put: operations["put_rules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the alerts of the tenant, newest first. */
+        get: operations["list_alerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/api-tokens": {
         parameters: {
             query?: never;
@@ -262,6 +297,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads the overview of the tenant. */
+        get: operations["dashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/enrollment-tokens": {
         parameters: {
             query?: never;
@@ -392,6 +444,60 @@ export interface paths {
         get: operations["get_job_logs"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the channels of the tenant. */
+        get: operations["list_channels"];
+        put?: never;
+        /** Creates a channel. A webhook gets a generated signing secret that the response shows once. */
+        post: operations["create_channel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one channel of the tenant. */
+        get: operations["get_channel"];
+        put?: never;
+        post?: never;
+        /** Removes a channel. Its pending messages go with it. */
+        delete: operations["delete_channel"];
+        options?: never;
+        head?: never;
+        /** Updates a channel. An absent field keeps its value. */
+        patch: operations["update_channel"];
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sends a test message through the channel and reports the result. */
+        post: operations["test_channel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1241,6 +1347,80 @@ export interface components {
             revoked_by_user_id?: string | null;
             status: components["schemas"]["AgentStatus"];
         };
+        /**
+         * @description The kind of an alert. The string value of each variant is stored: do not change a string.
+         * @enum {string}
+         */
+        AlertKind: "rpo_violated" | "job_failed" | "job_dead_letter" | "job_warnings" | "agent_offline" | "stale_lock";
+        AlertListResponse: {
+            items: components["schemas"]["AlertView"][];
+            next_cursor?: string | null;
+        };
+        /**
+         * @description The typed values of an alert condition. The interface and the messages build the text of the
+         *     condition from them, in the language of the reader, so the stored alert holds no sentence.
+         */
+        AlertParams: {
+            /**
+             * Format: int64
+             * @description Seconds since the last success of a plan, since the last contact with an agent, or since
+             *     a repository lock became stale. For a plan that never succeeded: since its creation.
+             */
+            elapsed_seconds?: number | null;
+            error_code?: string | null;
+            job_kind?: components["schemas"]["JobKind"] | null;
+            /**
+             * @description The finish time of the last succeeded backup, in RFC 3339. Absent when the plan never
+             *     succeeded.
+             */
+            last_success_at?: string | null;
+            /**
+             * Format: int64
+             * @description The recovery point objective of a plan, in seconds.
+             */
+            rpo_seconds?: number | null;
+            /**
+             * Format: int64
+             * @description The threshold of the rule at the time of the alert, in minutes.
+             */
+            threshold_minutes?: number | null;
+        };
+        AlertRuleView: {
+            enabled: boolean;
+            kind: components["schemas"]["AlertKind"];
+            /**
+             * Format: int32
+             * @description Minutes. Set for `agent_offline` and `stale_lock` only.
+             */
+            threshold_minutes?: number | null;
+        };
+        AlertRulesResponse: {
+            items: components["schemas"]["AlertRuleView"][];
+        };
+        /** @enum {string} */
+        AlertStatus: "open" | "resolved";
+        AlertView: {
+            agent_hostname?: string | null;
+            agent_id?: string | null;
+            error_text?: string | null;
+            id: string;
+            job_id?: string | null;
+            kind: components["schemas"]["AlertKind"];
+            opened_at: string;
+            /**
+             * @description The typed values of the condition. A client builds the sentence from them in the language of
+             *     the reader.
+             */
+            params: components["schemas"]["AlertParams"];
+            plan_id?: string | null;
+            plan_name?: string | null;
+            repository_id?: string | null;
+            repository_name?: string | null;
+            resolved_at?: string | null;
+            status: components["schemas"]["AlertStatus"];
+            /** @description The link of the alert. Absent when the installation sets no public origin. */
+            url?: string | null;
+        };
         ApiTokenListResponse: {
             items: components["schemas"]["ApiTokenView"][];
         };
@@ -1297,6 +1477,11 @@ export interface components {
          * @example profile_delete
          * @example signing_key_rotate
          * @example signing_key_retire
+         * @example channel_create
+         * @example channel_update
+         * @example channel_delete
+         * @example alert_rule_update
+         * @example alert_sent
          */
         AuditAction: string;
         AuditItem: {
@@ -1404,6 +1589,35 @@ export interface components {
             /** @description At least 12 characters. */
             new_password: string;
         };
+        /**
+         * @description The kind of a channel. The string value of each variant is stored: do not change a string.
+         * @enum {string}
+         */
+        ChannelKind: "email" | "webhook";
+        ChannelListResponse: {
+            /** @description False when the installation has no SMTP server, so an email channel cannot send. */
+            email_configured: boolean;
+            items: components["schemas"]["ChannelView"][];
+            /** @description True when the installation allows a webhook URL with the scheme `http`. */
+            webhook_allow_http: boolean;
+        };
+        ChannelResponse: {
+            channel: components["schemas"]["ChannelView"];
+            /** @description Set in the create response of a webhook and after a rotation. It is shown once. */
+            signing_secret?: string | null;
+        };
+        ChannelView: {
+            created_at: string;
+            enabled: boolean;
+            id: string;
+            kind: components["schemas"]["ChannelKind"];
+            name: string;
+            /** @description The addresses of an email channel. Empty for a webhook. */
+            recipients: string[];
+            updated_at: string;
+            /** @description The scheme, the host and the port of a webhook URL. The path and the query are write-only. */
+            url_origin?: string | null;
+        };
         /** @description Settings of the verification step (FR-PF-01). */
         CheckOptions: {
             /** @description Portion to check, for example `10%` or `1/7`. */
@@ -1431,6 +1645,15 @@ export interface components {
             platform_admin?: boolean;
             /** @description Unique in the installation; ignores the letter case. */
             username: string;
+        };
+        CreateChannelRequest: {
+            enabled?: boolean;
+            kind: components["schemas"]["ChannelKind"];
+            name: string;
+            /** @description Required for an email channel: 1 to 20 addresses. */
+            recipients?: string[];
+            /** @description Required for a webhook; `https` unless the installation allows `http`. */
+            url?: string | null;
         };
         CreateEnrollmentTokenRequest: {
             /**
@@ -1462,6 +1685,12 @@ export interface components {
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
             name: string;
             profile_id: string;
+            /**
+             * Format: int32
+             * @description The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
+             *     default of the schedule (ADR-0036).
+             */
+            rpo_seconds?: number | null;
             /** @description An IANA name, such as `Europe/Berlin`, validated before the write. */
             time_zone: string;
         };
@@ -1549,6 +1778,71 @@ export interface components {
             rest_password: boolean;
             s3_access_key: boolean;
             s3_secret_key: boolean;
+        };
+        DashboardAlerts: {
+            /** @description Newest first, at most 10. */
+            items: components["schemas"]["AlertView"][];
+            total: number;
+        };
+        DashboardFailedJob: {
+            agent_hostname: string;
+            finished_at: string;
+            id: string;
+            kind: components["schemas"]["JobKind"];
+            plan_name?: string | null;
+            repository_name?: string | null;
+            result_code?: string | null;
+            status: components["schemas"]["JobStatus"];
+        };
+        DashboardHost: {
+            hostname: string;
+            id: string;
+            last_seen_at?: string | null;
+            online: boolean;
+        };
+        DashboardHosts: {
+            /** @description The offline hosts first, then the others, at most 50. */
+            items: components["schemas"]["DashboardHost"][];
+            offline: number;
+            online: number;
+            total: number;
+        };
+        DashboardPlan: {
+            /**
+             * Format: int64
+             * @description The seconds since the last success, or since the creation of a plan that never succeeded.
+             */
+            age_seconds: number;
+            agent_hostname: string;
+            enabled: boolean;
+            id: string;
+            /** @description The finish time of the last succeeded backup. Null when the plan never succeeded. */
+            last_success_at?: string | null;
+            name: string;
+            repository_name: string;
+            /** Format: int64 */
+            rpo_seconds: number;
+            state: components["schemas"]["RpoState"];
+        };
+        DashboardPlans: {
+            at_risk: number;
+            /** @description The violated plans first, then the at risk plans, at most 50. */
+            items: components["schemas"]["DashboardPlan"][];
+            total: number;
+            violated: number;
+        };
+        DashboardRepository: {
+            id: string;
+            lock_state: components["schemas"]["LockState"];
+            name: string;
+        };
+        DashboardResponse: {
+            alerts: components["schemas"]["DashboardAlerts"];
+            failed_jobs: components["schemas"]["DashboardFailedJob"][];
+            generated_at: string;
+            hosts: components["schemas"]["DashboardHosts"];
+            plans: components["schemas"]["DashboardPlans"];
+            repositories: components["schemas"]["DashboardRepository"][];
         };
         EnrollRequest: {
             agent_version: string;
@@ -1750,6 +2044,8 @@ export interface components {
             /** @description In RFC 3339. */
             updated_at: string;
         };
+        /** @enum {string} */
+        LockState: "free" | "held" | "stale";
         /** @description Size and fate of the stored log text. */
         LogInfo: {
             /** Format: int64 */
@@ -1950,6 +2246,11 @@ export interface components {
             agent_id: string;
             created_at: string;
             cron: string;
+            /**
+             * Format: int64
+             * @description The objective that the control plane applies, in seconds (ADR-0036).
+             */
+            effective_rpo_seconds: number;
             enabled: boolean;
             id: string;
             /** @description The last fire time that the scheduler processed, in RFC 3339. */
@@ -1961,6 +2262,11 @@ export interface components {
             profile_id: string;
             profile_name: string;
             repository_id: string;
+            /**
+             * Format: int32
+             * @description The stored recovery point objective in seconds. Null means the default of the schedule.
+             */
+            rpo_seconds?: number | null;
             time_zone: string;
             updated_at: string;
         };
@@ -2265,6 +2571,8 @@ export interface components {
          * @enum {string}
          */
         Role: "platform_admin" | "admin" | "operator" | "viewer";
+        /** @enum {string} */
+        RpoState: "ok" | "at_risk" | "violated";
         RunMaintenanceRequest: {
             task: components["schemas"]["MaintenanceTask"];
         };
@@ -2301,7 +2609,7 @@ export interface components {
          *     change: a change makes every stored ciphertext of that purpose undecryptable.
          * @enum {string}
          */
-        SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password";
+        SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password" | "webhook_secret" | "webhook_url";
         /**
          * @description The metadata of a secret in a response (FR-RP-05).
          *
@@ -2522,6 +2830,11 @@ export interface components {
             id: string;
             name: string;
         };
+        TestResponse: {
+            /** @description A short code such as `blocked_address` or `http_500`. Absent when the send worked. */
+            error?: string | null;
+            ok: boolean;
+        };
         /** @description The request body of the `unlock_all` action (FR-SC-06). */
         UnlockAllRequest: {
             /** @description The agent that runs the step. An absent value uses the maintenance agent of the repository. */
@@ -2542,6 +2855,23 @@ export interface components {
             /** @description True when the account holds the installation-wide right (ADR-0029). */
             platform_admin?: boolean | null;
         };
+        UpdateAlertRulesRequest: {
+            /** @description The rules to change. A kind that is absent keeps its setting. */
+            items: components["schemas"]["AlertRuleView"][];
+        };
+        UpdateChannelRequest: {
+            enabled?: boolean | null;
+            name?: string | null;
+            /** @description The full new address list of an email channel. */
+            recipients?: string[] | null;
+            /** @description Generates a new signing secret for a webhook. The response returns it once. */
+            rotate_secret?: boolean | null;
+            /**
+             * @description The full new target of a webhook. The path and the query stay write-only: the control plane
+             *     stores them encrypted.
+             */
+            url?: string | null;
+        };
         /** @description The body of a schedule update. It replaces both schedules. */
         UpdateMaintenanceRequest: {
             check: components["schemas"]["MaintenanceScheduleInput"];
@@ -2557,6 +2887,11 @@ export interface components {
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
             name?: string | null;
             profile_id: string;
+            /**
+             * Format: int32
+             * @description The recovery point objective in seconds. Null restores the default of the schedule.
+             */
+            rpo_seconds?: number | null;
             time_zone: string;
         };
         /** @description The body of a profile update. The body replaces the settings; an absent name keeps the name. */
@@ -2872,6 +3207,147 @@ export interface operations {
             };
             /** @description The agent is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The alert rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRulesResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    put_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAlertRulesRequest"];
+            };
+        };
+        responses: {
+            /** @description The alert rules after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRulesResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_alerts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `open` (default), `resolved` or `all`. */
+                status: ("open" | "resolved" | "all") | null;
+                cursor: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The alerts of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertListResponse"];
+                };
+            };
+            /** @description A query parameter is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3357,6 +3833,44 @@ export interface operations {
             };
         };
     };
+    dashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The overview of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     list_enrollment_tokens: {
         parameters: {
             query?: never;
@@ -3764,6 +4278,342 @@ export interface operations {
             };
             /** @description The job is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_channels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The channels of the tenant. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelListResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChannelRequest"];
+            };
+        };
+        responses: {
+            /** @description The channel is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists, or the tenant holds the most channels. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the channel. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The channel. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The channel is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the channel. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The channel is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The channel is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    update_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the channel. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateChannelRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated channel. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The channel is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    test_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the channel. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result of the send. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The channel is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The actor or the tenant sent too many tests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The server runs the most tests that it allows. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

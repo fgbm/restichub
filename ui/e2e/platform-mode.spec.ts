@@ -28,6 +28,7 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 		'Plans',
 		'Jobs',
 		'Restore',
+		'Alerts',
 		'Audit',
 		'Settings'
 	]);
@@ -67,6 +68,7 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 		'Plans',
 		'Jobs',
 		'Restore',
+		'Alerts',
 		'Audit'
 	]);
 });
@@ -92,6 +94,7 @@ test('the current organization leaves the platform mode for its overview', async
 		'Plans',
 		'Jobs',
 		'Restore',
+		'Alerts',
 		'Audit',
 		'Settings'
 	]);

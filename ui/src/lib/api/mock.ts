@@ -5,15 +5,24 @@
  * know which one it uses. The tenant functions are the planned API of issue #20.
  */
 import { filterSnapshots, inRange, listDirectory, makeSnapshots } from './mock-restore';
+import { MockAlerts } from './mock-alerts';
 import type {
 	Agent,
+	AlertListResponse,
+	AlertQuery,
+	AlertRule,
 	ApiToken,
 	ApiTokenCreated,
 	AuditPage,
 	AuditQuery,
 	AuditRecord,
 	ChangePasswordRequest,
+	ChannelList,
+	ChannelSaved,
+	ChannelTestResult,
 	CreateApiTokenRequest,
+	CreateChannelRequest,
+	Dashboard,
 	CreateEnrollmentTokenRequest,
 	CreatePlatformUserRequest,
 	CreatePlanRequest,
@@ -61,6 +70,8 @@ import type {
 	Tenant,
 	TenantAccess,
 	UpdateAccountRequest,
+	UpdateAlertRulesRequest,
+	UpdateChannelRequest,
 	UpdatePlanRequest,
 	UpdateMaintenanceRequest,
 	UpdateProfileRequest,
@@ -316,6 +327,8 @@ function makePlans(): Plan[] {
 			time_zone: 'Europe/Berlin',
 			missed_run_policy: 'latest_only',
 			enabled: true,
+			rpo_seconds: null,
+			effective_rpo_seconds: 26 * 3600,
 			next_run_at: nextFireTime('0 2 * * *', 'Europe/Berlin'),
 			last_fire_time: iso(60 * 24),
 			created_at: iso(60 * 24 * 9),
@@ -637,6 +650,7 @@ export class MockApiService {
 	>();
 	private profiles: Profile[] = makeProfiles();
 	private plans: Plan[] = makePlans();
+	private alertMock = new MockAlerts();
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
@@ -1376,6 +1390,47 @@ export class MockApiService {
 		this.profiles = this.profiles.filter((item) => item.id !== id);
 	}
 
+	async getDashboard(): Promise<Dashboard> {
+		return this.alertMock.dashboard({
+			agents: this.agents,
+			plans: this.plans,
+			repositories: this.repositories,
+			jobs: this.jobs.map((item) => item.job)
+		});
+	}
+
+	async listAlerts(query?: AlertQuery): Promise<AlertListResponse> {
+		return this.alertMock.listAlerts(query);
+	}
+
+	async listAlertRules(): Promise<AlertRule[]> {
+		return this.alertMock.listAlertRules();
+	}
+
+	async updateAlertRules(request: UpdateAlertRulesRequest): Promise<AlertRule[]> {
+		return this.alertMock.updateAlertRules(request);
+	}
+
+	async listChannels(): Promise<ChannelList> {
+		return this.alertMock.listChannels();
+	}
+
+	async createChannel(request: CreateChannelRequest): Promise<ChannelSaved> {
+		return this.alertMock.createChannel(request);
+	}
+
+	async updateChannel(id: string, request: UpdateChannelRequest): Promise<ChannelSaved> {
+		return this.alertMock.updateChannel(id, request);
+	}
+
+	async deleteChannel(id: string): Promise<void> {
+		return this.alertMock.deleteChannel(id);
+	}
+
+	async testChannel(id: string): Promise<ChannelTestResult> {
+		return this.alertMock.testChannel(id);
+	}
+
 	async listPlans(): Promise<Plan[]> {
 		return [...this.plans];
 	}
@@ -1400,6 +1455,8 @@ export class MockApiService {
 			time_zone: request.time_zone,
 			missed_run_policy: request.missed_run_policy,
 			enabled: request.enabled ?? true,
+			rpo_seconds: request.rpo_seconds ?? null,
+			effective_rpo_seconds: request.rpo_seconds ?? 26 * 3600,
 			next_run_at: request.enabled === false ? null : nextFireTime(request.cron, request.time_zone),
 			last_fire_time: null,
 			created_at: now,
@@ -1431,6 +1488,8 @@ export class MockApiService {
 			time_zone: request.time_zone,
 			missed_run_policy: request.missed_run_policy,
 			enabled,
+			rpo_seconds: request.rpo_seconds ?? null,
+			effective_rpo_seconds: request.rpo_seconds ?? 26 * 3600,
 			next_run_at: enabled ? nextFireTime(request.cron, request.time_zone) : null,
 			updated_at: new Date().toISOString()
 		};

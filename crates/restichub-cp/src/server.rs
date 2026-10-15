@@ -53,6 +53,15 @@ pub const CREATE_USER_TENANT_RATE: u32 = 60;
 /// The snapshot list and tree page requests of one actor in one minute (ADR-0035). Each request
 /// can start a job that reads a repository, so an actor cannot flood an agent with them.
 pub const BROWSE_RATE: u32 = 60;
+/// The test-send limit for each actor and tenant in one minute. Each test makes an outbound
+/// connection to a target that the tenant chose (threat T29).
+pub const TEST_SEND_RATE: u32 = 6;
+
+/// The test-send limit for each tenant in one minute.
+pub const TEST_SEND_TENANT_RATE: u32 = 20;
+
+/// The most test sends that run at the same time in one control plane instance.
+pub const TEST_SEND_CONCURRENCY: usize = 8;
 
 /// The enrollment limit for each source IP address in one minute (FR-ID-05, AC-ID-05).
 ///
@@ -72,6 +81,9 @@ pub struct AuthState {
     pub resolved_limiter: Arc<RateLimiter>,
     pub create_user_limiter: Arc<RateLimiter>,
     pub create_user_tenant_limiter: Arc<RateLimiter>,
+    pub test_send_limiter: Arc<RateLimiter>,
+    pub test_send_tenant_limiter: Arc<RateLimiter>,
+    pub test_send_semaphore: Arc<Semaphore>,
     pub enroll_ip_limiter: Arc<RateLimiter>,
     pub enroll_token_limiter: Arc<RateLimiter>,
     pub browse_limiter: Arc<RateLimiter>,
@@ -109,6 +121,13 @@ impl AuthState {
             window,
             crate::rate_limit::MAX_ENTRIES,
         );
+        let test_send_limiter =
+            RateLimiter::new(TEST_SEND_RATE, window, crate::rate_limit::MAX_ENTRIES);
+        let test_send_tenant_limiter = RateLimiter::new(
+            TEST_SEND_TENANT_RATE,
+            window,
+            crate::rate_limit::MAX_ENTRIES,
+        );
         let enroll_ip_limiter =
             RateLimiter::new(ENROLL_IP_RATE, window, crate::rate_limit::MAX_ENTRIES);
         let enroll_token_limiter =
@@ -122,6 +141,9 @@ impl AuthState {
             resolved_limiter: Arc::new(resolved_limiter),
             create_user_limiter: Arc::new(create_user_limiter),
             create_user_tenant_limiter: Arc::new(create_user_tenant_limiter),
+            test_send_limiter: Arc::new(test_send_limiter),
+            test_send_tenant_limiter: Arc::new(test_send_tenant_limiter),
+            test_send_semaphore: Arc::new(Semaphore::new(TEST_SEND_CONCURRENCY)),
             enroll_ip_limiter: Arc::new(enroll_ip_limiter),
             enroll_token_limiter: Arc::new(enroll_token_limiter),
             browse_limiter: Arc::new(browse_limiter),
@@ -160,6 +182,23 @@ impl AuthState {
         self
     }
 
+    /// Replaces the test-send buckets and the concurrency bound, so a test can reach a limit quickly.
+    pub fn with_test_send_limits(mut self, actor: u32, tenant: u32, concurrency: usize) -> Self {
+        let window = Duration::from_secs(60);
+        self.test_send_limiter = Arc::new(RateLimiter::new(
+            actor,
+            window,
+            crate::rate_limit::MAX_ENTRIES,
+        ));
+        self.test_send_tenant_limiter = Arc::new(RateLimiter::new(
+            tenant,
+            window,
+            crate::rate_limit::MAX_ENTRIES,
+        ));
+        self.test_send_semaphore = Arc::new(Semaphore::new(concurrency));
+        self
+    }
+
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
         self
@@ -181,6 +220,8 @@ pub struct AppState {
     dispatch_wake: Arc<Notify>,
     log_retention_days: u32,
     metrics_cache: Arc<SnapshotCache>,
+    dashboard_cache: Arc<crate::dashboard::DashboardCache>,
+    sender: Option<crate::alerts::sender::Sender>,
 }
 
 impl AppState {
@@ -205,6 +246,8 @@ impl AppState {
             dispatch_wake: Arc::new(Notify::new()),
             log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
             metrics_cache: Arc::new(SnapshotCache::default()),
+            dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
+            sender: None,
         }
     }
 
@@ -223,6 +266,8 @@ impl AppState {
             dispatch_wake: Arc::new(Notify::new()),
             log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
             metrics_cache: Arc::new(SnapshotCache::default()),
+            dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
+            sender: None,
         }
     }
 
@@ -272,10 +317,32 @@ impl AppState {
         self
     }
 
+    /// The server passes the alert sender here. It serves the test button of a channel and the
+    /// link base of the messages (ADR-0036).
+    pub fn with_sender(mut self, sender: crate::alerts::sender::Sender) -> Self {
+        self.sender = Some(sender);
+        self
+    }
+
     /// Sets the time for which a metrics snapshot of a tenant is reused. A test sets zero.
     pub fn with_metrics_ttl(mut self, ttl: time::Duration) -> Self {
         self.metrics_cache = Arc::new(SnapshotCache::new(ttl));
         self
+    }
+
+    /// Sets the time for which the dashboard facts of a tenant are reused. A test sets zero.
+    pub fn with_dashboard_ttl(mut self, ttl: time::Duration) -> Self {
+        self.dashboard_cache = Arc::new(crate::dashboard::DashboardCache::new(ttl));
+        self
+    }
+
+    pub fn dashboard_cache(&self) -> &crate::dashboard::DashboardCache {
+        &self.dashboard_cache
+    }
+
+    /// Absent only in a test that does not set it.
+    pub fn sender(&self) -> Option<&crate::alerts::sender::Sender> {
+        self.sender.as_ref()
     }
 
     pub fn log_retention_days(&self) -> u32 {

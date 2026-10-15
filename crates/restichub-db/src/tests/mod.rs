@@ -6,6 +6,7 @@
 //! The tests are inside the crate, because the connection methods are crate-internal. The
 //! isolation checks read through the runtime login. The owner-level checks use the owner pool.
 
+mod alerts;
 mod audit;
 mod auth;
 mod enrollment_tokens;
@@ -68,7 +69,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 33] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 22] = [
+const TENANT_TABLES: [&str; 26] = [
     "users",
     "memberships",
     "sessions",
@@ -91,6 +92,10 @@ const TENANT_TABLES: [&str; 22] = [
     "job_planned_steps",
     "job_requests",
     "job_listings",
+    "alert_rules",
+    "notification_channels",
+    "alert_state",
+    "alert_deliveries",
 ];
 
 struct Seed {
@@ -348,6 +353,45 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     )
     .bind(crate::MaintenanceScheduleId::new())
     .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO alert_rules (tenant_id, kind, enabled) VALUES ($1, 'job_failed', true)",
+    )
+    .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    let channel_id = crate::ChannelId::new();
+    sqlx::query(
+        "INSERT INTO notification_channels (id, tenant_id, name, kind, recipients) \
+         VALUES ($1, $2, 'mail', 'email', ARRAY['ops@example.com'])",
+    )
+    .bind(channel_id)
+    .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    let alert_id = crate::AlertId::new();
+    sqlx::query(
+        "INSERT INTO alert_state (id, tenant_id, kind, dedupe_key, status, detail, opened_at) \
+         VALUES ($1, $2, 'agent_offline', 'agent:1', 'open', 'silent', now())",
+    )
+    .bind(alert_id)
+    .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO alert_deliveries \
+         (id, tenant_id, alert_id, channel_id, event, next_attempt_at, created_at) \
+         VALUES ($1, $2, $3, $4, 'opened', now(), now())",
+    )
+    .bind(crate::DeliveryId::new())
+    .bind(tenant)
+    .bind(alert_id)
+    .bind(channel_id)
     .execute(tx.as_conn())
     .await?;
 

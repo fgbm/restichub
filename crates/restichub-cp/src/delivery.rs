@@ -71,10 +71,33 @@ impl<'a> SecretReader<'a> {
         job_id: Uuid,
         repository_id: Uuid,
     ) -> Result<SecretString, DeliveryError> {
-        let tenant = tx.tenant();
         let row = load_ciphertext_for_delivery(tx, secret_id, agent_id, job_id, repository_id)
             .await?
             .ok_or(DeliveryError::NotFound)?;
+        self.decrypt_row(tx, secret_id, row).await
+    }
+
+    /// Reads the value of a secret that the control plane itself uses, such as the signing key of
+    /// a webhook channel (ADR-0036). The call writes no `secret_delivered` record, because no
+    /// value goes to an agent.
+    pub async fn read_for_control_plane(
+        &self,
+        tx: &mut TenantTx<'_>,
+        secret_id: SecretId,
+    ) -> Result<SecretString, DeliveryError> {
+        let row = restichub_db::delivery::load_webhook_ciphertext(tx, secret_id)
+            .await?
+            .ok_or(DeliveryError::NotFound)?;
+        self.decrypt_row(tx, secret_id, row).await
+    }
+
+    async fn decrypt_row(
+        &self,
+        tx: &mut TenantTx<'_>,
+        secret_id: SecretId,
+        row: restichub_db::delivery::CiphertextRow,
+    ) -> Result<SecretString, DeliveryError> {
+        let tenant = tx.tenant();
         // The key row of the version that encrypted the secret. The version can be not active,
         // because a rotation keeps the older keys (ADR-0017).
         let key = key_by_version(tx, row.key_version)

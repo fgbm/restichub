@@ -65,6 +65,10 @@ pub struct CreatePlanRequest {
     pub missed_run_policy: MissedRunPolicy,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
+    /// default of the schedule (ADR-0036).
+    #[serde(default)]
+    pub rpo_seconds: Option<i32>,
 }
 
 /// The request body of a plan update. An absent name keeps the name.
@@ -80,6 +84,9 @@ pub struct UpdatePlanRequest {
     pub missed_run_policy: MissedRunPolicy,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// The recovery point objective in seconds. Null restores the default of the schedule.
+    #[serde(default)]
+    pub rpo_seconds: Option<i32>,
 }
 
 fn default_enabled() -> bool {
@@ -100,6 +107,10 @@ pub struct PlanView {
     pub time_zone: String,
     pub missed_run_policy: MissedRunPolicy,
     pub enabled: bool,
+    /// The stored recovery point objective in seconds. Null means the default of the schedule.
+    pub rpo_seconds: Option<i32>,
+    /// The objective that the control plane applies, in seconds (ADR-0036).
+    pub effective_rpo_seconds: i64,
     /// In UTC, in RFC 3339. Null when the plan is disabled.
     pub next_run_at: Option<String>,
     /// The last fire time that the scheduler processed, in RFC 3339.
@@ -122,6 +133,14 @@ impl From<&Plan> for PlanView {
             time_zone: plan.time_zone.clone(),
             missed_run_policy: plan.missed_run_policy,
             enabled: plan.enabled,
+            rpo_seconds: plan.rpo_seconds,
+            effective_rpo_seconds: crate::alerts::rpo::effective_rpo(
+                &plan.cron,
+                &plan.time_zone,
+                plan.rpo_seconds,
+                time::OffsetDateTime::now_utc(),
+            )
+            .whole_seconds(),
             next_run_at: plan.next_run_at.map(format_time),
             last_fire_time: plan.last_fire_time.map(format_time),
             created_at: format_time(plan.created_at),
@@ -246,7 +265,7 @@ pub async fn create_plan(
     ApiJson(body): ApiJson<CreatePlanRequest>,
 ) -> Result<(StatusCode, Json<PlanResponse>), ApiError> {
     context.authorize(Operation::PlansWrite)?;
-    let input = validate_input(
+    let mut input = validate_input(
         Some(body.name),
         &body.profile_id,
         &body.agent_id,
@@ -255,6 +274,7 @@ pub async fn create_plan(
         body.missed_run_policy,
         body.enabled,
     )?;
+    input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
     let now = state.auth().clock.now();
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     let plan_id = PlanId::new();
@@ -274,6 +294,7 @@ pub async fn create_plan(
             time_zone: &input.time_zone,
             missed_run_policy: input.missed_run_policy,
             enabled: input.enabled,
+            rpo_seconds: input.rpo_seconds,
             next_run_at,
             created_by,
         },
@@ -328,7 +349,7 @@ pub async fn update_plan(
     let Some(current) = repo::get_for_update(&mut tx, plan_id).await? else {
         return Err(ApiError::not_found());
     };
-    let input = validate_input(
+    let mut input = validate_input(
         body.name.or(Some(current.name.clone())),
         &body.profile_id,
         &body.agent_id,
@@ -337,6 +358,7 @@ pub async fn update_plan(
         body.missed_run_policy,
         body.enabled,
     )?;
+    input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     check_references(&mut tx, input.profile_id, input.agent_id, now).await?;
     // A rename or a policy change keeps the pending fire time. The schedule is recomputed only when
@@ -355,6 +377,7 @@ pub async fn update_plan(
             time_zone: &input.time_zone,
             missed_run_policy: input.missed_run_policy,
             enabled: input.enabled,
+            rpo_seconds: input.rpo_seconds,
         },
     )
     .await
@@ -541,6 +564,23 @@ struct PlanInput {
     time_zone: String,
     missed_run_policy: MissedRunPolicy,
     enabled: bool,
+    rpo_seconds: Option<i32>,
+}
+
+/// The smallest and the largest recovery point objective, in seconds (ADR-0036).
+const MIN_RPO_SECONDS: i32 = 900;
+const MAX_RPO_SECONDS: i32 = 34_560_000;
+
+fn validate_rpo(value: Option<i32>) -> Result<Option<i32>, ApiError> {
+    match value {
+        Some(seconds) if seconds < MIN_RPO_SECONDS => {
+            Err(ApiError::invalid_field("rpo_seconds", Reason::TooShort))
+        }
+        Some(seconds) if seconds > MAX_RPO_SECONDS => {
+            Err(ApiError::invalid_field("rpo_seconds", Reason::TooLong))
+        }
+        other => Ok(other),
+    }
 }
 
 fn validate_input(
@@ -569,6 +609,7 @@ fn validate_input(
         time_zone,
         missed_run_policy,
         enabled,
+        rpo_seconds: None,
     })
 }
 
@@ -679,6 +720,7 @@ fn plan_value(input: &PlanInput) -> serde_json::Value {
         "time_zone": input.time_zone,
         "missed_run_policy": input.missed_run_policy.as_str(),
         "enabled": input.enabled,
+        "rpo_seconds": input.rpo_seconds,
     })
 }
 
@@ -691,6 +733,7 @@ fn stored_value(plan: &Plan) -> serde_json::Value {
         "time_zone": plan.time_zone,
         "missed_run_policy": plan.missed_run_policy.as_str(),
         "enabled": plan.enabled,
+        "rpo_seconds": plan.rpo_seconds,
     })
 }
 

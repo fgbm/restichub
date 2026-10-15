@@ -450,11 +450,7 @@ async fn audit_platform(
 
 /// The create endpoint limit for each actor and tenant, and for the tenant itself.
 fn check_create_user_limit(state: &AppState, context: &RequestContext) -> Result<(), ApiError> {
-    let actor = match &context.actor {
-        Actor::User(id) => format!("user:{id}"),
-        Actor::ApiToken(id) => format!("api_token:{id}"),
-        other => other.actor_type().to_owned(),
-    };
+    let actor = crate::rate_limit::actor_label(&context.actor);
     let now = std::time::Instant::now();
     let key = crate::rate_limit::create_user_key(context.tenant_id, &actor);
     if let Err(wait) = state.auth().create_user_limiter.check(&key, now) {

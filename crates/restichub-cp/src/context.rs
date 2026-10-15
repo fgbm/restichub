@@ -61,6 +61,11 @@ pub enum Operation {
     ProfilesWrite,
     PlansRead,
     PlansWrite,
+    AlertsRead,
+    AlertsWrite,
+    ChannelsRead,
+    ChannelsWrite,
+    DashboardRead,
 }
 
 impl Operation {
@@ -98,6 +103,11 @@ impl Operation {
                 | Self::ProfilesWrite
                 | Self::PlansRead
                 | Self::PlansWrite
+                | Self::AlertsRead
+                | Self::AlertsWrite
+                | Self::ChannelsRead
+                | Self::ChannelsWrite
+                | Self::DashboardRead
         )
     }
 
@@ -118,7 +128,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 30] = [
+    pub const ALL: [Operation; 35] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -149,6 +159,11 @@ impl Operation {
         Operation::ProfilesWrite,
         Operation::PlansRead,
         Operation::PlansWrite,
+        Operation::AlertsRead,
+        Operation::AlertsWrite,
+        Operation::ChannelsRead,
+        Operation::ChannelsWrite,
+        Operation::DashboardRead,
     ];
 
     /// The class of an operation, for the platform-tenant allow-list. The `match` lists every
@@ -184,7 +199,12 @@ impl Operation {
             | Operation::ProfilesRead
             | Operation::ProfilesWrite
             | Operation::PlansRead
-            | Operation::PlansWrite => OperationClass::Tenant,
+            | Operation::PlansWrite
+            | Operation::AlertsRead
+            | Operation::AlertsWrite
+            | Operation::ChannelsRead
+            | Operation::ChannelsWrite
+            | Operation::DashboardRead => OperationClass::Tenant,
         }
     }
 }
@@ -236,6 +256,12 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::ProfilesWrite => Role::Operator,
         Operation::PlansRead => Role::Viewer,
         Operation::PlansWrite => Role::Operator,
+        Operation::AlertsRead => Role::Viewer,
+        // The alert rules and the notification channels are settings of the organization.
+        Operation::AlertsWrite => Role::Admin,
+        Operation::ChannelsRead => Role::Admin,
+        Operation::ChannelsWrite => Role::Admin,
+        Operation::DashboardRead => Role::Viewer,
     }
 }
 

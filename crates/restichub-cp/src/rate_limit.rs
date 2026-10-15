@@ -14,6 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use restichub_db::audit::Actor;
 use restichub_db::{TenantId, UserId};
 
 pub const MAX_ENTRIES: usize = 100_000;
@@ -199,6 +200,24 @@ pub fn create_user_key(tenant: TenantId, actor: &str) -> String {
 /// the limit by minting many API tokens (threat T15).
 pub fn create_user_tenant_key(tenant: TenantId) -> String {
     format!("ct:{tenant}")
+}
+
+pub fn actor_label(actor: &Actor) -> String {
+    match actor {
+        Actor::User(id) => format!("user:{id}"),
+        Actor::ApiToken(id) => format!("api_token:{id}"),
+        other => other.actor_type().to_owned(),
+    }
+}
+
+/// The test-send bucket, keyed by the tenant and the actor (FR-MN-04, threat T29).
+pub fn test_send_key(tenant: TenantId, actor: &str) -> String {
+    format!("ts:{tenant}:{actor}")
+}
+
+/// The test-send bucket of a tenant, in addition to the actor bucket.
+pub fn test_send_tenant_key(tenant: TenantId) -> String {
+    format!("tst:{tenant}")
 }
 
 #[cfg(test)]

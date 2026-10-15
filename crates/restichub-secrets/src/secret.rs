@@ -34,6 +34,10 @@ pub enum SecretPurpose {
     S3AccessKey,
     S3SecretKey,
     RestServerPassword,
+    /// The HMAC key that signs the payloads of a webhook channel (ADR-0036).
+    WebhookSecret,
+    /// The path and the query of a webhook URL, which often hold a token (ADR-0036).
+    WebhookUrl,
 }
 
 impl SecretPurpose {
@@ -43,7 +47,15 @@ impl SecretPurpose {
             Self::S3AccessKey => "s3_access_key",
             Self::S3SecretKey => "s3_secret_key",
             Self::RestServerPassword => "rest_server_password",
+            Self::WebhookSecret => "webhook_secret",
+            Self::WebhookUrl => "webhook_url",
         }
+    }
+
+    /// True for a purpose that only the control plane creates for its own use. The generic secret
+    /// API refuses it.
+    pub fn is_internal(self) -> bool {
+        matches!(self, Self::WebhookSecret | Self::WebhookUrl)
     }
 
     /// The stable strings MUST NOT change: a change makes every stored ciphertext of that purpose
@@ -54,6 +66,8 @@ impl SecretPurpose {
             "s3_access_key" => Self::S3AccessKey,
             "s3_secret_key" => Self::S3SecretKey,
             "rest_server_password" => Self::RestServerPassword,
+            "webhook_secret" => Self::WebhookSecret,
+            "webhook_url" => Self::WebhookUrl,
             _ => return None,
         };
         Some(purpose)
@@ -195,6 +209,8 @@ mod tests {
             SecretPurpose::S3AccessKey,
             SecretPurpose::S3SecretKey,
             SecretPurpose::RestServerPassword,
+            SecretPurpose::WebhookSecret,
+            SecretPurpose::WebhookUrl,
         ] {
             assert_eq!(SecretPurpose::parse(purpose.as_str()), Some(purpose));
         }
