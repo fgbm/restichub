@@ -153,24 +153,24 @@ test('the limits section creates and edits a profile with the job limits', async
 	await page.getByRole('button', { name: /^Run limits/ }).click();
 	// The fields start with the defaults of the server.
 	await expect(page.locator('#profile-stall-timeout')).toHaveValue('60');
-	await expect(page.locator('#profile-max-duration')).toHaveValue('2880');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('48');
 	await page.locator('#profile-stall-timeout').fill('90');
-	await page.locator('#profile-max-duration').fill('720');
+	await page.locator('#profile-max-duration').fill('12');
 	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The profile is created.')).toBeVisible();
 
 	await page.getByRole('link', { name: 'limits-demo' }).click();
 	await page.getByRole('button', { name: /^Run limits/ }).click();
 	await expect(page.locator('#profile-stall-timeout')).toHaveValue('90');
-	await expect(page.locator('#profile-max-duration')).toHaveValue('720');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('12');
 
 	// An empty field is omitted, so the stored value stays.
 	await page.locator('#profile-stall-timeout').fill('');
-	await page.locator('#profile-max-duration').fill('300');
+	await page.locator('#profile-max-duration').fill('5');
 	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The profile is updated.')).toBeVisible();
 	await page.getByRole('link', { name: 'limits-demo' }).click();
 	await page.getByRole('button', { name: /^Run limits/ }).click();
 	await expect(page.locator('#profile-stall-timeout')).toHaveValue('90');
-	await expect(page.locator('#profile-max-duration')).toHaveValue('300');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('5');
 });
