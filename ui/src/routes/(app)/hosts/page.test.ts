@@ -7,7 +7,8 @@
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '#lib/api/index.ts';
 import Hosts from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -16,6 +17,8 @@ const mocks = vi.hoisted(() => ({
 	createEnrollmentToken: vi.fn(),
 	revokeEnrollmentToken: vi.fn(),
 	renameAgent: vi.fn(),
+	reenrollAgent: vi.fn(),
+	replaceAgent: vi.fn(),
 	pushToast: vi.fn()
 }));
 
@@ -48,7 +51,9 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listEnrollmentTokens: mocks.listEnrollmentTokens,
 			createEnrollmentToken: mocks.createEnrollmentToken,
 			revokeEnrollmentToken: mocks.revokeEnrollmentToken,
-			renameAgent: mocks.renameAgent
+			renameAgent: mocks.renameAgent,
+			reenrollAgent: mocks.reenrollAgent,
+			replaceAgent: mocks.replaceAgent
 		}
 	};
 });
@@ -67,6 +72,8 @@ function token(overrides: Record<string, unknown> = {}) {
 		revoked_by_user_id: null,
 		created_at: '2026-10-13T00:00:00Z',
 		created_by: 'u_01',
+		replaces_agent_id: null,
+		used_by_agent_id: null,
 		...overrides
 	};
 }
@@ -90,6 +97,8 @@ function agent(overrides: Record<string, unknown> = {}) {
 		version_status: 'current',
 		status: 'active',
 		last_seen_at: PAST,
+		first_connected_at: PAST,
+		possible_duplicate_of: null,
 		created_at: PAST,
 		revoked_at: null,
 		revoked_by_user_id: null,
@@ -208,6 +217,8 @@ describe('the Hosts screen', () => {
 		).toBeInTheDocument();
 		await user.keyboard('{Escape}');
 		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+		// The closing dialog locks the pointer on the page for a moment.
+		await waitFor(() => expect(document.body.style.pointerEvents).not.toBe('none'));
 
 		await user.click(screen.getByRole('button', { name: 'Server scripts: srv-db-01' }));
 		dialog = await screen.findByRole('dialog', { name: 'Server scripts' });
@@ -291,5 +302,150 @@ describe('the Hosts screen', () => {
 		const [fresh, warn] = screen.getAllByText(/^Expires /);
 		expect(fresh.classList.contains('cert__expiry--warn')).toBe(false);
 		expect(warn.classList.contains('cert__expiry--warn')).toBe(true);
+	});
+
+	it('shows a host that never connected as waiting (FR-ID-04)', async () => {
+		mocks.listAgents.mockResolvedValue([
+			agent({ id: 'a_01', hostname: 'host-live' }),
+			agent({ id: 'a_02', hostname: 'host-new', first_connected_at: null })
+		]);
+		render(Hosts);
+
+		await screen.findByText('host-new');
+		expect(screen.getAllByText('Waiting for connection')).toHaveLength(1);
+		expect(screen.getAllByText('Active')).toHaveLength(1);
+	});
+
+	it('flags a possible duplicate and replaces the old record (FR-ID-01)', async () => {
+		const user = userEvent.setup();
+		mocks.listAgents.mockResolvedValue([
+			agent({
+				id: 'a_01',
+				hostname: 'old-host',
+				possible_duplicate_of: { id: 'a_02', hostname: 'new-host' }
+			}),
+			agent({
+				id: 'a_02',
+				hostname: 'new-host',
+				possible_duplicate_of: { id: 'a_01', hostname: 'old-host' }
+			})
+		]);
+		mocks.replaceAgent.mockResolvedValue({ plans_moved: 2, repositories_moved: 0 });
+		render(Hosts);
+
+		await screen.findByText('Possible duplicate of old-host');
+		expect(screen.getByText('Possible duplicate of new-host')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'More actions for new-host' }));
+		await user.click(await screen.findByText('Replace the old record'));
+		const dialog = await screen.findByRole('dialog');
+		await user.click(within(dialog).getByRole('button', { name: 'Replace' }));
+
+		await waitFor(() => expect(mocks.replaceAgent).toHaveBeenCalledWith('a_02', 'a_01'));
+	});
+
+	it('issues a re-registration token and shows the command (FR-ID-01)', async () => {
+		const user = userEvent.setup();
+		mocks.listAgents.mockResolvedValue([agent()]);
+		mocks.reenrollAgent.mockResolvedValue({
+			id: 'e_9',
+			token: 're_SECRETVALUE',
+			display_prefix: 'SECRETVA',
+			labels: [],
+			expires_at: FUTURE,
+			created_at: PAST,
+			replaces_agent_id: 'a_01'
+		});
+		render(Hosts);
+
+		await screen.findByText('win-fs01');
+		await user.click(screen.getByRole('button', { name: 'More actions for win-fs01' }));
+		await user.click(await screen.findByText('Re-register'));
+		const confirm = await screen.findByRole('dialog');
+		await user.click(within(confirm).getByRole('button', { name: 'Create token' }));
+
+		await waitFor(() => expect(mocks.reenrollAgent).toHaveBeenCalledWith('a_01'));
+		const dialog = await screen.findByRole('dialog', { name: 'Copy the re-registration token' });
+		expect(
+			within(dialog).getByDisplayValue(/--force .*--token re_SECRETVALUE/)
+		).toBeInTheDocument();
+	});
+
+	it('refreshes the list after a conflict on cancel (FR-ID-01)', async () => {
+		const user = userEvent.setup();
+		mocks.listEnrollmentTokens.mockResolvedValueOnce([token()]).mockResolvedValue([]);
+		mocks.revokeEnrollmentToken.mockRejectedValue(
+			new ApiError({ status: 409, code: 'token_used', title: 'Conflict' })
+		);
+		render(Hosts);
+
+		await screen.findByText('Pending registrations');
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+		const dialog = await screen.findByRole('dialog');
+		await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+		await waitFor(() =>
+			expect(mocks.pushToast).toHaveBeenCalledWith(
+				'danger',
+				'A host already used this enrollment token. It cannot be cancelled.'
+			)
+		);
+		await waitFor(() =>
+			expect(screen.queryByText('Pending registrations')).not.toBeInTheDocument()
+		);
+	});
+
+	it('tells in the Add host dialog that the host used the token (FR-ID-01)', async () => {
+		const user = userEvent.setup();
+		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+		try {
+			mocks.createEnrollmentToken.mockResolvedValue({
+				id: 'e_1',
+				token: 're_SECRETVALUE',
+				display_prefix: 'SECRETVA',
+				labels: [],
+				expires_at: FUTURE,
+				created_at: PAST,
+				replaces_agent_id: null
+			});
+			mocks.listEnrollmentTokens
+				.mockResolvedValueOnce([])
+				.mockResolvedValueOnce([token()])
+				.mockResolvedValue([token({ used_at: PAST, used_by_agent_id: 'a_07' })]);
+			mocks.listAgents
+				.mockResolvedValueOnce([])
+				.mockResolvedValueOnce([])
+				.mockResolvedValue([agent({ id: 'a_07', hostname: 'brand-new' })]);
+			render(Hosts);
+
+			await user.click(await screen.findByRole('button', { name: 'Add host' }));
+			const dialog = await screen.findByRole('dialog');
+			await user.click(within(dialog).getByRole('button', { name: 'Create token' }));
+			await within(dialog).findByDisplayValue('re_SECRETVALUE');
+
+			await vi.advanceTimersByTimeAsync(10_000);
+			await within(dialog).findByText('Host registered: brand-new');
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	describe('the periodic refresh', () => {
+		beforeEach(() => {
+			vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('reloads the pending list every 10 seconds (FR-ID-01)', async () => {
+			mocks.listEnrollmentTokens.mockResolvedValueOnce([token()]).mockResolvedValue([]);
+			render(Hosts);
+
+			await screen.findByText('Pending registrations');
+			await vi.advanceTimersByTimeAsync(10_000);
+			await waitFor(() =>
+				expect(screen.queryByText('Pending registrations')).not.toBeInTheDocument()
+			);
+		});
 	});
 });

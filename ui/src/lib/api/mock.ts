@@ -4,6 +4,7 @@
  * The module holds the same functions as the real service, so a screen does not
  * know which one it uses. The tenant functions are the planned API of issue #20.
  */
+import { ApiError } from './errors';
 import { filterSnapshots, inRange, listDirectory, makeSnapshots } from './mock-restore';
 import { MockAlerts } from './mock-alerts';
 import { MockScripts } from './mock-scripts';
@@ -35,6 +36,7 @@ import type {
 	CreateTenantRequest,
 	CreateUserRequest,
 	EnrollmentToken,
+	ReplaceAgentResponse,
 	EnrollmentTokenCreated,
 	Instance,
 	Job,
@@ -196,6 +198,8 @@ function makeAgents(): Agent[] {
 			protocol?: string;
 			expiresInMinutes?: number;
 			rotatedMinutesAgo?: number | null;
+			waiting?: boolean;
+			duplicateOf?: { id: string; hostname: string };
 		} = {}
 	): Agent => ({
 		id,
@@ -213,6 +217,8 @@ function makeAgents(): Agent[] {
 					? ['/var/lib/restichub-restore']
 					: [],
 		last_seen_at: iso(seen),
+		first_connected_at: options.waiting ? null : iso(60 * 24 * 30),
+		possible_duplicate_of: options.duplicateOf ?? null,
 		created_at: iso(60 * 24 * 30),
 		certificate_expires_at: iso(-(options.expiresInMinutes ?? 24 * 60 * 20)),
 		last_certificate_rotation_at:
@@ -240,7 +246,8 @@ function makeAgents(): Agent[] {
 	return [
 		agent('1', 'win-fs01', 'windows', 'amd64', '0.4.2', 14, {
 			expiresInMinutes: 24 * 27 * 60,
-			rotatedMinutesAgo: 3 * 24 * 60
+			rotatedMinutesAgo: 3 * 24 * 60,
+			duplicateOf: { id: '7', hostname: 'win-fs01-new' }
 		}),
 		agent('2', 'srv-db-01', 'linux', 'amd64', '0.4.2', 26, {
 			expiresInMinutes: 2 * 24 * 60,
@@ -264,6 +271,14 @@ function makeAgents(): Agent[] {
 			status: 'revoked',
 			versionStatus: 'update_available',
 			expiresInMinutes: 14 * 24 * 60
+		}),
+		agent('7', 'win-fs01-new', 'windows', 'amd64', '0.4.2', 5, {
+			expiresInMinutes: 29 * 24 * 60,
+			duplicateOf: { id: '1', hostname: 'win-fs01' }
+		}),
+		agent('8', 'ws-reception', 'windows', 'amd64', '0.4.2', 2, {
+			expiresInMinutes: 29 * 24 * 60,
+			waiting: true
 		})
 	];
 }
@@ -1008,6 +1023,33 @@ export class MockApiService {
 		);
 	}
 
+	async reenrollAgent(id: string): Promise<EnrollmentTokenCreated> {
+		const agent = this.agents.find((item) => item.id === id);
+		if (!agent || agent.status === 'revoked') throw new Error('conflict');
+		const created = await this.createEnrollmentToken({ labels: [] });
+		this.enrollmentTokens = this.enrollmentTokens.map((token) =>
+			token.id === created.id ? { ...token, replaces_agent_id: id } : token
+		);
+		return created;
+	}
+
+	async replaceAgent(id: string, oldAgentId: string): Promise<ReplaceAgentResponse> {
+		const agent = this.agents.find((item) => item.id === id);
+		if (!agent || agent.possible_duplicate_of?.id !== oldAgentId) throw new Error('not found');
+		this.agents = this.agents.map((item) => {
+			if (item.id === oldAgentId) {
+				return {
+					...item,
+					status: 'revoked',
+					possible_duplicate_of: null,
+					revoked_at: new Date().toISOString()
+				};
+			}
+			return item.id === id ? { ...item, possible_duplicate_of: null } : item;
+		});
+		return { plans_moved: 0, repositories_moved: 0 };
+	}
+
 	async listEnrollmentTokens(): Promise<EnrollmentToken[]> {
 		return [...this.enrollmentTokens];
 	}
@@ -1037,7 +1079,9 @@ export class MockApiService {
 			revoked_at: null,
 			revoked_by_user_id: null,
 			created_at: created.created_at,
-			created_by: this.users[0].id
+			created_by: this.users[0].id,
+			replaces_agent_id: null,
+			used_by_agent_id: null
 		};
 		this.enrollmentTokens = [...this.enrollmentTokens, token];
 		return created;
@@ -1046,7 +1090,16 @@ export class MockApiService {
 	async revokeEnrollmentToken(id: string): Promise<void> {
 		const token = this.enrollmentTokens.find((item) => item.id === id);
 		if (!token) throw new Error('not found');
-		if (token.used_at || token.revoked_at) throw new Error('conflict');
+		const refusal = token.used_at
+			? 'token_used'
+			: token.revoked_at
+				? 'token_already_revoked'
+				: new Date(token.expires_at).getTime() <= Date.now()
+					? 'token_expired'
+					: null;
+		if (refusal) {
+			throw new ApiError({ status: 409, code: refusal, title: 'Conflict' });
+		}
 		token.revoked_at = new Date().toISOString();
 		token.revoked_by_user_id = this.users[0].id;
 	}

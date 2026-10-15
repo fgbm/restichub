@@ -226,6 +226,10 @@
 					<span class="stat__value">{dashboard.hosts.online}</span>
 					<span class="stat__label">{t('dashboard.stat.online')}</span>
 				</div>
+				<div class="stat" class:stat--warning={dashboard.hosts.waiting > 0}>
+					<span class="stat__value">{dashboard.hosts.waiting}</span>
+					<span class="stat__label">{t('dashboard.stat.waiting')}</span>
+				</div>
 				<div class="stat" class:stat--warning={dashboard.hosts.offline > 0}>
 					<span class="stat__value">{dashboard.hosts.offline}</span>
 					<span class="stat__label">{t('dashboard.stat.offline')}</span>
@@ -341,8 +345,12 @@
 						<ul class="rows">
 							{#each dashboard.hosts.items as host (host.id)}
 								<li class="row">
-									<StatusPill tone={host.online ? 'success' : 'neutral'}>
-										{host.online ? t('dashboard.hosts.online') : t('dashboard.hosts.offline')}
+									<StatusPill tone={host.waiting ? 'info' : host.online ? 'success' : 'neutral'}>
+										{host.waiting
+											? t('dashboard.hosts.waiting')
+											: host.online
+												? t('dashboard.hosts.online')
+												: t('dashboard.hosts.offline')}
 									</StatusPill>
 									<div class="row__main">
 										<span class="cell__name">{host.hostname}</span>
@@ -521,7 +529,7 @@
 
 	.stats {
 		display: grid;
-		grid-template-columns: repeat(5, minmax(0, 1fr));
+		grid-template-columns: repeat(6, minmax(0, 1fr));
 		gap: var(--rh-space-4);
 	}
 
