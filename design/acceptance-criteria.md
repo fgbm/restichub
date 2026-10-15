@@ -112,7 +112,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
 | AC-PF-01 | FR-PF-04 | Open the profile preview. **Expected:** the steps and the command line agree with the command that the agent ran (compare with the job log). Secrets are masked. | A |
-| AC-PF-02 | FR-PF-05 | Save a profile with one error. Do this test for each error: incorrect cron, a script for a host without the trust mode, VSS for a Linux agent, option not available in the installed restic. **Expected:** the UI does not save the profile. The error points to the field. | A |
+| AC-PF-02 | FR-PF-05 | Save a profile with one error. Test each error: incorrect cron, a script without the trust mode, VSS for a Linux agent, option not available in the installed restic. **Expected:** the UI does not save the profile. The error points to the field. | A |
 | AC-PF-03 | FR-PF-03 | A profile uses `{{hostname}}`, `{{os}}`, `{{agent.label.env}}` and the date on 3 agents. **Expected:** each agent gets its own values. | A |
 | AC-PF-04 | FR-PF-02 (1.0) | A chain of `extends` with three levels. **Expected:** the result agrees with the documented merge rules (table-driven test). The CP rejects the cycle A→B→A and shows the chain. | A |
 | AC-PF-05 | FR-PF-06 (1.0) | Change a profile and roll it back. **Expected:** the diff shows the change. The rollback restores the revision. Each job refers to the revision that the compiler used. | A |
