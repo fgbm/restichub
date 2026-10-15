@@ -1,4 +1,4 @@
-/* Product palette shared by all variants. Values come from ui/mockups/mockups.css. */
+/* Product palette Values come from ui/mockups/mockups.css. */
 :root {
 	--sl-color-accent-low: #12261e;
 	--sl-color-accent: #238636;
@@ -34,12 +34,12 @@
 
 /* Landing page. */
 .rh-hero { margin: 1rem 0 2rem; }
-.rh-hero h2 { border: 0; margin: 0 0 .5rem; font-size: var(--rh-hero-size, 2rem); line-height: 1.2; }
+.rh-hero h2 { font-family: var(--sl-font-system-mono); border: 0; margin: 0 0 .5rem; font-size: 1.6rem; line-height: 1.2; }
 .rh-hero p { margin: 0 0 1.25rem; color: var(--sl-color-gray-2); font-size: 1.05rem; max-width: 40rem; }
 .rh-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; margin: 0 0 2.5rem; }
 .rh-card {
 	display: block; padding: 1rem 1.1rem; border: 1px solid var(--sl-color-gray-5);
-	border-radius: var(--rh-radius, 8px); background: var(--sl-color-bg-nav); text-decoration: none !important;
+	border-radius: 6px; background: var(--sl-color-bg-nav); text-decoration: none !important;
 	transition: border-color .12s ease, background-color .12s ease;
 }
 .rh-card:hover { border-color: var(--sl-color-accent); }
@@ -54,5 +54,5 @@
 .rh-how text.sub { fill: var(--sl-color-gray-3); font-size: 11.5px; }
 .rh-how .arrow { stroke: var(--sl-color-gray-3); stroke-width: 1.6; fill: none; }
 .rh-how .head { fill: var(--sl-color-gray-3); }
-[data-has-hero] h1 { font-size: var(--rh-hero-size, 2rem); line-height: 1.2; }
+[data-has-hero] h1 { font-size: 1.6rem; line-height: 1.2; }
 .hero { padding-block: 2rem 1rem; }

@@ -2,9 +2,6 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-// DOCS_VARIANT picks one style variant: a, b or c.
-const variant = process.env.DOCS_VARIANT ?? 'a';
-
 const group = (en, ru, slugs) => ({
 	label: en,
 	translations: { ru },
@@ -25,7 +22,7 @@ export default defineConfig({
 				root: { label: 'English', lang: 'en' },
 				ru: { label: 'Русский', lang: 'ru' },
 			},
-			customCss: ['./src/styles/base.css', `./src/styles/variant-${variant}.css`],
+			customCss: ['./src/styles/base.css', './src/styles/theme.css'],
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/fgbm/restichub' },
 			],
@@ -33,9 +30,10 @@ export default defineConfig({
 				group('Getting started', 'Начало работы', [
 					'operations/install-control-plane',
 					'operations/register-an-agent',
-					'concepts/plans',
 				]),
 				group('Daily work', 'Ежедневная работа', [
+					'concepts/profiles',
+					'concepts/plans',
 					'concepts/jobs',
 					'operations/agent-jobs',
 					'operations/restore',
