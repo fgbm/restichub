@@ -391,6 +391,7 @@ async fn ac_hk_10_a_cancel_stops_the_script_and_runs_the_finally_script() {
     let jobs = host.jobs();
     let (tx, mut rx) = mpsc::channel(256);
     jobs.attach(&tx);
+    jobs.greeted(false);
     jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
     for _ in 0..200 {
         if started.exists() {

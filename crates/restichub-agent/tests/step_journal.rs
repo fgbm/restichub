@@ -39,6 +39,7 @@ async fn ac_pr_07_a_result_that_finished_offline_arrives_after_the_reconnect() {
 
     let (tx, mut rx) = mpsc::channel(64);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         "job-offline",
         vec![access("repo-1", &path, "topsecret")],
@@ -62,6 +63,7 @@ async fn ac_pr_07_a_result_that_finished_offline_arrives_after_the_reconnect() {
     for _ in 0..200 {
         let (tx, mut rx) = mpsc::channel(64);
         jobs.attach(&tx);
+        jobs.greeted(false);
         jobs.send_stored_results().await;
         let mut messages = Vec::new();
         while let Ok(message) = rx.try_recv() {
@@ -113,6 +115,7 @@ async fn ac_pr_07_a_result_that_finished_offline_arrives_after_the_reconnect() {
     let restarted = program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(64);
     restarted.attach(&tx);
+    restarted.greeted(false);
     restarted.send_stored_results().await;
     let again = collect(&mut rx).await;
     assert_eq!(again.result().job_id, "job-offline");
@@ -158,6 +161,7 @@ async fn ac_pr_07_the_stored_copy_drops_the_snapshot_list() {
 
     let (tx, mut rx) = mpsc::channel(64);
     jobs.attach(&tx);
+    jobs.greeted(false);
     jobs.send_stored_results().await;
     let stored = collect(&mut rx).await;
     assert!(stored.step("snapshots").output.is_none());
@@ -175,6 +179,7 @@ async fn resent_kinds(jobs: &restichub_agent::jobs::Jobs) -> (usize, usize, usiz
     use restichub_proto::agent::v1::agent_message::Payload;
     let (tx, mut rx) = mpsc::channel(64);
     jobs.attach(&tx);
+    jobs.greeted(false);
     jobs.send_stored_results().await;
     let mut kinds = (0, 0, 0);
     while let Ok(message) = rx.try_recv() {
@@ -291,6 +296,7 @@ async fn ac_ag_04_no_process_argument_holds_the_canary_during_a_backup() {
     let jobs = program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(64);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = job(
         "job-cmdline",
         vec![access("repo-1", &path, &canary)],
