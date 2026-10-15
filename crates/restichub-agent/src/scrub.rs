@@ -91,6 +91,19 @@ impl Scrubber {
             .filter(|secret| !secret.is_empty())
             .cloned()
             .collect();
+        // The reader splits the output into lines, so a secret with line breaks never matches as a
+        // whole. Each of its lines is masked too.
+        for secret in values {
+            if secret.contains('\n') {
+                secrets.extend(
+                    secret
+                        .lines()
+                        .map(str::trim)
+                        .filter(|line| line.len() >= 6)
+                        .map(|line| Zeroizing::new(line.to_owned())),
+                );
+            }
+        }
         secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
         secrets.dedup();
         Self {

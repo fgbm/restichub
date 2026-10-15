@@ -202,11 +202,14 @@ fn check_hook(job: &Job, hook: &HookStep) -> Result<(), Rejection> {
         if !parameter.value.is_empty() || parameter.typed.is_none() {
             return Err(reject(job, RejectReason::InvalidHookParameters));
         }
-        let text = match &parameter.typed {
-            Some(Typed::StringValue(value) | Typed::SecretValue(value)) => Some(value),
-            Some(Typed::IntegerValue(_) | Typed::BooleanValue(_)) | None => None,
+        // A secret may hold line breaks, such as a key. Only NUL cannot travel in an environment
+        // variable.
+        let invalid = match &parameter.typed {
+            Some(Typed::StringValue(value)) => has_forbidden(value),
+            Some(Typed::SecretValue(value)) => has_nul(value),
+            Some(Typed::IntegerValue(_) | Typed::BooleanValue(_)) | None => false,
         };
-        if text.is_some_and(|value| has_forbidden(value)) {
+        if invalid {
             return Err(reject(job, RejectReason::Malformed));
         }
         if !names.insert(parameter.name.as_str()) {

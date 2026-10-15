@@ -171,48 +171,65 @@ fn option_name(option: ResticOption) -> &'static str {
 
 fn validate_hooks(profile: &Profile, target: &TargetFacts) -> Result<(), CompileError> {
     for (index, hook) in profile.hooks.iter().enumerate() {
-        let hook_field = FieldPath::new(format!("hooks[{index}].hook_id"));
-        let Some(allowed) = target.allow_list.get(&hook.hook_id) else {
-            return Err(CompileError::UnknownHook {
-                field: hook_field,
-                hook_id: hook.hook_id.clone(),
-            });
-        };
-        if !allowed.allows(hook.phase) {
-            return Err(CompileError::HookPhaseNotAllowed {
-                field: FieldPath::new(format!("hooks[{index}].phase")),
-                hook_id: hook.hook_id.clone(),
-            });
-        }
+        check_hook(index, hook, target)?;
+    }
+    Ok(())
+}
 
-        let mut seen = HashSet::new();
-        for (parameter, value) in hook.parameters.iter().enumerate() {
-            let name_field = FieldPath::new(format!("hooks[{index}].parameters[{parameter}].name"));
-            if !allowed.parameters.contains_key(&value.name) {
-                return Err(CompileError::UnknownHookParameter {
-                    field: name_field,
-                    name: value.name.clone(),
-                });
-            }
-            if !seen.insert(value.name.as_str()) {
-                return Err(CompileError::DuplicateHookParameter {
-                    field: name_field,
-                    name: value.name.clone(),
-                });
-            }
+/// Checks one hook of a profile against the allow-list that the target agent reported: the
+/// identifier, the phase, the parameter names and every value (FR-HK-03, FR-HK-04, AC-HK-05).
+///
+/// `index` is the position of the hook in the profile and names the field of an error.
+///
+/// # Errors
+///
+/// Returns the [`CompileError`] for the first rule that the hook breaks.
+pub fn check_hook(
+    index: usize,
+    hook: &crate::profile::HookRef,
+    target: &TargetFacts,
+) -> Result<(), CompileError> {
+    let hook_field = FieldPath::new(format!("hooks[{index}].hook_id"));
+    let Some(allowed) = target.allow_list.get(&hook.hook_id) else {
+        return Err(CompileError::UnknownHook {
+            field: hook_field,
+            hook_id: hook.hook_id.clone(),
+        });
+    };
+    if !allowed.allows(hook.phase) {
+        return Err(CompileError::HookPhaseNotAllowed {
+            field: FieldPath::new(format!("hooks[{index}].phase")),
+            hook_id: hook.hook_id.clone(),
+        });
+    }
+
+    let mut seen = HashSet::new();
+    for (parameter, value) in hook.parameters.iter().enumerate() {
+        let name_field = FieldPath::new(format!("hooks[{index}].parameters[{parameter}].name"));
+        if !allowed.parameters.contains_key(&value.name) {
+            return Err(CompileError::UnknownHookParameter {
+                field: name_field,
+                name: value.name.clone(),
+            });
         }
-        if let Some((name, _)) = allowed
-            .parameters
-            .iter()
-            .find(|(name, spec)| spec.required && !seen.contains(name.as_str()))
-        {
-            return Err(CompileError::MissingHookParameter {
-                field: FieldPath::new(format!("hooks[{index}].parameters")),
-                name: name.clone(),
+        if !seen.insert(value.name.as_str()) {
+            return Err(CompileError::DuplicateHookParameter {
+                field: name_field,
+                name: value.name.clone(),
             });
         }
     }
-    Ok(())
+    if let Some((name, _)) = allowed
+        .parameters
+        .iter()
+        .find(|(name, spec)| spec.required && !seen.contains(name.as_str()))
+    {
+        return Err(CompileError::MissingHookParameter {
+            field: FieldPath::new(format!("hooks[{index}].parameters")),
+            name: name.clone(),
+        });
+    }
+    hook_step(index, hook, target).map(|_| ())
 }
 
 fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedStep>, CompileError> {

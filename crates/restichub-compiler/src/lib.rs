@@ -21,7 +21,7 @@ mod target;
 mod template;
 
 pub use arg::{ArgError, CommandLine};
-pub use compile::{Plan, PlannedStep, compile};
+pub use compile::{Plan, PlannedStep, check_hook, compile};
 pub use error::{CompileError, CronError, FieldPath, validate_cron};
 pub use hook::{AllowListedHook, HookParameterSpec, HookValue, ParameterKind, ValueError};
 pub use job::ValidatedJob;

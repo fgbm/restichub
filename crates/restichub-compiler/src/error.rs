@@ -159,6 +159,47 @@ fn validate_cron_field(
     Ok(())
 }
 
+impl CompileError {
+    /// True when the error comes from the hooks of the profile: the target agent does not report a
+    /// hook, or reports another schema (AC-HK-05).
+    #[must_use]
+    pub fn is_hook(&self) -> bool {
+        matches!(
+            self,
+            Self::UnknownHook { .. }
+                | Self::UnknownHookParameter { .. }
+                | Self::DuplicateHookParameter { .. }
+                | Self::InvalidHookParameter { .. }
+                | Self::MissingHookParameter { .. }
+                | Self::HookPhaseNotAllowed { .. }
+        )
+    }
+
+    /// The field of the error, when it names one.
+    #[must_use]
+    pub fn field(&self) -> Option<&FieldPath> {
+        match self {
+            Self::UnknownVariable { field, .. }
+            | Self::MissingLabel { field, .. }
+            | Self::InvalidDate { field, .. }
+            | Self::UnterminatedTemplate { field }
+            | Self::InvalidValue { field }
+            | Self::UnknownHook { field, .. }
+            | Self::UnknownHookParameter { field, .. }
+            | Self::DuplicateHookParameter { field, .. }
+            | Self::InvalidHookParameter { field, .. }
+            | Self::MissingHookParameter { field, .. }
+            | Self::HookPhaseNotAllowed { field, .. }
+            | Self::UnsupportedOs { field, .. }
+            | Self::IncompatibleOption { field, .. } => Some(field),
+            Self::InvalidCron { .. }
+            | Self::NoPaths { .. }
+            | Self::UnsupportedRestic { .. }
+            | Self::StepsRejected { .. } => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::validate_cron;

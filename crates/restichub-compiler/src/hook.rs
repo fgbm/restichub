@@ -225,7 +225,11 @@ impl HookParameterSpec {
             }
             (ParameterKind::Boolean, HookValue::Boolean(_)) => Ok(()),
             (ParameterKind::SecretRef, HookValue::Secret(text)) => {
-                check_text(text)?;
+                // A secret may hold line breaks, such as a key. Only NUL cannot travel in an
+                // environment variable.
+                if text.contains('\0') {
+                    return Err(ValueError::ControlCharacter);
+                }
                 if text.is_empty() {
                     Err(ValueError::Empty)
                 } else {
