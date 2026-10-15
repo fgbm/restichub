@@ -4678,7 +4678,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description A `text/event-stream` body. The events are `resync`, `job.progress`, `job.status`, `job.log`, `host.online`, `host.offline` and `alert.changed`. The data of an event holds identifiers and a status only; the client reads the REST API for the rest. The stream ends after at most 15 minutes. The client reconnects and reads the state again after the first `resync` event. */
+            /** @description A `text/event-stream` body. The events are `resync`, `job.progress`, `job.status`, `job.log`, `host.online`, `host.offline` and `alert.changed`. The data of an event holds identifiers and a status only; the client reads the REST API for the rest. The stream ends after at most 15 minutes, and earlier when the session, the token, the account, the role or the tenant no longer gives the access. The client reconnects and reads the state again after the first `resync` event. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4705,7 +4705,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The session or the tenant has too many open streams. */
+            /** @description The session, the token, the address, the tenant or the server has too many open streams. */
             429: {
                 headers: {
                     [name: string]: unknown;
