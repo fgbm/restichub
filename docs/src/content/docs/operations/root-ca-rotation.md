@@ -4,7 +4,7 @@ description: How an operator replaces the installation root certificate authorit
 ---
 
 :::caution
-ResticHub is in the design phase. This procedure is planned for 1.0. It is not implemented yet.
+No command does this procedure. The agent keeps the root certificate that it pinned at enrollment, and no function updates it. Register every agent again after a root CA change.
 :::
 
 The installation has one root certificate authority (CA). The root CA signs one issuing CA. The agents trust the root CA. A rotation of the root CA changes the trust of every agent.
@@ -20,24 +20,21 @@ The control plane rotates the issuing CA by itself. Do not rotate the issuing CA
 
 ## Before you start
 
-- Plan a maintenance window. During the rotation every agent must trust the new root CA.
-- Keep the old root certificate. An agent can still present an old chain.
+- Plan a maintenance window. Every agent must register again, so no agent runs a job until you finish.
 - Copy the control plane database and the key encryption key (KEK).
+- Make one enrollment token for each host. See [Register an agent](/restichub/operations/register-an-agent/).
 
 ## Procedure
 
-1. Generate the new root CA with a lifetime of 10 years.
-2. Generate a new issuing CA and sign it with the new root CA.
-3. Add the new root certificate to the trust store of every agent.
-4. Wait until every agent reports the new trust store.
-5. Replace the root CA row in the control plane database.
-6. Restart the control plane. At start the control plane checks the root CA.
-7. Remove the old root certificate from the trust store of every agent.
-8. Remove the old root CA row.
+1. Stop the control plane.
+2. Connect to the database as the owner role.
+3. Remove every row of the `ca_keys` table.
+4. Start the control plane. It creates a new root CA and a new issuing CA.
+5. Register each agent again with `--force` and a new enrollment token. The agent pins the new root CA.
+6. Revoke the old host entries after the new entries appear. See [Agent revocation](/restichub/operations/agent-revocation/).
 
 ## Result
 
 - The agents trust the new root CA.
 - The control plane signs the agent certificates with the new issuing CA.
-
-A start with an expired root CA refuses with a message. Follow this procedure then.
+- A start with an expired root CA refuses with a message. Follow this procedure then.

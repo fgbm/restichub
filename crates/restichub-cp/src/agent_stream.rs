@@ -825,7 +825,7 @@ async fn run_stream(
     };
     let capabilities = AgentCapability::parse_list(&hello.capabilities);
     let restore_roots = clean_roots(&hello.restore_roots);
-    let hooks = crate::hooks::from_hello(&hello, &capabilities);
+    let scripts = crate::scripts::from_hello(&hello, &capabilities);
     // The registry keeps the facts of a refused hello too, so the Hosts screen can mark the agent
     // as unsupported (FR-PR-09).
     crate::agents::record_hello_facts(
@@ -835,7 +835,7 @@ async fn run_stream(
         &hello,
         &capabilities,
         &restore_roots,
-        &hooks,
+        &scripts,
     )
     .await;
     let version = Version {

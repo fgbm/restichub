@@ -1,17 +1,13 @@
 //! The profile preview: the steps and the command line with masked secrets
 //! (FR-PF-04, AC-PF-01).
 
-use std::collections::BTreeMap;
-
 use restichub_proto::agent::v1::{
-    HookPhase, HookStep, Job, RepositoryAccess, ScriptInterpreter, ScriptStep, Step,
-    hook_parameter::Typed, step,
+    HookPhase, Job, RepositoryAccess, ScriptInterpreter, ScriptStep, Step, step,
 };
 use restichub_proto::signing::Rejection;
 
-use crate::arg::{self, ArgError, MASK};
+use crate::arg::{self, ArgError};
 use crate::compile::{Plan, PlannedStep};
-use crate::hook::{AllowListedHook, HookParameterSpec};
 use crate::job::ValidatedJob;
 
 /// Why a plan cannot be rendered.
@@ -37,9 +33,6 @@ pub struct PreviewStep {
 
 /// Renders a plan as step command lines for one repository (AC-PF-01).
 ///
-/// The allow-list of the target agents supplies the secret flag of a hook
-/// parameter, so the preview masks a secret hook parameter.
-///
 /// # Errors
 ///
 /// Returns [`PreviewError`] when the plan is not a valid job or a step cannot
@@ -47,7 +40,6 @@ pub struct PreviewStep {
 pub fn preview(
     plan: &Plan,
     repository: &RepositoryAccess,
-    allow_list: &BTreeMap<String, AllowListedHook>,
 ) -> Result<Vec<PreviewStep>, PreviewError> {
     let job = Job {
         job_id: "preview".to_owned(),
@@ -65,24 +57,14 @@ pub fn preview(
 
     plan.steps
         .iter()
-        .map(|planned| preview_step(planned, &validated, allow_list))
+        .map(|planned| preview_step(planned, &validated))
         .collect()
 }
 
 fn preview_step(
     planned: &PlannedStep,
     validated: &ValidatedJob,
-    allow_list: &BTreeMap<String, AllowListedHook>,
 ) -> Result<PreviewStep, PreviewError> {
-    if let Some(step::Kind::Hook(hook)) = &planned.step.kind {
-        return Ok(PreviewStep {
-            step: planned.step.clone(),
-            maintenance: planned.maintenance,
-            command: hook_command(hook, allow_list),
-            environment: Vec::new(),
-        });
-    }
-
     if let Some(step::Kind::Script(script)) = &planned.step.kind {
         return Ok(PreviewStep {
             step: planned.step.clone(),
@@ -100,29 +82,6 @@ fn preview_step(
         command: render(&line),
         environment: line.env().to_vec(),
     })
-}
-
-fn hook_command(hook: &HookStep, allow_list: &BTreeMap<String, AllowListedHook>) -> String {
-    let schema = allow_list.get(&hook.hook_id);
-    let mut parts = vec![
-        format!("hook={}", hook.hook_id),
-        format!("phase={}", phase_name(hook.phase)),
-    ];
-    for parameter in &hook.parameters {
-        let secret = matches!(parameter.typed, Some(Typed::SecretValue(_)))
-            || schema
-                .and_then(|hook| hook.parameters.get(&parameter.name))
-                .is_some_and(HookParameterSpec::secret);
-        let value = match &parameter.typed {
-            _ if secret => MASK.to_owned(),
-            Some(Typed::StringValue(value)) => quote(value),
-            Some(Typed::IntegerValue(value)) => value.to_string(),
-            Some(Typed::BooleanValue(value)) => value.to_string(),
-            Some(Typed::SecretValue(_)) | None => MASK.to_owned(),
-        };
-        parts.push(format!("{}={}", parameter.name, value));
-    }
-    parts.join(" ")
 }
 
 /// The line of a script in the preview: its name, interpreter and phase, never the body or a value.

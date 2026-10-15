@@ -31,6 +31,7 @@ export default defineConfig({
 				group('Getting started', 'Начало работы', [
 					'operations/install-control-plane',
 					'operations/register-an-agent',
+					'operations/migrate-from-resticprofile',
 				]),
 				group('Daily work', 'Ежедневная работа', [
 					'concepts/profiles',
@@ -54,6 +55,7 @@ export default defineConfig({
 					'operations/job-signing-key-recovery',
 					'operations/root-ca-rotation',
 					'operations/enrollment-rate-limit',
+					'operations/security-for-operators',
 					'operations/verify-a-release',
 				]),
 				group('Reference', 'Справочник', [
@@ -61,6 +63,8 @@ export default defineConfig({
 					'concepts/repositories',
 					'operations/metrics',
 					'operations/environment-variables',
+					'operations/api-reference',
+					'operations/glossary',
 				]),
 			],
 		}),

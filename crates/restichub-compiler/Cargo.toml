@@ -12,7 +12,6 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-regex = { workspace = true }
 restichub-proto = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

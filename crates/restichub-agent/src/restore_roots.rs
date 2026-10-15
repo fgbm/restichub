@@ -1,8 +1,8 @@
 //! Where the agent may restore files (FR-RS-03, ADR-0035).
 //!
 //! The agent restores as root or LocalSystem, so a restore target decides which file the agent can
-//! overwrite. Only root or Administrators configure the roots, in a protected file like the hook
-//! allow-list (ADR-0004). A job and the control plane cannot change them.
+//! overwrite. Only root or Administrators configure the roots, in a protected file like the trust
+//! mode file (ADR-0037). A job and the control plane cannot change them.
 
 use std::fmt;
 use std::io;
@@ -89,7 +89,6 @@ impl RestoreAccess {
         protected.push(roots_file_for(config_dir));
         protected.push(crate::paths::program_dir());
         protected.push(crate::paths::data_dir());
-        protected.push(crate::hooks::allow_list_file_for(config_dir));
         protected.push(crate::scripts::mode_file_for(config_dir));
         if let Some(dir) = program.parent() {
             protected.push(dir.to_path_buf());
@@ -123,24 +122,13 @@ impl RestoreAccess {
     ///
     /// Returns the reason when the agent must refuse the target.
     pub fn check(&self, target: &str) -> Result<(), TargetDenied> {
-        self.check_against(target, &[])
-    }
-
-    /// Like [`Self::check`], and the target may not touch the `extra` paths either. The agent
-    /// passes the hook executables, so a restore cannot replace a program that runs as root
-    /// (threat T2).
-    ///
-    /// # Errors
-    ///
-    /// Returns the reason when the agent must refuse the target.
-    pub fn check_against(&self, target: &str, extra: &[PathBuf]) -> Result<(), TargetDenied> {
         let flavor = PathFlavor::host();
         if components(flavor, target).is_none() {
             return Err(TargetDenied::NotAbsolute);
         }
         let resolved = resolve(Path::new(target)).map_err(|_| TargetDenied::Unresolvable)?;
         let resolved = resolved.to_str().ok_or(TargetDenied::NotAbsolute)?;
-        for protected in self.protected.iter().chain(extra) {
+        for protected in &self.protected {
             let Some(path) = protected.to_str() else {
                 continue;
             };
@@ -617,31 +605,16 @@ mod tests {
     }
 
     #[test]
-    fn ac_hk_02_a_restore_cannot_touch_the_hook_allow_list_or_a_hook_executable() {
-        let base = temp_dir("hooks");
+    fn ac_hk_02_a_restore_cannot_touch_the_trust_mode_file() {
+        let base = temp_dir("trust-file");
         let config = base.join("config");
         std::fs::create_dir_all(&config).expect("cannot create the config");
         let access = RestoreAccess::for_host(&config, &base.join("cache"), &base.join("restic"));
-        let allow_list = crate::hooks::allow_list_file_for(&config);
-        assert_eq!(
-            access.check(allow_list.to_str().expect("utf-8")),
-            Err(TargetDenied::ProtectedPath)
-        );
         let mode_file = crate::scripts::mode_file_for(&config);
         assert_eq!(
             access.check(mode_file.to_str().expect("utf-8")),
             Err(TargetDenied::ProtectedPath)
         );
-        let program = base.join("hooks").join("dump");
-        let listed = [program.clone()];
-        for target in [program.clone(), base.join("hooks"), base.clone()] {
-            assert_eq!(
-                access.check_against(target.to_str().expect("utf-8"), &listed),
-                Err(TargetDenied::ProtectedPath),
-                "{}",
-                target.display()
-            );
-        }
         let _ = std::fs::remove_dir_all(&base);
     }
 

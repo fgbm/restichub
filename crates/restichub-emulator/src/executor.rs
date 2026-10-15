@@ -158,7 +158,7 @@ impl Executor for Scripted {
 }
 
 /// Builds the command line of a step (FR-PR-10, ADR-0021). The function
-/// returns `None` for a hook step, because the emulator runs no hook.
+/// returns `None` for a script step, because the emulator runs no script.
 #[must_use]
 pub fn restic_arguments(step: &Step) -> Option<Vec<String>> {
     let mut arguments = Vec::new();
@@ -210,7 +210,7 @@ pub fn restic_arguments(step: &Step) -> Option<Vec<String>> {
             arguments.push("stats".to_owned());
             arguments.push("--json".to_owned());
         }
-        step::Kind::Hook(_) | step::Kind::Script(_) => return None,
+        step::Kind::Script(_) => return None,
     }
     Some(arguments)
 }
@@ -329,7 +329,7 @@ async fn report_progress(seconds: f64, rate: f64, progress: &ProgressSink) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use restichub_proto::agent::v1::{BackupStep, HookStep, LsStep, RestoreStep};
+    use restichub_proto::agent::v1::{BackupStep, LsStep, RestoreStep, ScriptStep};
 
     fn step(kind: step::Kind) -> Step {
         Step {
@@ -391,10 +391,10 @@ mod tests {
     }
 
     #[test]
-    fn a_hook_step_has_no_restic_arguments() {
-        let hook = step(step::Kind::Hook(HookStep::default()));
+    fn a_script_step_has_no_restic_arguments() {
+        let script = step(step::Kind::Script(ScriptStep::default()));
 
-        assert_eq!(restic_arguments(&hook), None);
+        assert_eq!(restic_arguments(&script), None);
     }
 
     #[test]

@@ -84,7 +84,7 @@ impl Scrubber {
         }
     }
 
-    /// Holds the secret values of one hook, so the hook output keeps none of them (FR-HK-03).
+    /// Holds the secret values of one script, so the script output keeps none of them (FR-HK-09).
     pub(crate) fn for_secrets(values: &[Zeroizing<String>]) -> Self {
         let mut secrets: Vec<Zeroizing<String>> = values
             .iter()

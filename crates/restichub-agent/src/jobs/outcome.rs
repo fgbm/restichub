@@ -1,8 +1,8 @@
-//! The typed outcome of a job from what its steps did (FR-AG-09, AC-RP-01, AC-HK-06).
+//! The typed outcome of a job from what its steps did (FR-AG-09, AC-RP-01, AC-HK-13).
 
 use restichub_proto::agent::v1::{ErrorDetail, JobStatus, KeyValue};
 
-use super::hooks::{self, HookFailure};
+use super::phases::{self, ScriptFailure};
 use super::runner::StepError;
 
 /// What the steps of one job did, as input of [`job_outcome`].
@@ -19,8 +19,8 @@ pub(super) struct Progress {
     pub(super) init_invalid: bool,
     /// Exit code 3 of a step: restic finished but could not read some files.
     pub(super) warned: bool,
-    /// Set by the first failed hook, so the job error names it (AC-HK-06).
-    pub(super) hook_failure: Option<HookFailure>,
+    /// Set by the first failed script, so the job error names it (AC-HK-13).
+    pub(super) script_failure: Option<ScriptFailure>,
     pub(super) limit: Option<StepError>,
 }
 
@@ -45,7 +45,7 @@ pub(super) fn job_outcome(progress: &Progress) -> JobStatus {
             _ => JobStatus::Failed,
         };
     }
-    if progress.init_invalid || progress.hook_failure.is_some() {
+    if progress.init_invalid || progress.script_failure.is_some() {
         return JobStatus::Failed;
     }
     if progress.had_init && progress.init_ran {
@@ -73,18 +73,18 @@ fn succeeded(progress: &Progress) -> JobStatus {
 pub(super) fn job_error(outcome: JobStatus, progress: &Progress) -> Option<ErrorDetail> {
     if outcome == JobStatus::Failed
         && progress.stopped_code.is_none()
-        && let Some(failure) = &progress.hook_failure
+        && let Some(failure) = &progress.script_failure
     {
         return Some(ErrorDetail {
             code: "hook_failed".to_owned(),
             params: vec![
                 KeyValue {
                     key: "hook".to_owned(),
-                    value: failure.hook_id.clone(),
+                    value: failure.script_name.clone(),
                 },
                 KeyValue {
                     key: "phase".to_owned(),
-                    value: hooks::phase_name(failure.phase).to_owned(),
+                    value: phases::phase_name(failure.phase).to_owned(),
                 },
             ],
         });
@@ -108,8 +108,8 @@ pub(super) fn job_error(outcome: JobStatus, progress: &Progress) -> Option<Error
     })
 }
 
-/// The error of a job that a restart interrupted before it finished. The agent runs no script or
-/// hook of such a job again (ADR-0037).
+/// The error of a job that a restart interrupted before it finished. The agent runs no script of
+/// such a job again (ADR-0037).
 pub(super) fn interrupted_error() -> ErrorDetail {
     ErrorDetail {
         code: "interrupted".to_owned(),

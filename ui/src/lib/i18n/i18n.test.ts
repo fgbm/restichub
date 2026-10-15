@@ -26,7 +26,9 @@ describe('i18n catalogs (AC-UI-03)', () => {
 	});
 
 	it('maps a known problem code and ignores an unknown one', () => {
-		expect(tErrorCode('forbidden')).toBe('You do not have permission for this operation.');
+		expect(tErrorCode('forbidden')).toBe(
+			'You do not have permission for this operation. Ask an administrator for a role with this right.'
+		);
 		expect(tErrorCode('unknown_code')).toBeUndefined();
 		expect(tErrorCode(undefined)).toBeUndefined();
 	});

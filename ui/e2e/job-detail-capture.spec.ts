@@ -15,6 +15,7 @@ type Labels = {
 	open: RegExp;
 	running: string;
 	succeeded: string;
+	showLog: RegExp;
 };
 
 const EN: Labels = {
@@ -22,7 +23,8 @@ const EN: Labels = {
 	jobs: 'Jobs',
 	open: /Open the job nightly-web/,
 	running: 'Running',
-	succeeded: 'Succeeded'
+	succeeded: 'Succeeded',
+	showLog: /Show the log of/
 };
 
 const RU: Labels = {
@@ -30,7 +32,8 @@ const RU: Labels = {
 	jobs: 'Задания',
 	open: /Открыть задание nightly-web/,
 	running: 'Выполняется',
-	succeeded: 'Успешно'
+	succeeded: 'Успешно',
+	showLog: /Показать журнал шага/
 };
 
 async function signIn(page: Page, labels: Labels): Promise<void> {
@@ -65,7 +68,9 @@ async function capture(page: Page, scheme: string, labels: Labels, suffix: strin
 	] as const) {
 		await page.locator('#jobs-status').selectOption({ label: status });
 		await page.getByRole('link', { name: labels.open }).first().click();
-		await page.locator('.log__line').first().waitFor();
+		if (name === 'finished')
+			await page.getByRole('button', { name: labels.showLog }).first().click();
+		await page.locator('.step-log__line').first().waitFor();
 		await page.waitForTimeout(300);
 		await page.screenshot({ path: `${out}/job-${name}-${scheme}${suffix}.png` });
 		await page.goBack();

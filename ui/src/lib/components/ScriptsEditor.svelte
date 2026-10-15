@@ -14,7 +14,9 @@
 		enableCommand,
 		groupOf,
 		hostProblem,
-		move
+		move,
+		templateDescription,
+		templateName
 	} from '#lib/scripts.ts';
 	import type { Group, ScriptDraft } from '#lib/scripts.ts';
 	import ScriptCard from './ScriptCard.svelte';
@@ -279,11 +281,11 @@
 			<li class="choice">
 				<div class="choice__text">
 					<span class="choice__name">
-						{template.name}
+						{templateName(template)}
 						{#if template.builtin}<Badge tone="accent">{t('scripts.template.builtin')}</Badge>{/if}
 					</span>
 					<span class="choice__meta">
-						{template.description}
+						{templateDescription(template)}
 						· {t(`scripts.interpreter.${template.interpreter}`)}
 						· {t('scripts.template.parameters', { count: template.parameters.length })}
 					</span>
@@ -310,11 +312,11 @@
 			<li class="choice">
 				<div class="choice__text">
 					<span class="choice__name">
-						{template.name}
+						{templateName(template, 'job')}
 						{#if template.builtin}<Badge tone="accent">{t('scripts.template.builtin')}</Badge>{/if}
 					</span>
 					<span class="choice__meta">
-						{template.description}
+						{templateDescription(template, 'job')}
 						· {t('scripts.jobTemplate.count', { count: template.scripts.length })}
 					</span>
 				</div>
