@@ -45,13 +45,20 @@ jobs:
         run: |
           set -euo pipefail
           tag="$(gh api repos/restic/restic/releases/latest --jq .tag_name)"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "unexpected release tag: $tag" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       # The script verifies the signed checksums and the archive hash.
       - name: Fetch and verify restic
+        env:
+          VERSION: ${{ steps.latest.outputs.version }}
         run: >-
           packaging/fetch-restic.sh
           --os linux --arch amd64
-          --version "${{ steps.latest.outputs.version }}"
+          --version "$VERSION"
           --output "$RUNNER_TEMP/restic"
       - name: Use the verified restic
         run: |
