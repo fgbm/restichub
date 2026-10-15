@@ -48,6 +48,7 @@ pub mod restore;
 pub mod routes;
 pub mod schedule;
 pub mod scheduler;
+pub mod scripts;
 pub mod secrets;
 pub mod server;
 pub mod setup;

@@ -42,6 +42,11 @@ pub const BODY_LIMIT: usize = 16 * 1024;
 /// A secret value holds at most 64 KiB bytes. A request holds at most six of them and the metadata,
 /// so the limit is six values plus 4 KiB.
 pub const SECRET_BODY_LIMIT: usize = 6 * 64 * 1024 + 4 * 1024;
+/// Largest request body of a route that carries scripts (FR-HK-09).
+///
+/// A profile holds at most 1 MiB of script text. The JSON escapes of quotes and line breaks add to
+/// it, so the limit is 3 MiB.
+pub const SCRIPT_BODY_LIMIT: usize = 3 * 1024 * 1024;
 
 /// The account create limit for each actor and tenant in one minute (threat T15).
 pub const CREATE_USER_RATE: u32 = 20;

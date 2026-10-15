@@ -65,6 +65,8 @@ pub enum Operation {
     AlertsWrite,
     ChannelsRead,
     ChannelsWrite,
+    ScriptsRead,
+    ScriptsWrite,
     DashboardRead,
 }
 
@@ -107,6 +109,8 @@ impl Operation {
                 | Self::AlertsWrite
                 | Self::ChannelsRead
                 | Self::ChannelsWrite
+                | Self::ScriptsRead
+                | Self::ScriptsWrite
                 | Self::DashboardRead
         )
     }
@@ -128,7 +132,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 35] = [
+    pub const ALL: [Operation; 37] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -163,6 +167,8 @@ impl Operation {
         Operation::AlertsWrite,
         Operation::ChannelsRead,
         Operation::ChannelsWrite,
+        Operation::ScriptsRead,
+        Operation::ScriptsWrite,
         Operation::DashboardRead,
     ];
 
@@ -204,6 +210,8 @@ impl Operation {
             | Operation::AlertsWrite
             | Operation::ChannelsRead
             | Operation::ChannelsWrite
+            | Operation::ScriptsRead
+            | Operation::ScriptsWrite
             | Operation::DashboardRead => OperationClass::Tenant,
         }
     }
@@ -261,6 +269,9 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::AlertsWrite => Role::Admin,
         Operation::ChannelsRead => Role::Admin,
         Operation::ChannelsWrite => Role::Admin,
+        Operation::ScriptsRead => Role::Viewer,
+        // Only an Admin changes code that runs on a host (ADR-0037, threat T33).
+        Operation::ScriptsWrite => Role::Admin,
         Operation::DashboardRead => Role::Viewer,
     }
 }

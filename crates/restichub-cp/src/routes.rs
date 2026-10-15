@@ -12,7 +12,7 @@ use utoipa_axum::router::{UtoipaMethodRouter, UtoipaMethodRouterExt};
 use utoipa_axum::routes;
 
 use crate::context::{Access, Operation};
-use crate::server::{AppState, BODY_LIMIT, SECRET_BODY_LIMIT};
+use crate::server::{AppState, BODY_LIMIT, SCRIPT_BODY_LIMIT, SECRET_BODY_LIMIT};
 
 #[derive(Debug)]
 pub struct Route {
@@ -315,6 +315,78 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/api/v1/script-templates",
+        access: Access::Protected(Operation::ScriptsRead),
+        handler: || routes!(crate::scripts::list_script_templates),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/script-templates",
+        access: Access::Protected(Operation::ScriptsWrite),
+        handler: || {
+            routes!(crate::scripts::create_script_template)
+                .layer(axum::extract::DefaultBodyLimit::max(SCRIPT_BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/script-templates/{id}",
+        access: Access::Protected(Operation::ScriptsRead),
+        handler: || routes!(crate::scripts::get_script_template),
+    },
+    Route {
+        method: "patch",
+        path: "/api/v1/script-templates/{id}",
+        access: Access::Protected(Operation::ScriptsWrite),
+        handler: || {
+            routes!(crate::scripts::update_script_template)
+                .layer(axum::extract::DefaultBodyLimit::max(SCRIPT_BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "delete",
+        path: "/api/v1/script-templates/{id}",
+        access: Access::Protected(Operation::ScriptsWrite),
+        handler: || routes!(crate::scripts::delete_script_template),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/job-templates",
+        access: Access::Protected(Operation::ScriptsRead),
+        handler: || routes!(crate::scripts::list_job_templates),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/job-templates",
+        access: Access::Protected(Operation::ScriptsWrite),
+        handler: || {
+            routes!(crate::scripts::create_job_template)
+                .layer(axum::extract::DefaultBodyLimit::max(SCRIPT_BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/job-templates/{id}",
+        access: Access::Protected(Operation::ScriptsRead),
+        handler: || routes!(crate::scripts::get_job_template),
+    },
+    Route {
+        method: "patch",
+        path: "/api/v1/job-templates/{id}",
+        access: Access::Protected(Operation::ScriptsWrite),
+        handler: || {
+            routes!(crate::scripts::update_job_template)
+                .layer(axum::extract::DefaultBodyLimit::max(SCRIPT_BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "delete",
+        path: "/api/v1/job-templates/{id}",
+        access: Access::Protected(Operation::ScriptsWrite),
+        handler: || routes!(crate::scripts::delete_job_template),
+    },
+    Route {
+        method: "get",
         path: "/api/v1/hooks",
         access: Access::Protected(Operation::AgentsRead),
         handler: || routes!(crate::hooks::list_hooks),
@@ -553,7 +625,7 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::ProfilesWrite),
         handler: || {
             routes!(crate::profiles::create_profile)
-                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+                .layer(axum::extract::DefaultBodyLimit::max(SCRIPT_BODY_LIMIT))
         },
     },
     Route {
@@ -568,7 +640,7 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::ProfilesWrite),
         handler: || {
             routes!(crate::profiles::update_profile)
-                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+                .layer(axum::extract::DefaultBodyLimit::max(SCRIPT_BODY_LIMIT))
         },
     },
     Route {
