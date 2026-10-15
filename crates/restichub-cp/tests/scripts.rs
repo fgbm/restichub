@@ -675,7 +675,7 @@ async fn fr_pr_09_an_agent_without_scripts_v1_never_gets_a_script_step() {
         .await;
     let plan = env.create_plan(profile, agent.id).await;
     let mut agent = env
-        .reconnect_agent(&agent, vec!["hooks-v1".to_owned(), "restore-v1".to_owned()])
+        .reconnect_agent(&agent, vec!["restore-v1".to_owned()])
         .await;
     let job = env
         .enqueue(

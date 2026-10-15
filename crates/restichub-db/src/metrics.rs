@@ -17,8 +17,11 @@ pub const DURATION_BUCKETS: [f64; 10] = [
     1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0, 3600.0,
 ];
 
+/// The upper bounds of the dispatch delay histogram, in seconds. AC-NFR-01 sets the target at 3 s.
+pub const DELAY_BUCKETS: [f64; 10] = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0];
+
 /// Cumulative histogram of the job durations of one kind.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DurationHistogram {
     /// For each bound of [`DURATION_BUCKETS`], the jobs that took at most that long.
     pub buckets: Vec<i64>,
@@ -32,6 +35,8 @@ pub struct MetricsSnapshot {
     /// The time of the last successful backup job of each plan.
     pub last_success: Vec<(PlanId, OffsetDateTime)>,
     pub durations: BTreeMap<&'static str, DurationHistogram>,
+    /// The time from the moment a job may run to the first send, over all kinds (NFR-PERF-01).
+    pub dispatch_delay: DurationHistogram,
     /// Only the final statuses, so that the counter never decreases.
     pub jobs_total: Vec<(JobStatus, i64)>,
     /// For each repository, whether a job that waits or runs reported a held lock.
@@ -97,6 +102,34 @@ pub async fn snapshot(tx: &mut TenantTx<'_>) -> Result<MetricsSnapshot, DbError>
         );
     }
 
+    let mut delay_filters = String::new();
+    for index in 1..=DELAY_BUCKETS.len() {
+        if index > 1 {
+            delay_filters.push_str(", ");
+        }
+        delay_filters.push_str(&format!(
+            "count(*) FILTER (WHERE secs <= ($1::float8[])[{index}])"
+        ));
+    }
+    let delay_query = format!(
+        "WITH sent AS ( \
+             SELECT GREATEST(extract(epoch FROM sent_at - run_at), 0)::float8 AS secs FROM jobs \
+             WHERE sent_at IS NOT NULL) \
+         SELECT count(*), COALESCE(sum(secs), 0)::float8, ARRAY[{delay_filters}]::bigint[] \
+         FROM sent"
+    );
+    let (delay_count, delay_sum, delay_buckets) =
+        sqlx::query_as::<_, (i64, f64, Vec<i64>)>(sqlx::AssertSqlSafe(delay_query))
+            .bind(DELAY_BUCKETS.to_vec())
+            .fetch_one(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    let dispatch_delay = DurationHistogram {
+        buckets: delay_buckets,
+        count: delay_count,
+        sum_seconds: delay_sum,
+    };
+
     let status_rows =
         sqlx::query_as::<_, (String, i64)>("SELECT status, count(*) FROM jobs GROUP BY status")
             .fetch_all(tx.as_conn())
@@ -134,6 +167,7 @@ pub async fn snapshot(tx: &mut TenantTx<'_>) -> Result<MetricsSnapshot, DbError>
     Ok(MetricsSnapshot {
         last_success,
         durations,
+        dispatch_delay,
         jobs_total,
         repo_lock_held,
         agents,

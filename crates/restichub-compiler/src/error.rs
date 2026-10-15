@@ -53,18 +53,6 @@ pub enum CompileError {
         field: FieldPath,
         interpreter: crate::script::ScriptInterpreter,
     },
-    #[error("hook {hook_id:?} is not in the agent allow-list ({field})")]
-    UnknownHook { field: FieldPath, hook_id: String },
-    #[error("hook parameter {name:?} is not in the hook schema ({field})")]
-    UnknownHookParameter { field: FieldPath, name: String },
-    #[error("hook parameter {name:?} is duplicated ({field})")]
-    DuplicateHookParameter { field: FieldPath, name: String },
-    #[error("hook parameter {name:?} does not obey the hook schema ({field})")]
-    InvalidHookParameter { field: FieldPath, name: String },
-    #[error("hook parameter {name:?} is required ({field})")]
-    MissingHookParameter { field: FieldPath, name: String },
-    #[error("hook {hook_id:?} does not run in this phase ({field})")]
-    HookPhaseNotAllowed { field: FieldPath, hook_id: String },
     #[error("option {option} is not available on {os} ({field})")]
     UnsupportedOs {
         field: FieldPath,
@@ -167,21 +155,6 @@ fn validate_cron_field(
 }
 
 impl CompileError {
-    /// True when the error comes from the hooks of the profile: the target agent does not report a
-    /// hook, or reports another schema (AC-HK-05).
-    #[must_use]
-    pub fn is_hook(&self) -> bool {
-        matches!(
-            self,
-            Self::UnknownHook { .. }
-                | Self::UnknownHookParameter { .. }
-                | Self::DuplicateHookParameter { .. }
-                | Self::InvalidHookParameter { .. }
-                | Self::MissingHookParameter { .. }
-                | Self::HookPhaseNotAllowed { .. }
-        )
-    }
-
     /// True when the error comes from the scripts of the profile: the host does not accept them
     /// or lacks the interpreter (FR-HK-10).
     #[must_use]
@@ -202,12 +175,6 @@ impl CompileError {
             | Self::InvalidValue { field }
             | Self::ServerScriptsDisabled { field }
             | Self::InterpreterUnavailable { field, .. }
-            | Self::UnknownHook { field, .. }
-            | Self::UnknownHookParameter { field, .. }
-            | Self::DuplicateHookParameter { field, .. }
-            | Self::InvalidHookParameter { field, .. }
-            | Self::MissingHookParameter { field, .. }
-            | Self::HookPhaseNotAllowed { field, .. }
             | Self::UnsupportedOs { field, .. }
             | Self::IncompatibleOption { field, .. } => Some(field),
             Self::InvalidCron { .. }

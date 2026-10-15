@@ -6,27 +6,27 @@
 
 use std::path::{Path, PathBuf};
 
-use restichub_agent::hooks::Trust;
 use restichub_agent::jobs::Jobs;
 use restichub_agent::scripts::ScriptStore;
+use restichub_agent::trust::Trust;
 use restichub_proto::agent::v1::{
     HookPhase, RejectReason, ScriptEnv, ScriptFailurePolicy, ScriptInterpreter, ScriptStep, Step,
     StepStatus, agent_message, script_env, step,
 };
 use tokio::sync::mpsc;
 
-use super::hooks::{HookFixture, set_mode};
+use super::host::{HostFixture, set_mode};
 use super::{AGENT, Collected, TENANT, ring, signed};
 
 /// The fixture of a host, with the setting file next to the work directory.
 pub struct Host {
-    pub fx: HookFixture,
+    pub fx: HostFixture,
 }
 
 impl Host {
     pub fn new(name: &str) -> Self {
         Self {
-            fx: HookFixture::new(name),
+            fx: HostFixture::new(name),
         }
     }
 

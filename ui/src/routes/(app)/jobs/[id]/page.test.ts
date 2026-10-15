@@ -172,17 +172,94 @@ describe('the job detail screen', () => {
 		expect(screen.queryByText('Signing key')).not.toBeInTheDocument();
 	});
 
-	it('shows the log lines with numbers and levels', async () => {
+	it('shows one log inside the step, collapsed with its counts until it opens', async () => {
+		const user = userEvent.setup();
 		render(JobDetailPage);
 
-		const log = await screen.findByRole('log', { name: 'Job log' });
-		await waitFor(() =>
-			expect(within(log).getByText('snapshot a1b2c3d4 saved')).toBeInTheDocument()
-		);
+		const toggle = await screen.findByRole('button', { name: 'Show the log of Backup' });
+		await waitFor(() => expect(toggle).toHaveTextContent('2 lines · 1 WARN'));
+		expect(screen.queryByRole('log')).not.toBeInTheDocument();
+		expect(screen.queryByText('Live log')).not.toBeInTheDocument();
+
+		await user.click(toggle);
+		const log = await screen.findByRole('log', { name: 'Log of the step: Backup' });
+		expect(within(log).getByText('snapshot a1b2c3d4 saved')).toBeInTheDocument();
 		expect(within(log).getByText('Warning: a file changed')).toBeInTheDocument();
 		expect(within(log).getByText('WARN')).toBeInTheDocument();
 		expect(within(log).getByText('2')).toBeInTheDocument();
 		expect(mocks.getJobLogs).toHaveBeenCalledWith('j_1', { after_seq: 0, limit: 1000 });
+		expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+	});
+
+	it('filters the log of a step by level and by text', async () => {
+		const user = userEvent.setup();
+		render(JobDetailPage);
+
+		await user.click(await screen.findByRole('button', { name: 'Show the log of Backup' }));
+		const log = await screen.findByRole('log');
+		await user.selectOptions(screen.getByRole('combobox', { name: 'Level' }), 'problems');
+		expect(within(log).queryByText('snapshot a1b2c3d4 saved')).not.toBeInTheDocument();
+		expect(within(log).getByText('Warning: a file changed')).toBeInTheDocument();
+		expect(screen.getByText('1 of 2 lines')).toBeInTheDocument();
+
+		await user.selectOptions(screen.getByRole('combobox', { name: 'Level' }), 'all');
+		await user.type(screen.getByRole('searchbox', { name: 'Search the log' }), 'SNAPSHOT');
+		expect(
+			within(screen.getByRole('log')).getByText('snapshot a1b2c3d4 saved')
+		).toBeInTheDocument();
+		expect(screen.queryByText('Warning: a file changed')).not.toBeInTheDocument();
+		await user.type(screen.getByRole('searchbox', { name: 'Search the log' }), 'zzz');
+		expect(screen.getByText('No line matches the filter.')).toBeInTheDocument();
+	});
+
+	it('copies the lines that the filter shows', async () => {
+		const user = userEvent.setup();
+		const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+		render(JobDetailPage);
+
+		await user.click(await screen.findByRole('button', { name: 'Show the log of Backup' }));
+		await user.selectOptions(screen.getByRole('combobox', { name: 'Level' }), 'problems');
+		await user.click(screen.getByRole('button', { name: 'Copy' }));
+		expect(writeText).toHaveBeenCalledWith('2026-10-14T10:01:02Z WARN Warning: a file changed');
+	});
+
+	it('shows lines of no step in the general log and hides the block when it is empty', async () => {
+		mocks.getJobLogs.mockResolvedValue(
+			logPage([line(1, 'snapshot a1b2c3d4 saved'), { ...line(2, 'agent restarted'), step_id: '' }])
+		);
+		const { unmount } = render(JobDetailPage);
+
+		const general = await screen.findByRole('log', { name: 'Log of the step: General log' });
+		expect(within(general).getByText('agent restarted')).toBeInTheDocument();
+		unmount();
+
+		mocks.getJobLogs.mockResolvedValue(logPage([line(1, 'snapshot a1b2c3d4 saved')]));
+		render(JobDetailPage);
+		await screen.findByRole('button', { name: 'Show the log of Backup' });
+		expect(screen.queryByText('General log')).not.toBeInTheDocument();
+	});
+
+	it('downloads the whole log as a text file through the logs API', async () => {
+		const user = userEvent.setup();
+		mocks.getJobLogs.mockImplementation(async (_id: string, query: { after_seq: number }) =>
+			query.after_seq === 0
+				? logPage([line(1, 'first')], { has_more: true })
+				: logPage([line(2, 'second')])
+		);
+		const create = vi.fn(() => 'blob:log');
+		const revoke = vi.fn();
+		Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
+		const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+		render(JobDetailPage);
+
+		await user.click(await screen.findByRole('button', { name: 'Download log' }));
+		await waitFor(() => expect(click).toHaveBeenCalled());
+		const blob = (create.mock.calls[0] as unknown as [Blob])[0];
+		expect(await blob.text()).toBe(
+			'2026-10-14T10:01:02Z INFO first\n2026-10-14T10:01:02Z INFO second\n'
+		);
+		expect(mocks.getJobLogs).toHaveBeenLastCalledWith('j_1', { after_seq: 1, limit: 2000 });
+		expect(revoke).toHaveBeenCalledWith('blob:log');
 	});
 
 	it('shows the progress of the running step and offers the cancel action', async () => {
@@ -214,7 +291,8 @@ describe('the job detail screen', () => {
 		expect(await screen.findByRole('progressbar', { name: 'Progress' })).toHaveValue(0.5);
 		expect(screen.getByText(/64,000 of 128,000 files/)).toBeInTheDocument();
 		expect(screen.getByText(/Now: C:\\Data\\big.psd/)).toBeInTheDocument();
-		expect(screen.getByText('Live log')).toBeInTheDocument();
+		expect(screen.queryByText('Live log')).not.toBeInTheDocument();
+		expect(await screen.findByText('The step wrote no log line.')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Cancel job' })).toBeInTheDocument();
 	});
 
@@ -545,18 +623,14 @@ describe('the job detail screen', () => {
 		expect(cleanup).toHaveTextContent('Finally');
 	});
 
-	it('fr_hk_11_reads_the_log_of_one_step_when_the_step_opens', async () => {
+	it('fr_hk_11_shows_the_lines_of_each_step_in_its_own_log', async () => {
 		const user = userEvent.setup();
 		mocks.getJob.mockResolvedValue(scriptedJob());
-		mocks.getJobLogs.mockImplementation(async (_id: string, query?: { step_id?: string }) =>
-			logPage(
-				query?.step_id === 'script-0'
-					? [stepLine(1, 'script-0', 'dump written: /var/backups/app.dump')]
-					: [
-							stepLine(1, 'script-0', 'dump written: /var/backups/app.dump'),
-							stepLine(2, 'backup', 'snapshot a1b2c3d4 saved')
-						]
-			)
+		mocks.getJobLogs.mockResolvedValue(
+			logPage([
+				stepLine(1, 'script-0', 'dump written: /var/backups/app.dump'),
+				stepLine(2, 'backup', 'snapshot a1b2c3d4 saved')
+			])
 		);
 		render(JobDetailPage);
 
@@ -566,13 +640,8 @@ describe('the job detail screen', () => {
 		const log = await screen.findByTestId('step-log-script-0');
 		expect(within(log).getByText('dump written: /var/backups/app.dump')).toBeInTheDocument();
 		expect(within(log).queryByText('snapshot a1b2c3d4 saved')).not.toBeInTheDocument();
-		await waitFor(() =>
-			expect(mocks.getJobLogs).toHaveBeenCalledWith('j_1', {
-				step_id: 'script-0',
-				after_seq: 0,
-				limit: 500
-			})
-		);
+		// One read serves every step: no request per step.
+		expect(mocks.getJobLogs).toHaveBeenCalledTimes(1);
 		// The step closes again.
 		await user.click(screen.getByRole('button', { name: 'Hide the log of Dump the database' }));
 		expect(screen.queryByTestId('step-log-script-0')).not.toBeInTheDocument();
@@ -591,12 +660,8 @@ describe('the job detail screen', () => {
 				]
 			})
 		);
-		mocks.getJobLogs.mockImplementation(async (_id: string, query?: { step_id?: string }) =>
-			logPage(
-				query?.step_id === 'script-0'
-					? [stepLine(1, 'script-0', 'pg_dump: connection refused')]
-					: []
-			)
+		mocks.getJobLogs.mockResolvedValue(
+			logPage([stepLine(1, 'script-0', 'pg_dump: connection refused')])
 		);
 		render(JobDetailPage);
 
@@ -610,9 +675,7 @@ describe('the job detail screen', () => {
 	it('fr_hk_11_says_that_a_step_wrote_no_log', async () => {
 		const user = userEvent.setup();
 		mocks.getJob.mockResolvedValue(scriptedJob());
-		mocks.getJobLogs.mockImplementation(async (_id: string, query?: { step_id?: string }) =>
-			logPage(query?.step_id ? [] : [line(1, 'x')])
-		);
+		mocks.getJobLogs.mockResolvedValue(logPage([line(1, 'x')]));
 		render(JobDetailPage);
 
 		await user.click(

@@ -20,7 +20,7 @@ The control plane sends a typed refusal and closes the stream. The refusal names
 
 ## Marks on the Hosts screen
 
-The Hosts screen shows the package version of each agent and a mark:
+The Hosts screen shows the package version of each agent in the column "Agent version" and a mark. The tooltip of the version reads "Protocol <protocol> · control plane <version>".
 
 | Mark | Meaning |
 |---|---|
@@ -32,6 +32,16 @@ The agents API has the same facts: `agent_version`, `protocol_version`, `control
 
 ## Build revision in the version
 
-A release build has the package version of the workspace, for example `0.1.0`. The build adds the short revision after a plus sign, for example `0.1.0+3b21922`. A local build adds `+dev`. The command `restichub-agent --version` prints the version. The agent sends the same version when it enrolls and in the first message of each stream. The control plane exposes its own version in the same format.
+A release build has the package version of the workspace, for example `0.1.0`. The build adds the short revision after a plus sign, for example `0.1.0+3b21922`. A local build adds `+dev`. The command `restichub-agent --version` prints the version and the protocol version, for example `restichub-agent 0.1.0+3b21922 (protocol 1.1)`. The agent sends the same version when it enrolls and in the first message of each stream. The control plane exposes its own version in the same format.
 
 The revision does not change the comparison. The mark "Update available" depends on the package version only.
+
+## Upgrade notes
+
+### Hooks removed
+
+The allow-list hooks no longer exist. The control plane drops the hook section of each profile when it upgrades. For each profile that had a hook, the audit log holds one record with the action `profile_hooks_removed`. The record names the profile, and the hook identifiers and phases. It holds no parameter value.
+
+A plan that ran a hook now runs without it, and its jobs can still succeed. Check the audit log after the upgrade. Move each hook to a server script on a host with the trust mode. See [Server scripts](../scripts/).
+
+The agent no longer reads the file `restichub-agent-hooks.toml`. When the file still exists, the agent writes a warning with its path at each start. Delete the file when you no longer need it.

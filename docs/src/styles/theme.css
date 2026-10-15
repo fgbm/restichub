@@ -50,11 +50,9 @@
 .sl-markdown-content th { background: var(--sl-color-gray-7); color: var(--sl-color-gray-3); font-family: var(--sl-font); font-size: .75rem; font-weight: 600; }
 .sl-markdown-content tr:nth-child(2n) { background: none; }
 
-/* Numbered steps. */
-.sl-markdown-content ol { counter-reset: rhstep; list-style: none; padding-inline-start: 0; }
-.sl-markdown-content ol > li { counter-increment: rhstep; position: relative; padding-inline-start: 2.2rem; }
-.sl-markdown-content ol > li::before { content: counter(rhstep); position: absolute; inset-inline-start: 0; top: .1em; width: 1.5rem; height: 1.5rem; display: grid; place-items: center; border-radius: 3px; background: var(--sl-color-accent); color: #fff; font: 600 .75rem var(--sl-font-system-mono); }
-.sl-markdown-content ol > li::marker { content: ''; }
+/* Numbered steps: plain numbers, muted. */
+.sl-markdown-content ol { list-style: decimal; padding-inline-start: 1.5rem; }
+.sl-markdown-content ol > li::marker { color: var(--sl-color-gray-3); }
 
 /* Callouts: like app alert banners, a subtle tint and a 1px border. */
 .starlight-aside { border-radius: var(--rh-radius); border: 1px solid var(--rh-aside-border); background: var(--rh-aside-bg); padding: .75rem 1rem; }

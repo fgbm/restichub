@@ -15,6 +15,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::enums::SecretUsageKind;
 use crate::ids::{SecretId, UserId};
 use crate::tx::TenantTx;
 
@@ -141,6 +142,25 @@ pub async fn get_for_update(
     Ok(row.map(SecretMetadata::from))
 }
 
+/// Reads the metadata of one secret and takes a `FOR KEY SHARE` lock on its row.
+///
+/// A save of an object that references the secret uses this function. A concurrent delete of the
+/// secret waits for the end of the transaction, so the delete sees the new reference and refuses.
+pub async fn get_for_key_share(
+    tx: &mut TenantTx<'_>,
+    id: SecretId,
+) -> Result<Option<SecretMetadata>, DbError> {
+    let row = sqlx::query_as::<_, MetadataRow>(
+        "SELECT id, name, purpose, created_at, updated_at, created_by \
+         FROM secrets WHERE id = $1 FOR KEY SHARE",
+    )
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(SecretMetadata::from))
+}
+
 /// True if it removed the secret, false for a missing secret.
 pub async fn delete(tx: &mut TenantTx<'_>, id: SecretId) -> Result<bool, DbError> {
     let result = sqlx::query("DELETE FROM secrets WHERE id = $1")
@@ -149,6 +169,63 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: SecretId) -> Result<bool, DbError
         .await
         .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
+}
+
+/// One object that references a secret.
+#[derive(Debug, Clone)]
+pub struct SecretUsage {
+    pub secret_id: SecretId,
+    pub kind: SecretUsageKind,
+    pub object_id: Uuid,
+    pub object_name: String,
+}
+
+/// Lists the references of the objects of the tenant to its secrets, ordered by object name.
+///
+/// `only` limits the list to one secret. A repository and a channel name a secret by a foreign
+/// key. A profile and a job template hold the identifier of a hook secret in a script variable of
+/// the kind `secret_ref`, so the match is on that field only (migration 0046 and the script
+/// validation keep the identifier in its canonical form).
+pub async fn list_usage(
+    tx: &mut TenantTx<'_>,
+    only: Option<SecretId>,
+) -> Result<Vec<SecretUsage>, DbError> {
+    let rows = sqlx::query_as::<_, (Uuid, SecretUsageKind, Uuid, String)>(
+        "SELECT s.id, 'repository'::text, r.id, r.name FROM secrets s \
+           JOIN repositories r ON s.id IN (r.password_secret_id, r.s3_access_key_secret_id, \
+                                           r.s3_secret_key_secret_id, r.rest_password_secret_id) \
+         WHERE ($1::uuid IS NULL OR s.id = $1) \
+         UNION ALL \
+         SELECT s.id, 'channel'::text, c.id, c.name FROM secrets s \
+           JOIN notification_channels c ON s.id IN (c.secret_id, c.url_secret_id) \
+         WHERE ($1::uuid IS NULL OR s.id = $1) \
+         UNION ALL \
+         SELECT DISTINCT s.id, 'profile'::text, p.id, p.name FROM profiles p \
+           CROSS JOIN LATERAL jsonb_path_query(p.scripts, \
+                '$[*].env[*] ? (@.kind == \"secret_ref\").value') AS ref(value) \
+           JOIN secrets s ON s.id::text = ref.value #>> '{}' \
+         WHERE ($1::uuid IS NULL OR s.id = $1) \
+         UNION ALL \
+         SELECT DISTINCT s.id, 'job_template'::text, t.id, t.name FROM job_templates t \
+           CROSS JOIN LATERAL jsonb_path_query(t.scripts, \
+                '$[*].env[*] ? (@.kind == \"secret_ref\").value') AS ref(value) \
+           JOIN secrets s ON s.id::text = ref.value #>> '{}' \
+         WHERE ($1::uuid IS NULL OR s.id = $1) \
+         ORDER BY 4, 3",
+    )
+    .bind(only)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows
+        .into_iter()
+        .map(|(secret_id, kind, object_id, object_name)| SecretUsage {
+            secret_id: SecretId::from_uuid(secret_id),
+            kind,
+            object_id,
+            object_name,
+        })
+        .collect())
 }
 
 type MetadataRow = (
