@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Fetch a pinned restic release, verify it against the signed SHA256SUMS of the
-# restic project, and print the SHA-256 of the binary for RESTICHUB_RESTIC_SHA256.
+# Fetch a pinned restic release for the CI tests, verify it against the signed
+# SHA256SUMS of the restic project, and print the SHA-256 of the binary.
+# The agent package does not hold restic. The agent downloads and verifies restic
+# itself (ADR-0038). This script gives the tests a restic with the same checks.
 # The pin and the signing key fingerprint are in restic.env (ADR-0011, ADR-0031).
 set -euo pipefail
 
@@ -15,7 +17,7 @@ key_file="$script_dir/restic-release-key.asc"
 
 usage() {
   cat <<'EOF'
-Usage: fetch-restic.sh --os <linux|windows> --arch <amd64|arm64> --output <dir>
+Usage: fetch-restic.sh --os <linux|windows> --arch <amd64|arm64> --output <dir> [--version <ver>]
 
 Download the pinned restic release, verify the SHA256SUMS signature and the
 archive hash, unpack the binary into <dir>, and print the binary SHA-256.
@@ -25,6 +27,7 @@ Options:
   --os <os>       linux or windows
   --arch <arch>   amd64 or arm64 (windows supports amd64 only)
   --output <dir>  the output directory
+  --version <ver> a restic version instead of the pin (the weekly latest-restic test)
   -h, --help      show this help
 EOF
 }
@@ -32,15 +35,23 @@ EOF
 os=""
 arch=""
 output=""
+version_override=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --os) os="${2:?--os needs a value}"; shift 2 ;;
     --arch) arch="${2:?--arch needs a value}"; shift 2 ;;
     --output) output="${2:?--output needs a value}"; shift 2 ;;
+    --version) version_override="${2:?--version needs a value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [ -n "$version_override" ]; then
+  [[ "$version_override" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: --version must look like 0.19.1" >&2; exit 2; }
+  RESTIC_VERSION="$version_override"
+  release_base="https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}"
+fi
 
 case "$os" in
   linux|windows) ;;

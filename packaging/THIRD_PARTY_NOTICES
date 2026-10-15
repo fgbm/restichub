@@ -1,0 +1,11 @@
+ResticHub agent package
+
+This package contains no restic binary. The agent downloads restic from
+https://github.com/restic/restic/releases when you register the agent or
+install the service, and it verifies the release signature first.
+
+restic is available under the BSD 2-Clause License. The license text is in the
+restic source archive of each release.
+
+The agent contains the public release signing key of the restic project
+(fingerprint CF8F18F2844575973F79D4E191A6868BD3F7A907).

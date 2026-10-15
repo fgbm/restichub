@@ -1,0 +1,67 @@
+name: Latest restic
+
+# The agent downloads the latest restic release (ADR-0038). A new release can
+# change the JSON output that the agent parses. This weekly run executes the
+# real-restic tests against the latest release, so a change shows up before an
+# operator installs it.
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  real-restic:
+    name: Real restic tests (latest release)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: restichub
+          POSTGRES_PASSWORD: restichub
+          POSTGRES_DB: restichub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restichub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RESTICHUB_TEST_DATABASE_URL: postgres://restichub:restichub@localhost:5432/restichub
+    steps:
+      - uses: actions/checkout@v7
+      - name: Find the latest restic release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh api repos/restic/restic/releases/latest --jq .tag_name)"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+      # The script verifies the signed checksums and the archive hash.
+      - name: Fetch and verify restic
+        run: >-
+          packaging/fetch-restic.sh
+          --os linux --arch amd64
+          --version "${{ steps.latest.outputs.version }}"
+          --output "$RUNNER_TEMP/restic"
+      - name: Use the verified restic
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/restic/restic" version
+          echo "RESTICHUB_TEST_RESTIC=$RUNNER_TEMP/restic/restic" >> "$GITHUB_ENV"
+          echo "RESTICHUB_REQUIRE_RESTIC=1" >> "$GITHUB_ENV"
+      # The action reads rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Test the agent against the latest restic
+        run: >-
+          cargo test -p restichub-agent
+          --test restic_jobs --test restic_steps --test restore_real
