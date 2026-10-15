@@ -12,6 +12,8 @@ The agent runs the steps of a signed job with the restic binary of its package. 
 | `backup` | `restic backup` | Files new, changed and unmodified, bytes added, snapshot ID, duration |
 | `check` | `restic check` | Number of errors, repair suggestion |
 | `snapshots` | `restic snapshots` | List of snapshots |
+| `ls` | `restic ls` | One page of the entries of one directory of a snapshot |
+| `restore` | `restic restore` | Files and bytes restored and skipped, duration |
 | `forget` | `restic forget` | Snapshots that the rule kept and removed |
 | `prune` | `restic prune` | Exit code and log |
 | `unlock` | `restic unlock` | Exit code and log |
@@ -21,7 +23,7 @@ The agent runs the steps of a signed job with the restic binary of its package. 
 
 The `unlock` step removes stale locks only. Only the `unlock_all` step removes all locks, including live locks. The control plane creates an `unlock_all` step only from an Admin action with a confirmation.
 
-The agent refuses a job that holds an `ls`, `restore` or `hook` step with the reason `unsupported step`. These steps are not available yet.
+The agent refuses a job that holds a `hook` step with the reason `unsupported step`. This step is not available yet. The agent announces the capability `restore-v1`, which shows that it runs the `ls` and `restore` steps. See [Restore](restore/).
 
 The agent builds the restic arguments from the typed fields of the step. It puts each positional value after `--` and writes each option as `--flag=value`. The agent adds `--json` to the commands that print JSON. A value from a job never becomes an option (ADR-0021).
 
@@ -50,7 +52,7 @@ The agent removes secrets from every log line before it sends the line. It repla
 
 ## When the control plane is not available
 
-The agent finishes a job when the connection to the control plane is down. It keeps the result of every step, the job result and the last 64 KiB of the log in its journal. The journal holds no secrets. When the connection comes back, the agent sends the stored result at once. The journal copy of a step keeps the summary of a backup, a check and the stats. It does not keep the list of snapshots or the forget result.
+The agent finishes a job when the connection to the control plane is down. It keeps the result of every step, the job result and the last 64 KiB of the log in its journal. The journal holds no secrets. When the connection comes back, the agent sends the stored result at once. The journal copy of a step keeps the summary of a backup, a check and the stats. It does not keep the list of snapshots, the page of an `ls` step or the forget result.
 
 ## Bandwidth and priority
 
