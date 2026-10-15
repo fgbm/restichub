@@ -53,6 +53,7 @@ use crate::restic_store::Layout;
 use crate::restore_roots::RestoreAccess;
 use crate::scripts::ScriptStore;
 
+mod command_text;
 mod log;
 mod outcome;
 mod phases;

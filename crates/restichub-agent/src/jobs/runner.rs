@@ -12,13 +12,13 @@ use std::time::Duration;
 
 use restichub_compiler::ValidatedJob;
 use restichub_compiler::arg::build_command;
-use restichub_compiler::masked_command;
 use restichub_proto::agent::v1::{
     AgentMessage, ErrorDetail, LogStream, ProcessPriority, Step, StepProgress, StepStatus,
     agent_message, step, step_result,
 };
 use tokio::sync::mpsc;
 
+use super::command_text::command_line_text;
 use super::log::JobLog;
 use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
@@ -315,14 +315,13 @@ impl Jobs {
             }
         };
         let step_id = step.step_id.as_str();
-        // The text is the one of the preview, so a secret never reaches the log (AC-PF-01).
+        let line = line.with_json();
+        let scrubber = Scrubber::for_command(&line);
         log.push(
             step_id,
             LogStream::Agent,
-            &format!("$ {}", masked_command(&line)),
+            &command_line_text(&scrubber, &line),
         );
-        let line = line.with_json();
-        let scrubber = Scrubber::for_command(&line);
         // The hash check and the start share one opening of the binary (FR-AG-11, threat T20).
         let spawned = self.expected_sha256().and_then(|expected| {
             crate::exec::spawn_job_restic(
