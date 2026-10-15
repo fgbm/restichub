@@ -16,6 +16,7 @@ pub mod keys;
 mod output;
 pub mod paths;
 pub mod pem;
+pub mod preflight;
 pub mod restic;
 pub mod restore_roots;
 pub mod rotation;

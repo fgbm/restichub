@@ -19,6 +19,8 @@ pub use windows::run_as_service;
 /// Returns an error when the service cannot be written or enabled, or when the operating system is
 /// not supported in the MVP.
 pub fn install() -> Result<()> {
+    crate::preflight::ensure_elevated()?;
+    crate::preflight::prepare_directories(&crate::paths::config_dir(), &crate::paths::cache_dir())?;
     #[cfg(target_os = "linux")]
     {
         linux::install()

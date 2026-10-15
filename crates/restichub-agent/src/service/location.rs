@@ -62,12 +62,12 @@ fn check_unix(path: &Path) -> Result<()> {
 
 #[cfg(windows)]
 fn check_target(path: &Path) -> Result<()> {
-    crate::winsec::check_admin_only(path).with_context(|| install_hint())
+    crate::winsec::check_admin_only(path).with_context(install_hint)
 }
 
 #[cfg(windows)]
 fn check_parent_dir(path: &Path) -> Result<()> {
-    crate::winsec::check_parent(path).with_context(|| install_hint())
+    crate::winsec::check_parent(path).with_context(install_hint)
 }
 
 #[cfg(windows)]

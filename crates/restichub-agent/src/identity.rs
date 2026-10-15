@@ -267,7 +267,7 @@ pub fn generate_key_and_csr() -> Result<(GeneratedKey, Vec<u8>)> {
 }
 
 /// A path next to `dir` with the given suffix, so both stay on one file system.
-fn sibling(dir: &Path, suffix: &str) -> std::path::PathBuf {
+pub(crate) fn sibling(dir: &Path, suffix: &str) -> std::path::PathBuf {
     let name = dir
         .file_name()
         .and_then(|name| name.to_str())

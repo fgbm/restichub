@@ -18,26 +18,34 @@ use crate::restic::{Restic, ResticBinary};
 ///
 /// Returns an error when the runtime cannot start, or from [`register_async`].
 pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
+    crate::preflight::ensure_elevated()?;
     let restic = ResticBinary::locate()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("cannot start the runtime")?;
-    runtime.block_on(register_async(options, dir, &restic))
+    runtime.block_on(register_async(
+        options,
+        dir,
+        &crate::paths::cache_dir(),
+        &restic,
+    ))
 }
 
 /// Enrolls this host and writes the identity into `dir` (FR-IN-07).
 ///
 /// The one-time token is read from the given source and never stored or logged (ADR-0032). The
-/// restic binary is verified before the network and before the version is read (FR-AG-11).
+/// directories are made and proven writable, and the restic binary is verified, before the network
+/// is used, so a failure never spends the token (FR-IN-07, FR-AG-11).
 ///
 /// # Errors
 ///
-/// Returns an error when the identity already exists without `--force`, when restic is not the
-/// pinned binary, or when the control plane refuses the enrollment.
+/// Returns an error when the identity already exists without `--force`, when a directory is not
+/// ready, when restic is not the pinned binary, or when the control plane refuses the enrollment.
 pub async fn register_async(
     options: &RegisterOptions,
     dir: &Path,
+    cache: &Path,
     restic: &dyn Restic,
 ) -> Result<()> {
     let url = options
@@ -51,6 +59,7 @@ pub async fn register_async(
             dir.display()
         );
     }
+    crate::preflight::prepare_directories(dir, cache)?;
 
     let facts = Facts {
         hostname: hostname()?,
@@ -108,6 +117,8 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
         .with_context(|| format!("no agent identity in {}", dir.display()))?;
     // Rebuild the key ring, so a job that the current key signed verifies (ADR-0026, ADR-0030).
     let mut keys = crate::keys::KeyState::load(&identity, dir)?;
+    let cache = crate::paths::cache_dir();
+    crate::preflight::prepare_cache(&cache)?;
     let restic = ResticBinary::locate()?;
     restic.verify()?;
     let restic_version = restic.version().unwrap_or_default();
@@ -116,7 +127,7 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let jobs = crate::jobs::Jobs::open(
         restic.path().to_path_buf(),
         crate::restic::EXPECTED_SHA256.to_owned(),
-        crate::paths::cache_dir(),
+        cache,
         dir,
     )?;
     tracing::info!(
