@@ -74,7 +74,7 @@
 			value: (row) => (row.enabled ? t('common.enabled') : t('common.disabled')),
 			render: stateCell
 		},
-		{ key: 'created_at', header: t('common.createdAt'), render: createdCell }
+		{ key: 'created_at', header: t('common.createdAt'), nowrap: true, render: createdCell }
 	]);
 
 	function targetOf(channel: NotificationChannel): string {

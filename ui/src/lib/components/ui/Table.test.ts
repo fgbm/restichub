@@ -46,6 +46,25 @@ describe('Table', () => {
 		expect(container.querySelectorAll('tbody tr')).toHaveLength(10);
 	});
 
+	it('keeps a nowrap column on one line', () => {
+		const { container } = render(Table, {
+			props: {
+				columns: [{ key: 'name', header: 'Name', nowrap: true }],
+				rows,
+				rowKey: (row) => row.id
+			}
+		});
+		expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveClass('table__cell--nowrap');
+		const cells = container.querySelectorAll('tbody td');
+		expect(cells).toHaveLength(2);
+		for (const cell of cells) expect(cell).toHaveClass('table__cell--nowrap');
+	});
+
+	it('wraps a column that has no nowrap flag', () => {
+		const { container } = render(Table, { props: { columns, rows, rowKey: (row) => row.id } });
+		expect(container.querySelector('.table__cell--nowrap')).toBeNull();
+	});
+
 	it('renders the row actions', () => {
 		const rowActions = createRawSnippet<[Row]>((row) => ({
 			render: () => `<button type="button">Open ${row().id}</button>`

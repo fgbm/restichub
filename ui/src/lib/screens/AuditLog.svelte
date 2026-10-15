@@ -149,6 +149,7 @@
 	const columns = $derived<TableColumn<AuditRecord>[]>([
 		{
 			key: 'occurred_at',
+			nowrap: true,
 			header: t('audit.columns.time'),
 			value: (row) => row.occurred_at,
 			render: timeCell

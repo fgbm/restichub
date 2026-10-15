@@ -29,13 +29,14 @@
 	import {
 		isLive,
 		limitLines,
+		shortKeyId,
 		markerOf,
 		statsOf,
 		stepProgress,
 		stepRows
 	} from '#lib/job-detail.ts';
 	import type { StepRow } from '#lib/job-detail.ts';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -74,6 +75,7 @@
 	let cancelOpen = $state(false);
 	let cancelling = $state(false);
 	let rerunning = $state(false);
+	let keyCopied = $state(false);
 	let busy = false;
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
@@ -134,9 +136,19 @@
 			current.result_message ??
 			(current.result_code === 'repository_locked' ? current.result_code : null);
 		if (!code) return null;
-		const key = `jobs.reason.${code}` as MessageKey;
-		const text = t(key);
-		return text === key ? code : text;
+		return tOr(`jobs.reason.${code}`, code);
+	}
+
+	async function copyKeyId(keyId: string): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(keyId);
+			keyCopied = true;
+			setTimeout(() => {
+				keyCopied = false;
+			}, 1500);
+		} catch {
+			keyCopied = false;
+		}
 	}
 
 	function stepTitle(stepId: string): string {
@@ -561,6 +573,18 @@
 						<dt>{t('jobDetail.attempt')}</dt>
 						<dd>{job.attempt + 1}</dd>
 					{/if}
+					{#if job.signing_key_id}
+						<dt>{t('jobDetail.signingKey')}</dt>
+						<dd class="about__key">
+							<span class="mono" title={job.signing_key_id}>{shortKeyId(job.signing_key_id)}</span>
+							<Button
+								size="sm"
+								icon={keyCopied ? 'check' : 'copy'}
+								aria-label={keyCopied ? t('common.copied') : t('jobDetail.signingKey.copy')}
+								onclick={() => copyKeyId(job?.signing_key_id ?? '')}
+							/>
+						</dd>
+					{/if}
 				</dl>
 			</Panel>
 		</aside>
@@ -852,6 +876,12 @@
 
 	.about__line {
 		display: block;
+	}
+
+	.about__key {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
 	}
 
 	.about dt,

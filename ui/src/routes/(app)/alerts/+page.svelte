@@ -67,6 +67,7 @@
 		},
 		{
 			key: 'opened_at',
+			nowrap: true,
 			header: t('alerts.opened'),
 			value: (row) => row.opened_at,
 			render: openedCell

@@ -140,6 +140,7 @@
 		},
 		{
 			key: 'last_seen_at',
+			nowrap: true,
 			header: t('hosts.lastSeen'),
 			value: (row) => row.last_seen_at ?? '',
 			render: lastSeenCell
@@ -150,7 +151,7 @@
 			value: (row) => row.certificate_expires_at,
 			render: certificateCell
 		},
-		{ key: 'created_at', header: t('hosts.created'), render: createdCell }
+		{ key: 'created_at', header: t('hosts.created'), nowrap: true, render: createdCell }
 	]);
 
 	let scriptsTarget = $state<Agent | null>(null);

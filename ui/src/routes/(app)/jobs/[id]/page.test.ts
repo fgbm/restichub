@@ -150,6 +150,28 @@ describe('the job detail screen', () => {
 		expect(summary.getByText('128,260')).toBeInTheDocument();
 	});
 
+	it('fr_mn_02_shows_the_signing_key_with_a_copy_button', async () => {
+		const user = userEvent.setup();
+		const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+		mocks.getJob.mockResolvedValue(job({ signing_key_id: '3f9c2a71-5b4e-4d08-9a6c-1e7d0b8f42ac' }));
+		render(JobDetailPage);
+
+		const key = await screen.findByText('3f9c2a71');
+		expect(key).toHaveClass('mono');
+		expect(key).toHaveAttribute('title', '3f9c2a71-5b4e-4d08-9a6c-1e7d0b8f42ac');
+		expect(screen.getByText('Signing key')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Copy the signing key ID' }));
+		expect(writeText).toHaveBeenCalledWith('3f9c2a71-5b4e-4d08-9a6c-1e7d0b8f42ac');
+	});
+
+	it('fr_mn_02_hides_the_signing_key_of_a_job_that_was_not_sent', async () => {
+		mocks.getJob.mockResolvedValue(job({ signing_key_id: null }));
+		render(JobDetailPage);
+
+		await screen.findByText('About this job');
+		expect(screen.queryByText('Signing key')).not.toBeInTheDocument();
+	});
+
 	it('shows the log lines with numbers and levels', async () => {
 		render(JobDetailPage);
 

@@ -39,6 +39,8 @@ export interface TableColumn<T> {
 	mono?: boolean;
 	/** Sort the column. Default: `true`. */
 	sortable?: boolean;
+	/** Keep the cell on one line, for a date, a relative time or a status. */
+	nowrap?: boolean;
 	/** Align the cell text. Default: `left`. */
 	align?: 'left' | 'right' | 'center';
 	/** Value used for sorting and filtering. Default: `String(row[key])`. */
