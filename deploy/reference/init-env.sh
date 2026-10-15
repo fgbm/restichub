@@ -1,7 +1,9 @@
 #!/usr/bin/env sh
 # Writes the environment file of the reference stack with random secrets.
 #
-# Usage: ./init-env.sh <domain> <acme-email> [<image-tag>]
+# Usage: ./init-env.sh <domain> <acme-email> <image>
+# The image is a verified reference with a digest, for example
+# ghcr.io/fgbm/restichub-cp@sha256:<digest>. See the guide "Verify a release".
 # The script refuses to overwrite an existing file.
 
 set -eu
@@ -12,13 +14,13 @@ if [ -e "$target" ]; then
 	echo "$target already exists; remove it to generate a new one" >&2
 	exit 1
 fi
-if [ "$#" -lt 2 ]; then
-	echo "usage: $0 <domain> <acme-email> [<image-tag>]" >&2
+if [ "$#" -ne 3 ]; then
+	echo "usage: $0 <domain> <acme-email> <image>" >&2
 	exit 2
 fi
 domain="$1"
 acme_email="$2"
-tag="${3:-0.1.0}"
+image="$3"
 
 # The key encryption key is decoded as standard base64 and must hold 32 bytes.
 random() {
@@ -34,7 +36,7 @@ RESTICHUB_RUNTIME_PASSWORD=$(random)
 RESTICHUB_KEK=$(random)
 RESTICHUB_DOMAIN=$domain
 RESTICHUB_ACME_EMAIL=$acme_email
-RESTICHUB_IMAGE_TAG=$tag
+RESTICHUB_IMAGE=$image
 RESTICHUB_AGENT_ENDPOINT=https://$domain:8443
 RESTICHUB_TENANCY_MODE=single
 RESTICHUB_TRUSTED_PROXIES=172.28.0.0/24

@@ -4,13 +4,13 @@ This directory holds a neutral Compose stack for one host: PostgreSQL, the contr
 
 ## Use the stack
 
-1. Check out the release tag, and [verify the image](../../docs/src/content/docs/operations/verify-a-release.md).
+1. Check out the release tag, and [verify the image](../../docs/src/content/docs/operations/verify-a-release.md). The guide shows how to read the digest of the image.
 2. Point a DNS record to the host. Open port 80, port 443 and port 8443.
 3. Create the environment file:
 
    ```sh
    cd deploy/reference
-   ./init-env.sh restichub.example.com admin@example.com 0.1.0
+   ./init-env.sh restichub.example.com admin@example.com ghcr.io/fgbm/restichub-cp@sha256:<digest>
    ```
 
 4. Start the stack:

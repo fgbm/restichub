@@ -15,8 +15,9 @@ Each release of ResticHub carries a keyless signature for each file and for each
 
 ## What you need
 
-Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) version 2 or later. Set the identity that you expect. The identity is the release workflow at the tag that you verify:
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) version 3.0 or later. Version 2 does not find the signatures of the image. Set the identity that you expect. The identity is the release workflow at the tag that you verify:
 
+<!-- ci-run -->
 ```sh
 VERSION=0.1.0
 IDENTITY="https://github.com/fgbm/restichub/.github/workflows/release.yml@refs/tags/v${VERSION}"
@@ -28,6 +29,7 @@ ISSUER=https://token.actions.githubusercontent.com
 1. Download the files of the release into a new empty directory.
 2. Verify the signature of `SHA256SUMS`:
 
+   <!-- ci-run -->
    ```sh
    cosign verify-blob \
      --bundle SHA256SUMS.sigstore.json \
@@ -39,12 +41,14 @@ ISSUER=https://token.actions.githubusercontent.com
    The command prints `Verified OK`.
 3. Check the files against the list:
 
+   <!-- ci-run -->
    ```sh
    sha256sum --check --ignore-missing SHA256SUMS
    ```
 
 4. To verify one file alone, use its bundle:
 
+   <!-- ci-run -->
    ```sh
    cosign verify-blob \
      --bundle "restichub-agent-${VERSION}-linux-amd64.tar.gz.sigstore.json" \
@@ -59,31 +63,38 @@ Do not install a file when a command fails. A pre-release tag, for example `v0.1
 
 Verify the image by its digest. A tag can move, and a digest cannot:
 
+<!-- ci-run -->
 ```sh
+IMAGE=ghcr.io/fgbm/restichub-cp
+DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)
 cosign verify \
   --certificate-identity "$IDENTITY" \
   --certificate-oidc-issuer "$ISSUER" \
-  "ghcr.io/fgbm/restichub-cp:${VERSION}"
+  "$IMAGE@$DIGEST"
 ```
 
-The command prints the digest that it verified. Use `ghcr.io/fgbm/restichub-cp@sha256:<digest>` in your Compose file to pin it.
+The command checks the signature of the digest that the tag points to. Use `ghcr.io/fgbm/restichub-cp@sha256:<digest>` with that digest, and not the tag, in your Compose file. The reference stack takes the reference in `RESTICHUB_IMAGE`.
 
 ## Read the SBOM
 
 The SBOM files use the CycloneDX 1.5 JSON format. The SBOM of each platform image is also attached to the platform image as a signed attestation. Read the digest of the platform first:
 
+<!-- ci-run -->
 ```sh
-IMAGE=ghcr.io/fgbm/restichub-cp
-DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' \
+PLATFORM_DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' \
   | jq -r '.manifests[] | select(.platform.architecture=="amd64") | .digest')
 cosign verify-attestation --type cyclonedx \
   --certificate-identity "$IDENTITY" \
   --certificate-oidc-issuer "$ISSUER" \
-  "$IMAGE@$DIGEST" \
+  "$IMAGE@$PLATFORM_DIGEST" \
   | jq -r '.payload' | base64 -d | jq '.predicate.components | length'
 ```
 
 Use any CycloneDX tool, for example `grype sbom:<file>`, to match the components against vulnerability data.
+
+## Reproduce a Linux package
+
+The Linux agent packages are reproducible. A build of the same commit with the same toolchain gives the same archive bytes. The workflow sets `SOURCE_DATE_EPOCH` to the commit time and maps the build paths with `--remap-path-prefix`. It writes each archive with sorted entries, a fixed owner and a fixed time. The SBOM files hold their generation time. The Windows package and the images are not checked for this property.
 
 ## Windows
 

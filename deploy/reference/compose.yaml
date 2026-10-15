@@ -38,9 +38,10 @@ services:
         max-size: '10m'
         max-file: '3'
 
-  # Creates the cluster roles once and sets the installation passwords. The
-  # script reads each password from the environment with `\getenv`, so a
-  # password never appears in the process arguments.
+  # Creates the cluster roles once and sets the installation passwords. Each `\password`
+  # hashes its password on the client (SCRAM), as `bootstrap-roles.sql` asks, so the server
+  # and its log never see a password in clear text. The shell built-in `printf` passes the
+  # passwords on stdin, so they never appear in the process arguments.
   db-bootstrap:
     image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     restart: 'no'
@@ -64,12 +65,10 @@ services:
           -v app_role=restichub_app -v auth_role=restichub_auth \
           -v owner_role=restichub_owner -v runtime_role=restichub_runtime \
           -f /bootstrap-roles.sql
-        psql -v ON_ERROR_STOP=1 -d postgres <<'SQL'
-        \getenv owner_password OWNER_PASSWORD
-        \getenv runtime_password RUNTIME_PASSWORD
-        \getenv database DATABASE
-        ALTER ROLE restichub_owner PASSWORD :'owner_password';
-        ALTER ROLE restichub_runtime PASSWORD :'runtime_password';
+        printf '%s\n' '\password restichub_owner' "$$OWNER_PASSWORD" "$$OWNER_PASSWORD" \
+          '\password restichub_runtime' "$$RUNTIME_PASSWORD" "$$RUNTIME_PASSWORD" \
+          | psql -v ON_ERROR_STOP=1 -d postgres >/dev/null
+        psql -v ON_ERROR_STOP=1 -d postgres -v database="$$DATABASE" <<'SQL'
         ALTER DATABASE :"database" OWNER TO restichub_owner;
         SQL
     logging:
@@ -80,7 +79,7 @@ services:
 
   # Applies the migrations as the owner login and stops.
   migrate:
-    image: ghcr.io/fgbm/restichub-cp:${RESTICHUB_IMAGE_TAG:?set RESTICHUB_IMAGE_TAG in the environment file}
+    image: ${RESTICHUB_IMAGE:?set RESTICHUB_IMAGE in the environment file}
     restart: 'no'
     depends_on:
       db-bootstrap:
@@ -97,7 +96,7 @@ services:
 
   # Serves the control plane and the embedded web UI.
   cp:
-    image: ghcr.io/fgbm/restichub-cp:${RESTICHUB_IMAGE_TAG:?set RESTICHUB_IMAGE_TAG in the environment file}
+    image: ${RESTICHUB_IMAGE:?set RESTICHUB_IMAGE in the environment file}
     restart: unless-stopped
     depends_on:
       migrate:
