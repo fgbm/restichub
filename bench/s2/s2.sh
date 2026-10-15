@@ -446,14 +446,17 @@ restart_test() {
 	done
 	elapsed=$((${reconnected:-$now} - started))
 	local offline
-	offline="$(api GET "/api/v1/alerts?status=all&limit=200" | jq '[.items[] | select(.kind=="agent_offline")] | length')"
+	# Only the alerts that opened after the restart count: agents that wait for the load stay
+	# silent for 30 minutes and open their alert before the test starts.
+	offline="$(api GET "/api/v1/alerts?status=all&limit=200" |
+		jq --arg since "$(date -u -d "@$started" +%Y-%m-%dT%H:%M:%SZ)" '[.items[] | select(.kind=="agent_offline" and .opened_at >= $since)] | length')"
 	{
 		echo "# Restart test (AC-ID-06)"
 		echo
 		echo "- Agents connected before: $before"
 		echo "- Agents connected after: $up"
 		echo "- Reconnect time: $elapsed s (limit $RECONNECT_LIMIT_SECONDS s), measured from the restart command"
-		echo "- Alerts of the kind agent_offline: $offline"
+		echo "- Alerts of the kind agent_offline opened after the restart: $offline"
 	} | tee "$OUT/restart-report.md"
 	[ -n "$reconnected" ] && [ "$elapsed" -le "$RECONNECT_LIMIT_SECONDS" ] && [ "$offline" -eq 0 ]
 }
