@@ -66,6 +66,10 @@ const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// The largest number of jobs that the agent runs at the same time (ADR-0020).
 const MAX_CONCURRENT_JOBS: usize = 4;
 
+/// The largest number of browse jobs (`snapshots` and `ls`) at the same time. They have their own
+/// room, so a person who browses cannot make a scheduled backup `Busy` (ADR-0035).
+const MAX_BROWSE_JOBS: usize = 2;
+
 /// The action that [`Jobs::handle`] takes after it consults the journal (ADR-0020).
 enum Dispatch {
     Rejected(RejectReason),
@@ -87,6 +91,8 @@ pub struct Jobs {
     cache: PathBuf,
     journal: Arc<Mutex<FileJournal>>,
     running: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    /// Identifiers of the running jobs that use the room of [`MAX_BROWSE_JOBS`] only.
+    browse: Arc<Mutex<HashSet<String>>>,
     /// The stream that is open at this moment, or `None` between two connections (ADR-0020). A
     /// result goes through the current stream, not through the one that delivered the job.
     connection: Arc<Mutex<Option<mpsc::Sender<AgentMessage>>>>,
@@ -124,6 +130,7 @@ impl Jobs {
             cache,
             journal: Arc::new(Mutex::new(journal)),
             running: Arc::new(Mutex::new(HashMap::new())),
+            browse: Arc::new(Mutex::new(HashSet::new())),
             connection: Arc::new(Mutex::new(None)),
             written: Arc::new(Mutex::new(0)),
             resent: Arc::new(Mutex::new(HashSet::new())),
@@ -219,7 +226,7 @@ impl Jobs {
                 } else {
                     // The stream dropped after the admission; the control plane delivers the job
                     // again and the journal answers that replay (ADR-0020).
-                    lock(&self.running).remove(&job_id);
+                    self.release(&job_id);
                 }
             }
         }
@@ -240,7 +247,14 @@ impl Jobs {
         }
         // The agent refuses a new job beyond the cap, so the host never runs an unbounded number of
         // restic processes.
-        if running.len() >= MAX_CONCURRENT_JOBS || !journal.make_room(now) {
+        let browse = is_browse(job);
+        let browse_running = lock(&self.browse).len();
+        let full = if browse {
+            browse_running >= MAX_BROWSE_JOBS
+        } else {
+            running.len().saturating_sub(browse_running) >= MAX_CONCURRENT_JOBS
+        };
+        if full || !journal.make_room(now) {
             return Dispatch::Rejected(RejectReason::Busy);
         }
         let expires_at = job.expires_at.unwrap_or(now);
@@ -251,7 +265,16 @@ impl Jobs {
         };
         let cancel = CancelHandle::new();
         running.insert(job.job_id.clone(), cancel.clone());
+        if browse {
+            lock(&self.browse).insert(job.job_id.clone());
+        }
         Dispatch::Run { cancel, snapshot }
+    }
+
+    /// Frees the room of a job that stopped.
+    fn release(&self, job_id: &str) {
+        lock(&self.running).remove(job_id);
+        lock(&self.browse).remove(job_id);
     }
 
     /// Writes a journal snapshot off the async workers: the write waits for the disk (FR-AG-04).
@@ -267,7 +290,7 @@ impl Jobs {
         let snapshot = {
             let mut journal = lock(&self.journal);
             journal.forget(job_id);
-            lock(&self.running).remove(job_id);
+            self.release(job_id);
             journal.snapshot()
         };
         if let Err(error) = self.write_journal(snapshot).await {
@@ -532,7 +555,7 @@ impl Jobs {
         if let Err(error) = self.write_journal(snapshot).await {
             tracing::warn!(%error, "cannot write the job journal");
         }
-        lock(&self.running).remove(&job_id);
+        self.release(&job_id);
         // The step results and the log went out while the job ran. The stored copy goes out at
         // every connection until the entry expires (ADR-0020, FR-AG-12).
         let _ = self
@@ -639,6 +662,17 @@ fn verify_and_validate(
 /// The step kinds that the agent runs (FR-PR-02). The `hook` step belongs to the hook epic.
 fn is_supported(kind: &step::Kind) -> bool {
     !matches!(kind, step::Kind::Hook(_))
+}
+
+/// True for a job that only lists snapshots or the files of one (ADR-0035).
+fn is_browse(job: &restichub_proto::agent::v1::Job) -> bool {
+    !job.steps.is_empty()
+        && job.steps.iter().all(|step| {
+            matches!(
+                step.kind,
+                Some(step::Kind::Snapshots(_) | step::Kind::Ls(_))
+            )
+        })
 }
 
 /// The repository that a step acts on (FR-RP-02).

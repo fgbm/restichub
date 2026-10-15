@@ -407,3 +407,50 @@ async fn fr_rs_03_a_link_to_the_configuration_directory_is_rejected() {
     ));
     let _ = std::fs::remove_file(&link);
 }
+
+/// ADR-0035: two browse jobs fill the room of the browse jobs, a third one is `Busy`, and a backup
+/// still starts.
+#[tokio::test(flavor = "multi_thread")]
+async fn adr_0035_browse_jobs_have_their_own_room() {
+    let slow = Fixture::new("browse-cap-slow");
+    std::fs::write(format!("{}.restichub-sleep", slow.path.display()), "2500")
+        .expect("cannot script the delay");
+    let other = Fixture::new("browse-cap-other");
+    let jobs = program_jobs(&slow.dir);
+    let (tx, mut rx) = mpsc::channel(64);
+    jobs.attach(&tx);
+
+    for index in 0..3 {
+        let job = slow.job(
+            &format!("job-browse-{index}"),
+            vec![ls_step("repo-1", "0123abcd", "/data", 0, 10)],
+        );
+        jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    }
+    let backup = other.job("job-backup", vec![backup_step("repo-1", &["/data"])]);
+    jobs.handle(signed(&backup), &ring(), AGENT, TENANT).await;
+
+    let mut acked = Vec::new();
+    let mut busy = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while acked.len() + busy.len() < 4 && Instant::now() < deadline {
+        let Ok(Some(message)) = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
+        else {
+            continue;
+        };
+        match message.payload {
+            Some(agent_message::Payload::JobAck(ack)) => acked.push(ack.job_id),
+            Some(agent_message::Payload::JobRejected(rejected)) => {
+                assert_eq!(
+                    RejectReason::try_from(rejected.reason).ok(),
+                    Some(RejectReason::Busy)
+                );
+                busy.push(rejected.job_id);
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(busy, vec!["job-browse-2".to_owned()], "{acked:?}");
+    assert!(acked.contains(&"job-backup".to_owned()), "{acked:?}");
+    assert!(acked.contains(&"job-browse-0".to_owned()));
+}
