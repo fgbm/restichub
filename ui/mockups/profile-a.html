@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Профиль, вариант A · ResticHub</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<link rel="stylesheet" href="profile-mock.css" />
+		<script src="mockups.js"></script>
+		<script src="profile-mock.js"></script>
+	</head>
+	<body>
+		<div data-shell="profile" data-crumb="srv-web-nightly"></div>
+		<div class="pm-mock-bar"><b>Макет редактора профиля: полная страница</b><span>Другие макеты: <a href="profiles.html">список</a></span></div>
+		<main class="page page--wide" data-scope="edit" data-open-sec="basics,paths">
+			<div class="page-header">
+				<div>
+					<h1 class="page-title">Изменить профиль</h1>
+					<p class="page-subtitle">Слева разделы с отметкой «включено» и итогом, справа живая сводка и команды. Разделы раскрываются по одному.</p>
+				</div>
+				<div class="page-actions"><button class="btn" type="button" data-expand-all="open"><svg class="icon icon--xs"><use href="icons.svg#i-chevron-down" /></svg> Развернуть всё</button><button class="btn" type="button" data-expand-all="close"><svg class="icon icon--xs"><use href="icons.svg#i-chevron-up" /></svg> Свернуть всё</button></div>
+			</div>
+
+			<div class="pm-editor">
+				<nav class="pm-index" aria-label="Разделы профиля">
+					<div class="pm-index-title"><span>Разделы</span><span data-count-on></span></div>
+					<a href="#sec-basics"><span class="pm-dot" data-dot="basics"></span><span class="t">Основное</span><span class="s" data-sum="basics"></span></a>
+<a href="#sec-paths"><span class="pm-dot" data-dot="paths"></span><span class="t">Что копировать</span><span class="s" data-sum="paths"></span></a>
+<a href="#sec-excludes"><span class="pm-dot" data-dot="excludes"></span><span class="t">Исключения</span><span class="s" data-sum="excludes"></span></a>
+<a href="#sec-tags"><span class="pm-dot" data-dot="tags"></span><span class="t">Теги</span><span class="s" data-sum="tags"></span></a>
+<a href="#sec-options"><span class="pm-dot" data-dot="options"></span><span class="t">Параметры копирования</span><span class="s" data-sum="options"></span></a>
+<a href="#sec-retention"><span class="pm-dot" data-dot="retention"></span><span class="t">Хранение</span><span class="s" data-sum="retention"></span></a>
+<a href="#sec-check"><span class="pm-dot" data-dot="check"></span><span class="t">Проверка репозитория</span><span class="s" data-sum="check"></span></a>
+<a href="#sec-scripts"><span class="pm-dot" data-dot="scripts"></span><span class="t">Скрипты на хосте</span><span class="s" data-sum="scripts"></span></a>
+<a href="#sec-limits"><span class="pm-dot" data-dot="limits"></span><span class="t">Лимиты выполнения</span><span class="s" data-sum="limits"></span></a>
+				</nav>
+				<div class="pm-main">
+				<section class="pm-sec" data-section id="basics">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-basics">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="basics"></span>
+							<span class="pm-sec-title">Основное<span class="req" title="Обязательно">*</span></span>
+							<span class="pm-sec-sum" data-sum="basics"></span>
+						</button>
+						
+					</div>
+					<div class="pm-sec-body" id="sec-basics" data-sec-body="basics" hidden>
+						
+						<div class="pm-fields"><div data-block="basics"></div></div>
+					</div>
+				</section>
+				<section class="pm-sec" data-section id="paths">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-paths">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="paths"></span>
+							<span class="pm-sec-title">Что копировать<span class="req" title="Обязательно">*</span></span>
+							<span class="pm-sec-sum" data-sum="paths"></span>
+						</button>
+						
+					</div>
+					<div class="pm-sec-body" id="sec-paths" data-sec-body="paths" hidden>
+						
+						<div class="pm-fields"><div data-block="paths"></div></div>
+					</div>
+				</section>
+				<section class="pm-sec" data-section id="excludes">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-excludes">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="excludes"></span>
+							<span class="pm-sec-title">Исключения</span>
+							<span class="pm-sec-sum" data-sum="excludes"></span>
+						</button>
+						<label class="switch" title="Включить или выключить: Исключения"><input type="checkbox" data-k="on_excludes" aria-label="Включить: Исключения" /></label>
+					</div>
+					<div class="pm-sec-body" id="sec-excludes" data-sec-body="excludes" hidden>
+						<p class="pm-offnote">Раздел выключен. Значения ниже сохраняются в форме, но не применяются. Включите переключатель в заголовке.</p>
+						<div class="pm-fields"><div data-block="excludes"></div></div>
+					</div>
+				</section>
+				<section class="pm-sec" data-section id="tags">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-tags">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="tags"></span>
+							<span class="pm-sec-title">Теги</span>
+							<span class="pm-sec-sum" data-sum="tags"></span>
+						</button>
+						<label class="switch" title="Включить или выключить: Теги"><input type="checkbox" data-k="on_tags" aria-label="Включить: Теги" /></label>
+					</div>
+					<div class="pm-sec-body" id="sec-tags" data-sec-body="tags" hidden>
+						<p class="pm-offnote">Раздел выключен. Значения ниже сохраняются в форме, но не применяются. Включите переключатель в заголовке.</p>
+						<div class="pm-fields"><div data-block="tags"></div></div>
+					</div>
+				</section>
+				<section class="pm-sec" data-section id="options">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-options">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="options"></span>
+							<span class="pm-sec-title">Параметры копирования</span>
+							<span class="pm-sec-sum" data-sum="options"></span>
+						</button>
+						<label class="switch" title="Включить или выключить: Параметры копирования"><input type="checkbox" data-k="on_options" aria-label="Включить: Параметры копирования" /></label>
+					</div>
+					<div class="pm-sec-body" id="sec-options" data-sec-body="options" hidden>
+						<p class="pm-offnote">Раздел выключен. Значения ниже сохраняются в форме, но не применяются. Включите переключатель в заголовке.</p>
+						<div class="pm-fields"><div data-block="options"></div></div>
+					</div>
+				</section>
+				<section class="pm-sec" data-section id="retention">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-retention">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="retention"></span>
+							<span class="pm-sec-title">Хранение</span>
+							<span class="pm-sec-sum" data-sum="retention"></span>
+						</button>
+						<label class="switch" title="Включить или выключить: Хранение"><input type="checkbox" data-k="on_retention" aria-label="Включить: Хранение" /></label>
+					</div>
+					<div class="pm-sec-body" id="sec-retention" data-sec-body="retention" hidden>
+						<p class="pm-offnote">Раздел выключен. Значения ниже сохраняются в форме, но не применяются. Включите переключатель в заголовке.</p>
+						<div class="pm-fields"><div data-block="retention"></div></div>
+					</div>
+				</section>
+				<section class="pm-sec" data-section id="check">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-check">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="check"></span>
+							<span class="pm-sec-title">Проверка репозитория</span>
+							<span class="pm-sec-sum" data-sum="check"></span>
+						</button>
+						<label class="switch" title="Включить или выключить: Проверка репозитория"><input type="checkbox" data-k="on_check" aria-label="Включить: Проверка репозитория" /></label>
+					</div>
+					<div class="pm-sec-body" id="sec-check" data-sec-body="check" hidden>
+						<p class="pm-offnote">Раздел выключен. Значения ниже сохраняются в форме, но не применяются. Включите переключатель в заголовке.</p>
+						<div class="pm-fields"><div data-block="check"></div></div>
+					</div>
+				</section>
+				<section class="pm-sec" data-section id="scripts">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-scripts">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="scripts"></span>
+							<span class="pm-sec-title">Скрипты на хосте</span>
+							<span class="pm-sec-sum" data-sum="scripts"></span>
+						</button>
+						<label class="switch" title="Включить или выключить: Скрипты на хосте"><input type="checkbox" data-k="on_scripts" aria-label="Включить: Скрипты на хосте" /></label>
+					</div>
+					<div class="pm-sec-body" id="sec-scripts" data-sec-body="scripts" hidden>
+						<p class="pm-offnote">Раздел выключен. Значения ниже сохраняются в форме, но не применяются. Включите переключатель в заголовке.</p>
+						<div class="pm-fields"><div data-block="scripts"></div></div>
+					</div>
+				</section>
+				<section class="pm-sec" data-section id="limits">
+					<div class="pm-sec-head">
+						<button type="button" class="pm-sec-toggle" data-sec-toggle aria-expanded="false" aria-controls="sec-limits">
+							<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+							<span class="pm-dot" data-dot="limits"></span>
+							<span class="pm-sec-title">Лимиты выполнения <span class="pm-new">Новое</span></span>
+							<span class="pm-sec-sum" data-sum="limits"></span>
+						</button>
+						
+					</div>
+					<div class="pm-sec-body" id="sec-limits" data-sec-body="limits" hidden>
+						
+						<div class="pm-fields"><div data-block="limits"></div></div>
+					</div>
+				</section>
+				</div>
+				<aside class="pm-side" aria-label="Сводка профиля">
+					<div class="pm-side-box">
+						<div class="pm-side-head"><span>Что получится</span><span class="pm-sub" data-count-on></span></div>
+						<div class="pm-side-body"><ul class="pm-live"><li><span class="pm-dot" data-dot="basics"></span><div><b>Основное</b><span class="s" data-sum="basics"></span></div></li>
+<li><span class="pm-dot" data-dot="paths"></span><div><b>Что копировать</b><span class="s" data-sum="paths"></span></div></li>
+<li><span class="pm-dot" data-dot="excludes"></span><div><b>Исключения</b><span class="s" data-sum="excludes"></span></div></li>
+<li><span class="pm-dot" data-dot="tags"></span><div><b>Теги</b><span class="s" data-sum="tags"></span></div></li>
+<li><span class="pm-dot" data-dot="options"></span><div><b>Параметры копирования</b><span class="s" data-sum="options"></span></div></li>
+<li><span class="pm-dot" data-dot="retention"></span><div><b>Хранение</b><span class="s" data-sum="retention"></span></div></li>
+<li><span class="pm-dot" data-dot="check"></span><div><b>Проверка репозитория</b><span class="s" data-sum="check"></span></div></li>
+<li><span class="pm-dot" data-dot="scripts"></span><div><b>Скрипты на хосте</b><span class="s" data-sum="scripts"></span></div></li>
+<li><span class="pm-dot" data-dot="limits"></span><div><b>Лимиты выполнения</b><span class="s" data-sum="limits"></span></div></li></ul></div>
+					</div>
+					<div class="pm-side-box">
+						<div class="pm-side-head"><span>Команды restic</span><button class="btn btn--sm" type="button" data-copy-preview><svg class="icon icon--xs"><use href="icons.svg#i-copy" /></svg> <span class="btn-label">Копировать</span></button></div>
+						<div class="pm-side-body"><div data-preview>
+	<div class="pm-os"><label for="os-1">Команды для хоста:</label>
+		<span class="select-wrap"><select class="select" id="os-1" data-preview-os>
+			<option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option>
+		</select><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></span></div>
+	<div data-preview-steps></div>
+</div></div>
+					</div>
+				</aside>
+			</div>
+		</main>
+		<div class="pm-savebar" style="position: sticky; bottom: 0">
+			<span class="pm-sub">Изменения не сохранены. Профиль используют 3 плана: новые настройки подействуют на их следующий запуск.</span>
+			<a class="btn" href="profiles.html">Отмена</a>
+			<button class="btn btn--primary" type="button">Сохранить</button>
+		</div>
+	</body>
+</html>

@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// The Profiles screen lists the profiles of the organization, creates, edits and deletes one, and
-// shows the compiled steps of the preview (FR-PF-01, FR-PF-04, FR-PF-05).
+// The Profiles screen lists the profiles of the organization. The editor page creates and edits
+// one, the list deletes one and shows the compiled steps of the preview (FR-PF-01, FR-PF-04,
+// FR-PF-05).
 async function signIn(page: Page): Promise<void> {
 	await page.goto('/sign-in');
 	await page.locator('#signin-username').fill('admin');
@@ -30,31 +31,46 @@ async function createRepository(page: Page): Promise<void> {
 	await expect(page.getByText('The repository is created.')).toBeVisible();
 }
 
+async function openProfiles(page: Page): Promise<void> {
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Profiles', exact: true })
+		.click();
+}
+
+const breadcrumb = (page: Page) => page.getByRole('navigation', { name: 'Breadcrumb' });
+
 test('the profiles screen creates, previews, edits and deletes a profile', async ({ page }) => {
 	// One host reports its facts, so the preview has a target.
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
 	await signIn(page);
 	await createRepository(page);
 
-	await page
-		.getByRole('navigation', { name: 'Primary navigation' })
-		.getByRole('link', { name: 'Profiles', exact: true })
-		.click();
+	await openProfiles(page);
 	await expect(page.getByRole('heading', { level: 1, name: 'Profiles' })).toBeVisible();
 	await expect(page).toHaveTitle('Profiles · ResticHub');
 	await expect(page.getByText('No profiles yet')).toBeVisible();
 
+	// Create: the editor is a page, and the top bar names it.
 	await page.getByRole('button', { name: 'Add profile' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Add a profile' });
-	await expect(dialog).toBeVisible();
+	await expect(page).toHaveURL(/\/profiles\/new$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'New profile' })).toBeVisible();
+	await expect(breadcrumb(page)).toContainText('Profiles');
+	await expect(breadcrumb(page)).toContainText('New profile');
 	await page.locator('#profile-name').fill('web-daily');
 	await page.locator('#profile-paths-all').fill('/srv');
 	await page.locator('#profile-paths-linux').fill('/etc');
-	await page.locator('#profile-tags').fill('daily');
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('switch', { name: 'Turn on the section "Tags"' }).click();
+	await page.locator('#profile-tags').fill('daily, web ');
+	await expect(page.getByRole('button', { name: 'Remove the tag daily' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Remove the tag web' })).toBeVisible();
+	// The side panel shows the command of the profile as it is typed.
+	await expect(page.getByText('--tag daily')).toBeVisible();
+	await page.getByRole('button', { name: 'Save' }).click();
 
 	await expect(page.getByText('The profile is created.')).toBeVisible();
-	await expect(page.getByText('web-daily')).toBeVisible();
+	await expect(page).toHaveURL(/\/profiles$/);
+	await expect(page.getByRole('link', { name: 'web-daily' })).toBeVisible();
 
 	// The preview shows the steps and the command line with masked secrets.
 	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
@@ -65,15 +81,14 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await expect(page.getByText('***', { exact: false }).first()).toBeVisible();
 	await page.keyboard.press('Escape');
 
-	// Edit: the name changes.
-	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	const edit = page.getByRole('dialog', { name: 'Edit the profile' });
-	await expect(edit).toBeVisible();
+	// Edit: the name link opens the page, the name changes.
+	await page.getByRole('link', { name: 'web-daily' }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Edit profile' })).toBeVisible();
+	await expect(breadcrumb(page)).toContainText('web-daily');
 	await page.locator('#profile-name').fill('web-renamed');
-	await edit.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The profile is updated.')).toBeVisible();
-	await expect(page.getByText('web-renamed')).toBeVisible();
+	await expect(page.getByRole('link', { name: 'web-renamed' })).toBeVisible();
 
 	// Delete.
 	await page.getByRole('button', { name: 'More actions for web-renamed' }).click();
@@ -83,32 +98,79 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await expect(page.getByText('No profiles yet')).toBeVisible();
 });
 
+test('the Edit action and the profile link open the same page', async ({ page }) => {
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.profiles', 'sample'));
+	await signIn(page);
+	await createRepository(page);
+	await openProfiles(page);
+	await expect(page.getByRole('link', { name: 'web-daily' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await expect(page).toHaveURL(/\/profiles\/p_1$/);
+	await expect(page.locator('#profile-name')).toHaveValue('web-daily');
+
+	await page.getByRole('button', { name: 'Cancel' }).click();
+	await expect(page).toHaveURL(/\/profiles$/);
+	await page.getByRole('link', { name: 'web-daily' }).click();
+	await expect(page).toHaveURL(/\/profiles\/p_1$/);
+	await expect(page.locator('#profile-name')).toHaveValue('web-daily');
+});
+
 test('editing a profile keeps the retention fields', async ({ page }) => {
 	// The sample profile holds a keep-yearly rule and a snapshot filter.
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.profiles', 'sample'));
 	await signIn(page);
 	await createRepository(page);
+	await openProfiles(page);
+	await page.getByRole('link', { name: 'web-daily' }).click();
 
-	await page
-		.getByRole('navigation', { name: 'Primary navigation' })
-		.getByRole('link', { name: 'Profiles', exact: true })
-		.click();
-	await expect(page.getByText('web-daily')).toBeVisible();
-
-	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Edit the profile' });
-	await expect(dialog).toBeVisible();
-	// The retention fields that the form shows carry the stored values.
+	// A collapsed section shows its summary. The retention section opens on a click.
+	await page.getByRole('button', { name: /^Retention/ }).click();
 	await expect(page.locator('#profile-keep-yearly')).toHaveValue('2');
+	await page.getByText('Limit the rules to some snapshots').click();
 	await expect(page.locator('#profile-filter-hosts')).toHaveValue('web-*');
 	await page.locator('#profile-name').fill('web-renamed');
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The profile is updated.')).toBeVisible();
 
 	// A second edit keeps the fields after the rename.
-	await page.getByRole('button', { name: 'More actions for web-renamed' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.getByRole('link', { name: 'web-renamed' }).click();
+	await page.getByRole('button', { name: /^Retention/ }).click();
 	await expect(page.locator('#profile-keep-yearly')).toHaveValue('2');
+	await page.getByText('Limit the rules to some snapshots').click();
 	await expect(page.locator('#profile-filter-hosts')).toHaveValue('web-*');
+});
+
+test('the limits section creates and edits a profile with the job limits', async ({ page }) => {
+	await signIn(page);
+	await createRepository(page);
+	await openProfiles(page);
+	await page.getByRole('button', { name: 'Add profile' }).click();
+
+	await page.locator('#profile-name').fill('limits-demo');
+	await page.locator('#profile-paths-all').fill('/srv');
+	await page.getByRole('button', { name: /^Run limits/ }).click();
+	// The fields start with the defaults of the server.
+	await expect(page.locator('#profile-stall-timeout')).toHaveValue('60');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('2880');
+	await page.locator('#profile-stall-timeout').fill('90');
+	await page.locator('#profile-max-duration').fill('720');
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('The profile is created.')).toBeVisible();
+
+	await page.getByRole('link', { name: 'limits-demo' }).click();
+	await page.getByRole('button', { name: /^Run limits/ }).click();
+	await expect(page.locator('#profile-stall-timeout')).toHaveValue('90');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('720');
+
+	// An empty field is omitted, so the stored value stays.
+	await page.locator('#profile-stall-timeout').fill('');
+	await page.locator('#profile-max-duration').fill('300');
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('The profile is updated.')).toBeVisible();
+	await page.getByRole('link', { name: 'limits-demo' }).click();
+	await page.getByRole('button', { name: /^Run limits/ }).click();
+	await expect(page.locator('#profile-stall-timeout')).toHaveValue('90');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('300');
 });

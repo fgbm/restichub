@@ -179,6 +179,16 @@ impl FileJournal {
             .collect()
     }
 
+    /// Keeps the entry of `job_id` until `until` at the latest (ADR-0020, ADR-0039).
+    ///
+    /// A job without a fixed time limit can end after the acceptance window of its signature.
+    /// Its stored result must outlive that window, or the control plane fails the job as lost.
+    pub fn keep_until(&mut self, job_id: &str, until: Timestamp) {
+        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.job_id == job_id) {
+            entry.expires_at = entry.expires_at.max(until.seconds);
+        }
+    }
+
     /// Removes the entry of `job_id` (ADR-0020).
     ///
     /// The caller rolls back an acceptance whose persistence failed, so the journal never claims a
@@ -304,6 +314,20 @@ mod tests {
         journal.record_accepted("job-1", at(2_000));
         assert_eq!(journal.lookup("job-1"), JournalState::InProgress);
         journal.record_completed("job-1", result("job-1"));
+        assert_eq!(
+            journal.lookup("job-1"),
+            JournalState::Completed(result("job-1"))
+        );
+    }
+
+    #[test]
+    fn ac_ag_12_a_result_after_the_acceptance_window_is_kept() {
+        let mut journal = FileJournal::load(temp_path("late")).expect("cannot load");
+        journal.record_accepted("job-1", at(2_000));
+        journal.record_completed("job-1", result("job-1"));
+        journal.keep_until("job-1", at(90_000));
+        journal.prune(at(50_000));
+        assert_eq!(journal.stored_results().len(), 1);
         assert_eq!(
             journal.lookup("job-1"),
             JournalState::Completed(result("job-1"))

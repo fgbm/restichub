@@ -18,7 +18,7 @@ pub enum AgentVersionStatus {
     Unknown,
 }
 
-pub const CONTROL_PLANE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CONTROL_PLANE_VERSION: &str = restichub_common::BUILD_VERSION;
 
 /// Compares the package version and the protocol version of an agent with this build.
 ///
@@ -87,6 +87,27 @@ mod tests {
             status_against("1.4.0", "1.5.2+build.7", CURRENT),
             AgentVersionStatus::Current
         );
+    }
+
+    #[test]
+    fn fr_pr_09_the_build_revision_does_not_change_the_comparison() {
+        assert_eq!(
+            status_against("0.1.0+3b21922", "0.1.0+dev", CURRENT),
+            AgentVersionStatus::Current
+        );
+        assert_eq!(
+            status_against("0.2.0+3b21922", "0.1.0+3b21922", CURRENT),
+            AgentVersionStatus::UpdateAvailable
+        );
+    }
+
+    #[test]
+    fn fr_pr_09_the_control_plane_version_carries_the_build_revision() {
+        let (package, revision) = super::CONTROL_PLANE_VERSION
+            .split_once('+')
+            .expect("a build revision");
+        assert_ne!(package, "0.0.0");
+        assert!(!revision.is_empty());
     }
 
     #[test]

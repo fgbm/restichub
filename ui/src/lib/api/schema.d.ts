@@ -61,6 +61,50 @@ export interface paths {
         patch: operations["rename_agent"];
         trace?: never;
     };
+    "/api/v1/agents/{id}/reenroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issues an enrollment token that re-registers an existing host.
+         * @description The enrollment with the token keeps the agent identifier, the plans, the repositories and the
+         *     labels of the host and replaces its certificate. A revoked host gives HTTP 409.
+         */
+        post: operations["reenroll_agent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/{id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replaces the old duplicate record of a host.
+         * @description Both records must be active and must report the same machine identifier. This record must be
+         *     newer than the old one, and the old one must have been silent for the online window, otherwise
+         *     the answer is HTTP 404 or HTTP 409 `agent_recently_online`. The move and the revoke commit in
+         *     one transaction; the running jobs of the old record are cancelled as for a revoke (FR-ID-04).
+         */
+        post: operations["replace_agent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/{id}/revoke": {
         parameters: {
             query?: never;
@@ -344,9 +388,10 @@ export interface paths {
         post?: never;
         /**
          * Revokes an unused enrollment token of the tenant (a soft change).
-         * @description A used or an already revoked token gives HTTP 409 and changes nothing. An unknown token gives
-         *     HTTP 404. The conditional update and the re-read answer without a time-of-check gap, and a
-         *     failed revoke writes no audit record.
+         * @description A used, an already revoked or an expired token gives HTTP 409 with the code `token_used`,
+         *     `token_already_revoked` or `token_expired` and changes nothing. An unknown token gives HTTP 404.
+         *     The conditional update and the re-read answer without a time-of-check gap, and a failed revoke
+         *     writes no audit record.
          */
         delete: operations["revoke_enrollment_token"];
         options?: never;
@@ -911,6 +956,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads the job limits that a new profile gets when its request names none (ADR-0039). */
+        get: operations["job_limit_defaults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{id}": {
         parameters: {
             query?: never;
@@ -1454,6 +1516,8 @@ export interface components {
             /** @description The package version of the control plane that serves the request. */
             control_plane_version: string;
             created_at: string;
+            /** @description The time of the first stream open. Null while an active host waits for its first connection. */
+            first_connected_at?: string | null;
             /** @description Whether the agent trusted its hook allow-list file at its last connection (AC-HK-01). */
             hook_allow_list: components["schemas"]["HookAllowListState"];
             /**
@@ -1468,6 +1532,7 @@ export interface components {
             last_certificate_rotation_at?: string | null;
             last_seen_at?: string | null;
             os: string;
+            possible_duplicate_of?: components["schemas"]["DuplicateOfView"] | null;
             /** @description Reported in the last hello as `major.minor`. Null before the first hello. */
             protocol_version?: string | null;
             restic_version: string;
@@ -1599,6 +1664,8 @@ export interface components {
          * @example agent_certificate_rotate
          * @example agent_superseded_certificate_used
          * @example agent_update
+         * @example agent_reenroll
+         * @example agent_replace
          * @example remote_install
          * @example tenant_create
          * @example tenant_suspend
@@ -1694,7 +1761,19 @@ export interface components {
              * @description Upload limit in kibibytes each second. Zero means no limit (FR-AG-15).
              */
             limit_upload_kib?: number;
+            /**
+             * Format: int32
+             * @description Minutes after which the agent stops the job whatever its progress. Zero means no limit.
+             *     At most 43200. A missing value behaves as the stall timeout does (ADR-0039).
+             */
+            max_duration_minutes?: number | null;
             one_file_system?: boolean;
+            /**
+             * Format: int32
+             * @description Minutes without progress after which the agent stops a step. From 5 to 10080. A missing
+             *     value gives the default of a new profile and keeps the stored value of an update (ADR-0039).
+             */
+            stall_timeout_minutes?: number | null;
             /** @description Use a file system snapshot. VSS on Windows only (FR-PF-01). */
             use_fs_snapshot?: boolean;
         };
@@ -1852,6 +1931,8 @@ export interface components {
             expires_at: string;
             id: string;
             labels: string[];
+            /** @description The host that the token re-registers. Null for a token of a new host. */
+            replaces_agent_id?: string | null;
             /** @description Returned only here. */
             token: string;
         };
@@ -1998,13 +2079,17 @@ export interface components {
             id: string;
             last_seen_at?: string | null;
             online: boolean;
+            /** @description The host never opened a stream since its enrollment. It counts as neither online nor offline. */
+            waiting: boolean;
         };
         DashboardHosts: {
-            /** @description The offline hosts first, then the others, at most 50. */
+            /** @description The offline and waiting hosts first, then the others, at most 50. */
             items: components["schemas"]["DashboardHost"][];
             offline: number;
             online: number;
             total: number;
+            /** @description Counted in neither `online` nor `offline`: the host never opened a stream. */
+            waiting: number;
         };
         DashboardPlan: {
             /**
@@ -2043,12 +2128,28 @@ export interface components {
             plans: components["schemas"]["DashboardPlans"];
             repositories: components["schemas"]["DashboardRepository"][];
         };
+        DuplicateOfView: {
+            created_at: string;
+            hostname: string;
+            id: string;
+            /**
+             * @description True when the other record was created before this one. Only the newer record offers the
+             *     replacement of the older one (FR-ID-11).
+             */
+            is_older: boolean;
+            last_seen_at?: string | null;
+        };
         EnrollRequest: {
             agent_version: string;
             arch: string;
             /** @description The PKCS#10 certificate signing request in DER, base64 (standard alphabet). */
             csr: string;
             hostname: string;
+            /**
+             * @description An application-specific digest of the machine identifier, for the duplicate warning. The
+             *     control plane stores a keyed hash of it only. Optional: an older agent or an unsupported system sends none.
+             */
+            machine_id?: string | null;
             os: string;
             restic_version: string;
             /** @description The one-time secret that the Web UI shows, `re_...`. */
@@ -2064,6 +2165,11 @@ export interface components {
             certificate_expires_at: string;
             /** @description The gRPC endpoint of the agent listener, when the installation sets it. */
             grpc_endpoint?: string | null;
+            /**
+             * @description True when the token was bound to an existing host. The agent keeps that identifier and the
+             *     plans of the host, and the old certificate stops working.
+             */
+            reenrolled: boolean;
             /**
              * @description The signed job signing key set, the serialized `SigningKeyUpdate` message in base64. The
              *     agent verifies the update before it uses the next key (FR-PR-04, FR-PR-11).
@@ -2103,14 +2209,18 @@ export interface components {
             expires_at: string;
             id: string;
             labels: string[];
+            /** @description The host that the token re-registers. Null for a token of a new host. */
+            replaces_agent_id?: string | null;
             revoked_at?: string | null;
             revoked_by_user_id?: string | null;
             used_at?: string | null;
+            /** @description The host that the token enrolled. Null until the token is used. */
+            used_by_agent_id?: string | null;
         };
         /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online";
         /**
          * @description What a failed script does to the job.
          * @enum {string}
@@ -2204,6 +2314,7 @@ export interface components {
         };
         /** @description One job with its steps, its summary and its progress (FR-MN-02). */
         JobDetailView: components["schemas"]["JobView"] & {
+            limits: components["schemas"]["LimitsView"];
             log: components["schemas"]["LogInfo"];
             /**
              * @description The same steps with their kind, name and phase, so the job detail shows every script and
@@ -2229,6 +2340,13 @@ export interface components {
          * @enum {string}
          */
         JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "unlock_all" | "snapshots" | "ls" | "other";
+        /** @description The job limits that a new profile gets when the request names none (ADR-0039). */
+        JobLimitDefaults: {
+            /** Format: int32 */
+            max_duration_minutes: number;
+            /** Format: int32 */
+            stall_timeout_minutes: number;
+        };
         JobListResponse: {
             items: components["schemas"]["JobView"][];
             next_cursor?: string | null;
@@ -2283,7 +2401,10 @@ export interface components {
             attempt: number;
             /** @description In RFC 3339. */
             created_at: string;
-            /** @description In RFC 3339. Null when the job holds no expiry. */
+            /**
+             * @description In RFC 3339. The end of the acceptance window of the signed job: the agent refuses the job
+             *     after this time. It is not a limit of the run. Null when the job holds no expiry.
+             */
             expires_at?: string | null;
             /** @description In RFC 3339. Null until the job finishes. */
             finished_at?: string | null;
@@ -2310,6 +2431,19 @@ export interface components {
             status: components["schemas"]["JobStatus"];
             /** @description In RFC 3339. */
             updated_at: string;
+        };
+        LimitsView: {
+            /**
+             * Format: int32
+             * @description Seconds after which the agent stops the job whatever its progress. Null means no limit.
+             */
+            max_duration_seconds?: number | null;
+            /**
+             * Format: int32
+             * @description Seconds without progress after which the agent stops a step. Null when the control plane
+             *     did not set one and the agent uses the default of the step.
+             */
+            stall_timeout_seconds?: number | null;
         };
         /** @enum {string} */
         LockState: "free" | "held" | "stale";
@@ -2759,8 +2893,27 @@ export interface components {
             /** @description In RFC 3339. */
             updated_at: string;
         };
+        ReenrollAgentRequest: {
+            /**
+             * Format: int64
+             * @description The time to live in seconds. Between 60 and 3600. The default is 3600.
+             */
+            ttl_seconds?: number | null;
+        };
         RenameAgentRequest: {
             hostname: string;
+        };
+        ReplaceAgentRequest: {
+            /** @description The identifier of the old record. It must be the possible duplicate of this host. */
+            old_agent_id: string;
+        };
+        ReplaceAgentResponse: {
+            /** Format: int64 */
+            plans_moved: number;
+            /** Format: int64 */
+            queued_jobs_moved: number;
+            /** Format: int64 */
+            repositories_moved: number;
         };
         /**
          * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
@@ -3548,6 +3701,150 @@ export interface operations {
             };
             /** @description The agent is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    reenroll_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the agent. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReenrollAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description The token is created. The value appears once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateEnrollmentTokenResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is revoked. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    replace_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the new agent record. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description The old record is replaced. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplaceAgentResponse"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The pair is not a possible duplicate. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The old record was online recently (`agent_recently_online`). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4407,7 +4704,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The token is used or already revoked. */
+            /** @description The token is used (`token_used`), already revoked (`token_already_revoked`) or expired (`token_expired`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6716,6 +7013,44 @@ export interface operations {
             };
             /** @description The name exists. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    job_limit_defaults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The default job limits. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobLimitDefaults"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

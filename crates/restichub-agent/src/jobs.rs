@@ -61,11 +61,13 @@ mod hooks;
 mod log;
 mod outcome;
 mod runner;
+mod watchdog;
 
 use hooks::{HookFailure, PhaseMode, Phased, Sink};
 use log::JobLog;
 use outcome::{Progress, interrupted_error, job_error, job_outcome};
 use runner::{CancelHandle, StepError, StepOutcome};
+use watchdog::StepLimits;
 
 /// The grace period between the graceful stop signal and the forced kill of the process tree
 /// (FR-AG-10, AC-AG-06).
@@ -74,9 +76,6 @@ pub const STOP_GRACE: Duration = Duration::from_secs(30);
 /// How long past the job deadline the cleanup hooks (`after`, `on_*` and `finally`) may run
 /// (FR-HK-05).
 pub const CLEANUP_GRACE: Duration = Duration::from_secs(10 * 60);
-
-/// The timeout of a step that gives none and whose job gives none either (FR-AG-05).
-const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// The largest number of jobs that the agent runs at the same time (ADR-0020).
 const MAX_CONCURRENT_JOBS: usize = 4;
@@ -254,6 +253,22 @@ impl Jobs {
     #[must_use]
     pub fn restore_roots(&self) -> Vec<String> {
         self.restore.root_strings()
+    }
+
+    /// Identifiers of the jobs that run now or whose stored result is not yet expired, for
+    /// `AgentHello` (ADR-0039). The agent re-sends a stored result at each connection, so the
+    /// control plane must not fail such a job as lost.
+    #[must_use]
+    pub fn held_job_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = lock(&self.running).keys().cloned().collect();
+        ids.extend(
+            lock(&self.journal)
+                .stored_results()
+                .into_iter()
+                .map(|result| result.job_id),
+        );
+        ids.truncate(MAX_HELD_JOB_IDS);
+        ids
     }
 
     /// Sets the grace period between the graceful stop and the forced kill (FR-AG-10).
@@ -705,7 +720,7 @@ impl Jobs {
                 );
                 break;
             }
-            let mut limit = step_timeout(step.timeout_seconds, job.timeout_seconds);
+            let mut max = step_timeout(step.timeout_seconds, job.timeout_seconds);
             if let Some(deadline) = job_deadline {
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                 if remaining.is_zero() {
@@ -725,13 +740,19 @@ impl Jobs {
                     );
                     break;
                 }
-                limit = limit.min(remaining);
+                max = Some(max.map_or(remaining, |max| max.min(remaining)));
             }
             if is_init {
                 progress.init_ran = true;
             }
             let outcome = self
-                .run_step(&validated, step, &cancel, Some(limit), &mut log)
+                .run_step(
+                    &validated,
+                    step,
+                    &cancel,
+                    StepLimits::for_step(step, max, job.stall_timeout_seconds),
+                    &mut log,
+                )
                 .await;
             let finished_at = now_timestamp();
             step_results.push(
@@ -741,6 +762,12 @@ impl Jobs {
             if is_test_access {
                 probe_repository = repository_id(step);
                 progress.probe_missing = outcome.exit_code == 10;
+            }
+            if matches!(
+                outcome.error,
+                Some(StepError::Stalled | StepError::MaxDuration)
+            ) {
+                progress.limit = outcome.error;
             }
             match outcome.status {
                 StepStatus::Success => {
@@ -875,7 +902,15 @@ impl Jobs {
         let snapshot = {
             let mut journal = lock(&self.journal);
             journal.record_completed(&job_id, result.clone());
-            journal.prune(now_timestamp());
+            let now = now_timestamp();
+            journal.keep_until(
+                &job_id,
+                Timestamp {
+                    seconds: now.seconds + RESULT_RETENTION.as_secs() as i64,
+                    nanos: 0,
+                },
+            );
+            journal.prune(now);
             journal.snapshot()
         };
         if let Err(error) = self.write_journal(snapshot).await {
@@ -1016,18 +1051,23 @@ fn repository_id(step: &Step) -> Option<String> {
     }
 }
 
-/// The timeout of one step: its own value, the job value when the step gives none, or the default
-/// (FR-AG-05).
+/// The maximum duration of one step: its own value, or the job value when the step gives none.
+/// Zero in both means no limit (FR-AG-05, ADR-0039).
 #[must_use]
-fn step_timeout(step_seconds: u32, job_seconds: u32) -> Duration {
-    if step_seconds > 0 {
-        Duration::from_secs(u64::from(step_seconds))
-    } else if job_seconds > 0 {
-        Duration::from_secs(u64::from(job_seconds))
+fn step_timeout(step_seconds: u32, job_seconds: u32) -> Option<Duration> {
+    let seconds = if step_seconds > 0 {
+        step_seconds
     } else {
-        DEFAULT_STEP_TIMEOUT
-    }
+        job_seconds
+    };
+    (seconds > 0).then(|| Duration::from_secs(u64::from(seconds)))
 }
+
+/// How long the journal keeps the result of a finished job for the control plane to collect.
+const RESULT_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Bounds `AgentHello.held_job_ids`: the journal entries plus the running jobs.
+const MAX_HELD_JOB_IDS: usize = 4096 + 64;
 
 /// Reads the wall clock as a protocol timestamp.
 fn now_timestamp() -> Timestamp {

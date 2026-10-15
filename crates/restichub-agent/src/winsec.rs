@@ -154,7 +154,7 @@ fn protect_tree(
                 // A junction or a symbolic link would make the DACL check read the target.
                 if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
                     bail!(
-                        "{} is a reparse point; an administrator removes it and registers again",
+                        "{} is a reparse point; an administrator removes the link, then runs the command again",
                         level.display()
                     );
                 }
@@ -216,6 +216,36 @@ pub fn is_elevated_administrator() -> Result<bool> {
         );
     }
     Ok(member != 0)
+}
+
+/// The `MachineGuid` of this computer from the 64-bit view of the registry (FR-ID-01).
+pub fn machine_guid() -> Option<String> {
+    use windows_sys::Win32::System::Registry::{
+        HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+    };
+    let subkey: Vec<u16> = "SOFTWARE\\Microsoft\\Cryptography\0"
+        .encode_utf16()
+        .collect();
+    let value: Vec<u16> = "MachineGuid\0".encode_utf16().collect();
+    let mut buffer = [0u16; 128];
+    let mut size = std::mem::size_of_val(&buffer) as u32;
+    // SAFETY: both names end with a NUL, and `size` is the byte length of `buffer`.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return None;
+    }
+    let units = (size as usize / 2).saturating_sub(1).min(buffer.len());
+    String::from_utf16(&buffer[..units]).ok()
 }
 
 /// Makes `dir` with a protected DACL, or refuses an existing `dir` (FR-AG-04).
@@ -288,7 +318,7 @@ fn check(path: &Path, rights: u32) -> Result<()> {
     check_owner(path, security.owner)?;
     if let Some((mask, account)) = first_foreign_grant(security.dacl, rights)? {
         bail!(
-            "{} grants the access mask {mask:#010x} to {account}, which is not SYSTEM or Administrators; an administrator deletes it and registers again",
+            "{} grants the access mask {mask:#010x} to {account}, which is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
             path.display()
         );
     }
@@ -341,7 +371,7 @@ fn open_security(path: &Path) -> Result<Security> {
 fn check_owner(path: &Path, owner: PSID) -> Result<()> {
     if owner.is_null() || !is_trusted_sid(owner) {
         bail!(
-            "{} is owned by {}, not by SYSTEM or Administrators; an administrator deletes it and registers again",
+            "{} is owned by {}, not by SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
             path.display(),
             sid_to_string(owner)
         );

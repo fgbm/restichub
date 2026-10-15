@@ -331,11 +331,14 @@ export class MockAlerts {
 			hostname: agent.hostname,
 			// The sample installation shows two hosts that talk to the control plane now.
 			online:
-				(sampleEnabled() && SAMPLE_ONLINE.has(agent.id)) ||
-				(agent.last_seen_at ? now - Date.parse(agent.last_seen_at) <= ONLINE_WINDOW_MS : false),
+				!!agent.first_connected_at &&
+				((sampleEnabled() && SAMPLE_ONLINE.has(agent.id)) ||
+					(agent.last_seen_at ? now - Date.parse(agent.last_seen_at) <= ONLINE_WINDOW_MS : false)),
+			waiting: !agent.first_connected_at,
 			last_seen_at: agent.last_seen_at ?? null
 		}));
 		const online = hosts.filter((host) => host.online).length;
+		const waiting = hosts.filter((host) => host.waiting).length;
 		hosts.sort(
 			(a, b) => Number(a.online) - Number(b.online) || a.hostname.localeCompare(b.hostname)
 		);
@@ -394,7 +397,13 @@ export class MockAlerts {
 			.sort((a, b) => b.opened_at.localeCompare(a.opened_at));
 		return {
 			generated_at: new Date(now).toISOString(),
-			hosts: { total: hosts.length, online, offline: hosts.length - online, items: hosts },
+			hosts: {
+				total: hosts.length,
+				online,
+				offline: hosts.length - online - waiting,
+				waiting,
+				items: hosts
+			},
 			plans: {
 				total: plans.length,
 				at_risk: counted('at_risk'),

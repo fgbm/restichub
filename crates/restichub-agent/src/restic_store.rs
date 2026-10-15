@@ -138,7 +138,7 @@ impl Layout {
         release: &VerifiedRelease,
         probe: &dyn Fn(&Path) -> Result<String>,
     ) -> Result<Record> {
-        crate::paths::create_protected_dir(&self.bin_dir)?;
+        crate::paths::ensure_program_dir(&self.bin_dir)?;
         crate::paths::create_protected_dir(&self.config_dir)?;
         let staging = self.staging_path();
         let _ = std::fs::remove_file(&staging);
@@ -221,7 +221,7 @@ impl Layout {
 #[cfg(unix)]
 fn make_executable(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
         .with_context(|| format!("cannot set the mode of {}", path.display()))
 }
 

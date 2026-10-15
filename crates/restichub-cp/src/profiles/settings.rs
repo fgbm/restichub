@@ -16,9 +16,9 @@ use restichub_compiler::{
     AllowListedHook, Architecture, BackupOptions as CompilerBackupOptions,
     CheckOptions as CompilerCheckOptions, CompileError, GroupBy as CompilerGroupBy,
     HookParameter as CompilerHookParameter, HookPhase as CompilerHookPhase,
-    HookRef as CompilerHookRef, OperatingSystem, Profile as CompilerProfile,
-    ProfilePaths as CompilerProfilePaths, ResticVersion, Retention as CompilerRetention,
-    SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
+    HookRef as CompilerHookRef, JobLimits as CompilerJobLimits, OperatingSystem,
+    Profile as CompilerProfile, ProfilePaths as CompilerProfilePaths, ResticVersion,
+    Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
 };
 use restichub_db::profiles::{NewProfile, Profile, ProfileUpdate};
 use restichub_db::{ProfileId, RepositoryId, UserId};
@@ -90,6 +90,115 @@ pub struct BackupOptions {
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     #[serde(default)]
     pub limit_download_kib: u64,
+    /// Minutes without progress after which the agent stops a step. From 5 to 10080. A missing
+    /// value gives the default of a new profile and keeps the stored value of an update (ADR-0039).
+    #[serde(default)]
+    pub stall_timeout_minutes: Option<u32>,
+    /// Minutes after which the agent stops the job whatever its progress. Zero means no limit.
+    /// At most 43200. A missing value behaves as the stall timeout does (ADR-0039).
+    #[serde(default)]
+    pub max_duration_minutes: Option<u32>,
+}
+
+/// The job limits that a new profile gets when the request names none (ADR-0039).
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+pub struct JobLimitDefaults {
+    pub stall_timeout_minutes: u32,
+    pub max_duration_minutes: u32,
+}
+
+impl JobLimitDefaults {
+    #[must_use]
+    pub fn current() -> Self {
+        Self {
+            stall_timeout_minutes: default_stall_timeout_minutes(),
+            max_duration_minutes: default_max_duration_minutes(),
+        }
+    }
+}
+
+/// The stall timeout of a profile that does not set one (ADR-0039).
+pub const DEFAULT_STALL_TIMEOUT_MINUTES: u32 = 60;
+/// The maximum duration of a profile that does not set one (ADR-0039).
+pub const DEFAULT_MAX_DURATION_MINUTES: u32 = 48 * 60;
+const STALL_TIMEOUT_VARIABLE: &str = "RESTICHUB_JOB_STALL_TIMEOUT_SECS";
+const MAX_DURATION_VARIABLE: &str = "RESTICHUB_JOB_MAX_DURATION_SECS";
+const MIN_STALL_TIMEOUT_MINUTES: u32 = 5;
+const MAX_STALL_TIMEOUT_MINUTES: u32 = 10_080;
+const MAX_DURATION_MINUTES: u32 = 43_200;
+
+/// The stall timeout of a new profile: the environment variable or the built-in default.
+fn default_stall_timeout_minutes() -> u32 {
+    minutes_from_variable(
+        STALL_TIMEOUT_VARIABLE,
+        DEFAULT_STALL_TIMEOUT_MINUTES,
+        MIN_STALL_TIMEOUT_MINUTES..=MAX_STALL_TIMEOUT_MINUTES,
+    )
+}
+
+/// The maximum duration of a new profile: the environment variable or the built-in default.
+fn default_max_duration_minutes() -> u32 {
+    minutes_from_variable(
+        MAX_DURATION_VARIABLE,
+        DEFAULT_MAX_DURATION_MINUTES,
+        0..=MAX_DURATION_MINUTES,
+    )
+}
+
+/// Reads seconds from `name`. A missing or invalid value, or one outside `range`, gives `fallback`.
+fn minutes_from_variable(name: &str, fallback: u32, range: std::ops::RangeInclusive<u32>) -> u32 {
+    minutes_from_seconds(std::env::var(name).ok().as_deref(), fallback, range)
+}
+
+fn minutes_from_seconds(
+    value: Option<&str>,
+    fallback: u32,
+    range: std::ops::RangeInclusive<u32>,
+) -> u32 {
+    value
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .map(|seconds| seconds.div_ceil(60))
+        .filter(|minutes| range.contains(minutes))
+        .unwrap_or(fallback)
+}
+
+impl BackupOptions {
+    fn stall_minutes(&self) -> u32 {
+        self.stall_timeout_minutes
+            .unwrap_or_else(default_stall_timeout_minutes)
+    }
+
+    fn max_minutes(&self) -> u32 {
+        self.max_duration_minutes
+            .unwrap_or_else(default_max_duration_minutes)
+    }
+}
+
+fn validate_limits(options: &BackupOptions) -> Result<(), ApiError> {
+    if let Some(minutes) = options.stall_timeout_minutes {
+        if minutes < MIN_STALL_TIMEOUT_MINUTES {
+            return Err(ApiError::invalid_field(
+                "options.stall_timeout_minutes",
+                Reason::TooShort,
+            ));
+        }
+        if minutes > MAX_STALL_TIMEOUT_MINUTES {
+            return Err(ApiError::invalid_field(
+                "options.stall_timeout_minutes",
+                Reason::TooLong,
+            ));
+        }
+    }
+    if options
+        .max_duration_minutes
+        .is_some_and(|minutes| minutes > MAX_DURATION_MINUTES)
+    {
+        return Err(ApiError::invalid_field(
+            "options.max_duration_minutes",
+            Reason::TooLong,
+        ));
+    }
+    Ok(())
 }
 
 /// Position of a hook in the job (FR-HK-05).
@@ -486,6 +595,13 @@ impl TryFrom<&Profile> for ProfileView {
                 exclude_caches: profile.exclude_caches,
                 limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
                 limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
+                stall_timeout_minutes: Some(
+                    u32::try_from(profile.stall_timeout_minutes)
+                        .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
+                ),
+                max_duration_minutes: Some(
+                    u32::try_from(profile.max_duration_minutes).unwrap_or(0),
+                ),
             },
             hooks: hooks_from_row(profile)?,
             scripts: crate::scripts::from_row(&profile.scripts)?,
@@ -568,6 +684,8 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
+            stall_timeout_minutes: i32::try_from(self.options.stall_minutes()).unwrap_or(i32::MAX),
+            max_duration_minutes: i32::try_from(self.options.max_minutes()).unwrap_or(i32::MAX),
             retention: self.retention_value(),
             check_options: self.check_value(),
             hooks: self.hooks_value(),
@@ -592,6 +710,14 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
+            stall_timeout_minutes: self
+                .options
+                .stall_timeout_minutes
+                .map(|minutes| i32::try_from(minutes).unwrap_or(i32::MAX)),
+            max_duration_minutes: self
+                .options
+                .max_duration_minutes
+                .map(|minutes| i32::try_from(minutes).unwrap_or(i32::MAX)),
             retention: self.retention_value(),
             check_options: self.check_value(),
             hooks: self.hooks_value(),
@@ -650,6 +776,10 @@ impl ValidatedProfile {
                 limit_upload_kib: self.options.limit_upload_kib,
                 limit_download_kib: self.options.limit_download_kib,
             },
+            limits: CompilerJobLimits {
+                stall_timeout_seconds: self.options.stall_minutes().saturating_mul(60),
+                max_duration_seconds: self.options.max_minutes().saturating_mul(60),
+            },
             hooks: self.hooks.iter().map(compiler_hook).collect(),
             scripts: self
                 .scripts
@@ -691,6 +821,11 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
             exclude_caches: profile.exclude_caches,
             limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
             limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
+            stall_timeout_minutes: Some(
+                u32::try_from(profile.stall_timeout_minutes)
+                    .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
+            ),
+            max_duration_minutes: Some(u32::try_from(profile.max_duration_minutes).unwrap_or(0)),
         },
         hooks: hooks_from_row(profile)?,
         scripts: crate::scripts::from_row(&profile.scripts)?,
@@ -811,6 +946,7 @@ fn validate_profile(
     ensure_count("exclude_files", exclude_files.len(), MAX_EXCLUDE_FILES)?;
     let tags = validate_tags("tags", tags)?;
     ensure_count("tags", tags.len(), MAX_TAGS)?;
+    validate_limits(&options)?;
     let hooks = validate_hooks(hooks)?;
     let scripts = crate::scripts::validate_scripts(scripts, "scripts")?;
     let retention = match retention {
@@ -1149,6 +1285,8 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
             "exclude_caches": profile.options.exclude_caches,
             "limit_upload_kib": profile.options.limit_upload_kib,
             "limit_download_kib": profile.options.limit_download_kib,
+            "stall_timeout_minutes": profile.options.stall_timeout_minutes,
+            "max_duration_minutes": profile.options.max_duration_minutes,
         },
         "hooks": profile.hooks,
         "scripts": crate::scripts::audit_value(&profile.scripts),
@@ -1177,6 +1315,8 @@ pub fn stored_value(profile: &Profile) -> Value {
             "exclude_caches": profile.exclude_caches,
             "limit_upload_kib": profile.limit_upload_kib,
             "limit_download_kib": profile.limit_download_kib,
+            "stall_timeout_minutes": profile.stall_timeout_minutes,
+            "max_duration_minutes": profile.max_duration_minutes,
         },
         "hooks": profile.hooks,
         "scripts": stored_scripts_value(&profile.scripts),
@@ -1194,4 +1334,18 @@ fn stored_scripts_value(scripts: &Value) -> Value {
 fn format_time(value: time::OffsetDateTime) -> String {
     use time::format_description::well_known::Rfc3339;
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+}
+
+#[cfg(test)]
+mod limit_variable_tests {
+    use super::minutes_from_seconds;
+
+    #[test]
+    fn fr_pf_01_variable_gives_minutes_in_range() {
+        assert_eq!(minutes_from_seconds(None, 60, 5..=100), 60);
+        assert_eq!(minutes_from_seconds(Some("1800"), 60, 5..=100), 30);
+        assert_eq!(minutes_from_seconds(Some("61"), 60, 5..=100), 60);
+        assert_eq!(minutes_from_seconds(Some("junk"), 60, 5..=100), 60);
+        assert_eq!(minutes_from_seconds(Some("0"), 2880, 0..=43_200), 0);
+    }
 }

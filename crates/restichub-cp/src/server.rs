@@ -498,7 +498,7 @@ fn base_openapi() -> OpenApiDocument {
         .info(
             utoipa::openapi::InfoBuilder::new()
                 .title("ResticHub API")
-                .version(env!("CARGO_PKG_VERSION"))
+                .version(restichub_common::BUILD_VERSION)
                 .description(Some(env!("CARGO_PKG_DESCRIPTION")))
                 .license(Some(
                     utoipa::openapi::LicenseBuilder::new()

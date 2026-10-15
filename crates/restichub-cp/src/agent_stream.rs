@@ -723,7 +723,7 @@ impl AgentService for AgentStreamService {
                 protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
                 protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
                 accepted_capabilities: Vec::new(),
-                control_plane_version: env!("CARGO_PKG_VERSION").to_owned(),
+                control_plane_version: crate::agent_version::CONTROL_PLANE_VERSION.to_owned(),
             })),
         };
         let _ = tx.try_send(hello);
@@ -867,6 +867,16 @@ async fn run_stream(
         restore_roots.clone(),
     ) {
         return;
+    }
+    // An older agent sends no list, so its silence says nothing about its jobs (ADR-0039).
+    if AgentCapability::JobLimitsV1.is_listed(&hello.capabilities) {
+        crate::queue::stale::fail_unlisted_running(
+            &state,
+            identity.tenant,
+            agent,
+            &hello.held_job_ids,
+        )
+        .await;
     }
 
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);

@@ -86,6 +86,8 @@ export type AgentListResponse = components['schemas']['AgentListResponse'];
 
 export type RenameAgentRequest = components['schemas']['RenameAgentRequest'];
 
+export type ReplaceAgentResponse = components['schemas']['ReplaceAgentResponse'];
+
 export type EnrollmentToken = components['schemas']['EnrollmentTokenView'];
 
 /** The value appears one time only. */
@@ -286,6 +288,7 @@ export type CheckOptions = components['schemas']['CheckOptions'];
 /** One profile (FR-PF-01). It holds no secret. */
 export type Profile = components['schemas']['ProfileView'];
 
+export type JobLimitDefaults = components['schemas']['JobLimitDefaults'];
 export type ProfileListResponse = components['schemas']['ProfileListResponse'];
 
 export type CreateProfileRequest = components['schemas']['CreateProfileRequest'];

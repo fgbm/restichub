@@ -16,6 +16,7 @@ async function openSample(page: Page, link: string): Promise<void> {
 		localStorage.setItem('restichub.mock.profiles', 'sample');
 		localStorage.setItem('restichub.mock.plans', 'sample');
 		localStorage.setItem('restichub.mock.scripts', 'sample');
+		localStorage.setItem('restichub.mock.repositories', 'sample');
 	});
 	await signIn(page);
 	await page
@@ -28,11 +29,10 @@ test('a profile keeps its scripts in two ordered lists and saves a reorder', asy
 	await openSample(page, 'Profiles');
 	await page.getByRole('button', { name: 'More actions for db-nightly' }).click();
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Edit the profile' });
-	await expect(dialog).toBeVisible();
+	await page.getByRole('button', { name: /^Scripts on the host/ }).click();
 
-	const before = dialog.getByTestId('scripts-before');
-	const after = dialog.getByTestId('scripts-after');
+	const before = page.getByTestId('scripts-before');
+	const after = page.getByTestId('scripts-after');
 	await expect(before.getByTestId('script-card')).toHaveCount(2);
 	await expect(after.getByTestId('script-card')).toHaveCount(1);
 	const titles = before.locator('.card__title');
@@ -41,18 +41,16 @@ test('a profile keeps its scripts in two ordered lists and saves a reorder', asy
 	// The second script moves up, so the dump runs first.
 	await before.getByTestId('script-card').nth(1).getByRole('button', { name: 'Move up' }).click();
 	await expect(titles).toHaveText(['Dump the PostgreSQL database', 'Check free disk space']);
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The profile is updated.')).toBeVisible();
 
-	// The saved order comes back when the form opens again.
-	await page.getByRole('button', { name: 'More actions for db-nightly' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	await expect(
-		page
-			.getByRole('dialog', { name: 'Edit the profile' })
-			.getByTestId('scripts-before')
-			.locator('.card__title')
-	).toHaveText(['Dump the PostgreSQL database', 'Check free disk space']);
+	// The saved order comes back when the page opens again.
+	await page.getByRole('link', { name: 'db-nightly' }).click();
+	await page.getByRole('button', { name: /^Scripts on the host/ }).click();
+	await expect(page.getByTestId('scripts-before').locator('.card__title')).toHaveText([
+		'Dump the PostgreSQL database',
+		'Check free disk space'
+	]);
 });
 
 test('a script is added from a template and the host without the trust mode is named', async ({
@@ -62,26 +60,26 @@ test('a script is added from a template and the host without the trust mode is n
 	// The host of this profile is win-fs01, which did not turn on the trust mode.
 	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Edit the profile' });
-	await expect(dialog.getByTestId('scripts-before').getByTestId('script-card')).toHaveCount(0);
+	await page.getByRole('button', { name: /^Scripts on the host/ }).click();
+	await expect(page.getByTestId('scripts-before').getByTestId('script-card')).toHaveCount(0);
 
-	await dialog
+	await page
 		.getByTestId('scripts-before')
 		.getByRole('button', { name: 'From a script template' })
 		.click();
 	const picker = page.getByRole('dialog', { name: 'Add a script from a template' });
 	await picker.getByLabel('Search templates').fill('stop');
 	await picker.getByTestId('template-choices').getByRole('button', { name: 'Use' }).first().click();
-	const card = dialog.getByTestId('scripts-before').getByTestId('script-card');
+	const card = page.getByTestId('scripts-before').getByTestId('script-card');
 	await expect(card).toHaveCount(1);
 	await expect(card.locator('.card__title')).toHaveText('Stop a service (Linux)');
 	await expect(card.getByLabel('Variable')).toHaveValue('SERVICE_NAME');
 
-	await expect(dialog.getByText('A host does not accept scripts')).toBeVisible();
+	await expect(page.getByText('A host does not accept scripts')).toBeVisible();
 	await expect(
-		dialog.getByText('These hosts did not turn on the trust mode: win-fs01.')
+		page.getByText('These hosts did not turn on the trust mode: win-fs01.')
 	).toBeVisible();
-	await expect(dialog.locator('input[readonly]')).toHaveValue(
+	await expect(page.locator('input[readonly]')).toHaveValue(
 		'restichub-agent.exe trust-server-scripts --enable'
 	);
 });
@@ -126,7 +124,7 @@ test('the script templates screen opens a built-in template read-only and copies
 
 test('the hosts screen shows the trust mode and the command', async ({ page }) => {
 	await openSample(page, 'Hosts');
-	await page.getByRole('button', { name: 'Server scripts: win-fs01' }).click();
+	await page.getByRole('button', { name: 'Server scripts: win-fs01', exact: true }).click();
 	const dialog = page.getByRole('dialog', { name: 'Server scripts' });
 	await expect(dialog.locator('input[readonly]')).toHaveValue(
 		'restichub-agent.exe trust-server-scripts --enable'

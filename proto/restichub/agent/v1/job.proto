@@ -35,7 +35,8 @@ message Job {
   reserved "sequence", "nonce";
   // Time after which the agent rejects the job (FR-SC-07).
   google.protobuf.Timestamp expires_at = 6;
-  // Timeout of the full job in seconds (FR-AG-05).
+  // Maximum duration of the full job in seconds. Zero means no limit (FR-AG-05,
+  // ADR-0039).
   uint32 timeout_seconds = 7;
   // Repository access for this job only (FR-PR-05).
   repeated RepositoryAccess repositories = 8;
@@ -44,6 +45,9 @@ message Job {
   // Time when the control plane created the job (ADR-0020). The agent rejects a
   // job that is older than the maximum lifetime or that is from the future.
   google.protobuf.Timestamp issued_at = 10;
+  // Seconds without progress after which the agent stops a step. Zero means the
+  // default of the step kind (ADR-0039).
+  uint32 stall_timeout_seconds = 11;
 }
 
 // RepositoryAccess gives the agent access to one repository for one job.

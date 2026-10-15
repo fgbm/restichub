@@ -24,6 +24,7 @@ use time::format_description::well_known::Rfc2822;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
+use crate::machine_id::MachineId;
 use crate::pem;
 
 /// The enrollment route of the agent listener (ADR-0026).
@@ -45,6 +46,8 @@ pub struct Facts {
     pub arch: String,
     pub agent_version: String,
     pub restic_version: String,
+    /// Sent as a hint for the duplicate warning; the control plane stores only a hash.
+    pub machine_id: Option<MachineId>,
 }
 
 /// The material that the control plane returns at enrollment (ADR-0026).
@@ -61,6 +64,8 @@ pub struct Enrolled {
     /// Ed25519 signature over the key set, base64 (standard alphabet).
     pub signing_keys_signature: String,
     pub grpc_endpoint: Option<String>,
+    /// The token was bound to a host: the control plane replaced the identity of that host.
+    pub reenrolled: bool,
 }
 
 /// One public job signing key of the enrollment response (ADR-0026).
@@ -118,6 +123,7 @@ impl Client {
             arch: &facts.arch,
             agent_version: &facts.agent_version,
             restic_version: &facts.restic_version,
+            machine_id: facts.machine_id.as_ref().map(MachineId::as_str),
         };
         let body = serde_json::to_vec(&request).context("cannot serialize the request")?;
         let response = self.post(&origin, hyper::Method::POST, body).await?;
@@ -245,6 +251,8 @@ struct EnrollRequest<'a> {
     arch: &'a str,
     agent_version: &'a str,
     restic_version: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    machine_id: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -257,6 +265,8 @@ struct EnrollResponse {
     signing_keys: Vec<EnrollmentKeyBody>,
     signing_keys_signature: String,
     grpc_endpoint: Option<String>,
+    #[serde(default)]
+    reenrolled: bool,
 }
 
 #[derive(Deserialize)]
@@ -293,6 +303,7 @@ fn parse_response(body: &[u8]) -> Result<Enrolled> {
         signing_keys: response.signing_keys,
         signing_keys_signature: response.signing_keys_signature,
         grpc_endpoint: response.grpc_endpoint,
+        reenrolled: response.reenrolled,
     })
 }
 

@@ -29,3 +29,9 @@ The Hosts screen shows the package version of each agent and a mark:
 | Unsupported version | The control plane refuses the protocol version of the agent. The agent cannot connect. |
 
 The agents API has the same facts: `agent_version`, `protocol_version`, `control_plane_version` and `version_status`.
+
+## Build revision in the version
+
+A release build has the package version of the workspace, for example `0.1.0`. The build adds the short revision after a plus sign, for example `0.1.0+3b21922`. A local build adds `+dev`. The command `restichub-agent --version` prints the version. The agent sends the same version when it enrolls and in the first message of each stream. The control plane exposes its own version in the same format.
+
+The revision does not change the comparison. The mark "Update available" depends on the package version only.

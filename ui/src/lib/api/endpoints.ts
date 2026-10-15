@@ -33,7 +33,9 @@ export const endpoints = {
 	agents: {
 		list: '/agents',
 		byId: (id: string) => `/agents/${encodeURIComponent(id)}`,
-		revoke: (id: string) => `/agents/${encodeURIComponent(id)}/revoke`
+		revoke: (id: string) => `/agents/${encodeURIComponent(id)}/revoke`,
+		reenroll: (id: string) => `/agents/${encodeURIComponent(id)}/reenroll`,
+		replace: (id: string) => `/agents/${encodeURIComponent(id)}/replace`
 	},
 	enrollmentTokens: {
 		list: '/enrollment-tokens',
@@ -61,6 +63,7 @@ export const endpoints = {
 	},
 	profiles: {
 		list: '/profiles',
+		defaults: '/profiles/defaults',
 		create: '/profiles',
 		byId: (id: string) => `/profiles/${encodeURIComponent(id)}`,
 		preview: (id: string) => `/profiles/${encodeURIComponent(id)}/preview`

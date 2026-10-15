@@ -209,7 +209,9 @@ fn spawn_shutdown(shutdown: Option<Receiver<()>>, stop: watch::Sender<bool>) -> 
         }
     };
     std::thread::spawn(move || {
-        let _ = receiver.recv();
+        if receiver.recv().is_ok() {
+            tracing::info!("the agent stops: a stop signal arrived");
+        }
         let _ = stop.send(true);
     });
     Ok(())
@@ -237,6 +239,7 @@ pub async fn run(
         }
         let active = rotated.as_ref().unwrap_or(identity);
         warn_when_expired(active, options.timeouts.now);
+        let cp_url = active.cp_url.as_str();
         let (refused, healthy) = match connect_once(
             active,
             dir,
@@ -253,13 +256,29 @@ pub async fn run(
                     agent_id = %identity.agent_id,
                     "the control plane refused the agent identity; check that the agent is enrolled and not revoked"
                 );
+                crate::connection::record_failure(
+                    dir,
+                    cp_url,
+                    "the control plane refused the agent identity; check that the agent is enrolled and not revoked",
+                );
                 (true, false)
             }
             // The stream already logged the reason (FR-PR-09).
-            Ok(Disconnect::Incompatible) => (true, false),
-            Ok(Disconnect::Closed { healthy }) => (false, healthy),
+            Ok(Disconnect::Incompatible) => {
+                crate::connection::record_failure(
+                    dir,
+                    cp_url,
+                    "the control plane refused the protocol version of the agent; update the agent or the control plane",
+                );
+                (true, false)
+            }
+            Ok(Disconnect::Closed { healthy }) => {
+                crate::connection::record_closed(dir, cp_url);
+                (false, healthy)
+            }
             Err(error) => {
                 tracing::warn!(agent_id = %identity.agent_id, %error, "the agent stream stopped");
+                crate::connection::record_failure(dir, cp_url, &format!("{error:#}"));
                 (false, false)
             }
         };
@@ -280,13 +299,36 @@ pub async fn run(
         } else {
             next_attempt(attempt, healthy)
         };
+        let current = rotated.as_ref().unwrap_or(identity);
         tokio::select! {
-            () = tokio::time::sleep(delay) => {}
+            () = wait_before_retry(dir, current, delay, refused) => {}
             result = stop.changed() => {
                 if result.is_err() || *stop.borrow() {
                     return Ok(());
                 }
             }
+        }
+    }
+}
+
+/// How often a refused agent looks for an identity that a registration stored in the meantime.
+const IDENTITY_POLL: Duration = Duration::from_secs(2);
+
+/// Sleeps for `delay`. After a refusal it also ends early when the identity file holds a newer
+/// certificate: the control plane closes the stream of a re-registered host before the register
+/// command has stored the new identity (FR-ID-10).
+async fn wait_before_retry(dir: &Path, current: &StoredIdentity, delay: Duration, refused: bool) {
+    if !refused {
+        tokio::time::sleep(delay).await;
+        return;
+    }
+    let mut waited = Duration::ZERO;
+    while waited < delay {
+        let step = IDENTITY_POLL.min(delay - waited);
+        tokio::time::sleep(step).await;
+        waited += step;
+        if fresher_identity(dir, current).is_some() {
+            return;
         }
     }
 }
@@ -360,6 +402,7 @@ pub async fn connect_once(
         &tx,
         restic_version,
         jobs.restore_roots(),
+        jobs.held_job_ids(),
         jobs.hook_report().await,
         jobs.script_report().await,
     )
@@ -587,6 +630,9 @@ async fn handle_control(
                 control_plane_version = %hello.control_plane_version,
                 "the control plane greeted the agent"
             );
+            // Only the greeting proves that the control plane accepts the protocol version, so
+            // `register` does not report a connection before it (FR-IN-07).
+            crate::connection::record_connected(dir, &identity.cp_url);
         }
         Some(control_message::Payload::VersionRejected(rejected)) => {
             let reason = VersionRejectReason::try_from(rejected.reason).unwrap_or_default();
@@ -796,6 +842,7 @@ async fn send_hello(
     tx: &mpsc::Sender<AgentMessage>,
     restic_version: &str,
     restore_roots: Vec<String>,
+    held_job_ids: Vec<String>,
     (hook_allow_list_state, hooks): (HookAllowListState, Vec<HookMetadata>),
     (server_scripts_state, script_interpreters): (ServerScriptsState, Vec<ScriptInterpreter>),
 ) -> Result<()> {
@@ -803,7 +850,7 @@ async fn send_hello(
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
             protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
-            agent_version: env!("CARGO_PKG_VERSION").to_owned(),
+            agent_version: restichub_common::BUILD_VERSION.to_owned(),
             restic_version: restic_version.to_owned(),
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
@@ -812,6 +859,7 @@ async fn send_hello(
                 .map(|capability| capability.as_str().to_owned())
                 .collect(),
             restore_roots,
+            held_job_ids,
             hooks,
             hook_allow_list_state: hook_allow_list_state as i32,
             server_scripts_state: server_scripts_state as i32,
@@ -928,6 +976,7 @@ mod tests {
             &tx,
             "0.19.0",
             vec!["/var/lib/restichub-restore".to_owned()],
+            Vec::new(),
             (HookAllowListState::Absent, Vec::new()),
             (ServerScriptsState::Disabled, Vec::new()),
         )
@@ -947,6 +996,7 @@ mod tests {
             &tx,
             "0.19.0",
             vec!["/srv/restore".to_owned()],
+            Vec::new(),
             (HookAllowListState::Absent, Vec::new()),
             (ServerScriptsState::Disabled, Vec::new()),
         )

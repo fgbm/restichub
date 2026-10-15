@@ -1,5 +1,13 @@
 //! Shared types for ResticHub.
 
+/// Looks like `0.1.0+<short sha>`, or `0.1.0+dev` for a local build. Version comparisons ignore
+/// the part after `+`.
+pub const BUILD_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "+",
+    env!("RESTICHUB_BUILD_REVISION")
+);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
     /// restic exit code 0.

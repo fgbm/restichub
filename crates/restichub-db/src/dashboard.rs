@@ -83,6 +83,7 @@ pub struct AgentFacts {
     pub hostname: String,
     pub status: AgentStatus,
     pub last_seen_at: Option<OffsetDateTime>,
+    pub first_connected_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
 }
 
@@ -113,7 +114,7 @@ async fn agent_facts_page(
     after: Option<(String, AgentId)>,
 ) -> Result<Vec<AgentFacts>, DbError> {
     sqlx::query_as::<_, AgentFacts>(
-        "SELECT id, hostname, status, last_seen_at, created_at FROM agents \
+        "SELECT id, hostname, status, last_seen_at, first_connected_at, created_at FROM agents \
          WHERE ($1::text IS NULL OR (hostname, id) > ($1::text, $2::uuid)) \
          ORDER BY hostname, id LIMIT $3",
     )

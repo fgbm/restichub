@@ -49,6 +49,10 @@ pub enum ErrorCode {
     AlreadyQueued,
     AgentCapabilityMissing,
     RestoreTargetDenied,
+    TokenUsed,
+    TokenAlreadyRevoked,
+    TokenExpired,
+    AgentRecentlyOnline,
 }
 
 impl ErrorCode {
@@ -76,6 +80,10 @@ impl ErrorCode {
             Self::AlreadyQueued => "already_queued",
             Self::AgentCapabilityMissing => "agent_capability_missing",
             Self::RestoreTargetDenied => "restore_target_denied",
+            Self::TokenUsed => "token_used",
+            Self::TokenAlreadyRevoked => "token_already_revoked",
+            Self::TokenExpired => "token_expired",
+            Self::AgentRecentlyOnline => "agent_recently_online",
         }
     }
 }
@@ -317,6 +325,36 @@ impl ApiError {
         Self::new(
             StatusCode::CONFLICT,
             ErrorCode::RestoreTargetDenied,
+            "Conflict",
+        )
+    }
+
+    /// Creates a `409 token_used` error: a host already used the enrollment token. The user
+    /// interface translates the code (NFR-DOC-04).
+    pub fn token_used() -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorCode::TokenUsed, "Conflict")
+    }
+
+    /// Creates a `409 token_already_revoked` error: an Admin revoked the enrollment token before.
+    pub fn token_already_revoked() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::TokenAlreadyRevoked,
+            "Conflict",
+        )
+    }
+
+    /// Creates a `409 token_expired` error: the enrollment token is past its time to live.
+    pub fn token_expired() -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorCode::TokenExpired, "Conflict")
+    }
+
+    /// Creates a `409 agent_recently_online` error: the old record of a replacement had a sign of
+    /// life in the online window (FR-ID-11).
+    pub fn agent_recently_online() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::AgentRecentlyOnline,
             "Conflict",
         )
     }

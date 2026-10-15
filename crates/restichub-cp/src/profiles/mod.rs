@@ -48,9 +48,10 @@ use crate::validation::Reason;
 pub(crate) use settings::compiler_profile_from_row;
 pub use settings::{
     BackupOptions, CheckOptions, CreateProfileRequest, GroupBy, HookParameter, HookPhase, HookRef,
-    MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS, PlanWarning, PreviewEnvView,
-    PreviewRequest, PreviewResponse, PreviewStepView, ProfileListResponse, ProfilePaths,
-    ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter, UpdateProfileRequest,
+    JobLimitDefaults, MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS, PlanWarning,
+    PreviewEnvView, PreviewRequest, PreviewResponse, PreviewStepView, ProfileListResponse,
+    ProfilePaths, ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter,
+    UpdateProfileRequest,
 };
 use settings::{
     parse_profile_id, profile_value, save_warnings, stored_value, validate_create, validate_update,
@@ -117,6 +118,23 @@ pub async fn list_profiles(
         .map(ProfileView::try_from)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(ProfileListResponse { items, next_cursor }))
+}
+
+/// Reads the job limits that a new profile gets when its request names none (ADR-0039).
+#[utoipa::path(
+    get,
+    path = "/api/v1/profiles/defaults",
+    security(("cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, description = "The default job limits.", body = JobLimitDefaults),
+        crate::error::ProtectedResponses,
+    )
+)]
+pub async fn job_limit_defaults(
+    context: RequestContext,
+) -> Result<Json<JobLimitDefaults>, ApiError> {
+    context.authorize(Operation::ProfilesRead)?;
+    Ok(Json(JobLimitDefaults::current()))
 }
 
 /// Reads one profile of the tenant.

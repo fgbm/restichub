@@ -85,6 +85,7 @@ pub fn sample_job(agent_id: &str, job_id: &str) -> Job {
         issued_at: Some(issued),
         expires_at: Some(expires_at),
         timeout_seconds: 60,
+        stall_timeout_seconds: 0,
         repositories: vec![RepositoryAccess {
             repository_id: REPOSITORY_ID.to_owned(),
             location: "/tmp/restichub-p4-repo".to_owned(),

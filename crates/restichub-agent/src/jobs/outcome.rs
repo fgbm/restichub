@@ -3,6 +3,7 @@
 use restichub_proto::agent::v1::{ErrorDetail, JobStatus, KeyValue};
 
 use super::hooks::{self, HookFailure};
+use super::runner::StepError;
 
 /// What the steps of one job did, as input of [`job_outcome`].
 #[allow(clippy::struct_excessive_bools)]
@@ -20,6 +21,7 @@ pub(super) struct Progress {
     pub(super) warned: bool,
     /// Set by the first failed hook, so the job error names it (AC-HK-06).
     pub(super) hook_failure: Option<HookFailure>,
+    pub(super) limit: Option<StepError>,
 }
 
 /// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
@@ -88,6 +90,10 @@ pub(super) fn job_error(outcome: JobStatus, progress: &Progress) -> Option<Error
         });
     }
     let code = match outcome {
+        JobStatus::Failed if progress.limit == Some(StepError::Stalled) => "stalled",
+        JobStatus::Failed if progress.limit == Some(StepError::MaxDuration) => {
+            "max_duration_exceeded"
+        }
         JobStatus::ConfigError => "wrong_password",
         JobStatus::NotInitialized => "repository_missing",
         JobStatus::Failed => "step_failed",
