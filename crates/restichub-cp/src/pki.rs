@@ -378,6 +378,29 @@ impl CaStore {
         agent: Uuid,
         csr_der: &[u8],
     ) -> Result<IssuedCertificate, CaError> {
+        self.issue_agent_certificate_at(
+            tenant,
+            agent,
+            csr_der,
+            OffsetDateTime::now_utc(),
+            AGENT_CERT_LIFETIME,
+        )
+    }
+
+    /// Like [`Self::issue_agent_certificate`], with the issue time and the lifetime given.
+    ///
+    /// The rotation over the stream passes the clock of the control plane and the configured
+    /// lifetime (FR-ID-03).
+    pub fn issue_agent_certificate_at(
+        &self,
+        tenant: Uuid,
+        agent: Uuid,
+        csr_der: &[u8],
+        now: OffsetDateTime,
+        lifetime: Duration,
+    ) -> Result<IssuedCertificate, CaError> {
+        // A certificate holds whole seconds; the registry row stores the same expiry.
+        let now = now.replace_nanosecond(0).unwrap_or(now);
         let expected_uri = agent_san_uri(tenant, agent);
         let csr =
             CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(csr_der))
@@ -392,7 +415,6 @@ impl CaStore {
             source,
         })?;
 
-        let now = OffsetDateTime::now_utc();
         let mut params = CertificateParams::default();
         params.distinguished_name = distinguished_name(&agent.to_string());
         params.subject_alt_names = vec![SanType::URI(san)];
@@ -403,8 +425,8 @@ impl CaStore {
         let serial = random_serial()?;
         let serial_bytes = serial.to_bytes();
         params.serial_number = Some(serial);
-        params.not_before = now;
-        let not_after = leaf_not_after(now, AGENT_CERT_LIFETIME, issuing.not_after);
+        params.not_before = leaf_not_before(now, lifetime, issuing.not_before);
+        let not_after = leaf_not_after(now, lifetime, issuing.not_after);
         params.not_after = not_after;
 
         let cert = params
@@ -679,6 +701,20 @@ fn random_serial() -> Result<SerialNumber, CaError> {
     Ok(SerialNumber::from_slice(&bytes))
 }
 
+/// How far an agent certificate starts before the issue time, so an agent with a clock that runs
+/// slow still accepts it.
+pub const AGENT_CERT_BACKDATE: Duration = Duration::minutes(5);
+
+/// The issue time minus [`AGENT_CERT_BACKDATE`], but not before the issuer starts. A short lifetime
+/// shortens the backdate to a quarter of it, so the half of the lifetime stays near the issue time.
+fn leaf_not_before(
+    now: OffsetDateTime,
+    lifetime: Duration,
+    issuer_not_before: OffsetDateTime,
+) -> OffsetDateTime {
+    (now - AGENT_CERT_BACKDATE.min(lifetime / 4)).max(issuer_not_before)
+}
+
 /// The earlier of the requested lifetime and the expiry of the issuer, so a leaf never outlives it.
 fn leaf_not_after(
     now: OffsetDateTime,
@@ -744,6 +780,22 @@ pub fn validate_enrollment_csr(csr_der: &[u8]) -> Result<(), CaError> {
     validate_spki_p256(csr_der)
 }
 
+/// The raw public key of a certificate signing request. A rotation compares it with the key of the
+/// current certificate (FR-ID-03).
+pub fn csr_public_key(csr_der: &[u8]) -> Result<Vec<u8>, CaError> {
+    use x509_parser::certification_request::X509CertificationRequest;
+    use x509_parser::prelude::FromDer;
+
+    let (_, csr) =
+        X509CertificationRequest::from_der(csr_der).map_err(|_| CaError::CsrKeyAlgorithm)?;
+    Ok(csr
+        .certification_request_info
+        .subject_pki
+        .subject_public_key
+        .data
+        .to_vec())
+}
+
 /// Refuses a public key that is not an uncompressed ECDSA P-256 point (ADR-0026).
 ///
 /// The check reads the curve from the SubjectPublicKeyInfo. `rcgen` names the key algorithm after
@@ -782,6 +834,29 @@ fn validate_spki_p256(csr_der: &[u8]) -> Result<(), CaError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fr_id_03_a_leaf_starts_five_minutes_early_but_not_before_the_issuer() {
+        use super::{AGENT_CERT_LIFETIME, leaf_not_before};
+        use time::{Duration, OffsetDateTime};
+
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(100);
+        let long_ago = now - Duration::days(30);
+        assert_eq!(
+            leaf_not_before(now, AGENT_CERT_LIFETIME, long_ago),
+            now - Duration::minutes(5)
+        );
+        let issuer_start = now - Duration::minutes(2);
+        assert_eq!(
+            leaf_not_before(now, AGENT_CERT_LIFETIME, issuer_start),
+            issuer_start
+        );
+        // A short test lifetime shortens the backdate.
+        assert_eq!(
+            leaf_not_before(now, Duration::seconds(8), long_ago),
+            now - Duration::seconds(2)
+        );
+    }
+
     use uuid::Uuid;
 
     use super::{

@@ -41,6 +41,13 @@ impl ManualClock {
             .fetch_add(seconds * 1_000_000_000, Ordering::SeqCst);
     }
 
+    /// Moves the clock to a given time, so a test that waits in real time can follow the wall
+    /// clock.
+    pub fn set(&self, time: OffsetDateTime) {
+        self.nanos
+            .store(time.unix_timestamp_nanos() as i64, Ordering::SeqCst);
+    }
+
     pub fn shared(self) -> Arc<dyn Clock> {
         Arc::new(self)
     }

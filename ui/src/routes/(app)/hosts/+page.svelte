@@ -98,15 +98,35 @@
 			value: (row) => statusLabel(row),
 			render: statusCell
 		},
-		{ key: 'agent_version', header: t('hosts.agent'), render: versionCell },
+		{
+			key: 'agent_version',
+			header: t('hosts.agent'),
+			value: (row) => row.agent_version,
+			render: versionCell
+		},
 		{
 			key: 'last_seen_at',
 			header: t('hosts.lastSeen'),
 			value: (row) => row.last_seen_at ?? '',
 			render: lastSeenCell
 		},
+		{
+			key: 'certificate_expires_at',
+			header: t('hosts.certificate'),
+			value: (row) => row.certificate_expires_at,
+			render: certificateCell
+		},
 		{ key: 'created_at', header: t('hosts.created'), render: createdCell }
 	]);
+
+	// An agent rotates at two thirds of the lifetime, so a certificate that is close to its end
+	// means that the agent could not rotate (FR-ID-03).
+	const CERT_WARNING_MS = 3 * 24 * 60 * 60 * 1000;
+
+	function certificateExpiry(agent: Agent): { expired: boolean; warn: boolean } {
+		const left = new Date(agent.certificate_expires_at).getTime() - Date.now();
+		return { expired: left <= 0, warn: agent.status === 'active' && left < CERT_WARNING_MS };
+	}
 
 	function statusLabel(agent: Agent): string {
 		return t(agent.status === 'revoked' ? 'hosts.status.revoked' : 'hosts.status.active');
@@ -283,7 +303,50 @@
 {/snippet}
 
 {#snippet versionCell(agent: Agent)}
-	<span class="host__version">{agent.agent_version}</span>
+	<span class="version">
+		<span
+			class="host__version"
+			title={t('hosts.versionTitle', {
+				protocol: agent.protocol_version ?? '-',
+				version: agent.control_plane_version
+			})}>{agent.agent_version}</span
+		>
+		{#if agent.version_status === 'update_available' && agent.status !== 'revoked'}
+			<Badge tone="warning">{t('hosts.versionUpdate')}</Badge>
+		{:else if agent.version_status === 'unsupported'}
+			<Badge tone="danger">{t('hosts.versionUnsupported')}</Badge>
+		{/if}
+	</span>
+{/snippet}
+
+{#snippet certificateCell(agent: Agent)}
+	{@const expiry = certificateExpiry(agent)}
+	<span class="cert">
+		<time
+			class="cert__expiry"
+			class:cert__expiry--warn={expiry.warn}
+			datetime={agent.certificate_expires_at}
+			title={formatTime(agent.certificate_expires_at)}
+		>
+			{t(expiry.expired ? 'hosts.certExpired' : 'hosts.certExpires', {
+				time: relativeTime(agent.certificate_expires_at)
+			})}
+		</time>
+		<span class="cert__rotation">
+			{#if agent.last_certificate_rotation_at}
+				{t('hosts.certRotated', { time: relativeTime(agent.last_certificate_rotation_at) })}
+			{:else}
+				{t('hosts.certNotRotated')}
+			{/if}
+		</span>
+		{#if agent.superseded_certificate_used_at}
+			<Badge tone="danger">
+				<span title={formatTime(agent.superseded_certificate_used_at)}
+					>{t('hosts.certSuperseded')}</span
+				>
+			</Badge>
+		{/if}
+	</span>
 {/snippet}
 
 <svelte:head>
@@ -484,6 +547,29 @@
 
 	.host__version {
 		font-family: var(--rh-font-mono);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.version {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.cert {
+		display: flex;
+		flex-direction: column;
+		white-space: nowrap;
+	}
+
+	.cert__expiry--warn {
+		color: var(--rh-color-danger-text);
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.cert__rotation {
+		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 	}
 

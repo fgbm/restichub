@@ -19,7 +19,7 @@ A start with every key retired refuses with the message "every stored job signin
 ## Before you start
 
 - Copy the control plane database.
-- Confirm that no key retired for a compromise. A compromise needs a key rotation and an agent re-enrollment. Ask the security owner.
+- Confirm that no key retired for a compromise. A compromise needs a key rotation. An agent that is more than one rotation behind also needs a new enrollment. See [Job signing key compromise](job-signing-key-compromise.md). Ask the security owner.
 
 ## Procedure
 

@@ -185,7 +185,13 @@ pub struct Rejection {
 /// (ADR-0005, ADR-0020).
 #[must_use]
 pub fn sign_job(job: &Job, key_id: impl Into<String>, key: &SigningKey) -> SignedJob {
-    let bytes = job.encode_to_vec();
+    sign_job_bytes(job.encode_to_vec(), key_id, key)
+}
+
+/// Signs serialized [`Job`] bytes as they are, so a field that this build does not know stays in
+/// the signed message (ADR-0005, ADR-0030).
+#[must_use]
+pub fn sign_job_bytes(bytes: Vec<u8>, key_id: impl Into<String>, key: &SigningKey) -> SignedJob {
     let signature = key
         .sign(&signing_input(JOB_SIGNING_CONTEXT, &bytes))
         .to_bytes()

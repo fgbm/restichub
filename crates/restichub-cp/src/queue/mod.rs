@@ -27,10 +27,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use prost::Message as _;
+use restichub_db::audit::{AuditAction, AuditEvent, diff};
 use restichub_db::jobs::{self as job_repo, Job, JobOutcome};
 use restichub_db::queue as queue_repo;
 use restichub_db::{AgentId, DbError, JobId, JobStatus, TenantId, TenantStatus, TenantTx, tenants};
 use restichub_proto::agent::v1::{ControlMessage, Job as ProtoJob, SignedJob, control_message};
+use serde_json::json;
 use time::OffsetDateTime;
 use zeroize::Zeroizing;
 
@@ -342,6 +344,13 @@ async fn redeliver(
             ));
         }
     };
+    let signed = match resign_if_retired(state, tx, job, signed, &stored).await? {
+        Resigned::Current(signed) => signed,
+        Resigned::Fail(code) => {
+            return Ok(Prepared::Fail(code, restichub_db::JobResultCode::Failed));
+        }
+        Resigned::Skip => return Ok(Prepared::Skip),
+    };
     // The stored job may carry a field that only a newer agent reads. The agent may have come back
     // from an older release since the first send (FR-PR-09).
     let required = match ProtoJob::decode(signed.job.as_slice()) {
@@ -377,6 +386,74 @@ async fn redeliver(
     }
     queue_repo::mark_redelivered(tx, job.id, now, lease_until).await?;
     Ok(Prepared::Send(signed, required))
+}
+
+enum Resigned {
+    Current(SignedJob),
+    Fail(&'static str),
+    Skip,
+}
+
+/// Signs a stored job again when its signer key is retired, and stores the new bytes. A redelivery
+/// never sends a blob of a retired or a compromised key (ADR-0030).
+async fn resign_if_retired(
+    state: &AppState,
+    tx: &mut TenantTx<'_>,
+    job: &Job,
+    signed: SignedJob,
+    stored: &queue_repo::StoredSignedJob,
+) -> Result<Resigned, DbError> {
+    let (Some(signing), Some(provider)) = (state.job_signing(), state.kek()) else {
+        tracing::error!("the server holds no job signing key set or key provider");
+        return Ok(Resigned::Skip);
+    };
+    let retired = match signing.retired_key_ids(state.db()).await {
+        Ok(retired) => retired,
+        Err(error) => {
+            tracing::warn!(job = %job.id, %error, "the queue could not read the retired keys");
+            return Ok(Resigned::Skip);
+        }
+    };
+    if !retired.contains(&signed.signer_key_id) {
+        return Ok(Resigned::Current(signed));
+    }
+    let fresh = match signing.sign_job_bytes(state.db(), signed.job.clone()).await {
+        Ok(fresh) => fresh,
+        Err(error) => {
+            tracing::warn!(job = %job.id, %error, "the queue could not sign a stored job again");
+            return Ok(Resigned::Fail(SIGNING_FAILED));
+        }
+    };
+    let bytes = Zeroizing::new(fresh.encode_to_vec());
+    let sealed = match delivery::seal_signed_job(tx, provider, job.id, &bytes).await {
+        Ok(sealed) => sealed,
+        Err(DeliveryError::Database(error)) => return Err(error),
+        Err(error) => {
+            tracing::warn!(job = %job.id, %error, "the queue could not store a signed job again");
+            return Ok(Resigned::Skip);
+        }
+    };
+    let replacement = queue_repo::StoredSignedJob {
+        key_version: sealed.key_version,
+        nonce: sealed.nonce,
+        ciphertext: sealed.ciphertext,
+        secrets: stored.secrets.clone(),
+    };
+    queue_repo::replace_signed_job(tx, job.id, &replacement).await?;
+    let mut event = AuditEvent::new(AuditAction::JobResigned, "job");
+    event.object_id = Some(job.id.as_uuid());
+    // The audit diff masks a field name with "key"; a signer identifier is public.
+    event.diff = Some(diff(
+        None,
+        Some(&json!({
+            "old_signer": signed.signer_key_id,
+            "new_signer": fresh.signer_key_id,
+        })),
+        &[],
+    ));
+    restichub_db::audit::insert(tx, &event).await?;
+    tracing::info!(job = %job.id, "the queue signed a stored job again with the current key");
+    Ok(Resigned::Current(fresh))
 }
 
 async fn fail(

@@ -4,8 +4,9 @@
 //! platform tenant gets HTTP 403 (the endpoints are tenant-only). An agent of another tenant gives
 //! HTTP 404 (AC-TN-01).
 //!
-//! The revoke writes the status and the audit record in one transaction. The stream close follows
-//! in #52; the layer reads the status of this row (AC-ID-04).
+//! The revoke writes the status and the audit record in one transaction. The instance that serves
+//! the revoke cancels the running jobs and closes the stream; the other instances close theirs with
+//! the revocation sweep (AC-ID-04).
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -25,13 +26,14 @@ use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::validation::Reason;
 
-/// Stores the capabilities and the restore roots of the last connection of an agent for the
-/// diagnostics and the Restore screen (FR-PR-09, FR-RS-03). The job builder never reads the
-/// capabilities: it uses the capabilities of the live connection.
+/// Stores the facts of the last hello of an agent for the diagnostics, the Hosts screen and the
+/// Restore screen (FR-PR-09, FR-RS-03). The job builder never reads the capabilities: it uses the
+/// capabilities of the live connection.
 pub async fn record_hello_facts(
     state: &AppState,
     tenant: restichub_db::TenantId,
     agent: AgentId,
+    hello: &restichub_proto::agent::v1::AgentHello,
     capabilities: &[restichub_proto::AgentCapability],
     restore_roots: &[String],
 ) {
@@ -39,15 +41,41 @@ pub async fn record_hello_facts(
         .iter()
         .map(|capability| capability.as_str().to_owned())
         .collect();
+    let agent_version = clean_version(&hello.agent_version);
+    let restic_version = clean_version(&hello.restic_version);
     let result = async {
         let mut tx = state.db().begin_tenant(tenant).await?;
-        repo::set_hello_facts(&mut tx, agent, &names, restore_roots).await?;
+        repo::set_hello_facts(
+            &mut tx,
+            agent,
+            &repo::HelloFacts {
+                capabilities: &names,
+                restore_roots,
+                agent_version: &agent_version,
+                restic_version: &restic_version,
+                protocol_version_major: hello.protocol_version_major,
+                protocol_version_minor: hello.protocol_version_minor,
+            },
+        )
+        .await?;
         tx.commit().await
     }
     .await;
     if let Err(error) = result {
-        tracing::warn!(agent = %agent, cause = ?error, "the agent capabilities were not stored");
+        tracing::warn!(agent = %agent, cause = ?error, "the agent hello facts were not stored");
     }
+}
+
+/// The longest version text that the registry keeps.
+const MAX_VERSION_CHARS: usize = 64;
+
+/// Bounds a version text that an agent reported. A value with a control character is dropped.
+fn clean_version(value: &str) -> String {
+    if value.chars().count() > MAX_VERSION_CHARS || restichub_proto::validate::has_forbidden(value)
+    {
+        return String::new();
+    }
+    value.to_owned()
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -66,6 +94,16 @@ pub struct AgentView {
     pub certificate_serial: String,
     /// In RFC 3339.
     pub certificate_expires_at: String,
+    /// In RFC 3339. Null until the first rotation of the certificate.
+    pub last_certificate_rotation_at: Option<String>,
+    /// In RFC 3339. Null unless a connection presented the certificate that the last rotation
+    /// replaced. It can mean a copy of the old key (T17).
+    pub superseded_certificate_used_at: Option<String>,
+    /// Reported in the last hello as `major.minor`. Null before the first hello.
+    pub protocol_version: Option<String>,
+    /// The package version of the control plane that serves the request.
+    pub control_plane_version: String,
+    pub version_status: crate::agent_version::AgentVersionStatus,
     pub status: AgentStatus,
     pub last_seen_at: Option<String>,
     pub created_at: String,
@@ -86,6 +124,19 @@ impl From<&repo::Agent> for AgentView {
             restore_roots: agent.restore_roots.clone(),
             certificate_serial: to_hex(&agent.certificate_serial),
             certificate_expires_at: format_time(agent.certificate_expires_at),
+            last_certificate_rotation_at: agent.last_certificate_rotation_at.map(format_time),
+            superseded_certificate_used_at: agent.superseded_certificate_used_at.map(format_time),
+            protocol_version: agent
+                .protocol_version_major
+                .zip(agent.protocol_version_minor)
+                .map(|(major, minor)| format!("{major}.{minor}")),
+            control_plane_version: crate::agent_version::CONTROL_PLANE_VERSION.to_owned(),
+            version_status: crate::agent_version::status(
+                &agent.agent_version,
+                agent
+                    .protocol_version_major
+                    .zip(agent.protocol_version_minor),
+            ),
             status: agent.status,
             last_seen_at: agent.last_seen_at.map(format_time),
             created_at: format_time(agent.created_at),
@@ -278,6 +329,7 @@ pub async fn revoke_agent(
         return Err(ApiError::not_found());
     }
     let changed = repo::revoke(&mut tx, agent_id, actor, now).await?;
+    let jobs = restichub_db::queue::active_job_ids_for_agent(&mut tx, agent_id).await?;
     if changed {
         let mut event = context.audit_event(AuditAction::AgentRevoke, "agent", agent_id.as_uuid());
         event.diff = Some(diff(
@@ -288,8 +340,9 @@ pub async fn revoke_agent(
         restichub_db::audit::insert(&mut tx, &event).await?;
     }
     tx.commit().await?;
-    // A revoke closes an open stream at once (FR-ID-04, AC-ID-04).
-    state.agent_registry().close_by_agent(agent_id);
+    // A revoke cancels the running jobs and closes an open stream at once (FR-ID-04, AC-ID-04). A
+    // stream on another instance closes with the revocation sweep of that instance.
+    crate::agent_stream::cancel_jobs_and_close(state.agent_registry(), agent_id, &jobs);
     Ok(StatusCode::NO_CONTENT)
 }
 
