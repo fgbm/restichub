@@ -74,7 +74,7 @@ pub struct ProfilePaths {
 }
 
 /// The restic flags that a profile sets (FR-PF-01).
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BackupOptions {
     /// Use a file system snapshot. VSS on Windows only (FR-PF-01).
@@ -171,20 +171,6 @@ impl BackupOptions {
     fn max_minutes(&self) -> u32 {
         self.max_duration_minutes
             .unwrap_or_else(default_max_duration_minutes)
-    }
-}
-
-impl Default for BackupOptions {
-    fn default() -> Self {
-        Self {
-            use_fs_snapshot: false,
-            one_file_system: false,
-            exclude_caches: false,
-            limit_upload_kib: 0,
-            limit_download_kib: 0,
-            stall_timeout_minutes: None,
-            max_duration_minutes: None,
-        }
     }
 }
 

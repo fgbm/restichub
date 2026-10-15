@@ -314,7 +314,6 @@ impl Collector {
             (OutputKind::Backup | OutputKind::Restore, Some("error")) => {
                 Accepted::Log(backup_error(&message))
             }
-            // A status carries no log text (ADR-0011).
             (_, Some("verbose_status" | "status")) => Accepted::Status(line.to_owned()),
             _ => Accepted::Log(line.to_owned()),
         }
