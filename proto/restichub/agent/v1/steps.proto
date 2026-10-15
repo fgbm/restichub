@@ -311,7 +311,6 @@ message ScriptStep {
   string name = 1;
   // Program that runs the body.
   ScriptInterpreter interpreter = 2;
-  // Phase of the script in the job. (FR-HK-05).
   HookPhase phase = 3;
   // Text of the script. At most 65536 bytes of UTF-8. The agent writes it to a
   // protected temporary file and deletes the file after the run.

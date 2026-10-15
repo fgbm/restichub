@@ -62,6 +62,8 @@ pub enum Reason {
     Mismatch,
     /// The host did not turn on the trust mode for server scripts (FR-HK-10).
     ServerScriptsDisabled,
+    /// The field no longer exists (ADR-0040).
+    Removed,
 }
 
 impl Reason {
@@ -84,6 +86,7 @@ impl Reason {
             Self::Unavailable => "unavailable",
             Self::Mismatch => "mismatch",
             Self::ServerScriptsDisabled => "server_scripts_disabled",
+            Self::Removed => "removed",
         }
     }
 }

@@ -446,7 +446,6 @@ fn decode_cursor(value: &str) -> Result<ProfileCursor, String> {
 }
 
 /// The compiler input facts of a registered agent (FR-PF-03).
-///
 pub(crate) fn target_facts(
     agent: &Agent,
     now: time::OffsetDateTime,

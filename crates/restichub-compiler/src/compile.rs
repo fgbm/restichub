@@ -37,7 +37,8 @@ pub struct PlannedStep {
 /// # Errors
 ///
 /// Returns a [`CompileError`] for an unsupported restic version, an option
-/// that the operating system or the restic version does not allow, an invalid value or a template that does not expand.
+/// that the operating system or the restic version does not allow, an invalid value or a
+/// template that does not expand.
 pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileError> {
     if target.restic_version < ResticVersion::MIN_SUPPORTED {
         return Err(CompileError::UnsupportedRestic {

@@ -1032,3 +1032,31 @@ async fn an_unparsable_restic_version_is_refused() {
 
     db.cleanup().await;
 }
+
+/// ADR-0040: a request with a non-empty `hooks` field names the field and says it is removed; an
+/// empty list from an old client is accepted.
+#[tokio::test]
+async fn adr_0040_a_request_with_hooks_names_the_removed_field() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let repository_id = repository_fixture(db.database(), tenant).await;
+
+    let mut body = profile_body("with-hooks", &repository_id, json!(["/srv"]));
+    body["hooks"] = json!([{"hook_id": "pg-dump", "phase": "before"}]);
+    let (status, _, problem) = send(
+        &app,
+        request("POST", "/api/v1/profiles", Some(&cookie), Some(body)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "hooks");
+    assert_eq!(problem["reason"], "removed");
+
+    let mut body = profile_body("old-client", &repository_id, json!(["/srv"]));
+    body["hooks"] = json!([]);
+    create_profile(&app, &cookie, body).await;
+}

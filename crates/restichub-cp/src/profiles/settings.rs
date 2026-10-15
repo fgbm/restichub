@@ -285,6 +285,11 @@ pub struct CreateProfileRequest {
     /// Absent when the profile runs no verification step.
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
+    /// (ADR-0040).
+    #[serde(default)]
+    #[schema(ignore)]
+    pub hooks: Option<Vec<serde_json::Value>>,
 }
 
 /// The body of a profile update. The body replaces the settings; an absent name keeps the name.
@@ -311,6 +316,11 @@ pub struct UpdateProfileRequest {
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
+    /// (ADR-0040).
+    #[serde(default)]
+    #[schema(ignore)]
+    pub hooks: Option<Vec<serde_json::Value>>,
 }
 
 /// One stored profile (FR-PF-01). It holds no secret.
@@ -794,6 +804,7 @@ fn compiler_retention(retention: &Retention) -> CompilerRetention {
 
 /// Validates a create request and returns the normalized settings (FR-PF-05).
 pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, ApiError> {
+    reject_hooks(body.hooks.as_deref())?;
     validate_profile(
         Some(body.name),
         body.repository_id,
@@ -813,6 +824,7 @@ pub fn validate_update(
     body: UpdateProfileRequest,
     current_name: &str,
 ) -> Result<ValidatedProfile, ApiError> {
+    reject_hooks(body.hooks.as_deref())?;
     let name = body.name.unwrap_or_else(|| current_name.to_owned());
     validate_profile(
         Some(name),
@@ -826,6 +838,13 @@ pub fn validate_update(
         body.retention,
         body.check,
     )
+}
+
+fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
+    match hooks {
+        Some([_, ..]) => Err(ApiError::invalid_field("hooks", Reason::Removed)),
+        _ => Ok(()),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
