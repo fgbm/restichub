@@ -61,7 +61,7 @@
 	}
 
 	const columns = $derived<TableColumn<Secret>[]>([
-		{ key: 'name', header: t('secrets.name'), render: nameCell },
+		{ key: 'name', header: t('secrets.name'), nowrap: true, render: nameCell },
 		{
 			key: 'purpose',
 			header: t('secrets.purpose'),

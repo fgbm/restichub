@@ -153,8 +153,6 @@ fn format_time(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
-/// The metadata of a secret in a response (FR-RP-05).
-///
 /// One object that references a secret.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SecretUsageView {
@@ -163,6 +161,8 @@ pub struct SecretUsageView {
     pub name: String,
 }
 
+/// The metadata of a secret in a response (FR-RP-05).
+///
 /// The view never holds the value. The API cannot return a secret value after a user saves it
 /// (AC-RP-02).
 #[derive(Debug, Serialize, ToSchema)]
