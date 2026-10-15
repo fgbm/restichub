@@ -190,7 +190,7 @@ The configuration file holds the same value as `log_retention_days`. The value i
 
 ## Job detail
 
-Select a job in the list "Jobs" to open its detail. The header shows the plan (or the kind of the job), the status, the host, the trigger and, while the job runs, the number of the step. The button "Run again" starts the plan again. The button "Cancel job" is available while the job can still change. The panel "About this job" holds these fields:
+Select a job in the list "Jobs" to open its detail. The header shows the plan (or the kind of the job), the status, the host and the trigger. While the job runs, it also shows the step number. The button "Run again" starts the plan again. The button "Cancel job" is available while the job can still change. The panel "About this job" holds these fields:
 
 | Field | Meaning |
 |---|---|

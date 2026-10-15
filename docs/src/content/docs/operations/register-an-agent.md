@@ -135,7 +135,7 @@ restichub-agent status
 restichub-agent uninstall-service
 ```
 
-- `status` prints the agent ID, the organization ID, the certificate expiry, the restic version and path, the service state, the control plane URL, the connection state, the time of the last connection and the last error. It prints no secret. It exits with the code 1 when the agent is not connected.
+- `status` prints the agent ID and the organization ID. It prints the certificate expiry, the restic version and path, and the service state. It also prints the control plane URL, the connection state, the time of the last connection and the last error. It prints no secret. It exits with the code 1 when the agent is not connected.
 - `uninstall-service` stops and removes the service. It keeps the data, so `install-service` can install the service again.
 
 A `status` output looks like this:
@@ -179,7 +179,7 @@ On Linux the command writes `/etc/systemd/system/restichub-agent.service` and en
 
 ### Troubleshooting
 
-The agent exits with the code 0 on success, with the code 1 on an error, and with the code 78 when the service starts without a usable identity. The systemd unit does not restart the service after the code 78, because a restart cannot create an identity.
+The exit code is 0 on success and 1 on an error. The exit code is 78 when the service starts without a usable identity. The systemd unit does not restart the service after the code 78, because a restart cannot create an identity.
 
 | Message or symptom | Cause | Action |
 | --- | --- | --- |

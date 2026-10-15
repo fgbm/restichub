@@ -44,7 +44,7 @@ The command writes a small file next to the configuration directory of the agent
 
 The agent trusts the file only when root or Administrators own it and no other account can write it or the directory above it. If another account can write the file, the mode is off. The host list then shows **Disabled, the setting file is not trusted**. A job, the control plane and a self-update cannot change the file.
 
-The agent reports the mode and the interpreters that it found. The control plane keeps this report. The profile form warns with "A host does not accept scripts" when a host of a plan has not turned on the mode or lacks the interpreter of a script. The control plane refuses a plan or a job that holds a script for a host without the mode. The agent refuses such a job too and answers with the reason `server_scripts_disabled`.
+The agent reports the mode and the interpreters that it found. The control plane keeps this report. The profile form warns "A host does not accept scripts" in two cases. A host of a plan has not turned on the mode, or it lacks the interpreter of a script. The control plane refuses a plan or a job that holds a script for a host without the mode. The agent refuses such a job too and answers with the reason `server_scripts_disabled`.
 
 ## Write a script
 
@@ -138,7 +138,7 @@ ReadWritePaths=/var/backups
 
 ## Job detail
 
-The job detail lists every script in order before the job runs. Each step shows its status, start time, duration and exit code. Select the log of a step ("Show the log of ...") to read the output of that step only. The backup step has its own log too. The complete log of the job ("Full log") stays below the steps.
+The job detail lists every script in order before the job runs. Each step shows its status, start time, duration and exit code. Select the log of a step ("Show the log of ...") to read the output of that step only. The backup step has its own log too. The complete log of the job ("Complete log") stays below the steps.
 
 ## Audit
 

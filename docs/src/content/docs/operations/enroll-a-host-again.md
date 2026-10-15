@@ -22,7 +22,7 @@ Use this procedure when the agent lost its identity, or when you must move the a
 
 The token is bound to the host. The command prints that it replaced the host record. The control plane then refuses the old certificate at once, and it closes the open stream of the old agent. The audit log gets the action `agent_reenroll`.
 
-A token that is bound to a host appears in the list "Pending registrations" with the text "Re-registers the host" and the name of the host. The token takes over the identity of the host, so it expires after one hour at most. Set [`RESTICHUB_REENROLL_TOKEN_MAX_TTL_SECS`](/restichub/operations/environment-variables/) to change the limit. A new token for the same host cancels the earlier unused tokens of that host, and a successful registration cancels the others. A revoked host cannot enroll again, and the audit log records the attempt.
+A token that is bound to a host appears in the list "Pending registrations" with the text "Re-registers the host" and the host name. The token takes over the identity of the host. Therefore it expires after one hour at most. Set [`RESTICHUB_REENROLL_TOKEN_MAX_TTL_SECS`](/restichub/operations/environment-variables/) to change the limit. A new token for the same host cancels the earlier unused tokens of that host, and a successful registration cancels the others. A revoked host cannot enroll again, and the audit log records the attempt.
 
 The host shows "Waiting for connection" until the new agent connects. It raises no "Host offline" alert in this time.
 

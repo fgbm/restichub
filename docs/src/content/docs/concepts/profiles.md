@@ -46,7 +46,7 @@ The hourly, daily, weekly, monthly and yearly rules count only the intervals tha
 
 The rules apply to each group of snapshots separately. Then the copies of different hosts or paths do not push each other out. Without a choice, the group is the host and the paths. A filter can limit the rules to some hosts, tags or paths. Snapshots outside the filter stay.
 
-The editor shows a sample of 60 daily snapshots, with two snapshots a day in the last three days, and which of them the current rules keep. The legend marks a snapshot that stays because of a tag as "stays because of a tag".
+The editor shows a sample of 60 daily snapshots. The last three days hold two snapshots a day. The sample shows which snapshots the current rules keep. The legend marks a snapshot that stays because of a tag as "stays because of a tag".
 
 ### Presets
 
