@@ -57,10 +57,22 @@ pub fn program_dir() -> PathBuf {
     }
 }
 
-/// The directory of the downloaded restic binary: `bin` in the program directory (ADR-0038).
+/// The directory of the downloaded restic binary (ADR-0038).
+///
+/// Windows keeps it next to the agent executable. Linux uses `bin` in the program directory.
 #[must_use]
 pub fn restic_dir() -> PathBuf {
-    program_dir().join("bin")
+    restic_dir_in(&program_dir())
+}
+
+/// The restic directory inside a program directory.
+#[must_use]
+pub fn restic_dir_in(program: &Path) -> PathBuf {
+    if cfg!(windows) {
+        program.to_path_buf()
+    } else {
+        program.join("bin")
+    }
 }
 
 /// Where the agent executable lives after the self-install (FR-IN-07).
@@ -80,16 +92,16 @@ pub fn agent_exe_in(program: &Path) -> PathBuf {
     }
 }
 
-/// The restic directory of an install before the program directory existed (ADR-0038).
+/// The restic directories of earlier installs, the newest first (ADR-0038).
 #[must_use]
-pub fn legacy_restic_dir() -> PathBuf {
+pub fn legacy_restic_dirs() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
-        config_dir().join("bin")
+        vec![program_dir().join("bin"), config_dir().join("bin")]
     }
     #[cfg(not(windows))]
     {
-        PathBuf::from("/var/lib/restichub-agent/bin")
+        vec![PathBuf::from("/var/lib/restichub-agent/bin")]
     }
 }
 
