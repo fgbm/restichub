@@ -591,27 +591,43 @@ pub async fn lost_running(
     .map_err(DbError::Query)
 }
 
-/// Lists and locks the running jobs of an agent that the agent does not list as its own, and that
-/// started before `cutoff` (ADR-0039).
+/// Lists and locks the running jobs of an agent that the agent does not list as its own.
 pub async fn running_unlisted(
     tx: &mut TenantTx<'_>,
     agent: AgentId,
     listed: &[Uuid],
-    cutoff: OffsetDateTime,
 ) -> Result<Vec<JobId>, DbError> {
     let rows = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM jobs \
          WHERE status = 'running' AND agent_id = $1 AND NOT (id = ANY($2)) \
-           AND COALESCE(started_at, sent_at, created_at) <= $3 \
          FOR UPDATE SKIP LOCKED",
     )
     .bind(agent)
     .bind(listed)
-    .bind(cutoff)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
     Ok(rows.into_iter().map(JobId::from_uuid).collect())
+}
+
+/// Fails a running job that an agent restart interrupted, and marks the repository lock as
+/// possibly stale.
+pub async fn mark_interrupted(
+    tx: &mut TenantTx<'_>,
+    id: JobId,
+    now: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'failed', result_code = 'failed', result_message = 'interrupted', \
+                stale_lock_since = $2, finished_at = $2, lease_until = NULL, updated_at = now() \
+         WHERE id = $1 AND status = 'running'",
+    )
+    .bind(id)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
 }
 
 /// Fails a running job because its agent is lost, and marks the repository lock as possibly stale.

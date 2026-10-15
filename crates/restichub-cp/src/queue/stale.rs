@@ -130,16 +130,14 @@ pub async fn recover_tenant(
     tx.commit().await
 }
 
-/// How long a job must run before a hello that does not list it fails it. The acknowledgement of
-/// a job and the hello of a new connection can cross.
-const UNLISTED_GRACE: time::Duration = time::Duration::minutes(2);
-
 /// The most job identifiers that the control plane reads from one hello.
 const MAX_LISTED_JOBS: usize = 4096 + 64;
 
 /// Fails the running jobs that a connecting agent does not list (ADR-0039).
 ///
 /// The agent restarted and lost the job, so the job can never report. Its lock becomes a suspect.
+/// No grace applies: the agent lists a job before it acknowledges it, so a running job that the
+/// hello omits is gone.
 pub async fn fail_unlisted_running(
     state: &AppState,
     tenant: TenantId,
@@ -155,10 +153,8 @@ pub async fn fail_unlisted_running(
     let now = state.auth().clock.now();
     let outcome = async {
         let mut tx = state.db().begin_tenant(tenant).await?;
-        for id in
-            queue_repo::running_unlisted(&mut tx, agent, &listed, now - UNLISTED_GRACE).await?
-        {
-            queue_repo::mark_agent_lost(&mut tx, id, now, now).await?;
+        for id in queue_repo::running_unlisted(&mut tx, agent, &listed).await? {
+            queue_repo::mark_interrupted(&mut tx, id, now).await?;
         }
         tx.commit().await
     }
