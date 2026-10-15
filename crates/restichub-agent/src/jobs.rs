@@ -40,8 +40,8 @@ use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{
-    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, RejectReason, SignedJob, Step,
-    StepResult, StepStatus, agent_message, step, step_result,
+    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, RejectReason, ScriptInterpreter,
+    ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message, step, step_result,
 };
 use restichub_proto::signing::{
     Admission, Expected, JobJournal as _, JournalState, KeyRing, Rejection, admit, verify_job,
@@ -51,6 +51,7 @@ use tokio::sync::mpsc;
 use crate::hooks::HookStore;
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
 use crate::restore_roots::RestoreAccess;
+use crate::scripts::ScriptStore;
 
 mod hooks;
 mod log;
@@ -115,6 +116,9 @@ pub struct Jobs {
     /// Place and trust rule of the allow-list file. The agent reads the file again at each job
     /// (FR-HK-01).
     hooks: Arc<HookStore>,
+    /// Place and trust rule of the server scripts setting. The agent reads it again at each job
+    /// (FR-HK-08).
+    scripts: Arc<ScriptStore>,
 }
 
 impl Jobs {
@@ -133,6 +137,7 @@ impl Jobs {
         journal.prune(now_timestamp());
         journal.persist()?;
         let restore = RestoreAccess::for_host(dir, &cache, &program);
+        let scripts = ScriptStore::for_config_dir(dir, &cache);
         Ok(Self {
             program,
             expected_sha256,
@@ -146,6 +151,7 @@ impl Jobs {
             stop_grace: STOP_GRACE,
             restore: Arc::new(restore),
             hooks: Arc::new(HookStore::for_config_dir(dir)),
+            scripts: Arc::new(scripts),
         })
     }
 
@@ -154,6 +160,25 @@ impl Jobs {
     pub fn with_hook_store(mut self, store: HookStore) -> Self {
         self.hooks = Arc::new(store);
         self
+    }
+
+    /// Replaces the place and the trust rule of the server scripts setting (FR-HK-08).
+    #[must_use]
+    pub fn with_script_store(mut self, store: ScriptStore) -> Self {
+        self.scripts = Arc::new(store);
+        self
+    }
+
+    /// The trust mode and the interpreters for `AgentHello` (FR-HK-08).
+    pub async fn script_report(&self) -> (ServerScriptsState, Vec<ScriptInterpreter>) {
+        let store = Arc::clone(&self.scripts);
+        match tokio::task::spawn_blocking(move || store.report()).await {
+            Ok(report) => report,
+            Err(error) => {
+                tracing::warn!(%error, "the server scripts check stopped");
+                (ServerScriptsState::Unspecified, Vec::new())
+            }
+        }
     }
 
     /// The state and the public metadata of the hook allow-list for `AgentHello` (FR-HK-04). A
@@ -282,6 +307,30 @@ impl Jobs {
     /// The reason to refuse a job whose hook is unknown or whose parameters do not obey the
     /// schema, or `None` (FR-HK-03, AC-HK-01, AC-HK-03).
     async fn hook_refusal(&self, validated: &ValidatedJob) -> Option<RejectReason> {
+        let scripts: Vec<_> = validated
+            .job()
+            .steps
+            .iter()
+            .filter_map(|step| match step.kind.as_ref() {
+                Some(step::Kind::Script(script)) => Some(script.clone()),
+                _ => None,
+            })
+            .collect();
+        if !scripts.is_empty() {
+            let store = Arc::clone(&self.scripts);
+            let checked = tokio::task::spawn_blocking(move || {
+                scripts
+                    .iter()
+                    .find_map(|script| store.check(script).err())
+                    .map(|refusal| refusal.reject_reason())
+            })
+            .await;
+            match checked {
+                Ok(Some(reason)) => return Some(reason),
+                Ok(None) => {}
+                Err(_) => return Some(RejectReason::Internal),
+            }
+        }
         let hooks: Vec<_> = validated
             .job()
             .steps
@@ -496,6 +545,7 @@ impl Jobs {
             )
             .await;
         progress.cancelled |= before.cancelled;
+        progress.warned |= before.warned;
         let mut hook_failure: Option<HookFailure> = before.failure;
         let before_ok = hook_failure.is_none() && !progress.cancelled;
         if !before_ok {
@@ -662,6 +712,7 @@ impl Jobs {
                 .run_hook_steps(&phased.after, cleanup, &cancel, deadline, sink!())
                 .await;
             progress.cancelled |= report.cancelled;
+            progress.warned |= report.warned;
             hook_failure = hook_failure.or(report.failure);
         } else {
             self.skip_steps(&phased.after, sink!()).await;
@@ -683,6 +734,7 @@ impl Jobs {
                     .run_hook_steps(steps, cleanup, &cancel, deadline, sink!())
                     .await;
                 progress.cancelled |= report.cancelled;
+                progress.warned |= report.warned;
                 hook_failure = hook_failure.or(report.failure);
             } else {
                 self.skip_steps(steps, sink!()).await;
@@ -700,6 +752,7 @@ impl Jobs {
                 sink!(),
             )
             .await;
+        progress.warned |= report.warned;
         hook_failure = hook_failure.or(report.failure);
         progress.hook_failure = hook_failure;
 

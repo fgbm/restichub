@@ -18,7 +18,9 @@ use std::time::Duration;
 
 use restichub_compiler::HookPhase;
 use restichub_compiler::hook::phase_of;
-use restichub_proto::agent::v1::{HookStep, LogStream, Step, StepResult, StepStatus, step};
+use restichub_proto::agent::v1::{
+    HookStep, LogStream, ScriptFailurePolicy, ScriptStep, Step, StepResult, StepStatus, step,
+};
 use tokio::sync::mpsc;
 
 use super::log::JobLog;
@@ -27,8 +29,9 @@ use super::runner::{
     StepOutcome, interrupt, kill_tree,
 };
 use super::{Jobs, lock, now_timestamp};
-use crate::hooks::Refusal;
+use crate::hooks::{Invocation, Refusal};
 use crate::output::{Line, MAX_LINE, Pipe, spawn_reader};
+use crate::scripts::ScriptRefusal;
 use crate::scrub::Scrubber;
 
 /// The most hook output bytes that one hook adds to the job log. The log of the job has its own
@@ -59,6 +62,7 @@ impl<'a> Phased<'a> {
         for step in steps {
             let phase = match step.kind.as_ref() {
                 Some(step::Kind::Hook(hook)) => phase_of(hook.phase),
+                Some(step::Kind::Script(script)) => phase_of(script.phase),
                 _ => None,
             };
             match phase {
@@ -78,6 +82,7 @@ impl<'a> Phased<'a> {
 /// The first hook that failed, for the error of the job (AC-HK-06).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct HookFailure {
+    /// The identifier of a hook or the name of a script.
     pub(super) hook_id: String,
     pub(super) phase: HookPhase,
 }
@@ -98,6 +103,47 @@ pub(super) struct PhaseMode {
 pub(super) struct PhaseReport {
     pub(super) failure: Option<HookFailure>,
     pub(super) cancelled: bool,
+    /// A script with the policy `continue` failed: the job goes on and ends with warnings.
+    pub(super) warned: bool,
+}
+
+/// The hook or the script that a step holds.
+enum Planned<'a> {
+    Hook(&'a HookStep),
+    Script(&'a ScriptStep),
+}
+
+impl Planned<'_> {
+    fn of(step: &Step) -> Option<Planned<'_>> {
+        match step.kind.as_ref()? {
+            step::Kind::Hook(hook) => Some(Planned::Hook(hook)),
+            step::Kind::Script(script) => Some(Planned::Script(script)),
+            _ => None,
+        }
+    }
+
+    /// The name in the job error and in the log.
+    fn label(&self) -> String {
+        match self {
+            Self::Hook(hook) => hook.hook_id.clone(),
+            Self::Script(script) => script.name.clone(),
+        }
+    }
+
+    fn phase(&self) -> HookPhase {
+        let wire = match self {
+            Self::Hook(hook) => hook.phase,
+            Self::Script(script) => script.phase,
+        };
+        phase_of(wire).unwrap_or(HookPhase::Before)
+    }
+
+    /// A failed script with the policy `continue` does not stop the sequence and does not fail the
+    /// job (FR-HK-09).
+    fn tolerates_failure(&self) -> bool {
+        matches!(self, Self::Script(script)
+            if script.failure_policy == ScriptFailurePolicy::Continue as i32)
+    }
 }
 
 /// Where the results of the steps of one job collect.
@@ -121,7 +167,7 @@ impl Jobs {
     ) -> PhaseReport {
         let mut report = PhaseReport::default();
         for (index, step) in steps.iter().enumerate() {
-            let Some(step::Kind::Hook(hook)) = step.kind.as_ref() else {
+            let Some(planned) = Planned::of(step) else {
                 continue;
             };
             if mode.honor_cancel && cancel.is_cancelled() {
@@ -130,9 +176,16 @@ impl Jobs {
                 break;
             }
             let started_at = now_timestamp();
-            let outcome = self
-                .run_hook(step, hook, mode, cancel, deadline, sink.log)
-                .await;
+            let outcome = match &planned {
+                Planned::Hook(hook) => {
+                    self.run_hook(step, hook, mode, cancel, deadline, sink.log)
+                        .await
+                }
+                Planned::Script(script) => {
+                    self.run_script(step, script, mode, cancel, deadline, sink.log)
+                        .await
+                }
+            };
             let finished_at = now_timestamp();
             sink.results.push(
                 self.send_step_result(sink.job_id, step, &outcome, started_at, finished_at)
@@ -145,12 +198,16 @@ impl Jobs {
                     self.skip_steps(&steps[index + 1..], sink).await;
                     break;
                 }
+                _ if planned.tolerates_failure() => {
+                    *sink.failed += 1;
+                    report.warned = true;
+                }
                 _ => {
                     *sink.failed += 1;
                     if report.failure.is_none() {
                         report.failure = Some(HookFailure {
-                            hook_id: hook.hook_id.clone(),
-                            phase: phase_of(hook.phase).unwrap_or(HookPhase::Before),
+                            hook_id: planned.label(),
+                            phase: planned.phase(),
                         });
                     }
                     if mode.stop_on_failure {
@@ -204,6 +261,75 @@ impl Jobs {
                 return StepOutcome::not_started();
             }
         };
+        self.supervise(
+            step,
+            &format!("hook {}", hook.hook_id),
+            invocation,
+            mode,
+            cancel,
+            deadline,
+            log,
+        )
+        .await
+    }
+
+    /// Writes one script, runs it and removes the file (FR-HK-09, AC-HK-09).
+    async fn run_script(
+        &self,
+        step: &Step,
+        script: &ScriptStep,
+        mode: PhaseMode,
+        cancel: &CancelHandle,
+        deadline: Option<tokio::time::Instant>,
+        log: &mut JobLog,
+    ) -> StepOutcome {
+        let step_id = step.step_id.as_str();
+        let label = format!("script {}", script.name);
+        let store = Arc::clone(&self.scripts);
+        let request = script.clone();
+        let timeout = step.timeout_seconds;
+        let prepared = tokio::task::spawn_blocking(move || store.prepare(&request, timeout)).await;
+        let prepared = match prepared {
+            Ok(Ok(prepared)) => prepared,
+            Ok(Err(refusal)) => {
+                log.push(
+                    step_id,
+                    LogStream::Agent,
+                    &script_refusal_text(&label, &refusal),
+                );
+                self.send_log(log).await;
+                return StepOutcome::not_started();
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the script check stopped");
+                return StepOutcome::not_started();
+            }
+        };
+        let crate::scripts::PreparedScript {
+            invocation,
+            scratch,
+        } = prepared;
+        let outcome = self
+            .supervise(step, &label, invocation, mode, cancel, deadline, log)
+            .await;
+        // The process tree is gone, so the file can go (AC-HK-09).
+        drop(scratch);
+        outcome
+    }
+
+    /// Starts the process of an invocation, supervises it and returns its outcome (FR-HK-03,
+    /// FR-AG-10).
+    async fn supervise(
+        &self,
+        step: &Step,
+        label: &str,
+        invocation: Invocation,
+        mode: PhaseMode,
+        cancel: &CancelHandle,
+        deadline: Option<tokio::time::Instant>,
+        log: &mut JobLog,
+    ) -> StepOutcome {
+        let step_id = step.step_id.as_str();
         let mut limit = invocation.timeout;
         if step.timeout_seconds > 0 {
             limit = limit.min(Duration::from_secs(u64::from(step.timeout_seconds)));
@@ -216,10 +342,7 @@ impl Jobs {
                 log.push(
                     step_id,
                     LogStream::Agent,
-                    &format!(
-                        "hook {} did not start: the job deadline passed",
-                        hook.hook_id
-                    ),
+                    &format!("{label} did not start: the job deadline passed"),
                 );
                 self.send_log(log).await;
                 return StepOutcome::not_started();
@@ -230,12 +353,8 @@ impl Jobs {
         let mut child = match crate::exec::spawn_job_hook(&invocation, &self.cache) {
             Ok(child) => child,
             Err(error) => {
-                tracing::warn!(hook = %hook.hook_id, error = %format!("{error:#}"), "cannot start a hook");
-                log.push(
-                    step_id,
-                    LogStream::Agent,
-                    &format!("hook {} did not start", hook.hook_id),
-                );
+                tracing::warn!(step = %label, error = %format!("{error:#}"), "cannot start a hook or a script");
+                log.push(step_id, LogStream::Agent, &format!("{label} did not start"));
                 self.send_log(log).await;
                 return StepOutcome::not_started();
             }
@@ -343,7 +462,7 @@ impl Jobs {
         log.push(
             step_id,
             LogStream::Agent,
-            &format!("hook {} finished with code {code}", hook.hook_id),
+            &format!("{label} finished with code {code}"),
         );
         self.send_log(log).await;
 
@@ -395,6 +514,19 @@ impl HookOutput<'_> {
         }
         self.budget -= text.len() + 1;
         log.push(self.step_id, stream, &text);
+    }
+}
+
+/// The agent line that tells why a script did not start. It holds no value.
+fn script_refusal_text(label: &str, refusal: &ScriptRefusal) -> String {
+    match refusal {
+        ScriptRefusal::Disabled => {
+            format!("{label} did not start: the host does not trust scripts from the control plane")
+        }
+        ScriptRefusal::Invalid(text) => format!("{label} did not start: {text}"),
+        ScriptRefusal::Unavailable(_) => {
+            format!("{label} did not start: the agent cannot write the script file")
+        }
     }
 }
 

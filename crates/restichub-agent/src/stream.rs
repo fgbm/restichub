@@ -23,8 +23,8 @@ use anyhow::{Context, Result, bail};
 use hyper::Uri;
 use restichub_proto::agent::v1::{
     AgentHello, AgentMessage, ControlMessage, HookAllowListState, HookMetadata, KeyUpdateAck, Ping,
-    Pong, SigningKeyUpdate, agent_message, agent_service_client::AgentServiceClient,
-    control_message,
+    Pong, ScriptInterpreter, ServerScriptsState, SigningKeyUpdate, agent_message,
+    agent_service_client::AgentServiceClient, control_message,
 };
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
@@ -301,6 +301,7 @@ pub async fn connect_once(
         restic_version,
         jobs.restore_roots(),
         jobs.hook_report().await,
+        jobs.script_report().await,
     )
     .await?;
     // The results go through this stream now, and a result that a dropped stream lost reaches the
@@ -532,6 +533,7 @@ async fn send_hello(
     restic_version: &str,
     restore_roots: Vec<String>,
     (hook_allow_list_state, hooks): (HookAllowListState, Vec<HookMetadata>),
+    (server_scripts_state, script_interpreters): (ServerScriptsState, Vec<ScriptInterpreter>),
 ) -> Result<()> {
     let hello = AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
@@ -548,6 +550,11 @@ async fn send_hello(
             restore_roots,
             hooks,
             hook_allow_list_state: hook_allow_list_state as i32,
+            server_scripts_state: server_scripts_state as i32,
+            script_interpreters: script_interpreters
+                .into_iter()
+                .map(|kind| kind as i32)
+                .collect(),
             ..AgentHello::default()
         })),
     };
@@ -560,7 +567,7 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::{Backoff, endpoint_host, next_attempt, pong, refused, send_hello};
-    use restichub_proto::agent::v1::{HookAllowListState, Ping, agent_message};
+    use restichub_proto::agent::v1::{HookAllowListState, Ping, ServerScriptsState, agent_message};
 
     #[test]
     fn m2_a_stream_that_closes_at_once_grows_the_delay() {
@@ -622,6 +629,7 @@ mod tests {
             "0.19.0",
             vec!["/var/lib/restichub-restore".to_owned()],
             (HookAllowListState::Absent, Vec::new()),
+            (ServerScriptsState::Disabled, Vec::new()),
         )
         .await
         .expect("the hello is sent");
@@ -640,6 +648,7 @@ mod tests {
             "0.19.0",
             vec!["/srv/restore".to_owned()],
             (HookAllowListState::Absent, Vec::new()),
+            (ServerScriptsState::Disabled, Vec::new()),
         )
         .await
         .expect("the hello is sent");
