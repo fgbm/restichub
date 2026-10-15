@@ -20,7 +20,7 @@ def clean(text):
 
 
 def sentences(text):
-    return [s for s in re.split(r"(?<=[.!?:])\s+(?=[A-ZА-ЯЁ])", clean(text)) if s.strip()]
+    return [s for s in re.split(r"(?:(?<=[.!?:])|(?<=[.!?:][\"»”]))\s+(?=[\"«“A-ZА-ЯЁ])", clean(text)) if s.strip()]
 
 
 def check(path):
