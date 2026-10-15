@@ -159,6 +159,21 @@ async fn ac_id_07_the_agent_connects_and_acknowledges_a_key_rotation() {
         wait_for_last_seen(fixture.db.database(), fixture.tenant, agent, old).await,
         "the stream must write last_seen_at"
     );
+    let mut connected = false;
+    for _ in 0..200 {
+        connected = restichub_agent::connection::ConnectionStatus::read(&dir)
+            .ok()
+            .flatten()
+            .is_some_and(|status| status.connected);
+        if connected {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        connected,
+        "the status must show the connection after the greeting (FR-IN-07)"
+    );
 
     // Rotate the key set. The stream delivers the new set and the agent acknowledges it.
     let signing = fixture

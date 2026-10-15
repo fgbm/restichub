@@ -311,12 +311,28 @@ fn swap(dir: &Path, staging: &Path) -> Result<()> {
         return Err(error).context("cannot install the new identity");
     }
     if had_old {
+        keep_other_entries(&backup, dir);
         let _ = std::fs::remove_dir_all(&backup);
     }
     if let Some(parent) = dir.parent() {
         paths::sync_dir(parent)?;
     }
     Ok(())
+}
+
+/// The entries of the old directory that survive a new registration. Everything else is tied to the
+/// old identity (key updates, job journal, status) and would break or mislead the new one.
+const KEPT_ENTRIES: [&str; 1] = ["restic.json"];
+
+/// Moves the entries of [`KEPT_ENTRIES`] into the new directory, so a registration does not lose
+/// the restic record (FR-IN-07).
+fn keep_other_entries(old: &Path, new: &Path) {
+    for name in KEPT_ENTRIES {
+        let target = new.join(name);
+        if !target.exists() {
+            let _ = std::fs::rename(old.join(name), target);
+        }
+    }
 }
 
 fn read(path: std::path::PathBuf) -> Result<Vec<u8>> {
@@ -403,6 +419,29 @@ mod tests {
     fn a_directory_without_an_identity_is_reported() {
         let dir = temp_dir("absent");
         assert!(!StoredIdentity::exists(&dir));
+    }
+
+    #[test]
+    fn fr_in_07_a_save_keeps_the_files_that_are_not_identity_files() {
+        let dir = temp_dir("keeps-other");
+        crate::paths::ensure_config_dir(&dir).expect("cannot create the directory");
+        std::fs::write(dir.join("restic.json"), b"{}").expect("write");
+        sample().save(&dir).expect("cannot save the identity");
+        assert!(dir.join("restic.json").is_file());
+        assert!(StoredIdentity::exists(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_in_07_a_save_drops_the_state_of_the_old_identity() {
+        let dir = temp_dir("drops-old-state");
+        crate::paths::ensure_config_dir(&dir).expect("cannot create the directory");
+        std::fs::write(dir.join("signing-key-updates.json"), b"{}").expect("write");
+        std::fs::write(dir.join("status.json"), b"{}").expect("write");
+        sample().save(&dir).expect("cannot save the identity");
+        assert!(!dir.join("signing-key-updates.json").exists());
+        assert!(!dir.join("status.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

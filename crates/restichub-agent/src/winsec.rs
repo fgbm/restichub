@@ -154,7 +154,7 @@ fn protect_tree(
                 // A junction or a symbolic link would make the DACL check read the target.
                 if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
                     bail!(
-                        "{} is a reparse point; an administrator removes it and registers again",
+                        "{} is a reparse point; an administrator removes the link, then runs the command again",
                         level.display()
                     );
                 }
@@ -288,7 +288,7 @@ fn check(path: &Path, rights: u32) -> Result<()> {
     check_owner(path, security.owner)?;
     if let Some((mask, account)) = first_foreign_grant(security.dacl, rights)? {
         bail!(
-            "{} grants the access mask {mask:#010x} to {account}, which is not SYSTEM or Administrators; an administrator deletes it and registers again",
+            "{} grants the access mask {mask:#010x} to {account}, which is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
             path.display()
         );
     }
@@ -341,7 +341,7 @@ fn open_security(path: &Path) -> Result<Security> {
 fn check_owner(path: &Path, owner: PSID) -> Result<()> {
     if owner.is_null() || !is_trusted_sid(owner) {
         bail!(
-            "{} is owned by {}, not by SYSTEM or Administrators; an administrator deletes it and registers again",
+            "{} is owned by {}, not by SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
             path.display(),
             sid_to_string(owner)
         );
