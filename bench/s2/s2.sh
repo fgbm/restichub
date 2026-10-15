@@ -43,6 +43,8 @@ RECONNECT_LIMIT_SECONDS="${RECONNECT_LIMIT_SECONDS:-300}"
 
 web="${CP_WEB_URL:-http://127.0.0.1:8080}"
 listener="${CP_AGENT_URL:-https://localhost:8443}"
+server_name="${listener#https://}"
+server_name="${server_name%:*}"
 admin_password="bench-password-12345"
 csrf=(-H "x-restichub-csrf: 1")
 jar="$OUT/cookies.txt"
@@ -217,14 +219,14 @@ fetch_ca() {
 # enrollment of 500 agents takes about an hour. It runs once; `emulate` reuses the identities.
 enroll() {
 	"$EMULATOR" --agents "$AGENTS" \
-		--enroll-url "$listener" --ca "$OUT/ca.pem" \
+		--enroll-url "$listener" --server-name "$server_name" --ca "$OUT/ca.pem" \
 		--api-url "$web" --api-token-file "$OUT/api-token" \
 		--identities "$IDENTITIES" --enroll-only --metrics-addr none
 }
 
 emulate() {
 	"$EMULATOR" --agents "$AGENTS" \
-		--enroll-url "$listener" --ca "$OUT/ca.pem" \
+		--enroll-url "$listener" --server-name "$server_name" --ca "$OUT/ca.pem" \
 		--api-url "$web" --api-token-file "$OUT/api-token" \
 		--identities "$IDENTITIES" \
 		--step-seconds "$STEP_SECONDS" --progress-ticks 2 \
