@@ -71,7 +71,6 @@ fn backup_job(job_id: &str, repository: &Path, stall_seconds: u32, max_seconds: 
             })),
             ..Step::default()
         }],
-        ..Job::default()
     }
 }
 

@@ -1,4 +1,4 @@
-//! The job limits and the cloud files option of a profile (ADR-0039, FR-PF-01).
+//! The job limits of a profile (ADR-0039, FR-PF-01).
 
 #![allow(clippy::expect_used)]
 
@@ -54,7 +54,6 @@ async fn ac_ag_12_a_profile_stores_its_job_limits() {
     let options = &created["profile"]["options"];
     assert_eq!(options["stall_timeout_minutes"], 60);
     assert_eq!(options["max_duration_minutes"], 0);
-    assert_eq!(options["exclude_cloud_files"], false);
 
     let (status, _, created) = send(
         &app,
@@ -68,7 +67,6 @@ async fn ac_ag_12_a_profile_stores_its_job_limits() {
                 json!({
                     "stall_timeout_minutes": 120,
                     "max_duration_minutes": 1440,
-                    "exclude_cloud_files": true,
                 }),
             )),
         ),
@@ -90,7 +88,6 @@ async fn ac_ag_12_a_profile_stores_its_job_limits() {
     let options = &read["options"];
     assert_eq!(options["stall_timeout_minutes"], 120);
     assert_eq!(options["max_duration_minutes"], 1440);
-    assert_eq!(options["exclude_cloud_files"], true);
 
     db.cleanup().await;
 }

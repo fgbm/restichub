@@ -64,8 +64,6 @@
 	let excludeCaches = $state(false);
 	let limitUpload = $state('');
 	let limitDownload = $state('');
-	// New profiles skip the cloud-only placeholder files. The setting reaches Windows agents only.
-	let excludeCloudFiles = $state(true);
 	let stallMinutes = $state('60');
 	let maxDurationMinutes = $state('');
 	let retentionEnabled = $state(false);
@@ -259,7 +257,6 @@
 		excludeCaches = false;
 		limitUpload = '';
 		limitDownload = '';
-		excludeCloudFiles = true;
 		stallMinutes = '60';
 		maxDurationMinutes = '';
 		retentionEnabled = false;
@@ -310,7 +307,6 @@
 		limitDownload = profile.options?.limit_download_kib
 			? String(profile.options.limit_download_kib)
 			: '';
-		excludeCloudFiles = profile.options?.exclude_cloud_files ?? false;
 		stallMinutes = String(profile.options?.stall_timeout_minutes ?? 60);
 		maxDurationMinutes = profile.options?.max_duration_minutes
 			? String(profile.options.max_duration_minutes)
@@ -380,7 +376,6 @@
 				exclude_caches: excludeCaches,
 				limit_upload_kib: numberOrZero(limitUpload),
 				limit_download_kib: numberOrZero(limitDownload),
-				exclude_cloud_files: excludeCloudFiles,
 				stall_timeout_minutes: numberOrZero(stallMinutes) || 60,
 				max_duration_minutes: numberOrZero(maxDurationMinutes)
 			},
@@ -658,8 +653,6 @@
 			<Checkbox label={t('profiles.options.vss')} bind:checked={vss} />
 			<Checkbox label={t('profiles.options.oneFileSystem')} bind:checked={oneFileSystem} />
 			<Checkbox label={t('profiles.options.excludeCaches')} bind:checked={excludeCaches} />
-			<Checkbox label={t('profiles.options.excludeCloudFiles')} bind:checked={excludeCloudFiles} />
-			<p class="hint">{t('profiles.options.excludeCloudFilesHint')}</p>
 			<div class="grid">
 				<TextField
 					id="profile-limit-upload"

@@ -525,9 +525,6 @@ export const en = {
 	'profiles.options.limitUpload': 'Upload limit (KiB/s)',
 	'profiles.options.limitDownload': 'Download limit (KiB/s)',
 	'profiles.options.limitNone': 'No limit',
-	'profiles.options.excludeCloudFiles': 'Exclude cloud-only files (OneDrive, iCloud placeholders)',
-	'profiles.options.excludeCloudFilesHint':
-		'Applies to Windows hosts only. The files stay in the cloud and are not read.',
 	'profiles.limits': 'Limits',
 	'profiles.limits.hint':
 		'A backup has no fixed time limit. The host stops a step that makes no progress.',

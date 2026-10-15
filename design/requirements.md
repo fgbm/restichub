@@ -145,7 +145,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-PF-01 | A profile contains the repository, paths for each operating system, excludes, exclude files and tags. It also contains backup options (VSS, one file system, exclude caches, exclude cloud-only files, rate limits), job limits (stall timeout, maximum duration), hooks, retention and check options (`read-data-subset`). | M |
+| FR-PF-01 | A profile contains the repository, paths for each operating system, excludes, exclude files and tags. It also contains backup options (VSS, one file system, exclude caches, rate limits), job limits (stall timeout, maximum duration), hooks, retention and check options (`read-data-subset`). | M |
 | FR-PF-02 | Inheritance with `extends`: deep merge, cycle detection, explicit merge rules for lists (replace or append). | 1.0 |
 | FR-PF-03 | Variables: host name, operating system, agent name, agent labels, date. | M |
 | FR-PF-04 | The compiler converts a profile to a sequence of steps. The UI shows a preview: the steps and the equivalent restic command line with masked secrets. | M |

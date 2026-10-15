@@ -59,8 +59,6 @@ pub struct BackupOptions {
     pub limit_upload_kib: u64,
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     pub limit_download_kib: u64,
-    /// Skip cloud-only placeholder files. The compiler emits it for Windows targets only.
-    pub exclude_cloud_files: bool,
 }
 
 /// The time limits of a job (ADR-0039). Zero means the default of the stall timeout and no

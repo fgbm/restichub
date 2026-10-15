@@ -61,7 +61,6 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-AG-11 | FR-AG-11 | Replace the installed restic binary with a different binary. **Expected:** the agent refuses to run restic and reports the mismatch. The control plane has no setting for the restic path. | S |
 | AC-AG-12 | FR-AG-05 | A backup step reports progress for longer than the stall timeout and for longer than 12 hours. **Expected:** the agent does not stop the step. A step whose status does not change for the stall timeout is stopped in two stages, and the job result has the code `stalled`. | A |
 | AC-AG-13 | FR-AG-05 | A profile sets a maximum duration and the backup is still in progress after that time. **Expected:** the agent stops the step, and the job result has the code `max_duration_exceeded`. A profile without a maximum duration has no wall-clock limit. | A |
-| AC-AG-14 | FR-PF-01 | A profile sets "exclude cloud-only files". **Expected:** the backup argument list of a Windows agent holds `--exclude-cloud-files`. The argument list of a Linux agent does not. | A |
 
 ## 3. Enrollment, identity, connection
 

@@ -529,10 +529,6 @@ export const ru: Record<MessageKey, string> = {
 	'profiles.options.limitUpload': 'Ограничение отдачи (КиБ/с)',
 	'profiles.options.limitDownload': 'Ограничение приёма (КиБ/с)',
 	'profiles.options.limitNone': 'Без ограничения',
-	'profiles.options.excludeCloudFiles':
-		'Исключить файлы только в облаке (заглушки OneDrive, iCloud)',
-	'profiles.options.excludeCloudFilesHint':
-		'Действует только на узлах Windows. Такие файлы остаются в облаке и не читаются.',
 	'profiles.limits': 'Ограничения',
 	'profiles.limits.hint':
 		'У копирования нет предельного времени. Узел останавливает шаг, который не продвигается.',

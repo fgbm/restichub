@@ -84,10 +84,6 @@ pub struct BackupOptions {
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     #[serde(default)]
     pub limit_download_kib: u64,
-    /// Skip cloud-only placeholder files, for example OneDrive. Windows targets only
-    /// (restic `--exclude-cloud-files`).
-    #[serde(default)]
-    pub exclude_cloud_files: bool,
     /// Minutes without progress after which the agent stops a step. From 5 to 10080 (ADR-0039).
     #[serde(default = "default_stall_timeout_minutes")]
     pub stall_timeout_minutes: u32,
@@ -115,7 +111,6 @@ impl Default for BackupOptions {
             exclude_caches: false,
             limit_upload_kib: 0,
             limit_download_kib: 0,
-            exclude_cloud_files: false,
             stall_timeout_minutes: DEFAULT_STALL_TIMEOUT_MINUTES,
             max_duration_minutes: 0,
         }
@@ -515,7 +510,6 @@ impl TryFrom<&Profile> for ProfileView {
                 exclude_caches: profile.exclude_caches,
                 limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
                 limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
-                exclude_cloud_files: profile.exclude_cloud_files,
                 stall_timeout_minutes: u32::try_from(profile.stall_timeout_minutes)
                     .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
                 max_duration_minutes: u32::try_from(profile.max_duration_minutes).unwrap_or(0),
@@ -599,7 +593,6 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
-            exclude_cloud_files: self.options.exclude_cloud_files,
             stall_timeout_minutes: i32::try_from(self.options.stall_timeout_minutes)
                 .unwrap_or(i32::MAX),
             max_duration_minutes: i32::try_from(self.options.max_duration_minutes)
@@ -627,7 +620,6 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
-            exclude_cloud_files: self.options.exclude_cloud_files,
             stall_timeout_minutes: i32::try_from(self.options.stall_timeout_minutes)
                 .unwrap_or(i32::MAX),
             max_duration_minutes: i32::try_from(self.options.max_duration_minutes)
@@ -684,7 +676,6 @@ impl ValidatedProfile {
                 exclude_caches: self.options.exclude_caches,
                 limit_upload_kib: self.options.limit_upload_kib,
                 limit_download_kib: self.options.limit_download_kib,
-                exclude_cloud_files: self.options.exclude_cloud_files,
             },
             limits: CompilerJobLimits {
                 stall_timeout_seconds: self.options.stall_timeout_minutes.saturating_mul(60),
@@ -726,7 +717,6 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
             exclude_caches: profile.exclude_caches,
             limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
             limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
-            exclude_cloud_files: profile.exclude_cloud_files,
             stall_timeout_minutes: u32::try_from(profile.stall_timeout_minutes)
                 .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
             max_duration_minutes: u32::try_from(profile.max_duration_minutes).unwrap_or(0),
@@ -1159,7 +1149,6 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
             "exclude_caches": profile.options.exclude_caches,
             "limit_upload_kib": profile.options.limit_upload_kib,
             "limit_download_kib": profile.options.limit_download_kib,
-            "exclude_cloud_files": profile.options.exclude_cloud_files,
             "stall_timeout_minutes": profile.options.stall_timeout_minutes,
             "max_duration_minutes": profile.options.max_duration_minutes,
         },
@@ -1189,7 +1178,6 @@ pub fn stored_value(profile: &Profile) -> Value {
             "exclude_caches": profile.exclude_caches,
             "limit_upload_kib": profile.limit_upload_kib,
             "limit_download_kib": profile.limit_download_kib,
-            "exclude_cloud_files": profile.exclude_cloud_files,
             "stall_timeout_minutes": profile.stall_timeout_minutes,
             "max_duration_minutes": profile.max_duration_minutes,
         },

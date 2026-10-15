@@ -12,14 +12,7 @@ A profile holds the repository, the paths, the excludes, the tags, the backup op
 | Use a file system snapshot (VSS) | Passes `--use-fs-snapshot`. Windows hosts only. |
 | Stay on one file system | Passes `--one-file-system`. |
 | Exclude cache directories | Passes `--exclude-caches`. |
-| Exclude cloud-only files | Passes `--exclude-cloud-files`. Windows hosts only. |
 | Upload limit, download limit | Pass `--limit-upload` and `--limit-download`. The unit is KiB each second. |
-
-### Cloud-only files
-
-A cloud service such as OneDrive can keep a placeholder on the disk. The file content stays in the cloud. When restic reads such a file through VSS, Windows answers "Access to the cloud file is denied". The backup then ends with warnings.
-
-The option "Exclude cloud-only files" makes restic skip these files. The compiler adds the flag for Windows hosts only, so one profile can serve Windows and Linux hosts. A new profile has the option on. An existing profile keeps its old setting. The option needs restic 0.17 or later.
 
 ## Limits
 

@@ -89,9 +89,6 @@ message BackupStep {
   bool retry_lock = 11;
   // Process and I/O priority of the restic process (FR-AG-15).
   ProcessPriority priority = 12;
-  // Skip cloud-only placeholder files with "--exclude-cloud-files". Windows
-  // only. An agent that does not know the field backs the files up.
-  bool exclude_cloud_files = 13;
 }
 
 // CheckStep tests the repository structure.

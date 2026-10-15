@@ -15,8 +15,6 @@ pub enum ResticOption {
     UseFsSnapshot,
     OneFileSystem,
     ExcludeCaches,
-    /// `backup --exclude-cloud-files` (Windows only, restic 0.17).
-    ExcludeCloudFiles,
     LimitUpload,
     LimitDownload,
     RetryLock,
@@ -45,7 +43,6 @@ impl ResticOption {
             Self::UseFsSnapshot => "--use-fs-snapshot",
             Self::OneFileSystem => "--one-file-system",
             Self::ExcludeCaches => "--exclude-caches",
-            Self::ExcludeCloudFiles => "--exclude-cloud-files",
             Self::LimitUpload => "--limit-upload",
             Self::LimitDownload => "--limit-download",
             Self::RetryLock => "--retry-lock",

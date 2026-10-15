@@ -310,7 +310,6 @@ function makeProfiles(): Profile[] {
 				exclude_caches: true,
 				limit_upload_kib: 0,
 				limit_download_kib: 0,
-				exclude_cloud_files: false,
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 0
 			},
@@ -335,7 +334,6 @@ function makeProfiles(): Profile[] {
 				exclude_caches: false,
 				limit_upload_kib: 2048,
 				limit_download_kib: 0,
-				exclude_cloud_files: true,
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 0
 			},
@@ -1394,7 +1392,6 @@ export class MockApiService {
 				exclude_caches: false,
 				limit_upload_kib: 0,
 				limit_download_kib: 0,
-				exclude_cloud_files: false,
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 0
 			},

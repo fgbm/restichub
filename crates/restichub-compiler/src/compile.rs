@@ -71,7 +71,7 @@ fn validate_platform(profile: &Profile, target: &TargetFacts) -> Result<(), Comp
         });
     }
 
-    for (option, field) in emitted_options(profile, target.os == OperatingSystem::Windows) {
+    for (option, field) in emitted_options(profile) {
         let required = option.minimum_version();
         if target.restic_version < required {
             return Err(CompileError::IncompatibleOption {
@@ -86,17 +86,13 @@ fn validate_platform(profile: &Profile, target: &TargetFacts) -> Result<(), Comp
     Ok(())
 }
 
-fn emitted_options(profile: &Profile, windows: bool) -> Vec<(ResticOption, FieldPath)> {
+fn emitted_options(profile: &Profile) -> Vec<(ResticOption, FieldPath)> {
     let mut options = Vec::new();
     let backup = &profile.options;
     let flags = [
         (backup.use_fs_snapshot, ResticOption::UseFsSnapshot),
         (backup.one_file_system, ResticOption::OneFileSystem),
         (backup.exclude_caches, ResticOption::ExcludeCaches),
-        (
-            backup.exclude_cloud_files && windows,
-            ResticOption::ExcludeCloudFiles,
-        ),
         (backup.limit_upload_kib > 0, ResticOption::LimitUpload),
         (backup.limit_download_kib > 0, ResticOption::LimitDownload),
     ];
@@ -172,7 +168,6 @@ fn option_name(option: ResticOption) -> &'static str {
         ResticOption::UseFsSnapshot => "use_fs_snapshot",
         ResticOption::OneFileSystem => "one_file_system",
         ResticOption::ExcludeCaches => "exclude_caches",
-        ResticOption::ExcludeCloudFiles => "exclude_cloud_files",
         ResticOption::LimitUpload => "limit_upload_kib",
         ResticOption::LimitDownload => "limit_download_kib",
         _ => "option",
@@ -309,8 +304,6 @@ fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileE
             use_fs_snapshot: options.use_fs_snapshot,
             one_file_system: options.one_file_system,
             exclude_caches: options.exclude_caches,
-            exclude_cloud_files: options.exclude_cloud_files
-                && target.os == OperatingSystem::Windows,
             limit_upload_kib: options.limit_upload_kib,
             limit_download_kib: options.limit_download_kib,
             retry_lock: true,

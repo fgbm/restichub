@@ -566,7 +566,6 @@ pub async fn seed_profile(
             exclude_caches: false,
             limit_upload_kib: 0,
             limit_download_kib: 0,
-            exclude_cloud_files: false,
             stall_timeout_minutes: 60,
             max_duration_minutes: 0,
             retention: None,
