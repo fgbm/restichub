@@ -165,6 +165,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-LG-02 | FR-LG-01, FR-LG-02 (1.0) | Change the backend to `s3`. **Expected:** new logs go to S3 with the keys `<tenant>/<job>/<step>`. The UI shows old logs from the database and new logs from S3. Retention in S3 works independently. | A |
 | AC-LG-03 | FR-LG-04 (1.0) | MinIO is not available for 30 minutes. **Expected:** jobs do not fail. The logs go to the database. An alert occurs. | A |
 | AC-LG-04 | NFR-SEC-05 | After the full end-to-end suite, search for the canary in all logs of all backends. **Expected:** 0 matches. | S |
+| AC-LG-05 | FR-LG-07, FR-PR-07 | The stream drops in the middle of a backup that writes a long log. The agent restarts once, and the control plane acknowledges only a part of the log. The spool of the agent is full for a short time. **Expected:** after the reconnect, the CP has every line once and in order. The acknowledged data leaves the disk of the agent. A full spool leaves one marker line with the number of lost lines. A stalled CP does not delay a cancel. | A |
 
 ## 11. Tenants
 

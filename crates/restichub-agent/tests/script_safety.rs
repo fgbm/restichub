@@ -177,6 +177,7 @@ async fn ac_hk_10_a_cancel_stops_a_hanging_finally_script() {
         .with_stop_grace(std::time::Duration::from_secs(120));
     let (tx, mut rx) = tokio::sync::mpsc::channel(256);
     jobs.attach(&tx);
+    jobs.greeted(false);
     jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
     for _ in 0..200 {
         if started.exists() {

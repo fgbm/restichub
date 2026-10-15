@@ -76,6 +76,7 @@ async fn run_backup(
     .expect("the job journal must open");
     let (captured_tx, mut captured) = tokio::sync::mpsc::channel(64);
     jobs.attach(&captured_tx);
+    jobs.greeted(false);
 
     let repository = env
         .create_repository_at(
