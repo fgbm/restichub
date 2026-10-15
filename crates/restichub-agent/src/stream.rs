@@ -409,6 +409,7 @@ pub async fn connect_once(
     .await?;
     // The results go through this stream now, and a result that a dropped stream lost reaches the
     // control plane (ADR-0020).
+    jobs.set_log_acks(false);
     jobs.attach(&tx);
     jobs.send_stored_results().await;
     let started = tokio::time::Instant::now();
@@ -633,7 +634,14 @@ async fn handle_control(
             // Only the greeting proves that the control plane accepts the protocol version, so
             // `register` does not report a connection before it (FR-IN-07).
             crate::connection::record_connected(dir, &identity.cp_url);
+            // A control plane that lists the capability acknowledges log chunks, so the agent
+            // sends the log through its spool from here on (FR-LG-07).
+            if restichub_proto::AgentCapability::LogAckV1.is_listed(&hello.accepted_capabilities) {
+                jobs.set_log_acks(true);
+                jobs.resend_logs().await;
+            }
         }
+        Some(control_message::Payload::LogAck(ack)) => jobs.log_ack(&ack),
         Some(control_message::Payload::VersionRejected(rejected)) => {
             let reason = VersionRejectReason::try_from(rejected.reason).unwrap_or_default();
             tracing::error!(

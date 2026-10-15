@@ -36,6 +36,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -43,7 +44,7 @@ use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{
-    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, RejectReason, ScriptInterpreter,
+    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, LogAck, RejectReason, ScriptInterpreter,
     ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message, step, step_result,
 };
 use restichub_proto::signing::{
@@ -53,6 +54,7 @@ use tokio::sync::mpsc;
 
 use crate::hooks::HookStore;
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
+use crate::log_spool::LogSpool;
 use crate::restic_store::Layout;
 use crate::restore_roots::RestoreAccess;
 use crate::scripts::ScriptStore;
@@ -136,6 +138,13 @@ pub struct Jobs {
     hooks: Arc<HookStore>,
     /// The agent reads it again at each job (FR-HK-08).
     scripts: Arc<ScriptStore>,
+    /// The log chunks that the control plane did not acknowledge yet (FR-LG-07).
+    log_spool: Arc<LogSpool>,
+    /// True while the open stream belongs to a control plane that acknowledges log chunks. Without
+    /// it the agent keeps no spool and sends the log once, as before.
+    log_acks: Arc<AtomicBool>,
+    /// Serializes the sends of spooled chunks, so they reach the stream in order.
+    log_order: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Jobs {
@@ -172,7 +181,42 @@ impl Jobs {
             restore: Arc::new(restore),
             hooks: Arc::new(HookStore::for_config_dir(dir)),
             scripts: Arc::new(scripts),
+            log_spool: Arc::new(LogSpool::open(dir, LogSpool::max_bytes_from_env())),
+            log_acks: Arc::new(AtomicBool::new(false)),
+            log_order: Arc::new(tokio::sync::Mutex::new(())),
         })
+    }
+
+    /// Replaces the log spool, for a test that needs a small cap (FR-LG-07).
+    #[must_use]
+    pub fn with_log_spool(mut self, spool: LogSpool) -> Self {
+        self.log_spool = Arc::new(spool);
+        self
+    }
+
+    /// Records whether the open stream belongs to a control plane that acknowledges log chunks
+    /// (FR-LG-07).
+    pub fn set_log_acks(&self, enabled: bool) {
+        self.log_acks.store(enabled, Ordering::SeqCst);
+    }
+
+    /// Removes the chunks that the control plane acknowledged (FR-LG-07).
+    pub fn log_ack(&self, ack: &LogAck) {
+        self.log_spool.acknowledge(ack);
+    }
+
+    /// Sends every unacknowledged log chunk again, in order (FR-LG-07, AC-PR-07).
+    ///
+    /// The agent calls it when a control plane that acknowledges chunks greets it. The control
+    /// plane stores a chunk once, so the chunks that it got before the drop do no harm.
+    pub async fn resend_logs(&self) {
+        let mut keep: HashSet<String> = lock(&self.running).keys().cloned().collect();
+        keep.extend(lock(&self.journal).job_ids());
+        self.log_spool.sweep(&keep);
+        self.log_spool.rewind_all();
+        for job_id in self.log_spool.pending_jobs() {
+            self.flush_log(&job_id, false).await;
+        }
     }
 
     /// Replaces the place and the trust rule of the hook allow-list (FR-HK-01).
@@ -551,6 +595,11 @@ impl Jobs {
     /// The log tail and the step results go out only if this process did not send them yet. False
     /// when no stream is open or a send fails.
     async fn send_result(&self, mut result: JobResult) -> bool {
+        // The spool resends the whole log in order, so the tail would only come first and
+        // reorder the lines (FR-LG-07).
+        if self.log_spool.holds(&result.job_id) {
+            result.log_tail.clear();
+        }
         if lock(&self.resent).contains(&result.job_id) {
             result.log_tail.clear();
             result.steps.clear();
@@ -583,6 +632,15 @@ impl Jobs {
         let tx = lock(&self.connection).clone();
         if let Some(tx) = tx {
             let _ = tokio::time::timeout(wait, tx.send(message)).await;
+        }
+    }
+
+    /// Like [`Self::send_within`], and tells whether the stream took the message.
+    async fn send_live(&self, message: AgentMessage, wait: Duration) -> bool {
+        let tx = lock(&self.connection).clone();
+        match tx {
+            Some(tx) => matches!(tokio::time::timeout(wait, tx.send(message)).await, Ok(Ok(()))),
+            None => false,
         }
     }
 
@@ -875,6 +933,7 @@ impl Jobs {
         progress.hook_failure = hook_failure;
 
         self.send_log(&mut log).await;
+        self.log_spool.finish(&job_id);
         let outcome = job_outcome(&progress);
         let status = stopped_status.unwrap_or(match outcome {
             JobStatus::SucceededWithWarnings => StepStatus::Warning,

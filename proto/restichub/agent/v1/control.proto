@@ -38,6 +38,9 @@ message ControlMessage {
     VersionRejected version_rejected = 7;
     // CertificateRejected refuses a rotation request (FR-ID-03).
     CertificateRejected certificate_rejected = 8;
+    // LogAck confirms stored log chunks, so the agent may delete them from its
+    // spool (FR-LG-07).
+    LogAck log_ack = 9;
   }
 }
 
@@ -127,6 +130,25 @@ enum CertificateRejectReason {
   CERTIFICATE_REJECT_REASON_REVOKED = 4;
   // The control plane cannot issue a certificate now.
   CERTIFICATE_REJECT_REASON_UNAVAILABLE = 5;
+}
+
+// LogAck tells the agent which log chunks of a job the control plane stored
+// (FR-LG-07). The control plane sends it only to an agent that lists the
+// capability "log-ack-v1". The agent sends chunks of one stream in order, so
+// an acknowledgement covers every chunk of the stream up to the sequence.
+message LogAck {
+  // Identifier of the job.
+  string job_id = 1;
+  // Newest stored sequence for each stream.
+  repeated LogStreamAck streams = 2;
+}
+
+// LogStreamAck is the newest stored chunk sequence of one log stream.
+message LogStreamAck {
+  // The log stream.
+  LogStream stream = 1;
+  // Sequence of the newest stored chunk of the stream.
+  uint64 sequence = 2;
 }
 
 // CertificateInstalled tells the control plane that the agent stored the new

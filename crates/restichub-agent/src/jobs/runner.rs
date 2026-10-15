@@ -13,12 +13,13 @@ use std::time::Duration;
 use restichub_compiler::ValidatedJob;
 use restichub_compiler::arg::build_command;
 use restichub_proto::agent::v1::{
-    AgentMessage, ErrorDetail, LogStream, ProcessPriority, Step, StepProgress, StepStatus,
+    AgentMessage, ErrorDetail, LogChunk, LogStream, ProcessPriority, Step, StepProgress, StepStatus,
     agent_message, step, step_result,
 };
 use tokio::sync::mpsc;
 
 use super::log::JobLog;
+use crate::log_spool::Stored;
 use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
 use crate::exec::JobChild;
@@ -495,17 +496,94 @@ impl Jobs {
         }
     }
 
-    /// Chunks that find no room in the stream buffer within a moment are lost; the journal tail
-    /// still keeps them (AC-PR-07).
+    /// Sends the log chunks that are due.
+    ///
+    /// A control plane that acknowledges chunks gets them through the spool: a chunk that finds no
+    /// room within a moment stays there and goes out again after the next connection (FR-LG-07).
+    /// Otherwise a chunk without room is lost; the journal tail still keeps the newest ones
+    /// (AC-PR-07).
     pub(super) async fn send_log(&self, log: &mut JobLog) {
-        for chunk in log.take_pending() {
-            self.send_within(
-                AgentMessage {
+        let chunks = log.take_pending();
+        if !self.log_acks.load(Ordering::SeqCst) {
+            for chunk in chunks {
+                self.send_within(
+                    AgentMessage {
+                        payload: Some(agent_message::Payload::LogChunk(chunk)),
+                    },
+                    SEND_WAIT,
+                )
+                .await;
+            }
+            return;
+        }
+        for chunk in chunks {
+            self.spool_chunk(log, chunk);
+        }
+        self.flush_log(&log.job_id().to_owned(), true).await;
+    }
+
+    /// Puts a chunk in the spool. A full spool drops the chunk and counts its lines; the next
+    /// chunk that fits is preceded by one marker line with the count (FR-LG-07).
+    fn spool_chunk(&self, log: &mut JobLog, chunk: LogChunk) {
+        let lost = log.lost_lines();
+        if let Some(marker) = log.take_loss_marker(&chunk.step_id)
+            && !self.keep_in_spool(log.job_id(), &marker)
+        {
+            log.note_lost(lost);
+        }
+        if !self.keep_in_spool(log.job_id(), &chunk) {
+            log.note_lost(crate::log_spool::line_count(&chunk));
+        }
+    }
+
+    fn keep_in_spool(&self, job_id: &str, chunk: &LogChunk) -> bool {
+        match self.log_spool.append(job_id, chunk) {
+            Ok(Stored::Kept) => true,
+            Ok(Stored::Full) => false,
+            Err(error) => {
+                tracing::warn!(%error, "cannot write the log spool");
+                false
+            }
+        }
+    }
+
+    /// Sends the spooled chunks that the open stream did not get yet, in order (FR-LG-07).
+    ///
+    /// The live call never waits for the order lock or for room in the stream buffer, so a slow
+    /// control plane never blocks a cancel (FR-AG-10). A failed send leaves the chunk in the spool
+    /// for the next call.
+    pub(super) async fn flush_log(&self, job_id: &str, live: bool) {
+        let _order = if live {
+            match self.log_order.try_lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            }
+        } else {
+            self.log_order.lock().await
+        };
+        loop {
+            let batch = self.log_spool.claim_unsent(job_id);
+            if batch.is_empty() {
+                return;
+            }
+            let total = batch.len();
+            for (index, chunk) in batch.into_iter().enumerate() {
+                let message = AgentMessage {
                     payload: Some(agent_message::Payload::LogChunk(chunk)),
-                },
-                SEND_WAIT,
-            )
-            .await;
+                };
+                let sent = if live {
+                    self.send_live(message, SEND_WAIT).await
+                } else {
+                    self.send(message).await
+                };
+                if !sent {
+                    self.log_spool.unclaim(job_id, total - index);
+                    return;
+                }
+            }
+            if live {
+                return;
+            }
         }
     }
 }

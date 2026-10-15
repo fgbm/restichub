@@ -13,16 +13,20 @@ pub enum AgentCapability {
     HooksV1,
     /// The agent runs the `script` step on a host with the local trust mode (FR-HK-09, ADR-0037).
     ScriptsV1,
+    /// The agent keeps unacknowledged log chunks in a spool and sends them again after a
+    /// reconnect; the control plane answers with `LogAck` (FR-LG-07).
+    LogAckV1,
 }
 
 impl AgentCapability {
     /// Every capability that this build supports.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::ForgetAllTags,
         Self::RestoreV1,
         Self::JobLimitsV1,
         Self::HooksV1,
         Self::ScriptsV1,
+        Self::LogAckV1,
     ];
 
     /// The wire name in `AgentHello.capabilities`.
@@ -34,6 +38,7 @@ impl AgentCapability {
             Self::JobLimitsV1 => "job-limits-v1",
             Self::HooksV1 => "hooks-v1",
             Self::ScriptsV1 => "scripts-v1",
+            Self::LogAckV1 => "log-ack-v1",
         }
     }
 
@@ -81,6 +86,7 @@ mod tests {
         names.push("job-limits-v1".to_owned());
         names.push("hooks-v1".to_owned());
         names.push("scripts-v1".to_owned());
+        names.push("log-ack-v1".to_owned());
         assert_eq!(
             AgentCapability::parse_list(&names),
             [
@@ -88,7 +94,8 @@ mod tests {
                 AgentCapability::RestoreV1,
                 AgentCapability::JobLimitsV1,
                 AgentCapability::HooksV1,
-                AgentCapability::ScriptsV1
+                AgentCapability::ScriptsV1,
+                AgentCapability::LogAckV1
             ]
         );
         assert!(AgentCapability::parse_list(&names[..10_000]).is_empty());

@@ -31,6 +31,8 @@ pub(super) struct JobLog {
     tail: VecDeque<LogChunk>,
     tail_bytes: usize,
     sequence: [u64; STREAMS],
+    /// Lines that the full spool refused since the last marker.
+    lost_lines: u64,
 }
 
 impl JobLog {
@@ -45,7 +47,45 @@ impl JobLog {
             tail: VecDeque::new(),
             tail_bytes: 0,
             sequence: [0; STREAMS],
+            lost_lines: 0,
         }
+    }
+
+    pub(super) fn job_id(&self) -> &str {
+        &self.job_id
+    }
+
+    /// Lines refused by the spool that no marker reports yet.
+    pub(super) fn lost_lines(&self) -> u64 {
+        self.lost_lines
+    }
+
+    /// Counts lines that the spool could not keep (FR-LG-07).
+    pub(super) fn note_lost(&mut self, lines: u64) {
+        self.lost_lines += lines;
+    }
+
+    /// The marker chunk for the lines lost so far, or `None` when nothing was lost. The marker
+    /// takes the place of the gap, so the log never has a silent hole (FR-LG-07).
+    pub(super) fn take_loss_marker(&mut self, step_id: &str) -> Option<LogChunk> {
+        if self.lost_lines == 0 {
+            return None;
+        }
+        let lines = std::mem::take(&mut self.lost_lines);
+        let text = if lines == 1 {
+            "1 log line was lost while the control plane was unreachable\n".to_owned()
+        } else {
+            format!("{lines} log lines were lost while the control plane was unreachable\n")
+        };
+        let slot = &mut self.sequence[LogStream::Agent as usize % STREAMS];
+        *slot += 1;
+        Some(LogChunk {
+            job_id: self.job_id.clone(),
+            step_id: step_id.to_owned(),
+            stream: LogStream::Agent as i32,
+            sequence: *slot,
+            data: text.into_bytes(),
+        })
     }
 
     /// Adds the line about the dropped search path entries to the first step that has one. Later
@@ -163,6 +203,25 @@ mod tests {
         // After the marker the log drops every line.
         log.push("step-2", LogStream::Stdout, "late");
         assert!(log.take_pending().is_empty());
+    }
+
+    #[test]
+    fn fr_lg_07_the_marker_counts_the_lost_lines_once() {
+        let mut log = JobLog::new("job-1");
+        assert!(log.take_loss_marker("step-1").is_none());
+        log.note_lost(3);
+        log.note_lost(2);
+        let marker = log.take_loss_marker("step-1").expect("a marker");
+        assert_eq!(
+            String::from_utf8_lossy(&marker.data),
+            "5 log lines were lost while the control plane was unreachable\n"
+        );
+        assert_eq!(marker.stream, LogStream::Agent as i32);
+        assert!(log.take_loss_marker("step-1").is_none());
+        log.note_lost(1);
+        let single = log.take_loss_marker("step-1").expect("a marker");
+        assert_eq!(single.sequence, 2);
+        assert!(String::from_utf8_lossy(&single.data).starts_with("1 log line was lost"));
     }
 
     #[test]
