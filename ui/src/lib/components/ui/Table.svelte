@@ -18,6 +18,7 @@
 		filterable = true,
 		filterPlaceholder,
 		paginated = true,
+		flush = false,
 		pageSize = 10,
 		caption,
 		emptyTitle,
@@ -37,6 +38,8 @@
 		filterPlaceholder?: string;
 		/** Client-side pagination. Set to `false` for cursor pagination. */
 		paginated?: boolean;
+		/** For a table inside a panel body: no outer border or radius, and cell padding as in the panel. */
+		flush?: boolean;
 		pageSize?: number;
 		caption?: string;
 		emptyTitle?: string;
@@ -121,7 +124,7 @@
 	}
 </script>
 
-<div class="table-wrap">
+<div class="table-wrap" class:table-wrap--flush={flush}>
 	{#if filterable || toolbar}
 		<div class="table-toolbar">
 			{#if filterable}
@@ -151,6 +154,7 @@
 							scope="col"
 							class:table__cell--right={column.align === 'right'}
 							class:table__cell--center={column.align === 'center'}
+							class:table__cell--nowrap={column.nowrap}
 							aria-sort={column.sortable === false ? undefined : ariaSort(column)}
 						>
 							{#if column.sortable === false}
@@ -212,6 +216,7 @@
 									class:table__cell--right={column.align === 'right'}
 									class:table__cell--center={column.align === 'center'}
 									class:table__cell--mono={column.mono}
+									class:table__cell--nowrap={column.nowrap}
 								>
 									{#if column.render}
 										{@render column.render(row)}
@@ -268,6 +273,31 @@
 		overflow: hidden;
 	}
 
+	.table-wrap--flush {
+		border: 0;
+		border-radius: 0;
+	}
+
+	.table-wrap--flush .table-toolbar {
+		padding: var(--rh-space-3) var(--rh-space-4);
+	}
+
+	.table-wrap--flush :global(th:first-child:not(:has(.th-btn))),
+	.table-wrap--flush :global(th:first-child .th-btn),
+	.table-wrap--flush :global(td:first-child) {
+		padding-left: var(--rh-space-4);
+	}
+
+	.table-wrap--flush :global(th:last-child:not(:has(.th-btn))),
+	.table-wrap--flush :global(th:last-child .th-btn),
+	.table-wrap--flush :global(td:last-child) {
+		padding-right: var(--rh-space-4);
+	}
+
+	.table-wrap--flush .table-footer {
+		padding: var(--rh-space-2) var(--rh-space-4);
+	}
+
 	.table-toolbar {
 		display: flex;
 		flex-wrap: wrap;
@@ -311,8 +341,7 @@
 	}
 
 	.table-scroll {
-		overflow: auto;
-		max-height: 32rem;
+		overflow-x: auto;
 	}
 
 	table {
@@ -329,9 +358,6 @@
 	}
 
 	th {
-		position: sticky;
-		top: 0;
-		z-index: var(--rh-z-sticky);
 		padding: 0;
 		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
 		background-color: var(--rh-color-canvas-subtle);
@@ -402,6 +428,10 @@
 	.table__cell--right {
 		text-align: right;
 		font-variant-numeric: tabular-nums;
+	}
+
+	.table__cell--nowrap {
+		white-space: nowrap;
 	}
 
 	.table__cell--center {

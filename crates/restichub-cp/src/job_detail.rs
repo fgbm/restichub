@@ -185,6 +185,9 @@ pub struct JobDetailView {
     pub progress: Option<ProgressView>,
     pub log: LogInfo,
     pub limits: LimitsView,
+    /// The identifier of the job signing key that signed the job. Null until the control plane sent
+    /// the job, and for a job that it sent before it recorded the key.
+    pub signing_key_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -229,10 +232,18 @@ pub async fn get_job(
             let planned = job_steps::list_planned_described(tx, job_id).await?;
             let progress = job_steps::get_progress(tx, job_id).await?;
             let log = job_logs::state(tx, job_id).await?;
-            Ok(Some((detail, steps, planned, progress, log)))
+            let signing_key_id = restichub_db::queue::signer_key_id(tx, job_id).await?;
+            Ok(Some((
+                detail,
+                steps,
+                planned,
+                progress,
+                log,
+                signing_key_id,
+            )))
         })
         .await?;
-    let Some((detail, steps, planned, progress, log)) = found else {
+    let Some((detail, steps, planned, progress, log, signing_key_id)) = found else {
         return Err(ApiError::not_found());
     };
     let summary = steps
@@ -276,6 +287,7 @@ pub async fn get_job(
                 .and_then(|seconds| u32::try_from(seconds).ok())
                 .filter(|seconds| *seconds > 0),
         },
+        signing_key_id,
         log: LogInfo {
             lines: log.as_ref().map_or(0, |state| state.last_seq),
             truncated: log.as_ref().is_some_and(|state| state.truncated),

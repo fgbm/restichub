@@ -61,6 +61,11 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
 	return interpolate(catalogs[locale][key], params);
 }
 
+/** Translate a key that may be missing, such as a code from the agent. Falls back to the code. */
+export function tOr(key: string, fallback: string): string {
+	return key in en ? t(key as MessageKey) : fallback;
+}
+
 /**
  * Translate an API problem code. If the catalog has no message for the code,
  * the caller shows the generic title and the code itself.

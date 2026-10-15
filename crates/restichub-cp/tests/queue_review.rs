@@ -79,6 +79,31 @@ async fn cancel(env: &Env, job: Uuid) {
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
 }
 
+/// FR-MN-02: the job detail names the key that signed the job, also after the job ended.
+#[tokio::test]
+async fn ac_mn_04_the_job_detail_names_the_signing_key() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let mut w = world(db, test_queue()).await;
+    let env = &w.env;
+    let job = env.run_plan(w.plan).await;
+    assert!(env.job(job).await["signing_key_id"].is_null());
+
+    env.pass().await;
+    let id = decode_job_id(&w.agent.job().await);
+    let signed = env.job(job).await["signing_key_id"].clone();
+    assert!(
+        signed.as_str().is_some_and(|key| !key.is_empty()),
+        "{signed}"
+    );
+
+    w.agent.start(env, &id).await;
+    cancel(env, job).await;
+    assert_eq!(env.job(job).await["signing_key_id"], signed);
+    env.db.cleanup().await;
+}
+
 /// ADR-0039: a connected agent keeps a job for longer than 12 hours; the default is 48 hours.
 #[tokio::test]
 async fn ac_sc_10_a_running_job_of_a_connected_agent_is_not_failed_by_the_clock() {

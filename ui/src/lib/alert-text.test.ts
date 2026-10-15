@@ -31,6 +31,22 @@ function alert(overrides: Partial<Alert>): Alert {
 describe('alertCondition', () => {
 	afterEach(() => setLocale('en'));
 
+	it('translates the error code of a failed job', () => {
+		setLocale('ru');
+		const text = alertCondition(
+			alert({ params: { job_kind: 'backup', error_code: 'interrupted' } })
+		);
+		expect(text).toContain('прервано перезапуском агента');
+		expect(text).not.toContain('interrupted');
+	});
+
+	it('keeps an unknown error code as it is', () => {
+		setLocale('en');
+		expect(
+			alertCondition(alert({ params: { job_kind: 'backup', error_code: 'new_code' } }))
+		).toContain('new_code');
+	});
+
 	it('builds an English sentence from the values', () => {
 		setLocale('en');
 		expect(

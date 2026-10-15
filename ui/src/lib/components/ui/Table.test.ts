@@ -15,6 +15,7 @@ interface TableProps {
 	rows: Row[];
 	rowKey: (row: Row) => string;
 	loading?: boolean;
+	flush?: boolean;
 	rowActions?: Snippet<[Row]>;
 }
 
@@ -46,11 +47,43 @@ describe('Table', () => {
 		expect(container.querySelectorAll('tbody tr')).toHaveLength(10);
 	});
 
+	it('keeps a nowrap column on one line', () => {
+		const { container } = render(Table, {
+			props: {
+				columns: [{ key: 'name', header: 'Name', nowrap: true }],
+				rows,
+				rowKey: (row) => row.id
+			}
+		});
+		expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveClass('table__cell--nowrap');
+		const cells = container.querySelectorAll('tbody td');
+		expect(cells).toHaveLength(2);
+		for (const cell of cells) expect(cell).toHaveClass('table__cell--nowrap');
+	});
+
+	it('wraps a column that has no nowrap flag', () => {
+		const { container } = render(Table, { props: { columns, rows, rowKey: (row) => row.id } });
+		expect(container.querySelector('.table__cell--nowrap')).toBeNull();
+	});
+
 	it('renders the row actions', () => {
 		const rowActions = createRawSnippet<[Row]>((row) => ({
 			render: () => `<button type="button">Open ${row().id}</button>`
 		}));
 		render(Table, { props: { columns, rows, rowKey: (row) => row.id, rowActions } });
 		expect(screen.getByRole('button', { name: 'Open r1' })).toBeInTheDocument();
+	});
+
+	it('has no inner height limit, so the table grows with the page', () => {
+		const { container } = render(Table, { props: { columns, rows, rowKey: (row) => row.id } });
+		expect(container.querySelector('.table-scroll')).not.toBeNull();
+		expect(container.querySelector('.table-wrap--flush')).toBeNull();
+	});
+
+	it('marks a table inside a panel as flush', () => {
+		const { container } = render(Table, {
+			props: { columns, rows, rowKey: (row) => row.id, flush: true }
+		});
+		expect(container.querySelector('.table-wrap')).toHaveClass('table-wrap--flush');
 	});
 });

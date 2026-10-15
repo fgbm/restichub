@@ -101,6 +101,7 @@
 		{ key: 'time_zone', header: t('plans.timeZone'), value: (row) => row.time_zone },
 		{
 			key: 'next_run_at',
+			nowrap: true,
 			header: t('plans.nextRun'),
 			value: (row) =>
 				row.next_run_at ? formatTimeInZoneWithLocal(row.next_run_at, row.time_zone) : '',

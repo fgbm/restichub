@@ -13,6 +13,7 @@
 		Badge,
 		Button,
 		Checkbox,
+		Combobox,
 		ConfirmDialog,
 		CopyField,
 		Dialog,
@@ -24,6 +25,7 @@
 		Pagination,
 		Panel,
 		PasswordField,
+		Popover,
 		Select,
 		SidePanel,
 		Skeleton,
@@ -46,6 +48,7 @@
 	let username = $state('operator');
 	let displayName = $state('Boris Ivanov');
 	let role = $state('operator');
+	let host = $state('');
 
 	const menuItems: MenuItem[] = [
 		{ label: 'Open', icon: 'eye' },
@@ -241,6 +244,16 @@
 					]}
 				/>
 				<PasswordField label="Password" value="correct-horse-battery" />
+				<Combobox
+					label="Host"
+					bind:value={host}
+					placeholder="Search hosts"
+					options={[
+						{ value: 'srv-db-01', label: 'srv-db-01' },
+						{ value: 'srv-db-02', label: 'srv-db-02' },
+						{ value: 'win-fs01', label: 'win-fs01' }
+					]}
+				/>
 			</div>
 			<div class="demo-cell">
 				<span class="demo-label">Checkbox</span>
@@ -298,6 +311,13 @@
 			<div class="demo-state">
 				<span class="demo-label">tooltip</span>
 				<Tooltip content="Copy snapshot ID" ariaLabel="Copy"><span>Copy</span></Tooltip>
+			</div>
+			<div class="demo-state">
+				<span class="demo-label">popover</span>
+				<Popover label="Retention details">
+					{#snippet trigger()}Retention{/snippet}
+					Keeps 7 daily and 4 weekly snapshots.
+				</Popover>
 			</div>
 		</div>
 	</section>
@@ -378,7 +398,7 @@
 				<Alert tone="attention" icon="key" title="Copy the token value">
 					This value appears one time only.
 				</Alert>
-				<CopyField value="rh_EXAMPLEONLYVALUE0000000000000000000000" secret />
+				<CopyField label="New token" value="rh_EXAMPLEONLYVALUE0000000000000000000000" secret />
 			</div>
 		</div>
 	</section>

@@ -637,6 +637,22 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.lock_retry': 'Репозиторий был заблокирован. Новая попытка стоит в очереди.',
 	'jobs.reason.signed_job_unavailable': 'Сохранённое задание нечитаемо.',
 	'jobs.reason.agent_lost': 'Хост отключился во время задания.',
+	'jobs.reason.wrong_password': 'Пароль репозитория или ключи доступа неверны.',
+	'jobs.reason.step_failed': 'restic остановился с ошибкой.',
+	'jobs.reason.hook_failed': 'Скрипт или хук завершился ошибкой.',
+	'jobs.reason.cancelled': 'Задание отменено.',
+	'jobs.reason.succeeded_with_warnings': 'Завершено с предупреждениями.',
+	'jobs.errorCode.interrupted': 'прервано перезапуском агента',
+	'jobs.errorCode.step_failed': 'ошибка restic',
+	'jobs.errorCode.wrong_password': 'неверный пароль или ключи',
+	'jobs.errorCode.repository_missing': 'репозиторий не найден',
+	'jobs.errorCode.hook_failed': 'ошибка скрипта или хука',
+	'jobs.errorCode.stalled': 'нет прогресса',
+	'jobs.errorCode.max_duration_exceeded': 'превышена предельная длительность',
+	'jobs.errorCode.repository_locked': 'репозиторий заблокирован',
+	'jobs.errorCode.agent_lost': 'хост отключился',
+	'jobs.errorCode.expired': 'срок задания истёк',
+	'jobs.errorCode.cancelled': 'отменено',
 	'jobs.reason.interrupted': 'Прервано: агент перезапустился во время скриптов',
 	'jobs.reason.timed_out': 'Задание выполнялось дольше предельной длительности.',
 	'jobs.reason.stalled': 'Задание остановлено: restic слишком долго не продвигался.',
@@ -761,6 +777,8 @@ export const ru: Record<MessageKey, string> = {
 	'jobDetail.level.error': 'ERROR',
 	'jobDetail.about': 'О задании',
 	'jobDetail.id': 'Идентификатор',
+	'jobDetail.signingKey': 'Ключ подписи',
+	'jobDetail.signingKey.copy': 'Копировать идентификатор ключа подписи',
 	'jobDetail.kind': 'Вид',
 	'jobDetail.queuedAt': 'Поставлено в очередь',
 	'jobDetail.startedAt': 'Начало',
@@ -1462,6 +1480,7 @@ export const ru: Record<MessageKey, string> = {
 	'pe.rule.within.title': 'Все снимки за период',
 	'pe.rule.within.text':
 		'Оставить все снимки, которые новее самого нового снимка не больше чем на этот срок. Отсчёт идёт от самого нового снимка, а не от сегодняшнего дня. Пример: <code>30d</code> — 30 дней, <code>1y2m</code> — год и два месяца.',
+	'pe.rule.within.hint': 'Например: 30d, 1y2m',
 	'pe.rule.within.invalid': 'Не разобрать срок. Пример: 30d, 6m, 1y2m7d3h.',
 	'pe.rule.tags.title': 'Теги, которые не удаляются',
 	'pe.rule.tags.text':
@@ -1553,5 +1572,54 @@ export const ru: Record<MessageKey, string> = {
 	'pe.sum.maxDefault': 'не дольше {count} (по умолчанию)',
 	'pe.sum.maxNone': 'без ограничения',
 	'pe.sum.maxServer': 'предельное время: по умолчанию сервера',
-	'pe.sum.stallServer': 'без прогресса: по умолчанию сервера'
+	'pe.sum.stallServer': 'без прогресса: по умолчанию сервера',
+	// Built-in script and job templates, keyed by slug
+	'builtin.script.postgres-dump-bash.name': 'Дамп PostgreSQL через pg_dump (Linux)',
+	'builtin.script.postgres-dump-bash.description':
+		'Перед резервным копированием пишет дамп одной базы в пользовательском формате. Нужен pg_dump на хосте.',
+	'builtin.script.postgres-dump-powershell.name': 'Дамп PostgreSQL через pg_dump (Windows)',
+	'builtin.script.postgres-dump-powershell.description':
+		'Перед резервным копированием пишет дамп одной базы в пользовательском формате. Нужен pg_dump.exe в PATH агента.',
+	'builtin.script.mysql-dump-bash.name': 'Дамп MySQL через mysqldump (Linux)',
+	'builtin.script.mysql-dump-bash.description':
+		'Перед резервным копированием пишет согласованный дамп одной базы InnoDB. Нужен mysqldump на хосте.',
+	'builtin.script.mssql-backup-powershell.name': 'Резервная копия MSSQL через sqlcmd (Windows)',
+	'builtin.script.mssql-backup-powershell.description':
+		'Перед копированием файлов выполняет BACKUP DATABASE в файл .bak. Нужен sqlcmd.exe в PATH агента.',
+	'builtin.script.windows-vss-note-powershell.name': 'Заметка о Windows VSS (Windows)',
+	'builtin.script.windows-vss-note-powershell.description':
+		'Перед резервным копированием выводит список записывающих VSS. Сам снимок создаёт параметр профиля для снимка файловой системы.',
+	'builtin.script.service-stop-bash.name': 'Остановка службы (Linux)',
+	'builtin.script.service-stop-bash.description':
+		'Перед резервным копированием останавливает службу systemd. Используйте вместе с шаблоном запуска в фазе finally.',
+	'builtin.script.service-start-bash.name': 'Запуск службы (Linux)',
+	'builtin.script.service-start-bash.description':
+		'Запускает службу systemd. Используйте в фазе finally, чтобы служба запустилась снова, даже если копирование завершилось ошибкой.',
+	'builtin.script.service-stop-powershell.name': 'Остановка службы (Windows)',
+	'builtin.script.service-stop-powershell.description':
+		'Перед резервным копированием останавливает службу Windows. Используйте вместе с шаблоном запуска в фазе finally.',
+	'builtin.script.service-start-powershell.name': 'Запуск службы (Windows)',
+	'builtin.script.service-start-powershell.description':
+		'Запускает службу Windows. Используйте в фазе finally, чтобы служба запустилась снова, даже если копирование завершилось ошибкой.',
+	'builtin.script.disk-space-check-bash.name': 'Проверка свободного места на диске (Linux)',
+	'builtin.script.disk-space-check-bash.description':
+		'Завершается ошибкой, если на пути свободно меньше заданного предела.',
+	'builtin.script.disk-space-check-powershell.name': 'Проверка свободного места на диске (Windows)',
+	'builtin.script.disk-space-check-powershell.description':
+		'Завершается ошибкой, если на диске пути свободно меньше заданного предела.',
+	'builtin.script.run-command-bash.name': 'Выполнить команду (Linux)',
+	'builtin.script.run-command-bash.description':
+		'Выполняет одну командную строку через bash. Для всего, что требует экранирования, используйте отдельный шаблон.',
+	'builtin.script.run-command-powershell.name': 'Выполнить команду (Windows)',
+	'builtin.script.run-command-powershell.description':
+		'Выполняет одну командную строку через PowerShell.',
+	'builtin.job.postgres-linux.name': 'Сервер PostgreSQL (Linux)',
+	'builtin.job.postgres-linux.description':
+		'Проверяет свободное место и перед копированием пишет дамп одной базы. После копирования ничего не удаляет.',
+	'builtin.job.mssql-windows.name': 'Microsoft SQL Server (Windows)',
+	'builtin.job.mssql-windows.description':
+		'Выводит список записывающих VSS и перед копированием файлов сохраняет одну базу в файл .bak.',
+	'builtin.job.stop-start-service-linux.name': 'Приложение со службой (Linux)',
+	'builtin.job.stop-start-service-linux.description':
+		'Останавливает службу перед копированием и запускает её снова в фазе finally.'
 };

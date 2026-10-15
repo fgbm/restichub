@@ -170,6 +170,9 @@ pub struct StoredSignedJob {
     pub key_version: i32,
     pub nonce: Vec<u8>,
     pub ciphertext: Vec<u8>,
+    /// The identifier of the job signing key that signed the bytes. Absent for a row that was sent
+    /// before the column existed.
+    pub signer_key_id: Option<String>,
     /// The secrets that the job carries; each delivery writes their audit records.
     pub secrets: Vec<SecretId>,
 }
@@ -190,7 +193,7 @@ pub async fn mark_dispatched(
         "UPDATE jobs SET status = 'sent', sent_at = $2, lease_until = $3, \
                 deliveries = deliveries + 1, signed_job = $4, signed_job_nonce = $5, \
                 signed_job_key_version = $6, signed_job_secrets = $7, timeout_seconds = $8, stall_timeout_seconds = $9, \
-                updated_at = now() \
+                signer_key_id = $10, updated_at = now() \
          WHERE id = $1 AND status = 'queued'",
     )
     .bind(id)
@@ -202,6 +205,7 @@ pub async fn mark_dispatched(
     .bind(&secrets)
     .bind(timeout_seconds)
     .bind(stall_timeout_seconds)
+    .bind(&signed.signer_key_id)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -239,17 +243,29 @@ pub async fn replace_signed_job(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE jobs SET signed_job = $2, signed_job_nonce = $3, signed_job_key_version = $4, \
-                updated_at = now() \
+                signer_key_id = $5, updated_at = now() \
          WHERE id = $1 AND status = 'sent'",
     )
     .bind(id)
     .bind(&signed.ciphertext)
     .bind(&signed.nonce)
     .bind(signed.key_version)
+    .bind(&signed.signer_key_id)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
+}
+
+/// The identifier of the key that signed the job. `None` for a job that no key signed yet.
+pub async fn signer_key_id(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<String>, DbError> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT signer_key_id FROM jobs WHERE id = $1")
+            .bind(id)
+            .fetch_optional(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    Ok(row.and_then(|(key_id,)| key_id))
 }
 
 /// The ciphertext of a `sent` row, or `None` when the row holds none.
@@ -257,8 +273,18 @@ pub async fn signed_job(
     tx: &mut TenantTx<'_>,
     id: JobId,
 ) -> Result<Option<StoredSignedJob>, DbError> {
-    let row = sqlx::query_as::<_, (Option<Vec<u8>>, Option<Vec<u8>>, Option<i32>, Vec<Uuid>)>(
-        "SELECT signed_job, signed_job_nonce, signed_job_key_version, signed_job_secrets \
+    let row = sqlx::query_as::<
+        _,
+        (
+            Option<Vec<u8>>,
+            Option<Vec<u8>>,
+            Option<i32>,
+            Vec<Uuid>,
+            Option<String>,
+        ),
+    >(
+        "SELECT signed_job, signed_job_nonce, signed_job_key_version, signed_job_secrets, \
+                signer_key_id \
          FROM jobs WHERE id = $1 AND status = 'sent'",
     )
     .bind(id)
@@ -266,11 +292,12 @@ pub async fn signed_job(
     .await
     .map_err(DbError::Query)?;
     Ok(match row {
-        Some((Some(ciphertext), Some(nonce), Some(key_version), secrets)) => {
+        Some((Some(ciphertext), Some(nonce), Some(key_version), secrets, signer_key_id)) => {
             Some(StoredSignedJob {
                 key_version,
                 nonce,
                 ciphertext,
+                signer_key_id,
                 secrets: secrets.into_iter().map(SecretId::from_uuid).collect(),
             })
         }

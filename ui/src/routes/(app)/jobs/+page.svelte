@@ -19,7 +19,7 @@
 		StatusTone,
 		TableColumn
 	} from '#lib/components/ui/index.ts';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatDuration, formatLocalTime } from '#lib/format.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -55,7 +55,13 @@
 	]);
 
 	const columns = $derived<TableColumn<Job>[]>([
-		{ key: 'status', header: t('jobs.status'), value: statusLabel, render: statusCell },
+		{
+			key: 'status',
+			header: t('jobs.status'),
+			nowrap: true,
+			value: statusLabel,
+			render: statusCell
+		},
 		{ key: 'plan', header: t('jobs.plan'), value: planLabel, render: planCell },
 		{
 			key: 'host',
@@ -66,12 +72,14 @@
 		{ key: 'repository', header: t('jobs.repository'), value: (row) => row.repository_name ?? '' },
 		{
 			key: 'started',
+			nowrap: true,
 			header: t('jobs.started'),
 			value: (row) => row.started_at ?? '',
 			render: startedCell
 		},
 		{
 			key: 'duration',
+			nowrap: true,
 			header: t('jobs.duration'),
 			value: (row) => durationOf(row),
 			render: durationCell
@@ -122,9 +130,7 @@
 		const code =
 			job.result_message ?? (job.result_code === 'repository_locked' ? job.result_code : null);
 		if (!code) return null;
-		const key = `jobs.reason.${code}` as MessageKey;
-		const text = t(key);
-		return text === key ? code : text;
+		return tOr(`jobs.reason.${code}`, code);
 	}
 
 	function durationOf(job: Job): string {
@@ -349,6 +355,7 @@
 
 	.job__reason {
 		max-width: 22ch;
+		white-space: normal;
 	}
 
 	.filter {
