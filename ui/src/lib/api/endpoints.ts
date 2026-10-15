@@ -94,6 +94,7 @@ export const endpoints = {
 		byId: (id: string) => `/job-templates/${encodeURIComponent(id)}`
 	},
 	dashboard: '/dashboard',
+	events: '/events',
 	alerts: {
 		list: '/alerts',
 		rules: '/alert-rules'

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { eventReader } from '#lib/events.ts';
+	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
 		Agent,
@@ -211,10 +213,9 @@
 			error = messageOf(problem);
 		} finally {
 			loading = false;
+			reader.loaded();
 		}
 	}
-
-	onMount(load);
 
 	// A used token leaves the pending list and a new host appears without a manual reload.
 	const REFRESH_MS = 10_000;
@@ -232,11 +233,27 @@
 		}
 	}
 
-	onMount(() => {
-		const timer = setInterval(() => {
-			if (!document.hidden && !loading) void refresh();
-		}, REFRESH_MS);
+	// The stream pushes a change of a host. The poll covers a stream that is down.
+	const STREAM_REFRESH_MS = 60_000;
+
+	$effect(() => {
+		const timer = setInterval(
+			() => {
+				if (!document.hidden && !loading) void refresh();
+			},
+			isStreamConnected() ? STREAM_REFRESH_MS : REFRESH_MS
+		);
 		return () => clearInterval(timer);
+	});
+
+	const reader = eventReader(() => loading, refresh, 300);
+	// The subscription comes before the first load, so an event during the load is not lost.
+	onMount(() => {
+		const off = onEvent((event) => {
+			if (event.type.startsWith('host.') || event.type === 'resync') reader.notify();
+		});
+		void load();
+		return off;
 	});
 
 	function openAdd(): void {

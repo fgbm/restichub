@@ -200,6 +200,15 @@ pub async fn cancel_job(
     let detail = queue_repo::get_detail(&mut tx, job_id).await?;
     tx.commit().await?;
     state.wake_dispatcher();
+    state.events().job_status(
+        context.tenant_id,
+        job_id,
+        if status == StatusCode::OK {
+            JobStatus::Failed
+        } else {
+            job.status
+        },
+    );
     let Some(detail) = detail else {
         return Err(ApiError::internal("the job is not found after the cancel"));
     };
@@ -294,6 +303,9 @@ pub async fn run_plan(
     let detail = queue_repo::get_detail(&mut tx, job_id).await?;
     tx.commit().await?;
     state.wake_dispatcher();
+    state
+        .events()
+        .job_status(context.tenant_id, job_id, JobStatus::Queued);
     let Some(detail) = detail else {
         return Err(ApiError::internal("the job is not found after the create"));
     };
@@ -391,6 +403,9 @@ pub async fn unlock_all_repository(
     let detail = queue_repo::get_detail(&mut tx, job_id).await?;
     tx.commit().await?;
     state.wake_dispatcher();
+    state
+        .events()
+        .job_status(context.tenant_id, job_id, JobStatus::Queued);
     let Some(detail) = detail else {
         return Err(ApiError::internal("the job is not found after the create"));
     };

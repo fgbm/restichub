@@ -455,6 +455,9 @@ async fn create_job(
     let detail = queue_repo::get_detail(&mut tx, job_id).await?;
     tx.commit().await?;
     state.wake_dispatcher();
+    state
+        .events()
+        .job_status(context.tenant_id, job_id, restichub_db::JobStatus::Queued);
     let Some(detail) = detail else {
         return Err(ApiError::internal("the job is not found after the create"));
     };
