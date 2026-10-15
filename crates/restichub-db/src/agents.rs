@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::enums::AgentStatus;
+use crate::enums::{AgentStatus, HookAllowListState};
 use crate::ids::{AgentId, UserId};
 use crate::tx::TenantTx;
 
@@ -33,6 +33,11 @@ pub struct Agent {
     pub capabilities: Vec<String>,
     /// The directories where the agent restores files, from its last `AgentHello` (FR-RS-03).
     pub restore_roots: Vec<String>,
+    /// The hooks from the last `AgentHello`: a JSON object that maps a hook identifier to its
+    /// schema (FR-HK-04). It holds no path.
+    pub hooks: serde_json::Value,
+    /// Whether the agent trusted its allow-list file at its last connection (AC-HK-01).
+    pub hook_allow_list: HookAllowListState,
     pub certificate_serial: Vec<u8>,
     pub certificate_expires_at: OffsetDateTime,
     pub status: AgentStatus,
@@ -127,8 +132,8 @@ pub async fn list(
     };
     let mut agents: Vec<Agent> = sqlx::query_as::<_, AgentRow>(
         "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
-                capabilities, restore_roots, certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
-                revoked_at, revoked_by_user_id \
+                capabilities, restore_roots, hooks, hook_allow_list, certificate_serial, certificate_expires_at, status, \
+                last_seen_at, created_at, revoked_at, revoked_by_user_id \
          FROM agents \
          WHERE ($1::text IS NULL OR status = $1) \
            AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid)) \
@@ -154,8 +159,8 @@ pub async fn list(
 pub async fn get(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option<Agent>, DbError> {
     let row = sqlx::query_as::<_, AgentRow>(
         "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
-                capabilities, restore_roots, certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
-                revoked_at, revoked_by_user_id \
+                capabilities, restore_roots, hooks, hook_allow_list, certificate_serial, certificate_expires_at, status, \
+                last_seen_at, created_at, revoked_at, revoked_by_user_id \
          FROM agents WHERE id = $1",
     )
     .bind(id)
@@ -219,21 +224,33 @@ pub async fn touch_last_seen_batch(
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
-/// Stores the capabilities and the restore roots that the agent announced in its `AgentHello`
-/// (FR-PR-09, FR-RS-03).
+/// What the agent announced in its `AgentHello`: the capabilities, the restore roots and the hook
+/// allow-list (FR-PR-09, FR-RS-03, FR-HK-04).
+#[derive(Debug, Clone)]
+pub struct HelloFacts<'a> {
+    pub capabilities: &'a [String],
+    pub restore_roots: &'a [String],
+    /// A JSON object that maps a hook identifier to its schema.
+    pub hooks: &'a serde_json::Value,
+    pub hook_allow_list: HookAllowListState,
+}
+
+/// Stores the facts of the last `AgentHello`.
 pub async fn set_hello_facts(
     tx: &mut TenantTx<'_>,
     id: AgentId,
-    capabilities: &[String],
-    restore_roots: &[String],
+    facts: &HelloFacts<'_>,
 ) -> Result<(), DbError> {
     sqlx::query(
-        "UPDATE agents SET capabilities = $2, restore_roots = $3 \
-         WHERE id = $1 AND (capabilities <> $2 OR restore_roots <> $3)",
+        "UPDATE agents SET capabilities = $2, restore_roots = $3, hooks = $4, hook_allow_list = $5 \
+         WHERE id = $1 AND (capabilities <> $2 OR restore_roots <> $3 OR hooks <> $4 \
+                            OR hook_allow_list <> $5)",
     )
     .bind(id)
-    .bind(capabilities)
-    .bind(restore_roots)
+    .bind(facts.capabilities)
+    .bind(facts.restore_roots)
+    .bind(facts.hooks)
+    .bind(facts.hook_allow_list.as_str())
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -277,62 +294,50 @@ pub async fn revoke(
     Ok(result.rows_affected() == 1)
 }
 
-type AgentRow = (
-    Uuid,
-    String,
-    String,
-    String,
-    String,
-    String,
-    Vec<String>,
-    Vec<String>,
-    Vec<String>,
-    Vec<u8>,
-    OffsetDateTime,
-    AgentStatus,
-    Option<OffsetDateTime>,
-    OffsetDateTime,
-    Option<OffsetDateTime>,
-    Option<Uuid>,
-);
+#[derive(sqlx::FromRow)]
+struct AgentRow {
+    id: Uuid,
+    hostname: String,
+    os: String,
+    arch: String,
+    agent_version: String,
+    restic_version: String,
+    labels: Vec<String>,
+    capabilities: Vec<String>,
+    restore_roots: Vec<String>,
+    hooks: serde_json::Value,
+    hook_allow_list: String,
+    certificate_serial: Vec<u8>,
+    certificate_expires_at: OffsetDateTime,
+    status: AgentStatus,
+    last_seen_at: Option<OffsetDateTime>,
+    created_at: OffsetDateTime,
+    revoked_at: Option<OffsetDateTime>,
+    revoked_by_user_id: Option<Uuid>,
+}
 
 impl From<AgentRow> for Agent {
     fn from(row: AgentRow) -> Self {
-        let (
-            id,
-            hostname,
-            os,
-            arch,
-            agent_version,
-            restic_version,
-            labels,
-            capabilities,
-            restore_roots,
-            certificate_serial,
-            certificate_expires_at,
-            status,
-            last_seen_at,
-            created_at,
-            revoked_at,
-            revoked_by_user_id,
-        ) = row;
         Self {
-            id: AgentId::from_uuid(id),
-            hostname,
-            os,
-            arch,
-            agent_version,
-            restic_version,
-            labels,
-            capabilities,
-            restore_roots,
-            certificate_serial,
-            certificate_expires_at,
-            status,
-            last_seen_at,
-            created_at,
-            revoked_at,
-            revoked_by_user_id: revoked_by_user_id.map(UserId::from_uuid),
+            id: AgentId::from_uuid(row.id),
+            hostname: row.hostname,
+            os: row.os,
+            arch: row.arch,
+            agent_version: row.agent_version,
+            restic_version: row.restic_version,
+            labels: row.labels,
+            capabilities: row.capabilities,
+            restore_roots: row.restore_roots,
+            hooks: row.hooks,
+            hook_allow_list: HookAllowListState::parse(&row.hook_allow_list)
+                .unwrap_or(HookAllowListState::Unknown),
+            certificate_serial: row.certificate_serial,
+            certificate_expires_at: row.certificate_expires_at,
+            status: row.status,
+            last_seen_at: row.last_seen_at,
+            created_at: row.created_at,
+            revoked_at: row.revoked_at,
+            revoked_by_user_id: row.revoked_by_user_id.map(UserId::from_uuid),
         }
     }
 }
