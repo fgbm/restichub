@@ -115,7 +115,8 @@ pub struct JobView {
     pub updated_at: String,
     /// In RFC 3339. Null until the job finishes.
     pub finished_at: Option<String>,
-    /// In RFC 3339. Null when the job holds no expiry.
+    /// In RFC 3339. The end of the acceptance window of the signed job: the agent refuses the job
+    /// after this time. It is not a limit of the run. Null when the job holds no expiry.
     pub expires_at: Option<String>,
     /// Null for an on-demand job and for a job whose plan was deleted.
     pub plan_id: Option<String>,
@@ -304,6 +305,7 @@ async fn create_repository_job(
         issued_at: Some(timestamp(now)),
         expires_at: Some(timestamp(expires_at)),
         timeout_seconds: JOB_TIMEOUT_SECONDS,
+        stall_timeout_seconds: 0,
         repositories: vec![access],
         steps: repository_steps(kind, &repository_id.to_string()),
     };

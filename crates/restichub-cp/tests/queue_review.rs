@@ -79,8 +79,9 @@ async fn cancel(env: &Env, job: Uuid) {
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
 }
 
+/// ADR-0039: a connected agent keeps a job for longer than 12 hours; the default is 48 hours.
 #[tokio::test]
-async fn ac_sc_06_a_running_job_past_its_timeout_fails_while_the_agent_is_online() {
+async fn ac_sc_10_a_running_job_of_a_connected_agent_is_not_failed_by_the_clock() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -91,8 +92,78 @@ async fn ac_sc_06_a_running_job_past_its_timeout_fails_while_the_agent_is_online
     let id = decode_job_id(&w.agent.job().await);
     w.agent.start(env, &id).await;
 
+    env.clock.advance(13 * 3600);
+    env.pass().await;
+    assert_eq!(env.job_status(job).await, "running");
+    let limits = &env.job(job).await["limits"];
+    assert_eq!(limits["max_duration_seconds"], 48 * 3600);
+    assert_eq!(limits["stall_timeout_seconds"], 3600);
+
+    // Only the loss of the agent ends the job.
+    let agent_id = w.agent.id;
+    drop(w.agent);
+    eventually(|| async { !env.state.agent_registry().is_online(agent_id) }).await;
+    env.clock.advance(31 * 60);
+    env.pass().await;
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["result_message"], "agent_lost");
+    env.db.cleanup().await;
+}
+
+/// ADR-0039: an agent that connects and does not list a running job has lost it.
+#[tokio::test]
+async fn ac_sc_10_a_hello_that_does_not_list_a_running_job_fails_it() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let mut w = world(db, test_queue()).await;
+    let env = &w.env;
+    let job = env.run_plan(w.plan).await;
+    env.pass().await;
+    let id = decode_job_id(&w.agent.job().await);
+    w.agent.start(env, &id).await;
+    env.clock.advance(3 * 60);
+
+    // A hello that lists the job keeps it running.
+    let listed = env
+        .reconnect_agent_holding(&w.agent, vec![id.clone()])
+        .await;
+    env.pass().await;
+    assert_eq!(env.job_status(job).await, "running");
+
+    let _restarted = env.reconnect_agent_holding(&listed, Vec::new()).await;
+    eventually(|| async { env.job_status(job).await == "failed" }).await;
+    assert_eq!(env.job(job).await["result_message"], "agent_lost");
+    assert!(stale_marked(env, job).await, "the lock may be stale");
+    env.db.cleanup().await;
+}
+
+/// ADR-0039: a job that carries a maximum duration still fails past it and a grace period.
+#[tokio::test]
+async fn ac_sc_06_a_running_job_past_its_maximum_duration_fails_while_the_agent_is_online() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("review-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env
+        .create_profile(
+            repository,
+            json!({"options": {"max_duration_minutes": 120}}),
+        )
+        .await;
+    let plan = env.create_plan(profile, agent.id).await;
+    let job = env.run_plan(plan).await;
+    env.pass().await;
+    let id = decode_job_id(&agent.job().await);
+    agent.start(&env, &id).await;
+
+    assert_eq!(env.job(job).await["limits"]["max_duration_seconds"], 7200);
+
     // The agent restarted and lost the job, but it is online again.
-    env.clock.advance(12 * 3600 + 5 * 60);
+    env.clock.advance(2 * 3600 + 5 * 60);
     env.pass().await;
     assert_eq!(env.job_status(job).await, "running", "the grace still runs");
     env.clock.advance(6 * 60);
@@ -100,11 +171,11 @@ async fn ac_sc_06_a_running_job_past_its_timeout_fails_while_the_agent_is_online
     let body = env.job(job).await;
     assert_eq!(body["status"], "failed");
     assert_eq!(body["result_message"], "timed_out");
-    assert!(stale_marked(env, job).await, "the lock may be stale");
+    assert!(stale_marked(&env, job).await, "the lock may be stale");
 
-    let next = env.run_plan(w.plan).await;
+    let next = env.run_plan(plan).await;
     env.pass().await;
-    assert_eq!(decode_job_id(&w.agent.job().await), next.to_string());
+    assert_eq!(decode_job_id(&agent.job().await), next.to_string());
     env.db.cleanup().await;
 }
 

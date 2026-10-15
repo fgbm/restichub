@@ -384,6 +384,16 @@ fn ac_pf_02_vss_on_windows_agent_is_accepted() {
 }
 
 #[test]
+fn ac_ag_12_the_plan_carries_the_job_limits() {
+    let mut profile = profile();
+    profile.limits = crate::profile::JobLimits {
+        stall_timeout_seconds: 1800,
+        max_duration_seconds: 86_400,
+    };
+    assert_eq!(plan(&profile, &target()).limits, profile.limits);
+}
+
+#[test]
 fn ac_pf_02_missing_hook_is_rejected() {
     let mut profile = profile();
     profile.hooks = vec![hook("missing", HookPhase::Before, &[])];

@@ -460,13 +460,16 @@ fn fr_sc_06_the_agent_rejects_unlock_all_with_another_step() {
 }
 
 #[test]
-fn fr_ag_05_a_step_without_a_timeout_uses_the_job_timeout_or_the_default() {
+fn fr_ag_05_a_step_without_a_timeout_uses_the_job_timeout_or_has_no_limit() {
     // Step value wins over the job value.
-    assert_eq!(super::step_timeout(600, 900), Duration::from_secs(600));
+    assert_eq!(
+        super::step_timeout(600, 900),
+        Some(Duration::from_secs(600))
+    );
     // No step value: the job value stands in.
-    assert_eq!(super::step_timeout(0, 900), Duration::from_secs(900));
-    // Neither: the default.
-    assert_eq!(super::step_timeout(0, 0), super::DEFAULT_STEP_TIMEOUT);
+    assert_eq!(super::step_timeout(0, 900), Some(Duration::from_secs(900)));
+    // Neither: no wall-clock limit (ADR-0039).
+    assert_eq!(super::step_timeout(0, 0), None);
 }
 
 #[test]

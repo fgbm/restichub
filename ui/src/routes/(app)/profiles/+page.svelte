@@ -76,6 +76,9 @@
 	let excludeCaches = $state(false);
 	let limitUpload = $state('');
 	let limitDownload = $state('');
+	let limitDefaults = $state({ stall: '60', max: '2880' });
+	let stallMinutes = $state('60');
+	let maxDurationMinutes = $state('2880');
 	let retentionEnabled = $state(false);
 	let keepLast = $state('0');
 	let keepHourly = $state('0');
@@ -254,11 +257,19 @@
 			plans = planList;
 			// The templates and the secrets serve the script editor only. A failure leaves the
 			// editor without choices and does not block the list.
-			const [templateList, jobTemplateList, secretList] = await Promise.allSettled([
+			const [defaults, templateList, jobTemplateList, secretList] = await Promise.allSettled([
+				service.getJobLimitDefaults(),
 				service.listScriptTemplates(),
 				service.listJobTemplates(),
 				service.listSecrets()
 			]);
+			if (defaults.status === 'fulfilled') {
+				limitDefaults = {
+					stall: String(defaults.value.stall_timeout_minutes),
+					max: String(defaults.value.max_duration_minutes)
+				};
+				if (!formOpen) resetForm();
+			}
 			scriptTemplates = templateList.status === 'fulfilled' ? templateList.value : [];
 			jobTemplates = jobTemplateList.status === 'fulfilled' ? jobTemplateList.value : [];
 			secrets = secretList.status === 'fulfilled' ? secretList.value : [];
@@ -290,6 +301,8 @@
 		excludeCaches = false;
 		limitUpload = '';
 		limitDownload = '';
+		stallMinutes = limitDefaults.stall;
+		maxDurationMinutes = limitDefaults.max;
 		retentionEnabled = false;
 		keepLast = '0';
 		keepHourly = '0';
@@ -338,6 +351,10 @@
 		limitUpload = profile.options?.limit_upload_kib ? String(profile.options.limit_upload_kib) : '';
 		limitDownload = profile.options?.limit_download_kib
 			? String(profile.options.limit_download_kib)
+			: '';
+		stallMinutes = String(profile.options?.stall_timeout_minutes ?? limitDefaults.stall);
+		maxDurationMinutes = profile.options?.max_duration_minutes
+			? String(profile.options.max_duration_minutes)
 			: '';
 		if (profile.retention) {
 			const retention = profile.retention;
@@ -388,6 +405,15 @@
 			.map((hook) => ({ hook_id: hook.hookId.trim(), phase: hook.phase, parameters: [] }));
 	}
 
+	/** An empty field leaves the value to the server. Zero goes to the server, which refuses it. */
+	function stallValue(): number | undefined {
+		// A number input binds a number, or null when the field is empty.
+		const text = String(stallMinutes ?? '').trim();
+		if (text === '') return undefined;
+		const parsed = Number.parseInt(text, 10);
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
+
 	function settings() {
 		return {
 			paths: {
@@ -404,7 +430,9 @@
 				one_file_system: oneFileSystem,
 				exclude_caches: excludeCaches,
 				limit_upload_kib: numberOrZero(limitUpload),
-				limit_download_kib: numberOrZero(limitDownload)
+				limit_download_kib: numberOrZero(limitDownload),
+				stall_timeout_minutes: stallValue(),
+				max_duration_minutes: numberOrZero(maxDurationMinutes)
 			},
 			hooks: hookRefs(),
 			// An Operator keeps the scripts as they are stored: only an Admin changes them.
@@ -701,6 +729,31 @@
 		</section>
 
 		<section class="section">
+			<h3 class="section__title">{t('profiles.limits')}</h3>
+			<p class="hint">{t('profiles.limits.hint')}</p>
+			<div class="grid">
+				<TextField
+					id="profile-stall-timeout"
+					type="number"
+					label={t('profiles.limits.stall')}
+					help={t('profiles.limits.stallHelp')}
+					error={fieldError(formProblem, 'options.stall_timeout_minutes')}
+					bind:value={stallMinutes}
+				/>
+				<TextField
+					id="profile-max-duration"
+					type="number"
+					min="0"
+					label={t('profiles.limits.maxDuration')}
+					help={t('profiles.limits.maxDurationHelp')}
+					placeholder={t('profiles.limits.none')}
+					error={fieldError(formProblem, 'options.max_duration_minutes')}
+					bind:value={maxDurationMinutes}
+				/>
+			</div>
+		</section>
+
+		<section class="section">
 			<h3 class="section__title">{t('profiles.retention')}</h3>
 			<Checkbox label={t('profiles.retention.enabled')} bind:checked={retentionEnabled} />
 			{#if retentionEnabled}
@@ -960,6 +1013,12 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-3);
+	}
+
+	.hint {
+		margin: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.section__title {

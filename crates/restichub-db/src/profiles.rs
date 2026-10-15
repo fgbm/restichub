@@ -41,6 +41,10 @@ pub struct Profile {
     pub exclude_caches: bool,
     pub limit_upload_kib: i64,
     pub limit_download_kib: i64,
+    /// Minutes without progress after which the agent stops a step (ADR-0039).
+    pub stall_timeout_minutes: i32,
+    /// Minutes after which the agent stops the job. Zero means no limit (ADR-0039).
+    pub max_duration_minutes: i32,
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub hooks: Value,
@@ -98,6 +102,8 @@ pub struct NewProfile<'a> {
     pub exclude_caches: bool,
     pub limit_upload_kib: i64,
     pub limit_download_kib: i64,
+    pub stall_timeout_minutes: i32,
+    pub max_duration_minutes: i32,
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub hooks: Value,
@@ -123,6 +129,9 @@ pub struct ProfileUpdate<'a> {
     pub exclude_caches: bool,
     pub limit_upload_kib: i64,
     pub limit_download_kib: i64,
+    /// `None` keeps the stored value.
+    pub stall_timeout_minutes: Option<i32>,
+    pub max_duration_minutes: Option<i32>,
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub hooks: Value,
@@ -135,9 +144,9 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
          (id, tenant_id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
           excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
           limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, \
-          created_by) \
+          created_by, stall_timeout_minutes, max_duration_minutes) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, \
-                 $18, $19, $20, $21)",
+                 $18, $19, $20, $21, $22, $23)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -160,6 +169,8 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
     .bind(&new.hooks)
     .bind(&new.scripts)
     .bind(new.created_by)
+    .bind(new.stall_timeout_minutes)
+    .bind(new.max_duration_minutes)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -176,7 +187,8 @@ pub async fn list_for_repository(
     let rows = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, created_at, \
+                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
+                max_duration_minutes, retention, check_options, hooks, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE repository_id = $1 ORDER BY created_at, id",
     )
@@ -197,7 +209,8 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePa
     let rows = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, created_at, \
+                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
+                max_duration_minutes, retention, check_options, hooks, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles \
          WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
@@ -221,7 +234,8 @@ pub async fn get(tx: &mut TenantTx<'_>, id: ProfileId) -> Result<Option<Profile>
     let row = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, created_at, \
+                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
+                max_duration_minutes, retention, check_options, hooks, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE id = $1",
     )
@@ -243,7 +257,8 @@ pub async fn get_for_update(
     let row = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, created_at, \
+                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
+                max_duration_minutes, retention, check_options, hooks, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE id = $1 FOR UPDATE",
     )
@@ -265,7 +280,9 @@ pub async fn update(
                 paths_linux = $6, paths_macos = $7, excludes = $8, exclude_files = $9, tags = $10, \
                 use_fs_snapshot = $11, one_file_system = $12, exclude_caches = $13, \
                 limit_upload_kib = $14, limit_download_kib = $15, retention = $16, \
-                check_options = $17, hooks = $18, scripts = $19, updated_at = now() \
+                check_options = $17, hooks = $18, scripts = $19, \
+                stall_timeout_minutes = COALESCE($20, stall_timeout_minutes), \
+                max_duration_minutes = COALESCE($21, max_duration_minutes), updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
@@ -287,6 +304,8 @@ pub async fn update(
     .bind(&patch.check_options)
     .bind(&patch.hooks)
     .bind(&patch.scripts)
+    .bind(patch.stall_timeout_minutes)
+    .bind(patch.max_duration_minutes)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -336,6 +355,8 @@ struct ProfileRow {
     exclude_caches: bool,
     limit_upload_kib: i64,
     limit_download_kib: i64,
+    stall_timeout_minutes: i32,
+    max_duration_minutes: i32,
     retention: Option<Value>,
     check_options: Option<Value>,
     hooks: Value,
@@ -363,6 +384,8 @@ impl From<ProfileRow> for Profile {
             exclude_caches: row.exclude_caches,
             limit_upload_kib: row.limit_upload_kib,
             limit_download_kib: row.limit_download_kib,
+            stall_timeout_minutes: row.stall_timeout_minutes,
+            max_duration_minutes: row.max_duration_minutes,
             retention: row.retention,
             check_options: row.check_options,
             hooks: row.hooks,
