@@ -22,7 +22,9 @@ restichub-agent register --url https://<control-plane> --token <token>
 - `--no-service` enrolls the host and installs no service. Run `install-service` later.
 - `--restic-archive PATH`, `--restic-sums PATH` and `--restic-sums-sig PATH` give the restic release files of an offline host (see "The restic binary"). Give all three or none.
 
-Run the command as `root` on Linux, or in an elevated PowerShell on Windows ("Run as administrator"). The agent checks the rights, creates its directories and proves that it can write there before it contacts the control plane. A failed check does not use the token.
+Run the command as `root` on Linux, or in an elevated PowerShell on Windows ("Run as administrator"). You can run it from any folder. The agent checks the rights, creates its directories and proves that it can write there before it contacts the control plane. A failed check does not use the token.
+
+Give the token with exactly one of `--token`, `--token-file` and `--token-stdin`. The command refuses to run when an agent identity already exists on the host, unless you pass `--force`.
 
 The command installs restic when the host has none. This step runs after the checks of the rights and the directories, and before the request to the control plane. A host without internet access and without the offline files fails here, and the token stays unused.
 
@@ -36,6 +38,10 @@ connection:    connected to https://<control-plane>
 ```
 
 If a step fails, the summary names what failed and the next command to run. The exit code is not zero when the agent is not connected. The identity stays, so the next command is `install-service` or `status`, not a new registration.
+
+After `register --no-service` the command prints that the service is not installed and names `install-service` as the next command.
+
+After a successful registration, the host appears on the "Hosts" screen with the status "Waiting for connection". The status changes to "Active" when the agent opens its stream.
 
 The token is single use. The control plane consumes the token at the first successful registration. A used token, an expired token and a revoked token give a clear error.
 
@@ -79,10 +85,11 @@ To check the connection:
 
 1. Open the "Hosts" screen in the Web UI.
 2. Find the host by its name.
-3. Read the status. The status is `active` when the agent is enrolled.
+3. Read the status. A host that enrolled but did not connect yet shows "Waiting for connection". The status is "Active" after the first connection.
 4. Read the "Last seen" time. The control plane writes this time while the stream is open. A time within the last minute shows a live connection.
+5. Read the column "Agent version". The mark "Update available" shows an agent package that is older than the control plane (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)).
 
-The control plane marks an agent offline after a grace period of 300 seconds without a heartbeat. A short network failure therefore does not change the status.
+The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. The Overview counts a host as online when the control plane heard from it in the last 90 seconds. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/operations/alerts/)).
 
 The agent writes one line when the control plane greets it:
 
@@ -96,7 +103,7 @@ An agent with a revoked or an unknown certificate writes this line:
 the control plane refused the agent identity; check that the agent is enrolled and not revoked
 ```
 
-The agent then waits 60 seconds and tries again. Register the host again after a revoke (see above).
+The agent then waits 60 seconds and tries again. Register the host again after a revoke (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)).
 
 ## Initialize a repository
 
@@ -111,7 +118,7 @@ To initialize a repository:
 1. Open the "Repositories" screen in the Web UI.
 2. Find the repository.
 3. Start "Initialize". For a repository that exists, start "Test access" instead.
-4. Read the job state. The state `succeeded` means that restic initialized the repository, or that the access succeeded. The state `config_error` means that the password or the credentials are wrong. The state `not_initialized` means that the repository does not exist.
+4. Read the job result. "The repository is ready." means that restic initialized the repository, or that the access succeeded. "The repository password or the credentials are not correct." is the result `config_error`. "The repository does not exist yet. Initialize it." is the result `not_initialized`.
 5. Read the repository state. The control plane sets `initialized` after a successful init or a successful test-access.
 
 An init and a local-path repository run on the maintenance agent of the repository only.
@@ -128,8 +135,35 @@ restichub-agent status
 restichub-agent uninstall-service
 ```
 
-- `status` prints the identity, the certificate expiry, the restic version and path, the service state, the last connection, the last error and the control plane URL. It exits with a non-zero code when the agent is not connected.
-- `uninstall-service` stops and removes the service. It keeps the data.
+- `status` prints the agent ID and the organization ID. It prints the certificate expiry, the restic version and path, and the service state. It also prints the control plane URL, the connection state, the time of the last connection and the last error. It prints no secret. It exits with the code 1 when the agent is not connected.
+- `uninstall-service` stops and removes the service. It keeps the data, so `install-service` can install the service again.
+
+A `status` output looks like this:
+
+```text
+agent id:            0192f1e0-0000-7000-8000-000000000001
+organization:        0192f1e0-0000-7000-8000-000000000002
+certificate expires: 2026-12-01 10:00:00.0 +00:00:00
+restic:              restic 0.19.1 (/opt/restichub-agent/bin/restic)
+service:             installed, running, start type automatic
+control plane:       https://<control-plane>:8443
+connection:          connected
+last connected:      2026-10-15 09:30:12.0 +00:00:00
+```
+
+All commands of the agent:
+
+| Command | Function |
+| --- | --- |
+| `register` | Enroll the host, install the files, download restic, install and start the service, and wait for the connection. |
+| `install-service` | Install and start the service for an existing identity. Download restic if it is absent. |
+| `restic update` | Download the latest restic and replace the installed one. |
+| `uninstall-service` | Stop and remove the service. |
+| `status` | Print the state of the agent. |
+| `trust-server-scripts --enable` or `--disable` | Turn the local trust mode for [server scripts](/restichub/operations/scripts/) on or off. Run it as `root` or Administrator. |
+| `run` | Run the agent in the foreground. The service uses this command. You do not start it by hand. |
+| `version`, `--version` or `-V` | Print the agent version and the protocol version, for example `restichub-agent 0.1.0+3b21922 (protocol 1.1)`. |
+| `help`, `--help` or `-h` | Print the usage. |
 
 The agent installs itself, so you do not copy files by hand. The command copies the running agent into the program directory. Only SYSTEM and Administrators (Linux: `root`) can write there. If the service runs from that directory, the command stops it, replaces the file and starts it again. The service starts from the program directory. The command refuses an executable that another account can write.
 
@@ -139,18 +173,29 @@ The agent installs itself, so you do not copy files by hand. The command copies 
 | Restic | `/opt/restichub-agent/bin/restic` | `%ProgramFiles%\ResticHub\Agent\bin\restic.exe` |
 | Identity, status file, restic record, cache, journal | `/etc/restichub-agent`, `/var/lib/restichub-agent`, `/var/cache/restichub-agent` | `%ProgramData%\ResticHub\Agent` |
 
-An older install kept restic in `/var/lib/restichub-agent/bin` or in `%ProgramData%\ResticHub\Agent\bin`. `register` and `install-service` move restic into the program directory, point the service at the new path and remove the old copies. The identity stays, so the host does not register again.
+An older install kept restic in `/var/lib/restichub-agent/bin` or in `%ProgramData%\ResticHub\Agent\bin`. `register` and `install-service` stop a running service, move restic into the program directory, point the service at the new path and remove the old copies. The identity stays, so the host does not register again. To migrate an old install, unpack the new agent package and run `restichub-agent install-service` as `root` or Administrator.
 
 On Linux the command writes `/etc/systemd/system/restichub-agent.service` and enables the unit. On Windows the command writes a Windows service that runs as LocalSystem. The service starts after a reboot.
 
 ### Troubleshooting
 
+The exit code is 0 on success and 1 on an error. The exit code is 78 when the service starts without a usable identity. The systemd unit does not restart the service after the code 78, because a restart cannot create an identity.
+
 | Message or symptom | Cause | Action |
 | --- | --- | --- |
+| `--url is required for register` | The command has no `--url`. | Add the control plane URL. |
+| `give the token with --token, --token-file or --token-stdin` or `give exactly one of ...` | The command has no token source, or it has more than one. | Use one source only. |
+| `an agent identity already exists in ...; pass --force to register again` | The host holds an identity. | Create a token with "Re-register" on the host record, and run `register --force` (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)). |
+| `run this command as an administrator ... or as root` | You did not run the command as `root` or Administrator. | Run it with `sudo`, or in an elevated PowerShell. |
+| The error names a clock difference | The clock of the host differs by more than 5 minutes. | Fix the clock (see "The host clock"). The token stays unused. |
+| The error says that restic cannot be downloaded | The host cannot reach GitHub. | Use a proxy or the offline files (see "The restic binary"). The token stays unused. |
+| The control plane refuses the token | The token is used, expired or cancelled. | Create a new token with "Add host". |
 | `register first: restichub-agent register ...` | `install-service` found no valid identity. | Run `register` with a new token. |
 | `service: installed, not running` | The service stopped at the start. | On Linux read `journalctl -u restichub-agent`. On Windows read the Application log. Fix the cause and run `install-service`. |
 | `connection: not connected ... after the wait` | The agent cannot reach the control plane. | Check the clock of the host, the firewall to port 8443 and the URL. Run `status` to read the last error. |
-| The log says that the identity cannot load | The identity directory is damaged or empty. The service exits with code 78 and does not restart. | Run `register --force` with a new token. |
+| `cannot load the agent identity in ...; register the agent again with a new enrollment token` | The identity directory is damaged or empty. The service exits with code 78 and does not restart. | Create a token with "Re-register" and run `register --force` with it. |
+| The host stays in "Waiting for connection" | The service does not run, or it cannot reach the control plane. | Run `restichub-agent status` and read "last error". Check the service, the clock and the firewall. |
+| `the control plane does not accept the protocol version of this agent` | The agent and the control plane have different protocol versions. | Update the agent (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)). |
 | The command refuses a directory or file | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
 | `cannot stop the service` on Windows | A job still runs. | Wait for the job, or stop the service by hand. Run the command again. |
 
@@ -225,8 +270,9 @@ The restic child holds no other variable of the agent, so a job cannot redirect 
 ## Related
 
 - [Manual agent registration and service install](https://github.com/fgbm/restichub/blob/main/design/adr/0032-manual-agent-registration-and-service-install.md)
-- [Bundled restic in the agent package](https://github.com/fgbm/restichub/blob/main/design/adr/0031-bundled-restic-in-agent-package.md)
 - [Agent downloads restic](https://github.com/fgbm/restichub/blob/main/design/adr/0038-agent-downloads-restic.md)
+- [Enroll a host again and find duplicate hosts](/restichub/operations/enroll-a-host-again/)
+- [Environment variables](/restichub/operations/environment-variables/)
 - [Agent enrollment rate limit](enrollment-rate-limit.md)
 - [Agent certificate rotation](certificate-rotation.md)
 - [Agent and control plane versions](agent-version-compatibility.md)

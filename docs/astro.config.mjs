@@ -43,6 +43,7 @@ export default defineConfig({
 				]),
 				group('Hosts and agent', 'Хосты и агент', [
 					'operations/agent-packages',
+					'operations/enroll-a-host-again',
 					'operations/agent-version-compatibility',
 					'operations/certificate-rotation',
 					'operations/agent-revocation',
@@ -59,6 +60,7 @@ export default defineConfig({
 					'concepts/overview',
 					'concepts/repositories',
 					'operations/metrics',
+					'operations/environment-variables',
 				]),
 			],
 		}),
