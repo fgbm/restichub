@@ -122,7 +122,8 @@
 		access_error: 'repositories.result.access_error',
 		cancelled: 'repositories.result.cancelled',
 		succeeded_with_warnings: 'repositories.result.succeeded_with_warnings',
-		repository_locked: 'repositories.result.repository_locked'
+		repository_locked: 'repositories.result.repository_locked',
+		incompatible: 'repositories.result.incompatible'
 	};
 
 	const jobDone = $derived(

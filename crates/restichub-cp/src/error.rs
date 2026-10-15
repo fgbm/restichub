@@ -53,6 +53,8 @@ pub enum ErrorCode {
     TokenAlreadyRevoked,
     TokenExpired,
     AgentRecentlyOnline,
+    SetupAlreadyDone,
+    InvalidSetupToken,
 }
 
 impl ErrorCode {
@@ -84,6 +86,8 @@ impl ErrorCode {
             Self::TokenAlreadyRevoked => "token_already_revoked",
             Self::TokenExpired => "token_expired",
             Self::AgentRecentlyOnline => "agent_recently_online",
+            Self::SetupAlreadyDone => "setup_already_done",
+            Self::InvalidSetupToken => "invalid_setup_token",
         }
     }
 }
@@ -315,6 +319,21 @@ impl ApiError {
             StatusCode::CONFLICT,
             ErrorCode::RestoreTargetDenied,
             "Conflict",
+        )
+    }
+
+    /// Creates a `409 setup_already_done` error: the first-run setup is finished. The user
+    /// interface translates the code (NFR-DOC-04).
+    pub fn setup_already_done() -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorCode::SetupAlreadyDone, "Conflict")
+    }
+
+    /// Creates a `401 invalid_setup_token` error: the setup token is unknown, used or expired.
+    pub fn invalid_setup_token() -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::InvalidSetupToken,
+            "Unauthorized",
         )
     }
 

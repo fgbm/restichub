@@ -1679,6 +1679,8 @@ export interface components {
          * @example job_template_delete
          * @example script_run
          * @example profile_hooks_removed
+         * @example job_rejected
+         * @example agent_message_refused
          */
         AuditAction: string;
         AuditItem: {
@@ -2182,7 +2184,7 @@ export interface components {
         /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token";
         /**
          * @description What a failed script does to the job.
          * @enum {string}
@@ -2276,7 +2278,7 @@ export interface components {
          *     `result_code` column holds one of these strings. It is stable: do not change a string.
          * @enum {string}
          */
-        JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "access_error" | "cancelled" | "succeeded_with_warnings" | "repository_locked";
+        JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "access_error" | "cancelled" | "succeeded_with_warnings" | "repository_locked" | "incompatible";
         /**
          * @description The lifecycle status of a job (FR-SC-03, FR-SC-07).
          *

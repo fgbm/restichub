@@ -515,6 +515,7 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.result.cancelled': 'Задание отменено.',
 	'repositories.result.succeeded_with_warnings': 'Задание завершено с предупреждениями.',
 	'repositories.result.repository_locked': 'Репозиторий заблокирован другим процессом.',
+	'repositories.result.incompatible': 'Версия restic на узле слишком старая для этого задания. Обновите restic на узле.',
 	'repositories.result.access_error':
 		'Репозитория нет по этому пути на этом хосте. Проверьте путь, точку монтирования и хост.',
 	'repositories.jobExpired': 'Срок задания истёк до ответа хоста. Запустите его снова.',

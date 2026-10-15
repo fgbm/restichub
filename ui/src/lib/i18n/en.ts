@@ -511,6 +511,7 @@ export const en = {
 	'repositories.result.cancelled': 'The job was cancelled.',
 	'repositories.result.succeeded_with_warnings': 'The job finished with warnings.',
 	'repositories.result.repository_locked': 'The repository is locked by another process.',
+	'repositories.result.incompatible': 'The restic of the host is too old for this job. Update restic on the host.',
 	'repositories.result.access_error':
 		'The repository is not at this location on this host. Check the path, the mount and the host.',
 	'repositories.jobExpired': 'The job expired before the host answered. Start it again.',
