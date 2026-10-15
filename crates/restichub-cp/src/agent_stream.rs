@@ -868,6 +868,16 @@ async fn run_stream(
     ) {
         return;
     }
+    // An older agent sends no list, so its silence says nothing about its jobs (ADR-0039).
+    if AgentCapability::JobLimitsV1.is_listed(&hello.capabilities) {
+        crate::queue::stale::fail_unlisted_running(
+            &state,
+            identity.tenant,
+            agent,
+            &hello.held_job_ids,
+        )
+        .await;
+    }
 
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

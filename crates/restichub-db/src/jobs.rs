@@ -77,7 +77,11 @@ macro_rules! job_columns {
             $p,
             "empty_forget_reported, ",
             $p,
-            "retry_of"
+            "retry_of, ",
+            $p,
+            "timeout_seconds, ",
+            $p,
+            "stall_timeout_seconds"
         )
     };
 }
@@ -126,6 +130,10 @@ pub struct Job {
     pub empty_forget_reported: bool,
     /// The job whose lock result created this retry.
     pub retry_of: Option<JobId>,
+    /// The maximum duration of the signed job in seconds. Absent means no limit (ADR-0039).
+    pub timeout_seconds: Option<i32>,
+    /// Seconds without progress after which the agent stops a step. Absent when the job predates the setting.
+    pub stall_timeout_seconds: Option<i32>,
 }
 
 /// The values that the control plane writes for a new row in the `jobs` table.
@@ -505,6 +513,8 @@ pub(crate) struct JobRow {
     lock_reported: bool,
     empty_forget_reported: bool,
     retry_of: Option<Uuid>,
+    timeout_seconds: Option<i32>,
+    stall_timeout_seconds: Option<i32>,
 }
 
 impl From<JobRow> for Job {
@@ -536,6 +546,8 @@ impl From<JobRow> for Job {
             lock_reported: row.lock_reported,
             empty_forget_reported: row.empty_forget_reported,
             retry_of: row.retry_of.map(JobId::from_uuid),
+            timeout_seconds: row.timeout_seconds,
+            stall_timeout_seconds: row.stall_timeout_seconds,
         }
     }
 }

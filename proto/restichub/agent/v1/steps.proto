@@ -19,7 +19,8 @@ package restichub.agent.v1;
 message Step {
   // Identifier of the step in the job.
   string step_id = 1;
-  // Time in seconds after which the agent cancels the step (FR-AG-05).
+  // Time in seconds after which the agent cancels the step. Zero means the
+  // job value, or no limit (FR-AG-05, ADR-0039).
   uint32 timeout_seconds = 2;
   oneof kind {
     // BackupStep runs "restic backup".

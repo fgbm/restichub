@@ -286,6 +286,7 @@ export type CheckOptions = components['schemas']['CheckOptions'];
 /** One profile (FR-PF-01). It holds no secret. */
 export type Profile = components['schemas']['ProfileView'];
 
+export type JobLimitDefaults = components['schemas']['JobLimitDefaults'];
 export type ProfileListResponse = components['schemas']['ProfileListResponse'];
 
 export type CreateProfileRequest = components['schemas']['CreateProfileRequest'];

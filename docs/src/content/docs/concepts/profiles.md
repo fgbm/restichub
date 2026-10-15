@@ -14,7 +14,7 @@ The profile editor is one page. Each section shows its state (on, off or needs a
 | Basics | The name of the profile and its repository. The name is how you find the profile in the list and in plans. |
 | What to copy | One path in each line. The paths for all systems apply on every host. The other paths apply only on their own system (Windows, Linux or macOS). |
 | Exclusions | Patterns such as `*.tmp`, or paths. One entry in each line. You can also give the path of a file on the host that holds a list of patterns. |
-| Backup options | Snapshot tags and VSS (Windows only). Stay on one file system. Skip the cache directories that hold a `CACHEDIR.TAG` file. Limit the upload and download speed in KiB/s. |
+| Backup options | Snapshot tags. VSS (Windows only), which passes `--use-fs-snapshot`. Stay on one file system (`--one-file-system`). Skip the cache directories that hold a `CACHEDIR.TAG` file (`--exclude-caches`). Limit the upload and download speed in KiB/s (`--limit-upload`, `--limit-download`). |
 | Repository check | A check after the backup. Without a read share, the check reads the repository structure only. This is fast. A share such as `5%` or `1/10` reads that part of the data. A larger share takes more time and traffic. |
 | Scripts on the host | Scripts before and after the backup. See [Server scripts](/restichub/operations/scripts/). |
 | Execution limits | The stall limit and the maximum duration of a job. See the section below. |
@@ -60,7 +60,7 @@ The limits protect against jobs that hang or run too long. They always apply. An
 
 | Limit | Default | Environment variable for the whole stack |
 |---|---|---|
-| No progress | 60 minutes | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` |
-| Maximum duration | 48 hours | `RESTICHUB_JOB_MAX_DURATION_SECS` |
+| No progress | 60 minutes (from 5 to 10080) | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` |
+| Maximum duration | 48 hours (from 0 to 43200, where 0 turns the limit off) | `RESTICHUB_JOB_MAX_DURATION_SECS` |
 
-If the agent reports no progress for longer than the first limit, the control plane stops the job as stalled. A job that runs longer than the second limit stops even when it makes progress. The environment variable sets the default. A value in the profile overrides it.
+If the agent reports no progress for longer than the first limit, the control plane stops the job as stalled. A job that runs longer than the second limit stops even when it makes progress. The environment variable sets the default. A value in the profile overrides it. The [Jobs](/restichub/concepts/jobs/#time-limits) page describes how the agent measures progress.

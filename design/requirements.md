@@ -73,7 +73,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-AG-02 | The agent starts no action itself. The only exceptions are the connection to the CP, the heartbeat and the delivery of results. | M |
 | FR-AG-03 | The agent does not store schedules, profiles, repository secrets or job history. | M |
 | FR-AG-04 | The agent stores only the CP address, its private key and certificate, the CP root certificate and the public job signing key. It also stores the hook allow-list and an outbox of results that it did not send yet. The outbox contains no secrets. It also stores a job journal with accepted `job_id` values and their results (ADR-0020). The journal contains no secrets. | M |
-| FR-AG-05 | The agent executes steps in the specified sequence. Each step and each job has a timeout. | M |
+| FR-AG-05 | The agent executes steps in the specified sequence. A step has no fixed wall-clock limit. The agent stops a step that makes no progress for the stall timeout (default 60 minutes). A profile can set an optional maximum duration for a job (ADR-0039). | M |
 | FR-AG-06 | The agent starts restic as a child process. Secrets go to the child process only through environment variables or a pipe. Secrets never go into command-line arguments. | M |
 | FR-AG-07 | The agent erases secrets from memory after each step. The agent disables crash dumps during a job where the operating system permits it. | 1.0 |
 | FR-AG-08 | The agent parses the restic JSON output and streams progress and logs to the CP in real time. | M |
@@ -150,7 +150,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-PF-01 | A profile contains the repository, paths for each operating system, excludes, exclude files and tags. It also contains backup options (VSS, one file system, exclude caches, limits), hooks, retention and check options (`read-data-subset`). | M |
+| FR-PF-01 | A profile contains the repository, paths for each operating system, excludes, exclude files and tags. It also contains backup options (VSS, one file system, exclude caches, rate limits), job limits (stall timeout, maximum duration), hooks, retention and check options (`read-data-subset`). | M |
 | FR-PF-02 | Inheritance with `extends`: deep merge, cycle detection, explicit merge rules for lists (replace or append). | 1.0 |
 | FR-PF-03 | Variables: host name, operating system, agent name, agent labels, date. | M |
 | FR-PF-04 | The compiler converts a profile to a sequence of steps. The UI shows a preview: the steps and the equivalent restic command line with masked secrets. | M |

@@ -184,6 +184,16 @@ pub struct JobDetailView {
     /// Null unless the job is sent or running and the agent reported progress.
     pub progress: Option<ProgressView>,
     pub log: LogInfo,
+    pub limits: LimitsView,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LimitsView {
+    /// Seconds after which the agent stops the job whatever its progress. Null means no limit.
+    pub max_duration_seconds: Option<u32>,
+    /// Seconds without progress after which the agent stops a step. Null when the control plane
+    /// did not set one and the agent uses the default of the step.
+    pub stall_timeout_seconds: Option<u32>,
 }
 
 /// Reads one job of the tenant with its steps, summary and progress.
@@ -254,6 +264,18 @@ pub async fn get_job(
             .filter(|_| running)
             .as_ref()
             .map(ProgressView::from),
+        limits: LimitsView {
+            max_duration_seconds: detail
+                .job
+                .timeout_seconds
+                .and_then(|seconds| u32::try_from(seconds).ok())
+                .filter(|seconds| *seconds > 0),
+            stall_timeout_seconds: detail
+                .job
+                .stall_timeout_seconds
+                .and_then(|seconds| u32::try_from(seconds).ok())
+                .filter(|seconds| *seconds > 0),
+        },
         log: LogInfo {
             lines: log.as_ref().map_or(0, |state| state.last_seq),
             truncated: log.as_ref().is_some_and(|state| state.truncated),

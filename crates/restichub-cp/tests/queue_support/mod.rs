@@ -372,6 +372,26 @@ impl Env {
             capabilities,
             roots,
             report,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Opens a new stream for an enrolled identity whose hello lists `held` as its jobs
+    /// (ADR-0039).
+    pub async fn reconnect_agent_holding(&self, agent: &FakeAgent, held: Vec<String>) -> FakeAgent {
+        let capabilities = restichub_proto::AgentCapability::ALL
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect();
+        open_stream_on(
+            &self.listener,
+            &self.state,
+            agent.identity.clone(),
+            capabilities,
+            default_restore_roots(),
+            None,
+            held,
         )
         .await
     }
@@ -441,6 +461,7 @@ impl Env {
             capabilities,
             default_restore_roots(),
             None,
+            Vec::new(),
         )
         .await
     }
@@ -700,11 +721,12 @@ async fn open_stream_on(
     capabilities: Vec<String>,
     roots: Vec<String>,
     report: Option<HookReport>,
+    held: Vec<String>,
 ) -> FakeAgent {
     let (tx, mut inbound) = raw_stream(listener, &identity)
         .await
         .expect("the stream must open");
-    tx.send(hello(capabilities, roots, report))
+    tx.send(hello(capabilities, roots, report, held))
         .await
         .expect("cannot send the hello");
     let (mut hello_seen, mut update_seen) = (false, false);
@@ -776,6 +798,7 @@ fn hello(
     capabilities: Vec<String>,
     restore_roots: Vec<String>,
     report: Option<HookReport>,
+    held_job_ids: Vec<String>,
 ) -> AgentMessage {
     let (hook_allow_list_state, hooks, scripts) = match report {
         Some(report) => (report.state as i32, report.hooks, report.scripts),
@@ -794,6 +817,7 @@ fn hello(
             agent_version: "0.1.0".to_owned(),
             capabilities,
             restore_roots,
+            held_job_ids,
             hooks,
             hook_allow_list_state,
             server_scripts_state,

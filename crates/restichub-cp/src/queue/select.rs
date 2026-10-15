@@ -156,6 +156,8 @@ mod tests {
             lock_reported: false,
             empty_forget_reported: false,
             retry_of: None,
+            timeout_seconds: None,
+            stall_timeout_seconds: None,
         }
     }
 

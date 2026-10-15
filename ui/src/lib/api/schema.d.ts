@@ -911,6 +911,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads the job limits that a new profile gets when its request names none (ADR-0039). */
+        get: operations["job_limit_defaults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{id}": {
         parameters: {
             query?: never;
@@ -1694,7 +1711,19 @@ export interface components {
              * @description Upload limit in kibibytes each second. Zero means no limit (FR-AG-15).
              */
             limit_upload_kib?: number;
+            /**
+             * Format: int32
+             * @description Minutes after which the agent stops the job whatever its progress. Zero means no limit.
+             *     At most 43200. A missing value behaves as the stall timeout does (ADR-0039).
+             */
+            max_duration_minutes?: number | null;
             one_file_system?: boolean;
+            /**
+             * Format: int32
+             * @description Minutes without progress after which the agent stops a step. From 5 to 10080. A missing
+             *     value gives the default of a new profile and keeps the stored value of an update (ADR-0039).
+             */
+            stall_timeout_minutes?: number | null;
             /** @description Use a file system snapshot. VSS on Windows only (FR-PF-01). */
             use_fs_snapshot?: boolean;
         };
@@ -2204,6 +2233,7 @@ export interface components {
         };
         /** @description One job with its steps, its summary and its progress (FR-MN-02). */
         JobDetailView: components["schemas"]["JobView"] & {
+            limits: components["schemas"]["LimitsView"];
             log: components["schemas"]["LogInfo"];
             /**
              * @description The same steps with their kind, name and phase, so the job detail shows every script and
@@ -2229,6 +2259,13 @@ export interface components {
          * @enum {string}
          */
         JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "unlock_all" | "snapshots" | "ls" | "other";
+        /** @description The job limits that a new profile gets when the request names none (ADR-0039). */
+        JobLimitDefaults: {
+            /** Format: int32 */
+            max_duration_minutes: number;
+            /** Format: int32 */
+            stall_timeout_minutes: number;
+        };
         JobListResponse: {
             items: components["schemas"]["JobView"][];
             next_cursor?: string | null;
@@ -2283,7 +2320,10 @@ export interface components {
             attempt: number;
             /** @description In RFC 3339. */
             created_at: string;
-            /** @description In RFC 3339. Null when the job holds no expiry. */
+            /**
+             * @description In RFC 3339. The end of the acceptance window of the signed job: the agent refuses the job
+             *     after this time. It is not a limit of the run. Null when the job holds no expiry.
+             */
             expires_at?: string | null;
             /** @description In RFC 3339. Null until the job finishes. */
             finished_at?: string | null;
@@ -2310,6 +2350,19 @@ export interface components {
             status: components["schemas"]["JobStatus"];
             /** @description In RFC 3339. */
             updated_at: string;
+        };
+        LimitsView: {
+            /**
+             * Format: int32
+             * @description Seconds after which the agent stops the job whatever its progress. Null means no limit.
+             */
+            max_duration_seconds?: number | null;
+            /**
+             * Format: int32
+             * @description Seconds without progress after which the agent stops a step. Null when the control plane
+             *     did not set one and the agent uses the default of the step.
+             */
+            stall_timeout_seconds?: number | null;
         };
         /** @enum {string} */
         LockState: "free" | "held" | "stale";
@@ -6716,6 +6769,44 @@ export interface operations {
             };
             /** @description The name exists. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    job_limit_defaults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The default job limits. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobLimitDefaults"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

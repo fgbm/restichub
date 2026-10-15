@@ -379,6 +379,7 @@ pub async fn connect_once(
         &tx,
         restic_version,
         jobs.restore_roots(),
+        jobs.held_job_ids(),
         jobs.hook_report().await,
         jobs.script_report().await,
     )
@@ -818,6 +819,7 @@ async fn send_hello(
     tx: &mpsc::Sender<AgentMessage>,
     restic_version: &str,
     restore_roots: Vec<String>,
+    held_job_ids: Vec<String>,
     (hook_allow_list_state, hooks): (HookAllowListState, Vec<HookMetadata>),
     (server_scripts_state, script_interpreters): (ServerScriptsState, Vec<ScriptInterpreter>),
 ) -> Result<()> {
@@ -834,6 +836,7 @@ async fn send_hello(
                 .map(|capability| capability.as_str().to_owned())
                 .collect(),
             restore_roots,
+            held_job_ids,
             hooks,
             hook_allow_list_state: hook_allow_list_state as i32,
             server_scripts_state: server_scripts_state as i32,
@@ -950,6 +953,7 @@ mod tests {
             &tx,
             "0.19.0",
             vec!["/var/lib/restichub-restore".to_owned()],
+            Vec::new(),
             (HookAllowListState::Absent, Vec::new()),
             (ServerScriptsState::Disabled, Vec::new()),
         )
@@ -969,6 +973,7 @@ mod tests {
             &tx,
             "0.19.0",
             vec!["/srv/restore".to_owned()],
+            Vec::new(),
             (HookAllowListState::Absent, Vec::new()),
             (ServerScriptsState::Disabled, Vec::new()),
         )
