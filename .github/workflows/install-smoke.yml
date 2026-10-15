@@ -160,8 +160,7 @@ jobs:
           if ($service.StartMode -ne 'Auto') { throw "start mode: $($service.StartMode)" }
           if ($service.StartName -ne 'LocalSystem') { throw "account: $($service.StartName)" }
           bash scripts/install-smoke.sh connected 0 60
-        env:
-              - name: The service connects again after a restart
+      - name: The service connects again after a restart
         shell: pwsh
         run: |
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
