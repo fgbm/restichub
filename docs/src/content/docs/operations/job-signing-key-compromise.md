@@ -13,6 +13,14 @@ The control plane signs each job with the current job signing key. A person who 
 
 ## Procedure
 
+Read the identifier of the current key. Run the command on a host that has the configuration file and the KEK of the control plane:
+
+```sh
+restichub-cp show-signing-key --config /etc/restichub/cp.toml
+```
+
+The command prints the identifier and does not change anything. Use this identifier as `<current-key-id>` below.
+
 Run one of the two commands.
 
 In the multi tenant mode, a Platform Admin calls the API:
@@ -29,10 +37,10 @@ The request names the key that you believe is current. If another call changed t
 In every mode, run the command on a host that has the configuration file and the KEK of the control plane:
 
 ```sh
-restichub-cp compromise-signing-key --config /etc/restichub/cp.toml
+restichub-cp compromise-signing-key --config /etc/restichub/cp.toml --expected-key-id <current-key-id>
 ```
 
-The command prints the identifier of each key that it retired for a compromise.
+The argument `--expected-key-id` is required. If another call changed the current key first, the command stops and changes nothing. The command prints the identifier of each key that it retired for a compromise.
 
 ## What the command does
 
@@ -42,7 +50,7 @@ The command prints the identifier of each key that it retired for a compromise.
 4. The control plane writes the audit records `signing_key_compromise` and `signing_key_retire`.
 5. Each control plane instance sends a signed update to its open streams within 2 seconds. The signature comes from the new current key, which the agents already hold. The update names the retired keys as revoked. The agents refuse each job of the old key from then on.
 
-If the next key leaked too, run the command a second time with the new current key identifier.
+If the next key leaked too, read the new current key identifier with `show-signing-key` and run the command a second time with it.
 
 A job in the status `sent` can hold a signature of a retired key. The control plane signs it again with the current key before it sends the job again. The agent never gets the old signature.
 

@@ -172,7 +172,13 @@ pub enum Command {
     /// Apply the database migrations and stop.
     Migrate(Box<Cli>),
     /// Rotate the job signing key set and retire the current key for a compromise (ADR-0030).
-    CompromiseSigningKey(Box<Cli>),
+    CompromiseSigningKey {
+        cli: Box<Cli>,
+        /// The key that the operator believes is current. Another current key stops the command.
+        expected_key_id: String,
+    },
+    /// Print the identifier of the current job signing key.
+    ShowSigningKey(Box<Cli>),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -192,6 +198,10 @@ pub enum ConfigError {
     UnknownArgument(String),
     #[error("the argument `--config` needs a path")]
     ConfigPathMissing,
+    #[error("the argument `--expected-key-id` needs a key identifier")]
+    ExpectedKeyIdMissing,
+    #[error("the command `compromise-signing-key` needs the argument `--expected-key-id`")]
+    ExpectedKeyIdRequired,
     #[error("cannot read the configuration file `{path}`")]
     ReadFile {
         path: PathBuf,
@@ -515,13 +525,16 @@ impl Config {
 
 /// Parses the command-line arguments.
 ///
-/// The function reads the subcommands `serve` (the default), `migrate` and `compromise-signing-key`, and the arguments
-/// `--config <path>`, `--config=<path>`, `--version` and `-V`.
+/// The function reads the subcommands `serve` (the default), `migrate`, `show-signing-key` and
+/// `compromise-signing-key`, and the arguments `--config <path>`, `--config=<path>`,
+/// `--expected-key-id <id>`, `--version` and `-V`. The command `compromise-signing-key` needs
+/// `--expected-key-id`.
 pub fn parse_args<I>(args: I) -> Result<Command, ConfigError>
 where
     I: IntoIterator<Item = String>,
 {
     let mut config_path = None;
+    let mut expected_key_id = None;
     let mut mode = Mode::Serve;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -530,6 +543,10 @@ where
             "serve" => mode = Mode::Serve,
             "migrate" => mode = Mode::Migrate,
             "compromise-signing-key" => mode = Mode::CompromiseSigningKey,
+            "show-signing-key" => mode = Mode::ShowSigningKey,
+            "--expected-key-id" => {
+                expected_key_id = Some(args.next().ok_or(ConfigError::ExpectedKeyIdMissing)?);
+            }
             "--config" => {
                 let value = args.next().ok_or(ConfigError::ConfigPathMissing)?;
                 config_path = Some(PathBuf::from(value));
@@ -537,6 +554,8 @@ where
             _ => {
                 if let Some(value) = arg.strip_prefix("--config=") {
                     config_path = Some(PathBuf::from(value));
+                } else if let Some(value) = arg.strip_prefix("--expected-key-id=") {
+                    expected_key_id = Some(value.to_owned());
                 } else {
                     return Err(ConfigError::UnknownArgument(arg));
                 }
@@ -544,16 +563,25 @@ where
         }
     }
     let cli = Box::new(Cli { config_path });
+    if let (Some(_), Mode::Serve | Mode::Migrate | Mode::ShowSigningKey) = (&expected_key_id, &mode)
+    {
+        return Err(ConfigError::UnknownArgument("--expected-key-id".to_owned()));
+    }
     Ok(match mode {
         Mode::Serve => Command::Serve(cli),
         Mode::Migrate => Command::Migrate(cli),
-        Mode::CompromiseSigningKey => Command::CompromiseSigningKey(cli),
+        Mode::ShowSigningKey => Command::ShowSigningKey(cli),
+        Mode::CompromiseSigningKey => Command::CompromiseSigningKey {
+            cli,
+            expected_key_id: expected_key_id.ok_or(ConfigError::ExpectedKeyIdRequired)?,
+        },
     })
 }
 
 enum Mode {
     Serve,
     Migrate,
+    ShowSigningKey,
     CompromiseSigningKey,
 }
 
