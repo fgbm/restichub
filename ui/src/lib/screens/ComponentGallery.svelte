@@ -6,8 +6,10 @@
 	 * This is a development tool, so the labels are English and it is not part of a
 	 * production screen. The route `(dev)/components` mounts it in a dev build only.
 	 */
+	import { icons } from '#lib/components/ui/icons.ts';
 	import {
 		Alert,
+		Icon,
 		Badge,
 		Button,
 		Checkbox,
@@ -33,7 +35,7 @@
 		Toast,
 		Tooltip
 	} from '#lib/components/ui/index.ts';
-	import type { MenuItem, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
+	import type { IconName, MenuItem, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
 
 	let confirmOpen = $state(false);
 	let destructiveOpen = $state(false);
@@ -181,6 +183,16 @@
 				<span class="demo-label">small with icon</span>
 				<Button size="sm" icon="eye">Details</Button>
 			</div>
+		</div>
+
+		<h3>Icons</h3>
+		<div class="icon-grid">
+			{#each Object.keys(icons) as name (name)}
+				<div class="icon-cell" data-testid="gallery-icon">
+					<Icon name={name as IconName} size="lg" />
+					<span class="demo-label">{name}</span>
+				</div>
+			{/each}
 		</div>
 	</section>
 
@@ -440,6 +452,23 @@
 		align-items: center;
 		gap: var(--rh-space-3);
 		padding: var(--rh-space-4);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+		background-color: var(--rh-color-canvas);
+	}
+
+	.icon-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+		gap: var(--rh-space-2);
+	}
+
+	.icon-cell {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--rh-space-2);
+		padding: var(--rh-space-3);
 		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
 		background-color: var(--rh-color-canvas);
