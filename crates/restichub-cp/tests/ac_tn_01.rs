@@ -181,6 +181,7 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/jobs/{id}/cancel", Fixture::Object(Object::Job)),
     ("/api/v1/jobs/{id}/logs", Fixture::Object(Object::Job)),
     ("/api/v1/profiles", Fixture::Collection),
+    ("/api/v1/profiles/defaults", Fixture::Collection),
     ("/api/v1/profiles/{id}", Fixture::Object(Object::Profile)),
     (
         "/api/v1/profiles/{id}/preview",

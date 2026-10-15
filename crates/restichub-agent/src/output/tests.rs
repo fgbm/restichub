@@ -77,7 +77,7 @@ fn adr_0011_unknown_fields_and_message_types_are_ignored() {
     assert_eq!(collector.accept(summary, false), Accepted::Consumed);
     assert_eq!(
         collector.accept(r#"{"message_type":"verbose_status","action":"new"}"#, false),
-        Accepted::Consumed
+        Accepted::Status(r#"{"message_type":"verbose_status","action":"new"}"#.to_owned())
     );
     let Some(Output::BackupSummary(summary)) = collector.finish() else {
         panic!("the summary must survive an unknown field");

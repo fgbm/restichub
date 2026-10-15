@@ -13,6 +13,22 @@ export function isLive(status: JobStatus): boolean {
 	return status === 'queued' || status === 'sent' || status === 'running';
 }
 
+/**
+ * The limits of a running job as lines for the about panel (ADR-0039). A run has no fixed time
+ * limit by default: the host stops a step that makes no progress, and a profile can set a maximum
+ * duration. Null for a job that does not run.
+ */
+export function limitLines(job: JobDetail): string[] | null {
+	if (job.status !== 'running') return null;
+	const { max_duration_seconds: max, stall_timeout_seconds: stall } = job.limits;
+	const lines = [
+		max ? t('jobDetail.limit.max', { max: formatSeconds(max) }) : t('jobDetail.limit.noMax')
+	];
+	if (stall) lines.push(t('jobDetail.limit.stall', { stall: formatSeconds(stall) }));
+	else if (!max) lines.push(t('jobDetail.limit.noProgress'));
+	return lines;
+}
+
 /** The count of files with the plural form of the current language, such as "128 402 файла". */
 export function formatFiles(count: number): string {
 	const rule = new Intl.PluralRules(getLocale()).select(count);

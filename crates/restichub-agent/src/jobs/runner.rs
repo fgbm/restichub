@@ -3,8 +3,8 @@
 //!
 //! The agent reads the standard output and the standard error of restic through bounded readers
 //! ([`crate::output`]), scrubs every line ([`crate::scrub`]) and sends progress and log chunks while
-//! the step runs. A cancel or a timeout stops the step in two stages: the graceful signal, then the
-//! forced kill of the process tree after the grace period.
+//! the step runs. A cancel, a stall or the maximum duration stops the step in two stages: the
+//! graceful signal, then the forced kill of the process tree after the grace period (ADR-0039).
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,7 @@ use restichub_proto::agent::v1::{
 use tokio::sync::mpsc;
 
 use super::log::JobLog;
+use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
 use crate::exec::JobChild;
 use crate::output::{Accepted, Collector, Line, OutputKind, Pipe, spawn_reader};
@@ -54,6 +55,11 @@ pub(super) enum StepError {
     ConfigError,
     Failed,
     Cancelled,
+    /// The step ran longer than its maximum duration (ADR-0039).
+    MaxDuration,
+    /// restic made no progress for the stall timeout (ADR-0039).
+    Stalled,
+    /// A hook ran longer than its own timeout (FR-HK-02).
     TimedOut,
     NotStarted,
 }
@@ -66,6 +72,8 @@ impl StepError {
             Self::ConfigError => "step_config_error",
             Self::Failed => "step_failed",
             Self::Cancelled => "step_cancelled",
+            Self::MaxDuration => "step_max_duration",
+            Self::Stalled => "step_stalled",
             Self::TimedOut => "step_timeout",
             Self::NotStarted => "step_not_started",
         }
@@ -128,10 +136,20 @@ impl StepOutcome {
         }
     }
 
-    pub(super) fn timed_out(possible_stale_lock: bool) -> Self {
+    pub(super) fn timed_out() -> Self {
+        Self {
+            error: Some(StepError::TimedOut),
+            ..Self::new(StepStatus::Failed, -1)
+        }
+    }
+
+    pub(super) fn limit_exceeded(limit: LimitStop, possible_stale_lock: bool) -> Self {
         Self {
             possible_stale_lock,
-            error: Some(StepError::TimedOut),
+            error: Some(match limit {
+                LimitStop::MaxDuration => StepError::MaxDuration,
+                LimitStop::Stalled => StepError::Stalled,
+            }),
             ..Self::new(StepStatus::Failed, -1)
         }
     }
@@ -146,6 +164,13 @@ impl StepOutcome {
     fn from_exit(code: i32) -> Self {
         Self::new(status_for_exit(code), code)
     }
+}
+
+/// Why the agent stops a step on its own (ADR-0039).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LimitStop {
+    MaxDuration,
+    Stalled,
 }
 
 /// The handle that stops the restic child of a running job (FR-AG-10).
@@ -223,6 +248,7 @@ struct StepOutput {
     scrubber: Scrubber,
     /// The newest progress message that the agent did not send yet.
     progress: Option<StepProgress>,
+    watchdog: Watchdog,
     last_progress: Option<tokio::time::Instant>,
     last_log: tokio::time::Instant,
 }
@@ -230,20 +256,27 @@ struct StepOutput {
 impl StepOutput {
     /// Handles one line of restic output: a log line, a progress message or typed output.
     fn line(&mut self, line: Line, log: &mut JobLog) {
+        let now = tokio::time::Instant::now();
         let text = String::from_utf8_lossy(&line.bytes);
         match line.pipe {
             Pipe::Stdout => match self.collector.accept(&text, line.truncated) {
                 Accepted::Log(text) => {
+                    self.watchdog.output(now);
                     log.push(
                         &self.step_id,
                         LogStream::Stdout,
                         &self.scrubber.scrub_line(&text, line.truncated),
                     );
                 }
-                Accepted::Progress(progress) => self.progress = Some(progress),
-                Accepted::Consumed => {}
+                Accepted::Progress(progress) => {
+                    self.watchdog.status(&progress, now);
+                    self.progress = Some(progress);
+                }
+                Accepted::Status(line) => self.watchdog.status_line(&line, now),
+                Accepted::Consumed => self.watchdog.output(now),
             },
             Pipe::Stderr => {
+                self.watchdog.output(now);
                 let text = crate::output::stderr_text(&text, line.truncated);
                 log.push(
                     &self.step_id,
@@ -259,13 +292,14 @@ impl Jobs {
     /// Runs one step with the installed restic and stops it in two stages (FR-AG-05, FR-AG-06,
     /// FR-AG-09, FR-AG-10).
     ///
-    /// `limit` is the timeout of the step, or `None` for no timeout.
+    /// `limits` holds the maximum duration of the step, or `None` for no limit, and the stall
+    /// timeout (ADR-0039).
     pub(super) async fn run_step(
         &self,
         validated: &ValidatedJob,
         step: &Step,
         cancel: &CancelHandle,
-        limit: Option<Duration>,
+        limits: StepLimits,
         log: &mut JobLog,
     ) -> StepOutcome {
         // A cancel that arrived before the spawn starts no process (FR-AG-10).
@@ -319,13 +353,14 @@ impl Jobs {
             collector: collector_for(step, kind, &validated.job().job_id),
             scrubber,
             progress: None,
+            watchdog: Watchdog::new(limits.stall, tokio::time::Instant::now()),
             last_progress: None,
             last_log: tokio::time::Instant::now(),
         };
 
         *lock(&cancel.child) = Some(child);
         let started = tokio::time::Instant::now();
-        let mut timed_out = false;
+        let mut limit_stop: Option<LimitStop> = None;
         let mut lines_open = true;
         // The stop is two stages: the graceful signal first, then the forced kill of the tree after
         // the grace period (FR-AG-10, AC-AG-07).
@@ -364,8 +399,17 @@ impl Jobs {
                 } else if cancel.is_cancelled() {
                     interrupt(&cancel.child);
                     stopped_at = Some(tokio::time::Instant::now());
-                } else if limit.is_some_and(|limit| started.elapsed() >= limit) {
-                    timed_out = true;
+                } else if limits.max.is_some_and(|max| started.elapsed() >= max) {
+                    limit_stop = Some(LimitStop::MaxDuration);
+                    interrupt(&cancel.child);
+                    stopped_at = Some(tokio::time::Instant::now());
+                } else if output.watchdog.is_stalled(tokio::time::Instant::now()) {
+                    limit_stop = Some(LimitStop::Stalled);
+                    log.push(
+                        step_id,
+                        LogStream::Agent,
+                        "restic made no progress; stopping the step",
+                    );
                     interrupt(&cancel.child);
                     stopped_at = Some(tokio::time::Instant::now());
                 }
@@ -409,8 +453,8 @@ impl Jobs {
 
         let mut outcome = if cancel.is_cancelled() {
             StepOutcome::cancelled(hard_killed)
-        } else if timed_out {
-            StepOutcome::timed_out(hard_killed)
+        } else if let Some(limit) = limit_stop {
+            StepOutcome::limit_exceeded(limit, hard_killed)
         } else if page_done {
             StepOutcome {
                 possible_stale_lock: hard_killed,
@@ -488,7 +532,7 @@ pub(super) fn kill_tree(child: &Mutex<Option<JobChild>>) {
 mod tests {
     use restichub_proto::agent::v1::StepStatus;
 
-    use super::{StepError, StepOutcome, status_for_exit};
+    use super::{LimitStop, StepError, StepOutcome, status_for_exit};
 
     #[test]
     fn ac_ag_05_maps_the_restic_exit_codes() {
@@ -515,9 +559,13 @@ mod tests {
         );
         assert_eq!(StepOutcome::skipped().error, None);
         assert_eq!(
-            StepOutcome::timed_out(true).error,
-            Some(StepError::TimedOut)
+            StepOutcome::limit_exceeded(LimitStop::MaxDuration, true).error,
+            Some(StepError::MaxDuration)
         );
-        assert!(StepOutcome::timed_out(true).possible_stale_lock);
+        assert_eq!(
+            StepOutcome::limit_exceeded(LimitStop::Stalled, false).error,
+            Some(StepError::Stalled)
+        );
+        assert!(StepOutcome::limit_exceeded(LimitStop::Stalled, true).possible_stale_lock);
     }
 }

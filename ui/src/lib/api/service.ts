@@ -46,6 +46,7 @@ import type {
 	JobTemplateListResponse,
 	JobDetail,
 	JobListResponse,
+	JobLimitDefaults,
 	JobLogPage,
 	JobLogQuery,
 	JobQuery,
@@ -181,6 +182,8 @@ export interface ApiService {
 
 	/** The profiles of the tenant (FR-PF-01). */
 	listProfiles(): Promise<Profile[]>;
+	/** The job limits that a new profile gets (ADR-0039). */
+	getJobLimitDefaults(): Promise<JobLimitDefaults>;
 	createProfile(request: CreateProfileRequest): Promise<ProfileResponse>;
 	updateProfile(id: string, request: UpdateProfileRequest): Promise<ProfileResponse>;
 	deleteProfile(id: string): Promise<void>;
@@ -330,6 +333,7 @@ const httpService: ApiService = {
 
 	listProfiles: () =>
 		api.get<ProfileListResponse>(endpoints.profiles.list).then((response) => response.items),
+	getJobLimitDefaults: () => api.get<JobLimitDefaults>(endpoints.profiles.defaults),
 	createProfile: (request) => api.post<ProfileResponse>(endpoints.profiles.create, request),
 	updateProfile: (id, request) => api.patch<ProfileResponse>(endpoints.profiles.byId(id), request),
 	deleteProfile: (id) => api.delete<void>(endpoints.profiles.byId(id)),

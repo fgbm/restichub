@@ -10,6 +10,7 @@ import Profiles from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
 	listProfiles: vi.fn(),
+	getJobLimitDefaults: vi.fn(),
 	listRepositories: vi.fn(),
 	listAgents: vi.fn(),
 	listPlans: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 		service: {
 			...actual.service,
 			listProfiles: mocks.listProfiles,
+			getJobLimitDefaults: mocks.getJobLimitDefaults,
 			listRepositories: mocks.listRepositories,
 			listAgents: mocks.listAgents,
 			listPlans: mocks.listPlans,
@@ -117,6 +119,10 @@ beforeEach(() => {
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	session.role = 'admin';
 	mocks.listProfiles.mockResolvedValue([profile()]);
+	mocks.getJobLimitDefaults.mockResolvedValue({
+		stall_timeout_minutes: 60,
+		max_duration_minutes: 2880
+	});
 	mocks.listRepositories.mockResolvedValue([{ id: 'r_1', name: 'offsite' }]);
 	mocks.listAgents.mockResolvedValue([agent()]);
 	mocks.listPlans.mockResolvedValue([{ id: 'pl_1', profile_id: 'p_1', agent_id: 'a_1' }]);
@@ -199,5 +205,45 @@ describe('Profiles screen scripts', () => {
 		expect(request.scripts).toMatchObject([
 			{ name: 'Check', phase: 'before', body: 'true', interpreter: 'bash' }
 		]);
+	});
+
+	async function openNewForm(
+		user: ReturnType<typeof userEvent.setup>,
+		defaults = { stall_timeout_minutes: 60, max_duration_minutes: 2880 }
+	) {
+		mocks.listProfiles.mockResolvedValue([]);
+		mocks.getJobLimitDefaults.mockResolvedValue(defaults);
+		render(Profiles);
+		await user.click(await screen.findByRole('button', { name: 'Add the first profile' }));
+		return screen.findByRole('dialog');
+	}
+
+	it('ac_ag_12_fills_the_job_limits_of_a_new_profile_from_the_server_defaults', async () => {
+		const user = userEvent.setup();
+		const dialog = await openNewForm(user, {
+			stall_timeout_minutes: 90,
+			max_duration_minutes: 600
+		});
+		expect(within(dialog).getByLabelText(/^Stop after no progress/)).toHaveValue(90);
+		expect(within(dialog).getByLabelText(/^Maximum duration/)).toHaveValue(600);
+	});
+
+	it('ac_ag_12_sends_a_zero_stall_timeout_to_the_server_and_omits_an_empty_one', async () => {
+		const user = userEvent.setup();
+		const dialog = await openNewForm(user);
+		mocks.createProfile.mockRejectedValueOnce(new Error('refused'));
+		await user.type(within(dialog).getByLabelText(/^Profile/), 'new');
+		await user.type(within(dialog).getByLabelText(/^All systems/), '/srv');
+		const stall = within(dialog).getByLabelText(/^Stop after no progress/);
+		await user.clear(stall);
+		await user.type(stall, '0');
+		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(mocks.createProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.createProfile.mock.calls[0][0].options.stall_timeout_minutes).toBe(0);
+
+		await user.clear(stall);
+		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(mocks.createProfile).toHaveBeenCalledTimes(2));
+		expect(mocks.createProfile.mock.calls[1][0].options.stall_timeout_minutes).toBeUndefined();
 	});
 });

@@ -10,7 +10,7 @@ use restichub_proto::agent::v1::{
 
 use crate::error::{CompileError, FieldPath};
 use crate::option::ResticOption;
-use crate::profile::{CheckOptions, GroupBy, HookPhase, Profile, Retention};
+use crate::profile::{CheckOptions, GroupBy, HookPhase, JobLimits, Profile, Retention};
 use crate::target::{OperatingSystem, ResticVersion, TargetFacts};
 use crate::template::{self, TemplateError};
 
@@ -21,6 +21,7 @@ const RESERVED_TAG_PREFIX: &str = "restichub-";
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     pub steps: Vec<PlannedStep>,
+    pub limits: JobLimits,
 }
 
 /// One step and whether only the maintenance agent runs it (FR-RP-08).
@@ -55,7 +56,10 @@ pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileE
     let steps = build_steps(profile, target)?;
     check_contract(profile, &steps)?;
 
-    Ok(Plan { steps })
+    Ok(Plan {
+        steps,
+        limits: profile.limits,
+    })
 }
 
 fn validate_platform(profile: &Profile, target: &TargetFacts) -> Result<(), CompileError> {

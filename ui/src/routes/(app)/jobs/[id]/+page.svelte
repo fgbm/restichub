@@ -26,7 +26,14 @@
 		formatLocalTime,
 		formatSeconds
 	} from '#lib/format.ts';
-	import { isLive, markerOf, statsOf, stepProgress, stepRows } from '#lib/job-detail.ts';
+	import {
+		isLive,
+		limitLines,
+		markerOf,
+		statsOf,
+		stepProgress,
+		stepRows
+	} from '#lib/job-detail.ts';
 	import type { StepRow } from '#lib/job-detail.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -538,9 +545,17 @@
 						<dt>{t('jobDetail.finishedAt')}</dt>
 						<dd>{formatLocalTime(job.finished_at)}</dd>
 					{/if}
-					{#if job.expires_at}
-						<dt>{t('jobDetail.expiresAt')}</dt>
+					{#if job.expires_at && (job.status === 'queued' || job.status === 'sent')}
+						<dt>{t('jobDetail.acceptUntil')}</dt>
 						<dd>{formatLocalTime(job.expires_at)}</dd>
+					{/if}
+					{#if limitLines(job)}
+						<dt>{t('jobDetail.limit')}</dt>
+						<dd>
+							{#each limitLines(job) ?? [] as line (line)}
+								<span class="about__line">{line}</span>
+							{/each}
+						</dd>
 					{/if}
 					{#if job.attempt > 0}
 						<dt>{t('jobDetail.attempt')}</dt>
@@ -664,7 +679,7 @@
 
 	.layout {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) 300px;
+		grid-template-columns: minmax(0, 1fr) minmax(340px, 24rem);
 		gap: var(--rh-space-8);
 		align-items: start;
 		margin-top: var(--rh-space-6);
@@ -833,6 +848,10 @@
 		display: grid;
 		grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
 		margin: 0;
+	}
+
+	.about__line {
+		display: block;
 	}
 
 	.about dt,
