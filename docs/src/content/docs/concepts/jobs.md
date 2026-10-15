@@ -63,7 +63,7 @@ The same values can be set in the `[queue]` section of the configuration file, w
 
 ## Time limits
 
-A running job has no fixed time limit (ADR-0039). A first backup of a large disk can take many hours. While restic makes progress, the job runs on.
+A running job has no short fixed time limit (ADR-0039). A first backup of a large disk can take many hours. While restic makes progress, the job runs on until the maximum duration of its profile.
 
 ### Acceptance window
 
@@ -84,7 +84,19 @@ A profile sets the stall timeout for its jobs. The setting is "Stop after no pro
 
 ### Maximum duration
 
-A profile can set a maximum duration. The default is no maximum duration. When the job runs longer, the agent stops it, whatever its progress. The job fails with the reason `max_duration_exceeded`. The value is from 1 to 43200 minutes. The job detail shows the limits of a running job.
+A profile sets a maximum duration. The default is 48 hours (2880 minutes). Zero turns the limit off. When the job runs longer, the agent stops it, whatever its progress. The job fails with the reason `max_duration_exceeded`. The value is from 0 to 43200 minutes. The job detail shows the limits of a running job.
+
+### Environment variables
+
+An operator can change the defaults. The values are in seconds.
+
+| Variable | Where | Effect |
+|---|---|---|
+| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | control plane | The stall timeout of a new profile. From 300 to 604800. |
+| `RESTICHUB_JOB_MAX_DURATION_SECS` | control plane | The maximum duration of a new profile. From 0 to 2592000. Zero means no limit. |
+| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | The stall timeout of a job that carries none, for all step kinds. |
+
+A value that is not a number, or is out of range, is ignored. A profile that exists keeps its own values.
 
 ### Lost jobs
 
@@ -93,7 +105,7 @@ The control plane does not fail a running job because of the time that it ran. I
 - The agent is offline and the control plane did not hear from it for 30 minutes.
 - The agent connects again and does not list the job in its hello message. The agent restarted and lost the job.
 
-A job that has a maximum duration also fails with the reason `timed_out` when it runs 10 minutes longer than its maximum duration and the agent did not report an end. The control plane marks the repository lock as possibly stale in each of these cases.
+A job also fails with the reason `timed_out` when it runs 10 minutes longer than its maximum duration and the agent did not report an end. The control plane marks the repository lock as possibly stale in each of these cases.
 
 An agent that is older than this version does not know the stall timeout. The control plane sends such an agent a fixed limit of 12 hours.
 
@@ -111,7 +123,7 @@ The control plane ends the job that reported the lock and queues a new job with 
 
 ## Stale locks
 
-A hard stop of restic can leave a lock in the repository. The control plane marks the lock when the agent reports a possible stale lock, or when the agent is lost while a job runs. A job on a lost agent fails with the reason `agent_lost`. A running job that stays past its maximum duration and a grace period of 10 minutes fails with the reason `timed_out`, and its lock is marked too. The agent stops a stalled step and a step past its maximum duration itself, and it reports `possible_stale_lock` after a forced stop. A sent job that the agent did not confirm before it expired fails with the reason `unacknowledged_expired`, and its lock is marked too.
+A hard stop of restic can leave a lock in the repository. The control plane marks the lock in two cases. The agent reports a possible stale lock, or the agent is lost while a job runs. A job on a lost agent fails with the reason `agent_lost`. A running job fails with the reason `timed_out` when it stays past its maximum duration and a grace period of 10 minutes. The control plane marks its lock too. The agent stops a stalled step itself. It also stops a step past its maximum duration. It reports `possible_stale_lock` after a forced stop. A sent job that the agent did not confirm before it expired fails with the reason `unacknowledged_expired`, and its lock is marked too.
 
 When the mark is 30 minutes old and no job waits or runs on the repository, the control plane queues an `unlock` job (FR-SC-06, AC-SC-06). The job never removes the locks of a running operation. If a later job succeeded on the repository, the control plane queues no unlock.
 
