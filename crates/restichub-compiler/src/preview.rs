@@ -3,13 +3,16 @@
 
 use std::collections::BTreeMap;
 
-use restichub_proto::agent::v1::{HookPhase, HookStep, Job, RepositoryAccess, Step, step};
+use restichub_proto::agent::v1::{
+    HookPhase, HookStep, Job, RepositoryAccess, ScriptInterpreter, ScriptStep, Step,
+    hook_parameter::Typed, step,
+};
 use restichub_proto::signing::Rejection;
 
 use crate::arg::{self, ArgError, MASK};
 use crate::compile::{Plan, PlannedStep};
+use crate::hook::{AllowListedHook, HookParameterSpec};
 use crate::job::ValidatedJob;
-use crate::target::AllowListedHook;
 
 /// Why a plan cannot be rendered.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -80,6 +83,15 @@ fn preview_step(
         });
     }
 
+    if let Some(step::Kind::Script(script)) = &planned.step.kind {
+        return Ok(PreviewStep {
+            step: planned.step.clone(),
+            maintenance: planned.maintenance,
+            command: script_command(script),
+            environment: Vec::new(),
+        });
+    }
+
     let mut line = arg::build_command(validated, &planned.step)?;
     arg::mask_secrets(&mut line);
     Ok(PreviewStep {
@@ -97,17 +109,44 @@ fn hook_command(hook: &HookStep, allow_list: &BTreeMap<String, AllowListedHook>)
         format!("phase={}", phase_name(hook.phase)),
     ];
     for parameter in &hook.parameters {
-        let secret = schema
-            .and_then(|hook| hook.parameters.get(&parameter.name))
-            .is_some_and(|spec| spec.secret);
-        let value = if secret {
-            MASK.to_owned()
-        } else {
-            quote(&parameter.value)
+        let secret = matches!(parameter.typed, Some(Typed::SecretValue(_)))
+            || schema
+                .and_then(|hook| hook.parameters.get(&parameter.name))
+                .is_some_and(HookParameterSpec::secret);
+        let value = match &parameter.typed {
+            _ if secret => MASK.to_owned(),
+            Some(Typed::StringValue(value)) => quote(value),
+            Some(Typed::IntegerValue(value)) => value.to_string(),
+            Some(Typed::BooleanValue(value)) => value.to_string(),
+            Some(Typed::SecretValue(_)) | None => MASK.to_owned(),
         };
         parts.push(format!("{}={}", parameter.name, value));
     }
     parts.join(" ")
+}
+
+/// The line of a script in the preview: its name, interpreter and phase, never the body or a value.
+fn script_command(script: &ScriptStep) -> String {
+    let interpreter = ScriptInterpreter::try_from(script.interpreter)
+        .ok()
+        .and_then(crate::script::ScriptInterpreter::from_proto);
+    let names: Vec<&str> = script
+        .env
+        .iter()
+        .map(|variable| variable.name.as_str())
+        .collect();
+    format!(
+        "script={} interpreter={} phase={} env=[{}]",
+        quote(&script.name),
+        interpreter.map_or("unspecified", |value| match value {
+            crate::script::ScriptInterpreter::Powershell => "powershell",
+            crate::script::ScriptInterpreter::Cmd => "cmd",
+            crate::script::ScriptInterpreter::Bash => "bash",
+            crate::script::ScriptInterpreter::Sh => "sh",
+        }),
+        phase_name(script.phase),
+        names.join(",")
+    )
 }
 
 fn phase_name(phase: i32) -> &'static str {

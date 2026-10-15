@@ -40,6 +40,8 @@ const CANARY_REPOSITORY: &str = "canary-repo";
 const CANARY_PROFILE: &str = "canary-profile";
 const CANARY_PLAN: &str = "canary-plan";
 const CANARY_CHANNEL: &str = "canary-channel";
+const CANARY_SCRIPT_TEMPLATE: &str = "canary-script-template";
+const CANARY_JOB_TEMPLATE: &str = "canary-job-template";
 
 /// The kind of tenant B object whose identifier the isolation check puts into the path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +56,8 @@ enum Object {
     Profile,
     Plan,
     Channel,
+    ScriptTemplate,
+    JobTemplate,
 }
 
 /// The isolation fixture of one route path pattern from the route table (AC-TN-01).
@@ -196,6 +200,17 @@ const FIXTURES: &[(&str, Fixture)] = &[
         "/api/v1/notification-channels/{id}/test",
         Fixture::Object(Object::Channel),
     ),
+    ("/api/v1/hooks", Fixture::Collection),
+    ("/api/v1/script-templates", Fixture::Collection),
+    (
+        "/api/v1/script-templates/{id}",
+        Fixture::Object(Object::ScriptTemplate),
+    ),
+    ("/api/v1/job-templates", Fixture::Collection),
+    (
+        "/api/v1/job-templates/{id}",
+        Fixture::Object(Object::JobTemplate),
+    ),
 ];
 
 fn fixture_for(method: &str, path: &str) -> Fixture {
@@ -308,6 +323,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     let job_b = common::seed_job(db.database(), tenant_b, agent_b, repository_b).await;
     let plan_b = common::seed_plan(db.database(), tenant_b, CANARY_PLAN, profile_b, agent_b).await;
     let channel_b = seed_channel(&db, tenant_b, CANARY_CHANNEL).await;
+    let (script_template_b, job_template_b) = seed_templates(&db, tenant_b).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
     let token_b = list_tokens(db.database(), tenant_b)
         .await
@@ -376,6 +392,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
         profile_b.to_string(),
         plan_b.to_string(),
         channel_b.to_string(),
+        script_template_b.to_string(),
+        job_template_b.to_string(),
     ];
     let before = snapshot_tenant(&db, tenant_b).await;
     let audit_before = count(db.database(), tenant_b, "audit_log").await;
@@ -436,6 +454,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     Object::Profile => profile_b.to_string(),
                     Object::Plan => plan_b.to_string(),
                     Object::Channel => channel_b.to_string(),
+                    Object::ScriptTemplate => script_template_b.to_string(),
+                    Object::JobTemplate => job_template_b.to_string(),
                 };
                 let uri = path.replace("{id}", &id);
                 let Access::Protected(operation) = route.access else {
@@ -505,7 +525,11 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     CANARY_PROFILE.to_owned(),
                     CANARY_PLAN.to_owned(),
                     CANARY_CHANNEL.to_owned(),
+                    CANARY_SCRIPT_TEMPLATE.to_owned(),
+                    CANARY_JOB_TEMPLATE.to_owned(),
                     channel_b.to_string(),
+                    script_template_b.to_string(),
+                    job_template_b.to_string(),
                 ] {
                     assert!(
                         !text.contains(&needle),
@@ -610,6 +634,53 @@ async fn seed_channel(db: &TestDatabase, tenant: TenantId, name: &str) -> restic
     .expect("cannot create the channel");
     tx.commit().await.expect("cannot commit the channel");
     id
+}
+
+async fn seed_templates(
+    db: &TestDatabase,
+    tenant: TenantId,
+) -> (restichub_db::ScriptTemplateId, restichub_db::JobTemplateId) {
+    use restichub_db::script_templates::{NewJobTemplate, NewScriptTemplate};
+    let script_id = restichub_db::ScriptTemplateId::new();
+    let job_id = restichub_db::JobTemplateId::new();
+    let parameters = serde_json::json!([]);
+    let scripts = serde_json::json!([]);
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    restichub_db::script_templates::create(
+        &mut tx,
+        &NewScriptTemplate {
+            id: script_id,
+            name: CANARY_SCRIPT_TEMPLATE,
+            description: "",
+            interpreter: "bash",
+            phase: "before",
+            body: "true",
+            timeout_seconds: 60,
+            failure_policy: "abort_backup",
+            parameters: &parameters,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the script template");
+    restichub_db::script_templates::create_job_template(
+        &mut tx,
+        &NewJobTemplate {
+            id: job_id,
+            name: CANARY_JOB_TEMPLATE,
+            description: "",
+            scripts: &scripts,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the job template");
+    tx.commit().await.expect("cannot commit the templates");
+    (script_id, job_id)
 }
 
 async fn snapshot_tenant(db: &TestDatabase, tenant: TenantId) -> BTreeMap<String, String> {

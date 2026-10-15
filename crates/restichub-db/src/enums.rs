@@ -119,6 +119,80 @@ impl AgentStatus {
     }
 }
 
+/// Whether an agent trusts its hook allow-list file (FR-HK-01, AC-HK-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum HookAllowListState {
+    Unknown,
+    Absent,
+    Loaded,
+    /// Another account can change the file or its directory, so no hook runs.
+    Insecure,
+    /// The file does not obey the format, so no hook runs.
+    Invalid,
+}
+
+impl HookAllowListState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Absent => "absent",
+            Self::Loaded => "loaded",
+            Self::Insecure => "insecure",
+            Self::Invalid => "invalid",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unknown" => Some(Self::Unknown),
+            "absent" => Some(Self::Absent),
+            "loaded" => Some(Self::Loaded),
+            "insecure" => Some(Self::Insecure),
+            "invalid" => Some(Self::Invalid),
+            _ => None,
+        }
+    }
+}
+
+/// Whether a host trusts scripts from the control plane (FR-HK-08, ADR-0037).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum ServerScriptsState {
+    /// The agent does not report the state. The control plane treats it as disabled.
+    Unknown,
+    /// The host administrator did not turn the mode on. This is the default.
+    Disabled,
+    Enabled,
+    /// Another account can change the setting file, so the mode is off.
+    Insecure,
+}
+
+impl ServerScriptsState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Disabled => "disabled",
+            Self::Enabled => "enabled",
+            Self::Insecure => "insecure",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unknown" => Some(Self::Unknown),
+            "disabled" => Some(Self::Disabled),
+            "enabled" => Some(Self::Enabled),
+            "insecure" => Some(Self::Insecure),
+            _ => None,
+        }
+    }
+}
+
 /// The derived administrator state of a tenant (ADR-0028).
 ///
 /// The control plane computes the state from the memberships: an active Admin count of zero gives
@@ -843,4 +917,28 @@ mod tests {
         }
         assert_eq!(StepStatus::parse("nope"), None);
     }
+}
+
+/// The kind of a planned step, as the job detail shows it (FR-HK-11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum PlannedKind {
+    Backup,
+    Hook,
+    Script,
+    /// A step of another kind: the job detail needs no more.
+    Other,
+}
+
+/// The phase of a hook or a script step (FR-HK-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum PlannedPhase {
+    Before,
+    After,
+    OnSuccess,
+    OnError,
+    Finally,
 }

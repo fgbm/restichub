@@ -1,6 +1,6 @@
 # ADR-0004: Hooks only from an agent-side allow-list
 
-- Status: accepted
+- Status: accepted. Superseded by [ADR-0037](0037-server-scripts-on-trusted-hosts.md) for hosts with the local trust mode. The allow-list stays the mode for all other hosts.
 - Date: 2026-10-12
 - Requirements: FR-HK-01 to FR-HK-07, NFR-SEC-03
 

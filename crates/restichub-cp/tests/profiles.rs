@@ -235,7 +235,20 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
     assert_eq!(problem["field"], "options.use_fs_snapshot");
     assert_eq!(problem["reason"], "unsupported");
 
-    // A hook that the agent allow-list does not hold (FR-HK-04).
+    // A hook that the agent allow-list does not hold (FR-HK-04). Another agent reports it, so the
+    // profile is saved and only the preview for this agent refuses it.
+    let holder = seed_agent_full(db.database(), tenant, "holder-1", "linux", "0.19.0", &[]).await;
+    common::seed_agent_hooks(
+        db.database(),
+        tenant,
+        holder,
+        &std::collections::BTreeMap::from([(
+            "pg_dump".to_owned(),
+            restichub_compiler::AllowListedHook::default(),
+        )]),
+        restichub_db::HookAllowListState::Loaded,
+    )
+    .await;
     let hook = create_profile(
         &app,
         &cookie,
@@ -993,58 +1006,6 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "hooks");
     assert_eq!(problem["reason"], "too_long");
-
-    db.cleanup().await;
-}
-
-/// A hook parameter is refused until the agent reports its allow-list (FR-HK-04).
-#[tokio::test]
-async fn a_hook_parameter_is_refused() {
-    let Some(db) = common::test_db().await else {
-        return;
-    };
-    let tenant = create_tenant_with_key(db.database(), "acme").await;
-    let app = app_with_kek(db.database());
-    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
-
-    // A parameter is refused with a clear reason.
-    let (status, _, problem) = send(
-        &app,
-        request(
-            "POST",
-            "/api/v1/profiles",
-            Some(&cookie),
-            Some(json!({
-                "name": "hook-params",
-                "repository_id": repository_id,
-                "paths": {"all": ["/srv"]},
-                "hooks": [{
-                    "hook_id": "pg_dump",
-                    "phase": "before",
-                    "parameters": [{"name": "database", "value": "app"}],
-                }],
-            })),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
-    assert_eq!(problem["field"], "hooks[0].parameters");
-    assert_eq!(problem["reason"], "unavailable");
-
-    // Hooks without parameters stay allowed.
-    let hook = create_profile(
-        &app,
-        &cookie,
-        json!({
-            "name": "hook-no-params",
-            "repository_id": repository_id,
-            "paths": {"all": ["/srv"]},
-            "hooks": [{"hook_id": "pg_dump", "phase": "before"}],
-        }),
-    )
-    .await;
-    assert_eq!(hook["hooks"][0]["hook_id"], "pg_dump");
 
     db.cleanup().await;
 }

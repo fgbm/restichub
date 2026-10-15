@@ -245,32 +245,32 @@ async fn fr_pr_02_only_unlock_all_removes_live_locks() {
     assert_eq!(fixture.argv(), vec!["unlock", "unlock --remove-all"]);
 }
 
-/// FR-PR-02: the `hook` step is refused until its epic.
+/// FR-PR-02, AC-HK-03: a `hook` step is rejected when the host has no allow-list.
 #[tokio::test(flavor = "multi_thread")]
-async fn fr_pr_02_the_later_step_kinds_are_rejected() {
+async fn fr_pr_02_a_hook_step_is_rejected_without_an_allow_list() {
     use restichub_proto::agent::v1::HookStep;
     let fixture = Fixture::new("step-unsupported");
     let jobs = fixture.jobs();
-    let kinds = [step::Kind::Hook(HookStep {
-        hook_id: "pg_dump".to_owned(),
-        ..HookStep::default()
-    })];
-    for (index, kind) in kinds.into_iter().enumerate() {
-        let (tx, mut rx) = mpsc::channel(8);
-        jobs.attach(&tx);
-        let job = fixture.job(
-            &format!("job-later-{index}"),
-            vec![make_step("later", kind)],
-        );
-        jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
-        let message = rx.recv().await.expect("the agent must answer");
-        match message.payload {
-            Some(agent_message::Payload::JobRejected(rejected)) => assert_eq!(
-                RejectReason::try_from(rejected.reason).ok(),
-                Some(RejectReason::UnsupportedStep)
-            ),
-            other => panic!("the job must be rejected: {other:?}"),
-        }
+    let (tx, mut rx) = mpsc::channel(8);
+    jobs.attach(&tx);
+    let job = fixture.job(
+        "job-later",
+        vec![make_step(
+            "later",
+            step::Kind::Hook(HookStep {
+                hook_id: "pg_dump".to_owned(),
+                ..HookStep::default()
+            }),
+        )],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    let message = rx.recv().await.expect("the agent must answer");
+    match message.payload {
+        Some(agent_message::Payload::JobRejected(rejected)) => assert_eq!(
+            RejectReason::try_from(rejected.reason).ok(),
+            Some(RejectReason::UnknownHook)
+        ),
+        other => panic!("the job must be rejected: {other:?}"),
     }
     assert!(fixture.argv().is_empty(), "no restic may start");
 }

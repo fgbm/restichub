@@ -150,6 +150,14 @@ pub enum AuditAction {
     ChannelDelete,
     AlertRuleUpdate,
     AlertSent,
+    ScriptTemplateCreate,
+    ScriptTemplateUpdate,
+    ScriptTemplateDelete,
+    JobTemplateCreate,
+    JobTemplateUpdate,
+    JobTemplateDelete,
+    /// A job left for a host with the hash of every script it carries (FR-HK-12).
+    ScriptRun,
     /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),
 }
@@ -213,6 +221,13 @@ impl AuditAction {
             Self::ChannelDelete => "channel_delete",
             Self::AlertRuleUpdate => "alert_rule_update",
             Self::AlertSent => "alert_sent",
+            Self::ScriptTemplateCreate => "script_template_create",
+            Self::ScriptTemplateUpdate => "script_template_update",
+            Self::ScriptTemplateDelete => "script_template_delete",
+            Self::JobTemplateCreate => "job_template_create",
+            Self::JobTemplateUpdate => "job_template_update",
+            Self::JobTemplateDelete => "job_template_delete",
+            Self::ScriptRun => "script_run",
             Self::Unknown(value) => value,
         }
     }
@@ -276,6 +291,13 @@ impl AuditAction {
             "channel_delete" => Self::ChannelDelete,
             "alert_rule_update" => Self::AlertRuleUpdate,
             "alert_sent" => Self::AlertSent,
+            "script_template_create" => Self::ScriptTemplateCreate,
+            "script_template_update" => Self::ScriptTemplateUpdate,
+            "script_template_delete" => Self::ScriptTemplateDelete,
+            "job_template_create" => Self::JobTemplateCreate,
+            "job_template_update" => Self::JobTemplateUpdate,
+            "job_template_delete" => Self::JobTemplateDelete,
+            "script_run" => Self::ScriptRun,
             _ => return None,
         };
         Some(action)
@@ -343,6 +365,13 @@ impl AuditAction {
             Self::ChannelDelete,
             Self::AlertRuleUpdate,
             Self::AlertSent,
+            Self::ScriptTemplateCreate,
+            Self::ScriptTemplateUpdate,
+            Self::ScriptTemplateDelete,
+            Self::JobTemplateCreate,
+            Self::JobTemplateUpdate,
+            Self::JobTemplateDelete,
+            Self::ScriptRun,
         ]
     }
 }

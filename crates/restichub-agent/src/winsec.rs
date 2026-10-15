@@ -34,9 +34,10 @@ use windows_sys::Win32::Security::{
     TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, DELETE, FILE_ALL_ACCESS, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-    FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, WRITE_DAC, WRITE_OWNER,
+    CreateDirectoryW, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
+    FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE,
+    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA,
+    WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::SystemServices::{
     ACCESS_ALLOWED_ACE_TYPE, ACCESS_ALLOWED_CALLBACK_ACE_TYPE,
@@ -80,6 +81,11 @@ const AGENT_RIGHTS: u32 = FILE_WRITE_DATA
 /// delete of a child, or a change of the access control. A normal `C:\` grants Authenticated Users
 /// the right to add a file, which stays allowed.
 const PARENT_RIGHTS: u32 = FILE_DELETE_CHILD | DELETE | WRITE_DAC | WRITE_OWNER;
+
+/// The rights that another account must not hold on a directory that the agent searches for a
+/// program or runs one from: the rights of a parent, and the right to add a file or a
+/// subdirectory, which plants a program or a library next to a trusted one.
+const PROGRAM_DIRECTORY_RIGHTS: u32 = PARENT_RIGHTS | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY;
 
 /// Owns a security descriptor and frees it on drop.
 struct OwnedDescriptor(PSECURITY_DESCRIPTOR);
@@ -295,6 +301,16 @@ pub fn check_admin_only(path: &Path) -> Result<()> {
 /// Returns an error when another account owns the directory or can delete it or change its access.
 pub fn check_parent(path: &Path) -> Result<()> {
     check(path, PARENT_RIGHTS)
+}
+
+/// Refuses a directory in which another account can add a file or a subdirectory, or that it can
+/// delete or re-permission (threat T20).
+///
+/// # Errors
+///
+/// Returns an error when another account owns the directory or holds one of these rights on it.
+pub fn check_program_directory(path: &Path) -> Result<()> {
+    check(path, PROGRAM_DIRECTORY_RIGHTS)
 }
 
 fn check(path: &Path, rights: u32) -> Result<()> {
@@ -658,6 +674,23 @@ mod tests {
         grant(&dir, "(OI)(CI)(WO)").expect("cannot add the access control entry");
         assert!(check_admin_only(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ac_hk_01_a_program_directory_where_users_add_files_is_refused() {
+        // `(W)` grants write data and attributes: the right to add a file, without a delete.
+        for rights in ["(W)", "(OI)(CI)(WD)", "(AD)"] {
+            let dir = temp("program-dir");
+            create_protected_dir(&dir).expect("cannot create the protected directory");
+            check_program_directory(&dir).expect("a protected directory must pass");
+            grant(&dir, rights).expect("cannot add the access control entry");
+            assert!(check_program_directory(&dir).is_err(), "{rights}");
+            // A parent check accepts the same directory, so it cannot guard a program directory.
+            if rights == "(W)" {
+                check_parent(&dir).expect("a parent may let users add files");
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     #[test]

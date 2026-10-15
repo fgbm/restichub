@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::target::OperatingSystem;
 
 /// A profile: the repository, the paths, the excludes, the tags, the options,
@@ -19,6 +21,8 @@ pub struct Profile {
     pub profile_tag: Option<String>,
     pub options: BackupOptions,
     pub hooks: Vec<HookRef>,
+    /// Code that the control plane sends (FR-HK-09, ADR-0037).
+    pub scripts: Vec<crate::script::ScriptRef>,
     /// Policy that produces the `forget` and `prune` steps.
     pub retention: Option<Retention>,
     /// Policy that produces the verification step.
@@ -76,7 +80,8 @@ pub struct HookParameter {
 }
 
 /// Position of a hook in the job (FR-HK-05).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HookPhase {
     Before,
     After,

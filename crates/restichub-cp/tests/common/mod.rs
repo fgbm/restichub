@@ -196,6 +196,19 @@ pub fn write_body(
             "recipients": ["matrix@example.com"],
         })),
         ("PATCH", "/api/v1/notification-channels/{id}") => Some(json!({"enabled": true})),
+        ("POST", "/api/v1/script-templates") => Some(json!({
+            "name": format!("matrix-script-{index}"),
+            "interpreter": "bash",
+            "phase": "before",
+            "body": "true",
+            "failure_policy": "abort_backup",
+        })),
+        ("PATCH", "/api/v1/script-templates/{id}") | ("PATCH", "/api/v1/job-templates/{id}") => {
+            Some(json!({"description": "matrix"}))
+        }
+        ("POST", "/api/v1/job-templates") => {
+            Some(json!({"name": format!("matrix-job-{index}"), "scripts": []}))
+        }
         ("PUT", "/api/v1/alert-rules") => Some(json!({"items": []})),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
         // A key that is never current: the matrix checks the right and compromises nothing.
@@ -570,6 +583,7 @@ pub async fn seed_profile(
             retention: None,
             check_options: None,
             hooks: serde_json::json!([]),
+            scripts: serde_json::json!([]),
             created_by: None,
         },
     )
@@ -609,6 +623,79 @@ pub async fn seed_agent(db: &Database, tenant: TenantId, hostname: &str) -> rest
     .expect("cannot create the agent");
     tx.commit().await.expect("cannot commit the agent");
     id
+}
+
+/// Stores the hook report of an agent as its hello does (FR-HK-04). `hooks` maps a hook
+/// identifier to the schema; the agent reports the capability `hooks-v1`.
+pub async fn seed_agent_hooks(
+    db: &Database,
+    tenant: TenantId,
+    agent: restichub_db::AgentId,
+    hooks: &std::collections::BTreeMap<String, restichub_compiler::AllowListedHook>,
+    state: restichub_db::HookAllowListState,
+) {
+    let value = serde_json::to_value(hooks).expect("the hooks serialize");
+    let capabilities = vec!["hooks-v1".to_owned()];
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    restichub_db::agents::set_hello_facts(
+        &mut tx,
+        agent,
+        &restichub_db::agents::HelloFacts {
+            capabilities: &capabilities,
+            restore_roots: &[],
+            agent_version: "",
+            restic_version: "",
+            protocol_version_major: restichub_proto::version::Version::CURRENT.major,
+            protocol_version_minor: restichub_proto::version::Version::CURRENT.minor,
+            hooks: &value,
+            hook_allow_list: state,
+            server_scripts: restichub_db::ServerScriptsState::Unknown,
+            script_interpreters: &[],
+        },
+    )
+    .await
+    .expect("cannot store the hooks");
+    tx.commit().await.expect("cannot commit the hooks");
+}
+
+/// Stores the trust mode of an agent as its hello does (FR-HK-08). The agent reports the
+/// capabilities `hooks-v1` and `scripts-v1`.
+pub async fn seed_agent_scripts(
+    db: &Database,
+    tenant: TenantId,
+    agent: restichub_db::AgentId,
+    state: restichub_db::ServerScriptsState,
+    interpreters: &[&str],
+) {
+    let capabilities = vec!["hooks-v1".to_owned(), "scripts-v1".to_owned()];
+    let interpreters: Vec<String> = interpreters.iter().map(|name| (*name).to_owned()).collect();
+    let hooks = serde_json::json!({});
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    restichub_db::agents::set_hello_facts(
+        &mut tx,
+        agent,
+        &restichub_db::agents::HelloFacts {
+            capabilities: &capabilities,
+            restore_roots: &[],
+            agent_version: "",
+            restic_version: "",
+            protocol_version_major: restichub_proto::version::Version::CURRENT.major,
+            protocol_version_minor: restichub_proto::version::Version::CURRENT.minor,
+            hooks: &hooks,
+            hook_allow_list: restichub_db::HookAllowListState::Absent,
+            server_scripts: state,
+            script_interpreters: &interpreters,
+        },
+    )
+    .await
+    .expect("cannot store the trust mode");
+    tx.commit().await.expect("cannot commit the trust mode");
 }
 
 /// Inserts a job row of a tenant and returns its identifier.

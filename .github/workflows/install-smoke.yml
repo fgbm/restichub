@@ -1,0 +1,183 @@
+name: Install smoke (AC-IN-03)
+
+# Installs the agent as a real operating system service on a runner, enrolls it with a control
+# plane that runs on the same runner, and checks that the service starts and connects, also after
+# a restart. The reboot part of AC-IN-03 stays a manual check.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - crates/restichub-agent/**
+      - crates/restichub-cp/**
+      - crates/restichub-proto/**
+      - packaging/**
+      - scripts/install-smoke.sh
+      - .github/workflows/install-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Install smoke (AC-IN-03) / Linux systemd
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: restichub
+          POSTGRES_PASSWORD: restichub
+          POSTGRES_DB: restichub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restichub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set the state directory
+        shell: bash
+        run: echo "SMOKE_DIR=$(cygpath -m "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")/smoke" >> "$GITHUB_ENV"
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Build the control plane and the agent
+        run: cargo build -p restichub-cp -p restichub-agent
+      - name: Prepare the database
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: restichub
+          PGPASSWORD: restichub
+          CP_BIN: target/debug/restichub-cp
+        run: scripts/install-smoke.sh db-prepare
+      - name: Start the control plane and create the token
+        env:
+          CP_BIN: target/debug/restichub-cp
+        run: scripts/install-smoke.sh cp-up
+      - name: Install the agent binary as root (T20)
+        run: |
+          sudo install -d -m 0755 -o root -g root /opt/restichub-agent
+          sudo install -m 0755 -o root -g root target/debug/restichub-agent /opt/restichub-agent/restichub-agent
+          # The runner image makes /opt world-writable with a default ACL for the runner account.
+          # The agent refuses such a location (T20), so the step restores a normal root-owned /opt.
+          sudo chmod 0755 /opt
+          sudo setfacl -b /opt
+          sudo setfacl -R -b /opt/restichub-agent
+          ls -ld /opt /opt/restichub-agent
+      - name: Register the agent and install the service
+        run: |
+          set -euo pipefail
+          scripts/install-smoke.sh ca
+          agent=/opt/restichub-agent/restichub-agent
+          sudo "$agent" register --url "https://localhost:8443" \
+            --token-file "$SMOKE_DIR/enrollment-token" --ca-file "$SMOKE_DIR/ca.pem"
+          sudo "$agent" install-service
+      - name: The service is enabled, active and connected
+        run: |
+          set -euo pipefail
+          test "$(systemctl is-enabled restichub-agent)" = enabled
+          test "$(systemctl is-active restichub-agent)" = active
+          scripts/install-smoke.sh connected 0 60
+      - name: The service connects again after a restart
+        run: |
+          set -euo pipefail
+          since="$(date -u +%s)"
+          sudo systemctl restart restichub-agent
+          test "$(systemctl is-active restichub-agent)" = active
+          scripts/install-smoke.sh connected "$since" 60
+      - name: Diagnostics
+        if: failure()
+        run: |
+          sudo systemctl status restichub-agent --no-pager || true
+          sudo journalctl -u restichub-agent --no-pager | tail -50 || true
+          echo "--- control plane log"
+          scripts/install-smoke.sh cp-logs | tail -80 || true
+
+  windows:
+    name: Install smoke (AC-IN-03) / Windows service
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set the state directory
+        shell: bash
+        run: echo "SMOKE_DIR=$(cygpath -m "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")/smoke" >> "$GITHUB_ENV"
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Build the control plane and the agent
+        run: cargo build -p restichub-cp -p restichub-agent
+      # The runner holds PostgreSQL but no container engine. A fresh cluster in a temporary
+      # directory does not depend on the version or the credentials of the installed one.
+      - name: Start PostgreSQL
+        run: |
+          set -euo pipefail
+          pg_bin="$(ls -d "/c/Program Files/PostgreSQL/"*/bin | sort -V | tail -n1)"
+          echo "$pg_bin" >> "$GITHUB_PATH"
+          export PATH="$pg_bin:$PATH"
+          pg_data="$(cygpath -w "$RUNNER_TEMP/pgdata")"
+          initdb -D "$pg_data" -U restichub -A trust -E UTF8
+          pg_ctl -D "$pg_data" -l "$RUNNER_TEMP/pg.log" -o "-p 5432 -c listen_addresses=127.0.0.1" -w start
+          createdb -h 127.0.0.1 -U restichub restichub
+      - name: Prepare the database
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: restichub
+          CP_BIN: target/debug/restichub-cp.exe
+        run: scripts/install-smoke.sh db-prepare
+      - name: Start the control plane and create the token
+        env:
+          CP_BIN: target/debug/restichub-cp.exe
+        run: scripts/install-smoke.sh cp-up
+      - name: Install the agent binary under Program Files
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item target\debug\restichub-agent.exe $dir
+      - name: Register the agent and install the service
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPENSSL="$(cygpath -u "$PROGRAMFILES")/Git/usr/bin/openssl.exe" scripts/install-smoke.sh ca
+          agent="$(cygpath -u "$PROGRAMFILES")/ResticHub/Agent/restichub-agent.exe"
+          "$agent" register --url "https://localhost:8443" \
+            --token-file "$(cygpath -w "$SMOKE_DIR/enrollment-token")" \
+            --ca-file "$(cygpath -w "$SMOKE_DIR/ca.pem")"
+          "$agent" install-service
+      - name: The service is running, automatic, LocalSystem and connected
+        shell: pwsh
+        run: |
+          $service = Get-CimInstance Win32_Service -Filter "Name='restichub-agent'"
+          $service | Format-List Name, State, StartMode, StartName
+          if ($service.State -ne 'Running') { throw "state: $($service.State)" }
+          if ($service.StartMode -ne 'Auto') { throw "start mode: $($service.StartMode)" }
+          if ($service.StartName -ne 'LocalSystem') { throw "account: $($service.StartName)" }
+          bash scripts/install-smoke.sh connected 0 60
+      - name: The service connects again after a restart
+        shell: pwsh
+        run: |
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          Restart-Service restichub-agent
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          bash scripts/install-smoke.sh connected $since 60
+      - name: Diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-Service restichub-agent -ErrorAction SilentlyContinue | Format-List *
+          Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='restichub-agent'} -MaxEvents 50 -ErrorAction SilentlyContinue | Format-List TimeCreated, Message
+          Write-Host '--- control plane log'
+          bash scripts/install-smoke.sh cp-logs

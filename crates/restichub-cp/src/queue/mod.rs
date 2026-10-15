@@ -291,14 +291,12 @@ async fn first_send(
     let timeout = i32::try_from(build::JOB_TIMEOUT_SECONDS).unwrap_or(i32::MAX);
     queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, &stored).await?;
     let required = compat::required_capabilities(&built.job.job().steps);
-    let step_ids: Vec<String> = built
-        .job
-        .job()
-        .steps
-        .iter()
-        .map(|step| step.step_id.clone())
-        .collect();
-    restichub_db::job_steps::plan(tx, job.id, &step_ids).await?;
+    restichub_db::job_steps::plan_described(
+        tx,
+        job.id,
+        &crate::jobs::planned_steps(&built.job.job().steps),
+    )
+    .await?;
     Ok(Prepared::Send(signed, required))
 }
 

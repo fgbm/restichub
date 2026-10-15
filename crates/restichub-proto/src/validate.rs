@@ -24,10 +24,25 @@
 use std::collections::HashSet;
 
 use crate::agent::v1::{
-    HookStep, Job, OverwriteMode, RejectReason, RepositoryAccess, SnapshotsFilter, Step,
-    repository_access::BackendCredentials, step,
+    HookPhase, HookStep, Job, OverwriteMode, RejectReason, RepositoryAccess, ScriptFailurePolicy,
+    ScriptInterpreter, ScriptStep, SnapshotsFilter, Step, hook_parameter::Typed,
+    repository_access::BackendCredentials, script_env, step,
 };
 use crate::signing::Rejection;
+
+/// The most parameters that one hook step carries (FR-HK-02).
+pub const MAX_HOOK_PARAMETERS: usize = 32;
+
+/// The most bytes in the body of a script (FR-HK-09).
+pub const MAX_SCRIPT_BODY_BYTES: usize = 64 * 1024;
+
+pub const MAX_SCRIPT_NAME_CHARS: usize = 128;
+
+/// The most environment variables that one script step carries.
+pub const MAX_SCRIPT_ENV: usize = 64;
+
+/// The most bytes in the value of a script variable.
+pub const MAX_SCRIPT_ENV_VALUE_BYTES: usize = 8 * 1024;
 
 /// The most nodes that one `ls` step returns. The result of a step must fit in a protocol message
 /// (AC-RS-02).
@@ -39,7 +54,8 @@ pub const MAX_LS_LIMIT: u64 = 5_000;
 ///
 /// Returns a [`Rejection`] with [`RejectReason::UnsupportedStep`] for an
 /// unknown step kind, [`RejectReason::InvalidHookParameters`] for a duplicate
-/// hook parameter name, and [`RejectReason::Malformed`] for any other rule.
+/// hook parameter name, [`RejectReason::InvalidScript`] for a script step that breaks a rule, and
+/// [`RejectReason::Malformed`] for any other rule.
 pub fn validate_job(job: &Job) -> Result<(), Rejection> {
     if job.steps.is_empty() {
         return Err(reject(job, RejectReason::Malformed));
@@ -170,6 +186,9 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
         step::Kind::Hook(hook) => {
             check_hook(job, hook)?;
         }
+        step::Kind::Script(script) => {
+            check_script(job, script)?;
+        }
     }
 
     Ok(())
@@ -187,9 +206,26 @@ fn check_hook(job: &Job, hook: &HookStep) -> Result<(), Rejection> {
         return Err(reject(job, RejectReason::Malformed));
     }
 
+    if hook.parameters.len() > MAX_HOOK_PARAMETERS {
+        return Err(reject(job, RejectReason::InvalidHookParameters));
+    }
     let mut names = HashSet::new();
     for parameter in &hook.parameters {
-        if has_forbidden(&parameter.name) || has_forbidden(&parameter.value) {
+        if has_forbidden(&parameter.name) {
+            return Err(reject(job, RejectReason::Malformed));
+        }
+        // Field 2 held an untyped value. A value must have a type (FR-HK-03).
+        if !parameter.value.is_empty() || parameter.typed.is_none() {
+            return Err(reject(job, RejectReason::InvalidHookParameters));
+        }
+        // A secret may hold line breaks, such as a key. Only NUL cannot travel in an environment
+        // variable.
+        let invalid = match &parameter.typed {
+            Some(Typed::StringValue(value)) => has_forbidden(value),
+            Some(Typed::SecretValue(value)) => has_nul(value),
+            Some(Typed::IntegerValue(_) | Typed::BooleanValue(_)) | None => false,
+        };
+        if invalid {
             return Err(reject(job, RejectReason::Malformed));
         }
         if !names.insert(parameter.name.as_str()) {
@@ -197,6 +233,94 @@ fn check_hook(job: &Job, hook: &HookStep) -> Result<(), Rejection> {
         }
     }
 
+    Ok(())
+}
+
+/// True for a name that a script variable may have. The agent runs the interpreter with these
+/// variables, so a name that changes how the loader or a shell starts is not allowed (FR-HK-09).
+#[must_use]
+pub fn is_script_env_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') || name.len() > 64 {
+        return false;
+    }
+    if !characters.all(|character| character.is_ascii_alphanumeric() || character == '_') {
+        return false;
+    }
+    let upper = name.to_ascii_uppercase();
+    const RESERVED: [&str; 14] = [
+        "PATH",
+        "BASH_ENV",
+        "ENV",
+        "IFS",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "PS4",
+        "PROMPT_COMMAND",
+        "PSMODULEPATH",
+        "SYSTEMROOT",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "HOME",
+    ];
+    const RESERVED_PREFIXES: [&str; 5] = ["LD_", "DYLD_", "RESTICHUB_", "RESTIC_", "PYTHON"];
+    !RESERVED.contains(&upper.as_str())
+        && !RESERVED_PREFIXES
+            .iter()
+            .any(|prefix| upper.starts_with(prefix))
+}
+
+fn check_script(job: &Job, script: &ScriptStep) -> Result<(), Rejection> {
+    let invalid = || reject(job, RejectReason::InvalidScript);
+    if script.name.is_empty()
+        || script.name.chars().count() > MAX_SCRIPT_NAME_CHARS
+        || has_forbidden(&script.name)
+    {
+        return Err(invalid());
+    }
+    if script.body.trim().is_empty()
+        || script.body.len() > MAX_SCRIPT_BODY_BYTES
+        || has_nul(&script.body)
+    {
+        return Err(invalid());
+    }
+    let interpreter =
+        ScriptInterpreter::try_from(script.interpreter).unwrap_or(ScriptInterpreter::Unspecified);
+    let phase = HookPhase::try_from(script.phase).unwrap_or(HookPhase::Unspecified);
+    let policy = ScriptFailurePolicy::try_from(script.failure_policy)
+        .unwrap_or(ScriptFailurePolicy::Unspecified);
+    if interpreter == ScriptInterpreter::Unspecified
+        || phase == HookPhase::Unspecified
+        || policy == ScriptFailurePolicy::Unspecified
+    {
+        return Err(invalid());
+    }
+    if script.env.len() > MAX_SCRIPT_ENV {
+        return Err(invalid());
+    }
+    let mut names = HashSet::new();
+    for variable in &script.env {
+        if !is_script_env_name(&variable.name) || !names.insert(variable.name.to_ascii_uppercase())
+        {
+            return Err(invalid());
+        }
+        let valid = match &variable.value {
+            Some(script_env::Value::StringValue(value)) => {
+                value.len() <= MAX_SCRIPT_ENV_VALUE_BYTES && !has_forbidden(value)
+            }
+            Some(script_env::Value::SecretValue(value)) => {
+                value.len() <= MAX_SCRIPT_ENV_VALUE_BYTES && !has_nul(value)
+            }
+            None => false,
+        };
+        if !valid {
+            return Err(invalid());
+        }
+    }
     Ok(())
 }
 
@@ -536,6 +660,92 @@ mod tests {
         SftpCredentials, SnapshotsStep, StatsStep, UnlockAllStep, UnlockStep,
     };
 
+    fn hook_job(parameter: HookParameter) -> Job {
+        job_with(vec![step(step::Kind::Hook(HookStep {
+            hook_id: string("pg_dump"),
+            parameters: vec![parameter],
+            ..HookStep::default()
+        }))])
+    }
+
+    #[test]
+    fn fr_hk_03_rejects_an_untyped_hook_parameter() {
+        let untyped = hook_job(HookParameter {
+            name: string("database"),
+            value: string("app"),
+            typed: None,
+        });
+        assert_eq!(
+            validate_job(&untyped),
+            Err(reject(&untyped, RejectReason::InvalidHookParameters))
+        );
+        let both = hook_job(HookParameter {
+            name: string("database"),
+            value: string("app"),
+            typed: Some(Typed::StringValue(string("app"))),
+        });
+        assert_eq!(
+            validate_job(&both),
+            Err(reject(&both, RejectReason::InvalidHookParameters))
+        );
+        let none = hook_job(HookParameter {
+            name: string("database"),
+            ..HookParameter::default()
+        });
+        assert_eq!(
+            validate_job(&none),
+            Err(reject(&none, RejectReason::InvalidHookParameters))
+        );
+    }
+
+    #[test]
+    fn fr_hk_03_accepts_every_hook_value_type_and_rejects_a_control_character() {
+        for typed in [
+            Typed::StringValue(string("app")),
+            Typed::IntegerValue(-7),
+            Typed::BooleanValue(true),
+            Typed::SecretValue(string("s3cret")),
+        ] {
+            let job = hook_job(HookParameter {
+                name: string("p"),
+                typed: Some(typed),
+                ..HookParameter::default()
+            });
+            assert_eq!(validate_job(&job), Ok(()));
+        }
+        for typed in [
+            Typed::StringValue(string("a\nb")),
+            Typed::SecretValue(string("a\u{0}b")),
+        ] {
+            let job = hook_job(HookParameter {
+                name: string("p"),
+                typed: Some(typed),
+                ..HookParameter::default()
+            });
+            assert!(malformed(&job));
+        }
+    }
+
+    #[test]
+    fn fr_hk_02_rejects_too_many_hook_parameters() {
+        let parameters = (0..=MAX_HOOK_PARAMETERS)
+            .map(|index| HookParameter {
+                name: format!("p{index}"),
+                typed: Some(Typed::BooleanValue(true)),
+                ..HookParameter::default()
+            })
+            .collect();
+        let job = job_with(vec![step(step::Kind::Hook(HookStep {
+            hook_id: string("pg_dump"),
+            parameters,
+            ..HookStep::default()
+        }))]);
+        assert_eq!(
+            validate_job(&job),
+            Err(reject(&job, RejectReason::InvalidHookParameters))
+        );
+    }
+
     const BAD_OPTION: &str = "--password-command=cmd /c calc";
     const BAD_SHORT: &str = "-x";
 
@@ -556,6 +766,80 @@ mod tests {
             steps,
             ..Job::default()
         }
+    }
+
+    fn script(body: &str) -> ScriptStep {
+        ScriptStep {
+            name: string("dump"),
+            interpreter: ScriptInterpreter::Bash as i32,
+            phase: HookPhase::Before as i32,
+            body: string(body),
+            failure_policy: ScriptFailurePolicy::AbortBackup as i32,
+            env: Vec::new(),
+        }
+    }
+
+    fn script_job(script: ScriptStep) -> Job {
+        job_with(vec![step(step::Kind::Script(script))])
+    }
+
+    #[test]
+    fn fr_hk_09_accepts_a_valid_script_and_rejects_every_broken_rule() {
+        assert_eq!(validate_job(&script_job(script("echo ok\n"))), Ok(()));
+        let invalid = |script: ScriptStep| {
+            let job = script_job(script);
+            assert_eq!(
+                validate_job(&job),
+                Err(reject(&job, RejectReason::InvalidScript))
+            );
+        };
+        invalid(script("  \n"));
+        invalid(script(&"x".repeat(MAX_SCRIPT_BODY_BYTES + 1)));
+        invalid(script("echo\0"));
+        invalid(ScriptStep {
+            name: String::new(),
+            ..script("echo")
+        });
+        invalid(ScriptStep {
+            name: "a\nb".to_owned(),
+            ..script("echo")
+        });
+        invalid(ScriptStep {
+            interpreter: 0,
+            ..script("echo")
+        });
+        invalid(ScriptStep {
+            phase: 0,
+            ..script("echo")
+        });
+        invalid(ScriptStep {
+            failure_policy: 0,
+            ..script("echo")
+        });
+        let variable = |name: &str, value: Option<script_env::Value>| ScriptStep {
+            env: vec![crate::agent::v1::ScriptEnv {
+                name: name.to_owned(),
+                value,
+            }],
+            ..script("echo")
+        };
+        let plain = || Some(script_env::Value::StringValue(string("x")));
+        for name in ["", "1A", "A-B", "PATH", "path", "LD_PRELOAD", "BASH_ENV"] {
+            invalid(variable(name, plain()));
+        }
+        invalid(variable("PGHOST", None));
+        invalid(variable(
+            "PGHOST",
+            Some(script_env::Value::StringValue(string("a\nb"))),
+        ));
+        let mut twice = variable("PGHOST", plain());
+        twice.env.push(twice.env[0].clone());
+        invalid(twice);
+        let accepted = variable(
+            "PGPASSWORD",
+            Some(script_env::Value::SecretValue(string("line1\nline2"))),
+        );
+        assert_eq!(validate_job(&script_job(accepted)), Ok(()));
     }
 
     fn job_with_sftp(credentials: SftpCredentials) -> Job {
@@ -645,7 +929,8 @@ mod tests {
                 hook_id: string("pg_dump"),
                 parameters: vec![HookParameter {
                     name: string("database"),
-                    value: string("app"),
+                    typed: Some(Typed::StringValue(string("app"))),
+                    ..HookParameter::default()
                 }],
                 ..HookStep::default()
             })),
@@ -792,7 +1077,8 @@ mod tests {
                 hook_id: string("pg_dump"),
                 parameters: vec![HookParameter {
                     name: string("database"),
-                    value: string(BAD_OPTION),
+                    typed: Some(Typed::StringValue(string(BAD_OPTION))),
+                    ..HookParameter::default()
                 }],
                 ..HookStep::default()
             })),
@@ -832,7 +1118,8 @@ mod tests {
                 hook_id: string("pg_dump"),
                 parameters: vec![HookParameter {
                     name: string("database"),
-                    value: string(newline),
+                    typed: Some(Typed::StringValue(string(newline))),
+                    ..HookParameter::default()
                 }],
                 ..HookStep::default()
             }))]),
@@ -962,11 +1249,13 @@ mod tests {
             parameters: vec![
                 HookParameter {
                     name: string("database"),
-                    value: string("app"),
+                    typed: Some(Typed::StringValue(string("app"))),
+                    ..HookParameter::default()
                 },
                 HookParameter {
                     name: string("database"),
-                    value: string("other"),
+                    typed: Some(Typed::StringValue(string("other"))),
+                    ..HookParameter::default()
                 },
             ],
             ..HookStep::default()

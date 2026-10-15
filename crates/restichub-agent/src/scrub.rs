@@ -84,6 +84,35 @@ impl Scrubber {
         }
     }
 
+    /// Holds the secret values of one hook, so the hook output keeps none of them (FR-HK-03).
+    pub(crate) fn for_secrets(values: &[Zeroizing<String>]) -> Self {
+        let mut secrets: Vec<Zeroizing<String>> = values
+            .iter()
+            .filter(|secret| !secret.is_empty())
+            .cloned()
+            .collect();
+        // The reader splits the output into lines, so a secret with line breaks never matches as a
+        // whole. Each of its lines is masked too.
+        for secret in values {
+            if secret.contains('\n') {
+                secrets.extend(
+                    secret
+                        .lines()
+                        .map(str::trim)
+                        .filter(|line| line.len() >= 6)
+                        .map(|line| Zeroizing::new(line.to_owned())),
+                );
+            }
+        }
+        secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+        secrets.dedup();
+        Self {
+            secrets,
+            names: Vec::new(),
+            locations: Vec::new(),
+        }
+    }
+
     /// Returns the text with every known secret replaced by the mask.
     pub(crate) fn scrub(&self, text: &str) -> String {
         let mut text = text.to_owned();

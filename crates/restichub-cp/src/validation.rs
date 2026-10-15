@@ -60,6 +60,8 @@ pub enum Reason {
     Unavailable,
     /// A confirmation value does not match the object (FR-SC-06).
     Mismatch,
+    /// The host did not turn on the trust mode for server scripts (FR-HK-10).
+    ServerScriptsDisabled,
 }
 
 impl Reason {
@@ -81,6 +83,7 @@ impl Reason {
             Self::Incompatible => "incompatible",
             Self::Unavailable => "unavailable",
             Self::Mismatch => "mismatch",
+            Self::ServerScriptsDisabled => "server_scripts_disabled",
         }
     }
 }

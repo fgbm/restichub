@@ -26,16 +26,17 @@ use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::validation::Reason;
 
-/// Stores the facts of the last hello of an agent for the diagnostics, the Hosts screen and the
-/// Restore screen (FR-PR-09, FR-RS-03). The job builder never reads the capabilities: it uses the
-/// capabilities of the live connection.
-pub async fn record_hello_facts(
+/// Stores the facts of the last hello of an agent for the diagnostics, the Hosts screen, the
+/// Restore screen and the hook picker (FR-PR-09, FR-RS-03, FR-HK-04). The job builder never reads
+/// the capabilities: it uses the capabilities of the live connection.
+pub(crate) async fn record_hello_facts(
     state: &AppState,
     tenant: restichub_db::TenantId,
     agent: AgentId,
     hello: &restichub_proto::agent::v1::AgentHello,
     capabilities: &[restichub_proto::AgentCapability],
     restore_roots: &[String],
+    hooks: &crate::hooks::HelloHooks,
 ) {
     let names: Vec<String> = capabilities
         .iter()
@@ -45,19 +46,19 @@ pub async fn record_hello_facts(
     let restic_version = clean_version(&hello.restic_version);
     let result = async {
         let mut tx = state.db().begin_tenant(tenant).await?;
-        repo::set_hello_facts(
-            &mut tx,
-            agent,
-            &repo::HelloFacts {
-                capabilities: &names,
-                restore_roots,
-                agent_version: &agent_version,
-                restic_version: &restic_version,
-                protocol_version_major: hello.protocol_version_major,
-                protocol_version_minor: hello.protocol_version_minor,
-            },
-        )
-        .await?;
+        let facts = repo::HelloFacts {
+            capabilities: &names,
+            restore_roots,
+            agent_version: &agent_version,
+            restic_version: &restic_version,
+            protocol_version_major: hello.protocol_version_major,
+            protocol_version_minor: hello.protocol_version_minor,
+            hooks: &hooks.hooks,
+            hook_allow_list: hooks.state,
+            server_scripts: hooks.scripts.state,
+            script_interpreters: &hooks.scripts.interpreters,
+        };
+        repo::set_hello_facts(&mut tx, agent, &facts).await?;
         tx.commit().await
     }
     .await;
@@ -90,6 +91,16 @@ pub struct AgentView {
     /// Absolute directories where the agent restores files, from its last connection. A restore
     /// target must lie inside one of them.
     pub restore_roots: Vec<String>,
+    /// Whether the agent trusted its hook allow-list file at its last connection (AC-HK-01).
+    pub hook_allow_list: restichub_db::HookAllowListState,
+    /// The hooks from the allow-list of the host, as the agent reported them (FR-HK-04). The list
+    /// holds no path. The control plane cannot change it.
+    pub hooks: Vec<crate::hooks::HookView>,
+    /// Whether the host trusts scripts from the control plane (FR-HK-08, ADR-0037). The host
+    /// administrator changes it with `restichub-agent trust-server-scripts`.
+    pub server_scripts: restichub_db::ServerScriptsState,
+    /// The interpreters the agent found, for example `bash`. Empty unless the mode is enabled.
+    pub script_interpreters: Vec<String>,
     /// Lower-case hexadecimal.
     pub certificate_serial: String,
     /// In RFC 3339.
@@ -132,6 +143,10 @@ impl From<&repo::Agent> for AgentView {
             restic_version: agent.restic_version.clone(),
             labels: agent.labels.clone(),
             restore_roots: agent.restore_roots.clone(),
+            hook_allow_list: agent.hook_allow_list,
+            hooks: crate::hooks::views_of(agent),
+            server_scripts: agent.server_scripts,
+            script_interpreters: agent.script_interpreters.clone(),
             certificate_serial: to_hex(&agent.certificate_serial),
             certificate_expires_at: format_time(agent.certificate_expires_at),
             last_certificate_rotation_at: agent.last_certificate_rotation_at.map(format_time),

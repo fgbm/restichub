@@ -12,8 +12,12 @@ import type {
 	JobLogPage,
 	JobLogQuery,
 	JobProgress,
-	JobStep
+	JobStep,
+	PlannedStep
 } from './types';
+
+/** The sample plan whose jobs run scripts before and after the backup (FR-HK-11). */
+export const SCRIPTED_PLAN = 'pl_2';
 
 const LINE_INTERVAL_MS = 4000;
 const RUNNING_FILES = 128_402;
@@ -111,9 +115,73 @@ function closingLines(job: Job): Draft[] {
 	return lines;
 }
 
+function isScripted(job: Job): boolean {
+	return job.plan_id === SCRIPTED_PLAN && job.status === 'succeeded';
+}
+
+const SCRIPTED_STEPS: PlannedStep[] = [
+	{ step_id: 'script-0', kind: 'script', name: 'Check free disk space', phase: 'before' },
+	{ step_id: 'script-1', kind: 'script', name: 'Dump the PostgreSQL database', phase: 'before' },
+	{ step_id: 'backup', kind: 'backup', name: '', phase: null },
+	{ step_id: 'script-2', kind: 'script', name: 'Remove the old dumps', phase: 'finally' }
+];
+
+// Seconds that each step of a scripted job takes, in the order of SCRIPTED_STEPS.
+const SCRIPTED_SECONDS = [2, 41, 96, 3];
+
+const SCRIPTED_LINES: [string, Draft][] = [
+	['script-0', ['info', 'script Check free disk space started', 'agent']],
+	['script-0', ['info', 'free: 214 GB, needed: 10 GB', 'stdout']],
+	['script-0', ['info', 'script Check free disk space finished with code 0', 'agent']],
+	['script-1', ['info', 'script Dump the PostgreSQL database started', 'agent']],
+	['script-1', ['info', 'dump written: /var/backups/postgres/app.dump', 'stdout']],
+	['script-1', ['info', 'script Dump the PostgreSQL database finished with code 0', 'agent']],
+	['backup', ['info', 'using parent snapshot 7f3c9a10', 'stdout']],
+	['backup', ['info', 'start backup on [/var/backups/postgres /etc]', 'stdout']],
+	['backup', ['info', 'snapshot a1b2c3d4 saved', 'stdout']],
+	['script-2', ['info', 'script Remove the old dumps started', 'agent']],
+	['script-2', ['warn', 'removed 2 dumps older than 7 days', 'stderr']],
+	['script-2', ['info', 'script Remove the old dumps finished with code 0', 'agent']]
+];
+
+function scriptedLines(job: Job): JobLogLine[] {
+	const start = startOf(job);
+	return SCRIPTED_LINES.map(([stepId, draft], index) => ({
+		seq: index + 1,
+		step_id: stepId,
+		stream: draft[2],
+		level: draft[0],
+		ts: new Date(start + index * 7000).toISOString(),
+		text: draft[1]
+	}));
+}
+
+function scriptedSteps(job: Job): JobStep[] {
+	let cursor = startOf(job);
+	return SCRIPTED_STEPS.map((planned, index) => {
+		const begin = cursor;
+		cursor += SCRIPTED_SECONDS[index] * 1000;
+		return {
+			step_id: planned.step_id,
+			kind: planned.kind,
+			name: planned.name,
+			phase: planned.phase,
+			status: 'success',
+			exit_code: 0,
+			started_at: new Date(begin).toISOString(),
+			finished_at: new Date(cursor).toISOString(),
+			error_code: null,
+			error_params: {},
+			possible_stale_lock: false,
+			output: planned.kind === 'backup' ? BACKUP_SUMMARY : { kind: 'none' }
+		};
+	});
+}
+
 /** All lines a job holds at the time `now`. */
 export function logLinesOf(job: Job, now: number): JobLogLine[] {
 	if (job.status === 'queued' || job.status === 'sent') return [];
+	if (isScripted(job)) return scriptedLines(job);
 	const start = startOf(job);
 	const lines: JobLogLine[] = [];
 	const push = (draft: Draft, at: number) =>
@@ -146,7 +214,10 @@ export function logLinesOf(job: Job, now: number): JobLogLine[] {
 export function logPageOf(job: Job, query: JobLogQuery | undefined, now: number): JobLogPage {
 	const after = query?.after_seq ?? 0;
 	const limit = query?.limit ?? 500;
-	const rest = logLinesOf(job, now).filter((item) => item.seq > after);
+	const step = query?.step_id;
+	const rest = logLinesOf(job, now).filter(
+		(item) => item.seq > after && (step === undefined || item.step_id === step)
+	);
 	return {
 		items: rest.slice(0, limit),
 		has_more: rest.length > limit,
@@ -173,7 +244,9 @@ function progressOf(job: Job, now: number): JobProgress | null {
 	};
 }
 
-function failedStep(job: Job, status: JobStep['status'], exit: number, code: string): JobStep {
+type BareStep = Omit<JobStep, 'kind' | 'name' | 'phase'>;
+
+function failedStep(job: Job, status: JobStep['status'], exit: number, code: string): BareStep {
 	return {
 		step_id: stepIdOf(job),
 		status,
@@ -187,8 +260,9 @@ function failedStep(job: Job, status: JobStep['status'], exit: number, code: str
 	};
 }
 
-function stepsOf(job: Job): JobStep[] {
+function stepsOf(job: Job): BareStep[] {
 	if (job.status === 'queued' || job.status === 'sent' || job.status === 'running') return [];
+	if (isScripted(job)) return scriptedSteps(job);
 	if (job.result_code === 'config_error') {
 		return [failedStep(job, 'config_error', 12, 'step_config_error')];
 	}
@@ -245,21 +319,35 @@ function stepsOf(job: Job): JobStep[] {
 }
 
 /** The steps that the control plane signed into the job. A queued job has no list yet. */
-function plannedStepsOf(job: Job): string[] {
+function plannedStepsOf(job: Job): PlannedStep[] {
+	const plain = (ids: string[]): PlannedStep[] =>
+		ids.map((id) => ({
+			step_id: id,
+			kind: id === 'backup' ? 'backup' : 'other',
+			name: '',
+			phase: null
+		}));
 	if (job.status === 'queued') return [];
-	if (job.kind === 'restore') return ['restore'];
-	if (job.status === 'running') return ['backup', 'forget', 'prune'];
-	return ['backup', 'forget'];
+	if (job.plan_id === SCRIPTED_PLAN) return SCRIPTED_STEPS;
+	if (job.kind === 'restore') return plain(['restore']);
+	if (job.status === 'running') return plain(['backup', 'forget', 'prune']);
+	return plain(['backup', 'forget']);
 }
 
 /** The detail of a job at the time `now`: steps, summary, progress and the state of the log. */
 export function detailOf(job: Job, now: number): JobDetail {
-	const steps = stepsOf(job);
+	const steps: JobStep[] = stepsOf(job).map((step) => ({
+		kind: step.step_id === 'backup' ? 'backup' : 'other',
+		name: '',
+		phase: null,
+		...step
+	}));
 	const summary = steps.map((step) => step.output).find((output) => output.kind !== 'none') ?? null;
 	return {
 		...job,
 		trigger: job.kind === 'restore' ? 'manual' : 'schedule',
-		planned_steps: plannedStepsOf(job),
+		planned_steps: plannedStepsOf(job).map((step) => step.step_id),
+		planned: plannedStepsOf(job),
 		steps,
 		summary,
 		progress: progressOf(job, now),
