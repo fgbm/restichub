@@ -95,6 +95,9 @@ async fn ac_sc_10_a_running_job_of_a_connected_agent_is_not_failed_by_the_clock(
     env.clock.advance(13 * 3600);
     env.pass().await;
     assert_eq!(env.job_status(job).await, "running");
+    let limits = &env.job(job).await["limits"];
+    assert_eq!(limits["max_duration_seconds"], serde_json::Value::Null);
+    assert_eq!(limits["stall_timeout_seconds"], 3600);
 
     // Only the loss of the agent ends the job.
     let agent_id = w.agent.id;
@@ -157,6 +160,8 @@ async fn ac_sc_06_a_running_job_past_its_maximum_duration_fails_while_the_agent_
     env.pass().await;
     let id = decode_job_id(&agent.job().await);
     agent.start(&env, &id).await;
+
+    assert_eq!(env.job(job).await["limits"]["max_duration_seconds"], 7200);
 
     // The agent restarted and lost the job, but it is online again.
     env.clock.advance(2 * 3600 + 5 * 60);

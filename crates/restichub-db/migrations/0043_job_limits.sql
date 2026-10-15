@@ -16,3 +16,7 @@ ALTER TABLE profiles ADD CONSTRAINT profiles_job_limits_check CHECK (
 
 UPDATE jobs SET timeout_seconds = NULL
     WHERE timeout_seconds = 43200 AND status IN ('queued', 'sent', 'running');
+
+-- The stall timeout of the signed job, for the job detail. NULL for a job that was sent before
+-- the migration or by an older control plane.
+ALTER TABLE jobs ADD COLUMN stall_timeout_seconds integer;

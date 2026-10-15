@@ -182,13 +182,14 @@ pub async fn mark_dispatched(
     now: OffsetDateTime,
     lease_until: OffsetDateTime,
     timeout_seconds: Option<i32>,
+    stall_timeout_seconds: Option<i32>,
     signed: &StoredSignedJob,
 ) -> Result<bool, DbError> {
     let secrets: Vec<Uuid> = signed.secrets.iter().map(|id| id.as_uuid()).collect();
     let result = sqlx::query(
         "UPDATE jobs SET status = 'sent', sent_at = $2, lease_until = $3, \
                 deliveries = deliveries + 1, signed_job = $4, signed_job_nonce = $5, \
-                signed_job_key_version = $6, signed_job_secrets = $7, timeout_seconds = $8, \
+                signed_job_key_version = $6, signed_job_secrets = $7, timeout_seconds = $8, stall_timeout_seconds = $9, \
                 updated_at = now() \
          WHERE id = $1 AND status = 'queued'",
     )
@@ -200,6 +201,7 @@ pub async fn mark_dispatched(
     .bind(signed.key_version)
     .bind(&secrets)
     .bind(timeout_seconds)
+    .bind(stall_timeout_seconds)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

@@ -192,7 +192,11 @@ fn is_format_character(character: char) -> bool {
 /// Derives the level of a line from its text. restic prints no level on a plain line.
 fn classify(text: &str) -> LogLevel {
     let lower = text.trim_start().to_ascii_lowercase();
-    if lower.starts_with("fatal") || lower.starts_with("error") || lower.contains("error:") {
+    // restic reports an unreadable item as an `error` message and goes on; the run ends with
+    // exit code 3 and the status `succeeded_with_warnings`. A fatal error never has this form.
+    if lower.starts_with("error during ") {
+        LogLevel::Warn
+    } else if lower.starts_with("fatal") || lower.starts_with("error") || lower.contains("error:") {
         LogLevel::Error
     } else if lower.starts_with("warning") || lower.contains("warning:") {
         LogLevel::Warn
@@ -295,5 +299,16 @@ mod tests {
             LogLevel::Warn
         );
         assert_eq!(classify("scan finished in 1s"), LogLevel::Info);
+    }
+
+    #[test]
+    fn fr_mn_02_an_item_error_of_a_backup_is_a_warning() {
+        assert_eq!(
+            classify(
+                "error during archival of C:/Users/a/OneDrive/x: Access to the cloud file is denied"
+            ),
+            LogLevel::Warn
+        );
+        assert_eq!(classify("error: the repository is locked"), LogLevel::Error);
     }
 }

@@ -290,7 +290,9 @@ async fn first_send(
     };
     let timeout = Some(i32::try_from(built.job.job().timeout_seconds).unwrap_or(i32::MAX))
         .filter(|seconds| *seconds > 0);
-    queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, &stored).await?;
+    let stall = Some(i32::try_from(built.job.job().stall_timeout_seconds).unwrap_or(i32::MAX))
+        .filter(|seconds| *seconds > 0);
+    queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, stall, &stored).await?;
     let required = compat::required_capabilities(&built.job.job().steps);
     let step_ids: Vec<String> = built
         .job
