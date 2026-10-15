@@ -136,7 +136,7 @@ jobs:
           cp -a "$GITHUB_WORKSPACE" "$RUNNER_TEMP/copy"
           for dir in "$GITHUB_WORKSPACE" "$RUNNER_TEMP/copy"; do
             ( cd "$dir"
-              export RUSTFLAGS="--remap-path-prefix=${dir}=/build/src --remap-path-prefix=${CARGO_HOME}=/build/cargo --remap-path-prefix=${RUSTUP_HOME}=/build/rustup"
+              export RUSTFLAGS="--remap-path-prefix=${dir}=/build/src --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/build/cargo --remap-path-prefix=${RUSTUP_HOME:-$HOME/.rustup}=/build/rustup"
               RESTICHUB_BUILD_VERSION="$revision" cargo build --release --locked -p restichub-agent --target "$TARGET"
               packaging/assemble-agent-package.sh "target/$TARGET/release/restichub-agent" linux amd64 0.0.0 "$dir/package" )
           done
