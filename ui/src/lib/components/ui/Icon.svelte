@@ -24,7 +24,7 @@
 <svg
 	class="icon icon--{size} {className}"
 	class:icon--spin={spin}
-	viewBox="0 0 16 16"
+	viewBox="0 0 24 24"
 	focusable="false"
 	role={label ? 'img' : undefined}
 	aria-label={label}
@@ -38,8 +38,14 @@
 			<circle {...attributes} />
 		{:else if tag === 'rect'}
 			<rect {...attributes} />
-		{:else}
+		{:else if tag === 'ellipse'}
 			<ellipse {...attributes} />
+		{:else if tag === 'line'}
+			<line {...attributes} />
+		{:else if tag === 'polyline'}
+			<polyline {...attributes} />
+		{:else}
+			<polygon {...attributes} />
 		{/if}
 	{/each}
 </svg>
@@ -51,7 +57,7 @@
 		height: 16px;
 		fill: none;
 		stroke: currentColor;
-		stroke-width: 1.5;
+		stroke-width: 2;
 		stroke-linecap: round;
 		stroke-linejoin: round;
 		vertical-align: -0.15em;

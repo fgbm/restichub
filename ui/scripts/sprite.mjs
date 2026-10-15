@@ -9,10 +9,12 @@ export function parseSprite(source) {
 	for (const symbol of source.matchAll(/<symbol id="i-([a-z0-9-]+)"[^>]*>([\s\S]*?)<\/symbol>/g)) {
 		/** @type {[string, Record<string, string>][]} */
 		const shapes = [];
-		for (const shape of symbol[2].matchAll(/<(path|circle|rect|ellipse)\b([^>]*?)\/>/g)) {
+		for (const shape of symbol[2].matchAll(
+			/<(path|circle|rect|ellipse|line|polyline|polygon)\b([^>]*?)\/>/g
+		)) {
 			/** @type {Record<string, string>} */
 			const attributes = {};
-			for (const attribute of shape[2].matchAll(/([a-z-]+)="([^"]*)"/g)) {
+			for (const attribute of shape[2].matchAll(/([a-z0-9-]+)="([^"]*)"/g)) {
 				attributes[attribute[1]] = attribute[2];
 			}
 			shapes.push([shape[1], attributes]);

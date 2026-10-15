@@ -2,3 +2,6 @@ ResticHub
 Copyright 2026 The ResticHub Authors
 
 This product is licensed under the Apache License, Version 2.0.
+
+The web UI contains icons from Lucide (ISC License) and Feather (MIT License).
+The licence texts are in ui/static/THIRD_PARTY_NOTICES.txt, which the control plane serves.
