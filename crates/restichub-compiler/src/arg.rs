@@ -414,8 +414,8 @@ fn overwrite_value(mode: OverwriteMode) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use restichub_proto::agent::v1::{
-        BackupStep, ForgetStep, HookPhase, Job, ScriptFailurePolicy, ScriptInterpreter, ScriptStep, RepositoryAccess, SnapshotsFilter, Step, UnlockStep,
-        step,
+        BackupStep, ForgetStep, HookPhase, Job, RepositoryAccess, ScriptFailurePolicy,
+        ScriptInterpreter, ScriptStep, SnapshotsFilter, Step, UnlockStep, step,
     };
 
     use super::{ArgError, MASK, build_command, is_safe_env, mask_secrets};

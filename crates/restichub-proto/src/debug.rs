@@ -8,9 +8,8 @@
 use std::fmt;
 
 use crate::agent::v1::{
-    RepositoryAccess, RestCredentials, S3Credentials, ScriptEnv, ScriptStep,
-    SftpCredentials, SignedJob, repository_access::BackendCredentials,
-    script_env,
+    RepositoryAccess, RestCredentials, S3Credentials, ScriptEnv, ScriptStep, SftpCredentials,
+    SignedJob, repository_access::BackendCredentials, script_env,
 };
 
 const MASK: &str = "***";

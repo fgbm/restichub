@@ -12,9 +12,9 @@
 pub mod arg;
 mod compile;
 mod error;
-pub mod phase;
 mod job;
 mod option;
+pub mod phase;
 mod preview;
 mod profile;
 pub mod script;

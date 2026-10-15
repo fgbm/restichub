@@ -25,8 +25,8 @@ use std::collections::HashSet;
 
 use crate::agent::v1::{
     HookPhase, Job, OverwriteMode, RejectReason, RepositoryAccess, ScriptFailurePolicy,
-    ScriptInterpreter, ScriptStep, SnapshotsFilter, Step,
-    repository_access::BackendCredentials, script_env, step,
+    ScriptInterpreter, ScriptStep, SnapshotsFilter, Step, repository_access::BackendCredentials,
+    script_env, step,
 };
 use crate::signing::Rejection;
 
@@ -614,8 +614,8 @@ fn reject(job: &Job, reason: RejectReason) -> Rejection {
 mod tests {
     use super::*;
     use crate::agent::v1::{
-        BackupStep, CheckStep, ForgetStep, LsStep, PruneStep, RestoreStep,
-        SftpCredentials, SnapshotsStep, StatsStep, UnlockAllStep, UnlockStep,
+        BackupStep, CheckStep, ForgetStep, LsStep, PruneStep, RestoreStep, SftpCredentials,
+        SnapshotsStep, StatsStep, UnlockAllStep, UnlockStep,
     };
 
     const BAD_OPTION: &str = "--password-command=cmd /c calc";

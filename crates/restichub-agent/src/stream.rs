@@ -29,9 +29,9 @@ use anyhow::{Context, Result, bail};
 use hyper::Uri;
 use restichub_proto::agent::v1::{
     AgentHello, AgentMessage, CertificateInstalled, CertificateRejectReason,
-    CertificateSigningRequest, ControlMessage, KeyUpdateAck,
-    Ping, Pong, ScriptInterpreter, ServerScriptsState, SigningKeyUpdate, VersionRejectReason,
-    agent_message, agent_service_client::AgentServiceClient, control_message,
+    CertificateSigningRequest, ControlMessage, KeyUpdateAck, Ping, Pong, ScriptInterpreter,
+    ServerScriptsState, SigningKeyUpdate, VersionRejectReason, agent_message,
+    agent_service_client::AgentServiceClient, control_message,
 };
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, watch};

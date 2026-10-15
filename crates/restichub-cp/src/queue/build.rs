@@ -255,17 +255,12 @@ async fn resolve_hook_secrets(
     let mut read = Vec::new();
     for step in steps {
         let mut references: Vec<&mut String> = Vec::new();
-        match step.kind.as_mut() {
-            // A secret reference of a script variable is an identifier that the control plane resolves at
-            // dispatch (FR-HK-09, ADR-0017).
-            Some(step::Kind::Script(script)) => {
-                for variable in &mut script.env {
-                    if let Some(script_env::Value::SecretValue(reference)) = &mut variable.value {
-                        references.push(reference);
-                    }
+        if let Some(step::Kind::Script(script)) = step.kind.as_mut() {
+            for variable in &mut script.env {
+                if let Some(script_env::Value::SecretValue(reference)) = &mut variable.value {
+                    references.push(reference);
                 }
             }
-            _ => {}
         }
         for reference in references {
             let id = uuid::Uuid::parse_str(reference)

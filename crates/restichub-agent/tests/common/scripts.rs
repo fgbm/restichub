@@ -6,9 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
-use restichub_agent::trust::Trust;
 use restichub_agent::jobs::Jobs;
 use restichub_agent::scripts::ScriptStore;
+use restichub_agent::trust::Trust;
 use restichub_proto::agent::v1::{
     HookPhase, RejectReason, ScriptEnv, ScriptFailurePolicy, ScriptInterpreter, ScriptStep, Step,
     StepStatus, agent_message, script_env, step,

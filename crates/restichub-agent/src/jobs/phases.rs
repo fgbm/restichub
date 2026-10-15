@@ -1,4 +1,4 @@
-//! The script steps of a job: the phases, the stop rules and the result (FR-HK-05, AC-HK-06,
+//! The script steps of a job: the phases, the stop rules and the result (FR-HK-05, AC-HK-13,
 //! ADR-0037).
 //!
 //! The agent derives the order from the phase of each script, not from its position in the job.
@@ -38,7 +38,7 @@ use crate::scrub::Scrubber;
 /// limit; this one stops a chatty script from using all of it (FR-AG-08).
 const SCRIPT_OUTPUT_LIMIT: usize = 256 * 1024;
 
-/// The steps of a job, grouped by the phase of the hooks (FR-HK-05).
+/// The steps of a job, grouped by the phase of the scripts (FR-HK-05).
 pub(super) struct Phased<'a> {
     pub(super) before: Vec<&'a Step>,
     /// Every step that is not a script, in the order of the job.
@@ -78,11 +78,11 @@ impl<'a> Phased<'a> {
     }
 }
 
-/// The first hook that failed, for the error of the job (AC-HK-06).
+/// The first script that failed, for the error of the job (AC-HK-13).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HookFailure {
+pub(super) struct ScriptFailure {
     /// The name of the script.
-    pub(super) hook_id: String,
+    pub(super) script_name: String,
     pub(super) phase: HookPhase,
 }
 
@@ -103,7 +103,7 @@ pub(super) struct PhaseMode {
 /// What a phase did.
 #[derive(Debug, Default)]
 pub(super) struct PhaseReport {
-    pub(super) failure: Option<HookFailure>,
+    pub(super) failure: Option<ScriptFailure>,
     pub(super) cancelled: bool,
     /// A script with the policy `continue` failed: the job goes on and ends with warnings.
     pub(super) warned: bool,
@@ -126,7 +126,7 @@ pub(super) struct Sink<'a> {
 
 impl Jobs {
     /// Executes the scripts of one phase one by one and reports the first failure (FR-HK-05).
-    pub(super) async fn run_hook_steps(
+    pub(super) async fn run_script_steps(
         &self,
         steps: &[&Step],
         mode: PhaseMode,
@@ -167,8 +167,8 @@ impl Jobs {
                 _ => {
                     *sink.failed += 1;
                     if report.failure.is_none() {
-                        report.failure = Some(HookFailure {
-                            hook_id: script.name.clone(),
+                        report.failure = Some(ScriptFailure {
+                            script_name: script.name.clone(),
                             phase: phase_of(script.phase).unwrap_or(HookPhase::Before),
                         });
                     }
@@ -182,7 +182,7 @@ impl Jobs {
         report
     }
 
-    /// Reports the steps that did not run, so the user sees why the sequence ended (AC-HK-06).
+    /// Reports the steps that did not run, so the user sees why the sequence ended (AC-HK-13).
     pub(super) async fn skip_steps(&self, steps: &[&Step], sink: &mut Sink<'_>) {
         for step in steps {
             let now = now_timestamp();
@@ -241,7 +241,7 @@ impl Jobs {
         outcome
     }
 
-    /// Starts the process of an invocation, supervises it and returns its outcome (FR-HK-03,
+    /// Starts the process of an invocation, supervises it and returns its outcome (FR-HK-09,
     /// FR-AG-10).
     #[allow(clippy::too_many_arguments)]
     async fn supervise(
@@ -288,7 +288,7 @@ impl Jobs {
                 return StepOutcome::not_started();
             }
         };
-        // The secret values leave the memory of the agent with the invocation (FR-HK-03).
+        // The secret values leave the memory of the agent with the invocation (FR-HK-09).
         drop(invocation);
 
         let (stdout, stderr) = child.take_output();

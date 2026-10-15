@@ -53,15 +53,15 @@ use crate::restic_store::Layout;
 use crate::restore_roots::RestoreAccess;
 use crate::scripts::ScriptStore;
 
-mod hooks;
 mod log;
 mod outcome;
+mod phases;
 mod runner;
 mod watchdog;
 
-use hooks::{HookFailure, PhaseMode, Phased, Sink};
 use log::JobLog;
 use outcome::{Progress, interrupted_error, job_error, job_outcome};
+use phases::{PhaseMode, Phased, ScriptFailure, Sink};
 use runner::{CancelHandle, StepError, StepOutcome};
 use watchdog::StepLimits;
 
@@ -559,9 +559,9 @@ impl Jobs {
         // matches (FR-RP-02, AC-RP-01).
         let mut probe_repository: Option<String> = None;
 
-        // The `before` scripts run first. A failed one stops the sequence (AC-HK-06).
+        // The `before` scripts run first. A failed one stops the sequence (AC-HK-13).
         let before = self
-            .run_hook_steps(
+            .run_script_steps(
                 &phased.before,
                 PhaseMode {
                     stop_on_failure: true,
@@ -582,8 +582,8 @@ impl Jobs {
             .await;
         progress.cancelled |= before.cancelled;
         progress.warned |= before.warned;
-        let mut hook_failure: Option<HookFailure> = before.failure;
-        let before_ok = hook_failure.is_none() && !progress.cancelled;
+        let mut script_failure: Option<ScriptFailure> = before.failure;
+        let before_ok = script_failure.is_none() && !progress.cancelled;
         if !before_ok {
             let mut sink = Sink {
                 job_id: &job_id,
@@ -760,15 +760,15 @@ impl Jobs {
             && !progress.cancelled;
         if before_ok && !progress.cancelled {
             let report = self
-                .run_hook_steps(&phased.after, cleanup, &cancel, cleanup_deadline, sink!())
+                .run_script_steps(&phased.after, cleanup, &cancel, cleanup_deadline, sink!())
                 .await;
             progress.cancelled |= report.cancelled;
             progress.warned |= report.warned;
-            hook_failure = hook_failure.or(report.failure);
+            script_failure = script_failure.or(report.failure);
         } else {
             self.skip_steps(&phased.after, sink!()).await;
         }
-        let succeeded_so_far = main_ok && hook_failure.is_none() && !progress.cancelled;
+        let succeeded_so_far = main_ok && script_failure.is_none() && !progress.cancelled;
         let (run_success, run_error) = if progress.cancelled {
             (false, false)
         } else if succeeded_so_far {
@@ -782,17 +782,17 @@ impl Jobs {
         ] {
             if run {
                 let report = self
-                    .run_hook_steps(steps, cleanup, &cancel, cleanup_deadline, sink!())
+                    .run_script_steps(steps, cleanup, &cancel, cleanup_deadline, sink!())
                     .await;
                 progress.cancelled |= report.cancelled;
                 progress.warned |= report.warned;
-                hook_failure = hook_failure.or(report.failure);
+                script_failure = script_failure.or(report.failure);
             } else {
                 self.skip_steps(steps, sink!()).await;
             }
         }
         let report = self
-            .run_hook_steps(
+            .run_script_steps(
                 &phased.finally,
                 PhaseMode {
                     honor_cancel: false,
@@ -805,8 +805,8 @@ impl Jobs {
             .await;
         progress.cancelled |= report.cancelled;
         progress.warned |= report.warned;
-        hook_failure = hook_failure.or(report.failure);
-        progress.hook_failure = hook_failure;
+        script_failure = script_failure.or(report.failure);
+        progress.script_failure = script_failure;
 
         self.send_log(&mut log).await;
         let outcome = job_outcome(&progress);

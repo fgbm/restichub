@@ -1,5 +1,5 @@
 //! The safety rules of the script steps: the search path, the journal and the cleanup phases
-//! (AC-HK-01, FR-HK-08, ADR-0037).
+//! (AC-HK-08, FR-HK-08, ADR-0037).
 
 #![allow(clippy::expect_used)]
 #![cfg(unix)]
@@ -19,10 +19,10 @@ fn directory(host: &Host, name: &str, mode: u32) -> std::path::PathBuf {
     dir
 }
 
-/// AC-HK-01: a search path directory that another account can write never reaches a script, and
+/// AC-HK-08: a search path directory that another account can write never reaches a script, and
 /// the step log names the dropped directory once for the job.
 #[tokio::test(flavor = "multi_thread")]
-async fn ac_hk_01_a_user_writable_search_path_directory_is_not_in_the_script_environment() {
+async fn ac_hk_08_a_user_writable_search_path_directory_is_not_in_the_script_environment() {
     let host = Host::new("script-path");
     host.enable();
     let good = directory(&host, "bin-good", 0o755);

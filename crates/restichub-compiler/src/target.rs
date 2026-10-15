@@ -1,10 +1,9 @@
-//! Facts about the target agent (FR-PF-03, FR-HK-04).
+//! Facts about the target agent (FR-PF-03).
 
 use std::collections::BTreeMap;
 use std::fmt;
 
 use time::OffsetDateTime;
-
 
 /// Operating system of a target agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

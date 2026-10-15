@@ -312,7 +312,7 @@ async fn fr_hk_09_the_output_of_a_script_is_bounded() {
     );
     let collected = run(&host.jobs(), &job).await;
     let log = collected.log_text();
-    assert!(log.contains("hook output truncated"), "{}", log.len());
+    assert!(log.contains("script output truncated"), "{}", log.len());
     assert!(log.len() < 300 * 1024, "{}", log.len());
 }
 
@@ -563,21 +563,21 @@ async fn run_whoami_script(name: &str, interpreter: ScriptInterpreter, body: &st
     host
 }
 
-/// ADR-0037, AC-HK-01 on Windows: a cmd script finds `whoami` by name, and its `PATH` holds no
+/// ADR-0037, AC-HK-08 on Windows: a cmd script finds `whoami` by name, and its `PATH` holds no
 /// verbatim `\\?\` entry.
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
-async fn ac_hk_01_a_cmd_script_runs_a_system_program_by_name() {
+async fn ac_hk_08_a_cmd_script_runs_a_system_program_by_name() {
     let body =
         "whoami > \"%MARKS%\\who\"\nif errorlevel 1 exit /b 1\n>\"%MARKS%\\path\" echo %PATH%\n";
     run_whoami_script("script-cmd-path", ScriptInterpreter::Cmd, body).await;
 }
 
-/// ADR-0037, AC-HK-01 on Windows: a PowerShell script finds `whoami` by name, and its `PATH` holds
+/// ADR-0037, AC-HK-08 on Windows: a PowerShell script finds `whoami` by name, and its `PATH` holds
 /// no verbatim `\\?\` entry.
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
-async fn ac_hk_01_a_powershell_script_runs_a_system_program_by_name() {
+async fn ac_hk_08_a_powershell_script_runs_a_system_program_by_name() {
     let body = "whoami | Set-Content -Path (Join-Path $env:MARKS 'who')\r\n\
                 if ($LASTEXITCODE -ne 0) { exit 1 }\r\n\
                 Set-Content -Path (Join-Path $env:MARKS 'path') -Value $env:PATH\r\n";

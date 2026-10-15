@@ -12,8 +12,8 @@
 //! check and the spawn is therefore refused (threat T20).
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use restichub_compiler::arg::CommandLine;
@@ -929,7 +929,6 @@ mod tests {
     #[test]
     fn fr_ag_11_an_update_takes_effect_for_the_next_spawn() {
         use restichub_proto::agent::v1::ProcessPriority;
-use zeroize::Zeroizing;
         use sha2::Digest as _;
 
         use crate::restic_release::VerifiedRelease;

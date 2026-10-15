@@ -1,8 +1,8 @@
 //! Where the agent may restore files (FR-RS-03, ADR-0035).
 //!
 //! The agent restores as root or LocalSystem, so a restore target decides which file the agent can
-//! overwrite. Only root or Administrators configure the roots, in a protected file like the hook
-//! allow-list (ADR-0004). A job and the control plane cannot change them.
+//! overwrite. Only root or Administrators configure the roots, in a protected file like the trust
+//! mode file (ADR-0037). A job and the control plane cannot change them.
 
 use std::fmt;
 use std::io;

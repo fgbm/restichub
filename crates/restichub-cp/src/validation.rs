@@ -56,7 +56,7 @@ pub enum Reason {
     Unsupported,
     /// The installed restic version lacks the option (AC-AG-09).
     Incompatible,
-    /// Not available yet (FR-HK-04).
+    /// Not available on the host (FR-HK-10).
     Unavailable,
     /// A confirmation value does not match the object (FR-SC-06).
     Mismatch,

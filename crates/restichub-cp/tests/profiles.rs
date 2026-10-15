@@ -8,7 +8,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use restichub_cp::profiles::{MAX_EXCLUDES, MAX_HOOKS, MAX_PATHS, MAX_TAGS};
+use restichub_cp::profiles::{MAX_EXCLUDES, MAX_PATHS, MAX_TAGS};
 use restichub_db::agents::{self as agents_repo, NewAgent};
 use restichub_db::{AgentId, PLATFORM_TENANT_ID, TenantId};
 use serde_json::{Value, json};
@@ -191,7 +191,7 @@ async fn ac_pf_01_the_preview_masks_the_secrets() {
     db.cleanup().await;
 }
 
-/// AC-PF-02: the preview refuses VSS for a Linux agent, a missing hook and an old restic.
+/// AC-PF-02: the preview refuses VSS for a Linux agent and an old restic.
 #[tokio::test]
 async fn ac_pf_02_the_preview_points_to_the_field() {
     let Some(db) = common::test_db().await else {
@@ -234,48 +234,6 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "options.use_fs_snapshot");
     assert_eq!(problem["reason"], "unsupported");
-
-    // A hook that the agent allow-list does not hold (FR-HK-04). Another agent reports it, so the
-    // profile is saved and only the preview for this agent refuses it.
-    let holder = seed_agent_full(db.database(), tenant, "holder-1", "linux", "0.19.0", &[]).await;
-    common::seed_agent_hooks(
-        db.database(),
-        tenant,
-        holder,
-        &std::collections::BTreeMap::from([(
-            "pg_dump".to_owned(),
-            restichub_compiler::AllowListedHook::default(),
-        )]),
-        restichub_db::HookAllowListState::Loaded,
-    )
-    .await;
-    let hook = create_profile(
-        &app,
-        &cookie,
-        json!({
-            "name": "hook-profile",
-            "repository_id": repository_id,
-            "paths": {"all": ["/srv"]},
-            "hooks": [{"hook_id": "pg_dump", "phase": "before", "parameters": []}],
-        }),
-    )
-    .await;
-    let (status, _, problem) = send(
-        &app,
-        request(
-            "POST",
-            &format!(
-                "/api/v1/profiles/{}/preview",
-                hook["id"].as_str().expect("the identifier")
-            ),
-            Some(&cookie),
-            Some(json!({"agent_id": linux_agent.to_string()})),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
-    assert_eq!(problem["field"], "hooks[0].hook_id");
-    assert_eq!(problem["reason"], "unknown");
 
     // An agent with an old restic (FR-AG-11, NFR-CMP-03).
     let (status, _, problem) = send(
@@ -982,29 +940,6 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "tags");
-    assert_eq!(problem["reason"], "too_long");
-
-    // Too many hooks.
-    let hooks: Vec<Value> = (0..=MAX_HOOKS)
-        .map(|index| json!({"hook_id": format!("h{index}"), "phase": "before"}))
-        .collect();
-    let (status, _, problem) = send(
-        &app,
-        request(
-            "POST",
-            "/api/v1/profiles",
-            Some(&cookie),
-            Some(json!({
-                "name": "many-hooks",
-                "repository_id": repository_id,
-                "paths": {"all": ["/srv"]},
-                "hooks": hooks,
-            })),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
-    assert_eq!(problem["field"], "hooks");
     assert_eq!(problem["reason"], "too_long");
 
     db.cleanup().await;

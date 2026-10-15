@@ -78,7 +78,7 @@ impl<'a> SecretReader<'a> {
     }
 
     /// Reads the value of a secret that a profile hands to a script and records the delivery
-    /// (FR-HK-03, ADR-0017).
+    /// (FR-HK-09, ADR-0017).
     ///
     /// Only a secret of the purpose `hook_secret` passes: a profile cannot make the agent receive
     /// a repository password through a script.

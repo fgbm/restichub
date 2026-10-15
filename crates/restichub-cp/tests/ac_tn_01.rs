@@ -209,7 +209,6 @@ const FIXTURES: &[(&str, Fixture)] = &[
         "/api/v1/notification-channels/{id}/test",
         Fixture::Object(Object::Channel),
     ),
-    ("/api/v1/hooks", Fixture::Collection),
     ("/api/v1/script-templates", Fixture::Collection),
     (
         "/api/v1/script-templates/{id}",

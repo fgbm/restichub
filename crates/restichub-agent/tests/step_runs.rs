@@ -13,10 +13,8 @@ use std::path::PathBuf;
 
 use common::*;
 use restichub_proto::agent::v1::{
-    BackupStep, JobStatus, LogStream, RejectReason, StepStatus, agent_message, step,
-    step_result::Output,
+    BackupStep, JobStatus, LogStream, StepStatus, step, step_result::Output,
 };
-use tokio::sync::mpsc;
 
 type StepBuilder = fn() -> restichub_proto::agent::v1::Step;
 
@@ -243,36 +241,6 @@ async fn fr_pr_02_only_unlock_all_removes_live_locks() {
     )
     .await;
     assert_eq!(fixture.argv(), vec!["unlock", "unlock --remove-all"]);
-}
-
-/// FR-PR-02, AC-HK-03: a `hook` step is rejected when the host has no allow-list.
-#[tokio::test(flavor = "multi_thread")]
-async fn fr_pr_02_a_hook_step_is_rejected_without_an_allow_list() {
-    use restichub_proto::agent::v1::HookStep;
-    let fixture = Fixture::new("step-unsupported");
-    let jobs = fixture.jobs();
-    let (tx, mut rx) = mpsc::channel(8);
-    jobs.attach(&tx);
-    let job = fixture.job(
-        "job-later",
-        vec![make_step(
-            "later",
-            step::Kind::Hook(HookStep {
-                hook_id: "pg_dump".to_owned(),
-                ..HookStep::default()
-            }),
-        )],
-    );
-    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
-    let message = rx.recv().await.expect("the agent must answer");
-    match message.payload {
-        Some(agent_message::Payload::JobRejected(rejected)) => assert_eq!(
-            RejectReason::try_from(rejected.reason).ok(),
-            Some(RejectReason::UnknownHook)
-        ),
-        other => panic!("the job must be rejected: {other:?}"),
-    }
-    assert!(fixture.argv().is_empty(), "no restic may start");
 }
 
 /// FR-AG-08: a backup sends progress and a typed summary, and the progress is throttled.

@@ -1,7 +1,8 @@
-//! Who may change the allow-list file and the hook executables (FR-HK-01, AC-HK-01, threat T2).
+//! Who may change the trust mode file and the paths that a script uses (FR-HK-01, AC-HK-08,
+//! threat T2).
 //!
-//! The agent runs a hook as root or LocalSystem. A user who can change the allow-list, an
-//! executable or a directory above them would gain that power, so the agent trusts a path only
+//! The agent runs a script as root or LocalSystem. A user who can change the trust mode file, an
+//! interpreter or a directory above them would gain that power, so the agent trusts a path only
 //! when root or Administrators own every element of the chain and no other account can write it.
 
 use std::path::{Path, PathBuf};
@@ -19,7 +20,7 @@ pub enum Trust {
     CurrentUser,
 }
 
-/// Checks the allow-list file: a regular file, not a link, that only the trusted account can
+/// Checks the trust mode file: a regular file, not a link, that only the trusted account can
 /// change, in directories that only the trusted account can change.
 ///
 /// # Errors
@@ -192,27 +193,27 @@ mod tests {
     }
 
     #[test]
-    fn ac_hk_01_a_file_of_the_current_user_without_write_bits_is_trusted_for_that_user() {
+    fn ac_hk_08_a_file_of_the_current_user_without_write_bits_is_trusted_for_that_user() {
         let dir = temp_dir("ok");
-        let path = file(&dir, "hooks.toml", 0o644);
+        let path = file(&dir, "trust-mode.conf", 0o644);
         assert!(check_file(&path, Trust::CurrentUser).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn ac_hk_01_a_file_that_others_can_write_is_refused() {
+    fn ac_hk_08_a_file_that_others_can_write_is_refused() {
         let dir = temp_dir("writable");
         for mode in [0o666, 0o664, 0o646] {
-            let path = file(&dir, "hooks.toml", mode);
+            let path = file(&dir, "trust-mode.conf", mode);
             assert!(check_file(&path, Trust::CurrentUser).is_err(), "{mode:o}");
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn ac_hk_01_a_directory_that_others_can_write_is_refused() {
+    fn ac_hk_08_a_directory_that_others_can_write_is_refused() {
         let dir = temp_dir("dir");
-        let path = file(&dir, "hooks.toml", 0o644);
+        let path = file(&dir, "trust-mode.conf", 0o644);
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777))
             .expect("cannot set the mode");
         assert!(check_file(&path, Trust::CurrentUser).is_err());
@@ -222,9 +223,9 @@ mod tests {
     }
 
     #[test]
-    fn ac_hk_01_the_host_trust_refuses_a_file_of_a_user_account() {
+    fn ac_hk_08_the_host_trust_refuses_a_file_of_a_user_account() {
         let dir = temp_dir("host");
-        let path = file(&dir, "hooks.toml", 0o644);
+        let path = file(&dir, "trust-mode.conf", 0o644);
         // The test account is not root, so the host trust refuses its file.
         if current_uid() != 0 {
             assert!(check_file(&path, Trust::Host).is_err());
@@ -233,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn ac_hk_01_a_link_is_not_an_allow_list_file() {
+    fn ac_hk_08_a_link_is_not_a_trust_mode_file() {
         let dir = temp_dir("link");
         let target = file(&dir, "real.toml", 0o644);
         let link = dir.join("link.toml");
@@ -243,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn ac_hk_01_an_executable_that_others_can_write_is_refused() {
+    fn ac_hk_08_an_executable_that_others_can_write_is_refused() {
         let dir = temp_dir("exe");
         let good = file(&dir, "good", 0o755);
         let bad = file(&dir, "bad", 0o757);
@@ -265,7 +266,7 @@ mod windows_tests {
     }
 
     #[test]
-    fn ac_hk_01_the_system_directories_of_the_search_path_stay_trusted() {
+    fn ac_hk_08_the_system_directories_of_the_search_path_stay_trusted() {
         let system32 = system_root().join("System32");
         let powershell = system32.join("WindowsPowerShell").join("v1.0");
         for dir in [system32, powershell] {
@@ -275,7 +276,7 @@ mod windows_tests {
     }
 
     #[test]
-    fn ac_hk_01_a_search_path_directory_where_users_write_is_refused() {
+    fn ac_hk_08_a_search_path_directory_where_users_write_is_refused() {
         let dir = std::env::temp_dir().join(format!(
             "restichub-agent-trust-users-{}",
             std::process::id()
