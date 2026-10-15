@@ -275,6 +275,8 @@ impl Jobs {
     /// they keep their order across the greeting (FR-LG-07).
     pub fn attach(&self, tx: &mpsc::Sender<AgentMessage>) {
         self.set_log_mode(LogMode::Pending);
+        // Nothing went out on this stream yet, whatever the stream before it got.
+        self.log_spool.rewind_all();
         *lock(&self.connection) = Some(tx.clone());
         self.start_log_drain(tx.clone());
     }

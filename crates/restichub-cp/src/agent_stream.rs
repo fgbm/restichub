@@ -27,9 +27,8 @@ use restichub_db::queue as queue_repo;
 use restichub_db::{AgentId, AgentStatus, Database, JobId, TenantId};
 use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{
-    AgentMessage, CancelJob, CertificateRejectReason, CertificateRejected, ControlMessage, LogAck,
-    LogChunk, LogStreamAck, Ping, ServerHello, SigningKeyUpdate, VersionRejectReason,
-    VersionRejected, agent_message,
+    AgentMessage, CancelJob, CertificateRejectReason, CertificateRejected, ControlMessage, Ping,
+    ServerHello, SigningKeyUpdate, VersionRejectReason, VersionRejected, agent_message,
     agent_service_server::{AgentService, AgentServiceServer},
     control_message,
 };
@@ -44,6 +43,7 @@ use uuid::Uuid;
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
 use crate::job_signing::{JobSigningService, RotationEvent};
+use crate::log_acks::LogAcks;
 use crate::rotation::PresentedCertificate;
 use crate::server::AppState;
 
@@ -58,6 +58,9 @@ pub const IDLE_CLOSE: Duration = Duration::from_secs(3 * HEARTBEAT_INTERVAL.as_s
 
 /// The agent must send its `AgentHello` within this time, or the stream closes (FR-PR-09).
 pub const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How often the stream sends the waiting log acknowledgements, one for each job (FR-LG-07).
+const LOG_ACK_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Control messages buffered for one agent.
 /// The buffer of the messages that the control plane sends to one agent.
@@ -890,6 +893,8 @@ async fn run_stream(
     let mut last_activity = tokio::time::Instant::now();
     let mut last_request: Option<tokio::time::Instant> = None;
     let mut log_acks = LogAcks::new(capabilities.contains(&AgentCapability::LogAckV1));
+    let mut ack_flush = tokio::time::interval(LOG_ACK_INTERVAL);
+    ack_flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut active = false;
 
     loop {
@@ -908,9 +913,15 @@ async fn run_stream(
                         message,
                     )
                     .await;
+                    if log_acks.take_reconnect() {
+                        break;
+                    }
                 }
                 Ok(None) | Err(_) => break,
             },
+            _ = ack_flush.tick(), if log_acks.has_waiting() => {
+                log_acks.flush(&tx);
+            }
             _ = heartbeat.tick() => {
                 if last_activity.elapsed() >= IDLE_CLOSE {
                     break;
@@ -993,53 +1004,6 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
     // The delivering stream may be superseded between the event and this call.
     let _ = state.agent_registry().send_to_agent(agent, message);
 }
-
-/// The acknowledgements of log chunks on one connection (FR-LG-07).
-///
-/// An acknowledgement covers every chunk of the stream up to its sequence, because the agent sends
-/// the chunks in order. A chunk that fails to store therefore stops the acknowledgements of its job
-/// on this connection; the agent sends the chunks again on the next one.
-struct LogAcks {
-    enabled: bool,
-    failed: HashSet<String>,
-}
-
-impl LogAcks {
-    fn new(enabled: bool) -> Self {
-        Self {
-            enabled,
-            failed: HashSet::new(),
-        }
-    }
-
-    fn after_store(&mut self, tx: &mpsc::Sender<ControlMessage>, chunk: &LogChunk, stored: bool) {
-        if !self.enabled {
-            return;
-        }
-        if !stored {
-            if self.failed.len() < MAX_FAILED_LOG_JOBS {
-                self.failed.insert(chunk.job_id.clone());
-            }
-            return;
-        }
-        if self.failed.contains(&chunk.job_id) {
-            return;
-        }
-        // A full buffer drops the acknowledgement. The agent sends the chunk again later.
-        let _ = tx.try_send(ControlMessage {
-            payload: Some(control_message::Payload::LogAck(LogAck {
-                job_id: chunk.job_id.clone(),
-                streams: vec![LogStreamAck {
-                    stream: chunk.stream,
-                    sequence: chunk.sequence,
-                }],
-            })),
-        });
-    }
-}
-
-/// The most jobs with a failed log write that one connection remembers.
-const MAX_FAILED_LOG_JOBS: usize = 1024;
 
 /// Handles one inbound message (FR-PR-08, ADR-0026).
 ///
@@ -1165,10 +1129,13 @@ async fn handle_message(
                 .await;
         }
         Some(agent_message::Payload::LogChunk(chunk)) => {
-            let stored =
+            if !log_acks.admits(&chunk.job_id) {
+                return;
+            }
+            let outcome =
                 crate::job_data::handle_log_chunk(state, identity.tenant, identity.agent, &chunk)
                     .await;
-            log_acks.after_store(tx, &chunk, stored);
+            log_acks.record(&chunk, outcome);
         }
         None => {}
     }

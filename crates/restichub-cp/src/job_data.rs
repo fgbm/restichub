@@ -118,32 +118,59 @@ pub async fn handle_step_result(
     finish(tx, outcome, job_id, "step result").await;
 }
 
-/// Records one log chunk. True when the log holds the chunk afterwards, so the agent may drop its
-/// copy (FR-LG-07).
+/// Why the control plane never stores a log chunk (FR-LG-07).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChunkRefusal {
+    /// The data is longer than [`MAX_CHUNK_BYTES`].
+    TooLarge,
+    /// The chunk has no valid job, stream, step or sequence.
+    Malformed,
+    /// The job is not a job of this agent, or its log retention is over.
+    UnknownJob,
+}
+
+/// What became of a log chunk (FR-LG-07).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChunkOutcome {
+    /// The log holds the chunk.
+    Stored,
+    /// The chunk will never be stored, so the agent may drop it.
+    Refused(ChunkRefusal),
+    /// The store failed for now. The agent has to send the chunk again.
+    Failed,
+}
+
+/// Records one log chunk and tells the agent whether it may drop its copy (FR-LG-07).
 pub async fn handle_log_chunk(
     state: &AppState,
     tenant: TenantId,
     agent: AgentId,
     chunk: &LogChunk,
-) -> bool {
+) -> ChunkOutcome {
     let Some(job_id) = parse_job_id_value(&chunk.job_id) else {
-        return false;
+        return ChunkOutcome::Refused(ChunkRefusal::Malformed);
     };
-    let Some(new_chunk) = chunk_of(chunk) else {
-        return false;
+    let new_chunk = match chunk_of(chunk) {
+        Ok(new_chunk) => new_chunk,
+        Err(refusal) => {
+            tracing::warn!(job = %job_id, ?refusal, "the log chunk is refused");
+            return ChunkOutcome::Refused(refusal);
+        }
     };
-    if !job_is_owned(state, tenant, agent, job_id).await {
-        return false;
+    match ownership(state, tenant, agent, job_id).await {
+        Ownership::Owned => {}
+        Ownership::Refused => return ChunkOutcome::Refused(ChunkRefusal::UnknownJob),
+        Ownership::Retry => return ChunkOutcome::Failed,
     }
     let store = DatabaseLogStore::new(state.db().clone());
     match store
         .append(tenant, job_id, &new_chunk, state.auth().clock.now())
         .await
     {
-        Ok(_) => true,
+        Ok(_) => ChunkOutcome::Stored,
         Err(error) => {
             tracing::warn!(job = %job_id, %error, "the log chunk could not be stored");
-            false
+            ChunkOutcome::Failed
         }
     }
 }
@@ -180,7 +207,11 @@ pub async fn handle_job_result_data(
     finish(tx, outcome, job_id, "job result data").await;
 
     let store = DatabaseLogStore::new(state.db().clone());
-    for chunk in result.log_tail.iter().filter_map(chunk_of) {
+    for chunk in result
+        .log_tail
+        .iter()
+        .filter_map(|chunk| chunk_of(chunk).ok())
+    {
         if let Err(error) = store
             .append(tenant, job_id, &chunk, state.auth().clock.now())
             .await
@@ -191,14 +222,44 @@ pub async fn handle_job_result_data(
     }
 }
 
+/// Whether a job takes writes from the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ownership {
+    Owned,
+    /// The job is unknown, belongs to another agent, or its retention is over. This stays so.
+    Refused,
+    /// The job may take writes later, or the database did not answer.
+    Retry,
+}
+
 async fn job_is_owned(state: &AppState, tenant: TenantId, agent: AgentId, job: JobId) -> bool {
+    ownership(state, tenant, agent, job).await == Ownership::Owned
+}
+
+async fn ownership(state: &AppState, tenant: TenantId, agent: AgentId, job: JobId) -> Ownership {
     let cutoff = write_cutoff(state);
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        return false;
+        return Ownership::Retry;
     };
-    let owned = matches!(owned_job(&mut tx, job, agent, cutoff).await, Ok(Some(_)));
+    let found = job_repo::get(&mut tx, job).await;
     let _ = tx.commit().await;
-    owned
+    match found {
+        Ok(row) => classify(row.as_ref(), agent, cutoff),
+        Err(_) => Ownership::Retry,
+    }
+}
+
+fn classify(row: Option<&Job>, agent: AgentId, cutoff: OffsetDateTime) -> Ownership {
+    let Some(row) = row else {
+        return Ownership::Refused;
+    };
+    if row.agent_id != agent || row.finished_at.is_some_and(|finished| finished < cutoff) {
+        Ownership::Refused
+    } else if row.status == JobStatus::Queued {
+        Ownership::Retry
+    } else {
+        Ownership::Owned
+    }
 }
 
 /// The earliest end time of a finished job that still takes writes: the log retention window.
@@ -217,11 +278,7 @@ async fn owned_job(
     cutoff: OffsetDateTime,
 ) -> Result<Option<Job>, restichub_db::DbError> {
     let found = job_repo::get(tx, job).await?;
-    Ok(found.filter(|row| {
-        row.agent_id == agent
-            && row.status != JobStatus::Queued
-            && row.finished_at.is_none_or(|finished| finished >= cutoff)
-    }))
+    Ok(found.filter(|row| classify(Some(row), agent, cutoff) == Ownership::Owned))
 }
 
 async fn finish(
@@ -240,20 +297,23 @@ async fn finish(
     }
 }
 
-fn chunk_of(chunk: &LogChunk) -> Option<NewChunk> {
-    if chunk.data.len() > MAX_CHUNK_BYTES || chunk.sequence == 0 {
-        return None;
+fn chunk_of(chunk: &LogChunk) -> Result<NewChunk, ChunkRefusal> {
+    if chunk.data.len() > MAX_CHUNK_BYTES {
+        return Err(ChunkRefusal::TooLarge);
+    }
+    if chunk.sequence == 0 {
+        return Err(ChunkRefusal::Malformed);
     }
     let stream = match ProtoLogStream::try_from(chunk.stream) {
         Ok(ProtoLogStream::Stdout) => LogStream::Stdout,
         Ok(ProtoLogStream::Stderr) => LogStream::Stderr,
         Ok(ProtoLogStream::Agent) => LogStream::Agent,
-        Ok(ProtoLogStream::Unspecified) | Err(_) => return None,
+        Ok(ProtoLogStream::Unspecified) | Err(_) => return Err(ChunkRefusal::Malformed),
     };
     if chunk.step_id.chars().count() > MAX_STEP_ID_LEN {
-        return None;
+        return Err(ChunkRefusal::Malformed);
     }
-    Some(NewChunk {
+    Ok(NewChunk {
         step_id: clean(&chunk.step_id, MAX_STEP_ID_LEN),
         stream,
         chunk: count(chunk.sequence),
@@ -424,6 +484,35 @@ mod tests {
         assert_eq!(fraction(7.0), 1.0);
         assert_eq!(non_negative(-1.0), 0.0);
         assert_eq!(clean("a\u{0}b\nc", 2), "ab");
+    }
+
+    fn log_chunk(sequence: u64, size: usize) -> LogChunk {
+        LogChunk {
+            job_id: "job".to_owned(),
+            step_id: "backup".to_owned(),
+            stream: ProtoLogStream::Stdout as i32,
+            sequence,
+            data: vec![b'a'; size],
+        }
+    }
+
+    #[test]
+    fn fr_lg_07_a_chunk_refusal_has_a_typed_reason() {
+        assert!(chunk_of(&log_chunk(1, MAX_CHUNK_BYTES)).is_ok());
+        assert_eq!(
+            chunk_of(&log_chunk(1, MAX_CHUNK_BYTES + 1)).err(),
+            Some(ChunkRefusal::TooLarge)
+        );
+        assert_eq!(
+            chunk_of(&log_chunk(0, 1)).err(),
+            Some(ChunkRefusal::Malformed)
+        );
+        let mut unknown_stream = log_chunk(1, 1);
+        unknown_stream.stream = 0;
+        assert_eq!(
+            chunk_of(&unknown_stream).err(),
+            Some(ChunkRefusal::Malformed)
+        );
     }
 
     #[test]

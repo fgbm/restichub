@@ -349,7 +349,7 @@ async fn connect_once(
                     }
                 }
             }
-            // The emulator does not list `log-ack-v1`, so the control plane never sends this.
+            // The emulator keeps no log spool, so an acknowledgement frees nothing.
             Some(control_message::Payload::LogAck(_)) => {}
             Some(control_message::Payload::CertificateRejected(rejected)) => {
                 eprintln!(

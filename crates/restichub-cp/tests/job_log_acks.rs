@@ -94,7 +94,13 @@ async fn ac_lg_05_a_resent_log_is_stored_once_in_order_and_acknowledged() {
     assert_eq!(ack.expect("an acknowledgement").job_id, id);
     eventually(|| async { texts(&env, job).await.len() == 2 }).await;
 
-    // The agent reconnects and sends everything it still holds from the first chunk.
+    // The agent reconnects on a new stream and sends everything it still holds from the first
+    // chunk.
+    let capabilities = AgentCapability::ALL
+        .iter()
+        .map(|capability| capability.as_str().to_owned())
+        .collect();
+    let mut agent = env.reconnect_agent(&agent, capabilities).await;
     for (sequence, text) in [(1, "one\n"), (2, "two\n"), (3, "three\n"), (4, "four\n")] {
         agent
             .tx
@@ -140,18 +146,79 @@ async fn ac_lg_05_an_agent_without_the_capability_gets_no_acknowledgement() {
 }
 
 #[tokio::test]
-async fn ac_lg_05_a_chunk_of_another_job_is_not_acknowledged() {
+async fn ac_lg_05_a_chunk_larger_than_the_bound_is_refused_and_does_not_stop_the_acknowledgements() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("big-agent").await;
+    let (job, id) = running_job(&env, &mut agent).await;
+    let oversize = "x".repeat(restichub_cp::log_store::MAX_CHUNK_BYTES + 1);
+    for (sequence, text) in [(1, "one\n"), (2, oversize.as_str()), (3, "three\n")] {
+        agent
+            .tx
+            .send(chunk(&id, sequence, text))
+            .await
+            .expect("cannot send the chunk");
+    }
+    eventually(|| async { texts(&env, job).await.len() == 2 }).await;
+    assert_eq!(texts(&env, job).await, ["one", "three"]);
+    let mut newest = 0;
+    while let Some(ack) = next_ack(&mut agent, Duration::from_secs(1)).await {
+        for stream in ack.streams {
+            newest = newest.max(stream.sequence);
+        }
+    }
+    assert_eq!(newest, 3, "the refused chunk does not hold back the next ones");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_lg_05_acknowledgements_of_many_chunks_are_coalesced() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("many-agent").await;
+    let (job, id) = running_job(&env, &mut agent).await;
+    for sequence in 1..=60 {
+        agent
+            .tx
+            .send(chunk(&id, sequence, "line\n"))
+            .await
+            .expect("cannot send the chunk");
+    }
+    eventually(|| async { texts(&env, job).await.len() == 60 }).await;
+    let mut count = 0;
+    let mut newest = 0;
+    while let Some(ack) = next_ack(&mut agent, Duration::from_millis(600)).await {
+        count += 1;
+        for stream in ack.streams {
+            newest = newest.max(stream.sequence);
+        }
+    }
+    assert_eq!(newest, 60);
+    assert!(count < 30, "{count} acknowledgements for 60 chunks");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_lg_05_a_chunk_of_another_job_is_refused_and_never_stored() {
     let Some(db) = common::test_db().await else {
         return;
     };
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("foreign-agent").await;
     let (_job, _id) = running_job(&env, &mut agent).await;
+    let stray = Uuid::new_v4().to_string();
     agent
         .tx
-        .send(chunk(&Uuid::new_v4().to_string(), 1, "stray\n"))
+        .send(chunk(&stray, 1, "stray\n"))
         .await
         .expect("cannot send the chunk");
-    assert!(next_ack(&mut agent, Duration::from_secs(1)).await.is_none());
+    // The refusal is for good, so the agent may drop its copy; the log of no job holds the line.
+    let ack = next_ack(&mut agent, Duration::from_secs(5)).await;
+    assert_eq!(ack.expect("an acknowledgement").job_id, stray);
+    assert!(texts(&env, _job).await.is_empty());
     env.db.cleanup().await;
 }
