@@ -28,7 +28,10 @@ import type {
 	CreateEnrollmentTokenRequest,
 	CreatePlanRequest,
 	CreateProfileRequest,
+	CreateJobTemplateRequest,
 	CreateRepositoryRequest,
+	CreateScriptTemplateRequest,
+	CreateSecretRequest,
 	CreateTenantRequest,
 	CreateUserRequest,
 	CreatePlatformUserRequest,
@@ -38,6 +41,8 @@ import type {
 	Instance,
 	Job,
 	JobActionRequest,
+	JobTemplate,
+	JobTemplateListResponse,
 	JobDetail,
 	JobListResponse,
 	JobLogPage,
@@ -67,6 +72,10 @@ import type {
 	RepositoryListResponse,
 	ResetPasswordRequest,
 	SchedulePreviewResponse,
+	ScriptTemplate,
+	ScriptTemplateListResponse,
+	Secret,
+	SecretListResponse,
 	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
@@ -81,6 +90,8 @@ import type {
 	UpdateAccountRequest,
 	UpdateAlertRulesRequest,
 	UpdateChannelRequest,
+	UpdateJobTemplateRequest,
+	UpdateScriptTemplateRequest,
 	UpdatePlanRequest,
 	UpdateProfileRequest,
 	UpdateMaintenanceRequest,
@@ -182,6 +193,22 @@ export interface ApiService {
 	nextRuns(id: string, count: number): Promise<NextRunsResponse>;
 	/** The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
 	previewSchedule(request: PreviewScheduleRequest): Promise<SchedulePreviewResponse>;
+
+	/** The metadata of the secrets of the tenant. A value is never returned. */
+	listSecrets(): Promise<Secret[]>;
+	/** Stores a secret. The value goes to the control plane once and never comes back. */
+	createSecret(request: CreateSecretRequest): Promise<Secret>;
+
+	/** The built-in and the own script templates (FR-HK-12). */
+	listScriptTemplates(): Promise<ScriptTemplate[]>;
+	createScriptTemplate(request: CreateScriptTemplateRequest): Promise<ScriptTemplate>;
+	updateScriptTemplate(id: string, request: UpdateScriptTemplateRequest): Promise<ScriptTemplate>;
+	deleteScriptTemplate(id: string): Promise<void>;
+	/** The built-in and the own job templates (FR-HK-12). */
+	listJobTemplates(): Promise<JobTemplate[]>;
+	createJobTemplate(request: CreateJobTemplateRequest): Promise<JobTemplate>;
+	updateJobTemplate(id: string, request: UpdateJobTemplateRequest): Promise<JobTemplate>;
+	deleteJobTemplate(id: string): Promise<void>;
 
 	listTenants(): Promise<Tenant[]>;
 	createTenant(request: CreateTenantRequest): Promise<Tenant>;
@@ -311,6 +338,28 @@ const httpService: ApiService = {
 	runPlan: (id) => api.post<Job>(endpoints.plans.run(id)),
 	nextRuns: (id, count) => api.get<NextRunsResponse>(endpoints.plans.nextRuns(id, count)),
 	previewSchedule: (request) => api.post<SchedulePreviewResponse>(endpoints.plans.preview, request),
+
+	listSecrets: () =>
+		api.get<SecretListResponse>(endpoints.secrets.list).then((response) => response.items),
+	createSecret: (request) => api.post<Secret>(endpoints.secrets.create, request),
+
+	listScriptTemplates: () =>
+		api
+			.get<ScriptTemplateListResponse>(endpoints.scriptTemplates.list)
+			.then((response) => response.items),
+	createScriptTemplate: (request) =>
+		api.post<ScriptTemplate>(endpoints.scriptTemplates.create, request),
+	updateScriptTemplate: (id, request) =>
+		api.patch<ScriptTemplate>(endpoints.scriptTemplates.byId(id), request),
+	deleteScriptTemplate: (id) => api.delete<void>(endpoints.scriptTemplates.byId(id)),
+	listJobTemplates: () =>
+		api
+			.get<JobTemplateListResponse>(endpoints.jobTemplates.list)
+			.then((response) => response.items),
+	createJobTemplate: (request) => api.post<JobTemplate>(endpoints.jobTemplates.create, request),
+	updateJobTemplate: (id, request) =>
+		api.patch<JobTemplate>(endpoints.jobTemplates.byId(id), request),
+	deleteJobTemplate: (id) => api.delete<void>(endpoints.jobTemplates.byId(id)),
 
 	listTenants: () =>
 		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),
