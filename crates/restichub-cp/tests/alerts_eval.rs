@@ -320,9 +320,7 @@ async fn ac_mn_01_explicit_rpo_replaces_the_default() {
     );
 }
 
-/// AC-MN-02: a failed job sends an alert with the tenant, the agent, the plan, the error text and
-/// the link to the job. An agent that is offline for long sends a separate alert.
-/// AC-MN-02: the error text of a stable code reads as words, not as the raw code.
+/// AC-MN-02: the webhook keeps the stable error code and adds the words for it.
 #[tokio::test]
 async fn ac_mn_02_the_alert_translates_a_stable_error_code() {
     let Some(fx) = fixture("ac-mn-02-code").await else {
@@ -343,13 +341,16 @@ async fn ac_mn_02_the_alert_translates_a_stable_error_code() {
 
     let hooks = fx.hooks();
     assert_eq!(hooks.len(), 1);
+    assert_eq!(hooks[0].json()["alert"]["error_text"], "interrupted");
     assert_eq!(
-        hooks[0].json()["alert"]["error_text"],
+        hooks[0].json()["alert"]["error_label"],
         "interrupted by an agent restart"
     );
     fx.db.cleanup().await;
 }
 
+/// AC-MN-02: a failed job sends an alert with the tenant, the agent, the plan, the error text and
+/// the link to the job. An agent that is offline for long sends a separate alert.
 #[tokio::test]
 async fn ac_mn_02_job_failure_and_offline_agent_alert() {
     let Some(fx) = fixture("ac-mn-02").await else {

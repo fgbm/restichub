@@ -151,29 +151,10 @@ pub fn duration(language: Language, seconds: i64) -> String {
 }
 
 /// The words for a stable error code of a job. `None` for a free text or an unknown code.
-///
-/// The list follows the codes that the user interface translates (NFR-DOC-04).
 pub fn error_label(language: Language, code: &str) -> Option<&'static str> {
-    let (en, ru) = match code {
-        "interrupted" => (
-            "interrupted by an agent restart",
-            "прервано перезапуском агента",
-        ),
-        "step_failed" => ("restic error", "ошибка restic"),
-        "wrong_password" => ("wrong password or keys", "неверный пароль или ключи"),
-        "repository_missing" => ("repository not found", "репозиторий не найден"),
-        "hook_failed" => ("script error", "ошибка скрипта"),
-        "stalled" => ("no progress", "нет прогресса"),
-        "max_duration_exceeded" => (
-            "maximum duration exceeded",
-            "превышена предельная длительность",
-        ),
-        "repository_locked" => ("repository locked", "репозиторий заблокирован"),
-        "agent_lost" => ("the host went offline", "хост отключился"),
-        "expired" => ("the job expired", "срок задания истёк"),
-        "cancelled" => ("cancelled", "отменено"),
-        _ => return None,
-    };
+    let (_, en, ru) = super::error_labels::LABELS
+        .iter()
+        .find(|(known, _, _)| *known == code)?;
     Some(match language {
         Language::En => en,
         Language::Ru => ru,
