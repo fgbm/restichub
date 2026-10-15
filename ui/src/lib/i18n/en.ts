@@ -631,6 +631,7 @@ export const en = {
 	'jobs.reason.lock_retry': 'The repository was locked. A new attempt is queued.',
 	'jobs.reason.signed_job_unavailable': 'The stored job is not readable.',
 	'jobs.reason.agent_lost': 'The host went offline during the job.',
+	'jobs.reason.interrupted': 'Interrupted: the agent restarted while scripts ran',
 	'jobs.reason.timed_out': 'The job ran longer than its timeout.',
 	'jobs.reason.unacknowledged_expired': 'The host did not confirm the job before it expired.',
 	'jobs.reason.agent_revoked': 'The host is revoked.',
