@@ -23,6 +23,7 @@ export default defineConfig({
 				ru: { label: 'Русский', lang: 'ru' },
 			},
 			customCss: ['./src/styles/base.css', './src/styles/theme.css'],
+			expressiveCode: { frames: false, styleOverrides: { borderRadius: '6px' } },
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/fgbm/restichub' },
 			],

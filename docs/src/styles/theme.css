@@ -7,8 +7,12 @@
 	--sl-text-h3: 1.15rem;
 	--sl-text-h4: 1rem;
 	--sl-line-height: 1.5;
-	--sl-content-width: 46rem;
+	--sl-content-width: 50rem;
+	--sl-sidebar-width: 16rem;
 	--sl-nav-height: 3.5rem;
+	--sl-text-code: 0.8125rem;
+	--sl-text-code-sm: 0.75rem;
+	--rh-radius: 6px;
 	--sl-font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 	--__sl-font-headings: var(--sl-font);
 }
@@ -17,21 +21,34 @@
 .sl-markdown-content :is(h1, h2, h3, h4) { font-family: var(--sl-font); font-weight: 600; letter-spacing: 0; }
 .sl-markdown-content :is(h2, h3, h4) a { color: inherit; }
 
-/* Content sits next to the sidebar, not centered in the free space. */
-.sl-container { margin-inline: 0; }
+/* Center the content column between the sidebar and the contents column. */
+@media (min-width: 72rem) {
+	[data-has-sidebar][data-has-toc] .main-pane { --sl-content-margin-inline: auto; width: calc(100% - var(--sl-sidebar-width)); }
+	.right-sidebar-container { width: var(--sl-sidebar-width) !important; }
+}
 
-/* Starlight spaces blocks with this long selector; the same selector keeps the tighter gap. */
-.sl-markdown-content :not(a, strong, em, del, span, input, code, br) + :not(a, strong, em, del, span, input, code, br, :where(.not-content *)) { margin-top: .85rem; }
+/* Vertical rhythm: 1rem between blocks, more space above headings than below. Starlight spaces blocks with this long selector; the same selector overrides it. */
+.sl-markdown-content :not(a, strong, em, del, span, input, code, br) + :not(a, strong, em, del, span, input, code, br, :where(.not-content *)) { margin-top: 1rem; }
+.sl-markdown-content :not(a, strong, em, del, span, input, code, br) + :is(h2, h3, h4) { margin-top: 2rem; }
+.sl-markdown-content h2 + :not(a, strong, em, del, span, input, code, br) { margin-top: .75rem; }
+.sl-markdown-content :is(h3, h4) + :not(a, strong, em, del, span, input, code, br) { margin-top: .5rem; }
+.sl-markdown-content :is(h2, h3, h4) { line-height: 1.3; }
+.sl-markdown-content :is(h2, h3, h4) .sl-anchor-link { margin-top: 0; }
+.sl-markdown-content :is(ul, ol) > li + li { margin-top: .4rem !important; }
+.sl-markdown-content li > :is(.expressive-code, ul, ol, p, aside) { margin-top: .5rem !important; }
 
-/* Code. */
-.sl-markdown-content code { border-radius: 3px; background: var(--sl-color-gray-6); border: 0; padding: 0 .12rem; margin: 0; }
-.sl-markdown-content pre code { padding: 0; }
-.sl-markdown-content pre { border-radius: 3px; }
+/* Code. Blocks match app cards: 1px border, 6px radius, no window frame. */
+.sl-markdown-content code { border-radius: 4px; background: var(--sl-color-gray-6); border: 0; padding: .1rem .3rem; margin: 0; font-size: .85em; }
+.sl-markdown-content pre code { padding: 0; border: 0; background: none; font-size: inherit; }
+.expressive-code { --ec-brdRad: 6px; --ec-brdWd: 1px; --ec-codeFontSize: .8125rem; --ec-codeLineHt: 1.55; --ec-codePadBlk: .75rem; --ec-codePadInl: 1rem; --ec-codeBg: var(--sl-color-gray-7); --ec-brdCol: var(--sl-color-gray-5); --ec-uiFontFml: var(--sl-font); --ec-frm-frameBoxShdCssVal: none; --ec-codeFontFml: var(--sl-font-mono); }
+.expressive-code pre { scrollbar-width: thin; }
 
-/* Tables. */
-.sl-markdown-content table { font-size: inherit; }
-.sl-markdown-content :is(th, td) { font-size: inherit; }
-.sl-markdown-content th { background: var(--sl-color-gray-6); font-family: var(--sl-font); font-weight: 600; }
+/* Tables span the column and follow the app table: muted header, thin borders. */
+.sl-markdown-content table { display: table; width: 100%; border-collapse: separate; border-spacing: 0; font-size: .875rem; border: 1px solid var(--sl-color-gray-5); border-radius: var(--rh-radius); overflow: hidden; }
+.sl-markdown-content :is(th, td) { font-size: inherit; padding: .5rem .75rem; border: 0; border-bottom: 1px solid var(--sl-color-gray-5); vertical-align: top; text-align: start; }
+.sl-markdown-content tr:last-child td { border-bottom: 0; }
+.sl-markdown-content th { background: var(--sl-color-gray-7); color: var(--sl-color-gray-3); font-family: var(--sl-font); font-size: .75rem; font-weight: 600; }
+.sl-markdown-content tr:nth-child(2n) { background: none; }
 
 /* Numbered steps. */
 .sl-markdown-content ol { counter-reset: rhstep; list-style: none; padding-inline-start: 0; }
@@ -39,14 +56,23 @@
 .sl-markdown-content ol > li::before { content: counter(rhstep); position: absolute; inset-inline-start: 0; top: .1em; width: 1.5rem; height: 1.5rem; display: grid; place-items: center; border-radius: 3px; background: var(--sl-color-accent); color: #fff; font: 600 .75rem var(--sl-font-system-mono); }
 .sl-markdown-content ol > li::marker { content: ''; }
 
-/* Callouts: a full thin border in the aside color. */
-.starlight-aside { border-radius: 3px; border: 1px solid var(--sl-color-asides-border); }
+/* Callouts: like app alert banners, a subtle tint and a 1px border. */
+.starlight-aside { border-radius: var(--rh-radius); border: 1px solid var(--rh-aside-border); background: var(--rh-aside-bg); padding: .75rem 1rem; }
+.starlight-aside--note { --rh-aside-bg: color-mix(in srgb, var(--rh-info) 6%, var(--sl-color-bg)); --rh-aside-border: color-mix(in srgb, var(--rh-info) 35%, var(--sl-color-bg)); --sl-color-asides-text-accent: var(--rh-info); }
+.starlight-aside--tip { --rh-aside-bg: color-mix(in srgb, var(--rh-success) 6%, var(--sl-color-bg)); --rh-aside-border: color-mix(in srgb, var(--rh-success) 35%, var(--sl-color-bg)); --sl-color-asides-text-accent: var(--rh-success); }
+.starlight-aside--caution { --rh-aside-bg: color-mix(in srgb, var(--rh-warning) 6%, var(--sl-color-bg)); --rh-aside-border: color-mix(in srgb, var(--rh-warning) 35%, var(--sl-color-bg)); --sl-color-asides-text-accent: var(--rh-warning); }
+.starlight-aside--danger { --rh-aside-bg: color-mix(in srgb, var(--rh-danger) 6%, var(--sl-color-bg)); --rh-aside-border: color-mix(in srgb, var(--rh-danger) 35%, var(--sl-color-bg)); --sl-color-asides-text-accent: var(--rh-danger); }
+.starlight-aside .starlight-aside__title { color: var(--sl-color-white); font-size: .875rem; font-weight: 600; font-family: var(--sl-font); }
+.starlight-aside__icon { color: var(--sl-color-asides-text-accent); width: 1.1rem; height: 1.1rem; }
+.starlight-aside__content { font-size: .875rem; color: var(--sl-color-gray-1); }
+.starlight-aside__content > * + * { margin-top: .5rem !important; }
 
 /* Header and sidebar. */
-header.header { border-bottom: 1px solid var(--sl-color-gray-5); }
+header.header { border-bottom: 1px solid var(--sl-color-gray-5); background: var(--sl-color-bg-nav); }
+.site-title { font-size: 1rem; font-weight: 600; gap: .625rem; }
 .sidebar-content a { border-radius: 4px; padding: .3rem .6rem; }
 /* Starlight marks the current page with aria-current=page. */
-.sidebar-content a[aria-current='page'] { background: var(--sl-color-accent-low); color: var(--sl-color-text-accent); font-weight: 600; }
+.sidebar-content a[aria-current='page'] { background: var(--sl-color-accent-low); color: var(--sl-color-text-accent); font-weight: 500; }
 /* Group icons (Lucide), one per top-level group in sidebar order. */
 .sidebar-content details > summary .large { font-family: var(--sl-font); font-size: .875rem; font-weight: 600; display: flex; align-items: center; gap: .5rem; }
 .sidebar-content details > summary .large::before { content: ''; width: 1rem; height: 1rem; flex: none; background: currentColor; -webkit-mask: var(--rh-icon) center / contain no-repeat; mask: var(--rh-icon) center / contain no-repeat; }

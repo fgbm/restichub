@@ -1,4 +1,4 @@
-/* Product palette Values come from ui/mockups/mockups.css. */
+/* Product palette Values come from ui/src/lib/styles/tokens.css. */
 :root {
 	--sl-color-accent-low: #12261e;
 	--sl-color-accent: #238636;
@@ -12,7 +12,12 @@
 	--sl-color-gray-6: #161b22;
 	--sl-color-gray-7: #0f1216;
 	--sl-color-black: #0b0e12;
-	--sl-color-text-accent: #5fd08a;
+	--rh-info: #58a6ff;
+	--rh-success: #3fb950;
+	--rh-warning: #d29922;
+	--rh-danger: #f85149;
+	--sl-color-hairline: #2b313a;
+	--sl-color-text-accent: #56d364;
 	--sl-font-system-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 :root[data-theme='light'] {
@@ -28,7 +33,12 @@
 	--sl-color-gray-6: #eff2f5;
 	--sl-color-gray-7: #f6f8fa;
 	--sl-color-black: #ffffff;
-	--sl-color-text-accent: #1a7f37;
+	--sl-color-text-accent: #116329;
+	--sl-color-hairline: #d0d7de;
+	--rh-info: #0969da;
+	--rh-success: #1a7f37;
+	--rh-warning: #9a6700;
+	--rh-danger: #cf222e;
 }
 .site-title img { border-radius: 7px; }
 
