@@ -76,7 +76,7 @@ The tests of `restichub-cp/tests/threat_model_e2e.rs` run the real control plane
 | T5 | `ac_rp_02_a_database_dump_does_not_contain_the_canary`, `ac_pr_02_a_database_dump_holds_no_job_signing_key` | Automated |
 | T6 | `t6_an_agent_cannot_act_for_another_agent`, `a_wrong_tenant_san_is_refused`, `ac_tn_02_the_request_carries_no_tenant_and_the_subject_is_ignored` | Automated |
 | T7 | `ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing`, `ac_tn_01_an_agent_of_another_tenant_is_not_found`, `ac_tn_01_another_tenant_gets_404_on_the_queue_endpoints` | Automated |
-| T8 | `ac_in_02_a_used_expired_revoked_or_unknown_token_is_refused`, `ac_id_01_concurrent_requests_with_one_token_create_one_agent`, `ac_id_01_a_used_or_expired_token_is_refused` | Automated |
+| T8 | `ac_in_02_a_used_expired_revoked_or_unknown_token_is_refused`, `ac_id_01_concurrent_requests_with_one_token_create_one_agent`, `ac_id_01_a_used_or_expired_token_is_refused`, `ac_id_07_a_second_bound_token_dies_with_the_first_use`, `ac_id_08_a_bound_token_lives_one_hour_at_most`, `ac_id_09_the_replacement_runs_only_from_the_newer_record`, `ac_id_09_the_replacement_is_refused_while_the_old_record_is_online`, `ac_id_07_a_refused_bound_token_of_a_revoked_host_is_audited` | Automated |
 | T9 | `t9_t21_the_enrollment_and_the_rotation_leave_no_key_or_token_in_the_database_or_the_logs`, `ac_ag_03_a_canary_in_the_agent_directory_is_found`, `ac_ag_04_a_canary_in_a_process_argument_is_found` | Automated |
 | T10 | The release key and the signed update are a release procedure (FR-AG-13). | Manual |
 | T11 | `ac_id_05_the_eleventh_enrollment_from_one_ip_is_rate_limited` | Automated |
