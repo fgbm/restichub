@@ -120,6 +120,14 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/agents", Fixture::Collection),
     ("/api/v1/agents/{id}", Fixture::Object(Object::Agent)),
     ("/api/v1/agents/{id}/revoke", Fixture::Object(Object::Agent)),
+    (
+        "/api/v1/agents/{id}/reenroll",
+        Fixture::Object(Object::Agent),
+    ),
+    (
+        "/api/v1/agents/{id}/replace",
+        Fixture::Object(Object::Agent),
+    ),
     ("/api/v1/enrollment-tokens", Fixture::Collection),
     (
         "/api/v1/enrollment-tokens/{id}",
