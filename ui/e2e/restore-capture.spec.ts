@@ -16,6 +16,7 @@ type Labels = {
 	select: (name: string) => string;
 	open: string;
 	target: string;
+	host: string;
 	existing: string;
 };
 
@@ -27,6 +28,7 @@ const EN: Labels = {
 	select: (name) => `Select ${name}`,
 	open: 'Restore…',
 	target: 'Target path',
+	host: 'Target host',
 	existing: 'Existing files'
 };
 
@@ -38,6 +40,7 @@ const RU: Labels = {
 	select: (name) => `Отметить ${name}`,
 	open: 'Восстановить…',
 	target: 'Целевой путь',
+	host: 'Целевой хост',
 	existing: 'Существующие файлы'
 };
 
@@ -78,7 +81,7 @@ async function capture(page: Page, scheme: 'light' | 'dark', labels: Labels, suf
 
 	await page.getByRole('button', { name: labels.open }).click();
 	const dialog = page.getByRole('dialog');
-	await dialog.getByLabel(labels.target).fill('/etc');
+	await dialog.getByLabel(labels.host).selectOption({ label: 'srv-db-01 · linux' });
 	await page.waitForTimeout(300);
 	await page.screenshot({ path: `${out}/restore-dialog-${scheme}${suffix}.png` });
 }

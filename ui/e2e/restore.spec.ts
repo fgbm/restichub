@@ -72,15 +72,24 @@ test('a restore asks for the target, warns about a system path and opens the job
 	await page.getByRole('button', { name: 'Restore…' }).click();
 	const dialog = page.getByRole('dialog');
 	await expect(dialog.getByText('Selected paths: 1')).toBeVisible();
+	await dialog.getByLabel('Target host').selectOption({ label: 'srv-db-01 · linux' });
+	// The target starts as a folder in the restore root that the host reports.
+	await expect(dialog.getByLabel('Target path')).toHaveValue(
+		/^\/var\/lib\/restichub-restore\/[0-9a-f]{8}$/
+	);
 	await dialog.getByLabel('Target path').fill('/etc');
 	await expect(dialog.getByText('System path', { exact: true })).toBeVisible();
+	await expect(
+		dialog.getByText('The target is outside the restore roots of the host.')
+	).toBeVisible();
 	await dialog.getByLabel('Target path').fill('relative');
 	await expect(dialog.getByText('Enter an absolute path.')).toBeVisible();
 	await expect(dialog.getByRole('button', { name: 'Start restore' })).toBeDisabled();
-	await dialog.getByLabel('Target path').fill('/srv/restore');
+	await dialog.getByLabel('Target path').fill('/var/lib/restichub-restore/job-1');
 	await expect(dialog.getByText('System path', { exact: true })).toHaveCount(0);
 	await dialog.getByLabel('Existing files').selectOption({ label: 'Replace a file that differs' });
 	await dialog.getByLabel('Dry run').check();
+	await expect(dialog.getByLabel('Verify after the restore')).toBeDisabled();
 	await dialog.getByRole('button', { name: 'Start restore' }).click();
 
 	// The job detail shows the restore with its summary.
