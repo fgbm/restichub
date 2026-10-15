@@ -94,6 +94,13 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-HK-03 | FR-HK-03 | A job refers to an unknown hook ID. **Expected:** the agent rejects the job. | A |
 | AC-HK-04 | FR-HK-02, FR-HK-03 | A hook parameter does not agree with the schema. **Expected:** the agent rejects it. The strings `; rm -rf /`, `& del C:\*`, `$(id)` and `` `id` `` go to the hook as one literal argument or the schema rejects them. No side effect occurs. | S |
 | AC-HK-05 | FR-HK-04 | A profile refers to a hook that one target agent does not have. **Expected:** the UI does not save the profile. The error shows the agent and the hook. | A |
+| AC-HK-07 | FR-HK-08, FR-HK-10 | The trust mode is off and a job has a script step. **Expected:** the CP refuses the job with a typed reason. A job that reaches the agent anyway gets `JobRejected`. No script runs. | A |
+| AC-HK-08 | FR-HK-08 | Another user can write the trust file. **Expected:** the agent reports the mode as off and runs no script. | A |
+| AC-HK-09 | FR-HK-09 | A script has a secret parameter with a canary value. **Expected:** the script reads the canary from its environment. The canary is not in the arguments, the logs, the journal or a file after the run. The file with the body does not exist after the run. | S |
+| AC-HK-10 | FR-HK-09 | A script runs longer than its timeout, or the user cancels the job. **Expected:** the agent stops the script and its child processes. | A |
+| AC-HK-11 | FR-HK-11 | A job has scripts, hooks and a backup. **Expected:** the planned steps list all of them in order before they run. Each step has its own log. The API returns the lines of one step. | A |
+| AC-HK-12 | FR-HK-12 | An Operator edits a script or a template. **Expected:** the CP refuses it. An Admin edit writes an audit record with the hash of the script. A template of another organization returns 404. | A |
+| AC-HK-13 | FR-HK-05, FR-HK-09 | A `before` script with the policy `abort_backup` fails. **Expected:** the backup does not run. `on_error` and `finally` scripts run. With the policy `continue`, the backup runs. | A |
 | AC-HK-06 | FR-HK-05 | The `before` hook fails. **Expected:** the backup does not run. `on_error` and `finally` run. `on_success` does not run. On success the sequence is `before`, backup, `after`, `on_success`, `finally`. | A |
 
 ## 6. Repositories and secrets
