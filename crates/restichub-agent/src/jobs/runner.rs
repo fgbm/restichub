@@ -496,8 +496,6 @@ impl Jobs {
         }
     }
 
-    /// Sends the log chunks that are due.
-    ///
     /// A control plane that acknowledges chunks gets them through the spool: a chunk that finds no
     /// room within a moment stays there and goes out again after the next connection (FR-LG-07).
     /// Otherwise a chunk without room is lost; the journal tail still keeps the newest ones
@@ -519,11 +517,11 @@ impl Jobs {
         for chunk in chunks {
             self.spool_chunk(log, chunk);
         }
-        self.flush_log(&log.job_id().to_owned(), true).await;
+        self.flush_log(log.job_id(), true).await;
     }
 
-    /// Puts a chunk in the spool. A full spool drops the chunk and counts its lines; the next
-    /// chunk that fits is preceded by one marker line with the count (FR-LG-07).
+    /// When the cap is reached the agent drops the chunk and counts its lines. The next chunk that
+    /// fits follows one marker line with the count (FR-LG-07).
     fn spool_chunk(&self, log: &mut JobLog, chunk: LogChunk) {
         let lost = log.lost_lines();
         if lost > 0 && !self.log_spool.fits_with_marker(&chunk) {
@@ -549,7 +547,7 @@ impl Jobs {
             if let Err(error) = self.log_spool.append_marker(log.job_id(), &marker) {
                 tracing::warn!(%error, "cannot write the log spool");
             }
-            self.flush_log(&log.job_id().to_owned(), true).await;
+            self.flush_log(log.job_id(), true).await;
         }
         self.log_spool.finish(log.job_id());
     }

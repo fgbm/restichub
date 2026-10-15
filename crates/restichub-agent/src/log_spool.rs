@@ -35,10 +35,8 @@ const FILE_EXTENSION: &str = "spool";
 /// Bytes that a loss marker record takes at most.
 const MARKER_RESERVE: u64 = 160;
 
-/// Bytes of the length prefix of one record.
 const PREFIX: u64 = 4;
 
-/// The result of an attempt to store a chunk.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Stored {
     Kept,
@@ -65,7 +63,6 @@ struct State {
     total: u64,
 }
 
-/// The spool of one agent.
 pub struct LogSpool {
     dir: PathBuf,
     max_bytes: u64,
@@ -76,7 +73,7 @@ fn record_size(chunk: &LogChunk) -> u64 {
     PREFIX + chunk.encoded_len() as u64
 }
 
-/// The file name of a job. Only identifiers that cannot leave the directory are accepted.
+/// Only identifiers that cannot leave the directory give a file name.
 fn file_name(job_id: &str) -> Option<String> {
     let plain = !job_id.is_empty()
         && job_id.len() <= 64
@@ -271,7 +268,6 @@ impl LogSpool {
         }
     }
 
-    /// The jobs that hold unacknowledged chunks.
     #[must_use]
     pub fn pending_jobs(&self) -> Vec<String> {
         self.lock()
