@@ -1678,6 +1678,7 @@ export interface components {
          * @example job_template_update
          * @example job_template_delete
          * @example script_run
+         * @example profile_hooks_removed
          */
         AuditAction: string;
         AuditItem: {
