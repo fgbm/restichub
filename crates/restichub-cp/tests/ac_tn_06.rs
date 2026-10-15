@@ -238,7 +238,7 @@ async fn ac_tn_06_single_mode_setup_requires_the_token() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(
         problem.get("code").and_then(Value::as_str),
-        Some("invalid_credentials")
+        Some("invalid_setup_token")
     );
 
     // The setup is still required and no tenant exists.
@@ -706,7 +706,7 @@ async fn a_successful_setup_marks_every_unused_token_used() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(
         problem.get("code").and_then(Value::as_str),
-        Some("invalid_credentials")
+        Some("invalid_setup_token")
     );
 
     db.cleanup().await;
