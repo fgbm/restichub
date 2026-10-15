@@ -1085,6 +1085,22 @@ impl Env {
         identity: EnrolledIdentity,
         executor: Arc<dyn restichub_emulator::executor::Executor>,
     ) -> Emulator {
+        let emulator = self
+            .run_emulator(identity, executor, self.listener.https_url(), false)
+            .await;
+        eventually_online(&self.state, emulator.id).await;
+        emulator
+    }
+
+    /// Runs the emulator against the control plane at `url` and does not wait for the stream. The
+    /// control plane may be a separate process whose registry the test cannot read.
+    pub async fn run_emulator(
+        &self,
+        identity: EnrolledIdentity,
+        executor: Arc<dyn restichub_emulator::executor::Executor>,
+        url: String,
+        survive_reconnect: bool,
+    ) -> Emulator {
         use base64::Engine as _;
         use restichub_emulator::agent::{AgentConfig, AgentLoad, Backoff, run_agent};
         use restichub_emulator::identity::AgentIdentity;
@@ -1105,7 +1121,7 @@ impl Env {
         let id = AgentId::from_uuid(Uuid::parse_str(&identity.agent_id).expect("agent id"));
         let config = Arc::new(AgentConfig {
             tenant_id: identity.tenant_id.clone(),
-            server_url: self.listener.https_url(),
+            server_url: url,
             server_name: "localhost".to_owned(),
             ca_pem: der_to_pem("CERTIFICATE", &self.listener.root_der),
             identity: AgentIdentity {
@@ -1122,12 +1138,12 @@ impl Env {
             load: {
                 let mut load = AgentLoad::new(Arc::new(Metrics::default()));
                 load.restore_roots = default_restore_roots();
+                load.survive_reconnect = survive_reconnect;
                 load
             },
         });
         let (shutdown, rx) = tokio::sync::watch::channel(false);
         let task = tokio::spawn(run_agent(Arc::clone(&config), rx));
-        eventually_online(&self.state, id).await;
         Emulator {
             id,
             config,

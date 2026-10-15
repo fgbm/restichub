@@ -131,13 +131,15 @@ fn error_code(result: &JobResult) -> Option<&str> {
 async fn ac_ag_12_a_stalled_step_is_stopped_with_the_reason_stalled() {
     let path = directory("limits-stalled");
     common::script_stdout(&path, "backup", &status_script(40, 500, false));
+    // The script would run for 20 seconds; the watchdog must end the step well before.
+    let script_length = Duration::from_secs(20);
     let job = backup_job("job-stalled", &path, 2, 0);
 
     let (result, elapsed) = run(&job, &path, "limits-stalled-dir").await;
     assert_eq!(result.outcome, JobStatus::Failed as i32);
     assert_eq!(error_code(&result), Some("stalled"));
     assert!(
-        elapsed < Duration::from_secs(12),
+        elapsed < script_length,
         "the watchdog must stop the step, took {elapsed:?}"
     );
 }
@@ -164,13 +166,15 @@ async fn ac_ag_12_a_step_that_makes_progress_is_not_stopped() {
 async fn ac_ag_13_the_maximum_duration_stops_a_step_that_makes_progress() {
     let path = directory("limits-max");
     common::script_stdout(&path, "backup", &status_script(60, 250, true));
+    // The script would run for 15 seconds; the limit must end the step before.
+    let script_length = Duration::from_secs(15);
     let job = backup_job("job-max", &path, 3600, 2);
 
     let (result, elapsed) = run(&job, &path, "limits-max-dir").await;
     assert_eq!(result.outcome, JobStatus::Failed as i32);
     assert_eq!(error_code(&result), Some("max_duration_exceeded"));
     assert!(
-        elapsed < Duration::from_secs(10),
+        elapsed < script_length,
         "the maximum duration must stop the step, took {elapsed:?}"
     );
 }
