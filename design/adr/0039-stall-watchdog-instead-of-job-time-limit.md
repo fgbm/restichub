@@ -23,7 +23,7 @@ Each queued job carried `timeout_seconds` of 12 hours. The agent enforced it as 
 
 - The job field `timeout_seconds` is the maximum duration. Zero means none. The step field `timeout_seconds` keeps its meaning for one step.
 - The agent stops a step that runs longer than the maximum duration, with the codes `step_max_duration` and `max_duration_exceeded`.
-- A profile has two settings: the stall timeout (default 60 minutes) and the maximum duration (default 48 hours; zero turns it off). The environment variables `RESTICHUB_JOB_STALL_TIMEOUT_SECS` and `RESTICHUB_JOB_MAX_DURATION_SECS` of the control plane change the defaults of a new profile. The same stall variable on the agent changes the stall timeout of a job that carries none. The control plane compiles them into the signed job. Jobs that the control plane creates for itself (browse, maintenance) keep their own values.
+- A profile has two settings: the stall timeout (default 60 minutes) and the maximum duration (default 48 hours; zero turns it off). The environment variables `RESTICHUB_JOB_STALL_TIMEOUT_SECS` and `RESTICHUB_JOB_MAX_DURATION_SECS` of the control plane change the defaults of a new profile. The same stall variable on the agent changes the stall timeout of a job that carries none. The control plane compiles them into the signed job. Browse jobs keep their own step timeouts. Maintenance jobs (forget, prune, check) get a maximum duration of 48 hours. The control plane also fails any running job after a hard ceiling (31 days by default, `RESTICHUB_JOB_HARD_CEILING_SECS`), so no job stays `running` forever.
 
 ### The control plane does not use a wall clock
 

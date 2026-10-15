@@ -234,3 +234,19 @@ async fn agent_is_active(tx: &mut TenantTx<'_>, agent: AgentId) -> Result<bool, 
         .await?
         .is_some_and(|row| row.status == AgentStatus::Active))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ac_sc_10_the_ceiling_variable_overrides_the_default_with_a_lower_bound() {
+        assert_eq!(ceiling_from(None), DEFAULT_CEILING);
+        assert_eq!(ceiling_from(Some("junk")), DEFAULT_CEILING);
+        assert_eq!(
+            ceiling_from(Some("7200")),
+            time::Duration::seconds(7200)
+        );
+        assert_eq!(ceiling_from(Some("5")), time::Duration::seconds(3600));
+    }
+}

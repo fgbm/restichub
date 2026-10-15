@@ -1355,7 +1355,7 @@ mod limit_variable_tests {
     use super::minutes_from_seconds;
 
     #[test]
-    fn ac_pf_job_limits_variable_gives_minutes_in_range() {
+    fn fr_pf_01_variable_gives_minutes_in_range() {
         assert_eq!(minutes_from_seconds(None, 60, 5..=100), 60);
         assert_eq!(minutes_from_seconds(Some("1800"), 60, 5..=100), 30);
         assert_eq!(minutes_from_seconds(Some("61"), 60, 5..=100), 60);

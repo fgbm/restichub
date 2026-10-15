@@ -19,6 +19,6 @@ A profile holds the repository, the paths, the excludes, the tags, the backup op
 | Setting | Default | Meaning |
 |---|---|---|
 | Stop after no progress | 60 minutes | The agent stops a step that makes no progress for this time. From 5 to 10080. |
-| Maximum duration | none | The agent stops the job after this time, whatever its progress. From 1 to 43200. |
+| Maximum duration | 48 hours | The agent stops the job after this time, whatever its progress. From 0 to 43200. Zero turns the limit off. |
 
 See [Jobs](../jobs/#time-limits) for how the agent measures progress.

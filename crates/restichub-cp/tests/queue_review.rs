@@ -79,7 +79,7 @@ async fn cancel(env: &Env, job: Uuid) {
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
 }
 
-/// ADR-0039: a connected agent keeps a job past the old 12 hour limit; the default is 48 hours.
+/// ADR-0039: a connected agent keeps a job for longer than 12 hours; the default is 48 hours.
 #[tokio::test]
 async fn ac_sc_10_a_running_job_of_a_connected_agent_is_not_failed_by_the_clock() {
     let Some(db) = common::test_db().await else {

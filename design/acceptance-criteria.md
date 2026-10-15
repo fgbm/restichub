@@ -137,7 +137,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-SC-07 | FR-SC-07 | An agent is offline for 3 plan intervals. **Expected:** the policies "run all", "run latest" and "skip" create 3, 1 and 0 jobs. The count is the missed fire times. A fire time within the grace window of the pass is on time, and it is in addition to the count. Expired jobs get the status `expired`. | A |
 | AC-SC-08 | FR-SC-08 | Limit 1 job for each agent and 2 jobs for each repository. Start 10 jobs at the same time. **Expected:** the start log shows that no limit was exceeded. | A |
 | AC-SC-09 | FR-SC-09, NFR-PERF-02 | Manual run for an online agent. **Expected:** from the click to the restic start, 3 s or less (95th percentile of 100 runs). | L |
-| AC-SC-10 | FR-SC-06 | A job runs on an online agent for longer than 12 hours. **Expected:** the CP keeps the job in the status `running`. When the agent stays away for 30 minutes, or connects and does not list the job, the CP fails the job with the reason `agent_lost`. | A |
+| AC-SC-10 | FR-SC-06 | A job runs on an online agent for longer than 12 hours. **Expected:** the CP keeps the job in the status `running`. When the agent stays away for 30 minutes, or connects and does not list the job, the CP fails the job with the reason `agent_lost`. A running job past the hard ceiling fails with the reason `timed_out`. | A |
 
 ## 9. Restore
 

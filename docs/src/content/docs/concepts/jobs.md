@@ -67,7 +67,7 @@ A running job has no short fixed time limit (ADR-0039). A first backup of a larg
 
 ### Acceptance window
 
-A job in the queue has an acceptance window of one hour. The agent refuses a job after this time. The job detail shows the end of the window as "Accept until" while the job is waiting or sent. A running job does not expire.
+A job in the queue has an acceptance window. A manual job has a window of one hour. A scheduled job has a window of 24 hours, and the signature of a job is never valid for more than 23 hours. The agent refuses a job after this time. The job detail shows the end of the window as "Accept until" while the job is waiting or sent. A running job does not expire.
 
 ### Stall timeout
 
@@ -78,9 +78,9 @@ The agent stops a step that makes no progress for the stall timeout. It stops th
 | Step | Default stall timeout |
 |---|---|
 | `backup`, `restore` and the short steps | 60 minutes |
-| `check`, `prune` | 6 hours |
+| `check`, `prune` | 6 hours, also inside a backup job |
 
-A profile sets the stall timeout for its jobs. The setting is "Stop after no progress" in the section "Limits" of the profile. The value is from 5 to 10080 minutes.
+A profile sets the stall timeout for its jobs. The setting is "Stop after no progress" in the section "Limits" of the profile. The value is from 5 to 10080 minutes. A `check` or `prune` step in the job waits for the longer of this value and 6 hours. A status line that repeats the same content is not progress.
 
 ### Maximum duration
 
@@ -94,7 +94,8 @@ An operator can change the defaults. The values are in seconds.
 |---|---|---|
 | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | control plane | The stall timeout of a new profile. From 300 to 604800. |
 | `RESTICHUB_JOB_MAX_DURATION_SECS` | control plane | The maximum duration of a new profile. From 0 to 2592000. Zero means no limit. |
-| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | The stall timeout of a job that carries none, for all step kinds. |
+| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | The stall timeout of a job that carries none, for all step kinds. From 60 to 604800. |
+| `RESTICHUB_JOB_HARD_CEILING_SECS` | control plane | The time after which the control plane fails a running job whatever its limits. From 3600. The default is 31 days. |
 
 A value that is not a number, or is out of range, is ignored. A profile that exists keeps its own values.
 
@@ -105,9 +106,9 @@ The control plane does not fail a running job because of the time that it ran. I
 - The agent is offline and the control plane did not hear from it for 30 minutes.
 - The agent connects again and does not list the job in its hello message. The agent restarted and lost the job.
 
-A job also fails with the reason `timed_out` when it runs 10 minutes longer than its maximum duration and the agent did not report an end. The control plane marks the repository lock as possibly stale in each of these cases.
+A job also fails with the reason `timed_out` when it runs 10 minutes longer than its maximum duration and the agent did not report an end. A job with no maximum duration fails with the same reason at the hard ceiling. Maintenance jobs (forget, prune, check) have a maximum duration of 48 hours. The control plane marks the repository lock as possibly stale in each of these cases.
 
-An agent that is older than this version does not know the stall timeout. The control plane sends such an agent a fixed limit of 12 hours.
+An agent that is older than this version does not know the stall timeout and does not stop a step that makes no progress. The control plane sends such an agent the maximum duration of the profile, or a fixed limit of 12 hours when the profile has none. The job detail shows only the maximum duration for such an agent.
 
 ## Lock retries
 
