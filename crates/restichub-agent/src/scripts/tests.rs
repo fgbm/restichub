@@ -300,3 +300,15 @@ fn ac_hk_01_a_search_path_of_trusted_directories_drops_nothing() {
     let prepared = store.prepare(&step("echo"), 0).expect("prepared");
     assert!(prepared.dropped_path.is_none());
 }
+
+#[test]
+fn ac_hk_09_a_crash_leaves_no_script_directory_after_the_next_start() {
+    let dir = TempDir::new();
+    let stale = dir.path().join("scripts").join("0123abcd");
+    std::fs::create_dir_all(&stale).expect("cannot create the directory");
+    std::fs::write(stale.join("script.sh"), "echo old").expect("cannot write the file");
+    let store = store(dir.path());
+    store.clean_leftovers();
+    assert!(!dir.path().join("scripts").exists());
+    store.clean_leftovers();
+}

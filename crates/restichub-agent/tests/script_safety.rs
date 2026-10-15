@@ -225,3 +225,15 @@ async fn fr_hk_05_a_hanging_finally_script_ends_with_the_deadline_and_the_grace(
     );
     assert!(host.leftovers().is_empty());
 }
+
+/// AC-HK-09: the agent removes the script directories of a crashed run when it starts.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_hk_09_the_agent_start_removes_a_stale_script_directory() {
+    let host = Host::new("script-stale");
+    host.enable();
+    let stale = host.cache().join("scripts").join("deadbeef");
+    std::fs::create_dir_all(&stale).expect("cannot create the stale directory");
+    std::fs::write(stale.join("script.sh"), "echo old").expect("cannot write the stale file");
+    let _jobs = host.jobs();
+    assert!(!stale.exists());
+}

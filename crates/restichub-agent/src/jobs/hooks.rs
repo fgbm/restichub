@@ -409,7 +409,9 @@ impl Jobs {
                         Ok(None) => None,
                         Err(error) => {
                             tracing::warn!(%error, "cannot wait for a hook");
-                            *slot = None;
+                            drop(slot);
+                            kill_tree(&cancel.child);
+                            *lock(&cancel.child) = None;
                             return StepOutcome::failed();
                         }
                     },

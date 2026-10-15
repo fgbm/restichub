@@ -152,6 +152,7 @@ impl Jobs {
         journal.persist()?;
         let restore = RestoreAccess::for_host(dir, &cache, &program);
         let scripts = ScriptStore::for_config_dir(dir, &cache);
+        scripts.clean_leftovers();
         Ok(Self {
             program,
             expected_sha256,
@@ -180,6 +181,7 @@ impl Jobs {
     /// Replaces the place and the trust rule of the server scripts setting (FR-HK-08).
     #[must_use]
     pub fn with_script_store(mut self, store: ScriptStore) -> Self {
+        store.clean_leftovers();
         self.scripts = Arc::new(store);
         self
     }

@@ -91,6 +91,16 @@ impl ScriptStore {
         }
     }
 
+    /// Removes the script directories that a crash left behind. A new agent has no running job, so
+    /// every directory under the root is a leftover (AC-HK-09).
+    pub fn clean_leftovers(&self) {
+        match std::fs::remove_dir_all(&self.scratch_root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => tracing::warn!(%error, "cannot remove the old script directories"),
+        }
+    }
+
     /// Filters this search path instead of the one of the process, for a test.
     #[must_use]
     pub fn with_search_path(mut self, path: std::ffi::OsString) -> Self {

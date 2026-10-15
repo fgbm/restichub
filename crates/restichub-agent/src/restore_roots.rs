@@ -88,6 +88,7 @@ impl RestoreAccess {
         let mut protected = vec![config_dir.to_path_buf(), cache_dir.to_path_buf()];
         protected.push(roots_file_for(config_dir));
         protected.push(crate::hooks::allow_list_file_for(config_dir));
+        protected.push(crate::scripts::mode_file_for(config_dir));
         if let Some(dir) = program.parent() {
             protected.push(dir.to_path_buf());
         }
@@ -585,6 +586,11 @@ mod tests {
         let allow_list = crate::hooks::allow_list_file_for(&config);
         assert_eq!(
             access.check(allow_list.to_str().expect("utf-8")),
+            Err(TargetDenied::ProtectedPath)
+        );
+        let mode_file = crate::scripts::mode_file_for(&config);
+        assert_eq!(
+            access.check(mode_file.to_str().expect("utf-8")),
             Err(TargetDenied::ProtectedPath)
         );
         let program = base.join("hooks").join("dump");
