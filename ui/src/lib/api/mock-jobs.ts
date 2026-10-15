@@ -122,7 +122,7 @@ function isScripted(job: Job): boolean {
 const SCRIPTED_STEPS: PlannedStep[] = [
 	{ step_id: 'script-0', kind: 'script', name: 'Check free disk space', phase: 'before' },
 	{ step_id: 'script-1', kind: 'script', name: 'Dump the PostgreSQL database', phase: 'before' },
-	{ step_id: 'backup', kind: 'backup', name: '', phase: '' },
+	{ step_id: 'backup', kind: 'backup', name: '', phase: null },
 	{ step_id: 'script-2', kind: 'script', name: 'Remove the old dumps', phase: 'finally' }
 ];
 
@@ -325,7 +325,7 @@ function plannedStepsOf(job: Job): PlannedStep[] {
 			step_id: id,
 			kind: id === 'backup' ? 'backup' : 'other',
 			name: '',
-			phase: ''
+			phase: null
 		}));
 	if (job.status === 'queued') return [];
 	if (job.plan_id === SCRIPTED_PLAN) return SCRIPTED_STEPS;
@@ -339,7 +339,7 @@ export function detailOf(job: Job, now: number): JobDetail {
 	const steps: JobStep[] = stepsOf(job).map((step) => ({
 		kind: step.step_id === 'backup' ? 'backup' : 'other',
 		name: '',
-		phase: '',
+		phase: null,
 		...step
 	}));
 	const summary = steps.map((step) => step.output).find((output) => output.kind !== 'none') ?? null;

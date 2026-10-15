@@ -1206,7 +1206,6 @@ export const ru: Record<MessageKey, string> = {
 	'scripts.after': 'После резервного копирования',
 	'scripts.emptyBefore': 'До резервного копирования скриптов нет.',
 	'scripts.emptyAfter': 'После резервного копирования скриптов нет.',
-	'scripts.add': 'Добавить скрипт',
 	'scripts.addBlank': 'Пустой скрипт',
 	'scripts.addTemplate': 'Из шаблона скрипта',
 	'scripts.useJobTemplate': 'Взять шаблон задания',

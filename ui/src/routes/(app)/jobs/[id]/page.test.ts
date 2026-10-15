@@ -86,13 +86,13 @@ function job(overrides: Record<string, unknown> = {}) {
 		attempt: 0,
 		trigger: 'schedule',
 		planned_steps: ['backup'],
-		planned: [{ step_id: 'backup', kind: 'backup', name: '', phase: '' }],
+		planned: [{ step_id: 'backup', kind: 'backup', name: '', phase: null }],
 		steps: [
 			{
 				step_id: 'backup',
 				kind: 'backup',
 				name: '',
-				phase: '',
+				phase: null,
 				status: 'success',
 				exit_code: 0,
 				started_at: '2026-10-14T10:01:00Z',
@@ -474,7 +474,7 @@ describe('the job detail screen', () => {
 			planned_steps: ['script-0', 'backup', 'script-1'],
 			planned: [
 				{ step_id: 'script-0', kind: 'script', name: 'Dump the database', phase: 'before' },
-				{ step_id: 'backup', kind: 'backup', name: '', phase: '' },
+				{ step_id: 'backup', kind: 'backup', name: '', phase: null },
 				{ step_id: 'script-1', kind: 'script', name: 'Remove old dumps', phase: 'finally' }
 			],
 			steps: [first, backup, last],

@@ -173,7 +173,9 @@ describe('Profiles screen scripts', () => {
 		expect(
 			within(dialog).getByText('Only an Admin changes the scripts of a profile.')
 		).toBeInTheDocument();
-		expect(within(dialog).queryByRole('button', { name: 'Add script' })).not.toBeInTheDocument();
+		expect(
+			within(dialog).queryByRole('button', { name: 'Use a job template' })
+		).not.toBeInTheDocument();
 		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
 		expect(mocks.updateProfile.mock.calls[0][1].scripts).toEqual([STORED_SCRIPT]);

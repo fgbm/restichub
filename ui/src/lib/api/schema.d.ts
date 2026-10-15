@@ -2504,13 +2504,24 @@ export interface components {
             /** @description Stable snake_case code. */
             reason: string;
         };
+        /**
+         * @description The kind of a planned step, as the job detail shows it (FR-HK-11).
+         * @enum {string}
+         */
+        PlannedKind: "backup" | "hook" | "script" | "other";
+        /**
+         * @description The phase of a hook or a script step (FR-HK-05).
+         * @enum {string}
+         */
+        PlannedPhase: "before" | "after" | "on_success" | "on_error" | "finally";
         /** @description One planned step of a job (FR-HK-11). */
         PlannedStepView: {
-            /** @description The kind of the step, such as `backup`, `hook` or `script`. Empty for an older job. */
-            kind: string;
+            /** @description The SHA-256 hash of the script body, in lowercase hex. Present for a script step only. */
+            content_sha256?: string | null;
+            kind?: components["schemas"]["PlannedKind"] | null;
             /** @description The name of a script or the identifier of a hook, or empty. */
             name: string;
-            phase: string;
+            phase?: components["schemas"]["PlannedPhase"] | null;
             step_id: string;
         };
         /** @description One membership of an account in the platform account list (ADR-0028). */
@@ -3091,15 +3102,11 @@ export interface components {
             exit_code: number;
             /** @description In RFC 3339. */
             finished_at?: string | null;
-            /**
-             * @description The kind of the step, such as `backup`, `hook` or `script`. Empty for a job from an older
-             *     version.
-             */
-            kind: string;
+            kind?: components["schemas"]["PlannedKind"] | null;
             /** @description The name of a script or the identifier of a hook, or empty. */
             name: string;
             output: components["schemas"]["StepOutput"];
-            phase: string;
+            phase?: components["schemas"]["PlannedPhase"] | null;
             /** @description True after a hard kill that can leave a stale lock. */
             possible_stale_lock: boolean;
             /** @description In RFC 3339. */

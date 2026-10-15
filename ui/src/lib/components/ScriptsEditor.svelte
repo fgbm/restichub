@@ -1,17 +1,8 @@
 <script lang="ts">
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type { Agent, JobTemplate, ScriptTemplate, Secret } from '#lib/api/index.ts';
-	import {
-		Alert,
-		Badge,
-		Button,
-		CopyField,
-		Dialog,
-		DropdownMenu,
-		TextField
-	} from '#lib/components/ui/index.ts';
+	import { Alert, Badge, Button, CopyField, Dialog, TextField } from '#lib/components/ui/index.ts';
 	import PasswordField from '#lib/components/ui/PasswordField.svelte';
-	import type { MenuItem } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import type { ApiProblem } from '#lib/api/index.ts';
@@ -113,20 +104,6 @@
 				item.description.toLowerCase().includes(query)
 		);
 	});
-
-	const addItems = $derived<MenuItem[]>([
-		{ label: t('scripts.addBlank'), icon: 'plus', onSelect: () => addBlank('before') },
-		{
-			label: t('scripts.addTemplate'),
-			icon: 'file',
-			onSelect: () => openTemplates('before')
-		},
-		{
-			label: t('scripts.useJobTemplate'),
-			icon: 'checklist',
-			onSelect: () => (jobTemplateOpen = true)
-		}
-	]);
 
 	function messageOf(error: unknown): string {
 		if (error instanceof ApiError) return tErrorCode(error.code) ?? error.title;
@@ -237,9 +214,9 @@
 
 	{#if !readonly}
 		<div class="scripts__toolbar">
-			<DropdownMenu icon="plus" items={addItems} label={t('scripts.add')}>
-				{t('scripts.add')}
-			</DropdownMenu>
+			<Button size="sm" variant="ghost" icon="checklist" onclick={() => (jobTemplateOpen = true)}>
+				{t('scripts.useJobTemplate')}
+			</Button>
 		</div>
 	{/if}
 

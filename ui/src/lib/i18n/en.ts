@@ -1200,7 +1200,6 @@ export const en = {
 	'scripts.after': 'After the backup',
 	'scripts.emptyBefore': 'No script runs before the backup.',
 	'scripts.emptyAfter': 'No script runs after the backup.',
-	'scripts.add': 'Add script',
 	'scripts.addBlank': 'Blank script',
 	'scripts.addTemplate': 'From a script template',
 	'scripts.useJobTemplate': 'Use a job template',

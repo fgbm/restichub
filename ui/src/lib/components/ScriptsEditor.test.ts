@@ -206,7 +206,7 @@ describe('ScriptsEditor', () => {
 			props: { scripts: [script('dump', 'before')], readonly: true }
 		});
 		expect(screen.getByText('Only an Admin changes the scripts of a profile.')).toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: 'Add script' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Use a job template' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Remove the script' })).not.toBeInTheDocument();
 	});
 });
