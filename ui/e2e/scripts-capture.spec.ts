@@ -58,14 +58,14 @@ async function captureProfile(page: Page, scheme: string, labels: Labels, suffix
 	await go(page, labels, '/profiles');
 	await page.getByRole('button', { name: labels.actions }).click();
 	await page.getByRole('menuitem', { name: labels.edit }).click();
+	await page.getByRole('button', { name: /^(Scripts on the host|Скрипты на хосте)/ }).click();
 	const editor = page.getByTestId('scripts-editor');
 	await editor.waitFor();
 	// The second script shows its editor, so the capture holds the line numbers and the parameters.
 	await page.getByTestId('script-card').nth(1).locator('.card__head button').first().click();
-	// The section starts at the top of the dialog.
+	// The section starts at the top of the page.
 	await page
-		.locator('h3.section__title')
-		.filter({ hasText: /^(Scripts|Скрипты)$/ })
+		.locator('[data-section="scripts"]')
 		.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 	await page.waitForTimeout(300);
 	await page.screenshot({ path: `${out}/profile-scripts-${scheme}${suffix}.png` });
