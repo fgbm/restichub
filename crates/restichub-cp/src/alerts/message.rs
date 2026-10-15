@@ -148,7 +148,7 @@ impl Message {
                 job: alert.job_id.map(|id| JobReference { id: id.to_string() }),
                 message: text::condition(self.language, alert),
                 params: alert.params.0.clone(),
-                error_text: error_text(alert),
+                error_text: error_text_in(self.language, alert),
                 url: link(self.public_origin.as_deref(), alert),
             }),
         }
@@ -217,7 +217,7 @@ impl Message {
             labels.details,
             text::condition(self.language, alert)
         ));
-        if let Some(error) = error_text(alert) {
+        if let Some(error) = error_text_in(self.language, alert) {
             lines.push(format!("{}: {error}", labels.error));
         }
         lines.push(format!("{}: {}", labels.opened, rfc3339(alert.opened_at)));
@@ -235,6 +235,12 @@ impl Message {
 pub fn error_text(alert: &Alert) -> Option<String> {
     let text = scrub(&alert.detail, MAX_TEXT_CHARS);
     (!text.is_empty()).then_some(text)
+}
+
+/// Like [`error_text`], with the words of the language for a stable error code.
+fn error_text_in(language: Language, alert: &Alert) -> Option<String> {
+    let text = error_text(alert)?;
+    Some(text::error_label(language, &text).map_or(text, str::to_owned))
 }
 
 fn subject_name(alert: &Alert) -> String {
