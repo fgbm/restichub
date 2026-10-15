@@ -196,6 +196,19 @@ pub fn write_body(
             "recipients": ["matrix@example.com"],
         })),
         ("PATCH", "/api/v1/notification-channels/{id}") => Some(json!({"enabled": true})),
+        ("POST", "/api/v1/script-templates") => Some(json!({
+            "name": format!("matrix-script-{index}"),
+            "interpreter": "bash",
+            "phase": "before",
+            "body": "true",
+            "failure_policy": "abort_backup",
+        })),
+        ("PATCH", "/api/v1/script-templates/{id}") | ("PATCH", "/api/v1/job-templates/{id}") => {
+            Some(json!({"description": "matrix"}))
+        }
+        ("POST", "/api/v1/job-templates") => {
+            Some(json!({"name": format!("matrix-job-{index}"), "scripts": []}))
+        }
         ("PUT", "/api/v1/alert-rules") => Some(json!({"items": []})),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
