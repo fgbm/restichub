@@ -81,7 +81,7 @@ impl<'a> Phased<'a> {
 /// The first script that failed, for the error of the job (AC-HK-13).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ScriptFailure {
-    /// The name of the script.
+    /// Shown in the job error.
     pub(super) script_name: String,
     pub(super) phase: HookPhase,
 }

@@ -3,7 +3,7 @@
 //!
 //! The agent runs the code of a script step as root or LocalSystem, so only the host administrator
 //! decides whether it does. The decision is a small file next to the configuration directory, with
-//! the same ownership rule as the hook allow-list ([`crate::hooks::trust`], AC-HK-08). Without the
+//! the same ownership rule as the other trusted paths ([`crate::trust`], AC-HK-08). Without the
 //! file, or when another account can write it, the mode is off. A job, the control plane and a
 //! self-update cannot change the file.
 //!

@@ -33,7 +33,7 @@ pub struct StepView {
     pub step_id: String,
     /// Absent for a job from an older version.
     pub kind: Option<PlannedKind>,
-    /// The name of a script, or empty.
+    /// Empty for a step that is not a script.
     pub name: String,
     pub phase: Option<PlannedPhase>,
     pub status: StepStatus,
@@ -89,7 +89,7 @@ pub struct PlannedStepView {
     pub step_id: String,
     /// Absent for a job from an older version.
     pub kind: Option<PlannedKind>,
-    /// The name of a script, or empty.
+    /// Empty for a step that is not a script.
     pub name: String,
     pub phase: Option<PlannedPhase>,
     /// The SHA-256 hash of the script body, in lowercase hex. Present for a script step only.

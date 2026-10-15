@@ -2608,7 +2608,7 @@ export interface components {
          */
         PlannedKind: "backup" | "hook" | "script" | "other";
         /**
-         * @description The phase of a script step (FR-HK-05).
+         * @description Position of a script in the job (FR-HK-05).
          * @enum {string}
          */
         PlannedPhase: "before" | "after" | "on_success" | "on_error" | "finally";
@@ -2617,7 +2617,7 @@ export interface components {
             /** @description The SHA-256 hash of the script body, in lowercase hex. Present for a script step only. */
             content_sha256?: string | null;
             kind?: components["schemas"]["PlannedKind"] | null;
-            /** @description The name of a script, or empty. */
+            /** @description Empty for a step that is not a script. */
             name: string;
             phase?: components["schemas"]["PlannedPhase"] | null;
             step_id: string;
@@ -3211,7 +3211,7 @@ export interface components {
             /** @description In RFC 3339. */
             finished_at?: string | null;
             kind?: components["schemas"]["PlannedKind"] | null;
-            /** @description The name of a script, or empty. */
+            /** @description Empty for a step that is not a script. */
             name: string;
             output: components["schemas"]["StepOutput"];
             phase?: components["schemas"]["PlannedPhase"] | null;

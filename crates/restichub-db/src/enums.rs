@@ -894,7 +894,7 @@ pub enum PlannedKind {
     Other,
 }
 
-/// The phase of a script step (FR-HK-05).
+/// Position of a script in the job (FR-HK-05).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
