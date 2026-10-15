@@ -16,11 +16,11 @@ description: Main parts and terms of ResticHub.
 | Term | Meaning |
 |---|---|
 | Tenant | An isolated organization in one installation. |
-| Profile | A backup definition: repository, paths, excludes, retention, hooks. |
+| Profile | A backup definition: repository, paths, excludes, retention, scripts. |
 | Plan | A profile assigned to agents, with a schedule. |
 | Job | One run of a plan or a manual operation. |
 | Step | One command in a job, for example `backup` or `forget`. |
-| Hook | An allow-listed command that runs before or after restic. |
+| Server script | A script that you write in the web interface. The agent runs it on a trusted host before or after the backup. |
 | Maintenance agent | The agent that runs `forget`, `prune` and `check` for a repository. |
 
 ## How a job runs

@@ -1480,6 +1480,7 @@ export const ru: Record<MessageKey, string> = {
 	'pe.rule.within.title': 'Все снимки за период',
 	'pe.rule.within.text':
 		'Оставить все снимки, которые новее самого нового снимка не больше чем на этот срок. Отсчёт идёт от самого нового снимка, а не от сегодняшнего дня. Пример: <code>30d</code> — 30 дней, <code>1y2m</code> — год и два месяца.',
+	'pe.rule.within.hint': 'Например: 30d, 1y2m',
 	'pe.rule.within.invalid': 'Не разобрать срок. Пример: 30d, 6m, 1y2m7d3h.',
 	'pe.rule.tags.title': 'Теги, которые не удаляются',
 	'pe.rule.tags.text':
