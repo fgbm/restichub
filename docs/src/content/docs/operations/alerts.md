@@ -80,12 +80,15 @@ When you create a webhook, the control plane generates a signing secret. The dia
     "repository": { "id": "…", "name": "primary-s3" },
     "job": { "id": "…" },
     "message": "The backup job failed (failed): repository password=<redacted> rejected",
+    "params": { "job_kind": "backup", "error_code": "failed" },
     "url": "https://backup.example.com/jobs/…"
   }
 }
 ```
 
 The field `event` is `alert.opened`, `alert.resolved` or `test`. A test message has `"alert": null`. The text in `message` is scrubbed and holds at most 500 characters. The control plane hides a password, a token, a key and the user in a URL.
+
+The language of `message` follows `notifications.language` of the installation, so a receiver must not parse it. A receiver that decides what to do must read `alert.kind` and `alert.params`. The fields of `params` are typed values, such as `elapsed_seconds`, `rpo_seconds`, `threshold_minutes`, `job_kind` and `error_code`. A field is absent when it does not apply. A new version can add a kind or a field, so a receiver must ignore the values that it does not know.
 
 ### Signature
 

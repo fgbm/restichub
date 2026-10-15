@@ -80,12 +80,15 @@ description: Как сервер управления создаёт опове�
     "repository": { "id": "…", "name": "primary-s3" },
     "job": { "id": "…" },
     "message": "The backup job failed (failed): repository password=<redacted> rejected",
+    "params": { "job_kind": "backup", "error_code": "failed" },
     "url": "https://backup.example.com/jobs/…"
   }
 }
 ```
 
-Поле `event` принимает значения `alert.opened`, `alert.resolved` и `test`. В тестовом сообщении `"alert": null`. Текст в `message` очищен и содержит не больше 500 символов. Сервер управления скрывает пароль, токен, ключ и пользователя в URL. Текст приходит на английском языке.
+Поле `event` принимает значения `alert.opened`, `alert.resolved` и `test`. В тестовом сообщении `"alert": null`. Текст в `message` очищен и содержит не больше 500 символов. Сервер управления скрывает пароль, токен, ключ и пользователя в URL. Язык `message` задаёт параметр `notifications.language` установки.
+
+Получатель не должен разбирать `message`. Чтобы принять решение, получатель читает `alert.kind` и `alert.params`. Поля `params` — это типизированные значения, например `elapsed_seconds`, `rpo_seconds`, `threshold_minutes`, `job_kind` и `error_code`. Поле отсутствует, если оно не применимо. Новая версия может добавить вид или поле, поэтому получатель должен пропускать неизвестные значения.
 
 ### Подпись
 
