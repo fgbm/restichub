@@ -7,15 +7,17 @@ A job is one run of a plan or one manual operation. The control plane keeps the 
 
 ## Job states
 
-| State | Meaning |
-|---|---|
-| Waiting (`queued`) | The job is in the queue. The control plane did not send it. |
-| Sent (`sent`) | The control plane sent the job. The agent did not confirm it. |
-| Running (`running`) | The agent confirmed the job and runs it. |
-| Succeeded (`succeeded`) | Every step succeeded. |
-| Failed (`failed`) | A step failed, the job was cancelled, or the control plane refused it. The result code and the reason give the detail. |
-| Expired (`expired`) | The job waited in the queue longer than its acceptance window. A running job never expires. |
-| Gave up (`dead_letter`) | The repository stayed locked after the last retry. |
+| State in the web interface | Stored state | Meaning |
+|---|---|---|
+| Waiting | `queued` | The job is in the queue. The control plane did not send it. |
+| Sent to the host | `sent` | The control plane sent the job. The agent did not confirm it. |
+| Running | `running` | The agent confirmed the job and runs it. |
+| Succeeded | `succeeded` | Every step succeeded. |
+| Succeeded with warnings | `succeeded` | Every step finished, and restic reported warnings. The result code is `succeeded_with_warnings`. |
+| Failed | `failed` | A step failed, or the control plane refused the job. The result code and the reason give the detail. |
+| Cancelled | `failed` | An Operator cancelled the job. The result code is `cancelled`. |
+| Expired | `expired` | The job waited in the queue longer than its acceptance window. A running job never expires. |
+| Gave up | `dead_letter` | The repository stayed locked after the last retry. |
 
 A job in a final state never changes again.
 
@@ -80,24 +82,24 @@ The agent stops a step that makes no progress for the stall timeout. It stops th
 | `backup`, `restore` and the short steps | 60 minutes |
 | `check`, `prune` | 6 hours, also inside a backup job |
 
-A profile sets the stall timeout for its jobs. The setting is "Stop after no progress" in the section "Limits" of the profile. The value is from 5 to 10080 minutes. A `check` or `prune` step in the job waits for the longer of this value and 6 hours. A status line that repeats the same content is not progress.
+A profile sets the stall timeout for its jobs. The setting is "Stop after no progress (minutes)" in the section "Run limits" of the profile. The value is from 5 to 10080 minutes. A `check` or `prune` step in the job waits for the longer of this value and 6 hours. A status line that repeats the same content is not progress.
 
 ### Maximum duration
 
-A profile sets a maximum duration. The default is 48 hours (2880 minutes). Zero turns the limit off. When the job runs longer, the agent stops it, whatever its progress. The job fails with the reason `max_duration_exceeded`. The value is from 0 to 43200 minutes. The job detail shows the limits of a running job.
+A profile sets a maximum duration. The setting is "Maximum duration (hours)" in the section "Run limits" of the profile. The default is 48 hours. Zero turns the limit off. When the job runs longer, the agent stops it, whatever its progress. The job fails with the reason `max_duration_exceeded`. The value is from 0 to 720 hours. The job detail shows the limits of a running job (see [Job detail](#job-detail)).
 
 ### Environment variables
 
-An operator can change the defaults. The values are in seconds.
+An operator can change the defaults. The values are in seconds. The page [Environment variables](/restichub/operations/environment-variables/) lists every variable.
 
 | Variable | Where | Effect |
 |---|---|---|
 | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | control plane | The stall timeout of a new profile. From 300 to 604800. |
 | `RESTICHUB_JOB_MAX_DURATION_SECS` | control plane | The maximum duration of a new profile. From 0 to 2592000. Zero means no limit. |
 | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | The stall timeout of a job that carries none, for all step kinds. From 60 to 604800. |
-| `RESTICHUB_JOB_HARD_CEILING_SECS` | control plane | The time after which the control plane fails a running job whatever its limits. From 3600. The default is 31 days. |
+| `RESTICHUB_JOB_HARD_CEILING_SECS` | control plane | The time after which the control plane fails a running job whatever its limits. The default is 31 days (2678400). A smaller value than 3600 becomes 3600. |
 
-A value that is not a number, or is out of range, is ignored. A profile that exists keeps its own values.
+For the stall timeout and the maximum duration, a value that is not a number, or is out of range, is ignored. The control plane rounds the value up to whole minutes. A profile that exists keeps its own values.
 
 ### Lost jobs
 
@@ -187,6 +189,95 @@ The control plane deletes log lines that are older than the retention period. A 
 | Days that the control plane keeps the log text | 30 | `RESTICHUB_LOG_RETENTION_DAYS` |
 
 The configuration file holds the same value as `log_retention_days`. The value is the same for every tenant. A value below 1 is raised to 1. A value above 36500 stops the start.
+
+## Job detail
+
+Select a job in the list "Jobs" to open its detail. The header shows the plan (or the kind of the job), the status, the host and the trigger. While the job runs, it also shows the step number. The button "Run again" starts the plan again. The button "Cancel job" is available while the job can still change. The panel "About this job" holds these fields:
+
+| Field | Meaning |
+|---|---|
+| Job ID | The identifier of the job. |
+| Kind | `backup`, `check`, `restore` and so on. |
+| Plan, Host, Repository | The objects of the job. |
+| Trigger | "Schedule", "Manual run" or "Maintenance". |
+| Queued | The time when the job entered the queue. |
+| Started, Finished | The start and end times. |
+| Accept until | The end of the acceptance window. The field shows while the job is waiting or sent. |
+| Limit | Shows for a running job only. The line "Maximum: ..." or "No maximum" shows the maximum duration. The line "No progress: ..." shows the stall timeout. Without both limits the field says "Stops when restic makes no progress". |
+| Attempt | The attempt number. The field shows after a lock retry. |
+| Signing key | The first 8 characters of the identifier of the key that signed the job. The button next to it copies the whole identifier. Use it to find the jobs of a key after a [key compromise](/restichub/operations/job-signing-key-compromise/). |
+| Duration | The run time. |
+
+The panel "Steps" lists every step of the job in run order, also the steps that did not start. Each step shows one of these statuses:
+
+| Code | Text in the web interface |
+|---|---|
+| `cancelled` | Cancelled |
+| `config_error` | Configuration error |
+| `failed` | Failed |
+| `retry` | Repository locked |
+| `skipped` | Skipped |
+| `success` | Succeeded |
+| `warning` | Warning |
+
+A script step shows the badge "Script" and its phase. Select a step to read its own log.
+
+### Reasons and result codes
+
+A failed or refused job shows a reason under its title. The list of jobs shows the short result code. These are the texts:
+
+| Code | Text in the web interface |
+|---|---|
+| `agent_capability_missing` | The agent is too old for this job. Update the agent. |
+| `agent_facts_invalid` | The facts of the host are not usable. |
+| `agent_lost` | The host went offline during the job. |
+| `agent_revoked` | The host is revoked. |
+| `cancelled` | The job was cancelled. |
+| `compile_failed` | The profile no longer fits the host. |
+| `expired` | The job waited too long and expired. |
+| `forget_selected_nothing` | Forget selected no snapshots |
+| `forget_without_tags` | The retention has no tag filter. The job was not sent. |
+| `hook_failed` | A script or a hook ended with an error. |
+| `interrupted` | Interrupted: the agent restarted while scripts ran |
+| `job_invalid` | The job did not pass the validation. |
+| `listing_missing` | The host sent no result for this request. |
+| `lock_retries_exhausted` | The repository stayed locked after every retry. |
+| `lock_retry` | The repository was locked. A new attempt is queued. |
+| `max_duration_exceeded` | The job was stopped: it ran longer than its maximum duration. |
+| `not_acknowledged` | The host never confirmed the job. |
+| `plan_changed` | The plan moved to another host. |
+| `plan_missing` | The plan is deleted. |
+| `profile_missing` | The profile is deleted. |
+| `repository_changed` | The profile now uses another repository. |
+| `repository_locked` | The repository is locked by another process. |
+| `repository_missing` | The repository is deleted. |
+| `request_missing` | The job lost its request. |
+| `restore_target_denied` | The host refused the target path. It lies outside the restore roots or holds a file of the agent. |
+| `secret_unavailable` | A repository secret is not available. |
+| `signed_job_unavailable` | The stored job is not readable. |
+| `signing_failed` | The control plane could not sign the job. |
+| `stalled` | The job was stopped: restic made no progress for too long. |
+| `step_failed` | restic stopped with an error. |
+| `step_missing` | The profile no longer holds this step. |
+| `succeeded_with_warnings` | Finished with warnings. |
+| `timed_out` | The job ran longer than its maximum duration. |
+| `unacknowledged_expired` | The host did not confirm the job before it expired. |
+| `unsupported_kind` | The queue does not run this kind of job. |
+| `wrong_password` | The repository password or the access keys are wrong. |
+
+| Code | Text in the web interface |
+|---|---|
+| `agent_lost` | the host went offline |
+| `cancelled` | cancelled |
+| `expired` | the job expired |
+| `hook_failed` | script or hook error |
+| `interrupted` | interrupted by an agent restart |
+| `max_duration_exceeded` | maximum duration exceeded |
+| `repository_locked` | repository locked |
+| `repository_missing` | repository not found |
+| `stalled` | no progress |
+| `step_failed` | restic error |
+| `wrong_password` | wrong password or keys |
 
 ## Roles
 

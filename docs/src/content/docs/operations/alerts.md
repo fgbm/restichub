@@ -9,14 +9,14 @@ The control plane watches each organization and raises an alert when a backup ne
 
 An Admin switches each kind on or off in **Settings**, **Alert rules**.
 
-| Kind | Raised when | Default |
-|---|---|---|
-| `rpo_violated` | A plan has no successful backup within its recovery point objective (RPO). | On |
-| `job_failed` | The latest finished job of a plan or a task failed. | On |
-| `job_dead_letter` | The latest finished job stayed locked after every retry. | On |
-| `job_warnings` | The latest finished job succeeded, but restic reported warnings. | Off |
-| `agent_offline` | A host did not contact the control plane for longer than the limit. | On, 30 minutes |
-| `stale_lock` | A job waits on a stale repository lock for longer than the limit. | On, 60 minutes |
+| Kind | Name in the web interface | Raised when | Default |
+|---|---|---|---|
+| `rpo_violated` | Backup overdue | A plan has no successful backup within its recovery point objective (RPO). | On |
+| `job_failed` | Job failed | The latest finished job of a plan or a task failed. | On |
+| `job_dead_letter` | Job gave up | The latest finished job stayed locked after every retry. | On |
+| `job_warnings` | Job with warnings | The latest finished job succeeded, but restic reported warnings. | Off |
+| `agent_offline` | Host offline | A host did not contact the control plane for longer than the limit. | On, 30 minutes |
+| `stale_lock` | Stale repository lock | A job waits on a stale repository lock for longer than the limit. | On, 60 minutes |
 
 An alert stays open while its condition holds. The control plane sends one message when it opens the alert. It sends no repeat while the alert is open. A job alert resolves when the next job of the same plan succeeds.
 

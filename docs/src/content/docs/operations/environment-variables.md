@@ -1,0 +1,123 @@
+---
+title: Environment variables
+description: Every RESTICHUB_ variable that the control plane and the agent read, with its default, its unit and its meaning.
+---
+
+The control plane reads a configuration file (TOML) and the environment variables that start with `RESTICHUB_`. An environment variable overrides the same value in the file. The agent reads one `RESTICHUB_` variable. A value in seconds is a whole number of seconds.
+
+Set the variables in the environment of the control plane process. For the Docker Compose stack, add them to the `environment` section of the service `cp`, or pass them through the file `.env` (see [Install the control plane](/restichub/operations/install-control-plane/)).
+
+## Control plane: base
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RESTICHUB_CONFIG` | none | The path of the configuration file. The command line option `--config` has priority. |
+| `RESTICHUB_LISTEN_ADDR` | `127.0.0.1:8080` | The address and the port of the web interface and the API. |
+| `RESTICHUB_LOG_FORMAT` | `text` | The format of the log: `text` or `json`. |
+| `RESTICHUB_LOG_LEVEL` | `info` | The log level, for example `info` or `debug`. |
+| `RESTICHUB_TRUSTED_PROXIES` | none | The networks of the reverse proxies, in CIDR form, separated with commas. The control plane trusts the header `X-Forwarded-For` from these networks only. See [Agent enrollment rate limit](/restichub/operations/enrollment-rate-limit/). |
+| `RESTICHUB_TENANCY_MODE` | `single` | `single` or `multi`. |
+| `RESTICHUB_TENANCY_DEFAULT_TENANT` | `default` | The name of the organization that the single mode uses. |
+| `RESTICHUB_LOG_RETENTION_DAYS` | `30` | The number of days that the control plane keeps the text of job logs. The smallest value is 1. The largest value is 36500. See [Jobs](/restichub/concepts/jobs/#log-retention). |
+
+## Control plane: database and secrets
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RESTICHUB_DATABASE_URL` | required | The PostgreSQL URL of the runtime login. |
+| `RESTICHUB_DATABASE_PASSWORD` | none | The password of the runtime login. Do not put a password in the URL as well. |
+| `RESTICHUB_DATABASE_PASSWORD_FILE` | none | The path of a file that holds that password. Use it instead of the variable. |
+| `RESTICHUB_DATABASE_MIGRATION_URL` | none | The PostgreSQL URL of the owner login. Without it the control plane runs no migration. |
+| `RESTICHUB_DATABASE_MIGRATION_PASSWORD` | none | The password of the owner login. |
+| `RESTICHUB_DATABASE_MIGRATION_PASSWORD_FILE` | none | The path of a file that holds that password. |
+| `RESTICHUB_KEK` | none | The key encryption key. It opens the repository passwords and the installation CA. |
+| `RESTICHUB_KEK_FILE` | none | The path of a file that holds the key encryption key. Set `RESTICHUB_KEK` or `RESTICHUB_KEK_FILE`, not both. |
+
+## Control plane: sign-in
+
+| Variable | Default | Unit | Meaning |
+|---|---|---|---|
+| `RESTICHUB_AUTH_SESSION_IDLE_SECS` | `1800` (30 minutes) | seconds | A session ends after this time without a request. |
+| `RESTICHUB_AUTH_SESSION_ABSOLUTE_SECS` | `43200` (12 hours) | seconds | A session ends after this time, whatever its use. |
+| `RESTICHUB_AUTH_SIGN_IN_USER_RATE` | `10` | attempts per minute | The largest number of sign-in attempts for one user name. |
+| `RESTICHUB_AUTH_SIGN_IN_IP_RATE` | `30` | attempts per minute | The largest number of sign-in attempts from one IP address. |
+| `RESTICHUB_AUTH_MAX_CONCURRENT_HASHES` | the number of CPUs | count | The largest number of password hashes that run at the same time. Each hash uses about 19 MiB of memory. |
+| `RESTICHUB_SERVER_INSECURE_COOKIES` | `false` | `true` or `false` | Turns off the `Secure` attribute of the session cookie. Use it for local development over plain HTTP only. |
+
+## Control plane: agent listener
+
+| Variable | Default | Unit | Meaning |
+|---|---|---|---|
+| `RESTICHUB_AGENT_LISTEN` | none | address and port | The address of the agent listener, for example `0.0.0.0:8443`. Without it the listener and the enrollment endpoint are off. |
+| `RESTICHUB_AGENT_ENDPOINT` | none | URL | The public `https` address that an agent dials. The control plane reports it to the agent at enrollment. |
+| `RESTICHUB_AGENT_TLS_CERT_FILE` | none | path | The server certificate of the agent listener. Without it the listener uses a certificate from the installation CA. |
+| `RESTICHUB_AGENT_TLS_KEY_FILE` | none | path | The private key of that certificate. |
+| `RESTICHUB_AGENT_MAX_CONNECTIONS` | `2200` | count | The largest number of open connections on the agent listener. |
+| `RESTICHUB_AGENT_CERT_LIFETIME_SECS` | `2592000` (30 days) | seconds | The lifetime of an agent certificate. From 600 (10 minutes) to 7776000 (90 days). The agent rotates the certificate after two thirds of the lifetime. See [Agent certificate rotation](/restichub/operations/certificate-rotation/). |
+| `RESTICHUB_REENROLL_TOKEN_MAX_TTL_SECS` | `3600` | seconds | The longest life of a token that is bound to a host. See [Enroll a host again](/restichub/operations/enroll-a-host-again/). |
+| `RESTICHUB_REPLACE_ONLINE_WINDOW_SECS` | `300` | seconds | An old host record with a sign of life inside this window is not replaced. |
+
+## Control plane: queue
+
+| Variable | Default | Unit | Meaning |
+|---|---|---|---|
+| `RESTICHUB_QUEUE_AGENT_LIMIT` | `2` | count | The largest number of jobs that run on one agent. |
+| `RESTICHUB_QUEUE_REPOSITORY_LIMIT` | `4` | count | The largest number of backups that run on one repository. |
+| `RESTICHUB_QUEUE_GLOBAL_LIMIT` | `100` | count | The largest number of jobs that run in one organization. |
+| `RESTICHUB_QUEUE_LEASE_SECS` | `60` | seconds | The time that the control plane waits for the acknowledgement of a job before it sends the job again. The smallest value is 15. |
+| `RESTICHUB_QUEUE_LOCK_RETRY_LIMIT` | `5` | count | The number of lock results after which a job gets the state "Gave up". |
+| `RESTICHUB_QUEUE_LOCK_RETRY_BASE_SECS` | `30` | seconds | The delay before the first lock retry. The delay doubles for each retry. |
+
+See [Jobs](/restichub/concepts/jobs/) for the rules of the queue.
+
+## Job time limits
+
+| Variable | Read by | Default | Unit | Meaning |
+|---|---|---|---|---|
+| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | control plane | `3600` (60 minutes) | seconds | The "No progress" limit of a new profile. The control plane rounds the value up to whole minutes. Allowed: 300 to 604800. Other values are ignored. |
+| `RESTICHUB_JOB_MAX_DURATION_SECS` | control plane | `172800` (48 hours) | seconds | The maximum duration of a new profile. Allowed: 0 to 2592000. 0 means no limit. Other values are ignored. |
+| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | 60 minutes. 6 hours for `check` and `prune`. | seconds | The stall timeout of a job that carries none. A value outside 60 to 604800 is set to the nearest limit. |
+| `RESTICHUB_JOB_HARD_CEILING_SECS` | control plane | `2678400` (31 days) | seconds | The time after which the control plane fails a running job, whatever its limits. A value below 3600 becomes 3600. |
+
+An existing profile keeps its own values. See [Profiles](/restichub/concepts/profiles/#job-limits) and [Jobs](/restichub/concepts/jobs/#time-limits).
+
+## Alerts and notifications
+
+See [Configure alerts](/restichub/operations/alert-configuration/) for the file keys and for examples.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RESTICHUB_PUBLIC_ORIGIN` | none | The scheme, the host and the port of the web interface, for example `https://backup.example.com`. The links in messages use it. |
+| `RESTICHUB_NOTIFICATIONS_LANGUAGE` | `en` | The language of emails and webhook messages: `en` or `ru`. |
+| `RESTICHUB_SMTP_HOST` | none | The SMTP server. Setting it turns email on. |
+| `RESTICHUB_SMTP_PORT` | 587 for `starttls`, 465 for `tls`, 25 for `none` | The SMTP port. |
+| `RESTICHUB_SMTP_SECURITY` | `starttls` | `starttls`, `tls` or `none`. |
+| `RESTICHUB_SMTP_USERNAME` | none | The user name for the SMTP server. |
+| `RESTICHUB_SMTP_PASSWORD` | none | The password. Set this variable or the file, not both. |
+| `RESTICHUB_SMTP_PASSWORD_FILE` | none | The path of a file that holds the password. |
+| `RESTICHUB_SMTP_FROM` | none | The sender address. It is required when the host is set. |
+| `RESTICHUB_WEBHOOK_ALLOW_HTTP` | `false` | Allows webhook URLs with the scheme `http`. |
+| `RESTICHUB_WEBHOOK_ALLOW_NETWORKS` | none | Networks in CIDR form, separated with commas, that the webhook address check admits although they are not public. |
+
+## Docker Compose stack
+
+The file `.env` of the stack holds more values. The script `bootstrap.sh` writes most of them. See [Install the control plane](/restichub/operations/install-control-plane/#the-environment-file).
+
+| Variable | Meaning |
+|---|---|
+| `RESTICHUB_OWNER_PASSWORD`, `RESTICHUB_RUNTIME_PASSWORD` | The passwords of the owner login and the runtime login of the database. |
+| `RESTICHUB_DOMAIN`, `RESTICHUB_ACME_EMAIL` | The host name of the control plane and the email address for its certificate. |
+| `RESTICHUB_IMAGE_TAG` | The tag of the control plane image. |
+| `RESTICHUB_AGENT_PORT` | The published port of the agent listener. The default is 8443. |
+
+## Agent
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | see "Job time limits" | The stall timeout of a job that carries none. |
+
+The agent also honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. See [Register an agent](/restichub/operations/register-an-agent/#the-proxy-of-the-download). The agent has no other `RESTICHUB_` variable.
+
+## Build and test variables
+
+`RESTICHUB_BUILD_VERSION` sets the revision in the version of a build. The CI sets it when it builds a release. The variables `RESTICHUB_TEST_DATABASE_URL`, `RESTICHUB_TEST_RESTIC`, `RESTICHUB_TEST_DETACHED` and `RESTICHUB_REQUIRE_RESTIC` are for the tests of the project. Do not set them in an installation.
