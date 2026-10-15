@@ -17,7 +17,7 @@ On a host with the trust mode, a person who controls the control plane can run a
 
 - The trust mode is local. Only root or an Administrator can turn it on. A job cannot change it.
 - The control plane signs each job. The signature covers the text of every script. It protects the job on the network. It does not stop a person who controls the control plane or its database, because the control plane signs the job from its own data.
-- Only an Admin can change a script or a template. An Operator and a Viewer can read them.
+- Only an Admin can change a script or a template. An Operator can read them. A Viewer cannot read a script text: the API returns an empty text for each script of a profile, and it refuses the template lists. People often type a credential into a script, so a Viewer must not see it.
 - The audit log records each change of a script and each job that carries scripts. Each record holds the SHA-256 hash of the script text.
 - A secret reaches a script only in an environment variable. It never appears in the text, in an argument or in the log.
 
@@ -161,7 +161,7 @@ No record holds the text of a script or the value of a parameter.
 
 | Action | Admin | Operator | Viewer |
 |---|---|---|---|
-| Read scripts and templates | yes | yes | yes |
+| Read scripts and templates | yes | yes | no |
 | Change the scripts of a profile | yes | no | no |
 | Change a template | yes | no | no |
 | Run a plan | yes | yes | no |

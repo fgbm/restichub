@@ -111,11 +111,14 @@ pub async fn list_profiles(
     } else {
         None
     };
-    let items = result
+    let mut items = result
         .profiles
         .iter()
         .map(ProfileView::try_from)
         .collect::<Result<Vec<_>, _>>()?;
+    if context.authorize(Operation::ScriptsRead).is_err() {
+        items.iter_mut().for_each(ProfileView::hide_script_bodies);
+    }
     Ok(Json(ProfileListResponse { items, next_cursor }))
 }
 
@@ -159,7 +162,13 @@ pub async fn get_profile(
         .tenant_tx(&state, async |tx| Ok(repo::get(tx, profile_id).await?))
         .await?;
     match profile {
-        Some(profile) => Ok(Json(ProfileView::try_from(&profile)?)),
+        Some(profile) => {
+            let mut view = ProfileView::try_from(&profile)?;
+            if context.authorize(Operation::ScriptsRead).is_err() {
+                view.hide_script_bodies();
+            }
+            Ok(Json(view))
+        }
         None => Err(ApiError::not_found()),
     }
 }

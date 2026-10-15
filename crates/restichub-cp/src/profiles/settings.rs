@@ -345,6 +345,15 @@ pub struct ProfileView {
     pub created_by: Option<String>,
 }
 
+impl ProfileView {
+    /// Empties the script bodies for a reader who may not read scripts (FR-HK-12).
+    pub fn hide_script_bodies(&mut self) {
+        for script in &mut self.scripts {
+            script.body.clear();
+        }
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProfileListResponse {
     pub items: Vec<ProfileView>,
