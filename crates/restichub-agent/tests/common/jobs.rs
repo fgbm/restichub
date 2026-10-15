@@ -359,6 +359,12 @@ pub fn script_ignore_interrupt(path: &Path) {
         .expect("cannot write the ignore file");
 }
 
+/// Makes the fake restic end itself with `SIGKILL` after its sleep (AC-SC-06).
+pub fn script_kill(path: &Path) {
+    std::fs::write(format!("{}.restichub-kill", path.display()), "1")
+        .expect("cannot write the kill file");
+}
+
 /// Sends a `CancelJob` to the open stream of an agent, as the control plane does (FR-AG-10).
 pub fn cancel_job(fixture: &StreamFixture, agent: Uuid, job_id: &str) -> bool {
     use restichub_proto::agent::v1::{CancelJob, ControlMessage, control_message};

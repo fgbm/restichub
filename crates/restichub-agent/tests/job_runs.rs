@@ -389,6 +389,40 @@ async fn ac_ag_07_a_step_that_ignores_the_signal_is_killed_after_the_grace_perio
     let _ = std::fs::remove_dir_all(&path);
 }
 
+/// AC-SC-06: restic killed by a signal from outside leaves a possible stale lock, so the control
+/// plane can schedule the `unlock`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_sc_06_a_restic_killed_from_outside_reports_a_possible_stale_lock() {
+    let dir = config_dir("job-runs-outside-kill");
+    let path = repository("job-runs-outside-kill-repo");
+    common::script_exit_codes(&path, 0, 0);
+    common::script_sleep(&path, 200);
+    common::script_kill(&path);
+
+    let jobs = common::program_jobs(&dir);
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    jobs.greeted(false);
+    let job = job(
+        "job-outside-kill",
+        vec![access("repo-1", &path)],
+        vec![test_access_step("repo-1")],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+
+    let (steps, result) = collect_job(&mut rx).await;
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].status, StepStatus::Failed as i32);
+    assert!(
+        steps[0].possible_stale_lock,
+        "a signal exit reports a possible stale lock"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
 /// Reads the messages until the job result arrives and returns the step results before it.
 async fn collect_job(rx: &mut mpsc::Receiver<AgentMessage>) -> (Vec<StepResult>, JobResult) {
     let mut steps = Vec::new();

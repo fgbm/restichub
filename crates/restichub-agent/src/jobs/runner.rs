@@ -220,6 +220,16 @@ pub(super) fn status_for_exit(code: i32) -> StepStatus {
     }
 }
 
+#[cfg(unix)]
+fn ended_by_signal(status: &std::process::ExitStatus) -> bool {
+    std::os::unix::process::ExitStatusExt::signal(status).is_some()
+}
+
+#[cfg(not(unix))]
+fn ended_by_signal(_status: &std::process::ExitStatus) -> bool {
+    false
+}
+
 /// Starts the collector of a step with the parameters that shape its output (AC-RS-02, FR-RS-04).
 fn collector_for(step: &Step, kind: OutputKind, job_id: &str) -> Collector {
     let collector = Collector::new(kind, job_id, &step.step_id);
@@ -375,7 +385,7 @@ impl Jobs {
         let mut hard_killed = false;
         // An `ls` page that is full needs no more of the listing, so the agent stops restic.
         let mut page_done = false;
-        let code = loop {
+        let (code, signalled) = loop {
             let reaped = {
                 let mut slot = lock(&cancel.child);
                 match slot.as_mut() {
@@ -383,7 +393,7 @@ impl Jobs {
                         Ok(Some(status)) => {
                             let code = status.code().unwrap_or(-1);
                             *slot = None;
-                            Some(code)
+                            Some((code, ended_by_signal(&status)))
                         }
                         Ok(None) => None,
                         Err(error) => {
@@ -395,8 +405,8 @@ impl Jobs {
                     None => None,
                 }
             };
-            if let Some(code) = reaped {
-                break code;
+            if let Some(exit) = reaped {
+                break exit;
             }
             if stopped_at.is_none() {
                 if output.collector.page_complete() {
@@ -468,7 +478,11 @@ impl Jobs {
                 ..StepOutcome::new(StepStatus::Success, 0)
             }
         } else {
-            StepOutcome::from_exit(code)
+            // A signal from outside kills restic before it can remove its lock (AC-SC-06).
+            StepOutcome {
+                possible_stale_lock: signalled,
+                ..StepOutcome::from_exit(code)
+            }
         };
         outcome.output = output.collector.finish();
         outcome
