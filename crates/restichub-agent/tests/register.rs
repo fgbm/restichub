@@ -56,9 +56,14 @@ async fn ac_in_02_register_enrolls_the_host_and_stores_no_token() {
     };
     let dir = common::temp_config_dir("register-e2e");
 
-    commands::register_async(&options(&fixture, false), &dir, &FakeRestic)
-        .await
-        .expect("the agent must register");
+    commands::register_async(
+        &options(&fixture, false),
+        &dir,
+        &dir.with_extension("cache"),
+        &FakeRestic,
+    )
+    .await
+    .expect("the agent must register");
 
     let identity = StoredIdentity::load(&dir).expect("the identity must load");
     assert_eq!(identity.tenant_id, fixture.tenant.to_string());
@@ -112,12 +117,22 @@ async fn ac_in_02_a_second_registration_is_refused_without_force() {
     };
     let dir = common::temp_config_dir("register-overwrite");
 
-    commands::register_async(&options(&fixture, false), &dir, &FakeRestic)
-        .await
-        .expect("the first register must succeed");
-    let error = commands::register_async(&options(&fixture, false), &dir, &FakeRestic)
-        .await
-        .expect_err("the second register must be refused");
+    commands::register_async(
+        &options(&fixture, false),
+        &dir,
+        &dir.with_extension("cache"),
+        &FakeRestic,
+    )
+    .await
+    .expect("the first register must succeed");
+    let error = commands::register_async(
+        &options(&fixture, false),
+        &dir,
+        &dir.with_extension("cache"),
+        &FakeRestic,
+    )
+    .await
+    .expect_err("the second register must be refused");
     assert!(
         error.to_string().contains("already exists"),
         "unexpected error: {error}"
@@ -125,6 +140,45 @@ async fn ac_in_02_a_second_registration_is_refused_without_force() {
 
     let _ = std::fs::remove_dir_all(&dir);
     fixture.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_in_07_a_failed_preflight_makes_no_enrollment_request() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("cannot bind the listener");
+    listener
+        .set_nonblocking(true)
+        .expect("cannot set the listener non-blocking");
+    let port = listener.local_addr().expect("no local address").port();
+    let dir = common::temp_config_dir("register-preflight");
+    std::fs::create_dir_all(&dir).expect("cannot create the test directory");
+    // A cache below a file cannot be made on any operating system.
+    let blocker = dir.join("blocker");
+    std::fs::write(&blocker, b"x").expect("cannot write the blocker");
+    let options = RegisterOptions {
+        url: Some(format!("http://127.0.0.1:{port}")),
+        token: Some("one-time-token".to_owned()),
+        ..RegisterOptions::default()
+    };
+
+    let error = commands::register_async(
+        &options,
+        &dir.join("Agent"),
+        &blocker.join("cache"),
+        &FakeRestic,
+    )
+    .await
+    .expect_err("the preflight must fail");
+
+    assert!(
+        error.to_string().contains("cache directory"),
+        "unexpected error: {error:#}"
+    );
+    let accepted = listener.accept();
+    assert!(
+        matches!(&accepted, Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+        "the agent connected before the preflight passed"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[cfg(unix)]
