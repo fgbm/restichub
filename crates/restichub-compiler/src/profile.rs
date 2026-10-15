@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::target::OperatingSystem;
 
 /// A profile: the repository, the paths, the excludes, the tags, the options,
-/// the hooks and the retention (FR-PF-01).
+/// the scripts and the retention (FR-PF-01).
 #[derive(Debug, Clone, Default)]
 pub struct Profile {
     /// Identifier of the repository in the control plane.

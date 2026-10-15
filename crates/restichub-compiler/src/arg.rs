@@ -414,7 +414,7 @@ fn overwrite_value(mode: OverwriteMode) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use restichub_proto::agent::v1::{
-        BackupStep, ForgetStep, Job, ScriptStep, RepositoryAccess, SnapshotsFilter, Step, UnlockStep,
+        BackupStep, ForgetStep, HookPhase, Job, ScriptFailurePolicy, ScriptInterpreter, ScriptStep, RepositoryAccess, SnapshotsFilter, Step, UnlockStep,
         step,
     };
 
@@ -596,7 +596,14 @@ mod tests {
     fn script_step_is_not_a_restic_command() {
         let step = Step {
             step_id: "script-0".to_owned(),
-            kind: Some(step::Kind::Script(ScriptStep::default())),
+            kind: Some(step::Kind::Script(ScriptStep {
+                name: "dump".to_owned(),
+                interpreter: ScriptInterpreter::Sh as i32,
+                phase: HookPhase::Before as i32,
+                body: "true".to_owned(),
+                failure_policy: ScriptFailurePolicy::AbortBackup as i32,
+                ..ScriptStep::default()
+            })),
             ..Step::default()
         };
         let validated = validated(step.clone());

@@ -6,7 +6,7 @@ use restichub_proto::agent::v1::{
 };
 use restichub_proto::signing::Rejection;
 
-use crate::arg::{self, ArgError, MASK};
+use crate::arg::{self, ArgError};
 use crate::compile::{Plan, PlannedStep};
 use crate::job::ValidatedJob;
 

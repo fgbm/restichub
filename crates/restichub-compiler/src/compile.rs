@@ -31,14 +31,13 @@ pub struct PlannedStep {
 
 /// Converts a profile to a plan for one target agent (FR-PF-04).
 ///
-/// The step order is the `before` hooks, the `backup` step, the remaining
-/// hooks, then the maintenance steps `forget`, `prune` and `check`.
+/// The step order is the `before` scripts, the `backup` step, the remaining
+/// scripts, then the maintenance steps `forget`, `prune` and `check`.
 ///
 /// # Errors
 ///
-/// Returns a [`CompileError`] for an unsupported restic version, an unknown
-/// hook, an option that the operating system or the restic version does not
-/// allow, an invalid value or a template that does not expand.
+/// Returns a [`CompileError`] for an unsupported restic version, an option
+/// that the operating system or the restic version does not allow, an invalid value or a template that does not expand.
 pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileError> {
     if target.restic_version < ResticVersion::MIN_SUPPORTED {
         return Err(CompileError::UnsupportedRestic {
