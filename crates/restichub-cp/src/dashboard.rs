@@ -55,7 +55,7 @@ pub struct DashboardHosts {
     pub total: usize,
     pub online: usize,
     pub offline: usize,
-    /// Hosts that wait for their first connection.
+    /// Counted in neither `online` nor `offline`: the host never opened a stream.
     pub waiting: usize,
     /// The offline and waiting hosts first, then the others, at most 50.
     pub items: Vec<DashboardHost>,

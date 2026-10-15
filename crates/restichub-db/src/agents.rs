@@ -97,7 +97,7 @@ pub struct Agent {
     pub possible_duplicate_of: Option<DuplicateOf>,
 }
 
-/// The active host that a record may duplicate.
+/// Matched by the machine identifier hash within the tenant.
 #[derive(Debug, Clone)]
 pub struct DuplicateOf {
     pub id: AgentId,

@@ -1,7 +1,7 @@
 //! Shared types for ResticHub.
 
-/// The package version with the build revision: `0.1.0+<short sha>`, or `0.1.0+dev` for a local
-/// build. Version comparisons ignore the part after `+`.
+/// Looks like `0.1.0+<short sha>`, or `0.1.0+dev` for a local build. Version comparisons ignore
+/// the part after `+`.
 pub const BUILD_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     "+",

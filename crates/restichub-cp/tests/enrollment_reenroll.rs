@@ -128,7 +128,7 @@ async fn agents(env: &Env) -> Vec<Value> {
     page["items"].as_array().cloned().expect("a list")
 }
 
-fn find<'a>(items: &'a [Value], id: AgentId) -> &'a Value {
+fn find(items: &[Value], id: AgentId) -> &Value {
     items
         .iter()
         .find(|item| item["id"] == id.to_string())
@@ -306,7 +306,6 @@ async fn ac_id_01_a_bound_token_keeps_the_agent_and_replaces_the_identity() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(plan_view["agent_id"], id.to_string());
 
-    // The token is single use.
     let (status, _) = enroll(&env, token, "MINDCORE", Some(MACHINE)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     db.cleanup().await;
