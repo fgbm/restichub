@@ -104,7 +104,7 @@ export function stepProgress(job: JobDetail, rows: StepRow[] = stepRows(job)): S
 	};
 }
 
-export type StepMarker = 'success' | 'warning' | 'running' | 'failed' | 'idle';
+export type StepMarker = 'success' | 'warning' | 'running' | 'failed' | 'skipped' | 'idle';
 
 export function markerOf(status: JobStep['status']): StepMarker {
 	switch (status) {
@@ -117,7 +117,7 @@ export function markerOf(status: JobStep['status']): StepMarker {
 		case 'config_error':
 			return 'failed';
 		default:
-			return 'idle';
+			return 'skipped';
 	}
 }
 
