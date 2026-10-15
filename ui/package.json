@@ -22,6 +22,7 @@
 		"test:watch": "vitest",
 		"gen:api": "openapi-typescript ${OPENAPI_URL:-http://127.0.0.1:8080/api/v1/openapi.json} -o src/lib/api/schema.d.ts",
 		"test:e2e": "playwright test",
+		"test:smoke": "playwright test --config playwright.smoke.config.ts",
 		"gen:icons": "node scripts/gen-icons.mjs && prettier --write src/lib/components/ui/icons.ts"
 	},
 	"overrides": {
