@@ -31,7 +31,7 @@ On a host with the trust mode, a person who controls the control plane can run a
    ```
 
    On Windows, start an elevated PowerShell and run `restichub-agent.exe trust-server-scripts --enable`.
-3. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled** after the agent connects again.
+3. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled** after the agent connects again. The agent sends the state each time it connects, so the column does not change until the next connection. To see the new state at once, restart the agent service.
 
 To turn the mode off, run the command with `--disable`. The agent reads the setting for each job, so the change applies to the next job.
 
@@ -50,7 +50,7 @@ The agent reports the mode and the interpreters that it found. The control plane
 
 1. Open **Profiles**. Select **Add profile**, or select **Edit** for a profile.
 2. Go to the section **Scripts**.
-3. Select **Add script**. Choose **Blank script** or **From a script template**.
+3. In the list **Before the backup** or **After the backup**, select **Blank script** or **From a script template**.
 4. Enter a name, select the interpreter and write the script.
 5. Select **Save**.
 
@@ -75,7 +75,7 @@ The section has two lists. The scripts of the first list run before the backup. 
 | PowerShell | Windows | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <file>` |
 | cmd | Windows | `cmd.exe /D /E:ON /V:OFF /C <file>` |
 
-The flags are fixed. PowerShell does not stop at the first error by itself. Start a PowerShell script with `$ErrorActionPreference = 'Stop'`. Start a Bash script with `set -euo pipefail`.
+The flags are fixed. A Group Policy can set the PowerShell execution policy for the machine. That policy overrides `-ExecutionPolicy Bypass`. PowerShell then refuses to load the script, exits with a non-zero code, and the step fails with the error in its log. Ask the domain administrator to allow the policy `RemoteSigned` or `Bypass` for the agent host. PowerShell does not stop at the first error by itself. Start a PowerShell script with `$ErrorActionPreference = 'Stop'`. Start a Bash script with `set -euo pipefail`.
 
 ### Failure policy and time limit
 
@@ -116,11 +116,17 @@ For each script, the agent does these steps:
 
 1. It checks the trust mode and the script again.
 2. It writes the script to a new file in a protected directory of its cache. Only the agent account can use the directory.
-3. It starts the interpreter with the fixed flags. The environment is the environment of the agent, without the variables that start with `RESTIC`, plus the parameters of the script. The working directory is the protected directory.
+3. It starts the interpreter with the fixed flags. The environment is the environment of the agent, without the variables that start with `RESTIC`, plus the parameters of the script. The search path (`PATH`) holds only directories that root or Administrators own and that no other account can write, with every directory above them. The agent drops each other directory and names it once for each job in the log of the first script. On Windows, `TEMP` and `TMP` point to the protected directory. The working directory is the protected directory.
 4. It reads the output. It masks secret values and keeps at most 256 KiB for each script.
 5. It deletes the file and the directory.
 
-On a timeout or a cancel, the agent asks the script to stop. It kills the whole process tree after a short grace period.
+On a timeout or a cancel, the agent asks the script to stop. It kills the whole process tree after a short grace period. A second cancel kills the tree at once.
+
+The scripts of the phases After, On success, On error and Finally have a time limit past the end of the job. They run for the time left plus at most 10 minutes, or for their own limit if that is shorter.
+
+A process that leaves the process group, for example with `setsid` or `nohup`, is outside the tree that the agent kills. On Linux, the service setting `KillMode=control-group` of the agent kills such a process when the service stops. Do not start a long-lived process from a script.
+
+If the agent restarts while a job with a script runs, the agent does not run the job again. It answers with the final result `interrupted`, because a script may not run twice. A job that already finished returns its stored result, also after you turned the mode off.
 
 On Linux, the service of the agent runs with `ProtectSystem=strict`. A script can write only to the cache directory, the configuration directory and the restore roots. To allow another path, add a drop-in file:
 
