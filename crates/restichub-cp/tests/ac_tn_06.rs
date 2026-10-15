@@ -276,7 +276,7 @@ async fn ac_tn_06_single_mode_setup_requires_the_token() {
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(
         problem.get("code").and_then(Value::as_str),
-        Some("conflict")
+        Some("setup_already_done")
     );
 
     db.cleanup().await;
