@@ -48,10 +48,12 @@ async function signIn(page: Page): Promise<void> {
 }
 
 async function openFromNav(page: Page, name: string): Promise<void> {
-	await page
+	const link = page
 		.getByRole('navigation', { name: 'Primary navigation' })
-		.getByRole('link', { name, exact: true })
-		.click();
+		.getByRole('link', { name, exact: true });
+	await link.click();
+	// The heading of the old screen must be gone before the measure reads the new one.
+	await expect(link).toHaveAttribute('aria-current', 'page');
 	await page.getByRole('heading', { level: 1 }).waitFor();
 }
 
