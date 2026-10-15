@@ -253,6 +253,22 @@ pub async fn signed_job(
     })
 }
 
+/// The identifiers of the `sent` and `running` jobs of one agent. A revoke cancels them before it
+/// closes the stream (FR-ID-04).
+pub async fn active_job_ids_for_agent(
+    tx: &mut TenantTx<'_>,
+    agent: AgentId,
+) -> Result<Vec<JobId>, DbError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM jobs WHERE agent_id = $1 AND status IN ('sent', 'running') ORDER BY id",
+    )
+    .bind(agent)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(|(id,)| JobId::from_uuid(id)).collect())
+}
+
 /// Flags a sent or running job for cancel. The dispatcher never sends a flagged job.
 pub async fn request_cancel(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
     let result = sqlx::query(

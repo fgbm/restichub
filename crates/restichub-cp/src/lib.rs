@@ -5,6 +5,7 @@
 
 pub mod agent_listener;
 pub mod agent_stream;
+pub mod agent_version;
 pub mod agents;
 pub mod alerts;
 pub mod alerts_api;
@@ -44,12 +45,14 @@ pub mod rate_limit;
 pub mod repositories;
 pub mod repository_maintenance;
 pub mod restore;
+pub mod rotation;
 pub mod routes;
 pub mod schedule;
 pub mod scheduler;
 pub mod secrets;
 pub mod server;
 pub mod setup;
+pub mod signing_keys;
 pub mod startup;
 pub mod telemetry;
 pub mod tenants;

@@ -378,6 +378,27 @@ impl CaStore {
         agent: Uuid,
         csr_der: &[u8],
     ) -> Result<IssuedCertificate, CaError> {
+        self.issue_agent_certificate_at(
+            tenant,
+            agent,
+            csr_der,
+            OffsetDateTime::now_utc(),
+            AGENT_CERT_LIFETIME,
+        )
+    }
+
+    /// Like [`Self::issue_agent_certificate`], with the issue time and the lifetime given.
+    ///
+    /// The rotation over the stream passes the clock of the control plane and the configured
+    /// lifetime (FR-ID-03).
+    pub fn issue_agent_certificate_at(
+        &self,
+        tenant: Uuid,
+        agent: Uuid,
+        csr_der: &[u8],
+        now: OffsetDateTime,
+        lifetime: Duration,
+    ) -> Result<IssuedCertificate, CaError> {
         let expected_uri = agent_san_uri(tenant, agent);
         let csr =
             CertificateSigningRequestParams::from_der(&CertificateSigningRequestDer::from(csr_der))
@@ -392,7 +413,6 @@ impl CaStore {
             source,
         })?;
 
-        let now = OffsetDateTime::now_utc();
         let mut params = CertificateParams::default();
         params.distinguished_name = distinguished_name(&agent.to_string());
         params.subject_alt_names = vec![SanType::URI(san)];
@@ -404,7 +424,7 @@ impl CaStore {
         let serial_bytes = serial.to_bytes();
         params.serial_number = Some(serial);
         params.not_before = now;
-        let not_after = leaf_not_after(now, AGENT_CERT_LIFETIME, issuing.not_after);
+        let not_after = leaf_not_after(now, lifetime, issuing.not_after);
         params.not_after = not_after;
 
         let cert = params
@@ -742,6 +762,22 @@ pub fn validate_enrollment_csr(csr_der: &[u8]) -> Result<(), CaError> {
         return Err(CaError::CsrExtraSan);
     }
     validate_spki_p256(csr_der)
+}
+
+/// The raw public key of a certificate signing request. A rotation compares it with the key of the
+/// current certificate (FR-ID-03).
+pub fn csr_public_key(csr_der: &[u8]) -> Result<Vec<u8>, CaError> {
+    use x509_parser::certification_request::X509CertificationRequest;
+    use x509_parser::prelude::FromDer;
+
+    let (_, csr) =
+        X509CertificationRequest::from_der(csr_der).map_err(|_| CaError::CsrKeyAlgorithm)?;
+    Ok(csr
+        .certification_request_info
+        .subject_pki
+        .subject_public_key
+        .data
+        .to_vec())
 }
 
 /// Refuses a public key that is not an uncompressed ECDSA P-256 point (ADR-0026).

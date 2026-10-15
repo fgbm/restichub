@@ -8,9 +8,9 @@
 /// major version is incompatible.
 pub const PROTOCOL_VERSION_MAJOR: u32 = 1;
 
-/// The control plane adds capabilities only. See `AgentHello` and
-/// `ServerHello`.
-pub const PROTOCOL_VERSION_MINOR: u32 = 0;
+/// A minor version adds messages and fields only. Version 1 adds the certificate rotation
+/// messages and the version refusal (FR-ID-03, FR-PR-09). See `AgentHello` and `ServerHello`.
+pub const PROTOCOL_VERSION_MINOR: u32 = 1;
 
 /// The largest stream message that either side accepts or sends. A step result stays below
 /// [`MAX_STEP_RESULT_BYTES`], so it always fits with room for the other fields (FR-AG-08).
@@ -26,6 +26,8 @@ pub mod agent {
 }
 
 pub mod signing;
+
+pub mod version;
 
 mod capability;
 pub use capability::AgentCapability;

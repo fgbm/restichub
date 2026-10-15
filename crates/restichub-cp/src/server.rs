@@ -215,6 +215,7 @@ pub struct AppState {
     ca: Option<Arc<CaStore>>,
     job_signing: Option<JobSigningService>,
     agent_endpoint: Option<String>,
+    agent_cert_lifetime: time::Duration,
     agent_registry: Arc<StreamRegistry>,
     queue: QueueConfig,
     dispatch_wake: Arc<Notify>,
@@ -241,6 +242,7 @@ impl AppState {
             ca: None,
             job_signing: None,
             agent_endpoint: None,
+            agent_cert_lifetime: crate::pki::AGENT_CERT_LIFETIME,
             agent_registry: Arc::new(StreamRegistry::new()),
             queue: QueueConfig::default(),
             dispatch_wake: Arc::new(Notify::new()),
@@ -261,6 +263,7 @@ impl AppState {
             ca: None,
             job_signing: None,
             agent_endpoint: None,
+            agent_cert_lifetime: crate::pki::AGENT_CERT_LIFETIME,
             agent_registry: Arc::new(StreamRegistry::new()),
             queue: QueueConfig::default(),
             dispatch_wake: Arc::new(Notify::new()),
@@ -302,6 +305,18 @@ impl AppState {
         self.job_signing = Some(job_signing);
         self.agent_endpoint = agent_endpoint;
         self
+    }
+
+    /// The server passes the lifetime of a rotated agent certificate here (FR-ID-03).
+    pub fn with_agent_cert_lifetime(mut self, lifetime: std::time::Duration) -> Self {
+        self.agent_cert_lifetime =
+            time::Duration::try_from(lifetime).unwrap_or(crate::pki::AGENT_CERT_LIFETIME);
+        self
+    }
+
+    /// The lifetime of an agent certificate that the control plane issues (FR-ID-03).
+    pub fn agent_cert_lifetime(&self) -> time::Duration {
+        self.agent_cert_lifetime
     }
 
     /// The server passes the settings of the job queue here (FR-SC-08).

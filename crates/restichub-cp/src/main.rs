@@ -24,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Serve(cli) => serve(*cli).await,
         Command::Migrate(cli) => migrate(*cli).await,
+        Command::CompromiseSigningKey(cli) => compromise_signing_key(*cli).await,
     }
 }
 
@@ -151,6 +152,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         .with_tenancy(config.tenancy.clone())
         .with_queue(config.queue.clone())
         .with_log_retention_days(config.log_retention_days)
+        .with_agent_cert_lifetime(config.agent_cert_lifetime)
         .with_pki(
             ca_store.clone(),
             job_signing.clone(),
@@ -179,6 +181,13 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         state.agent_registry_shared(),
         state.auth().clock.clone(),
         restichub_cp::agent_stream::LAST_SEEN_INTERVAL,
+    );
+
+    // The sweep closes the streams of this instance that an Admin revoked on another instance
+    // (FR-ID-04).
+    restichub_cp::agent_stream::spawn_revocation_sweep(
+        state.clone(),
+        restichub_cp::agent_stream::REVOCATION_SWEEP_INTERVAL,
     );
 
     // One shutdown signal stops the web server and the agent listener.
@@ -256,6 +265,38 @@ async fn migrate(cli: Cli) -> anyhow::Result<()> {
         .map(|password| password.expose_secret());
     let database = restichub_db::Database::connect(&database_config, password).await?;
     database.migrate().await?;
+    database.close().await;
+    Ok(())
+}
+
+/// Rotates the job signing key set and retires the current key for a compromise (ADR-0030). It
+/// works in the single and the multi tenant mode; the running instances deliver the signed update
+/// to their agents at their next sweep.
+async fn compromise_signing_key(cli: Cli) -> anyhow::Result<()> {
+    let config = Config::load(&cli)?;
+    telemetry::init_command()?;
+    let database = connect_database(&config).await?;
+    database.verify_runtime_role().await?;
+    let kek: Arc<dyn KekProvider> = load_kek_provider(
+        &KekConfig {
+            file_path: config.secrets.kek_file.clone(),
+        },
+        &SystemEnv,
+    )
+    .context("cannot load the key encryption key")?
+    .into();
+    let signing = restichub_cp::job_signing::JobSigningService::new(kek);
+    let event = restichub_db::audit::AuditEvent::new(
+        restichub_db::audit::AuditAction::SigningKeyCompromise,
+        "signing_key",
+    );
+    let retired = signing
+        .mark_compromised(&database, time::OffsetDateTime::now_utc(), &event)
+        .await
+        .context("cannot rotate the job signing key set")?;
+    for id in retired {
+        println!("retired for a compromise: {id}");
+    }
     database.close().await;
     Ok(())
 }
