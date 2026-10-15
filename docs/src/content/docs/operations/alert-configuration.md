@@ -3,7 +3,7 @@ title: Configure alerts
 description: The installation settings for the public origin, the SMTP server and the webhook allow-list.
 ---
 
-The alerts need four installation settings (ADR-0036). They belong to the installation, not to an organization. Set them in the configuration file or in environment variables. An environment variable overrides the file.
+The alerts need four installation settings. They belong to the installation, not to an organization. Set them in the configuration file or in environment variables. An environment variable overrides the file.
 
 ## Public origin
 

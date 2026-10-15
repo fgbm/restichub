@@ -3,7 +3,7 @@ title: Agent jobs
 description: What the agent runs for a job, how it reports the result, and how bandwidth limits and priority work.
 ---
 
-The agent runs the steps of a signed job with the restic binary that it downloaded and verified (ADR-0038). The agent starts no job by itself. The control plane sends each job (ADR-0002).
+The agent runs the steps of a signed job with the restic binary that it downloaded and verified. The agent starts no job by itself. The control plane sends each job.
 
 ## Steps that the agent runs
 
@@ -25,7 +25,7 @@ The `unlock` step removes stale locks only. Only the `unlock_all` step removes a
 
 The agent announces the capability `restore-v1`, which shows that it runs the `ls` and `restore` steps. See [Restore](restore/). The capability `hooks-v1` shows that it runs the `hook` step from its allow-list. See [Allow-list hooks](hooks/). The capability `scripts-v1` shows that it runs the `script` step on a host with the trust mode. See [Server scripts](scripts/).
 
-The agent builds the restic arguments from the typed fields of the step. It puts each positional value after `--` and writes each option as `--flag=value`. The agent adds `--json` to the commands that print JSON. A value from a job never becomes an option (ADR-0021).
+The agent builds the restic arguments from the typed fields of the step. It puts each positional value after `--` and writes each option as `--flag=value`. The agent adds `--json` to the commands that print JSON. A value from a job never becomes an option.
 
 ## Step status
 
@@ -66,5 +66,5 @@ A `backup`, `check`, `forget` or `prune` step can set the low priority.
 ## Related
 
 - [Register an agent](register-an-agent.md)
-- [ADR-0011](https://github.com/fgbm/restichub/blob/main/design/adr/0011-restic-cli-integration.md)
-- [ADR-0021](https://github.com/fgbm/restichub/blob/main/design/adr/0021-restic-argument-construction.md)
+- [Restic CLI integration](https://github.com/fgbm/restichub/blob/main/design/adr/0011-restic-cli-integration.md)
+- [Restic argument construction](https://github.com/fgbm/restichub/blob/main/design/adr/0021-restic-argument-construction.md)

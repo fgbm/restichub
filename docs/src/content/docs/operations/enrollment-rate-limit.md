@@ -3,7 +3,7 @@ title: Agent enrollment rate limit
 description: The rate limit of the agent enrollment endpoint, behind a proxy and behind a NAT.
 ---
 
-The control plane serves the agent enrollment on `POST /agent/v1/enroll`. This endpoint is the only endpoint without a client certificate (FR-ID-05). The control plane limits the request rate, so one client cannot flood the endpoint.
+The control plane serves the agent enrollment on `POST /agent/v1/enroll`. This endpoint is the only endpoint without a client certificate. The control plane limits the request rate, so one client cannot flood the endpoint.
 
 ## The limit
 

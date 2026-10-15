@@ -5,7 +5,7 @@ description: How to list the snapshots of a repository, browse a snapshot and re
 
 The Restore screen lists the snapshots of a repository, shows the files of a snapshot and restores them. An Operator or an Admin can use it. A Viewer cannot.
 
-The data of a restore goes from the repository to the target agent. It does not go through the control plane (ADR-0003). The target agent gets the secrets of this repository for the restore job only. Each delivery writes the audit record `secret_delivered`. The start of a restore writes the audit record `restore_start`. The record names the repository, the snapshot, the target agent and the target path. A snapshot list or a tree page that starts a job writes the audit record `browse_start`. It names the repository and the agent that reads it, because that agent gets the repository secrets.
+The data of a restore goes from the repository to the target agent. It does not go through the control plane. The target agent gets the secrets of this repository for the restore job only. Each delivery writes the audit record `secret_delivered`. The start of a restore writes the audit record `restore_start`. The record names the repository, the snapshot, the target agent and the target path. A snapshot list or a tree page that starts a job writes the audit record `browse_start`. It names the repository and the agent that reads it, because that agent gets the repository secrets.
 
 ## Requirements
 
@@ -92,4 +92,3 @@ A restore and a tree page need a snapshot identifier of 8 to 64 lower-case hexad
 ## Related
 
 - [Agent jobs](agent-jobs/)
-- ADR-0035 in the design folder.
