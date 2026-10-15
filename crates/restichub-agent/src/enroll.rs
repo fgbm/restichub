@@ -134,8 +134,9 @@ impl Client {
                 retry_suffix(response.retry_after)
             ),
             status => bail!(
-                "the control plane refused the enrollment: HTTP {status} {}",
-                describe_problem(&response.body)
+                "the control plane refused the enrollment: HTTP {status} {}; {}",
+                describe_problem(&response.body),
+                refusal_hint(status)
             ),
         }
     }
@@ -307,6 +308,17 @@ fn parse_response(body: &[u8]) -> Result<Enrolled> {
     })
 }
 
+/// What the person does after a refusal. An enrollment token works once and expires.
+fn refusal_hint(status: u16) -> &'static str {
+    match status {
+        400 | 401 | 403 | 404 | 409 | 410 => {
+            "create a new enrollment token in the console and run register again"
+        }
+        500..=599 => "the control plane has an error; wait a moment and run register again",
+        _ => "check the URL and run register again",
+    }
+}
+
 fn describe_problem(body: &[u8]) -> String {
     let Ok(problem) = serde_json::from_slice::<Problem>(body) else {
         return "with an unreadable body".to_owned();
@@ -429,6 +441,13 @@ mod tests {
         let origin = Origin::parse("https://[2001:db8::1]:8443").expect("parse");
         assert_eq!(origin.host, "2001:db8::1");
         assert_eq!(origin.port, 8443);
+    }
+
+    #[test]
+    fn a_refusal_tells_what_to_do() {
+        assert!(refusal_hint(409).contains("new enrollment token"));
+        assert!(refusal_hint(503).contains("run register again"));
+        assert!(refusal_hint(418).contains("URL"));
     }
 
     #[test]

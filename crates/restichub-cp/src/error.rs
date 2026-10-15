@@ -325,7 +325,11 @@ impl ApiError {
     /// Creates a `409 setup_already_done` error: the first-run setup is finished. The user
     /// interface translates the code (NFR-DOC-04).
     pub fn setup_already_done() -> Self {
-        Self::new(StatusCode::CONFLICT, ErrorCode::SetupAlreadyDone, "Conflict")
+        Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::SetupAlreadyDone,
+            "Conflict",
+        )
     }
 
     /// Creates a `401 invalid_setup_token` error: the setup token is unknown, used or expired.

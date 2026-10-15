@@ -155,6 +155,8 @@ fn place_program() -> Result<()> {
     Ok(())
 }
 
+const NOT_CONNECTED: &str = "the agent is registered but not connected yet; follow the next step above, then run: restichub-agent status";
+
 /// Prints the final summary and fails when the agent is not connected.
 fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<()> {
     let Some(report) = report else {
@@ -166,7 +168,7 @@ fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<
     if report.connected() {
         Ok(())
     } else {
-        bail!("the agent is registered but not connected yet")
+        bail!("{NOT_CONNECTED}")
     }
 }
 
@@ -439,6 +441,8 @@ fn check_token_sources(options: &RegisterOptions) -> Result<()> {
     }
 }
 
+const EMPTY_TOKEN: &str = "the token is empty; create an enrollment token in the console and pass it with --token, --token-file or --token-stdin";
+
 fn resolve_token(options: &RegisterOptions) -> Result<String> {
     check_token_sources(options)?;
     let raw = if let Some(token) = &options.token {
@@ -455,7 +459,7 @@ fn resolve_token(options: &RegisterOptions) -> Result<String> {
     };
     let token = raw.trim().to_owned();
     if token.is_empty() {
-        bail!("the token is empty");
+        bail!("{EMPTY_TOKEN}");
     }
     Ok(token)
 }
@@ -504,6 +508,24 @@ mod tests {
         assert!(is_missing_or_damaged(&missing));
         assert!(is_missing_or_damaged(&damaged));
         assert!(!is_missing_or_damaged(&denied));
+    }
+
+    #[test]
+    fn an_empty_token_error_tells_what_to_do() {
+        let options = RegisterOptions {
+            token: Some("  \n".to_owned()),
+            ..RegisterOptions::default()
+        };
+        let error = resolve_token(&options)
+            .expect_err("an empty token")
+            .to_string();
+        assert!(error.contains("--token-file"), "{error}");
+        assert!(error.contains("console"), "{error}");
+    }
+
+    #[test]
+    fn a_not_connected_error_names_the_next_command() {
+        assert!(NOT_CONNECTED.contains("restichub-agent status"));
     }
 
     #[test]
