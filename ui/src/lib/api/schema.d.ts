@@ -1366,7 +1366,7 @@ export interface components {
             last_certificate_rotation_at?: string | null;
             last_seen_at?: string | null;
             os: string;
-            /** @description The protocol version of the last hello, `major.minor`. Null before the first hello. */
+            /** @description Reported in the last hello as `major.minor`. Null before the first hello. */
             protocol_version?: string | null;
             restic_version: string;
             /**
