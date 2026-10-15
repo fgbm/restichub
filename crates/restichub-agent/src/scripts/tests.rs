@@ -312,3 +312,14 @@ fn ac_hk_09_a_crash_leaves_no_script_directory_after_the_next_start() {
     assert!(!dir.path().join("scripts").exists());
     store.clean_leftovers();
 }
+
+#[test]
+fn adr_0040_an_old_allow_list_file_is_reported_by_path_only() {
+    let dir = TempDir::new();
+    let config = dir.path().join("restichub-agent");
+    assert_eq!(super::removed_allow_list_file(&config), None);
+
+    let file = dir.path().join("restichub-agent-hooks.toml");
+    std::fs::write(&file, "secret = \"x\"").expect("cannot write the file");
+    assert_eq!(super::removed_allow_list_file(&config), Some(file));
+}
