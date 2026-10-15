@@ -1,0 +1,171 @@
+//! The notification channels of a tenant (FR-MN-04, ADR-0035).
+//!
+//! A channel is an email recipient list or a webhook URL. The signing secret of a webhook is a row
+//! of `secrets` that the channel names through `secret_id`; this module never holds its value.
+
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use utoipa::ToSchema;
+
+use crate::DbError;
+use crate::ids::{ChannelId, SecretId, UserId};
+use crate::tx::TenantTx;
+
+/// Per-tenant cap that keeps the settings page and the fan-out small.
+pub const MAX_CHANNELS: i64 = 50;
+
+/// The kind of a channel. The string value of each variant is stored: do not change a string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum ChannelKind {
+    Email,
+    Webhook,
+}
+
+impl ChannelKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Email => "email",
+            Self::Webhook => "webhook",
+        }
+    }
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct Channel {
+    pub id: ChannelId,
+    pub name: String,
+    pub kind: ChannelKind,
+    pub enabled: bool,
+    pub recipients: Vec<String>,
+    pub url: Option<String>,
+    pub secret_id: Option<SecretId>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+const COLUMNS: &str = "id, name, kind, enabled, recipients, url, secret_id, created_at, updated_at";
+
+#[derive(Debug, Clone)]
+pub struct NewChannel<'a> {
+    pub id: ChannelId,
+    pub name: &'a str,
+    pub kind: ChannelKind,
+    pub enabled: bool,
+    pub recipients: &'a [String],
+    pub url: Option<&'a str>,
+    pub secret_id: Option<SecretId>,
+    pub created_by: Option<UserId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelUpdate<'a> {
+    pub name: &'a str,
+    pub enabled: bool,
+    pub recipients: &'a [String],
+    pub url: Option<&'a str>,
+}
+
+pub async fn create(tx: &mut TenantTx<'_>, new: &NewChannel<'_>) -> Result<(), DbError> {
+    sqlx::query(
+        "INSERT INTO notification_channels \
+         (id, tenant_id, name, kind, enabled, recipients, url, secret_id, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    )
+    .bind(new.id)
+    .bind(tx.tenant())
+    .bind(new.name)
+    .bind(new.kind.as_str())
+    .bind(new.enabled)
+    .bind(new.recipients)
+    .bind(new.url)
+    .bind(new.secret_id)
+    .bind(new.created_by)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(())
+}
+
+pub async fn count(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM notification_channels")
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(count)
+}
+
+/// Oldest first. The tenant holds at most [`MAX_CHANNELS`].
+pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Channel>, DbError> {
+    sqlx::query_as::<_, Channel>(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLUMNS} FROM notification_channels ORDER BY created_at, id"
+    )))
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)
+}
+
+pub async fn get(tx: &mut TenantTx<'_>, id: ChannelId) -> Result<Option<Channel>, DbError> {
+    sqlx::query_as::<_, Channel>(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLUMNS} FROM notification_channels WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)
+}
+
+/// Reads a channel and locks its row for the transaction.
+pub async fn get_for_update(
+    tx: &mut TenantTx<'_>,
+    id: ChannelId,
+) -> Result<Option<Channel>, DbError> {
+    sqlx::query_as::<_, Channel>(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLUMNS} FROM notification_channels WHERE id = $1 FOR UPDATE"
+    )))
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)
+}
+
+pub async fn enabled_ids(tx: &mut TenantTx<'_>) -> Result<Vec<ChannelId>, DbError> {
+    sqlx::query_scalar::<_, ChannelId>(
+        "SELECT id FROM notification_channels WHERE enabled ORDER BY created_at, id",
+    )
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)
+}
+
+pub async fn update(
+    tx: &mut TenantTx<'_>,
+    id: ChannelId,
+    patch: &ChannelUpdate<'_>,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE notification_channels \
+         SET name = $2, enabled = $3, recipients = $4, url = $5, updated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(patch.name)
+    .bind(patch.enabled)
+    .bind(patch.recipients)
+    .bind(patch.url)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Removes a channel. The pending deliveries of the channel go with it.
+pub async fn delete(tx: &mut TenantTx<'_>, id: ChannelId) -> Result<bool, DbError> {
+    let result = sqlx::query("DELETE FROM notification_channels WHERE id = $1")
+        .bind(id)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}

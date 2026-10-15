@@ -163,6 +163,7 @@ pub struct AppState {
     dispatch_wake: Arc<Notify>,
     log_retention_days: u32,
     metrics_cache: Arc<SnapshotCache>,
+    sender: Option<crate::alerts::sender::Sender>,
 }
 
 impl AppState {
@@ -187,6 +188,7 @@ impl AppState {
             dispatch_wake: Arc::new(Notify::new()),
             log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
             metrics_cache: Arc::new(SnapshotCache::default()),
+            sender: None,
         }
     }
 
@@ -205,6 +207,7 @@ impl AppState {
             dispatch_wake: Arc::new(Notify::new()),
             log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
             metrics_cache: Arc::new(SnapshotCache::default()),
+            sender: None,
         }
     }
 
@@ -254,10 +257,22 @@ impl AppState {
         self
     }
 
+    /// The server passes the alert sender here. It serves the test button of a channel and the
+    /// link base of the messages (ADR-0035).
+    pub fn with_sender(mut self, sender: crate::alerts::sender::Sender) -> Self {
+        self.sender = Some(sender);
+        self
+    }
+
     /// Sets the time for which a metrics snapshot of a tenant is reused. A test sets zero.
     pub fn with_metrics_ttl(mut self, ttl: time::Duration) -> Self {
         self.metrics_cache = Arc::new(SnapshotCache::new(ttl));
         self
+    }
+
+    /// Absent only in a test that does not set it.
+    pub fn sender(&self) -> Option<&crate::alerts::sender::Sender> {
+        self.sender.as_ref()
     }
 
     pub fn log_retention_days(&self) -> u32 {

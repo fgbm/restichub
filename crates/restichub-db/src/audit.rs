@@ -138,6 +138,11 @@ pub enum AuditAction {
     PlanDelete,
     SigningKeyRotate,
     SigningKeyRetire,
+    ChannelCreate,
+    ChannelUpdate,
+    ChannelDelete,
+    AlertRuleUpdate,
+    AlertSent,
     /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),
 }
@@ -189,6 +194,11 @@ impl AuditAction {
             Self::PlanDelete => "plan_delete",
             Self::SigningKeyRotate => "signing_key_rotate",
             Self::SigningKeyRetire => "signing_key_retire",
+            Self::ChannelCreate => "channel_create",
+            Self::ChannelUpdate => "channel_update",
+            Self::ChannelDelete => "channel_delete",
+            Self::AlertRuleUpdate => "alert_rule_update",
+            Self::AlertSent => "alert_sent",
             Self::Unknown(value) => value,
         }
     }
@@ -240,6 +250,11 @@ impl AuditAction {
             "plan_delete" => Self::PlanDelete,
             "signing_key_rotate" => Self::SigningKeyRotate,
             "signing_key_retire" => Self::SigningKeyRetire,
+            "channel_create" => Self::ChannelCreate,
+            "channel_update" => Self::ChannelUpdate,
+            "channel_delete" => Self::ChannelDelete,
+            "alert_rule_update" => Self::AlertRuleUpdate,
+            "alert_sent" => Self::AlertSent,
             _ => return None,
         };
         Some(action)
@@ -295,6 +310,11 @@ impl AuditAction {
             Self::ProfileDelete,
             Self::SigningKeyRotate,
             Self::SigningKeyRetire,
+            Self::ChannelCreate,
+            Self::ChannelUpdate,
+            Self::ChannelDelete,
+            Self::AlertRuleUpdate,
+            Self::AlertSent,
         ]
     }
 }

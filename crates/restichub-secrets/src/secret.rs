@@ -34,6 +34,8 @@ pub enum SecretPurpose {
     S3AccessKey,
     S3SecretKey,
     RestServerPassword,
+    /// The HMAC key that signs the payloads of a webhook channel (ADR-0035).
+    WebhookSecret,
 }
 
 impl SecretPurpose {
@@ -43,6 +45,7 @@ impl SecretPurpose {
             Self::S3AccessKey => "s3_access_key",
             Self::S3SecretKey => "s3_secret_key",
             Self::RestServerPassword => "rest_server_password",
+            Self::WebhookSecret => "webhook_secret",
         }
     }
 
@@ -54,6 +57,7 @@ impl SecretPurpose {
             "s3_access_key" => Self::S3AccessKey,
             "s3_secret_key" => Self::S3SecretKey,
             "rest_server_password" => Self::RestServerPassword,
+            "webhook_secret" => Self::WebhookSecret,
             _ => return None,
         };
         Some(purpose)
@@ -195,6 +199,7 @@ mod tests {
             SecretPurpose::S3AccessKey,
             SecretPurpose::S3SecretKey,
             SecretPurpose::RestServerPassword,
+            SecretPurpose::WebhookSecret,
         ] {
             assert_eq!(SecretPurpose::parse(purpose.as_str()), Some(purpose));
         }

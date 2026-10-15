@@ -142,9 +142,12 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         auth.create_user_tenant_limiter.clone(),
         restichub_cp::maintenance::LIMITER_SWEEP_INTERVAL,
     );
+    let alert_sender = restichub_cp::alerts::sender::Sender::new(config.alerts.clone())
+        .context("cannot prepare the alert sender")?;
     let state = AppState::with_auth(database, auth)
         .with_trusted_proxies(config.trusted_proxies.clone())
-        .with_kek(kek)
+        .with_kek(kek.clone())
+        .with_sender(alert_sender.clone())
         .with_tenancy(config.tenancy.clone())
         .with_queue(config.queue.clone())
         .with_log_retention_days(config.log_retention_days)
@@ -156,6 +159,15 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     // The dispatcher sends the queued jobs to the online agents (FR-SC-03, ADR-0010). It runs in the
     // control plane; the agent holds no schedule (ADR-0002).
     restichub_cp::queue::spawn(state.clone(), state.auth().clock.clone());
+    // The alert loop evaluates the rules and sends the messages (FR-MN-03, FR-MN-04, ADR-0035). It
+    // is a control plane task, not job scheduling (ADR-0002).
+    restichub_cp::alerts::spawn(
+        state.db().clone(),
+        alert_sender,
+        kek,
+        state.auth().clock.clone(),
+        restichub_cp::alerts::INTERVAL,
+    );
     let app = server::router(state.clone());
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await

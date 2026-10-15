@@ -7,6 +7,7 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use restichub_secrets::{EnvReader, SecretString, SystemEnv, read_secret};
@@ -15,6 +16,7 @@ use utoipa::ToSchema;
 
 use axum::http::Uri;
 
+use crate::alerts::settings::{AlertsSettings, SmtpSection, WebhookSection};
 use crate::client_ip::TrustedProxies;
 use crate::queue::QueueConfig;
 
@@ -278,6 +280,8 @@ pub struct Config {
     pub queue: QueueConfig,
     /// The days for which the control plane keeps the text of a job log. At least one.
     pub log_retention_days: u32,
+    /// The public origin, the SMTP server and the webhook policy (ADR-0035).
+    pub alerts: Arc<AlertsSettings>,
 }
 
 /// Secret handling configuration (ADR-0023, section Secrets).
@@ -394,6 +398,13 @@ impl Config {
             });
         }
 
+        let alerts = Arc::new(AlertsSettings::load(
+            env,
+            file.public_origin,
+            file.smtp.as_ref(),
+            file.webhook.as_ref(),
+        )?);
+
         let database_url = env
             .get(DATABASE_URL_ENV)
             .or(file.database_url)
@@ -458,6 +469,7 @@ impl Config {
             agent_max_connections,
             queue,
             log_retention_days,
+            alerts,
         })
     }
 }
@@ -523,6 +535,9 @@ struct FileConfig {
     agent_max_connections: Option<usize>,
     queue: Option<QueueSection>,
     log_retention_days: Option<u32>,
+    public_origin: Option<String>,
+    smtp: Option<SmtpSection>,
+    webhook: Option<WebhookSection>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -795,7 +810,7 @@ fn number<T: std::str::FromStr>(
     }
 }
 
-fn boolean(
+pub(crate) fn boolean(
     env: &dyn EnvReader,
     name: &'static str,
     file: Option<bool>,

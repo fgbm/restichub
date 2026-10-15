@@ -39,6 +39,7 @@ const CANARY_SECRET: &str = "canary-secret";
 const CANARY_REPOSITORY: &str = "canary-repo";
 const CANARY_PROFILE: &str = "canary-profile";
 const CANARY_PLAN: &str = "canary-plan";
+const CANARY_CHANNEL: &str = "canary-channel";
 
 /// The kind of tenant B object whose identifier the isolation check puts into the path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +53,7 @@ enum Object {
     Job,
     Profile,
     Plan,
+    Channel,
 }
 
 /// The isolation fixture of one route path pattern from the route table (AC-TN-01).
@@ -166,6 +168,18 @@ const FIXTURES: &[(&str, Fixture)] = &[
     // The preview computes the fire times of a schedule in the request body. It names no tenant
     // object.
     ("/api/v1/plans/preview", Fixture::Exempt),
+    ("/api/v1/dashboard", Fixture::Collection),
+    ("/api/v1/alerts", Fixture::Collection),
+    ("/api/v1/alert-rules", Fixture::Collection),
+    ("/api/v1/notification-channels", Fixture::Collection),
+    (
+        "/api/v1/notification-channels/{id}",
+        Fixture::Object(Object::Channel),
+    ),
+    (
+        "/api/v1/notification-channels/{id}/test",
+        Fixture::Object(Object::Channel),
+    ),
 ];
 
 fn fixture_for(method: &str, path: &str) -> Fixture {
@@ -277,6 +291,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     let enrollment_token_b = common::seed_enrollment_token(db.database(), tenant_b, user_b).await;
     let job_b = common::seed_job(db.database(), tenant_b, agent_b, repository_b).await;
     let plan_b = common::seed_plan(db.database(), tenant_b, CANARY_PLAN, profile_b, agent_b).await;
+    let channel_b = seed_channel(&db, tenant_b, CANARY_CHANNEL).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
     let token_b = list_tokens(db.database(), tenant_b)
         .await
@@ -344,6 +359,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
         job_b.to_string(),
         profile_b.to_string(),
         plan_b.to_string(),
+        channel_b.to_string(),
     ];
     let before = snapshot_tenant(&db, tenant_b).await;
     let audit_before = count(db.database(), tenant_b, "audit_log").await;
@@ -403,6 +419,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     Object::Job => job_b.to_string(),
                     Object::Profile => profile_b.to_string(),
                     Object::Plan => plan_b.to_string(),
+                    Object::Channel => channel_b.to_string(),
                 };
                 let uri = path.replace("{id}", &id);
                 let Access::Protected(operation) = route.access else {
@@ -471,6 +488,8 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                     CANARY_REPOSITORY.to_owned(),
                     CANARY_PROFILE.to_owned(),
                     CANARY_PLAN.to_owned(),
+                    CANARY_CHANNEL.to_owned(),
+                    channel_b.to_string(),
                 ] {
                     assert!(
                         !text.contains(&needle),
@@ -550,6 +569,32 @@ async fn ac_tn_01_single_mode_has_one_tenant_and_hides_the_platform_routes() {
 ///
 /// The owner login is subject to `FORCE ROW LEVEL SECURITY` (ADR-0023). The function sets the
 /// tenant setting, so Row-Level Security shows the rows of the tenant only.
+async fn seed_channel(db: &TestDatabase, tenant: TenantId, name: &str) -> restichub_db::ChannelId {
+    let id = restichub_db::ChannelId::new();
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    restichub_db::channels::create(
+        &mut tx,
+        &restichub_db::channels::NewChannel {
+            id,
+            name,
+            kind: restichub_db::channels::ChannelKind::Email,
+            enabled: true,
+            recipients: &["canary@example.com".to_owned()],
+            url: None,
+            secret_id: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the channel");
+    tx.commit().await.expect("cannot commit the channel");
+    id
+}
+
 async fn snapshot_tenant(db: &TestDatabase, tenant: TenantId) -> BTreeMap<String, String> {
     let tables: Vec<(String,)> = sqlx::query_as(
         "SELECT table_name FROM information_schema.columns \

@@ -598,4 +598,73 @@ pub const ROUTES: &[Route] = &[
                 .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
         },
     },
+    Route {
+        method: "get",
+        path: "/api/v1/dashboard",
+        access: Access::Protected(Operation::DashboardRead),
+        handler: || routes!(crate::dashboard::dashboard),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/alerts",
+        access: Access::Protected(Operation::AlertsRead),
+        handler: || routes!(crate::alerts_api::list_alerts),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/alert-rules",
+        access: Access::Protected(Operation::AlertsRead),
+        handler: || routes!(crate::alerts_api::get_rules),
+    },
+    Route {
+        method: "put",
+        path: "/api/v1/alert-rules",
+        access: Access::Protected(Operation::AlertsWrite),
+        handler: || {
+            routes!(crate::alerts_api::put_rules)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/notification-channels",
+        access: Access::Protected(Operation::ChannelsRead),
+        handler: || routes!(crate::channels::list_channels),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/notification-channels",
+        access: Access::Protected(Operation::ChannelsWrite),
+        handler: || {
+            routes!(crate::channels::create_channel)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/notification-channels/{id}",
+        access: Access::Protected(Operation::ChannelsRead),
+        handler: || routes!(crate::channels::get_channel),
+    },
+    Route {
+        method: "patch",
+        path: "/api/v1/notification-channels/{id}",
+        access: Access::Protected(Operation::ChannelsWrite),
+        handler: || {
+            routes!(crate::channels::update_channel)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "delete",
+        path: "/api/v1/notification-channels/{id}",
+        access: Access::Protected(Operation::ChannelsWrite),
+        handler: || routes!(crate::channels::delete_channel),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/notification-channels/{id}/test",
+        access: Access::Protected(Operation::ChannelsWrite),
+        handler: || routes!(crate::channels::test_channel),
+    },
 ];

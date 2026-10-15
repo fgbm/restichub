@@ -48,6 +48,19 @@ pub async fn load_ciphertext_for_delivery(
     Ok(row)
 }
 
+/// Reads the encrypted signing secret of a webhook channel (ADR-0035).
+///
+/// The control plane itself uses this secret, and no agent receives it, so no `secret_delivered`
+/// record is written. The query matches the purpose `webhook_secret` only: no other secret can leave
+/// through this path.
+pub async fn load_webhook_ciphertext(
+    tx: &mut TenantTx<'_>,
+    id: SecretId,
+) -> Result<Option<CiphertextRow>, DbError> {
+    let row = read_row(tx, id).await?;
+    Ok(row.filter(|row| row.purpose == "webhook_secret"))
+}
+
 /// Reads the encrypted value of one secret without an audit record.
 ///
 /// The function is a test helper behind the feature `test-util`. The delivery path uses

@@ -11,7 +11,6 @@
 //! only (ADR-0023, section Tenant isolation).
 
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::DbError;
 use crate::enums::{AgentStatus, MissedRunPolicy};
@@ -47,6 +46,8 @@ pub struct Plan {
     pub agent_hostname: String,
     /// The repository of the bound profile (display only).
     pub repository_id: RepositoryId,
+    /// The recovery point objective in seconds. `None` means the default of the schedule (ADR-0035).
+    pub rpo_seconds: Option<i32>,
 }
 
 /// The keyset cursor of the plan list. It orders by `(created_at, id)`.
@@ -89,6 +90,7 @@ pub struct NewPlan<'a> {
     pub time_zone: &'a str,
     pub missed_run_policy: MissedRunPolicy,
     pub enabled: bool,
+    pub rpo_seconds: Option<i32>,
     /// The first fire time in UTC. `None` when the control plane computes it later.
     pub next_run_at: Option<OffsetDateTime>,
     /// Absent for an API token actor.
@@ -105,6 +107,7 @@ pub struct PlanUpdate<'a> {
     pub time_zone: &'a str,
     pub missed_run_policy: MissedRunPolicy,
     pub enabled: bool,
+    pub rpo_seconds: Option<i32>,
 }
 
 /// One due plan that the scheduler claimed, with the agent status (FR-SC-02, FR-SC-07).
@@ -126,8 +129,8 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewPlan<'_>) -> Result<PlanId, 
     sqlx::query(
         "INSERT INTO plans \
          (id, tenant_id, name, profile_id, agent_id, cron, time_zone, missed_run_policy, enabled, \
-          next_run_at, created_by) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+          next_run_at, created_by, rpo_seconds) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -140,6 +143,7 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewPlan<'_>) -> Result<PlanId, 
     .bind(new.enabled)
     .bind(new.next_run_at)
     .bind(new.created_by)
+    .bind(new.rpo_seconds)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -156,7 +160,8 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &PlanPage) -> Result<PlanPageResu
     let rows = sqlx::query_as::<_, PlanRow>(
         "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
                 p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name, pr.repository_id, a.hostname \
+                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
+                a.hostname AS agent_hostname, p.rpo_seconds \
          FROM plans p \
          JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
@@ -181,7 +186,8 @@ pub async fn get(tx: &mut TenantTx<'_>, id: PlanId) -> Result<Option<Plan>, DbEr
     let row = sqlx::query_as::<_, PlanRow>(
         "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
                 p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name, pr.repository_id, a.hostname \
+                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
+                a.hostname AS agent_hostname, p.rpo_seconds \
          FROM plans p \
          JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
@@ -222,7 +228,8 @@ pub async fn list_by_profile(
     let rows = sqlx::query_as::<_, PlanRow>(
         "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
                 p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name, pr.repository_id, a.hostname \
+                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
+                a.hostname AS agent_hostname, p.rpo_seconds \
          FROM plans p \
          JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
@@ -244,7 +251,8 @@ pub async fn get_for_update(tx: &mut TenantTx<'_>, id: PlanId) -> Result<Option<
     let row = sqlx::query_as::<_, PlanRow>(
         "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
                 p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name, pr.repository_id, a.hostname \
+                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
+                a.hostname AS agent_hostname, p.rpo_seconds \
          FROM plans p \
          JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
@@ -265,7 +273,7 @@ pub async fn update(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE plans SET name = $2, profile_id = $3, agent_id = $4, cron = $5, time_zone = $6, \
-                missed_run_policy = $7, enabled = $8, updated_at = now() \
+                missed_run_policy = $7, enabled = $8, rpo_seconds = $9, updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
@@ -276,6 +284,7 @@ pub async fn update(
     .bind(patch.time_zone)
     .bind(patch.missed_run_policy.as_str())
     .bind(patch.enabled)
+    .bind(patch.rpo_seconds)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -373,62 +382,47 @@ pub async fn advance(
 }
 
 /// The projected columns of the plan and of its bound profile and agent.
-type PlanRow = (
-    Uuid,
-    String,
-    Uuid,
-    Uuid,
-    String,
-    String,
-    MissedRunPolicy,
-    bool,
-    Option<OffsetDateTime>,
-    Option<OffsetDateTime>,
-    OffsetDateTime,
-    OffsetDateTime,
-    Option<Uuid>,
-    String,
-    Uuid,
-    String,
-);
+#[derive(sqlx::FromRow)]
+struct PlanRow {
+    id: PlanId,
+    name: String,
+    profile_id: ProfileId,
+    agent_id: AgentId,
+    cron: String,
+    time_zone: String,
+    missed_run_policy: MissedRunPolicy,
+    enabled: bool,
+    next_run_at: Option<OffsetDateTime>,
+    last_fire_time: Option<OffsetDateTime>,
+    created_at: OffsetDateTime,
+    updated_at: OffsetDateTime,
+    created_by: Option<UserId>,
+    profile_name: String,
+    repository_id: RepositoryId,
+    agent_hostname: String,
+    rpo_seconds: Option<i32>,
+}
 
 impl From<PlanRow> for Plan {
     fn from(row: PlanRow) -> Self {
-        let (
-            id,
-            name,
-            profile_id,
-            agent_id,
-            cron,
-            time_zone,
-            missed_run_policy,
-            enabled,
-            next_run_at,
-            last_fire_time,
-            created_at,
-            updated_at,
-            created_by,
-            profile_name,
-            repository_id,
-            agent_hostname,
-        ) = row;
         Self {
-            id: PlanId::from_uuid(id),
-            name,
-            profile_id: ProfileId::from_uuid(profile_id),
-            agent_id: AgentId::from_uuid(agent_id),
-            cron,
-            time_zone,
-            missed_run_policy,
-            enabled,
-            next_run_at,
-            last_fire_time,
-            created_at,
-            updated_at,
-            created_by: created_by.map(UserId::from_uuid),
-            profile_name,
-            agent_hostname,
-            repository_id: RepositoryId::from_uuid(repository_id),
+            id: row.id,
+            name: row.name,
+            profile_id: row.profile_id,
+            agent_id: row.agent_id,
+            cron: row.cron,
+            time_zone: row.time_zone,
+            missed_run_policy: row.missed_run_policy,
+            enabled: row.enabled,
+            next_run_at: row.next_run_at,
+            last_fire_time: row.last_fire_time,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            created_by: row.created_by,
+            profile_name: row.profile_name,
+            agent_hostname: row.agent_hostname,
+            repository_id: row.repository_id,
+            rpo_seconds: row.rpo_seconds,
         }
     }
 }

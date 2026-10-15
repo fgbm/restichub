@@ -2087,6 +2087,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
  "http-body-util",
+ "ipnet",
  "libc",
  "prost",
  "prost-types",
@@ -2099,6 +2100,7 @@ dependencies = [
  "restichub-proto",
  "restichub-secrets",
  "rust-embed",
+ "rustls-native-certs",
  "rustls-pki-types",
  "rustls-webpki",
  "serde",
@@ -2120,6 +2122,7 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "uuid",
+ "webpki-roots",
  "x509-parser",
  "zeroize",
 ]
