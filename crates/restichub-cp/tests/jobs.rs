@@ -201,6 +201,15 @@ fn hello() -> AgentMessage {
 
 /// Opens the connection and drains the `ServerHello` and the `SigningKeyUpdate`.
 async fn open_stream(
+    setup: &Setup,
+    client: &mut AgentServiceClient<tonic::transport::Channel>,
+) -> (mpsc::Sender<AgentMessage>, Streaming<ControlMessage>) {
+    open_stream_for(setup, setup.agent_id(), client).await
+}
+
+async fn open_stream_for(
+    setup: &Setup,
+    agent: Uuid,
     client: &mut AgentServiceClient<tonic::transport::Channel>,
 ) -> (mpsc::Sender<AgentMessage>, Streaming<ControlMessage>) {
     let (tx, rx) = mpsc::channel::<AgentMessage>(16);
@@ -225,6 +234,18 @@ async fn open_stream(
     }
     assert!(hello_seen, "the ServerHello must arrive");
     assert!(update_seen, "the key update must arrive");
+    // The control plane queues both messages before it registers the stream.
+    let agent = AgentId::from_uuid(agent);
+    for _ in 0..200 {
+        if setup.listener.state.agent_registry().is_online(agent) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        setup.listener.state.agent_registry().is_online(agent),
+        "the stream must register"
+    );
     (tx, inbound)
 }
 
@@ -384,7 +405,7 @@ async fn ac_rp_01_the_signed_init_job_reaches_the_agent_and_initializes() {
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), &canary).await;
 
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let (status, _, job) = send(
         &app,
@@ -460,7 +481,7 @@ async fn ac_rp_01_a_wrong_password_gives_config_error() {
         create_repository(&app, &setup.admin, setup.agent_id(), "correct-password").await;
 
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let (status, _, job) = send(
         &app,
@@ -517,7 +538,7 @@ async fn a_test_access_on_a_missing_repository_gives_not_initialized() {
         create_repository(&app, &setup.admin, setup.agent_id(), "correct-password").await;
 
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let (status, _, job) = send(
         &app,
@@ -608,7 +629,7 @@ async fn ac_rp_01_the_secret_never_reaches_the_job_row_or_the_audit() {
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), &canary).await;
 
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let (status, _, job) = send(
         &app,
@@ -772,7 +793,7 @@ async fn a_not_initialized_result_on_an_initialized_repository_gives_the_access_
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     initialize(&app, &setup, &mut inbound, &tx, repository_id).await;
 
@@ -822,7 +843,7 @@ async fn an_initialized_repository_is_not_re_initialized() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     initialize(&app, &setup, &mut inbound, &tx, repository_id).await;
 
@@ -1098,7 +1119,7 @@ async fn one_active_job_per_repository() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let first = start_action(&app, &setup, repository_id, "test-access").await;
     let (status, _, problem) = send(
@@ -1139,7 +1160,7 @@ async fn a_location_change_is_refused_while_a_job_is_active_or_initialized() {
     // An initialized repository refuses a location change.
     let initialized = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
     initialize(&app, &setup, &mut inbound, &tx, initialized).await;
     let (status, _, problem) = send(
         &app,
@@ -1184,7 +1205,7 @@ async fn the_initialized_flag_needs_the_same_location() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let job_id = start_action(&app, &setup, repository_id, "init").await;
     let _ = read_signed_job(&mut inbound).await;
@@ -1220,7 +1241,7 @@ async fn an_overdue_sent_job_reads_as_failed_unacknowledged() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (_tx, mut inbound) = open_stream(&mut client).await;
+    let (_tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let job_id = start_action(&app, &setup, repository_id, "test-access").await;
     let _ = read_signed_job(&mut inbound).await;
@@ -1254,7 +1275,7 @@ async fn the_expiry_sweep_ends_overdue_jobs() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (_tx, mut inbound) = open_stream(&mut client).await;
+    let (_tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let job_id = start_action(&app, &setup, repository_id, "test-access").await;
     let _ = read_signed_job(&mut inbound).await;
@@ -1359,7 +1380,7 @@ async fn a_repository_delete_keeps_the_job_history_and_refuses_an_active_job() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     // An active job holds the repository, so the delete is refused.
     let job_id = start_action(&app, &setup, repository_id, "test-access").await;
@@ -1397,7 +1418,7 @@ async fn a_rejection_fails_the_job_and_frees_the_repository() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let job_id = start_action(&app, &setup, repository_id, "test-access").await;
     let _ = read_signed_job(&mut inbound).await;
@@ -1439,7 +1460,7 @@ async fn adr_0020_a_busy_rejection_keeps_the_job() {
     let app = api_router(setup.listener.state.clone());
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     let job_id = start_action(&app, &setup, repository_id, "test-access").await;
     let _ = read_signed_job(&mut inbound).await;
@@ -1469,7 +1490,7 @@ async fn a_local_repository_binds_the_maintenance_agent() {
     let app = api_router(setup.listener.state.clone());
     let second_agent = common::seed_agent(db.database(), setup.tenant, "second-host").await;
     let mut client = setup.listener.channel(&setup.identity).await;
-    let (tx, mut inbound) = open_stream(&mut client).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
 
     // An initialized local repository refuses a maintenance agent change.
     let repository_id = create_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
@@ -1529,7 +1550,8 @@ async fn an_init_runs_on_the_maintenance_agent_and_a_test_access_accepts_another
     let second_id = Uuid::parse_str(&second.agent_id).expect("the second agent id");
     // The second agent holds an open stream, so an accepted job reaches it.
     let mut second_client = setup.listener.channel(&second).await;
-    let (_second_tx, mut _second_inbound) = open_stream(&mut second_client).await;
+    let (_second_tx, mut _second_inbound) =
+        open_stream_for(&setup, second_id, &mut second_client).await;
 
     let repository_id = create_s3_repository(&app, &setup.admin, setup.agent_id(), "pw").await;
 
