@@ -432,7 +432,11 @@ impl JobJournal for InMemoryJournal {
     }
 }
 
-/// A new job is recorded as accepted; an accepted job is not run a second time; a completed job returns its stored result (ADR-0020).
+/// A new job is recorded as accepted; a completed job returns its stored result (ADR-0020).
+///
+/// An accepted job that has no result is `InProgress`. The caller decides what that means: the
+/// agent runs a job of restic steps again after a restart, and answers a job with a script or hook
+/// step with a final result instead, because a program that ran may not run twice (ADR-0037).
 #[must_use]
 pub fn admit(job: &Job, journal: &mut impl JobJournal, now: Timestamp) -> Admission {
     match journal.lookup(&job.job_id) {

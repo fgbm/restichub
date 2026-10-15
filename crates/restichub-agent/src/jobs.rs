@@ -6,7 +6,10 @@
 //! key ring and checks the addressee, the tenant and the time rules ([`verify_job`]), validates the
 //! steps ([`ValidatedJob`], FR-PR-01) and consults the job journal (ADR-0020). It then acknowledges
 //! the job (FR-PR-06) and runs it off the stream task, so the heartbeat and the key updates keep
-//! flowing. A job that the journal already completed is not run again; the stored result is re-sent.
+//! flowing. A job that the journal already completed is not run again; the stored result is re-sent,
+//! also when the host changed the trust mode since. A job with a script or hook step that a restart
+//! interrupted is not run again either: it gets a final result with the error `interrupted`
+//! (ADR-0037).
 //!
 //! The agent sends every result through the stream that is open at that moment, not through the
 //! stream that delivered the job: a job outlives one connection. The result is durable in the
@@ -60,7 +63,7 @@ mod runner;
 
 use hooks::{HookFailure, PhaseMode, Phased, Sink};
 use log::JobLog;
-use outcome::{Progress, job_error, job_outcome};
+use outcome::{Progress, interrupted_error, job_error, job_outcome};
 use runner::{CancelHandle, StepError, StepOutcome};
 
 /// The grace period between the graceful stop signal and the forced kill of the process tree
@@ -88,6 +91,12 @@ enum Dispatch {
         cancel: CancelHandle,
         snapshot: Option<JournalSnapshot>,
     },
+}
+
+/// What the journal and the running jobs already know about a redelivered job (ADR-0020).
+enum Known {
+    Stored(JobResult),
+    Running,
 }
 
 /// The running jobs of one agent and the journal that records them (ADR-0020).
@@ -253,6 +262,19 @@ impl Jobs {
             }
         };
         let job_id = validated.job().job_id.clone();
+        // The journal answers a redelivery before the checks of the current host state: a job that
+        // finished is not judged again (ADR-0020).
+        match self.known(&validated).await {
+            Some(Known::Stored(result)) => {
+                self.send_result(result).await;
+                return;
+            }
+            Some(Known::Running) => {
+                let _ = self.send(ack(job_id)).await;
+                return;
+            }
+            None => {}
+        }
         if validated
             .job()
             .steps
@@ -301,6 +323,36 @@ impl Jobs {
                 }
             }
         }
+    }
+
+    /// The answer that the journal already holds for a redelivered job, or `None` for a job that
+    /// needs the checks and a run (ADR-0020).
+    ///
+    /// A job that the journal holds as accepted, without a result, and that runs in no task of this
+    /// process was interrupted by a restart. The agent runs a job of restic steps again, but not a
+    /// job with a script or hook step: a program may have run, and it may not run twice. It stores
+    /// and answers a final result instead (ADR-0037).
+    async fn known(&self, validated: &ValidatedJob) -> Option<Known> {
+        let job = validated.job();
+        let snapshot = {
+            let mut journal = lock(&self.journal);
+            let running = lock(&self.running);
+            match journal.lookup(&job.job_id) {
+                JournalState::Completed(result) => return Some(Known::Stored(result)),
+                _ if running.contains_key(&job.job_id) => return Some(Known::Running),
+                JournalState::InProgress if runs_programs(job) => {
+                    let result = interrupted_result(job);
+                    journal.record_completed(&job.job_id, result.clone());
+                    (result, journal.snapshot())
+                }
+                _ => return None,
+            }
+        };
+        let (result, snapshot) = snapshot;
+        if let Err(error) = self.write_journal(snapshot).await {
+            tracing::warn!(%error, "cannot write the job journal");
+        }
+        Some(Known::Stored(result))
     }
 
     /// The reason to refuse a job whose hook is unknown or whose parameters do not obey the
@@ -880,6 +932,28 @@ fn verify_and_validate(
         job_id: rejection.job_id.or_else(|| Some(job_id.clone())),
         reason: rejection.reason,
     })
+}
+
+/// True for a job with a script or hook step.
+fn runs_programs(job: &restichub_proto::agent::v1::Job) -> bool {
+    job.steps
+        .iter()
+        .any(|step| matches!(step.kind, Some(step::Kind::Script(_) | step::Kind::Hook(_))))
+}
+
+/// The final result of a job that a restart interrupted. No step result exists for it (ADR-0037).
+fn interrupted_result(job: &restichub_proto::agent::v1::Job) -> JobResult {
+    JobResult {
+        job_id: job.job_id.clone(),
+        status: StepStatus::Failed as i32,
+        steps_total: u32::try_from(job.steps.len()).unwrap_or(u32::MAX),
+        steps_succeeded: 0,
+        steps_failed: 0,
+        outcome: JobStatus::Failed as i32,
+        error: Some(interrupted_error()),
+        steps: Vec::new(),
+        log_tail: Vec::new(),
+    }
 }
 
 /// True for a job that only lists snapshots or the files of one (ADR-0035).

@@ -101,3 +101,12 @@ pub(super) fn job_error(outcome: JobStatus, progress: &Progress) -> Option<Error
         params: Vec::new(),
     })
 }
+
+/// The error of a job that a restart interrupted before it finished. The agent runs no script or
+/// hook of such a job again (ADR-0037).
+pub(super) fn interrupted_error() -> ErrorDetail {
+    ErrorDetail {
+        code: "interrupted".to_owned(),
+        params: Vec::new(),
+    }
+}

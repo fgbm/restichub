@@ -307,8 +307,11 @@ fn parameter_job(
     fx: &HookFixture,
     parameters: Vec<HookParameter>,
 ) -> restichub_proto::agent::v1::Job {
+    // A journal answers a repeated identifier before it checks the parameters.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let number = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     fx.job(
-        "job-parameters",
+        &format!("job-parameters-{number}"),
         vec![hook_step("hook-0", "tool", HookPhase::Before, parameters)],
     )
 }
