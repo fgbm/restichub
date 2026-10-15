@@ -18,6 +18,9 @@ const TAG_SIGNATURE: u8 = 2;
 const TAG_PUBLIC_KEY: u8 = 6;
 const ALGORITHM_RSA: u8 = 1;
 const SIGNATURE_BINARY_DOCUMENT: u8 = 0x00;
+const SUBPACKET_CREATION_TIME: u8 = 2;
+const SUBPACKET_EXPIRATION_TIME: u8 = 3;
+const SUBPACKET_ISSUER_KEY_ID: u8 = 16;
 const SUBPACKET_ISSUER_FINGERPRINT: u8 = 33;
 
 /// The signing key of the restic releases, pinned by its fingerprint.
@@ -90,7 +93,7 @@ pub fn verify_detached(key: &PublicKey, data: &[u8], armored_signature: &str) ->
         }
     }
     let packet = found.context("the signature holds no signature packet")?;
-    let signature = Signature::parse(packet.body)?;
+    let signature = Signature::parse(packet.body, now_seconds())?;
     if signature.issuer_fingerprint != Some(key.fingerprint) {
         bail!("the signature does not name the pinned release key");
     }
@@ -122,7 +125,7 @@ struct Signature<'a> {
 }
 
 impl<'a> Signature<'a> {
-    fn parse(body: &'a [u8]) -> Result<Self> {
+    fn parse(body: &'a [u8], now: u64) -> Result<Self> {
         let mut reader = Reader::new(body);
         if reader.u8()? != 4 {
             bail!("the signature is not a version 4 signature");
@@ -143,7 +146,8 @@ impl<'a> Signature<'a> {
         let hashed = reader.take(hashed_len)?;
         // The hashed bytes of the header are exactly the first six bytes plus the hashed area.
         let hashed_prefix = &body[..6 + hashed_len];
-        let issuer_fingerprint = issuer_fingerprint(hashed)?;
+        let subpackets = hashed_subpackets(hashed)?;
+        subpackets.check_not_expired(now)?;
         let unhashed_len = usize::from(reader.u16()?);
         reader.take(unhashed_len)?;
         reader.take(2)?;
@@ -154,14 +158,40 @@ impl<'a> Signature<'a> {
         Ok(Self {
             algorithm,
             hashed_prefix,
-            issuer_fingerprint,
+            issuer_fingerprint: subpackets.issuer_fingerprint,
             modulus_bytes,
         })
     }
 }
 
-fn issuer_fingerprint(mut area: &[u8]) -> Result<Option<[u8; 20]>> {
-    let mut found = None;
+fn now_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+#[derive(Default)]
+struct Subpackets {
+    issuer_fingerprint: Option<[u8; 20]>,
+    created: Option<u32>,
+    expires_after: Option<u32>,
+}
+
+impl Subpackets {
+    /// A signature that carries an expiry is no proof after that time (threat T20).
+    fn check_not_expired(&self, now: u64) -> Result<()> {
+        // A zero expiry means that the signature never expires.
+        if let (Some(created), Some(after)) = (self.created, self.expires_after.filter(|a| *a > 0))
+            && u64::from(created) + u64::from(after) <= now
+        {
+            bail!("the signature has expired");
+        }
+        Ok(())
+    }
+}
+
+fn hashed_subpackets(mut area: &[u8]) -> Result<Subpackets> {
+    let mut found = Subpackets::default();
     while !area.is_empty() {
         let mut reader = Reader::new(area);
         let length = match reader.u8()? {
@@ -176,19 +206,39 @@ fn issuer_fingerprint(mut area: &[u8]) -> Result<Option<[u8; 20]>> {
             bail!("a signature subpacket is cut short");
         }
         let subpacket = &area[consumed..consumed + length];
-        // Bit 7 marks a critical subpacket.
-        if subpacket[0] & 0x7F == SUBPACKET_ISSUER_FINGERPRINT {
-            let [4, rest @ ..] = &subpacket[1..] else {
-                bail!("the issuer fingerprint is not a version 4 fingerprint");
-            };
-            let fingerprint: [u8; 20] = rest
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("the issuer fingerprint has a bad length"))?;
-            found = Some(fingerprint);
+        // Bit 7 marks a critical subpacket, which a verifier that does not understand it refuses.
+        let kind = subpacket[0] & 0x7F;
+        let critical = subpacket[0] & 0x80 != 0;
+        match kind {
+            SUBPACKET_ISSUER_FINGERPRINT => {
+                let [4, rest @ ..] = &subpacket[1..] else {
+                    bail!("the issuer fingerprint is not a version 4 fingerprint");
+                };
+                let fingerprint: [u8; 20] = rest
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("the issuer fingerprint has a bad length"))?;
+                found.issuer_fingerprint = Some(fingerprint);
+            }
+            SUBPACKET_CREATION_TIME => found.created = Some(subpacket_u32(&subpacket[1..])?),
+            SUBPACKET_EXPIRATION_TIME => {
+                found.expires_after = Some(subpacket_u32(&subpacket[1..])?);
+            }
+            SUBPACKET_ISSUER_KEY_ID => {}
+            other if critical => {
+                bail!("the signature has a critical subpacket of type {other}, which is not supported")
+            }
+            _ => {}
         }
         area = &area[consumed + length..];
     }
     Ok(found)
+}
+
+fn subpacket_u32(body: &[u8]) -> Result<u32> {
+    let bytes: [u8; 4] = body
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("a signature time subpacket has a bad length"))?;
+    Ok(u32::from_be_bytes(bytes))
 }
 
 struct Packet<'a> {
@@ -450,5 +500,39 @@ mod tests {
             pin.contains(&format!("RESTIC_RELEASE_KEY_FINGERPRINT={FINGERPRINT}")),
             "the embedded pin differs from packaging/restic.env"
         );
+    }
+
+    fn subpacket(kind: u8, body: &[u8]) -> Vec<u8> {
+        let mut out = vec![u8::try_from(body.len() + 1).expect("length"), kind];
+        out.extend_from_slice(body);
+        out
+    }
+
+    #[test]
+    fn nfr_sec_06_a_critical_subpacket_that_is_not_known_is_refused() {
+        let area = subpacket(0x80 | 99, &[1, 2]);
+        let error = hashed_subpackets(&area).err().expect("critical subpacket");
+        assert!(error.to_string().contains("critical subpacket"), "{error}");
+        // The same subpacket without the critical bit is ignored.
+        hashed_subpackets(&subpacket(99, &[1, 2])).expect("not critical");
+        // A critical subpacket of a known type is fine.
+        hashed_subpackets(&subpacket(0x80 | SUBPACKET_CREATION_TIME, &[0, 0, 0, 1]))
+            .expect("known");
+    }
+
+    #[test]
+    fn nfr_sec_06_an_expired_signature_is_refused() {
+        let mut area = subpacket(SUBPACKET_CREATION_TIME, &1_000_u32.to_be_bytes());
+        area.extend(subpacket(SUBPACKET_EXPIRATION_TIME, &100_u32.to_be_bytes()));
+        let parsed = hashed_subpackets(&area).expect("parse");
+        parsed.check_not_expired(1_099).expect("still valid");
+        let error = parsed.check_not_expired(1_100).expect_err("expired");
+        assert!(error.to_string().contains("expired"), "{error}");
+        let mut forever = subpacket(SUBPACKET_CREATION_TIME, &1_000_u32.to_be_bytes());
+        forever.extend(subpacket(SUBPACKET_EXPIRATION_TIME, &0_u32.to_be_bytes()));
+        hashed_subpackets(&forever)
+            .expect("parse")
+            .check_not_expired(u64::MAX)
+            .expect("a zero expiry never expires");
     }
 }
