@@ -244,6 +244,7 @@ pub async fn enroll(
                 )
                 .await?;
             }
+            enrollment_tokens::set_used_by(&mut tx, token_id, agent_id).await?;
             write_use(&mut tx, token_id, agent_id, source_ip).await?;
             write_enroll(
                 &mut tx,

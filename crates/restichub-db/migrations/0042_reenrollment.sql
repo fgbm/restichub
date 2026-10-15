@@ -29,6 +29,11 @@ ALTER TABLE enrollment_tokens ADD COLUMN replaces_agent_id uuid;
 ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_replaces_agent_fk
     FOREIGN KEY (tenant_id, replaces_agent_id) REFERENCES agents (tenant_id, id);
 
+-- `used_by_agent_id` names the host that a spent token enrolled or re-registered.
+ALTER TABLE enrollment_tokens ADD COLUMN used_by_agent_id uuid;
+ALTER TABLE enrollment_tokens ADD CONSTRAINT enrollment_tokens_used_by_agent_fk
+    FOREIGN KEY (tenant_id, used_by_agent_id) REFERENCES agents (tenant_id, id);
+
 -- The function returns one more column, so it is dropped and created again with the same owner and
 -- grants as in migration 0025.
 GRANT CREATE ON SCHEMA public TO restichub_auth;

@@ -197,6 +197,30 @@ async fn ac_id_01_a_host_waits_for_its_first_connection() {
     db.cleanup().await;
 }
 
+#[tokio::test]
+async fn ac_id_01_a_used_token_names_the_host_it_enrolled() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = env(&db, "named").await;
+    let id = enroll_new(&db, &env, "named-host", None).await;
+
+    let (status, _, page) = send(
+        &env.api,
+        request("GET", "/api/v1/enrollment-tokens", Some(&env.cookie), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let tokens = page["items"].as_array().expect("a list");
+    let used: Vec<_> = tokens
+        .iter()
+        .filter(|token| token["used_at"].is_string())
+        .collect();
+    assert_eq!(used.len(), 1);
+    assert_eq!(used[0]["used_by_agent_id"], id.to_string());
+    db.cleanup().await;
+}
+
 async fn serial_of(
     db: &restichub_db::test_util::TestDatabase,
     env: &Env,

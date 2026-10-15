@@ -84,6 +84,8 @@ pub struct EnrollmentTokenView {
     pub created_by: String,
     /// The host that the token re-registers. Null for a token of a new host.
     pub replaces_agent_id: Option<String>,
+    /// The host that the token enrolled. Null until the token is used.
+    pub used_by_agent_id: Option<String>,
 }
 
 impl From<&repo::EnrollmentToken> for EnrollmentTokenView {
@@ -99,6 +101,7 @@ impl From<&repo::EnrollmentToken> for EnrollmentTokenView {
             created_at: format_time(entry.created_at),
             created_by: entry.created_by.to_string(),
             replaces_agent_id: entry.replaces_agent_id.map(|id| id.to_string()),
+            used_by_agent_id: entry.used_by_agent_id.map(|id| id.to_string()),
         }
     }
 }

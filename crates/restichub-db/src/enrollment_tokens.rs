@@ -51,6 +51,8 @@ pub struct EnrollmentToken {
     pub created_by: UserId,
     pub created_at: OffsetDateTime,
     pub replaces_agent_id: Option<AgentId>,
+    /// The host that the enrollment with this token created or replaced the identity of.
+    pub used_by_agent_id: Option<AgentId>,
 }
 
 /// The result of a token exchange (FR-ID-01, AC-ID-01).
@@ -133,7 +135,7 @@ pub async fn list(
     };
     let mut tokens: Vec<EnrollmentToken> = sqlx::query_as::<_, EnrollmentTokenRow>(
         "SELECT id, display_prefix, labels, expires_at, used_at, revoked_at, revoked_by_user_id, \
-                created_by_user_id, created_at, replaces_agent_id \
+                created_by_user_id, created_at, replaces_agent_id, used_by_agent_id \
          FROM enrollment_tokens \
          WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
          ORDER BY created_at DESC, id DESC \
@@ -160,7 +162,7 @@ pub async fn get(
 ) -> Result<Option<EnrollmentToken>, DbError> {
     let row = sqlx::query_as::<_, EnrollmentTokenRow>(
         "SELECT id, display_prefix, labels, expires_at, used_at, revoked_at, revoked_by_user_id, \
-                created_by_user_id, created_at, replaces_agent_id \
+                created_by_user_id, created_at, replaces_agent_id, used_by_agent_id \
          FROM enrollment_tokens WHERE id = $1",
     )
     .bind(id)
@@ -192,6 +194,21 @@ pub async fn revoke(
     .await
     .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
+}
+
+/// Records the host that a spent token enrolled, so the console can name it (FR-ID-01).
+pub async fn set_used_by(
+    tx: &mut TenantTx<'_>,
+    id: EnrollmentTokenId,
+    agent_id: AgentId,
+) -> Result<(), DbError> {
+    sqlx::query("UPDATE enrollment_tokens SET used_by_agent_id = $2 WHERE id = $1")
+        .bind(id)
+        .bind(agent_id)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(())
 }
 
 /// Spends a token (FR-ID-01, AC-ID-01).
@@ -381,6 +398,7 @@ type EnrollmentTokenRow = (
     Uuid,
     OffsetDateTime,
     Option<Uuid>,
+    Option<Uuid>,
 );
 
 impl From<EnrollmentTokenRow> for EnrollmentToken {
@@ -396,6 +414,7 @@ impl From<EnrollmentTokenRow> for EnrollmentToken {
             created_by,
             created_at,
             replaces_agent_id,
+            used_by_agent_id,
         ) = row;
         Self {
             id: EnrollmentTokenId::from_uuid(id),
@@ -408,6 +427,7 @@ impl From<EnrollmentTokenRow> for EnrollmentToken {
             created_by: UserId::from_uuid(created_by),
             created_at,
             replaces_agent_id: replaces_agent_id.map(AgentId::from_uuid),
+            used_by_agent_id: used_by_agent_id.map(AgentId::from_uuid),
         }
     }
 }
