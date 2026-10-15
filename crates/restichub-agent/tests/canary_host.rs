@@ -3,7 +3,7 @@
 //!
 //! `step_journal.rs` scans the agent directory and the Linux process arguments. The tests in this
 //! file also run on Windows, where the CI job `canary-windows` starts them with the real
-//! `windows-latest` runner.
+//! `windows-latest` runner and `RESTICHUB_HOST_CANARY` set.
 
 #![allow(clippy::expect_used)]
 
@@ -80,6 +80,17 @@ async fn ac_ag_03_ten_jobs_leave_no_canary_in_the_temporary_directory() {
     let _ = std::fs::remove_dir_all(&path);
 }
 
+/// The registry dump and the process listing are slow and read the whole host, so only the CI job
+/// `canary-windows` runs them (`RESTICHUB_HOST_CANARY`).
+#[cfg(windows)]
+fn host_scan_enabled() -> bool {
+    let enabled = std::env::var_os("RESTICHUB_HOST_CANARY").is_some();
+    if !enabled {
+        println!("skipping: RESTICHUB_HOST_CANARY is not set");
+    }
+    enabled
+}
+
 #[cfg(windows)]
 fn command_output(program: &str, arguments: &[&str]) -> Vec<u8> {
     let output = std::process::Command::new(program)
@@ -95,6 +106,9 @@ fn command_output(program: &str, arguments: &[&str]) -> Vec<u8> {
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
 async fn ac_ag_03_windows_ten_jobs_leave_no_canary_in_the_registry() {
+    if !host_scan_enabled() {
+        return;
+    }
     let canary = format!("CANARY-{}", uuid::Uuid::now_v7());
     let scanner = Scanner::new(&[Canary::parse(&canary)]);
     let dir = directory("registry-canary-agent");
@@ -125,6 +139,9 @@ async fn ac_ag_03_windows_ten_jobs_leave_no_canary_in_the_registry() {
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
 async fn ac_ag_04_windows_no_process_argument_holds_the_canary_during_a_backup() {
+    if !host_scan_enabled() {
+        return;
+    }
     let canary = format!("CANARY-{}", uuid::Uuid::now_v7());
     let scanner = Scanner::new(&[Canary::parse(&canary)]);
     let dir = directory("cim-agent");
