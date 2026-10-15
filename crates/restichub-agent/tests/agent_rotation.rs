@@ -97,6 +97,7 @@ async fn ac_id_03_the_agent_rotates_twice_over_its_open_stream() {
             },
             timeouts: Timeouts {
                 rotation_retry: Duration::from_millis(500),
+                rotation_jitter: Duration::ZERO,
                 ..Timeouts::default()
             },
         };

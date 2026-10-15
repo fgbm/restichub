@@ -111,6 +111,9 @@ pub struct Timeouts {
     /// The wait before the agent asks again after the control plane refused a rotation request
     /// or did not answer it (FR-ID-03).
     pub rotation_retry: Duration,
+    /// The upper bound of a random delay before a request that is already due when the stream
+    /// opens, so reconnects do not ask for a certificate each time (FR-ID-03).
+    pub rotation_jitter: Duration,
     /// The clock that places the rotation at two thirds of the certificate lifetime. A test
     /// replaces it (FR-ID-03).
     pub now: fn() -> OffsetDateTime,
@@ -132,7 +135,9 @@ impl Default for Timeouts {
             keepalive_interval: Duration::from_secs(30),
             keepalive_timeout: Duration::from_secs(20),
             tcp_keepalive: Duration::from_secs(60),
-            rotation_retry: Duration::from_secs(300),
+            // Longer than the cooldown of the control plane (10 minutes), so a retry is not refused.
+            rotation_retry: Duration::from_secs(660),
+            rotation_jitter: Duration::from_secs(60),
             now: OffsetDateTime::now_utc,
         }
     }
@@ -463,9 +468,14 @@ impl Upkeep {
             self.armed = false;
             return;
         };
-        let wait = (rotation::rotation_due(not_before, not_after) - (timeouts.now)())
+        let wait: Duration = (rotation::rotation_due(not_before, not_after) - (timeouts.now)())
             .try_into()
             .unwrap_or(Duration::ZERO);
+        let wait = if wait.is_zero() {
+            jitter_below(timeouts.rotation_jitter)
+        } else {
+            wait
+        };
         self.timer
             .as_mut()
             .reset(tokio::time::Instant::now() + wait);
@@ -512,6 +522,16 @@ impl Upkeep {
             .reset(tokio::time::Instant::now() + timeouts.rotation_retry);
         self.armed = true;
     }
+}
+
+/// A random duration below `max`. Zero when `max` is zero or the random source fails.
+fn jitter_below(max: Duration) -> Duration {
+    let millis = u64::try_from(max.as_millis()).unwrap_or(u64::MAX);
+    let mut bytes = [0_u8; 8];
+    if millis == 0 || getrandom::fill(&mut bytes).is_err() {
+        return Duration::ZERO;
+    }
+    Duration::from_millis(u64::from_le_bytes(bytes) % millis)
 }
 
 /// Matches the status codes of a revoked or an unknown agent (FR-ID-04).
@@ -779,8 +799,9 @@ async fn send_hello(
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use super::{Backoff, endpoint_host, next_attempt, pong, refused, send_hello};
+    use super::{Backoff, endpoint_host, jitter_below, next_attempt, pong, refused, send_hello};
     use restichub_proto::agent::v1::{Ping, agent_message};
+    use std::time::Duration;
 
     #[test]
     fn m2_a_stream_that_closes_at_once_grows_the_delay() {
@@ -794,6 +815,15 @@ mod tests {
         assert!(backoff.cap(attempt) > backoff.cap(0));
         // Reset the attempt when the stream was healthy.
         assert_eq!(next_attempt(attempt, true), 0);
+    }
+
+    #[test]
+    fn fr_id_03_the_rotation_jitter_stays_below_its_bound() {
+        assert_eq!(jitter_below(Duration::ZERO), Duration::ZERO);
+        let max = Duration::from_secs(60);
+        for _ in 0..50 {
+            assert!(jitter_below(max) < max);
+        }
     }
 
     #[test]
