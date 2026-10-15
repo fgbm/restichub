@@ -8,7 +8,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ApiService } from './service';
 
 interface Call {
 	method: string;
