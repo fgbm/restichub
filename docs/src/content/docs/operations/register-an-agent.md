@@ -121,3 +121,5 @@ The restic child holds no other variable of the agent, so a job cannot redirect 
 - [ADR-0032](https://github.com/fgbm/restichub/blob/main/design/adr/0032-manual-agent-registration-and-service-install.md)
 - [ADR-0031](https://github.com/fgbm/restichub/blob/main/design/adr/0031-bundled-restic-in-agent-package.md)
 - [Agent enrollment rate limit](enrollment-rate-limit.md)
+- [Agent certificate rotation](certificate-rotation.md)
+- [Agent and control plane versions](agent-version-compatibility.md)

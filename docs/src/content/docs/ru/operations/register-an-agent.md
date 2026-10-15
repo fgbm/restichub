@@ -118,3 +118,5 @@ restichub-agent install-service
 - [ADR-0032](https://github.com/fgbm/restichub/blob/main/design/adr/0032-manual-agent-registration-and-service-install.md)
 - [ADR-0031](https://github.com/fgbm/restichub/blob/main/design/adr/0031-bundled-restic-in-agent-package.md)
 - [Предел частоты регистрации агентов](enrollment-rate-limit.md)
+- [Замена сертификата агента](certificate-rotation.md)
+- [Версии агента и сервера управления](agent-version-compatibility.md)
