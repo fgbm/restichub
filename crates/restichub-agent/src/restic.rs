@@ -181,6 +181,38 @@ mod tests {
         assert!(error.to_string().contains("cannot read the restic binary"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn t20_start_refuses_an_absent_record_and_a_changed_binary() {
+        use crate::restic_release::VerifiedRelease;
+
+        let base = std::env::temp_dir().join(format!(
+            "restichub-agent-restic-start-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let layout = Layout::new(base.join("bin"), base.join("config"));
+        let error = ResticBinary::installed(&layout).expect_err("nothing is installed");
+        assert!(error.to_string().contains("restic update"), "{error:#}");
+
+        let release = VerifiedRelease {
+            version: "0.19.1".to_owned(),
+            binary: b"restic bytes".to_vec(),
+            sha256: hex(&Sha256::digest(b"restic bytes")),
+        };
+        layout
+            .install(&release, &|_| Ok("0.19.1".to_owned()))
+            .expect("install");
+        let restic = ResticBinary::installed(&layout).expect("installed");
+        restic.verify().expect("the installed binary matches");
+
+        std::fs::write(layout.binary_path(), b"another binary").expect("tamper");
+        let restic = ResticBinary::installed(&layout).expect("the record still loads");
+        let error = restic.verify().expect_err("a changed binary");
+        assert!(error.to_string().contains("recorded SHA-256"), "{error:#}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn the_version_token_is_read() {
         assert_eq!(
