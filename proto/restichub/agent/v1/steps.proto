@@ -41,8 +41,6 @@ message Step {
     PruneStep prune = 10;
     // StatsStep runs "restic stats".
     StatsStep stats = 11;
-    // HookStep runs an allow-listed hook (FR-HK-03).
-    HookStep hook = 12;
     // UnlockAllStep runs "restic unlock --remove-all" (FR-SC-06).
     UnlockAllStep unlock_all = 13;
     // InitStep runs "restic init" (FR-RP-02).
@@ -55,6 +53,10 @@ message Step {
     // on the local trust mode (FR-HK-09, ADR-0037).
     ScriptStep script = 20;
   }
+
+  // Field 12 held the hook step of the allow-list (ADR-0040).
+  reserved 12;
+  reserved "hook";
 }
 
 // ProcessPriority is the scheduling priority of the restic process (FR-AG-15).
@@ -289,43 +291,7 @@ enum StatsMode {
   STATS_MODE_RAW_DATA = 4;
 }
 
-// HookStep runs one allow-listed hook (FR-HK-03). A duplicate or unknown
-// parameter name causes REJECT_REASON_INVALID_HOOK_PARAMETERS.
-message HookStep {
-  // Identifier of the hook in the agent allow-list.
-  string hook_id = 1;
-  // Phase of the hook in the job.
-  HookPhase phase = 2;
-  // Parameters that the agent validates against the allow-list schema.
-  repeated HookParameter parameters = 3;
-}
-
-// HookParameter is one named parameter of a hook (FR-HK-03). The value is a
-// closed set of types, not free text. The agent checks the value against the
-// type of the parameter in its allow-list and rejects a mismatch.
-message HookParameter {
-  // Name of the parameter.
-  string name = 1;
-  // Field 2 held an untyped text value. The agent rejects a parameter that
-  // sets it (REJECT_REASON_INVALID_HOOK_PARAMETERS).
-  string value = 2;
-  // Value of the parameter. The set field must agree with the type in the
-  // allow-list.
-  oneof typed {
-    // Value of a string or an enumeration parameter.
-    string string_value = 3;
-    // Value of an integer parameter.
-    int64 integer_value = 4;
-    // Value of a boolean parameter.
-    bool boolean_value = 5;
-    // Value of a secret reference parameter. The control plane resolves the
-    // reference when it sends the job (ADR-0017). The agent gives it to the
-    // hook in an environment variable, never in an argument or a log.
-    string secret_value = 6;
-  }
-}
-
-// HookPhase is the position of a hook in a job (FR-HK-05).
+// HookPhase is the position of a script in a job (FR-HK-05).
 enum HookPhase {
   HOOK_PHASE_UNSPECIFIED = 0;
   HOOK_PHASE_BEFORE = 1;
@@ -345,7 +311,7 @@ message ScriptStep {
   string name = 1;
   // Program that runs the body.
   ScriptInterpreter interpreter = 2;
-  // Phase of the script in the job. Same meaning as for a hook (FR-HK-05).
+  // Phase of the script in the job. (FR-HK-05).
   HookPhase phase = 3;
   // Text of the script. At most 65536 bytes of UTF-8. The agent writes it to a
   // protected temporary file and deletes the file after the run.

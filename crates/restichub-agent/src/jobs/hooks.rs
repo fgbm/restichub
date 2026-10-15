@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use restichub_compiler::HookPhase;
-use restichub_compiler::hook::phase_of;
+use restichub_compiler::phase::phase_of;
 use restichub_proto::agent::v1::{
     LogStream, ScriptFailurePolicy, ScriptStep, Step, StepResult, StepStatus, step,
 };

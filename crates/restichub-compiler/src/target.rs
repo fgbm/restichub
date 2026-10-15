@@ -5,7 +5,6 @@ use std::fmt;
 
 use time::OffsetDateTime;
 
-use crate::hook::AllowListedHook;
 
 /// Operating system of a target agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -100,8 +99,6 @@ pub struct TargetFacts {
     pub restic_version: ResticVersion,
     /// Plan-local time for the date variables.
     pub now: OffsetDateTime,
-    /// Hook allow-list metadata of this agent (FR-HK-04).
-    pub allow_list: BTreeMap<String, AllowListedHook>,
     /// Trust mode and interpreters of this agent (FR-HK-08).
     pub server_scripts: crate::script::ServerScripts,
 }

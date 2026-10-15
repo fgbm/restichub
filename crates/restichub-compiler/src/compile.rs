@@ -1,11 +1,8 @@
 //! Converts a profile to typed steps (FR-PF-04, FR-PF-05).
 
-use std::collections::HashSet;
-
 use restichub_proto::agent::v1::{
-    BackupStep, CheckStep, ForgetGroupBy, ForgetStep, HookParameter as ProtoHookParameter,
-    HookPhase as ProtoHookPhase, HookStep, Job, PruneStep, RepositoryAccess, SnapshotsFilter, Step,
-    step,
+    BackupStep, CheckStep, ForgetGroupBy, ForgetStep, Job, PruneStep, RepositoryAccess,
+    SnapshotsFilter, Step, step,
 };
 
 use crate::error::{CompileError, FieldPath};
@@ -50,7 +47,6 @@ pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileE
         });
     }
     validate_platform(profile, target)?;
-    validate_hooks(profile, target)?;
     validate_scripts(profile, target)?;
 
     let steps = build_steps(profile, target)?;
@@ -174,13 +170,6 @@ fn option_name(option: ResticOption) -> &'static str {
     }
 }
 
-fn validate_hooks(profile: &Profile, target: &TargetFacts) -> Result<(), CompileError> {
-    for (index, hook) in profile.hooks.iter().enumerate() {
-        check_hook(index, hook, target)?;
-    }
-    Ok(())
-}
-
 fn validate_scripts(profile: &Profile, target: &TargetFacts) -> Result<(), CompileError> {
     for (index, script) in profile.scripts.iter().enumerate() {
         crate::script::check_script(index, script, target)?;
@@ -188,73 +177,9 @@ fn validate_scripts(profile: &Profile, target: &TargetFacts) -> Result<(), Compi
     Ok(())
 }
 
-/// Checks one hook of a profile against the allow-list that the target agent reported: the
-/// identifier, the phase, the parameter names and every value (FR-HK-03, FR-HK-04, AC-HK-05).
-///
-/// `index` is the position of the hook in the profile and names the field of an error.
-///
-/// # Errors
-///
-/// Returns the [`CompileError`] for the first rule that the hook breaks.
-pub fn check_hook(
-    index: usize,
-    hook: &crate::profile::HookRef,
-    target: &TargetFacts,
-) -> Result<(), CompileError> {
-    let hook_field = FieldPath::new(format!("hooks[{index}].hook_id"));
-    let Some(allowed) = target.allow_list.get(&hook.hook_id) else {
-        return Err(CompileError::UnknownHook {
-            field: hook_field,
-            hook_id: hook.hook_id.clone(),
-        });
-    };
-    if !allowed.allows(hook.phase) {
-        return Err(CompileError::HookPhaseNotAllowed {
-            field: FieldPath::new(format!("hooks[{index}].phase")),
-            hook_id: hook.hook_id.clone(),
-        });
-    }
-
-    let mut seen = HashSet::new();
-    for (parameter, value) in hook.parameters.iter().enumerate() {
-        let name_field = FieldPath::new(format!("hooks[{index}].parameters[{parameter}].name"));
-        if !allowed.parameters.contains_key(&value.name) {
-            return Err(CompileError::UnknownHookParameter {
-                field: name_field,
-                name: value.name.clone(),
-            });
-        }
-        if !seen.insert(value.name.as_str()) {
-            return Err(CompileError::DuplicateHookParameter {
-                field: name_field,
-                name: value.name.clone(),
-            });
-        }
-    }
-    if let Some((name, _)) = allowed
-        .parameters
-        .iter()
-        .find(|(name, spec)| spec.required && !seen.contains(name.as_str()))
-    {
-        return Err(CompileError::MissingHookParameter {
-            field: FieldPath::new(format!("hooks[{index}].parameters")),
-            name: name.clone(),
-        });
-    }
-    hook_step(index, hook, target).map(|_| ())
-}
-
 fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedStep>, CompileError> {
     let mut steps = Vec::new();
 
-    for (index, hook) in profile.hooks.iter().enumerate() {
-        if hook.phase == HookPhase::Before {
-            steps.push(PlannedStep {
-                step: hook_step(index, hook, target)?,
-                maintenance: false,
-            });
-        }
-    }
     push_scripts(&mut steps, profile, HookPhase::Before);
 
     steps.push(PlannedStep {
@@ -270,14 +195,6 @@ fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedSte
         HookPhase::OnError,
         HookPhase::Finally,
     ] {
-        for (index, hook) in profile.hooks.iter().enumerate() {
-            if hook.phase == phase {
-                steps.push(PlannedStep {
-                    step: hook_step(index, hook, target)?,
-                    maintenance: false,
-                });
-            }
-        }
         push_scripts(&mut steps, profile, phase);
     }
 
@@ -477,62 +394,11 @@ fn check_step(
     })
 }
 
-fn hook_step(
-    index: usize,
-    hook: &crate::profile::HookRef,
-    target: &TargetFacts,
-) -> Result<Step, CompileError> {
-    let allowed = target.allow_list.get(&hook.hook_id);
-    let mut parameters = Vec::new();
-    for (parameter, value) in hook.parameters.iter().enumerate() {
-        let field = format!("hooks[{index}].parameters[{parameter}].value");
-        let invalid = || CompileError::InvalidHookParameter {
-            field: FieldPath::new(&field),
-            name: value.name.clone(),
-        };
-        let spec = allowed
-            .and_then(|allowed| allowed.parameters.get(&value.name))
-            .ok_or_else(invalid)?;
-        // A secret reference is an identifier, not a text with template variables.
-        let text = if spec.secret() {
-            value.value.clone()
-        } else {
-            expand_field(&value.value, target, &field)?
-        };
-        let typed = spec.parse_text(&text).map_err(|_| invalid())?;
-        parameters.push(ProtoHookParameter {
-            name: value.name.clone(),
-            typed: Some(typed.to_proto()),
-            ..ProtoHookParameter::default()
-        });
-    }
-
-    Ok(Step {
-        step_id: format!("hook-{index}"),
-        timeout_seconds: 0,
-        kind: Some(step::Kind::Hook(HookStep {
-            hook_id: hook.hook_id.clone(),
-            phase: phase_flag(hook.phase),
-            parameters,
-        })),
-    })
-}
-
 fn group_by_flag(group: GroupBy) -> i32 {
     match group {
         GroupBy::Host => ForgetGroupBy::Host as i32,
         GroupBy::Paths => ForgetGroupBy::Paths as i32,
         GroupBy::Tags => ForgetGroupBy::Tags as i32,
-    }
-}
-
-fn phase_flag(phase: HookPhase) -> i32 {
-    match phase {
-        HookPhase::Before => ProtoHookPhase::Before as i32,
-        HookPhase::After => ProtoHookPhase::After as i32,
-        HookPhase::OnSuccess => ProtoHookPhase::OnSuccess as i32,
-        HookPhase::OnError => ProtoHookPhase::OnError as i32,
-        HookPhase::Finally => ProtoHookPhase::Finally as i32,
     }
 }
 

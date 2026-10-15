@@ -24,14 +24,11 @@
 use std::collections::HashSet;
 
 use crate::agent::v1::{
-    HookPhase, HookStep, Job, OverwriteMode, RejectReason, RepositoryAccess, ScriptFailurePolicy,
-    ScriptInterpreter, ScriptStep, SnapshotsFilter, Step, hook_parameter::Typed,
+    HookPhase, Job, OverwriteMode, RejectReason, RepositoryAccess, ScriptFailurePolicy,
+    ScriptInterpreter, ScriptStep, SnapshotsFilter, Step,
     repository_access::BackendCredentials, script_env, step,
 };
 use crate::signing::Rejection;
-
-/// The most parameters that one hook step carries (FR-HK-02).
-pub const MAX_HOOK_PARAMETERS: usize = 32;
 
 /// The most bytes in the body of a script (FR-HK-09).
 pub const MAX_SCRIPT_BODY_BYTES: usize = 64 * 1024;
@@ -53,8 +50,7 @@ pub const MAX_LS_LIMIT: u64 = 5_000;
 /// # Errors
 ///
 /// Returns a [`Rejection`] with [`RejectReason::UnsupportedStep`] for an
-/// unknown step kind, [`RejectReason::InvalidHookParameters`] for a duplicate
-/// hook parameter name, [`RejectReason::InvalidScript`] for a script step that breaks a rule, and
+/// unknown step kind, [`RejectReason::InvalidScript`] for a script step that breaks a rule, and
 /// [`RejectReason::Malformed`] for any other rule.
 pub fn validate_job(job: &Job) -> Result<(), Rejection> {
     if job.steps.is_empty() {
@@ -183,9 +179,6 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
                 check_format(job, snapshot_id, is_snapshot_id)?;
             }
         }
-        step::Kind::Hook(hook) => {
-            check_hook(job, hook)?;
-        }
         step::Kind::Script(script) => {
             check_script(job, script)?;
         }
@@ -199,41 +192,6 @@ fn check_filter(job: &Job, filter: &SnapshotsFilter) -> Result<(), Rejection> {
     check_tags(job, filter.tags.iter())?;
     check_tags(job, filter.all_tags.iter())?;
     check_free(job, filter.paths.iter())
-}
-
-fn check_hook(job: &Job, hook: &HookStep) -> Result<(), Rejection> {
-    if hook.hook_id.is_empty() || has_forbidden(&hook.hook_id) {
-        return Err(reject(job, RejectReason::Malformed));
-    }
-
-    if hook.parameters.len() > MAX_HOOK_PARAMETERS {
-        return Err(reject(job, RejectReason::InvalidHookParameters));
-    }
-    let mut names = HashSet::new();
-    for parameter in &hook.parameters {
-        if has_forbidden(&parameter.name) {
-            return Err(reject(job, RejectReason::Malformed));
-        }
-        // Field 2 held an untyped value. A value must have a type (FR-HK-03).
-        if !parameter.value.is_empty() || parameter.typed.is_none() {
-            return Err(reject(job, RejectReason::InvalidHookParameters));
-        }
-        // A secret may hold line breaks, such as a key. Only NUL cannot travel in an environment
-        // variable.
-        let invalid = match &parameter.typed {
-            Some(Typed::StringValue(value)) => has_forbidden(value),
-            Some(Typed::SecretValue(value)) => has_nul(value),
-            Some(Typed::IntegerValue(_) | Typed::BooleanValue(_)) | None => false,
-        };
-        if invalid {
-            return Err(reject(job, RejectReason::Malformed));
-        }
-        if !names.insert(parameter.name.as_str()) {
-            return Err(reject(job, RejectReason::InvalidHookParameters));
-        }
-    }
-
-    Ok(())
 }
 
 /// True for a name that a script variable may have. The agent runs the interpreter with these
@@ -656,95 +614,9 @@ fn reject(job: &Job, reason: RejectReason) -> Rejection {
 mod tests {
     use super::*;
     use crate::agent::v1::{
-        BackupStep, CheckStep, ForgetStep, HookParameter, HookStep, LsStep, PruneStep, RestoreStep,
+        BackupStep, CheckStep, ForgetStep, LsStep, PruneStep, RestoreStep,
         SftpCredentials, SnapshotsStep, StatsStep, UnlockAllStep, UnlockStep,
     };
-
-    fn hook_job(parameter: HookParameter) -> Job {
-        job_with(vec![step(step::Kind::Hook(HookStep {
-            hook_id: string("pg_dump"),
-            parameters: vec![parameter],
-            ..HookStep::default()
-        }))])
-    }
-
-    #[test]
-    fn fr_hk_03_rejects_an_untyped_hook_parameter() {
-        let untyped = hook_job(HookParameter {
-            name: string("database"),
-            value: string("app"),
-            typed: None,
-        });
-        assert_eq!(
-            validate_job(&untyped),
-            Err(reject(&untyped, RejectReason::InvalidHookParameters))
-        );
-        let both = hook_job(HookParameter {
-            name: string("database"),
-            value: string("app"),
-            typed: Some(Typed::StringValue(string("app"))),
-        });
-        assert_eq!(
-            validate_job(&both),
-            Err(reject(&both, RejectReason::InvalidHookParameters))
-        );
-        let none = hook_job(HookParameter {
-            name: string("database"),
-            ..HookParameter::default()
-        });
-        assert_eq!(
-            validate_job(&none),
-            Err(reject(&none, RejectReason::InvalidHookParameters))
-        );
-    }
-
-    #[test]
-    fn fr_hk_03_accepts_every_hook_value_type_and_rejects_a_control_character() {
-        for typed in [
-            Typed::StringValue(string("app")),
-            Typed::IntegerValue(-7),
-            Typed::BooleanValue(true),
-            Typed::SecretValue(string("s3cret")),
-        ] {
-            let job = hook_job(HookParameter {
-                name: string("p"),
-                typed: Some(typed),
-                ..HookParameter::default()
-            });
-            assert_eq!(validate_job(&job), Ok(()));
-        }
-        for typed in [
-            Typed::StringValue(string("a\nb")),
-            Typed::SecretValue(string("a\u{0}b")),
-        ] {
-            let job = hook_job(HookParameter {
-                name: string("p"),
-                typed: Some(typed),
-                ..HookParameter::default()
-            });
-            assert!(malformed(&job));
-        }
-    }
-
-    #[test]
-    fn fr_hk_02_rejects_too_many_hook_parameters() {
-        let parameters = (0..=MAX_HOOK_PARAMETERS)
-            .map(|index| HookParameter {
-                name: format!("p{index}"),
-                typed: Some(Typed::BooleanValue(true)),
-                ..HookParameter::default()
-            })
-            .collect();
-        let job = job_with(vec![step(step::Kind::Hook(HookStep {
-            hook_id: string("pg_dump"),
-            parameters,
-            ..HookStep::default()
-        }))]);
-        assert_eq!(
-            validate_job(&job),
-            Err(reject(&job, RejectReason::InvalidHookParameters))
-        );
-    }
 
     const BAD_OPTION: &str = "--password-command=cmd /c calc";
     const BAD_SHORT: &str = "-x";
@@ -925,15 +797,6 @@ mod tests {
                 snapshot_ids: vec![string("0123abcd")],
                 ..StatsStep::default()
             })),
-            step(step::Kind::Hook(HookStep {
-                hook_id: string("pg_dump"),
-                parameters: vec![HookParameter {
-                    name: string("database"),
-                    typed: Some(Typed::StringValue(string("app"))),
-                    ..HookParameter::default()
-                }],
-                ..HookStep::default()
-            })),
         ];
 
         assert_eq!(validate_job(&job_with(steps)), Ok(()));
@@ -1073,15 +936,6 @@ mod tests {
                 path: string(BAD_OPTION),
                 ..LsStep::default()
             })),
-            step(step::Kind::Hook(HookStep {
-                hook_id: string("pg_dump"),
-                parameters: vec![HookParameter {
-                    name: string("database"),
-                    typed: Some(Typed::StringValue(string(BAD_OPTION))),
-                    ..HookParameter::default()
-                }],
-                ..HookStep::default()
-            })),
         ];
 
         assert_eq!(validate_job(&job_with(steps)), Ok(()));
@@ -1113,15 +967,6 @@ mod tests {
                 snapshot_id: string("0123abcd"),
                 path: string(newline),
                 ..LsStep::default()
-            }))]),
-            job_with(vec![step(step::Kind::Hook(HookStep {
-                hook_id: string("pg_dump"),
-                parameters: vec![HookParameter {
-                    name: string("database"),
-                    typed: Some(Typed::StringValue(string(newline))),
-                    ..HookParameter::default()
-                }],
-                ..HookStep::default()
             }))]),
         ];
 
@@ -1234,37 +1079,11 @@ mod tests {
                 snapshot_id: string("latest"),
                 ..RestoreStep::default()
             }))]),
-            job_with(vec![step(step::Kind::Hook(HookStep::default()))]),
         ];
 
         for job in &jobs {
             assert!(malformed(job), "{:?}", job.steps);
         }
-    }
-
-    #[test]
-    fn ac_pr_08_rejects_duplicate_hook_parameters() {
-        let job = job_with(vec![step(step::Kind::Hook(HookStep {
-            hook_id: string("pg_dump"),
-            parameters: vec![
-                HookParameter {
-                    name: string("database"),
-                    typed: Some(Typed::StringValue(string("app"))),
-                    ..HookParameter::default()
-                },
-                HookParameter {
-                    name: string("database"),
-                    typed: Some(Typed::StringValue(string("other"))),
-                    ..HookParameter::default()
-                },
-            ],
-            ..HookStep::default()
-        }))]);
-
-        assert_eq!(
-            validate_job(&job),
-            Err(reject(&job, RejectReason::InvalidHookParameters))
-        );
     }
 
     #[test]
