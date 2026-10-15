@@ -4,7 +4,7 @@ description: How an operator replaces the installation root certificate authorit
 ---
 
 :::caution
-ResticHub is in the design phase. This procedure is planned for 1.0. It is not implemented yet.
+No command does this procedure. The agent keeps the root certificate that it pinned at enrollment, and no function updates it. Register every agent again after a root CA change.
 :::
 
 The installation has one root certificate authority (CA). The root CA signs one issuing CA. The agents trust the root CA. A rotation of the root CA changes the trust of every agent.
