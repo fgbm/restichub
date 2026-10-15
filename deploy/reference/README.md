@@ -22,4 +22,6 @@ This directory holds a neutral Compose stack for one host: PostgreSQL, the contr
 
 5. Open `https://restichub.example.com` and use the setup token to create the first administrator.
 
+To run the `db-bootstrap` service by hand, add `-T`: `docker compose run -T --rm db-bootstrap`. The option turns off the terminal of the container. The service sets the passwords from the environment file, never from a prompt, and also works with a terminal.
+
 Back up the environment file, in particular `RESTICHUB_KEK`. A new key makes the stored secrets unreadable.

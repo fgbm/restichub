@@ -6,8 +6,8 @@ name: Promote latest
 # release and publishes it; then this workflow moves `latest` to the image of that
 # release. It moves the tag only for a stable release that has the highest version of
 # all published stable releases, so `latest` never goes back (a patch of an older line
-# does not take it). The job uses the environment `release-latest`: the owner can add
-# a required reviewer to that environment for an extra approval.
+# does not take it). The job uses the environment `release-latest`. The environment needs
+# the approval of a reviewer and accepts only a `v*` tag as the ref.
 
 on:
   release:
@@ -22,8 +22,10 @@ on:
 permissions:
   contents: read
 
+# One group for each tag, so a queued run for another tag never replaces this one. The
+# comparison of the versions in the job keeps `latest` from going back.
 concurrency:
-  group: promote-latest
+  group: promote-latest-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
 
 env:

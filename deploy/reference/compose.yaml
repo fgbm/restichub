@@ -41,7 +41,9 @@ services:
   # Creates the cluster roles once and sets the installation passwords. Each `\password`
   # hashes its password on the client (SCRAM), as `bootstrap-roles.sql` asks, so the server
   # and its log never see a password in clear text. The shell built-in `printf` passes the
-  # passwords on stdin, so they never appear in the process arguments.
+  # passwords on stdin, so they never appear in the process arguments. `psql` reads a
+  # password from `/dev/tty` when it has one, so `setsid -w` starts it with no controlling
+  # terminal: `docker compose run` with a terminal then reads stdin like `up` does.
   db-bootstrap:
     image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     restart: 'no'
@@ -67,7 +69,7 @@ services:
           -f /bootstrap-roles.sql
         printf '%s\n' '\password restichub_owner' "$$OWNER_PASSWORD" "$$OWNER_PASSWORD" \
           '\password restichub_runtime' "$$RUNTIME_PASSWORD" "$$RUNTIME_PASSWORD" \
-          | psql -v ON_ERROR_STOP=1 -d postgres >/dev/null
+          | setsid -w psql -v ON_ERROR_STOP=1 -d postgres >/dev/null
         psql -v ON_ERROR_STOP=1 -d postgres -v database="$$DATABASE" <<'SQL'
         ALTER DATABASE :"database" OWNER TO restichub_owner;
         SQL

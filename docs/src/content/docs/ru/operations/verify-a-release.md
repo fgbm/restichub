@@ -94,7 +94,26 @@ cosign verify-attestation --type cyclonedx \
 
 ## Воспроизведение пакета для Linux
 
-Пакеты агента для Linux воспроизводимы. Сборка того же коммита тем же набором инструментов даёт тот же архив байт в байт. Рабочий процесс задаёт `SOURCE_DATE_EPOCH` по времени коммита, заменяет пути сборки через `--remap-path-prefix` и пишет архив с отсортированными записями, фиксированным владельцем и фиксированным временем. Файлы SBOM содержат время создания. Пакет для Windows и образы на это свойство не проверяются.
+Пакеты агента для Linux воспроизводимы. Сборка того же коммита тем же набором инструментов даёт тот же архив байт в байт. Рабочий процесс задаёт `SOURCE_DATE_EPOCH` по времени коммита, заменяет пути сборки через `--remap-path-prefix` и пишет архив с отсортированными записями, фиксированным владельцем и фиксированным временем. Файлы SBOM содержат время создания. Пакет для Windows, файлы SBOM и образы не воспроизводимы байт в байт, и рабочий процесс их не проверяет.
+
+Чтобы сравнить пакет с выпуском, соберите тот же коммит на Ubuntu 24.04 (`x86_64`) с пакетом `musl-tools`, набором инструментов Rust из файла `rust-toolchain.toml` (1.96) и `rustup`. Команды ниже собирают пакет `amd64`. Задайте в `VERSION` версию выпуска.
+
+```sh
+VERSION=0.1.0
+git clone https://github.com/fgbm/restichub.git
+cd restichub
+git checkout "v$VERSION"
+sudo apt-get install -y --no-install-recommends musl-tools
+rustup target add x86_64-unknown-linux-musl
+export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+export RUSTFLAGS="--remap-path-prefix=$PWD=/build/src --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/build/cargo --remap-path-prefix=${RUSTUP_HOME:-$HOME/.rustup}=/build/rustup"
+RESTICHUB_BUILD_VERSION="$(git rev-parse --short=7 HEAD)" RESTICHUB_RELEASE_VERSION="$VERSION" \
+  cargo build --release --locked -p restichub-agent --target x86_64-unknown-linux-musl
+packaging/assemble-agent-package.sh target/x86_64-unknown-linux-musl/release/restichub-agent linux amd64 "$VERSION" out
+sha256sum out/*.tar.gz
+```
+
+Хеш должен совпасть со строкой пакета в подписанном файле `SHA256SUMS` выпуска. Для пакета `arm64` собирайте на хосте `arm64` для цели `aarch64-unknown-linux-musl`. Другая версия `musl-tools` или набора инструментов даёт другой бинарный файл.
 
 ## Windows
 

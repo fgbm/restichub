@@ -94,7 +94,26 @@ Use any CycloneDX tool, for example `grype sbom:<file>`, to match the components
 
 ## Reproduce a Linux package
 
-The Linux agent packages are reproducible. A build of the same commit with the same toolchain gives the same archive bytes. The workflow sets `SOURCE_DATE_EPOCH` to the commit time and maps the build paths with `--remap-path-prefix`. It writes each archive with sorted entries, a fixed owner and a fixed time. The SBOM files hold their generation time. The Windows package and the images are not checked for this property.
+The Linux agent packages are reproducible. A build of the same commit with the same toolchain gives the same archive bytes. The workflow sets `SOURCE_DATE_EPOCH` to the commit time and maps the build paths with `--remap-path-prefix`. It writes each archive with sorted entries, a fixed owner and a fixed time. The SBOM files hold their generation time. The Windows package, the SBOM files and the images are not byte-reproducible, and the workflow does not check them.
+
+To compare a package with the release, build the same commit on Ubuntu 24.04 (`x86_64`) with the `musl-tools` package, the Rust toolchain of the file `rust-toolchain.toml` (1.96) and `rustup`. The commands below build the `amd64` package. Set `VERSION` to the version of the release.
+
+```sh
+VERSION=0.1.0
+git clone https://github.com/fgbm/restichub.git
+cd restichub
+git checkout "v$VERSION"
+sudo apt-get install -y --no-install-recommends musl-tools
+rustup target add x86_64-unknown-linux-musl
+export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+export RUSTFLAGS="--remap-path-prefix=$PWD=/build/src --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/build/cargo --remap-path-prefix=${RUSTUP_HOME:-$HOME/.rustup}=/build/rustup"
+RESTICHUB_BUILD_VERSION="$(git rev-parse --short=7 HEAD)" RESTICHUB_RELEASE_VERSION="$VERSION" \
+  cargo build --release --locked -p restichub-agent --target x86_64-unknown-linux-musl
+packaging/assemble-agent-package.sh target/x86_64-unknown-linux-musl/release/restichub-agent linux amd64 "$VERSION" out
+sha256sum out/*.tar.gz
+```
+
+The hash must equal the line of the package in the signed `SHA256SUMS` file of the release. For the `arm64` package, build on an `arm64` host with the target `aarch64-unknown-linux-musl`. A different `musl-tools` or toolchain version gives a different binary.
 
 ## Windows
 
