@@ -17,6 +17,7 @@ mod job;
 mod option;
 mod preview;
 mod profile;
+pub mod script;
 mod target;
 mod template;
 
@@ -30,6 +31,10 @@ pub use preview::{PreviewError, PreviewStep, preview};
 pub use profile::{
     BackupOptions, CheckOptions, GroupBy, HookParameter, HookPhase, HookRef, Profile, ProfilePaths,
     Retention, SnapshotFilter,
+};
+pub use script::{
+    FailurePolicy, ScriptEnvRef, ScriptEnvValue, ScriptInterpreter, ScriptRef, ServerScripts,
+    check_script,
 };
 pub use target::{Architecture, OperatingSystem, ResticVersion, TargetFacts};
 pub use template::TemplateError;

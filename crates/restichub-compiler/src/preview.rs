@@ -4,7 +4,8 @@
 use std::collections::BTreeMap;
 
 use restichub_proto::agent::v1::{
-    HookPhase, HookStep, Job, RepositoryAccess, Step, hook_parameter::Typed, step,
+    HookPhase, HookStep, Job, RepositoryAccess, ScriptInterpreter, ScriptStep, Step,
+    hook_parameter::Typed, step,
 };
 use restichub_proto::signing::Rejection;
 
@@ -82,6 +83,15 @@ fn preview_step(
         });
     }
 
+    if let Some(step::Kind::Script(script)) = &planned.step.kind {
+        return Ok(PreviewStep {
+            step: planned.step.clone(),
+            maintenance: planned.maintenance,
+            command: script_command(script),
+            environment: Vec::new(),
+        });
+    }
+
     let mut line = arg::build_command(validated, &planned.step)?;
     arg::mask_secrets(&mut line);
     Ok(PreviewStep {
@@ -113,6 +123,30 @@ fn hook_command(hook: &HookStep, allow_list: &BTreeMap<String, AllowListedHook>)
         parts.push(format!("{}={}", parameter.name, value));
     }
     parts.join(" ")
+}
+
+/// The line of a script in the preview: its name, interpreter and phase, never the body or a value.
+fn script_command(script: &ScriptStep) -> String {
+    let interpreter = ScriptInterpreter::try_from(script.interpreter)
+        .ok()
+        .and_then(crate::script::ScriptInterpreter::from_proto);
+    let names: Vec<&str> = script
+        .env
+        .iter()
+        .map(|variable| variable.name.as_str())
+        .collect();
+    format!(
+        "script={} interpreter={} phase={} env=[{}]",
+        quote(&script.name),
+        interpreter.map_or("unspecified", |value| match value {
+            crate::script::ScriptInterpreter::Powershell => "powershell",
+            crate::script::ScriptInterpreter::Cmd => "cmd",
+            crate::script::ScriptInterpreter::Bash => "bash",
+            crate::script::ScriptInterpreter::Sh => "sh",
+        }),
+        phase_name(script.phase),
+        names.join(",")
+    )
 }
 
 fn phase_name(phase: i32) -> &'static str {

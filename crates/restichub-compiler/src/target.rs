@@ -102,6 +102,8 @@ pub struct TargetFacts {
     pub now: OffsetDateTime,
     /// Hook allow-list metadata of this agent (FR-HK-04).
     pub allow_list: BTreeMap<String, AllowListedHook>,
+    /// Trust mode and interpreters of this agent (FR-HK-08).
+    pub server_scripts: crate::script::ServerScripts,
 }
 
 #[cfg(test)]

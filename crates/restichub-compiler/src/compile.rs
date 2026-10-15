@@ -50,6 +50,7 @@ pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileE
     }
     validate_platform(profile, target)?;
     validate_hooks(profile, target)?;
+    validate_scripts(profile, target)?;
 
     let steps = build_steps(profile, target)?;
     check_contract(profile, &steps)?;
@@ -176,6 +177,13 @@ fn validate_hooks(profile: &Profile, target: &TargetFacts) -> Result<(), Compile
     Ok(())
 }
 
+fn validate_scripts(profile: &Profile, target: &TargetFacts) -> Result<(), CompileError> {
+    for (index, script) in profile.scripts.iter().enumerate() {
+        crate::script::check_script(index, script, target)?;
+    }
+    Ok(())
+}
+
 /// Checks one hook of a profile against the allow-list that the target agent reported: the
 /// identifier, the phase, the parameter names and every value (FR-HK-03, FR-HK-04, AC-HK-05).
 ///
@@ -243,6 +251,7 @@ fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedSte
             });
         }
     }
+    push_scripts(&mut steps, profile, HookPhase::Before);
 
     steps.push(PlannedStep {
         step: backup_step(profile, target)?,
@@ -265,6 +274,7 @@ fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedSte
                 });
             }
         }
+        push_scripts(&mut steps, profile, phase);
     }
 
     if let Some(retention) = &profile.retention {
@@ -286,6 +296,18 @@ fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedSte
     }
 
     Ok(steps)
+}
+
+/// Adds the scripts of one phase, in the order of the profile (FR-HK-09).
+fn push_scripts(steps: &mut Vec<PlannedStep>, profile: &Profile, phase: HookPhase) {
+    for (index, script) in profile.scripts.iter().enumerate() {
+        if script.phase == phase {
+            steps.push(PlannedStep {
+                step: crate::script::script_step(index, script),
+                maintenance: false,
+            });
+        }
+    }
 }
 
 fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileError> {

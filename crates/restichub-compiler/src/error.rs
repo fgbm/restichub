@@ -46,6 +46,13 @@ pub enum CompileError {
     InvalidCron { expression: String },
     #[error("the profile has no path for {os}")]
     NoPaths { os: OperatingSystem },
+    #[error("the host does not accept scripts from the control plane ({field})")]
+    ServerScriptsDisabled { field: FieldPath },
+    #[error("the host has no {interpreter:?} interpreter ({field})")]
+    InterpreterUnavailable {
+        field: FieldPath,
+        interpreter: crate::script::ScriptInterpreter,
+    },
     #[error("hook {hook_id:?} is not in the agent allow-list ({field})")]
     UnknownHook { field: FieldPath, hook_id: String },
     #[error("hook parameter {name:?} is not in the hook schema ({field})")]
@@ -175,6 +182,16 @@ impl CompileError {
         )
     }
 
+    /// True when the error comes from the scripts of the profile: the host does not accept them
+    /// or lacks the interpreter (FR-HK-10).
+    #[must_use]
+    pub fn is_script(&self) -> bool {
+        matches!(
+            self,
+            Self::ServerScriptsDisabled { .. } | Self::InterpreterUnavailable { .. }
+        )
+    }
+
     /// The field of the error, when it names one.
     #[must_use]
     pub fn field(&self) -> Option<&FieldPath> {
@@ -184,6 +201,8 @@ impl CompileError {
             | Self::InvalidDate { field, .. }
             | Self::UnterminatedTemplate { field }
             | Self::InvalidValue { field }
+            | Self::ServerScriptsDisabled { field }
+            | Self::InterpreterUnavailable { field, .. }
             | Self::UnknownHook { field, .. }
             | Self::UnknownHookParameter { field, .. }
             | Self::DuplicateHookParameter { field, .. }

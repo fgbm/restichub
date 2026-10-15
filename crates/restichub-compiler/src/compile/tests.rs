@@ -110,6 +110,7 @@ fn target() -> TargetFacts {
         restic_version: ResticVersion::MIN_SUPPORTED,
         now: date(2026, 10, 13),
         allow_list: allow_list(),
+        server_scripts: crate::script::ServerScripts::default(),
     }
 }
 
@@ -844,4 +845,95 @@ proptest! {
             }
         }
     }
+}
+
+fn script(name: &str, phase: HookPhase) -> crate::script::ScriptRef {
+    crate::script::ScriptRef {
+        name: name.to_owned(),
+        interpreter: crate::script::ScriptInterpreter::Bash,
+        phase,
+        body: "echo ok".to_owned(),
+        timeout_seconds: 60,
+        failure_policy: crate::script::FailurePolicy::AbortBackup,
+        env: Vec::new(),
+    }
+}
+
+fn trusting_target() -> TargetFacts {
+    let mut target = target();
+    target.server_scripts = crate::script::ServerScripts {
+        enabled: true,
+        interpreters: vec![crate::script::ScriptInterpreter::Bash],
+    };
+    target
+}
+
+#[test]
+fn ac_hk_07_a_script_for_a_host_without_the_trust_mode_is_refused() {
+    let mut profile = profile();
+    profile.scripts = vec![script("dump", HookPhase::Before)];
+    let error = compile(&profile, &target()).expect_err("the host did not turn on the mode");
+    assert!(matches!(error, CompileError::ServerScriptsDisabled { .. }));
+    assert!(error.is_script());
+}
+
+#[test]
+fn fr_hk_10_a_script_needs_an_interpreter_of_the_host() {
+    let mut profile = profile();
+    let mut powershell = script("dump", HookPhase::Before);
+    powershell.interpreter = crate::script::ScriptInterpreter::Powershell;
+    profile.scripts = vec![powershell];
+    let error = compile(&profile, &trusting_target()).expect_err("no powershell on this host");
+    assert!(matches!(error, CompileError::InterpreterUnavailable { .. }));
+}
+
+#[test]
+fn fr_hk_11_the_scripts_are_steps_in_the_phase_order() {
+    let mut profile = profile();
+    profile.scripts = vec![
+        script("late", HookPhase::Finally),
+        script("first", HookPhase::Before),
+        script("second", HookPhase::Before),
+        script("after", HookPhase::After),
+        script("failed", HookPhase::OnError),
+    ];
+    let plan = plan(&profile, &trusting_target());
+    let order: Vec<String> = plan
+        .steps
+        .iter()
+        .map(|planned| match &planned.step.kind {
+            Some(step::Kind::Script(script)) => script.name.clone(),
+            Some(step::Kind::Backup(_)) => "backup".to_owned(),
+            _ => "other".to_owned(),
+        })
+        .collect();
+    assert_eq!(
+        order,
+        ["first", "second", "backup", "after", "failed", "late"]
+    );
+    let ids: Vec<&str> = plan
+        .steps
+        .iter()
+        .map(|planned| planned.step.step_id.as_str())
+        .collect();
+    assert_eq!(ids[0], "script-1");
+    assert_eq!(ids[1], "script-2");
+}
+
+#[test]
+fn ac_pf_01_the_preview_of_a_script_shows_no_body_and_no_value() {
+    let mut profile = profile();
+    let mut dump = script("dump", HookPhase::Before);
+    dump.body = "echo CANARY-BODY".to_owned();
+    dump.env = vec![crate::script::ScriptEnvRef {
+        name: "PGPASSWORD".to_owned(),
+        value: crate::script::ScriptEnvValue::Secret("CANARY-SECRET".to_owned()),
+    }];
+    profile.scripts = vec![dump];
+    let plan = plan(&profile, &trusting_target());
+    let lines = preview(&plan, &repository(), &BTreeMap::new()).expect("preview");
+    let line = &lines[0].command;
+    assert!(line.contains("script=dump"));
+    assert!(line.contains("PGPASSWORD"));
+    assert!(!line.contains("CANARY"));
 }
