@@ -172,10 +172,10 @@ last connected:      2026-10-15 09:30:12.0 +00:00:00
 | Объект | Linux | Windows |
 | --- | --- | --- |
 | Исполняемый файл агента | `/opt/restichub-agent/bin/restichub-agent` | `%ProgramFiles%\ResticHub\Agent\restichub-agent.exe` |
-| Restic | `/opt/restichub-agent/bin/restic` | `%ProgramFiles%\ResticHub\Agent\bin\restic.exe` |
+| Restic | `/opt/restichub-agent/bin/restic` | `%ProgramFiles%\ResticHub\Agent\restic.exe` |
 | Учётные данные, файл состояния, запись restic, кэш, журнал | `/etc/restichub-agent`, `/var/lib/restichub-agent`, `/var/cache/restichub-agent` | `%ProgramData%\ResticHub\Agent` |
 
-В прежней установке restic лежал в `/var/lib/restichub-agent/bin` или в `%ProgramData%\ResticHub\Agent\bin`. Команды `register` и `install-service` останавливают работающую службу, переносят restic в каталог программы, переключают службу на новый путь и удаляют старые копии. Учётная запись агента сохраняется, поэтому хост не регистрируется заново. Чтобы перенести старую установку, распакуйте новый пакет агента и выполните `restichub-agent install-service` от имени `root` или администратора.
+В прежней установке restic лежал в `/var/lib/restichub-agent/bin`. В прежней установке на Windows он лежал в `%ProgramFiles%\ResticHub\Agent\bin` или в `%ProgramData%\ResticHub\Agent\bin`. Команды `register` и `install-service` останавливают работающую службу, переносят restic в каталог программы, переключают службу на новый путь и удаляют старые копии и пустой каталог `bin`. Агент сверяет перенесённый файл с хешем из записи. Учётная запись агента сохраняется, поэтому хост не регистрируется заново. Служба Windows, которая запускается с новым агентом, переносит restic сама, поэтому она продолжает работать без нового `register`. Чтобы перенести старую установку, распакуйте новый пакет агента и выполните `restichub-agent install-service` от имени `root` или администратора.
 
 На Linux команда записывает `/etc/systemd/system/restichub-agent.service` и включает юнит. На Windows команда записывает службу Windows, которая работает от имени LocalSystem. Служба запускается после перезагрузки.
 
@@ -200,6 +200,8 @@ last connected:      2026-10-15 09:30:12.0 +00:00:00
 | `the control plane does not accept the protocol version of this agent` | У агента и сервера управления разные версии протокола. | Обновите агент (см. [Версии агента и сервера управления](/restichub/ru/operations/agent-version-compatibility/)). |
 | Команда не принимает каталог или файл | Владелец объекта — другая учётная запись, или она может в него писать. | Верните владельца и доступ SYSTEM и «Администраторы» (Linux: `root`, права 0755). Повторите команду. |
 | `cannot stop the service` на Windows | Идёт выполнение задания. | Дождитесь задания или остановите службу вручную. Повторите команду. |
+| `the restic binary ... is missing` на Windows после обновления | Прежний агент держал restic в каталоге `bin`, и перенос не выполнился. | Выполните `restichub-agent install-service` от имени администратора. Команда переносит restic в `%ProgramFiles%\ResticHub\Agent\restic.exe`. |
+| `restic differs from its record after the move` | Старый файл изменился до переноса. | Выполните `restichub-agent restic update` от имени администратора. |
 
 ## Ограничения юнита systemd
 
@@ -218,7 +220,7 @@ last connected:      2026-10-15 09:30:12.0 +00:00:00
 Агент хранит исполняемый файл в защищённом каталоге:
 
 - Linux: `/opt/restichub-agent/bin/restic`.
-- Windows: `%ProgramFiles%\ResticHub\Agent\bin\restic.exe`. Писать туда могут только SYSTEM и группа «Администраторы».
+- Windows: `%ProgramFiles%\ResticHub\Agent\restic.exe`, рядом с исполняемым файлом агента. Писать туда могут только SYSTEM и группа «Администраторы».
 
 Защищённый каталог конфигурации хранит файл `restic.json` с версией и суммой SHA-256 установленного файла. При каждом запуске и перед каждым процессом restic агент сверяет файл с этой записью и не принимает другой файл. Сервер управления не может задать путь к restic. Если restic нет или он не совпадает с записью, служба останавливается и сообщает, что делать дальше: выполните `restichub-agent restic update`.
 

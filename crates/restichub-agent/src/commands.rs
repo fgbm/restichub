@@ -151,6 +151,13 @@ fn place_program() -> Result<()> {
             "restic is moved into {}",
             crate::paths::restic_dir().display()
         );
+        // The record keeps the hash, so the moved binary must still match it (T20).
+        let layout = Layout::host();
+        if layout.has_record() {
+            layout
+                .verify_installed()
+                .context("restic differs from its record after the move")?;
+        }
     }
     Ok(())
 }
@@ -384,6 +391,10 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let mut keys = crate::keys::KeyState::load(&identity, dir)?;
     let cache = crate::paths::cache_dir();
     crate::preflight::prepare_cache(&cache)?;
+    // An update can replace the agent without a new `register`, so a restic in the Windows
+    // location of an earlier version moves first (ADR-0038).
+    #[cfg(windows)]
+    crate::self_install::migrate_restic(&crate::self_install::Placement::host())?;
     // The service never downloads restic; an absent or changed binary stops the start (ADR-0038).
     let restic = ResticBinary::installed(&Layout::host())?;
     restic.verify()?;

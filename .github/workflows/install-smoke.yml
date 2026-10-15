@@ -161,7 +161,8 @@ jobs:
         run: |
           $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
           if (-not (Test-Path "$dir\restichub-agent.exe")) { throw 'agent missing' }
-          if (-not (Test-Path "$dir\bin\restic.exe")) { throw 'restic missing' }
+          if (-not (Test-Path "$dir\restic.exe")) { throw 'restic missing' }
+          if (Test-Path "$dir\bin") { throw 'the bin directory exists' }
           & "$dir\restichub-agent.exe" status
           if ($LASTEXITCODE -ne 0) { throw "status exit code $LASTEXITCODE" }
       - name: The service is running, automatic, LocalSystem and connected
@@ -179,6 +180,45 @@ jobs:
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
           Restart-Service restichub-agent
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          bash scripts/install-smoke.sh connected $since 60
+      - name: An install with restic in an old location migrates
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
+          $agent = Join-Path $dir 'restichub-agent.exe'
+          $restic = Join-Path $dir 'restic.exe'
+          $olds = @(
+            (Join-Path $dir 'bin'),
+            (Join-Path $env:ProgramData 'ResticHub\Agent\bin')
+          )
+          foreach ($old in $olds) {
+            $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            $hash = (Get-FileHash $restic -Algorithm SHA256).Hash
+            Stop-Service restichub-agent
+            New-Item -ItemType Directory -Force $old | Out-Null
+            Move-Item $restic (Join-Path $old 'restic.exe')
+            & $agent install-service
+            if ($LASTEXITCODE -ne 0) { throw "install-service exit code $LASTEXITCODE" }
+            if (-not (Test-Path $restic)) { throw "restic not moved from $old" }
+            if ((Get-FileHash $restic -Algorithm SHA256).Hash -ne $hash) { throw 'hash changed by the move' }
+            if (Test-Path $old) { throw "$old still exists" }
+            if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+            bash scripts/install-smoke.sh connected $since 60
+          }
+          & $agent status
+          if ($LASTEXITCODE -ne 0) { throw "status exit code $LASTEXITCODE" }
+      - name: The service moves restic by itself at the start
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
+          $restic = Join-Path $dir 'restic.exe'
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          Stop-Service restichub-agent
+          New-Item -ItemType Directory -Force (Join-Path $dir 'bin') | Out-Null
+          Move-Item $restic (Join-Path $dir 'bin\restic.exe')
+          Start-Service restichub-agent
+          if (-not (Test-Path $restic)) { throw 'restic not moved by the service' }
+          if (Test-Path (Join-Path $dir 'bin')) { throw 'the bin directory exists' }
           bash scripts/install-smoke.sh connected $since 60
       - name: A second install-service works while the service runs (FR-IN-08)
         shell: pwsh

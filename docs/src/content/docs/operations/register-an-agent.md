@@ -170,10 +170,10 @@ The agent installs itself, so you do not copy files by hand. The command copies 
 | Item | Linux | Windows |
 | --- | --- | --- |
 | Agent executable | `/opt/restichub-agent/bin/restichub-agent` | `%ProgramFiles%\ResticHub\Agent\restichub-agent.exe` |
-| Restic | `/opt/restichub-agent/bin/restic` | `%ProgramFiles%\ResticHub\Agent\bin\restic.exe` |
+| Restic | `/opt/restichub-agent/bin/restic` | `%ProgramFiles%\ResticHub\Agent\restic.exe` |
 | Identity, status file, restic record, cache, journal | `/etc/restichub-agent`, `/var/lib/restichub-agent`, `/var/cache/restichub-agent` | `%ProgramData%\ResticHub\Agent` |
 
-An older install kept restic in `/var/lib/restichub-agent/bin` or in `%ProgramData%\ResticHub\Agent\bin`. `register` and `install-service` stop a running service, move restic into the program directory, point the service at the new path and remove the old copies. The identity stays, so the host does not register again. To migrate an old install, unpack the new agent package and run `restichub-agent install-service` as `root` or Administrator.
+An older install kept restic in `/var/lib/restichub-agent/bin`. An older Windows install kept it in `%ProgramFiles%\ResticHub\Agent\bin` or in `%ProgramData%\ResticHub\Agent\bin`. `register` and `install-service` stop a running service, move restic into the program directory, point the service at the new path and remove the old copies and the empty `bin` directory. The agent checks the moved file against the hash in the record. The identity stays, so the host does not register again. A Windows service moves restic by itself when it starts with the new agent. It keeps working without a new `register`. To migrate an old install, unpack the new agent package and run `restichub-agent install-service` as `root` or Administrator.
 
 On Linux the command writes `/etc/systemd/system/restichub-agent.service` and enables the unit. On Windows the command writes a Windows service that runs as LocalSystem. The service starts after a reboot.
 
@@ -198,6 +198,8 @@ The exit code is 0 on success and 1 on an error. The exit code is 78 when the se
 | `the control plane does not accept the protocol version of this agent` | The agent and the control plane have different protocol versions. | Update the agent (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)). |
 | The command refuses a directory or file | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
 | `cannot stop the service` on Windows | A job still runs. | Wait for the job, or stop the service by hand. Run the command again. |
+| `the restic binary ... is missing` on Windows after an update | An older agent kept restic in the `bin` directory, and the move did not run. | Run `restichub-agent install-service` as Administrator. The command moves restic to `%ProgramFiles%\ResticHub\Agent\restic.exe`. |
+| `restic differs from its record after the move` | The old file changed before the move. | Run `restichub-agent restic update` as Administrator. |
 
 ## The systemd hardening trade-off
 
@@ -216,7 +218,7 @@ The agent takes the latest release of restic from GitHub. It verifies the OpenPG
 The agent stores the binary in a protected directory:
 
 - Linux: `/opt/restichub-agent/bin/restic`.
-- Windows: `%ProgramFiles%\ResticHub\Agent\bin\restic.exe`. Only SYSTEM and Administrators can write there.
+- Windows: `%ProgramFiles%\ResticHub\Agent\restic.exe`, next to the agent executable. Only SYSTEM and Administrators can write there.
 
 The protected configuration directory holds the file `restic.json` with the version and the SHA-256 of the installed binary. At each start, and before each restic process, the agent checks the binary against this record and refuses a different binary. The control plane cannot set the restic path. If restic is absent or does not match, the service stops with a message that names the next step: run `restichub-agent restic update`.
 

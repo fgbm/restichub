@@ -39,7 +39,7 @@ A download must keep the integrity model of ADR-0031. The restic project signs t
 
 ### Location and record
 
-- The binary lives in a protected directory: `/opt/restichub-agent/bin` on Linux and `%ProgramFiles%\ResticHub\Agent\bin` on Windows (see the note of 2026-10-15). Only root or Administrators can write there.
+- The binary lives in a protected directory: `/opt/restichub-agent/bin` on Linux and `%ProgramFiles%\ResticHub\Agent` on Windows (see the notes of 2026-10-15). Only root or Administrators can write there.
 - The program directory and the data directory are in the protected set of the restore access (FR-RS-03). A restore never writes there.
 - After an install the agent writes a record `restic.json` in the protected configuration directory. The record holds the version and the SHA-256 of the installed binary.
 - At every start the agent reads the record and checks that the binary hash equals the recorded hash. The agent checks the hash again before each spawn (T20). A missing record, a missing binary or a different hash stops the start with a message that names `restichub-agent restic update`.
@@ -92,3 +92,10 @@ The owner decided on 2026-10-15 to keep executables apart from data.
 - Data lives in the data directories only: `%ProgramData%\ResticHub\Agent` on Windows, and `/etc/restichub-agent` and `/var/lib/restichub-agent` on Linux. The identity, the journal, the cache and the record `restic.json` stay there.
 - The earlier locations `%ProgramData%\ResticHub\Agent\bin` and `/var/lib/restichub-agent/bin` are legacy. `register` and `install-service` move restic from there into the program directory, remove the old copies and keep the identity and the record.
 - The agent copies itself into the program directory. Only SYSTEM and Administrators can write there (Linux: root-owned, mode 0755). The service starts from there. This keeps the location check of threat T20 true by construction.
+
+## Note of 2026-10-15: restic next to the agent on Windows
+
+The owner decided on 2026-10-15 that restic lives next to the agent executable on Windows.
+
+- Windows uses `%ProgramFiles%\ResticHub\Agent\restic.exe`. There is no `bin` subdirectory. This replaces the Windows path of the note "program directory". Linux does not change.
+- `%ProgramFiles%\ResticHub\Agent\bin\restic.exe` and `%ProgramData%\ResticHub\Agent\bin\restic.exe` are legacy. `register`, `install-service` and the start of the service move restic from there to the new path, remove the empty `bin` directory and keep the record. The agent checks that the moved file equals the original. The hash checks at the start and before each spawn then run against the new path. The record does not hold the path, so no re-register is needed.
