@@ -74,7 +74,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
 
 		const current = screen.getByRole('menuitemradio', { name: /acme/ });
@@ -90,14 +90,14 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await waitFor(() => expect(screen.getByText('No organizations')).toBeInTheDocument());
 	});
 
 	it('reloads the membership list on every open', async () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
-		const button = screen.getByRole('button', { name: 'Switch organization' });
+		const button = screen.getByRole('button', { name: /Switch organization/ });
 
 		await user.click(button);
 		await waitFor(() => expect(mocks.listMemberships).toHaveBeenCalledTimes(1));
@@ -113,7 +113,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 
 		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(auth)/sign-in'));
 		expect(getSession()).toBeNull();
@@ -123,7 +123,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
 
 		await user.keyboard('{ArrowDown}');
@@ -136,7 +136,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		const button = screen.getByRole('button', { name: 'Switch organization' });
+		const button = screen.getByRole('button', { name: /Switch organization/ });
 		await user.click(button);
 		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
 
@@ -149,7 +149,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
 
 		await user.click(document.body);
@@ -161,7 +161,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
 		await user.click(screen.getByRole('menuitemradio', { name: /globex/ }));
 
@@ -182,7 +182,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		const filter = await screen.findByRole('searchbox', { name: 'Filter organizations' });
 		await user.type(filter, 'glob');
 		await waitFor(() => expect(screen.queryByRole('menuitemradio', { name: /acme/ })).toBeNull());
@@ -193,7 +193,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await waitFor(() =>
 			expect(screen.getByRole('menuitemradio', { name: /acme/ })).toBeInTheDocument()
 		);
@@ -205,7 +205,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
 		expect(screen.queryByRole('menuitem', { name: 'Platform administration' })).toBeNull();
 		expect(screen.queryByRole('separator')).toBeNull();
@@ -216,7 +216,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		const entry = await screen.findByRole('menuitem', { name: 'Platform administration' });
 		expect(screen.getByRole('separator')).toBeInTheDocument();
 		expect(entry).not.toHaveAttribute('aria-checked');
@@ -236,7 +236,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		const menu = await screen.findByRole('menu');
 		await user.keyboard('{ArrowDown}{ArrowDown}');
 		expect(menu).toHaveAttribute('aria-activedescendant', 'tenant-switch-platform');
@@ -258,7 +258,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		const filter = await screen.findByRole('searchbox', { name: 'Filter organizations' });
 		await user.type(filter, 'zzz');
 		await waitFor(() => expect(screen.queryAllByRole('menuitemradio')).toHaveLength(0));
@@ -275,7 +275,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher);
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await waitFor(() => expect(screen.getByText('No organizations')).toBeInTheDocument());
 		expect(screen.getByRole('menuitem', { name: 'Platform administration' })).toBeInTheDocument();
 	});
@@ -285,7 +285,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher, { platformMode: true });
 
-		const button = screen.getByRole('button', { name: 'Switch organization' });
+		const button = screen.getByRole('button', { name: /Switch organization/ });
 		expect(button).toHaveTextContent('Platform administration');
 		expect(button).not.toHaveTextContent('acme');
 		expect(button.querySelector('svg[data-icon="shield"]')).not.toBeNull();
@@ -307,7 +307,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher, { platformMode: true });
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await user.click(await screen.findByRole('menuitemradio', { name: /acme/ }));
 
 		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(app)'));
@@ -319,7 +319,7 @@ describe('the tenant switcher', () => {
 		const user = userEvent.setup();
 		render(TenantSwitcher, { platformMode: true });
 
-		await user.click(screen.getByRole('button', { name: 'Switch organization' }));
+		await user.click(screen.getByRole('button', { name: /Switch organization/ }));
 		await user.click(await screen.findByRole('menuitemradio', { name: /globex/ }));
 
 		await waitFor(() => expect(mocks.switchTenant).toHaveBeenCalledWith('t_02'));
