@@ -1,45 +1,47 @@
 ---
 title: Agent packages
-description: The content of the agent package and the verification chain of the bundled restic binary.
+description: The content of the agent package and the verification chain of the restic that the agent downloads.
 ---
 
-The agent package holds the agent and the restic binary. The agent uses the bundled restic only (ADR-0031). The host install cannot change the tested restic version.
+The agent package does not hold restic. The package and restic are two separate downloads. The agent downloads and verifies restic itself (ADR-0038). See [Register an agent](register-an-agent.md) for the commands.
 
 ## Package content
 
 Each package holds these files:
 
 - `restichub-agent` or `restichub-agent.exe`: the agent binary.
-- `restic` or `restic.exe`: the pinned restic binary.
 - `LICENSE`: the Apache License 2.0 of ResticHub.
-- `THIRD_PARTY_NOTICES`: the license text of restic, the BSD 2-Clause License.
+- `THIRD_PARTY_NOTICES`: a note that the agent downloads restic, and the fingerprint of the restic release signing key inside the agent.
 - `SHA256SUMS`: the SHA-256 of each file above.
 
-The package format is `tar.gz` on Linux and `zip` on Windows. The package name is `restichub-agent-<version>-<os>-<arch>`.
+The package format is `tar.gz` on Linux and `zip` on Windows. The package name is `restichub-agent-<version>-<os>-<arch>`. The workflow publishes only these packages as artifacts. A build step passes its output to the package step as an intermediate artifact that expires after one day.
 
-## The pinned version
+## The verification chain of the agent
 
-The file `packaging/restic.env` holds the pinned restic version and the release signing key fingerprint. ADR-0011 sets the target version. The pin is restic 0.19.1.
+When the agent downloads restic it runs this chain:
 
-The fingerprint is `CF8F 18F2 8445 7597 3F79 D4E1 91A6 868B D3F7 A907`. The restic installation document names this fingerprint. The file `packaging/restic-release-key.asc` holds the public key.
+1. It reads the tag of the latest release from GitHub.
+2. It downloads the archive, `SHA256SUMS` and `SHA256SUMS.asc` from the release page, over HTTPS with certificate verification.
+3. It verifies the OpenPGP signature of `SHA256SUMS` with the release signing key. The key is part of the agent, and only the key with the pinned fingerprint counts.
+4. It checks that `SHA256SUMS` lists the archive and that the SHA-256 of the archive equals the listed value.
+5. It checks the version: restic 0.18.1 or later, and major version 0.
+6. It unpacks the binary and runs it with `version`. The printed version must equal the version of the archive.
+7. It stores the binary in the protected directory and writes the version and the SHA-256 into the protected record.
 
-## The verification chain
+The fingerprint is `CF8F 18F2 8445 7597 3F79 D4E1 91A6 868B D3F7 A907`. The restic installation document names this fingerprint. The file `packaging/restic-release-key.asc` holds the public key. A test checks that the pin inside the agent equals `packaging/restic.env`.
 
-The script `packaging/fetch-restic.sh` runs this chain:
+## The restic of the tests
 
-1. It downloads `SHA256SUMS` and `SHA256SUMS.asc` from the restic release page.
-2. It imports the public key from `packaging/restic-release-key.asc`. It does not use a keyserver.
-3. It verifies the signature of `SHA256SUMS`. It refuses a signature from another key.
-4. It downloads the archive for the target. It compares the SHA-256 of the archive with `SHA256SUMS`.
-5. It unpacks the binary and prints the SHA-256 of the binary.
-6. It downloads the source archive of the release. It verifies the archive and extracts the restic license text.
+The CI tests that need a real restic use the script `packaging/fetch-restic.sh`. The file `packaging/restic.env` holds the pinned version and the fingerprint. ADR-0011 sets the target version. The pin is restic 0.19.1. The script runs the same chain with `gpg`. It does not touch the agent package.
 
-The agent build reads the printed SHA-256 from the `RESTICHUB_RESTIC_SHA256` variable. The agent embeds this value. At start the agent hashes the bundled restic and refuses a different binary (T20).
-
-The workflow `.github/workflows/agent-packages.yml` runs the chain for each target. One step unpacks each package and checks the content and the restic hash (AC-IN-01).
+A weekly workflow (`.github/workflows/restic-latest.yml`) runs the real-restic tests with the latest restic release. A change in the JSON output of restic shows up there before an operator updates.
 
 ## Change the pin
 
 1. Change `RESTIC_VERSION` in `packaging/restic.env`.
 2. Run `packaging/fetch-restic.sh` for each target.
-3. Run the agent package workflow.
+3. Run the CI.
+
+## The package check
+
+The workflow `.github/workflows/agent-packages.yml` builds each target. One step unpacks each package. It checks that the package holds the agent, `LICENSE`, `THIRD_PARTY_NOTICES` and `SHA256SUMS`, that the hashes match, and that the package holds no restic (AC-IN-01).

@@ -1,6 +1,6 @@
 //! Hardening of the restic child process (FR-AG-06, FR-AG-11, ADR-0021, ADR-0031).
 //!
-//! The agent starts the bundled restic with a cleared environment, the variables of the step
+//! The agent starts the installed restic with a cleared environment, the variables of the step
 //! `CommandLine` and the proxy variables of the host (FR-AG-06). A secret reaches the child process
 //! only through the environment, never through an argument (threat T9).
 //!
@@ -18,7 +18,7 @@ use anyhow::{Context, Result};
 use restichub_compiler::arg::CommandLine;
 use restichub_proto::agent::v1::ProcessPriority;
 
-use crate::restic::{EXPECTED_SHA256, ResticBinary};
+use crate::restic::ResticBinary;
 
 /// The proxy variables that a restic child inherits from the agent environment (FR-AG-06).
 ///
@@ -149,7 +149,7 @@ pub fn allocate_hidden_console() -> Result<()> {
     windows_job::allocate_hidden_console().context("cannot allocate the console")
 }
 
-/// Re-checks the pinned hash and starts the child process (FR-AG-11, threat T20).
+/// Re-checks the recorded hash and starts the child process (FR-AG-11, threat T20).
 ///
 /// # Errors
 ///
@@ -157,13 +157,13 @@ pub fn allocate_hidden_console() -> Result<()> {
 pub fn spawn_restic(restic: &ResticBinary, line: &CommandLine) -> Result<Child> {
     spawn_verified(
         restic.path(),
-        EXPECTED_SHA256,
+        restic.expected_sha256(),
         line,
         &crate::paths::cache_dir(),
     )
 }
 
-/// Runs the pinned restic with `version` and collects its output (FR-AG-11, threat T20).
+/// Runs the recorded restic with `version` and collects its output (FR-AG-11, threat T20).
 ///
 /// The child runs the checked inode with the environment of a job (FR-AG-06), so the check and the
 /// run share one reading of the binary.
@@ -174,7 +174,7 @@ pub fn spawn_restic(restic: &ResticBinary, line: &CommandLine) -> Result<Child> 
 pub fn version_output(restic: &ResticBinary) -> Result<Output> {
     let (file, mut command) = verified_command(
         restic.path(),
-        EXPECTED_SHA256,
+        restic.expected_sha256(),
         &["version".to_owned()],
         &[],
         &crate::paths::cache_dir(),
@@ -582,7 +582,7 @@ fn verified_command(
     let file = open_for_exec(path)?;
     let digest = digest_of(&file)?;
     crate::restic::verify_digest(&digest, expected_hex)
-        .with_context(|| format!("the bundled restic at {}", path.display()))?;
+        .with_context(|| format!("the restic at {}", path.display()))?;
     crate::paths::create_protected_dir(cache)?;
     let command = restic_command_with(&pinned_program(&file, path), args, env, cache);
     Ok((file, command))
@@ -827,17 +827,81 @@ mod tests {
         let error = spawn_verified(&path, &"0".repeat(64), &line, &cache)
             .expect_err("a wrong hash must refuse the start");
         assert!(
-            format!("{error:#}").contains("does not match the pinned SHA-256"),
+            format!("{error:#}").contains("does not match the recorded SHA-256"),
             "{error:#}"
         );
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir_all(&cache);
     }
 
-    /// The production entry refuses a binary that is not next to the agent (FR-AG-11).
+    /// An update replaces the binary and the record under a running service. The next job spawn
+    /// reads the new hash, so no restart is needed (FR-AG-11, threat T20).
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_11_an_update_takes_effect_for_the_next_spawn() {
+        use restichub_proto::agent::v1::ProcessPriority;
+        use sha2::Digest as _;
+
+        use crate::restic_release::VerifiedRelease;
+        use crate::restic_store::Layout;
+
+        let base = temp_path("update");
+        let _ = std::fs::remove_dir_all(&base);
+        let layout = Layout::new(base.join("bin"), base.join("config"));
+        let release = |tail: &[u8]| {
+            let mut binary = std::fs::read("/bin/true").expect("cannot read true");
+            binary.extend_from_slice(tail);
+            VerifiedRelease {
+                version: "0.19.1".to_owned(),
+                sha256: hex(&sha2::Sha256::digest(&binary)),
+                binary,
+            }
+        };
+        let probe = |_: &Path| Ok("0.19.1".to_owned());
+        let first = layout
+            .install(&release(b""), &probe)
+            .expect("first install");
+        let jobs = crate::jobs::Jobs::open(
+            layout.binary_path(),
+            first.sha256.clone(),
+            base.join("cache"),
+            &base.join("config"),
+        )
+        .expect("jobs")
+        .with_record(layout.clone());
+        let line = command_line();
+        let spawn = |expected: &str| {
+            super::spawn_job_restic(
+                &layout.binary_path(),
+                expected,
+                &line,
+                &base.join("cache"),
+                ProcessPriority::Unspecified,
+            )
+        };
+        spawn(&jobs.expected_sha256().expect("hash")).expect("the first binary runs");
+
+        let second = layout.install(&release(b"update"), &probe).expect("update");
+        assert_ne!(first.sha256, second.sha256);
+        let Err(stale) = spawn(&first.sha256) else {
+            panic!("the old hash must no longer match");
+        };
+        assert!(
+            format!("{stale:#}").contains("restart the service"),
+            "{stale:#}"
+        );
+        assert_eq!(jobs.expected_sha256().expect("hash"), second.sha256);
+        spawn(&jobs.expected_sha256().expect("hash")).expect("the updated binary runs");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The production entry refuses a binary that is missing (FR-AG-11).
     #[test]
     fn fr_ag_11_spawn_restic_refuses_a_missing_binary() {
-        let restic = crate::restic::ResticBinary::locate().expect("cannot locate the restic path");
+        let restic = crate::restic::ResticBinary::new(
+            temp_path("missing-restic").join(crate::restic::RESTIC_FILE_NAME),
+            "0".repeat(64),
+        );
         let line = command_line();
         assert!(
             super::spawn_restic(&restic, &line).is_err(),

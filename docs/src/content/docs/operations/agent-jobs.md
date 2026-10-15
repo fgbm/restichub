@@ -3,7 +3,7 @@ title: Agent jobs
 description: What the agent runs for a job, how it reports the result, and how bandwidth limits and priority work.
 ---
 
-The agent runs the steps of a signed job with the restic binary of its package. The agent starts no job by itself. The control plane sends each job (ADR-0002).
+The agent runs the steps of a signed job with the restic binary that it downloaded and verified (ADR-0038). The agent starts no job by itself. The control plane sends each job (ADR-0002).
 
 ## Steps that the agent runs
 

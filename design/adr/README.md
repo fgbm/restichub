@@ -36,9 +36,10 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0028](0028-platform-user-management.md) | Organization creation without an administrator, and platform user management | accepted |
 | [0029](0029-platform-admin-account-right.md) | The Platform Admin is an account right, not a membership | accepted |
 | [0030](0030-job-signing-key-resync.md) | Re-sync of the job signing key set | accepted |
-| [0031](0031-bundled-restic-in-agent-package.md) | Agent package with a bundled restic | accepted |
+| [0031](0031-bundled-restic-in-agent-package.md) | Agent package with a bundled restic | accepted, bundling superseded by ADR-0038 |
 | [0032](0032-manual-agent-registration-and-service-install.md) | Manual agent registration and service install | accepted |
 | [0033](0033-enrollment-transport-and-agent-trust-bootstrap.md) | Enrollment transport and agent trust bootstrap | accepted |
 | [0034](0034-repository-maintenance-schedule.md) | Repository maintenance schedule and retention isolation | accepted |
 | [0035](0035-restore-and-snapshot-browsing.md) | Restore and snapshot browsing | accepted |
 | [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted |
+| [0038](0038-agent-downloads-restic.md) | The agent downloads restic | accepted |

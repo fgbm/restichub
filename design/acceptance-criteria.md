@@ -58,7 +58,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-AG-08 | FR-AG-12 | The agent completed a job. The CP sends the same `job_id` again. **Expected:** restic does not start. The agent returns the stored result. | A |
 | AC-AG-09 | FR-AG-11 | The agent has restic 0.18.1. The profile has an option that needs 0.19. **Expected:** the CP does not send the job. Status `incompatible`, with the option name and the necessary version. | A |
 | AC-AG-10 | FR-AG-15 | Upload limit 10 MB/s. **Expected:** the average upload rate over 60 s is 11 MB/s or less. | A |
-| AC-AG-11 | FR-AG-11 | Replace the bundled restic binary with a different binary. **Expected:** the agent refuses to run restic and reports the mismatch. The control plane has no setting for the restic path. | S |
+| AC-AG-11 | FR-AG-11 | Replace the installed restic binary with a different binary. **Expected:** the agent refuses to run restic and reports the mismatch. The control plane has no setting for the restic path. | S |
 
 ## 3. Enrollment, identity, connection
 
@@ -228,6 +228,6 @@ The MVP is accepted when all these conditions are true:
 
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
-| AC-IN-01 | FR-AG-11, FR-IN-07 | Open the agent package. **Expected:** it contains `restichub-agent`, `restic`, the restic BSD-2-Clause license text and a third-party notice. The SHA-256 of `restic` equals the pinned value from the restic `SHA256SUMS`. | A |
+| AC-IN-01 | FR-AG-11, FR-IN-07 | Open the agent package. **Expected:** it contains `restichub-agent`, the license text, a third-party notice and the package hashes. It does not contain `restic`. After `register`, the installed `restic` has the SHA-256 from the signed restic `SHA256SUMS`. | A |
 | AC-IN-02 | FR-ID-01, FR-IN-07 | Register a host with `restichub-agent register --url <url> --token <token>`. **Expected:** the host appears active with the certificate of ADR-0026. The control plane consumes the token. A second registration with the same token, an expired token and a token that an Admin revoked are each refused with a clear error. | A |
 | AC-IN-03 | FR-IN-08 | Run `restichub-agent install-service` on Windows and on Linux. **Expected:** the operating system registers the service and it starts after a reboot. | A |
