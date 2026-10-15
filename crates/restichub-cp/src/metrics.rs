@@ -15,7 +15,9 @@ use std::sync::{Arc, Mutex};
 use axum::extract::State;
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
-use restichub_db::metrics::{self as metrics_repo, DURATION_BUCKETS, MetricsSnapshot};
+use restichub_db::metrics::{
+    self as metrics_repo, DELAY_BUCKETS, DURATION_BUCKETS, MetricsSnapshot,
+};
 use restichub_db::{AgentId, TenantId};
 use time::OffsetDateTime;
 
@@ -158,6 +160,35 @@ pub fn render(
             histogram.count
         );
     }
+
+    family(
+        &mut out,
+        "restichub_job_dispatch_delay_seconds",
+        "histogram",
+        "Time from the moment a job may run to its first send to the agent.",
+    );
+    let delay = &snapshot.dispatch_delay;
+    for (bound, count) in DELAY_BUCKETS.iter().zip(&delay.buckets) {
+        let _ = writeln!(
+            out,
+            "restichub_job_dispatch_delay_seconds_bucket{{tenant=\"{tenant}\",le=\"{bound}\"}} {count}"
+        );
+    }
+    let _ = writeln!(
+        out,
+        "restichub_job_dispatch_delay_seconds_bucket{{tenant=\"{tenant}\",le=\"+Inf\"}} {}",
+        delay.count
+    );
+    let _ = writeln!(
+        out,
+        "restichub_job_dispatch_delay_seconds_sum{{tenant=\"{tenant}\"}} {}",
+        delay.sum_seconds
+    );
+    let _ = writeln!(
+        out,
+        "restichub_job_dispatch_delay_seconds_count{{tenant=\"{tenant}\"}} {}",
+        delay.count
+    );
 
     family(
         &mut out,
