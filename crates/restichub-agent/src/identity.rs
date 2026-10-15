@@ -449,6 +449,78 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    fn rotated() -> Rotated {
+        Rotated {
+            key_pem: "-----BEGIN PRIVATE KEY-----\nNEW\n-----END PRIVATE KEY-----\n".to_owned(),
+            certificate_der: vec![9, 9, 9],
+            ca_chain_der: vec![vec![8, 8], vec![6, 7]],
+        }
+    }
+
+    #[test]
+    fn fr_id_03_a_rotation_replaces_the_files_and_keeps_the_rest_of_the_state() {
+        let dir = temp_dir("rotation");
+        sample().save(&dir).expect("the save must succeed");
+        std::fs::write(dir.join("journal.db"), b"state").expect("cannot write other state");
+        StoredIdentity::install_rotation(&dir, &rotated()).expect("the rotation must install");
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.certificate_der, vec![9, 9, 9]);
+        assert!(loaded.key_pem.contains("NEW"));
+        assert_eq!(loaded.ca_chain_der, vec![vec![8, 8], vec![6, 7]]);
+        assert_eq!(loaded.agent_id, sample().agent_id);
+        assert_eq!(loaded.signing_keys, sample().signing_keys);
+        assert_eq!(
+            std::fs::read(dir.join("journal.db")).expect("other state"),
+            b"state"
+        );
+        assert!(!dir.join(ROTATION_MARKER).exists());
+        assert!(!staged(&dir, KEY_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_id_03_a_rotation_that_stopped_after_the_marker_is_finished_at_the_next_load() {
+        let dir = temp_dir("rotation-crash");
+        sample().save(&dir).expect("the save must succeed");
+        // A crash after the marker and the first move leaves the new key beside the old
+        // certificate and the staged rest.
+        let new = rotated();
+        paths::create_protected_file(&staged(&dir, KEY_FILE), new.key_pem.as_bytes())
+            .expect("stage the key");
+        paths::create_protected_file(
+            &staged(&dir, CERT_FILE),
+            pem::encode("CERTIFICATE", &new.certificate_der).as_bytes(),
+        )
+        .expect("stage the certificate");
+        let chain: String = new
+            .ca_chain_der
+            .iter()
+            .map(|der| pem::encode("CERTIFICATE", der))
+            .collect();
+        paths::create_protected_file(&staged(&dir, CA_CHAIN_FILE), chain.as_bytes())
+            .expect("stage the chain");
+        paths::create_protected_file(&dir.join(ROTATION_MARKER), b"1").expect("the marker");
+        std::fs::rename(staged(&dir, KEY_FILE), dir.join(KEY_FILE)).expect("move the key");
+
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.certificate_der, vec![9, 9, 9]);
+        assert!(loaded.key_pem.contains("NEW"));
+        assert!(!dir.join(ROTATION_MARKER).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_id_03_staged_files_without_the_marker_are_dropped_and_the_old_identity_stays() {
+        let dir = temp_dir("rotation-partial");
+        sample().save(&dir).expect("the save must succeed");
+        paths::create_protected_file(&staged(&dir, KEY_FILE), b"half").expect("stage the key");
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.certificate_der, sample().certificate_der);
+        assert!(loaded.key_pem.contains("MIIB"));
+        assert!(!staged(&dir, KEY_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_generated_key_and_request_are_valid() {
         let (generated, csr_der) = generate_key_and_csr().expect("cannot generate the key");

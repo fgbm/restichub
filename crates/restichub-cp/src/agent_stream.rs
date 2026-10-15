@@ -69,9 +69,15 @@ const OUTBOUND_CHANNEL: usize = 128;
 /// AC-ID-04).
 pub const REVOCATION_SWEEP_INTERVAL: Duration = Duration::from_secs(2);
 
-/// The shortest time between two rotation requests of one stream. A refused or failed request
-/// does not let the agent make the control plane sign in a loop (FR-ID-03).
+/// The longest wait between two signed rotations of one stream. A stream cannot make the control
+/// plane sign in a loop (FR-ID-03). A short certificate lifetime shortens the wait.
 const CERTIFICATE_REQUEST_COOLDOWN: Duration = Duration::from_secs(30);
+
+/// A quarter of the certificate lifetime, but not more than [`CERTIFICATE_REQUEST_COOLDOWN`].
+fn certificate_request_cooldown(state: &AppState) -> Duration {
+    let quarter = Duration::try_from(state.agent_cert_lifetime() / 4).unwrap_or_default();
+    quarter.min(CERTIFICATE_REQUEST_COOLDOWN)
+}
 
 /// The largest accepted key identifier in a `KeyUpdateAck`.
 const MAX_KEY_ID_LEN: usize = 64;
@@ -921,11 +927,10 @@ async fn handle_message(
             }
         }
         Some(agent_message::Payload::CertificateSigningRequest(request)) => {
-            if last_request.is_some_and(|at| at.elapsed() < CERTIFICATE_REQUEST_COOLDOWN) {
+            if last_request.is_some_and(|at| at.elapsed() < certificate_request_cooldown(state)) {
                 reject_certificate(tx, CertificateRejectReason::TooEarly);
                 return;
             }
-            *last_request = Some(tokio::time::Instant::now());
             let now = state.auth().clock.now();
             let payload = match crate::rotation::issue(
                 state,
@@ -938,6 +943,7 @@ async fn handle_message(
             .await
             {
                 Ok((issued, next)) => {
+                    *last_request = Some(tokio::time::Instant::now());
                     identity.issued = Some(next);
                     control_message::Payload::CertificateIssued(issued)
                 }
