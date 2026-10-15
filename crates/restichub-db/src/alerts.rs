@@ -222,10 +222,24 @@ pub struct AlertParams {
     /// The threshold of the rule at the time of the alert, in minutes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_minutes: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_job_kind"
+    )]
     pub job_kind: Option<JobKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+}
+
+/// A stored row outlives the code that wrote it, so a kind that this version does not know reads
+/// as [`JobKind::Other`] and never stops the evaluation of a tenant.
+fn lenient_job_kind<'de, D>(deserializer: D) -> Result<Option<JobKind>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.map(|value| serde_json::from_value(value).unwrap_or(JobKind::Other)))
 }
 
 /// Row of `alert_state`. The display names are copies.
@@ -512,7 +526,7 @@ pub async fn enqueue(
 pub struct ClaimedDelivery {
     pub id: DeliveryId,
     pub event: DeliveryEvent,
-    /// The number of the attempt, counted from one, including this one.
+    /// The sends that happened before this claim. [`extend_lease`] counts the next one.
     pub attempt: i32,
     pub alert: Alert,
     pub channel: Channel,
@@ -527,30 +541,42 @@ struct ClaimRow {
     attempts: i32,
 }
 
-/// Claims the due deliveries of the tenant and moves their next attempt to `lease_until`.
+/// Claims the due deliveries of the tenant and moves their next attempt to `lease_until`. A due
+/// delivery with `max_attempts` sends behind it ends as failed instead.
 ///
 /// The claim is a lease: a sender that crashes before it reports the result leaves the row due
-/// again at `lease_until`, so a delivery is at-least-once (ADR-0036). The number of the attempt
-/// is the token of the claim: a later claim raises it, and every write of the earlier holder
-/// then changes nothing.
+/// again at `lease_until`, so a delivery is at-least-once (ADR-0036). The claim does not count an
+/// attempt; [`extend_lease`] does when the send starts, and the count is the token of the send.
 pub async fn claim_due(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
     lease_until: OffsetDateTime,
     limit: i64,
+    max_attempts: i32,
 ) -> Result<Vec<ClaimedDelivery>, DbError> {
+    sqlx::query(
+        "UPDATE alert_deliveries SET status = 'failed', \
+             last_error = COALESCE(last_error, 'attempts_exhausted') \
+         WHERE status = 'pending' AND next_attempt_at <= $1 AND attempts >= $2",
+    )
+    .bind(now)
+    .bind(max_attempts)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     let rows = sqlx::query_as::<_, ClaimRow>(
         "WITH due AS ( \
              SELECT id FROM alert_deliveries \
-             WHERE status = 'pending' AND next_attempt_at <= $1 \
+             WHERE status = 'pending' AND next_attempt_at <= $1 AND attempts < $4 \
              ORDER BY next_attempt_at, id LIMIT $3 FOR UPDATE SKIP LOCKED) \
-         UPDATE alert_deliveries d SET attempts = d.attempts + 1, next_attempt_at = $2 \
+         UPDATE alert_deliveries d SET next_attempt_at = $2 \
          FROM due WHERE d.id = due.id \
          RETURNING d.id, d.alert_id, d.channel_id, d.event, d.attempts",
     )
     .bind(now)
     .bind(lease_until)
     .bind(limit)
+    .bind(max_attempts)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -571,21 +597,43 @@ pub async fn claim_due(
     Ok(claimed)
 }
 
-/// Moves the lease of a claim to `lease_until`. `false` means the claim is no longer the current
-/// one, so the caller must not send.
+/// Starts the send of a claim: counts the attempt and moves the lease to `lease_until`. `None`
+/// means the claim is no longer the current one, so the caller must not send. `Some` is the number
+/// of the attempt, counted from one, and the token of every later write of the send.
 pub async fn extend_lease(
     tx: &mut TenantTx<'_>,
     id: DeliveryId,
-    attempt: i32,
+    claimed_attempt: i32,
     lease_until: OffsetDateTime,
+) -> Result<Option<i32>, DbError> {
+    let row: Option<(i32,)> = sqlx::query_as(
+        "UPDATE alert_deliveries SET attempts = attempts + 1, next_attempt_at = $3 \
+         WHERE id = $1 AND attempts = $2 AND status = 'pending' \
+         RETURNING attempts",
+    )
+    .bind(id)
+    .bind(claimed_attempt)
+    .bind(lease_until)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(|(attempt,)| attempt))
+}
+
+/// Gives a claim back unsent: the delivery is due again at `now` and keeps its attempts.
+pub async fn release(
+    tx: &mut TenantTx<'_>,
+    id: DeliveryId,
+    claimed_attempt: i32,
+    now: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE alert_deliveries SET next_attempt_at = $3 \
          WHERE id = $1 AND attempts = $2 AND status = 'pending'",
     )
     .bind(id)
-    .bind(attempt)
-    .bind(lease_until)
+    .bind(claimed_attempt)
+    .bind(now)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

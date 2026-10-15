@@ -98,7 +98,15 @@ pub async fn run_once_with(
             (db.clone(), sender.clone(), provider.clone(), clock.clone());
         tasks.spawn(async move {
             let _permit = permit;
-            let work = handle_tenant(&db, &sender, provider.as_ref(), clock.as_ref(), &tenant);
+            let deadline = tokio::time::Instant::now() + tenant_budget;
+            let work = handle_tenant(
+                &db,
+                &sender,
+                provider.as_ref(),
+                clock.as_ref(),
+                &tenant,
+                deadline,
+            );
             if tokio::time::timeout(tenant_budget, work).await.is_err() {
                 tracing::warn!(tenant = %tenant.id, "the alert work of a tenant ran out of time");
             }
@@ -118,12 +126,21 @@ async fn handle_tenant(
     provider: &dyn KekProvider,
     clock: &dyn Clock,
     tenant: &restichub_db::tenants::Tenant,
+    deadline: tokio::time::Instant,
 ) {
     if let Err(error) = evaluate::evaluate_tenant(db, tenant.id, clock.now()).await {
         tracing::warn!(tenant = %tenant.id, %error, "the alert evaluation of a tenant failed");
     }
-    if let Err(error) =
-        deliver::deliver_tenant(db, sender, provider, clock, tenant.id, &tenant.name).await
+    if let Err(error) = deliver::deliver_tenant(
+        db,
+        sender,
+        provider,
+        clock,
+        tenant.id,
+        &tenant.name,
+        deadline,
+    )
+    .await
     {
         tracing::warn!(tenant = %tenant.id, %error, "the alert delivery of a tenant failed");
     }
