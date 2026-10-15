@@ -477,12 +477,25 @@ pub async fn list_planned_described(
     .map_err(DbError::Query)
 }
 
-/// Stores the last progress of a job. The write replaces the previous progress.
+/// Stores the last progress of a job. The write replaces an older progress and keeps a newer one.
+///
+/// The share lock on the job row orders the write against the result of the job: a job that has
+/// left `sent` and `running` takes no progress. `false` when nothing was stored.
 pub async fn upsert_progress(
     tx: &mut TenantTx<'_>,
     job: JobId,
     progress: &JobProgress,
-) -> Result<(), DbError> {
+) -> Result<bool, DbError> {
+    let running = sqlx::query_scalar::<_, i32>(
+        "SELECT 1 FROM jobs WHERE id = $1 AND status IN ('sent', 'running') FOR SHARE",
+    )
+    .bind(job)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    if running.is_none() {
+        return Ok(false);
+    }
     sqlx::query(
         "INSERT INTO job_progress \
          (tenant_id, job_id, step_id, bytes_done, total_bytes, files_done, total_files, \
@@ -494,7 +507,8 @@ pub async fn upsert_progress(
            total_files = EXCLUDED.total_files, percent_done = EXCLUDED.percent_done, \
            seconds_elapsed = EXCLUDED.seconds_elapsed, \
            seconds_remaining = EXCLUDED.seconds_remaining, \
-           current_files = EXCLUDED.current_files, updated_at = EXCLUDED.updated_at",
+           current_files = EXCLUDED.current_files, updated_at = EXCLUDED.updated_at \
+          WHERE job_progress.updated_at <= EXCLUDED.updated_at",
     )
     .bind(tx.tenant())
     .bind(job)
@@ -511,7 +525,7 @@ pub async fn upsert_progress(
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    Ok(())
+    Ok(true)
 }
 
 #[derive(sqlx::FromRow)]

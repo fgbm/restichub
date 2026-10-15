@@ -16,12 +16,16 @@ A server script runs as root on Linux and as LocalSystem on Windows. Turn on the
 On a host with the trust mode, a person who controls the control plane can run any code on that host. The same is true for a person who controls the account of an Admin. The control plane has these protections:
 
 - The trust mode is local. Only root or an Administrator can turn it on. A job cannot change it.
-- The control plane signs each job. The signature covers the text of every script.
-- Only an Admin can change a script or a template. An Operator and a Viewer can read them.
+- The control plane signs each job. The signature covers the text of every script. It protects the job on the network. It does not stop a person who controls the control plane or its database, because the control plane signs the job from its own data.
+- Only an Admin can change a script or a template. An Operator can read them. A Viewer cannot read a script text. For each script of a profile, the API returns an empty text and empty values of string variables. It refuses the template lists. People often type a credential into a script, so a Viewer must not see it.
 - The audit log records each change of a script and each job that carries scripts. Each record holds the SHA-256 hash of the script text.
 - A secret reaches a script only in an environment variable. It never appears in the text, in an argument or in the log.
 
 ## Turn the trust mode on
+
+:::danger
+When you turn the trust mode on, the control plane can run any command on this host, as root or LocalSystem. A compromised control plane, or a compromised account of an Admin, then controls the host. Today no setting limits the commands to approved scripts. A mode that runs only scripts with an approved SHA-256 hash is planned after the MVP ([issue 136](https://github.com/fgbm/restichub/issues/136)).
+:::
 
 1. Log in to the host as root or as an Administrator.
 2. Run the command:
@@ -157,7 +161,7 @@ No record holds the text of a script or the value of a parameter.
 
 | Action | Admin | Operator | Viewer |
 |---|---|---|---|
-| Read scripts and templates | yes | yes | yes |
+| Read scripts and templates | yes | yes | no |
 | Change the scripts of a profile | yes | no | no |
 | Change a template | yes | no | no |
 | Run a plan | yes | yes | no |

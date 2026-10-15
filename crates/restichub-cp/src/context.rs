@@ -278,7 +278,9 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::AlertsWrite => Role::Admin,
         Operation::ChannelsRead => Role::Admin,
         Operation::ChannelsWrite => Role::Admin,
-        Operation::ScriptsRead => Role::Viewer,
+        // A script body often holds a credential that an operator typed into it. An Operator
+        // reads the bodies because it edits the profiles that carry them (FR-HK-12).
+        Operation::ScriptsRead => Role::Operator,
         // Only an Admin changes code that runs on a host (ADR-0037, threat T33).
         Operation::ScriptsWrite => Role::Admin,
         Operation::DashboardRead => Role::Viewer,

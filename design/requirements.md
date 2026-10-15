@@ -108,7 +108,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-PR-01 | Steps are typed: one Protocol Buffers message for each step type in a `oneof`. The protocol has no free-form maps or raw restic argument strings. | M |
 | FR-PR-02 | Step types in the MVP: `backup`, `check`, `snapshots`, `ls`, `restore`, `unlock` (stale locks only), `unlock_all` (repository ID only, only from an Admin action with confirmation, FR-SC-06), `forget`, `prune`, `stats`, `script`. In 1.0: `find`, `dump`, `copy`, `init`, `key_add`, `key_remove`. | M, 1.0 |
 | FR-PR-03 | The CP signs each job with the job signing key (Ed25519). The signature covers `job_id`, `agent_id`, `tenant_id`, `issued_at` and `expires_at`. The signature input has the domain prefix `restichub-job-v1\0` before the serialized `Job` bytes. The agent rejects a job with a bad signature, a different addressee or a lifetime longer than 24 h. The agent also rejects a job with an `issued_at` more than 5 minutes in the future or an expired time. The agent keeps a job journal and returns the stored result of a known `job_id` (ADR-0020). | M |
-| FR-PR-04 | The job signing key is separate from the TLS key and from the database. It is in a file in the MVP and in an HSM or KMS later. | M (file), L (KMS) |
+| FR-PR-04 | The job signing key is separate from the TLS key. In the MVP the CP keeps it in the database, wrapped by the KEK (ADR-0026). A separate signing service, an HSM or a KMS is a later option. | M (database), L (KMS) |
 | FR-PR-05 | Secrets go with the job, protected by mTLS. The agent gets only the secrets of the repositories in that job. | M |
 | FR-PR-06 | The agent acknowledges each job. The CP holds a lease. If the lease expires before the acknowledgement, the CP delivers the job again. | M |
 | FR-PR-07 | The agent keeps an outbox of results and sends them after it reconnects. | M |
@@ -128,7 +128,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-HK-09 | A typed script step has an interpreter, a name, a phase, an order and a timeout. It also has a body of 64 KiB at most, a failure policy and typed environment parameters. A parameter value is a plain string or a secret reference. The agent gives the values to the script as environment variables only. The job signature covers the body. | M |
 | FR-HK-10 | The CP and the agent refuse a script step for a host without the trust mode. The job has a typed reason. | M |
 | FR-HK-11 | Each script is a job step with its own status, start time, duration, exit code and log. The job detail shows the steps in order. | M |
-| FR-HK-12 | An Admin edits scripts, script templates and job templates. Each change and each run is in the audit log with the SHA-256 hash of the script. The CP ships read-only built-in templates. | M |
+| FR-HK-12 | An Admin edits scripts, script templates and job templates. Each change and each run is in the audit log with the SHA-256 hash of the script. The CP ships read-only built-in templates. A Viewer reads a profile without the script bodies and without the values of string variables, and the templates return 403. | M |
 
 ### 3.5. Repositories and secrets
 
@@ -256,8 +256,8 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 |---|---|
 | NFR-SEC-01 | mTLS (TLS 1.3, rustls) between the agent and the CP. HTTPS for the UI and the API. |
 | NFR-SEC-02 | The threat model is in the repository. The maintainers review it before each release. |
-| NFR-SEC-03 | A compromised CP cannot execute arbitrary code on agents, because of the local trust mode and the separate job signing key. |
-| NFR-SEC-04 | A compromised CP database without the KEK does not disclose secrets. Without the job signing key it does not let an attacker forge jobs. |
+| NFR-SEC-03 | On a host without the local trust mode, a compromised CP cannot execute an arbitrary command. It can send only typed steps. A restore below a root that covers system or user files, for example `/` or `/home`, can still lead to code execution (T2, ADR-0035). On a host with the trust mode on, the CP can run any command with the rights of the agent service (ADR-0037, ADR-0040). A pinned-hash mode for scripts is planned after the MVP (issue #136). |
+| NFR-SEC-04 | A compromised CP database without the KEK does not disclose secrets. Job signing protects against a network attacker, a replayed or altered job, and a CP without the key. It does not protect against an attacker who can write to the database or who holds the KEK (T3). |
 | NFR-SEC-05 | The agent does not write secrets to logs, files or process arguments. The agent masks secrets in restic and script logs. |
 | NFR-SEC-06 | Releases are signed (cosign or minisign, Authenticode for Windows, notarization for macOS). Builds are reproducible. Each release has an SBOM. |
 | NFR-SEC-07 | CI checks dependencies with `cargo deny` and `npm audit`. |

@@ -44,6 +44,7 @@ pub mod pki;
 pub mod plans;
 pub mod platform_users;
 pub mod profiles;
+pub mod progress_throttle;
 pub mod queue;
 pub mod rate_limit;
 pub mod reenroll_limits;

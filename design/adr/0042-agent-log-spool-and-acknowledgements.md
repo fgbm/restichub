@@ -17,7 +17,6 @@ The agent dropped a log chunk that found no room in the stream buffer within a m
 - A spool has the cap `RESTICHUB_LOG_SPOOL_MAX_BYTES` for all jobs together (64 MiB by default). The job log limit of 1 MiB still applies to each job. When the cap is reached, the agent drops the new chunk, counts its lines, and later writes one marker line that gives the number. The marker is the last line of the job log when the cap holds until the end.
 - A running job only writes its chunks to the spool. One drain task for each connection sends the chunks in order, with bounded waits. It leaves a quarter of the stream buffer free for the other messages of the agent. A slow CP cannot delay a cancel (FR-AG-10). From the attach of a stream until the CP greeting, the chunks wait in the spool as unacknowledged, so their order holds. The job result follows the last log chunk of the job after a bounded wait for the drain task.
 - The agent splits a text into chunks of at most 64 KiB, the bound of the CP. The marker line for dropped lines does not name a cause that the agent cannot know.
-- The agent splits a text into chunks of at most 64 KiB, the bound of the CP. The marker line for dropped lines does not name a cause that the agent cannot know.
 
 ### Compatibility
 

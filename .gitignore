@@ -19,6 +19,9 @@ styles/.vale-config/
 # The workstation values for the stage deploy
 deploy/stage/stage.local.env
 
+# The key encryption key files of the deployments
+deploy/*/secrets/
+
 # Editors and OS
 .idea/
 .vscode/

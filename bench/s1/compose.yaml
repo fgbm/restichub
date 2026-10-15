@@ -1,0 +1,135 @@
+# Bench S1: the control plane, PostgreSQL 16, one repository and Linux agent hosts with real restic.
+# Development and test use only: the passwords come from `bench.env`, written by `bench.sh init`.
+#
+# The build context of the images is the repository root.
+
+name: ${COMPOSE_PROJECT_NAME:-restichub-bench-s1}
+
+x-agent: &agent
+  depends_on:
+    cp:
+      condition: service_started
+  environment:
+    CP_URL: https://cp:8443
+  volumes:
+    - ${STATE_DIR:-./state}/tokens:/tokens
+  restart: unless-stopped
+  mem_limit: ${AGENT_MEM_LIMIT:-128m}
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      # TCP only: the init phase of the image listens on the socket, and a socket check passes too early.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  db-bootstrap:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE: ${POSTGRES_DB}
+      OWNER_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+      RUNTIME_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+    volumes:
+      - ../../crates/restichub-db/sql/bootstrap-roles.sql:/bootstrap-roles.sql:ro
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=1 -d postgres \
+          -v app_role=restichub_app -v auth_role=restichub_auth \
+          -v owner_role=restichub_owner -v runtime_role=restichub_runtime \
+          -f /bootstrap-roles.sql
+        psql -v ON_ERROR_STOP=1 -d postgres <<'SQL'
+        \getenv owner_password OWNER_PASSWORD
+        \getenv runtime_password RUNTIME_PASSWORD
+        \getenv database DATABASE
+        ALTER ROLE restichub_owner PASSWORD :'owner_password';
+        ALTER ROLE restichub_runtime PASSWORD :'runtime_password';
+        ALTER DATABASE :"database" OWNER TO restichub_owner;
+        SQL
+
+  migrate:
+    image: ${RESTICHUB_CP_IMAGE:-restichub-cp}
+    build:
+      context: ../..
+      network: ${BUILD_NETWORK:-default}
+      dockerfile: Dockerfile
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_DATABASE_MIGRATION_URL: postgres://restichub_owner@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_MIGRATION_PASSWORD: ${RESTICHUB_OWNER_PASSWORD}
+    command: ['migrate']
+
+  cp:
+    image: ${RESTICHUB_CP_IMAGE:-restichub-cp}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      RESTICHUB_LISTEN_ADDR: 0.0.0.0:8080
+      RESTICHUB_DATABASE_URL: postgres://restichub_runtime@postgres:5432/${POSTGRES_DB}
+      RESTICHUB_DATABASE_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
+      RESTICHUB_SERVER_INSECURE_COOKIES: 'true'
+      RESTICHUB_KEK: ${RESTICHUB_KEK}
+      RESTICHUB_TENANCY_MODE: single
+      RESTICHUB_AGENT_LISTEN: 0.0.0.0:8443
+      RESTICHUB_AGENT_ENDPOINT: https://cp:8443
+      RESTICHUB_AGENT_MAX_CONNECTIONS: '100'
+      NO_COLOR: '1'
+    ports:
+      - '127.0.0.1:${CP_WEB_PORT:-18080}:8080'
+      - '127.0.0.1:${CP_AGENT_PORT:-18443}:8443'
+    mem_limit: 512m
+
+  # The repository of the bench: a rest-server without authentication on the bench network.
+  rest-server:
+    image: restic/rest-server:0.14.0
+    environment:
+      OPTIONS: --no-auth
+    volumes:
+      - repo-data:/data
+
+  agent-a:
+    <<: *agent
+    image: restichub-bench-agent:${RESTIC_A:-0.18.1}
+    build:
+      context: ../..
+      network: ${BUILD_NETWORK:-default}
+      dockerfile: bench/s1/Dockerfile.agent
+      args:
+        RESTIC_VERSION: ${RESTIC_A:-0.18.1}
+    deploy:
+      replicas: ${AGENTS_A:-10}
+
+  agent-b:
+    <<: *agent
+    image: restichub-bench-agent:${RESTIC_B:-0.19.1}
+    build:
+      context: ../..
+      network: ${BUILD_NETWORK:-default}
+      dockerfile: bench/s1/Dockerfile.agent
+      args:
+        RESTIC_VERSION: ${RESTIC_B:-0.19.1}
+    deploy:
+      replicas: ${AGENTS_B:-10}
+
+volumes:
+  pgdata:
+  repo-data:

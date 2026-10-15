@@ -107,8 +107,10 @@ services:
       RESTICHUB_LISTEN_ADDR: 0.0.0.0:8080
       RESTICHUB_DATABASE_URL: postgres://restichub_runtime@postgres:5432/${POSTGRES_DB}
       RESTICHUB_DATABASE_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
-      # The key encryption key. The control plane verifies it against the stored check at start.
-      RESTICHUB_KEK: ${RESTICHUB_KEK}
+      # The key encryption key comes from a Docker secret, not from the environment: `docker inspect`
+      # and `/proc/<pid>/environ` show an environment value. The control plane verifies the key
+      # against the stored check at start.
+      RESTICHUB_KEK_FILE: /run/secrets/restichub_kek
       # The tenancy mode: `single` or `multi`. See ADR-0024.
       RESTICHUB_TENANCY_MODE: ${RESTICHUB_TENANCY_MODE:-single}
       # The control plane reads the client address from `X-Forwarded-For` only
@@ -138,6 +140,8 @@ services:
     # the client certificate has to reach the control plane (ADR-0026).
     ports:
       - '${RESTICHUB_AGENT_PORT:-8443}:8443'
+    secrets:
+      - restichub_kek
     healthcheck:
       # The runtime image holds no HTTP client. Bash opens a socket and reads the
       # status line of `/healthz`.
@@ -194,6 +198,12 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/24
+
+# The file belongs to the control plane user (uid 10001) and has mode 0400. The control plane
+# refuses a file that others can read. `init-env.sh` creates the file.
+secrets:
+  restichub_kek:
+    file: ./secrets/restichub_kek
 
 volumes:
   pgdata:

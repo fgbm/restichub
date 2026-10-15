@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+
+# A Linux agent host of bench S1: the agent built from the source tree and one pinned restic release.
+# The build context is the repository root. The restic archive, the signed checksums and the
+# signature go to the register command, so the host never downloads restic at start.
+
+FROM rust:1.96-bookworm@sha256:a339861ae23e9abb272cea45dfafde21760d2ce6577a70f8a926153677902663 AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+COPY proto ./proto
+COPY packaging ./packaging
+ARG CARGO_BUILD_JOBS=4
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --locked -p restichub-agent \
+    && cp target/release/restichub-agent /restichub-agent
+
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+ARG RESTIC_VERSION
+COPY --from=build /restichub-agent /usr/local/bin/restichub-agent
+# `bench.sh build` downloads the release files into this directory.
+COPY bench/s1/out/restic/${RESTIC_VERSION} /opt/restic-release
+ENV RESTIC_VERSION=${RESTIC_VERSION}
+COPY bench/s1/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]

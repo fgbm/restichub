@@ -46,7 +46,6 @@ The stack reads one file, `.env`, next to `compose.yaml`. The script `bootstrap.
 | `POSTGRES_DB` | The name of the installation database |
 | `RESTICHUB_OWNER_PASSWORD` | The password of the owner login. The migrations use it |
 | `RESTICHUB_RUNTIME_PASSWORD` | The password of the runtime login. The control plane uses it |
-| `RESTICHUB_KEK` | The key encryption key. It opens the repository passwords and the installation CA |
 | `RESTICHUB_DOMAIN` | The host name of the control plane |
 | `RESTICHUB_ACME_EMAIL` | The email address for the certificate |
 | `RESTICHUB_IMAGE_TAG` | The image tag. `edge` follows the newest commit, `sha-<short>` pins one commit |
@@ -54,6 +53,12 @@ The stack reads one file, `.env`, next to `compose.yaml`. The script `bootstrap.
 | `RESTICHUB_TRUSTED_PROXIES` | The network of the reverse proxy in CIDR form |
 | `RESTICHUB_AGENT_ENDPOINT` | The public address of the agent listener that an agent reports |
 | `RESTICHUB_AGENT_PORT` | The published port of the agent listener. The default is 8443 |
+
+The key encryption key is not in `.env`. `bootstrap.sh` writes it to the file `secrets/restichub_kek` with the mode `400`, and Docker mounts the file as a secret. The control plane reads it through `RESTICHUB_KEK_FILE`. The key opens the repository passwords and the installation CA. The control plane user (uid 10001) must own the file. The control plane refuses a file that others can read. Run `bootstrap.sh` as root, or run `sudo chown 10001:10001 secrets/restichub_kek` after it.
+
+:::caution
+Do not pass the key in the environment variable `RESTICHUB_KEK`. `docker inspect` and the process environment show the value. The variable works for compatibility, but it is not recommended.
+:::
 
 The page [Environment variables](/restichub/operations/environment-variables/) lists every other setting of the control plane.
 
@@ -113,7 +118,7 @@ The control plane keeps the repository passwords in the database, wrapped with t
    ```
 
 2. Copy the file to another host.
-3. Keep the key encryption key with the copy. The value is in `.env`.
+3. Keep the key encryption key with the copy. The key is in the file `secrets/restichub_kek`.
 
 :::danger
 Losing the database or the key encryption key loses the repository passwords and the installation CA. Restic cannot open a repository without its password. Keep the copies on another host.

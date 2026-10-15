@@ -24,4 +24,4 @@ This directory holds a neutral Compose stack for one host: PostgreSQL, the contr
 
 To run the `db-bootstrap` service by hand, add `-T`: `docker compose run -T --rm db-bootstrap`. The option turns off the terminal of the container. The service sets the passwords from the environment file, never from a prompt, and also works with a terminal.
 
-Back up the environment file, in particular `RESTICHUB_KEK`. A new key makes the stored secrets unreadable.
+Back up the environment file and the file `secrets/restichub_kek`. A new key makes the stored secrets unreadable. The script writes the key file with the mode `400`. The control plane user (uid 10001) must own it: run the script as root, or run `sudo chown 10001:10001 secrets/restichub_kek` after it. Docker mounts the file as a secret, so `docker inspect` does not show the key.

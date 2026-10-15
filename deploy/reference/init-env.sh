@@ -27,13 +27,29 @@ random() {
 	head -c 32 /dev/urandom | base64
 }
 
+# The key encryption key goes to a file that Docker mounts as a secret. The control plane user
+# (uid 10001) must read it, and the control plane refuses a file that others can read.
+kek_file="secrets/restichub_kek"
+if [ -e "$kek_file" ]; then
+	echo "$kek_file already exists; remove it to generate a new one" >&2
+	exit 1
+fi
+mkdir -p secrets
+chmod 700 secrets
+random > "$kek_file"
+chmod 400 "$kek_file"
+if [ "$(id -u)" -eq 0 ]; then
+	chown 10001:10001 "$kek_file"
+else
+	echo "run this command to give the control plane access: sudo chown 10001:10001 $kek_file" >&2
+fi
+
 cat > "$target" <<EOF
 POSTGRES_USER=restichub
 POSTGRES_PASSWORD=$(random)
 POSTGRES_DB=restichub
 RESTICHUB_OWNER_PASSWORD=$(random)
 RESTICHUB_RUNTIME_PASSWORD=$(random)
-RESTICHUB_KEK=$(random)
 RESTICHUB_DOMAIN=$domain
 RESTICHUB_ACME_EMAIL=$acme_email
 RESTICHUB_IMAGE=$image
