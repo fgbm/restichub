@@ -244,8 +244,6 @@ function makeAgents(): Agent[] {
 		control_plane_version: '0.4.2',
 		version_status: options.versionStatus ?? 'current',
 		revoked_at: options.status === 'revoked' ? iso(60) : null,
-		hook_allow_list: 'absent',
-		hooks: [],
 		// A Linux host that turned the trust mode on lists its interpreters (FR-HK-08).
 		server_scripts:
 			os === 'linux' && (options.status ?? 'active') === 'active' && id !== '4'
@@ -373,7 +371,6 @@ function makeProfiles(): Profile[] {
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 2880
 			},
-			hooks: [],
 			scripts: [],
 			retention,
 			check: { read_data_subset: '10%' },
@@ -398,7 +395,6 @@ function makeProfiles(): Profile[] {
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 2880
 			},
-			hooks: [],
 			scripts: [],
 			retention: null,
 			check: null,
@@ -421,7 +417,6 @@ function makeProfiles(): Profile[] {
 				limit_upload_kib: 0,
 				limit_download_kib: 0
 			},
-			hooks: [],
 			scripts: sampleScripts(),
 			retention: null,
 			check: null,
@@ -1628,7 +1623,6 @@ export class MockApiService {
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 2880
 			},
-			hooks: request.hooks ?? [],
 			scripts: request.scripts ?? [],
 			retention: request.retention ?? null,
 			check: request.check ?? null,
@@ -1661,7 +1655,6 @@ export class MockApiService {
 							request.options.max_duration_minutes ?? current.options?.max_duration_minutes
 					}
 				: current.options,
-			hooks: request.hooks ?? [],
 			scripts: request.scripts ?? [],
 			retention: request.retention ?? null,
 			check: request.check ?? null,
