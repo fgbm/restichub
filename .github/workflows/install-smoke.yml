@@ -69,10 +69,12 @@ jobs:
         run: |
           sudo install -d -m 0755 -o root -g root /opt/restichub-agent
           sudo install -m 0755 -o root -g root target/debug/restichub-agent /opt/restichub-agent/restichub-agent
-          # The runner image gives /opt a default ACL that grants the runner account write access.
-          # The agent refuses such a directory (T20), so the step removes the inherited ACL.
+          # The runner image makes /opt world-writable with a default ACL for the runner account.
+          # The agent refuses such a location (T20), so the step restores a normal root-owned /opt.
+          sudo chmod 0755 /opt
+          sudo setfacl -b /opt
           sudo setfacl -R -b /opt/restichub-agent
-          getfacl -p /opt/restichub-agent
+          ls -ld /opt /opt/restichub-agent
       - name: Register the agent and install the service
         run: |
           set -euo pipefail
