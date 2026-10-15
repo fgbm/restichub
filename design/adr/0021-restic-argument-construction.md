@@ -6,7 +6,7 @@
 
 ## Context
 
-Typed steps still carry strings that become restic arguments. A value that starts with `-` can become a restic option. For example, `--password-command=...` runs a program as LocalSystem or root. This bypasses the hook allow-list (ADR-0004).
+Typed steps still carry strings that become restic arguments. A value that starts with `-` can become a restic option. For example, `--password-command=...` runs a program as LocalSystem or root. This bypasses the rule that the CP cannot run a program on a host (ADR-0037).
 
 ## Decision
 
@@ -19,7 +19,6 @@ Typed steps still carry strings that become restic arguments. A value that start
   - `read_data_subset`: `^([0-9]+/[0-9]+|[0-9]+(\.[0-9]+)?%|[0-9]+[kKmMgGtT]?)$`
   - no NUL or line break characters in any string, except the SFTP private key
   - the SFTP private key allows line breaks and rejects a NUL only, because a PEM key has line breaks
-- A duplicate or unknown hook parameter name causes `INVALID_HOOK_PARAMETERS`.
 - A step without a known kind causes `UNSUPPORTED_STEP`.
 - The agent never sets a restic option or an environment variable that executes a program from job data. Examples: `--password-command`, `RESTIC_PASSWORD_COMMAND` and `-o sftp.command`.
 

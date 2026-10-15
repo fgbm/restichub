@@ -77,11 +77,11 @@ impl<'a> SecretReader<'a> {
         self.decrypt_row(tx, secret_id, row).await
     }
 
-    /// Reads the value of a secret that a profile hands to a hook and records the delivery
-    /// (FR-HK-03, ADR-0017).
+    /// Reads the value of a secret that a profile hands to a script and records the delivery
+    /// (FR-HK-09, ADR-0017).
     ///
     /// Only a secret of the purpose `hook_secret` passes: a profile cannot make the agent receive
-    /// a repository password through a hook.
+    /// a repository password through a script.
     pub async fn read_hook_secret_for_delivery(
         &self,
         tx: &mut TenantTx<'_>,

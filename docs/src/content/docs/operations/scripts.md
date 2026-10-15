@@ -5,7 +5,7 @@ description: How to run scripts before and after a backup, how a host administra
 
 A server script is a script that you write in the web interface. The control plane sends it with the job. The agent runs it on the host before or after the backup. Each script is a step of the job with its own status, duration and log.
 
-A host runs server scripts only when its administrator turns on the local trust mode. The mode is off by default. A host without the mode can still run [allow-list hooks](hooks/).
+A host runs server scripts only when its administrator turns on the local trust mode. The mode is off by default. A host without the mode runs no script, and the control plane refuses a plan that carries a script for it.
 
 ## Risk
 
@@ -31,11 +31,11 @@ On a host with the trust mode, a person who controls the control plane can run a
    ```
 
    On Windows, start an elevated PowerShell and run `restichub-agent.exe trust-server-scripts --enable`.
-3. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled** after the agent connects again. The agent sends the state each time it connects, so the column does not change until the next connection. To see the new state at once, restart the agent service.
+3. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled** after the agent connects again. The agent sends the state each time it connects, so the column does not change until the next connection. To see the new state at once, restart the agent service. A host that has not reported yet shows **Unknown**. The host list also shows the interpreters that the agent found.
 
 To turn the mode off, run the command with `--disable`. The agent reads the setting for each job, so the change applies to the next job.
 
-The command writes a small file next to the configuration directory of the agent.
+The command writes a small file next to the configuration directory of the agent. The file holds one line, `server_scripts = enabled` or `server_scripts = disabled`.
 
 | System | File |
 |---|---|
@@ -44,12 +44,12 @@ The command writes a small file next to the configuration directory of the agent
 
 The agent trusts the file only when root or Administrators own it and no other account can write it or the directory above it. If another account can write the file, the mode is off. The host list then shows **Disabled, the setting file is not trusted**. A job, the control plane and a self-update cannot change the file.
 
-The agent reports the mode and the interpreters that it found. The control plane keeps this report. It refuses a plan or a job that holds a script for a host without the mode. The agent refuses such a job too and answers with the reason `server_scripts_disabled`.
+The agent reports the mode and the interpreters that it found. The control plane keeps this report. The profile form warns "A host does not accept scripts" in two cases. A host of a plan has not turned on the mode, or it lacks the interpreter of a script. The control plane refuses a plan or a job that holds a script for a host without the mode. The agent refuses such a job too and answers with the reason `server_scripts_disabled`.
 
 ## Write a script
 
 1. Open **Profiles**. Select **Add profile**, or select **Edit** for a profile.
-2. Go to the section **Scripts**.
+2. Open the section **Scripts on the host** and switch it on.
 3. In the list **Before the backup** or **After the backup**, select **Blank script** or **From a script template**.
 4. Enter a name, select the interpreter and write the script.
 5. Select **Save**.
@@ -116,7 +116,7 @@ For each script, the agent does these steps:
 
 1. It checks the trust mode and the script again.
 2. It writes the script to a new file in a protected directory of its cache. Only the agent account can use the directory.
-3. It starts the interpreter with the fixed flags. The environment is the environment of the agent, without the variables that start with `RESTIC`, plus the parameters of the script. The search path (`PATH`) holds only directories that root or Administrators own and that no other account can write, with every directory above them. The agent drops each other directory and names it once for each job in the log of the first script. On Windows, `TEMP` and `TMP` point to the protected directory. The working directory is the protected directory.
+3. It starts the interpreter with the fixed flags. The environment is the environment of the agent, plus the parameters of the script. It has no variable that starts with `RESTIC`. The search path (`PATH`) holds only directories that root or Administrators own. No other account can write in them or in the directories above them. The agent drops each other directory and names it once for each job in the log of the first script. On Windows, `TEMP` and `TMP` point to the protected directory. The working directory is the protected directory.
 4. It reads the output. It masks secret values and keeps at most 256 KiB for each script.
 5. It deletes the file and the directory.
 
@@ -138,7 +138,7 @@ ReadWritePaths=/var/backups
 
 ## Job detail
 
-The job detail lists every script and hook in order before the job runs. Each step shows its status, start time, duration and exit code. Select a step to read its own log. The backup step has its own log too. The complete log of the job stays below the steps.
+The job detail lists every script in order before the job runs. Each step shows its status, start time, duration and exit code. Select the log of a step ("Show the log of ...") to read the output of that step only. The backup step has its own log too. The complete log of the job ("Complete log") stays below the steps.
 
 ## Audit
 
@@ -147,6 +147,7 @@ The job detail lists every script and hook in order before the job runs. Each st
 | `profile_create`, `profile_update` | A profile changes. The record holds the name, the phase and the hash of each script, and the names of the parameters. |
 | `script_template_create`, `script_template_update`, `script_template_delete` | A script template changes. |
 | `job_template_create`, `job_template_update`, `job_template_delete` | A job template changes. |
+| `profile_hooks_removed` | A migration drops the hooks of a profile. The record holds the profile name, and the identifier and the phase of each hook. |
 | `script_run` | The control plane sends a job with scripts. The record holds the name, the phase and the hash of each script. |
 | `secret_delivered` | The control plane sends a secret to an agent. |
 

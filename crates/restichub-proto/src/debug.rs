@@ -8,9 +8,8 @@
 use std::fmt;
 
 use crate::agent::v1::{
-    HookParameter, RepositoryAccess, RestCredentials, S3Credentials, ScriptEnv, ScriptStep,
-    SftpCredentials, SignedJob, hook_parameter::Typed, repository_access::BackendCredentials,
-    script_env,
+    RepositoryAccess, RestCredentials, S3Credentials, ScriptEnv, ScriptStep, SftpCredentials,
+    SignedJob, repository_access::BackendCredentials, script_env,
 };
 
 const MASK: &str = "***";
@@ -82,17 +81,6 @@ impl fmt::Debug for SftpCredentials {
     }
 }
 
-impl fmt::Debug for HookParameter {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("HookParameter")
-            .field("name", &self.name)
-            .field("value", &self.value)
-            .field("typed", &self.typed)
-            .finish()
-    }
-}
-
 impl fmt::Debug for ScriptEnv {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match &self.value {
@@ -132,21 +120,6 @@ impl fmt::Debug for script_env::Value {
     }
 }
 
-impl fmt::Debug for Typed {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::StringValue(value) => formatter.debug_tuple("StringValue").field(value).finish(),
-            Self::IntegerValue(value) => {
-                formatter.debug_tuple("IntegerValue").field(value).finish()
-            }
-            Self::BooleanValue(value) => {
-                formatter.debug_tuple("BooleanValue").field(value).finish()
-            }
-            Self::SecretValue(_) => formatter.debug_tuple("SecretValue").field(&MASK).finish(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,18 +128,6 @@ mod tests {
     use crate::agent::v1::{ControlMessage, Job, control_message, repository_access};
 
     const CANARY: &str = "CANARY-do-not-log";
-
-    #[test]
-    fn fr_hk_03_debug_output_masks_a_secret_hook_parameter() {
-        let parameter = HookParameter {
-            name: "token".to_owned(),
-            typed: Some(Typed::SecretValue(CANARY.to_owned())),
-            ..HookParameter::default()
-        };
-        let text = format!("{parameter:?}");
-        assert!(!text.contains(CANARY));
-        assert!(text.contains(MASK));
-    }
 
     #[test]
     fn fr_hk_09_debug_output_masks_a_secret_script_variable_and_hides_the_body() {

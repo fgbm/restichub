@@ -18,7 +18,6 @@ const SECRET_MESSAGES: &[&str] = &[
     ".restichub.agent.v1.S3Credentials",
     ".restichub.agent.v1.RestCredentials",
     ".restichub.agent.v1.SftpCredentials",
-    ".restichub.agent.v1.HookParameter",
     ".restichub.agent.v1.ScriptStep",
     ".restichub.agent.v1.ScriptEnv",
 ];

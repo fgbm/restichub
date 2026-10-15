@@ -8,20 +8,16 @@ pub enum AgentCapability {
     /// The agent reads `Job.stall_timeout_seconds` and runs a job without a time limit when
     /// `Job.timeout_seconds` is zero. An older agent applies a fixed limit (ADR-0039).
     JobLimitsV1,
-    /// The agent runs the `hook` step from its allow-list and reads the typed hook parameters
-    /// (FR-HK-03). An older agent rejects the step.
-    HooksV1,
     /// The agent runs the `script` step on a host with the local trust mode (FR-HK-09, ADR-0037).
     ScriptsV1,
 }
 
 impl AgentCapability {
     /// Every capability that this build supports.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 4] = [
         Self::ForgetAllTags,
         Self::RestoreV1,
         Self::JobLimitsV1,
-        Self::HooksV1,
         Self::ScriptsV1,
     ];
 
@@ -32,7 +28,6 @@ impl AgentCapability {
             Self::ForgetAllTags => "forget-all-tags",
             Self::RestoreV1 => "restore-v1",
             Self::JobLimitsV1 => "job-limits-v1",
-            Self::HooksV1 => "hooks-v1",
             Self::ScriptsV1 => "scripts-v1",
         }
     }
@@ -79,7 +74,6 @@ mod tests {
         names.push("forget-all-tags".to_owned());
         names.push("restore-v1".to_owned());
         names.push("job-limits-v1".to_owned());
-        names.push("hooks-v1".to_owned());
         names.push("scripts-v1".to_owned());
         assert_eq!(
             AgentCapability::parse_list(&names),
@@ -87,7 +81,6 @@ mod tests {
                 AgentCapability::ForgetAllTags,
                 AgentCapability::RestoreV1,
                 AgentCapability::JobLimitsV1,
-                AgentCapability::HooksV1,
                 AgentCapability::ScriptsV1
             ]
         );

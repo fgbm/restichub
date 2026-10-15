@@ -59,7 +59,7 @@ pub(super) enum StepError {
     MaxDuration,
     /// restic made no progress for the stall timeout (ADR-0039).
     Stalled,
-    /// A hook ran longer than its own timeout (FR-HK-02).
+    /// A script ran longer than its own timeout (FR-HK-09).
     TimedOut,
     NotStarted,
 }
