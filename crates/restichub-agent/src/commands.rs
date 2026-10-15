@@ -147,17 +147,21 @@ fn place_program() -> Result<()> {
         );
     }
     if outcome.moved_restic {
+        verify_moved_restic(&Layout::host())?;
         println!(
             "restic is moved into {}",
             crate::paths::restic_dir().display()
         );
-        // The record keeps the hash, so the moved binary must still match it (T20).
-        let layout = Layout::host();
-        if layout.has_record() {
-            layout
-                .verify_installed()
-                .context("restic differs from its record after the move")?;
-        }
+    }
+    Ok(())
+}
+
+/// The record keeps the hash, so the moved binary must still match it (T20).
+fn verify_moved_restic(layout: &Layout) -> Result<()> {
+    if layout.has_record() {
+        layout
+            .verify_installed()
+            .context("restic differs from its record after the move")?;
     }
     Ok(())
 }
@@ -394,7 +398,7 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     // An update can replace the agent without a new `register`, so a restic in the Windows
     // location of an earlier version moves first (ADR-0038).
     #[cfg(windows)]
-    crate::self_install::migrate_restic(&crate::self_install::Placement::host())?;
+    crate::self_install::migrate_restic_at_start(&crate::self_install::Placement::host());
     // The service never downloads restic; an absent or changed binary stops the start (ADR-0038).
     let restic = ResticBinary::installed(&Layout::host())?;
     restic.verify()?;
@@ -498,6 +502,29 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
+
+    #[test]
+    fn fr_in_07_a_moved_restic_that_differs_from_its_record_fails() {
+        let base =
+            std::env::temp_dir().join(format!("restichub-agent-moved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let layout = Layout::new(base.join("bin"), base.join("config"));
+        std::fs::create_dir_all(layout.bin_dir()).expect("bin");
+        std::fs::create_dir_all(base.join("config")).expect("config");
+        std::fs::write(layout.binary_path(), b"restic").expect("restic");
+        let wrong = "a".repeat(64);
+        std::fs::write(
+            layout.record_path(),
+            format!(r#"{{"version":"0.19.1","sha256":"{wrong}"}}"#),
+        )
+        .expect("record");
+
+        let error = verify_moved_restic(&layout).expect_err("mismatch");
+
+        assert!(format!("{error:#}").contains("differs from its record after the move"));
+        assert!(layout.binary_path().exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn the_token_sources_are_mutually_exclusive() {

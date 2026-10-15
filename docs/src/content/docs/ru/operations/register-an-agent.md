@@ -200,7 +200,7 @@ last connected:      2026-10-15 09:30:12.0 +00:00:00
 | `the control plane does not accept the protocol version of this agent` | У агента и сервера управления разные версии протокола. | Обновите агент (см. [Версии агента и сервера управления](/restichub/ru/operations/agent-version-compatibility/)). |
 | Команда не принимает каталог или файл | Владелец объекта — другая учётная запись, или она может в него писать. | Верните владельца и доступ SYSTEM и «Администраторы» (Linux: `root`, права 0755). Повторите команду. |
 | `cannot stop the service` на Windows | Идёт выполнение задания. | Дождитесь задания или остановите службу вручную. Повторите команду. |
-| `the restic binary ... is missing` на Windows после обновления | Прежний агент держал restic в каталоге `bin`, и перенос не выполнился. | Выполните `restichub-agent install-service` от имени администратора. Команда переносит restic в `%ProgramFiles%\ResticHub\Agent\restic.exe`. |
+| `the restic binary ... is missing` на Windows после обновления | Прежний агент держал restic в каталоге `bin`, и служба не смогла его перенести. В журнале службы есть `cannot remove` или `cannot replace`. | Закройте программу, которая держит старый файл, или снимите с него атрибут «только чтение». Затем выполните `restichub-agent install-service` от имени администратора. Команда переносит restic в `%ProgramFiles%\ResticHub\Agent\restic.exe`. |
 | `restic differs from its record after the move` | Старый файл изменился до переноса. | Выполните `restichub-agent restic update` от имени администратора. |
 
 ## Ограничения юнита systemd
