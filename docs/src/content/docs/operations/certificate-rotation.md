@@ -10,7 +10,9 @@ Each agent has a client certificate for the mTLS stream to the control plane (AD
 - The default lifetime is 30 days. Set `RESTICHUB_AGENT_CERT_LIFETIME_SECS` (or `agent_cert_lifetime_secs` in the configuration file) to change it. The value is in seconds. The lowest value is 600 and the highest value is 7 776 000 (90 days).
 - The agent asks for a new certificate when two thirds of the lifetime have passed. With the default lifetime this is day 20.
 - The control plane accepts a request after half of the lifetime. The gap between the half and the two thirds absorbs a difference between the clocks of the two sides.
-- A stream gets a second signed rotation only after a quarter of the lifetime has passed, and at most 30 seconds.
+- The control plane signs at most one rotation for each agent in 10 minutes, or in a quarter of the lifetime when that is shorter. The registry holds the time of the last request, so a reconnect or another control plane instance does not reset the wait. A refused request starts the wait too. A certificate that the agent did not confirm blocks the next one in the same way.
+- An agent that finds its certificate past the due time at a connection waits a random time of up to 60 seconds before it asks. After a refusal it asks again after 11 minutes.
+- A new certificate starts 5 minutes before the time of issue, so an agent with a slow clock accepts it. The start never comes before the start of the issuing CA.
 
 ## What happens in a rotation
 
@@ -32,6 +34,10 @@ The agent writes the new files with the same owner-only rules as at enrollment. 
 ## What the Hosts screen shows
 
 The Hosts screen and the agents API show the certificate expiry and the time of the last rotation of each host. A host with an expiry in less than 3 days needs attention: its agent did not rotate.
+
+## A certificate that a rotation replaced
+
+After a rotation, the old certificate must not connect. If a connection presents it, the control plane refuses the connection. It writes the audit record `agent_superseded_certificate_used` at most once an hour, and the Hosts screen shows a warning for the host. This can mean a copy of the old private key (T17). Check the host. If the host is not safe, revoke the agent and register it again.
 
 ## When the agent did not rotate
 

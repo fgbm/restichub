@@ -19,8 +19,12 @@ In the multi tenant mode, a Platform Admin calls the API:
 
 ```sh
 curl -X POST https://<control-plane>/api/v1/platform/signing-keys/compromise \
-  -H "Authorization: Bearer <platform-admin-token>"
+  -H "Authorization: Bearer <platform-admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"expected_current_key_id": "<current-key-id>"}'
 ```
+
+The request names the key that you believe is current. If another call changed the current key first, the control plane answers HTTP 409 and changes nothing. A second call with the same key identifier therefore retires nothing.
 
 In every mode, run the command on a host that has the configuration file and the KEK of the control plane:
 
@@ -38,11 +42,15 @@ The command prints the identifier of each key that it retired for a compromise.
 4. The control plane writes the audit records `signing_key_compromise` and `signing_key_retire`.
 5. Each control plane instance sends a signed update to its open streams within 2 seconds. The signature comes from the new current key, which the agents already hold. The update names the retired keys as revoked. The agents refuse each job of the old key from then on.
 
-If the next key leaked too, run the command a second time.
+If the next key leaked too, run the command a second time with the new current key identifier.
+
+A job in the status `sent` can hold a signature of a retired key. The control plane signs it again with the current key before it sends the job again. The agent never gets the old signature.
 
 ## Agents that were offline
 
-An agent that was offline does not hold the new current key. The re-sync chain never carries a compromised key, so the agent cannot verify the update. The agent rejects each job with the reason "unknown key". Register such a host again with a new enrollment token. See [Register an agent](register-an-agent.md).
+An agent that was at most one rotation behind holds the new current key as its next key. When it connects, it gets the re-sync chain. The chain does not carry the compromised key, but it carries the step that the new current key signed. The agent verifies this step with the key that it already holds, learns the new next key and revokes the compromised key. It needs no new enrollment and it accepts the next job.
+
+An agent that is two or more rotations behind, for example after two compromises, does not hold the new current key. It cannot verify the chain and it does not run a job. Register such a host again with a new enrollment token. See [Register an agent](register-an-agent.md).
 
 ## Result
 
