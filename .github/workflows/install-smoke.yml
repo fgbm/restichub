@@ -217,6 +217,8 @@ jobs:
           New-Item -ItemType Directory -Force (Join-Path $dir 'bin') | Out-Null
           Move-Item $restic (Join-Path $dir 'bin\restic.exe')
           Start-Service restichub-agent
+          # The service reports Running before its start code runs.
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $restic); $i++) { Start-Sleep -Seconds 1 }
           if (-not (Test-Path $restic)) { throw 'restic not moved by the service' }
           if (Test-Path (Join-Path $dir 'bin')) { throw 'the bin directory exists' }
           bash scripts/install-smoke.sh connected $since 60
