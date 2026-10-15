@@ -53,6 +53,7 @@ use tokio::sync::mpsc;
 
 use crate::hooks::HookStore;
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
+use crate::restic_store::Layout;
 use crate::restore_roots::RestoreAccess;
 use crate::scripts::ScriptStore;
 
@@ -108,6 +109,9 @@ enum Known {
 pub struct Jobs {
     program: PathBuf,
     expected_sha256: String,
+    /// A job reads the hash from the protected file at every spawn, so a `restic update` takes
+    /// effect without a restart (FR-AG-11, threat T20).
+    record: Option<Arc<Layout>>,
     cache: PathBuf,
     journal: Arc<Mutex<FileJournal>>,
     running: Arc<Mutex<HashMap<String, CancelHandle>>>,
@@ -156,6 +160,7 @@ impl Jobs {
         Ok(Self {
             program,
             expected_sha256,
+            record: None,
             cache,
             journal: Arc::new(Mutex::new(journal)),
             running: Arc::new(Mutex::new(HashMap::new())),
@@ -221,6 +226,20 @@ impl Jobs {
                     Vec::new(),
                 )
             }
+        }
+    }
+
+    /// Reads the expected hash from the protected record before every spawn (ADR-0038).
+    #[must_use]
+    pub fn with_record(mut self, layout: Layout) -> Self {
+        self.record = Some(Arc::new(layout));
+        self
+    }
+
+    pub(crate) fn expected_sha256(&self) -> Result<String> {
+        match &self.record {
+            Some(layout) => Ok(layout.read_record()?.sha256),
+            None => Ok(self.expected_sha256.clone()),
         }
     }
 

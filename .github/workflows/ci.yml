@@ -20,7 +20,7 @@ env:
 
 jobs:
   # The agent tests that run the real restic need the pinned release. The job fetches it with the
-  # script of the agent packages, which verifies the signed checksums and the archive hash, so the
+  # test script in `packaging`, which verifies the signed checksums and the archive hash, so the
   # Windows runner needs no gpg.
   restic:
     name: Restic (${{ matrix.restic }})
@@ -42,6 +42,7 @@ jobs:
           path: |
             ${{ runner.temp }}/restic/restic
             ${{ runner.temp }}/restic/restic.exe
+          retention-days: 1
           if-no-files-found: error
 
   rust:

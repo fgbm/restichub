@@ -256,7 +256,7 @@ impl StepOutput {
 }
 
 impl Jobs {
-    /// Runs one step with the bundled restic and stops it in two stages (FR-AG-05, FR-AG-06,
+    /// Runs one step with the installed restic and stops it in two stages (FR-AG-05, FR-AG-06,
     /// FR-AG-09, FR-AG-10).
     ///
     /// `limit` is the timeout of the step, or `None` for no timeout.
@@ -282,16 +282,20 @@ impl Jobs {
         let step_id = step.step_id.as_str();
         let scrubber = Scrubber::for_command(&line);
         // The hash check and the start share one opening of the binary (FR-AG-11, threat T20).
-        let mut child = match crate::exec::spawn_job_restic(
-            &self.program,
-            &self.expected_sha256,
-            &line,
-            &self.cache,
-            priority_of(step),
-        ) {
+        let spawned = self.expected_sha256().and_then(|expected| {
+            crate::exec::spawn_job_restic(
+                &self.program,
+                &expected,
+                &line,
+                &self.cache,
+                priority_of(step),
+            )
+        });
+        let mut child = match spawned {
             Ok(child) => child,
             Err(error) => {
-                tracing::warn!(%error, "cannot start restic");
+                let detail = format!("{error:#}");
+                tracing::warn!(%detail, "cannot start restic");
                 log.push(step_id, LogStream::Agent, "restic did not start");
                 self.send_log(log).await;
                 return StepOutcome::not_started();

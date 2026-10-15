@@ -330,6 +330,7 @@ async fn ac_rs_04_include_and_exclude_select_the_files_of_the_table() {
 /// The pattern that matches one path only. The Restore screen builds the same pattern
 /// (`escapeGlob` in `ui/src/lib/restore.ts`): restic reads a backslash as a separator on Windows,
 /// so each special character stands in a one-character class.
+#[cfg(unix)]
 fn escape_glob(path: &str) -> String {
     let mut escaped = String::new();
     for character in path.chars() {

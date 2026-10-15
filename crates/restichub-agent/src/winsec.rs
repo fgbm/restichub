@@ -15,10 +15,11 @@
 
 use std::io::Write as _;
 use std::os::windows::ffi::OsStrExt as _;
+use std::os::windows::fs::MetadataExt as _;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HLOCAL, LocalFree};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
     ConvertStringSidToSidW, GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
@@ -26,15 +27,16 @@ use windows_sys::Win32::Security::Authorization::{
 };
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
-    DACL_SECURITY_INFORMATION, EqualSid, GENERIC_MAPPING, GetAce, GetAclInformation,
-    GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, INHERIT_ONLY_ACE, MapGenericMask,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES,
+    CheckTokenMembership, DACL_SECURITY_INFORMATION, EqualSid, GENERIC_MAPPING, GetAce,
+    GetAclInformation, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation,
+    INHERIT_ONLY_ACE, MapGenericMask, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, DELETE, FILE_ALL_ACCESS, FILE_APPEND_DATA, FILE_DELETE_CHILD,
-    FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_WRITE_ATTRIBUTES,
-    FILE_WRITE_DATA, FILE_WRITE_EA, WRITE_DAC, WRITE_OWNER,
+    CreateDirectoryW, DELETE, FILE_ALL_ACCESS, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+    FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::SystemServices::{
     ACCESS_ALLOWED_ACE_TYPE, ACCESS_ALLOWED_CALLBACK_ACE_TYPE,
@@ -45,6 +47,7 @@ use windows_sys::Win32::System::SystemServices::{
     SYSTEM_MANDATORY_LABEL_ACE_TYPE, SYSTEM_RESOURCE_ATTRIBUTE_ACE_TYPE,
     SYSTEM_SCOPED_POLICY_ID_ACE_TYPE,
 };
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 /// A protected DACL: full control for SYSTEM and Administrators only, inherited by the children,
 /// with Administrators as the owner.
@@ -100,19 +103,113 @@ impl Drop for OwnedSid {
     }
 }
 
-/// Makes `dir` and its parent with a protected DACL for SYSTEM and Administrators (FR-AG-04).
+/// Makes `dir` and every missing ancestor with a protected DACL for SYSTEM and Administrators
+/// (FR-AG-04).
+///
+/// An existing level at or below `root`, and `dir` itself, must be SYSTEM and Administrators only
+/// and is left as it is, so a repeated call does not walk the DACL over the children. A reparse
+/// point at such a level is refused. An existing ancestor above `root` is not read or changed.
 ///
 /// # Errors
 ///
-/// Returns an error when the directory or its parent cannot be created, when it already exists with
-/// another owner or with a write access for another account, or when the access control cannot be
-/// set.
-pub fn ensure_config_dir(dir: &Path) -> Result<()> {
-    if let Some(parent) = dir.parent().filter(|parent| !parent.as_os_str().is_empty()) {
-        create_protected_dir(parent)
-            .with_context(|| format!("cannot protect the parent directory {}", parent.display()))?;
+/// Returns an error when a level cannot be created, when an existing level is a reparse point, has
+/// another owner or a write access for another account, or when the access control cannot be set.
+pub fn create_protected_tree(dir: &Path, root: &Path) -> Result<()> {
+    protect_tree(dir, root, &mut |level| {
+        create_dir(level)?;
+        apply_descriptor(level, DIR_SDDL)
+    })
+}
+
+fn protect_tree(
+    dir: &Path,
+    root: &Path,
+    create: &mut dyn FnMut(&Path) -> Result<()>,
+) -> Result<()> {
+    let mut levels = Vec::new();
+    let mut level = Some(dir);
+    while let Some(current) = level {
+        if current != dir
+            && !current.starts_with(root)
+            && std::fs::symlink_metadata(current).is_ok()
+        {
+            break;
+        }
+        levels.push(current);
+        level = current
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty());
     }
-    create_protected_dir(dir)
+    // The top level comes first, so an unsafe existing level is refused before anything is created
+    // below it.
+    for level in levels.into_iter().rev() {
+        match std::fs::symlink_metadata(level) {
+            Ok(metadata) => {
+                // A junction or a symbolic link would make the DACL check read the target.
+                if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                    bail!(
+                        "{} is a reparse point; an administrator removes it and registers again",
+                        level.display()
+                    );
+                }
+                check_admin_only(level)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => create(level),
+            Err(error) => Err(error).with_context(|| format!("cannot read {}", level.display())),
+        }
+        .with_context(|| format!("cannot protect the directory {}", level.display()))?;
+    }
+    Ok(())
+}
+
+/// Tells whether the process token is elevated and a member of Administrators (FR-IN-07).
+pub fn is_elevated_administrator() -> Result<bool> {
+    let size = u32::try_from(std::mem::size_of::<TOKEN_ELEVATION>())
+        .context("the token elevation is too large")?;
+    let mut token: HANDLE = std::ptr::null_mut();
+    // SAFETY: the pseudo handle of the current process is always valid and the out parameter is a
+    // local.
+    let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+    if ok == 0 {
+        bail!(
+            "cannot open the process token: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut returned = 0;
+    // SAFETY: the token is open and the buffer is a local of the size that is passed.
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            std::ptr::addr_of_mut!(elevation).cast(),
+            size,
+            &mut returned,
+        )
+    };
+    let read_error = std::io::Error::last_os_error();
+    // SAFETY: the token was opened above and is closed once.
+    unsafe { CloseHandle(token) };
+    if ok == 0 {
+        bail!("cannot read the token elevation: {read_error}");
+    }
+    if elevation.TokenIsElevated == 0 {
+        return Ok(false);
+    }
+    let Some(administrators) = sid_from_string("S-1-5-32-544") else {
+        bail!("cannot build the Administrators identifier");
+    };
+    let mut member = 0;
+    // SAFETY: a null token means the token of the calling thread or process; the SID is valid.
+    let ok = unsafe { CheckTokenMembership(std::ptr::null_mut(), administrators.0, &mut member) };
+    if ok == 0 {
+        bail!(
+            "cannot check the Administrators membership: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(member != 0)
 }
 
 /// Makes `dir` with a protected DACL, or refuses an existing `dir` (FR-AG-04).
@@ -531,6 +628,95 @@ mod tests {
         grant(&dir, "(OI)(CI)(WO)").expect("cannot add the access control entry");
         assert!(check_admin_only(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_ag_04_a_tree_with_two_missing_levels_is_created_protected() {
+        let base = temp("tree-base");
+        std::fs::create_dir_all(&base).expect("cannot create the base");
+        let root = base.join("ResticHub");
+        let dir = root.join("Agent").join("cache");
+        create_protected_tree(&dir, &root).expect("cannot create the tree");
+        for level in [&root, &root.join("Agent"), &dir] {
+            check_admin_only(level)
+                .expect("a created level must be SYSTEM and Administrators only");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_tree_below_a_user_writable_level_is_refused() {
+        let base = temp("tree-writable");
+        std::fs::create_dir_all(&base).expect("cannot create the base");
+        let root = base.join("ResticHub");
+        create_protected_dir(&root).expect("cannot create the protected directory");
+        grant(&root, "(OI)(CI)(WD)").expect("cannot add the access control entry");
+        let dir = root.join("Agent").join("cache");
+        assert!(create_protected_tree(&dir, &root).is_err());
+        assert!(!root.join("Agent").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_an_existing_level_is_not_protected_again() {
+        let base = temp("tree-twice");
+        std::fs::create_dir_all(&base).expect("cannot create the base");
+        let root = base.join("ResticHub");
+        let dir = root.join("Agent").join("cache");
+        create_protected_tree(&dir, &root).expect("cannot create the tree");
+        let mut created = Vec::new();
+        protect_tree(&dir, &root, &mut |level| {
+            created.push(level.to_path_buf());
+            Ok(())
+        })
+        .expect("cannot check the existing tree");
+        assert!(created.is_empty(), "an existing level was created again");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_the_security_of_an_existing_child_stays_after_a_second_call() {
+        let base = temp("tree-child");
+        std::fs::create_dir_all(&base).expect("cannot create the base");
+        let root = base.join("ResticHub");
+        let dir = root.join("cache");
+        create_protected_tree(&dir, &root).expect("cannot create the tree");
+        let child = dir.join("data");
+        create_protected_file(&child, b"x").expect("cannot write the child");
+        let before = std::fs::metadata(&child)
+            .and_then(|metadata| metadata.modified())
+            .expect("cannot read the child");
+        create_protected_tree(&dir, &root).expect("cannot check the tree again");
+        let after = std::fs::metadata(&child)
+            .and_then(|metadata| metadata.modified())
+            .expect("cannot read the child");
+        assert_eq!(before, after);
+        check_admin_only(&child).expect("the child must stay SYSTEM and Administrators only");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_junction_level_is_refused() {
+        let base = temp("tree-junction");
+        let root = base.join("ResticHub");
+        let target = base.join("target");
+        std::fs::create_dir_all(&target).expect("cannot create the target");
+        create_protected_dir(&root).expect("cannot create the protected root");
+        let junction = root.join("Agent");
+        let status = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&junction)
+            .arg(&target)
+            .status()
+            .expect("cannot run mklink");
+        assert!(status.success(), "cannot create the junction");
+        let error = create_protected_tree(&junction.join("cache"), &root)
+            .expect_err("a junction level must be refused");
+        assert!(format!("{error:#}").contains("reparse point"), "{error:#}");
+        assert!(!target.join("cache").exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

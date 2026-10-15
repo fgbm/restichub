@@ -6,17 +6,15 @@ use anyhow::{Context, Result};
 
 /// Refuses an agent binary that an account other than root or Administrators can change (T20).
 ///
-/// The check covers the executable, the restic binary next to it, the directory that holds them and
-/// every parent directory up to the file system root.
+/// The check covers the executable, the directory that holds it and every parent directory up to
+/// the file system root. The restic binary and its directory lie in the protected tree of the agent
+/// (ADR-0038), so they need the file and the directory check only.
 ///
 /// # Errors
 ///
 /// Returns an error when a path is missing or writable by another account.
-pub fn check(exe: &Path) -> Result<()> {
-    let restic = exe.with_file_name(crate::restic::RESTIC_FILE_NAME);
-    for path in [exe, restic.as_path()] {
-        check_target(path)?;
-    }
+pub fn check(exe: &Path, restic: &Path) -> Result<()> {
+    check_target(exe)?;
     if let Some(dir) = exe.parent() {
         check_target(dir)?;
         let mut current = dir.parent();
@@ -24,6 +22,10 @@ pub fn check(exe: &Path) -> Result<()> {
             check_parent_dir(parent)?;
             current = parent.parent();
         }
+    }
+    check_target(restic)?;
+    if let Some(dir) = restic.parent() {
+        check_target(dir)?;
     }
     Ok(())
 }
@@ -62,12 +64,12 @@ fn check_unix(path: &Path) -> Result<()> {
 
 #[cfg(windows)]
 fn check_target(path: &Path) -> Result<()> {
-    crate::winsec::check_admin_only(path).with_context(|| install_hint())
+    crate::winsec::check_admin_only(path).with_context(install_hint)
 }
 
 #[cfg(windows)]
 fn check_parent_dir(path: &Path) -> Result<()> {
-    crate::winsec::check_parent(path).with_context(|| install_hint())
+    crate::winsec::check_parent(path).with_context(install_hint)
 }
 
 #[cfg(windows)]
@@ -97,12 +99,12 @@ mod tests {
         let bin = dir.join("restichub-agent");
         std::fs::create_dir_all(&dir).expect("cannot create the directory");
         std::fs::write(&bin, b"agent").expect("cannot write the binary");
-        std::fs::write(dir.join(crate::restic::RESTIC_FILE_NAME), b"restic")
-            .expect("cannot write restic");
+        let restic = dir.join(crate::restic::RESTIC_FILE_NAME);
+        std::fs::write(&restic, b"restic").expect("cannot write restic");
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
             .expect("cannot set the mode");
         // The temp directory is not owned by root, so the check must refuse it.
-        assert!(super::check(&bin).is_err());
+        assert!(super::check(&bin, &restic).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -82,7 +82,7 @@ impl RestoreAccess {
     /// The roots of the host (the default and the file) and the protected paths of this agent.
     ///
     /// `config_dir` is the identity directory, `cache_dir` the restic cache, and `program` the
-    /// restic binary, which lies next to the agent binary.
+    /// downloaded restic binary. The directory of `program` joins the protected paths (ADR-0038).
     #[must_use]
     pub fn for_host(config_dir: &Path, cache_dir: &Path, program: &Path) -> Self {
         let mut protected = vec![config_dir.to_path_buf(), cache_dir.to_path_buf()];
@@ -455,6 +455,23 @@ mod tests {
                 target.display()
             );
         }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn t20_the_restic_directory_is_a_protected_path() {
+        let base = temp_dir("restic-dir");
+        let bin = base.join("bin");
+        std::fs::create_dir_all(&bin).expect("cannot create the bin directory");
+        let access = RestoreAccess::for_host(
+            &base.join("config"),
+            &base.join("cache"),
+            &bin.join("restic"),
+        );
+        assert_eq!(
+            access.check(bin.join("restic").to_str().expect("utf-8")),
+            Err(TargetDenied::ProtectedPath)
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 

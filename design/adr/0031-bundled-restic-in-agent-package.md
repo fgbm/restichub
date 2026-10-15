@@ -1,6 +1,6 @@
 # ADR-0031: Agent package with a bundled restic
 
-- Status: accepted
+- Status: accepted. ADR-0038 supersedes the bundling part: the agent package no longer holds restic and the agent no longer embeds a restic hash. The CI verification of a pinned release, the release signing key and the license decisions stay valid for the test setup.
 - Date: 2026-10-13
 - Requirements: FR-AG-11, FR-PR-09, NFR-CMP-03, NFR-SEC-06
 

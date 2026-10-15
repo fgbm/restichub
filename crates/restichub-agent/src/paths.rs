@@ -38,7 +38,34 @@ pub fn cache_dir() -> PathBuf {
     }
 }
 
-/// Makes the directory and restricts it to the service account (FR-AG-04).
+/// The directory of the downloaded restic binary (ADR-0038).
+///
+/// Linux uses `/var/lib/restichub-agent/bin`. Windows uses the `bin` subdirectory of the
+/// configuration directory, which `create_protected_tree` already restricts.
+#[must_use]
+pub fn restic_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        config_dir().join("bin")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/var/lib/restichub-agent/bin")
+    }
+}
+
+/// The `ResticHub` directory under `%ProgramData%`. The agent owns it and every level below it; the
+/// levels above it belong to Windows and stay as they are.
+#[cfg(windows)]
+fn agent_root() -> PathBuf {
+    config_dir()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default()
+}
+
+/// Makes the directory and every missing parent, and restricts them to the service account
+/// (FR-AG-04).
 ///
 /// # Errors
 ///
@@ -46,7 +73,7 @@ pub fn cache_dir() -> PathBuf {
 pub fn ensure_config_dir(dir: &Path) -> Result<()> {
     #[cfg(windows)]
     {
-        crate::winsec::ensure_config_dir(dir)
+        crate::winsec::create_protected_tree(dir, &agent_root())
     }
     #[cfg(not(windows))]
     {
@@ -54,7 +81,7 @@ pub fn ensure_config_dir(dir: &Path) -> Result<()> {
     }
 }
 
-/// Makes one directory that only the service account can use (FR-AG-04).
+/// Makes a directory and every missing parent that only the service account can use (FR-AG-04).
 ///
 /// # Errors
 ///
@@ -62,7 +89,7 @@ pub fn ensure_config_dir(dir: &Path) -> Result<()> {
 pub fn create_protected_dir(dir: &Path) -> Result<()> {
     #[cfg(windows)]
     {
-        crate::winsec::create_protected_dir(dir)
+        crate::winsec::create_protected_tree(dir, &agent_root())
     }
     #[cfg(not(windows))]
     {

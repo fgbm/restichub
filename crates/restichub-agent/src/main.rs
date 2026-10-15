@@ -47,9 +47,13 @@ fn run() -> anyhow::Result<()> {
             }
             commands::run(&paths::config_dir(), None)
         }
-        Command::InstallService => {
+        Command::InstallService(options) => {
             init_tracing();
-            service::install()
+            service::install(&options)
+        }
+        Command::ResticUpdate(options) => {
+            init_tracing();
+            commands::restic_update(&options)
         }
         Command::UninstallService => {
             init_tracing();
