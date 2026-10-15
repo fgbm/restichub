@@ -74,7 +74,10 @@ pub struct AlertPayload {
     pub message: String,
     /// The typed values behind `message`, for a receiver that builds its own text.
     pub params: AlertParams,
+    /// The stable error code of a job, or the scrubbed error text. Receivers match on it.
     pub error_text: Option<String>,
+    /// The words for `error_text` in the language of the installation, when it is a known code.
+    pub error_label: Option<&'static str>,
     pub url: Option<String>,
 }
 
@@ -149,6 +152,7 @@ impl Message {
                 message: text::condition(self.language, alert),
                 params: alert.params.0.clone(),
                 error_text: error_text(alert),
+                error_label: error_label_in(self.language, alert),
                 url: link(self.public_origin.as_deref(), alert),
             }),
         }
@@ -217,7 +221,7 @@ impl Message {
             labels.details,
             text::condition(self.language, alert)
         ));
-        if let Some(error) = error_text(alert) {
+        if let Some(error) = error_body_in(self.language, alert) {
             lines.push(format!("{}: {error}", labels.error));
         }
         lines.push(format!("{}: {}", labels.opened, rfc3339(alert.opened_at)));
@@ -235,6 +239,17 @@ impl Message {
 pub fn error_text(alert: &Alert) -> Option<String> {
     let text = scrub(&alert.detail, MAX_TEXT_CHARS);
     (!text.is_empty()).then_some(text)
+}
+
+/// The words of the language for a stable error code of the alert.
+fn error_label_in(language: Language, alert: &Alert) -> Option<&'static str> {
+    text::error_label(language, &error_text(alert)?)
+}
+
+/// The text for the email body: the words for a stable code, else the scrubbed text.
+fn error_body_in(language: Language, alert: &Alert) -> Option<String> {
+    let text = error_text(alert)?;
+    Some(text::error_label(language, &text).map_or(text, str::to_owned))
 }
 
 fn subject_name(alert: &Alert) -> String {

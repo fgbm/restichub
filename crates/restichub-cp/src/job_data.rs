@@ -26,6 +26,7 @@ use time::OffsetDateTime;
 use crate::browse;
 use crate::jobs::parse_job_id_value;
 use crate::log_store::{DatabaseLogStore, LogStore, MAX_CHUNK_BYTES, lines_of};
+use crate::refusal_audit::{self, MessageRefusal};
 use crate::server::AppState;
 
 const MAX_STEP_ID_LEN: usize = 64;
@@ -72,7 +73,8 @@ pub async fn handle_progress(
         return;
     };
     let result = async {
-        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
+        let Some(job) = owned_job(state, &mut tx, job_id, agent, cutoff, "step_progress").await?
+        else {
             return Ok(false);
         };
         // A job that is not running shows no progress.
@@ -108,7 +110,8 @@ pub async fn handle_step_result(
         return;
     };
     let outcome = async {
-        let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
+        let Some(job) = owned_job(state, &mut tx, job_id, agent, cutoff, "step_result").await?
+        else {
             return Ok(false);
         };
         job_steps::upsert(&mut tx, job_id, &step).await?;
@@ -160,7 +163,7 @@ pub async fn handle_log_chunk(
             return ChunkOutcome::Refused(refusal);
         }
     };
-    match ownership(state, tenant, agent, job_id).await {
+    match ownership(state, tenant, agent, job_id, "log_chunk").await {
         Ownership::Owned => {}
         Ownership::Refused => return ChunkOutcome::Refused(ChunkRefusal::UnknownJob),
         Ownership::Retry => return ChunkOutcome::Failed,
@@ -194,7 +197,7 @@ pub async fn handle_job_result_data(
     let Some(job_id) = parse_job_id_value(&result.job_id) else {
         return;
     };
-    if !job_is_owned(state, tenant, agent, job_id).await {
+    if !job_is_owned(state, tenant, agent, job_id, "job_result").await {
         return;
     }
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
@@ -238,20 +241,51 @@ enum Ownership {
     Retry,
 }
 
-async fn job_is_owned(state: &AppState, tenant: TenantId, agent: AgentId, job: JobId) -> bool {
-    ownership(state, tenant, agent, job).await == Ownership::Owned
+async fn job_is_owned(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    job: JobId,
+    kind: &'static str,
+) -> bool {
+    ownership(state, tenant, agent, job, kind).await == Ownership::Owned
 }
 
-async fn ownership(state: &AppState, tenant: TenantId, agent: AgentId, job: JobId) -> Ownership {
+async fn ownership(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    job: JobId,
+    kind: &'static str,
+) -> Ownership {
     let cutoff = write_cutoff(state);
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         return Ownership::Retry;
     };
-    let found = job_repo::get(&mut tx, job).await;
+    let found = match job_repo::get(&mut tx, job).await {
+        Ok(found) => found,
+        Err(error) => {
+            tracing::warn!(%job, %error, "the job of a message could not be read");
+            return Ownership::Retry;
+        }
+    };
+    if let Some(refusal) = refusal_of(found.as_ref(), agent)
+        && let Err(error) =
+            refusal_audit::refused_message(state, &mut tx, agent, job, kind, refusal).await
+    {
+        tracing::warn!(%job, %error, "a refused message could not be audited");
+    }
     let _ = tx.commit().await;
-    match found {
-        Ok(row) => classify(row.as_ref(), agent, cutoff),
-        Err(_) => Ownership::Retry,
+    classify(found.as_ref(), agent, cutoff)
+}
+
+/// Why the message of the agent for this job is audited, if it is (AC-PR-05).
+fn refusal_of(row: Option<&Job>, agent: AgentId) -> Option<MessageRefusal> {
+    match row {
+        None => Some(MessageRefusal::UnknownJob),
+        Some(row) if row.agent_id != agent => Some(MessageRefusal::ForeignJob),
+        Some(row) if row.status == JobStatus::Queued => Some(MessageRefusal::JobNotSent),
+        Some(_) => None,
     }
 }
 
@@ -277,13 +311,22 @@ fn write_cutoff(state: &AppState) -> OffsetDateTime {
 }
 
 /// Reads the job when it belongs to the agent, has left the queue and takes writes.
+///
+/// A message for the job of another agent, or for a job that the control plane has not sent yet,
+/// changes no row and leaves an audit record (AC-PR-05). The record commits with the transaction
+/// of the caller.
 async fn owned_job(
+    state: &AppState,
     tx: &mut restichub_db::TenantTx<'_>,
     job: JobId,
     agent: AgentId,
     cutoff: OffsetDateTime,
+    kind: &'static str,
 ) -> Result<Option<Job>, restichub_db::DbError> {
     let found = job_repo::get(tx, job).await?;
+    if let Some(refusal) = refusal_of(found.as_ref(), agent) {
+        refusal_audit::refused_message(state, tx, agent, job, kind, refusal).await?;
+    }
     Ok(found.filter(|row| classify(Some(row), agent, cutoff) == Ownership::Owned))
 }
 

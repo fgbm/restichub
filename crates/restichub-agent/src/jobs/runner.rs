@@ -18,6 +18,7 @@ use restichub_proto::agent::v1::{
 };
 use tokio::sync::mpsc;
 
+use super::command_text::command_line_text;
 use super::log::JobLog;
 use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
@@ -307,14 +308,20 @@ impl Jobs {
             return StepOutcome::cancelled(false);
         }
         let line = match build_command(validated, step) {
-            Ok(line) => line.with_json(),
+            Ok(line) => line,
             Err(error) => {
                 tracing::warn!(%error, "cannot build the restic command");
                 return StepOutcome::not_started();
             }
         };
         let step_id = step.step_id.as_str();
+        let line = line.with_json();
         let scrubber = Scrubber::for_command(&line);
+        log.push(
+            step_id,
+            LogStream::Agent,
+            &command_line_text(&scrubber, &line),
+        );
         // The hash check and the start share one opening of the binary (FR-AG-11, threat T20).
         let spawned = self.expected_sha256().and_then(|expected| {
             crate::exec::spawn_job_restic(

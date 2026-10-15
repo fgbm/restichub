@@ -160,6 +160,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
             global: config.events_max_streams,
             ..Default::default()
         })
+        .with_audit_refusal_limit(config.audit_refusal_limit)
         .with_agent_cert_lifetime(config.agent_cert_lifetime)
         .with_pki(
             ca_store.clone(),

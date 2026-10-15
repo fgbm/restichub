@@ -150,6 +150,17 @@ pub fn duration(language: Language, seconds: i64) -> String {
     }
 }
 
+/// The words for a stable error code of a job. `None` for a free text or an unknown code.
+pub fn error_label(language: Language, code: &str) -> Option<&'static str> {
+    let (_, en, ru) = super::error_labels::LABELS
+        .iter()
+        .find(|(known, _, _)| *known == code)?;
+    Some(match language {
+        Language::En => en,
+        Language::Ru => ru,
+    })
+}
+
 /// The sentence that tells why the alert exists. It holds no error text of a job: that text is a
 /// separate field of the alert.
 pub fn condition(language: Language, alert: &Alert) -> String {
@@ -212,6 +223,19 @@ mod tests {
         assert_eq!(Language::parse("en"), Some(Language::En));
         assert_eq!(Language::parse(" RU "), Some(Language::Ru));
         assert_eq!(Language::parse("de"), None);
+    }
+
+    #[test]
+    fn an_error_code_has_words_in_both_languages() {
+        assert_eq!(
+            error_label(Language::En, "interrupted"),
+            Some("interrupted by an agent restart")
+        );
+        assert_eq!(
+            error_label(Language::Ru, "interrupted"),
+            Some("прервано перезапуском агента")
+        );
+        assert_eq!(error_label(Language::En, "restic said no"), None);
     }
 
     #[test]

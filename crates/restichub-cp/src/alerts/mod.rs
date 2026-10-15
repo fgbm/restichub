@@ -7,6 +7,7 @@
 
 pub mod deliver;
 pub mod email;
+mod error_labels;
 pub mod evaluate;
 pub mod message;
 pub mod rpo;

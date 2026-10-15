@@ -35,7 +35,13 @@ async fn ac_lg_05_the_end_of_the_log_arrives_before_the_job_result_without_a_rec
                     logs.entry(chunk.job_id.clone()).or_default().take(&chunk);
                 }
                 Some(agent_message::Payload::JobResult(result)) => {
-                    let lines = logs.get(&result.job_id).map_or(0, |log| log.lines().len());
+                    // The log of a step opens with the command line, which is no line of the script.
+                    let lines = logs.get(&result.job_id).map_or(0, |log| {
+                        log.lines()
+                            .iter()
+                            .filter(|line| !line.starts_with("$ "))
+                            .count()
+                    });
                     at_result.insert(result.job_id, lines);
                     if at_result.len() == 2 {
                         break;

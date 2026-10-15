@@ -38,9 +38,10 @@
 	} from '#lib/job-detail.ts';
 	import type { StepRow } from '#lib/job-detail.ts';
 	import { countLines, groupLines, logText } from '#lib/job-log.ts';
+	import { jobReason } from '#lib/job-reason.ts';
 	import type { LogCounts } from '#lib/job-log.ts';
 	import { plural } from '#lib/profile-form.ts';
-	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
+	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -144,11 +145,7 @@
 
 	function reasonOf(current: JobDetail): string | null {
 		if (cancelled) return null;
-		const code =
-			current.result_message ??
-			(current.result_code === 'repository_locked' ? current.result_code : null);
-		if (!code) return null;
-		return tOr(`jobs.reason.${code}`, code);
+		return jobReason(current);
 	}
 
 	async function copyKeyId(keyId: string): Promise<void> {
