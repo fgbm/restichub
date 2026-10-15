@@ -3,13 +3,12 @@ name: Agent packages
 # Build the agent package for each MVP platform. The package holds the agent,
 # the license texts and the package hashes. It does not hold restic: the agent
 # downloads and verifies restic itself (ADR-0038).
-# The workflow builds artifacts only. The operator approves a release, so no job
-# publishes one. The only deliverable artifacts are `restichub-agent-<os>-<arch>`.
+# The workflow builds artifacts only; it does not run for a tag. The release
+# workflow builds, signs and drafts the release packages.
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
