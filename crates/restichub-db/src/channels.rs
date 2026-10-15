@@ -50,8 +50,12 @@ pub struct Channel {
     pub updated_at: OffsetDateTime,
 }
 
-const COLUMNS: &str = "id, name, kind, enabled, recipients, url_origin, secret_id, url_secret_id, \
-                       created_at, updated_at";
+macro_rules! columns {
+    () => {
+        "id, name, kind, enabled, recipients, url_origin, secret_id, url_secret_id, \
+                       created_at, updated_at"
+    };
+}
 
 #[derive(Debug, Clone)]
 pub struct NewChannel<'a> {
@@ -107,18 +111,22 @@ pub async fn count(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
 
 /// Oldest first. The tenant holds at most [`MAX_CHANNELS`].
 pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Channel>, DbError> {
-    sqlx::query_as::<_, Channel>(sqlx::AssertSqlSafe(format!(
-        "SELECT {COLUMNS} FROM notification_channels ORDER BY created_at, id"
-    )))
+    sqlx::query_as::<_, Channel>(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM notification_channels ORDER BY created_at, id"
+    ))
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)
 }
 
 pub async fn get(tx: &mut TenantTx<'_>, id: ChannelId) -> Result<Option<Channel>, DbError> {
-    sqlx::query_as::<_, Channel>(sqlx::AssertSqlSafe(format!(
-        "SELECT {COLUMNS} FROM notification_channels WHERE id = $1"
-    )))
+    sqlx::query_as::<_, Channel>(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM notification_channels WHERE id = $1"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await
@@ -130,9 +138,11 @@ pub async fn get_for_update(
     tx: &mut TenantTx<'_>,
     id: ChannelId,
 ) -> Result<Option<Channel>, DbError> {
-    sqlx::query_as::<_, Channel>(sqlx::AssertSqlSafe(format!(
-        "SELECT {COLUMNS} FROM notification_channels WHERE id = $1 FOR UPDATE"
-    )))
+    sqlx::query_as::<_, Channel>(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM notification_channels WHERE id = $1 FOR UPDATE"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await

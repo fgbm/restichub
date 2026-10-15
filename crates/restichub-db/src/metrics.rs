@@ -63,7 +63,9 @@ pub async fn snapshot(tx: &mut TenantTx<'_>) -> Result<MetricsSnapshot, DbError>
     .await
     .map_err(DbError::Query)?;
 
-    // One pass over the jobs: the bounds come from `DURATION_BUCKETS`, one `FILTER` for each.
+    // One pass over the jobs: the bounds come from `DURATION_BUCKETS`, one `FILTER` for each. The
+    // bounds travel as a bind parameter. Only the array index is formatted into the text: it is a
+    // `usize` counter, never input.
     let bounds: Vec<f64> = DURATION_BUCKETS.to_vec();
     let mut filters = String::new();
     for index in 1..=DURATION_BUCKETS.len() {

@@ -263,9 +263,13 @@ pub struct Alert {
     pub resolved_at: Option<OffsetDateTime>,
 }
 
-const ALERT_COLUMNS: &str = "id, kind, dedupe_key, status, agent_id, plan_id, repository_id, \
+macro_rules! alert_columns {
+    () => {
+        "id, kind, dedupe_key, status, agent_id, plan_id, repository_id, \
                              job_id, agent_hostname, plan_name, repository_name, params, \
-                             detail, opened_at, resolved_at";
+                             detail, opened_at, resolved_at"
+    };
+}
 
 #[derive(Debug, Clone)]
 pub struct NewAlert<'a> {
@@ -306,11 +310,13 @@ pub async fn open_alerts_page(
         Some(cursor) => (Some(cursor.opened_at), Some(cursor.id)),
         None => (None, None),
     };
-    sqlx::query_as::<_, Alert>(sqlx::AssertSqlSafe(format!(
-        "SELECT {ALERT_COLUMNS} FROM alert_state WHERE status = 'open' \
+    sqlx::query_as::<_, Alert>(concat!(
+        "SELECT ",
+        alert_columns!(),
+        " FROM alert_state WHERE status = 'open' \
            AND ($1::timestamptz IS NULL OR (opened_at, id) > ($1::timestamptz, $2::uuid)) \
          ORDER BY opened_at, id LIMIT $3"
-    )))
+    ))
     .bind(cursor_time)
     .bind(cursor_id)
     .bind(limit)
@@ -346,10 +352,12 @@ pub async fn count_open(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
 }
 
 pub async fn newest_open(tx: &mut TenantTx<'_>, limit: i64) -> Result<Vec<Alert>, DbError> {
-    sqlx::query_as::<_, Alert>(sqlx::AssertSqlSafe(format!(
-        "SELECT {ALERT_COLUMNS} FROM alert_state WHERE status = 'open' \
+    sqlx::query_as::<_, Alert>(concat!(
+        "SELECT ",
+        alert_columns!(),
+        " FROM alert_state WHERE status = 'open' \
          ORDER BY opened_at DESC, id DESC LIMIT $1"
-    )))
+    ))
     .bind(limit)
     .fetch_all(tx.as_conn())
     .await
@@ -409,9 +417,11 @@ pub async fn resolve(
 }
 
 pub async fn get(tx: &mut TenantTx<'_>, id: AlertId) -> Result<Option<Alert>, DbError> {
-    sqlx::query_as::<_, Alert>(sqlx::AssertSqlSafe(format!(
-        "SELECT {ALERT_COLUMNS} FROM alert_state WHERE id = $1"
-    )))
+    sqlx::query_as::<_, Alert>(concat!(
+        "SELECT ",
+        alert_columns!(),
+        " FROM alert_state WHERE id = $1"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await
@@ -446,12 +456,14 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &AlertPage) -> Result<AlertPageRe
         Some(cursor) => (Some(cursor.opened_at), Some(cursor.id)),
         None => (None, None),
     };
-    let mut alerts = sqlx::query_as::<_, Alert>(sqlx::AssertSqlSafe(format!(
-        "SELECT {ALERT_COLUMNS} FROM alert_state \
+    let mut alerts = sqlx::query_as::<_, Alert>(concat!(
+        "SELECT ",
+        alert_columns!(),
+        " FROM alert_state \
          WHERE ($1::text IS NULL OR status = $1) \
            AND ($2::timestamptz IS NULL OR (opened_at, id) < ($2::timestamptz, $3::uuid)) \
          ORDER BY opened_at DESC, id DESC LIMIT $4"
-    )))
+    ))
     .bind(page.status.map(AlertStatus::as_str))
     .bind(cursor_time)
     .bind(cursor_id)

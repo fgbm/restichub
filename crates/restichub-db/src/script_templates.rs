@@ -29,8 +29,12 @@ pub struct ScriptTemplate {
     pub updated_at: OffsetDateTime,
 }
 
-const COLUMNS: &str = "id, name, description, interpreter, phase, body, timeout_seconds, \
-                       failure_policy, parameters, created_at, updated_at";
+macro_rules! columns {
+    () => {
+        "id, name, description, interpreter, phase, body, timeout_seconds, \
+                       failure_policy, parameters, created_at, updated_at"
+    };
+}
 
 #[derive(Debug, Clone)]
 pub struct NewScriptTemplate<'a> {
@@ -92,9 +96,11 @@ pub async fn count(tx: &mut TenantTx<'_>) -> Result<i64, DbError> {
 
 /// By name. The tenant holds at most [`MAX_TEMPLATES`].
 pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<ScriptTemplate>, DbError> {
-    sqlx::query_as::<_, ScriptTemplate>(sqlx::AssertSqlSafe(format!(
-        "SELECT {COLUMNS} FROM script_templates ORDER BY name, id"
-    )))
+    sqlx::query_as::<_, ScriptTemplate>(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM script_templates ORDER BY name, id"
+    ))
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)
@@ -104,9 +110,11 @@ pub async fn get(
     tx: &mut TenantTx<'_>,
     id: ScriptTemplateId,
 ) -> Result<Option<ScriptTemplate>, DbError> {
-    sqlx::query_as::<_, ScriptTemplate>(sqlx::AssertSqlSafe(format!(
-        "SELECT {COLUMNS} FROM script_templates WHERE id = $1"
-    )))
+    sqlx::query_as::<_, ScriptTemplate>(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM script_templates WHERE id = $1"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await
@@ -118,9 +126,11 @@ pub async fn get_for_update(
     tx: &mut TenantTx<'_>,
     id: ScriptTemplateId,
 ) -> Result<Option<ScriptTemplate>, DbError> {
-    sqlx::query_as::<_, ScriptTemplate>(sqlx::AssertSqlSafe(format!(
-        "SELECT {COLUMNS} FROM script_templates WHERE id = $1 FOR UPDATE"
-    )))
+    sqlx::query_as::<_, ScriptTemplate>(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM script_templates WHERE id = $1 FOR UPDATE"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await
@@ -174,7 +184,11 @@ pub struct JobTemplate {
     pub updated_at: OffsetDateTime,
 }
 
-const JOB_COLUMNS: &str = "id, name, description, scripts, created_at, updated_at";
+macro_rules! job_columns {
+    () => {
+        "id, name, description, scripts, created_at, updated_at"
+    };
+}
 
 #[derive(Debug, Clone)]
 pub struct NewJobTemplate<'a> {
@@ -214,9 +228,11 @@ pub async fn count_job_templates(tx: &mut TenantTx<'_>) -> Result<i64, DbError> 
 }
 
 pub async fn list_job_templates(tx: &mut TenantTx<'_>) -> Result<Vec<JobTemplate>, DbError> {
-    sqlx::query_as::<_, JobTemplate>(sqlx::AssertSqlSafe(format!(
-        "SELECT {JOB_COLUMNS} FROM job_templates ORDER BY name, id"
-    )))
+    sqlx::query_as::<_, JobTemplate>(concat!(
+        "SELECT ",
+        job_columns!(),
+        " FROM job_templates ORDER BY name, id"
+    ))
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)
@@ -226,9 +242,11 @@ pub async fn get_job_template(
     tx: &mut TenantTx<'_>,
     id: JobTemplateId,
 ) -> Result<Option<JobTemplate>, DbError> {
-    sqlx::query_as::<_, JobTemplate>(sqlx::AssertSqlSafe(format!(
-        "SELECT {JOB_COLUMNS} FROM job_templates WHERE id = $1"
-    )))
+    sqlx::query_as::<_, JobTemplate>(concat!(
+        "SELECT ",
+        job_columns!(),
+        " FROM job_templates WHERE id = $1"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await
@@ -240,9 +258,11 @@ pub async fn get_job_template_for_update(
     tx: &mut TenantTx<'_>,
     id: JobTemplateId,
 ) -> Result<Option<JobTemplate>, DbError> {
-    sqlx::query_as::<_, JobTemplate>(sqlx::AssertSqlSafe(format!(
-        "SELECT {JOB_COLUMNS} FROM job_templates WHERE id = $1 FOR UPDATE"
-    )))
+    sqlx::query_as::<_, JobTemplate>(concat!(
+        "SELECT ",
+        job_columns!(),
+        " FROM job_templates WHERE id = $1 FOR UPDATE"
+    ))
     .bind(id)
     .fetch_optional(tx.as_conn())
     .await

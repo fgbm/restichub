@@ -220,19 +220,25 @@ pub async fn latest_jobs(
     }
 }
 
-const SUBJECT_EXPR: &str = "COALESCE('plan:' || j.plan_id::text, \
+macro_rules! subject_expr {
+    () => {
+        "COALESCE('plan:' || j.plan_id::text, \
                                     'repo:' || j.repository_id::text || ':' || j.kind, \
-                                    'agent:' || j.agent_id::text || ':' || j.kind)";
+                                    'agent:' || j.agent_id::text || ':' || j.kind)"
+    };
+}
 
 async fn latest_jobs_page(
     tx: &mut TenantTx<'_>,
     since: OffsetDateTime,
     after: Option<String>,
 ) -> Result<Vec<LatestJob>, DbError> {
-    sqlx::query_as::<_, LatestJob>(sqlx::AssertSqlSafe(format!(
+    sqlx::query_as::<_, LatestJob>(concat!(
         "SELECT * FROM ( \
              SELECT DISTINCT ON (subject) \
-                    {SUBJECT_EXPR} AS subject, \
+                    ",
+        subject_expr!(),
+        " AS subject, \
                     j.id, j.kind, j.status, j.result_code, j.result_message, j.agent_id, \
                     a.hostname AS agent_hostname, j.plan_id, p.name AS plan_name, \
                     j.repository_id, r.name AS repository_name, \
@@ -244,10 +250,12 @@ async fn latest_jobs_page(
              WHERE j.status IN ('succeeded', 'failed', 'dead_letter') \
                AND j.result_code IS DISTINCT FROM 'cancelled' \
                AND COALESCE(j.finished_at, j.updated_at) > $1 \
-               AND ($2::text IS NULL OR {SUBJECT_EXPR} > $2) \
+               AND ($2::text IS NULL OR ",
+        subject_expr!(),
+        " > $2) \
              ORDER BY subject, COALESCE(j.finished_at, j.updated_at) DESC, j.id DESC) latest \
          ORDER BY subject LIMIT $3"
-    )))
+    ))
     .bind(since)
     .bind(after)
     .bind(PAGE)

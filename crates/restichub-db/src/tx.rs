@@ -66,9 +66,10 @@ impl<'a> TenantTx<'a> {
     /// Marks a point inside the open transaction.
     ///
     /// A caller that runs several independent units of work in one transaction uses a savepoint, so
-    /// a failure of one unit does not roll back the whole transaction. The name is a fixed
-    /// identifier that the caller chooses, never user input.
-    pub async fn savepoint(&mut self, name: &str) -> Result<(), DbError> {
+    /// a failure of one unit does not roll back the whole transaction. The name is formatted into the
+    /// statement, because `SAVEPOINT` takes no bind parameter. The `'static` bound keeps user input
+    /// out: only a constant can be the name.
+    pub async fn savepoint(&mut self, name: &'static str) -> Result<(), DbError> {
         sqlx::query(sqlx::AssertSqlSafe(format!("SAVEPOINT {name}")))
             .execute(&mut *self.tx)
             .await
@@ -77,7 +78,7 @@ impl<'a> TenantTx<'a> {
     }
 
     /// Rolls the transaction back to a savepoint. The savepoint stays defined.
-    pub async fn rollback_to_savepoint(&mut self, name: &str) -> Result<(), DbError> {
+    pub async fn rollback_to_savepoint(&mut self, name: &'static str) -> Result<(), DbError> {
         sqlx::query(sqlx::AssertSqlSafe(format!("ROLLBACK TO SAVEPOINT {name}")))
             .execute(&mut *self.tx)
             .await
@@ -86,7 +87,7 @@ impl<'a> TenantTx<'a> {
     }
 
     /// Releases a savepoint. The work inside it stays part of the transaction.
-    pub async fn release_savepoint(&mut self, name: &str) -> Result<(), DbError> {
+    pub async fn release_savepoint(&mut self, name: &'static str) -> Result<(), DbError> {
         sqlx::query(sqlx::AssertSqlSafe(format!("RELEASE SAVEPOINT {name}")))
             .execute(&mut *self.tx)
             .await
