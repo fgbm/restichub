@@ -1,0 +1,31 @@
+## ResticHub @VERSION@
+
+### Contents
+
+- The control plane image `@IMAGE@` for linux/amd64 and linux/arm64.
+- The agent packages for Linux (amd64, arm64; static musl builds) and Windows (amd64).
+- One CycloneDX SBOM for each package and each image.
+- `SHA256SUMS` for every file of this release.
+- A `.sigstore.json` bundle for every file: the keyless cosign signature.
+
+### Verify
+
+Every signature comes from the GitHub OIDC identity of the release workflow for the tag `@TAG@`. See the verification guide: https://github.com/@REPO@/blob/@TAG@/docs/src/content/docs/operations/verify-a-release.md
+
+```sh
+cosign verify-blob \
+  --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity "https://github.com/@REPO@/.github/workflows/release.yml@refs/tags/@TAG@" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+
+cosign verify \
+  --certificate-identity "https://github.com/@REPO@/.github/workflows/release.yml@refs/tags/@TAG@" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  @IMAGE@
+```
+
+### Changes
+
+- TODO: list the changes before you publish this draft.
