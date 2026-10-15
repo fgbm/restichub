@@ -2043,7 +2043,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "bzip2",
  "ctrlc",
@@ -2093,7 +2093,7 @@ dependencies = [
 name = "restichub-canary-scan"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
 ]
 
 [[package]]
@@ -2121,7 +2121,7 @@ dependencies = [
  "argon2",
  "async-trait",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "chrono-tz",
  "croner",
@@ -2190,7 +2190,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "ed25519-dalek",
  "getrandom 0.4.3",
  "prost-types",
@@ -2235,7 +2235,7 @@ name = "restichub-secrets"
 version = "0.0.0"
 dependencies = [
  "aes-gcm",
- "base64 0.22.1",
+ "base64 0.23.1",
  "getrandom 0.4.3",
  "libc",
  "serde",
