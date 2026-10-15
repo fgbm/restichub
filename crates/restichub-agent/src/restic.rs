@@ -122,7 +122,7 @@ pub fn verify_digest(actual: &[u8], expected_hex: &str) -> Result<()> {
     let actual = hex(actual);
     if !actual.eq_ignore_ascii_case(expected_hex) {
         bail!(
-            "the restic binary does not match the recorded SHA-256: expected {expected_hex}, got {actual}"
+            "the restic binary does not match the recorded SHA-256: expected {expected_hex}, got {actual}; run `restichub-agent restic update` again or restart the service"
         );
     }
     Ok(())

@@ -834,6 +834,65 @@ mod tests {
         let _ = std::fs::remove_dir_all(&cache);
     }
 
+    /// An update replaces the binary and the record under a running service. The next job spawn
+    /// reads the new hash, so no restart is needed (FR-AG-11, threat T20).
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_11_an_update_takes_effect_for_the_next_spawn() {
+        use restichub_proto::agent::v1::ProcessPriority;
+        use sha2::Digest as _;
+
+        use crate::restic_release::VerifiedRelease;
+        use crate::restic_store::Layout;
+
+        let base = temp_path("update");
+        let _ = std::fs::remove_dir_all(&base);
+        let layout = Layout::new(base.join("bin"), base.join("config"));
+        let release = |tail: &[u8]| {
+            let mut binary = std::fs::read("/bin/true").expect("cannot read true");
+            binary.extend_from_slice(tail);
+            VerifiedRelease {
+                version: "0.19.1".to_owned(),
+                sha256: hex(&sha2::Sha256::digest(&binary)),
+                binary,
+            }
+        };
+        let probe = |_: &Path| Ok("0.19.1".to_owned());
+        let first = layout.install(&release(b""), &probe).expect("first install");
+        let jobs = crate::jobs::Jobs::open(
+            layout.binary_path(),
+            first.sha256.clone(),
+            base.join("cache"),
+            &base.join("config"),
+        )
+        .expect("jobs")
+        .with_record(layout.clone());
+        let line = command_line();
+        let spawn = |expected: &str| {
+            super::spawn_job_restic(
+                &layout.binary_path(),
+                expected,
+                &line,
+                &base.join("cache"),
+                ProcessPriority::Unspecified,
+            )
+        };
+        spawn(&jobs.expected_sha256().expect("hash")).expect("the first binary runs");
+
+        let second = layout.install(&release(b"update"), &probe).expect("update");
+        assert_ne!(first.sha256, second.sha256);
+        let Err(stale) = spawn(&first.sha256) else {
+            panic!("the old hash must no longer match");
+        };
+        assert!(
+            format!("{stale:#}").contains("restart the service"),
+            "{stale:#}"
+        );
+        assert_eq!(jobs.expected_sha256().expect("hash"), second.sha256);
+        spawn(&jobs.expected_sha256().expect("hash")).expect("the updated binary runs");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// The production entry refuses a binary that is missing (FR-AG-11).
     #[test]
     fn fr_ag_11_spawn_restic_refuses_a_missing_binary() {

@@ -205,7 +205,8 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
         restic.expected_sha256().to_owned(),
         cache,
         dir,
-    )?;
+    )?
+    .with_record(Layout::host());
     tracing::info!(
         agent_id = %identity.agent_id,
         keys = identity.signing_keys.keys.len(),
