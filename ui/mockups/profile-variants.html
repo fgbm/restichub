@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Варианты редактора профиля · ResticHub</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<link rel="stylesheet" href="profile-mock.css" />
+		<script src="mockups.js"></script>
+		<script src="profile-mock.js"></script>
+	</head>
+	<body>
+		<div data-shell="profile"></div>
+		<main class="page page--wide">
+			<div class="page-header">
+				<div>
+					<div class="pm-crumbs"><a href="profiles.html">Профили</a><span>/</span><span>Варианты редактора</span></div>
+					<h1 class="page-title">Редактор профиля: три варианта</h1>
+					<p class="page-subtitle">Во всех вариантах одни и те же поля профиля, один и тот же раздел «Хранение» с исправленным текстом и схемой «что останется». Различается только устройство экрана.</p>
+				</div>
+				<div class="page-actions"><a class="btn" href="profiles.html">Список профилей</a></div>
+			</div>
+			<div class="pm-compare">
+				<article class="pm-vcard is-rec">
+					<div class="pm-vcard-head"><h2>A. Полная страница <span class="status status--success">Рекомендую</span></h2><p>Редактор на отдельной странице. Слева разделы с отметкой «включено» и итогом, посередине сворачиваемые разделы, справа живая сводка и команды.</p></div>
+					<div class="pm-vcard-body">
+						<div class="pm-wire pm-wire--a"><div class="col"><i class="hl"></i><i></i><i></i><i class="hl"></i><i></i><i class="hl"></i></div><div class="col"><i class="tall hl"></i><i></i><i class="tall"></i><i></i></div><div class="col"><i class="tall"></i><i class="tall hl"></i></div></div>
+						<div><div class="pm-list-title">Плюсы</div><ul class="pm-pros"><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Сразу видно, что включено: у каждого раздела точка и итог в одну строку.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Свёрнутый раздел сам себя описывает: «Хранение: последние 3 · по дням 5».</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Есть место для пояснений и схемы «что останется».</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Сводка и команды всегда на виду, не нужно открывать предпросмотр отдельно.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Адрес раздела можно отправить коллеге: <span class='code'>#sec-retention</span>.</span></li></ul></div>
+						<div><div class="pm-list-title">Минусы</div><ul class="pm-cons"><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Самый большой объём новой вёрстки: страница, роут, три колонки.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>На узком экране сводка уходит вниз и перестаёт быть «живой».</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Для первого профиля избыточно: десять разделов сразу.</span></li></ul></div>
+					</div>
+					<div class="pm-vcard-foot"><a class="btn btn--primary" href="profile-a.html">Открыть макет A</a><a class="btn" href="profile-a.html#retention">Сразу «Хранение»</a></div>
+				</article>
+				<article class="pm-vcard">
+					<div class="pm-vcard-head"><h2>B. Диалог по-новому</h2><p>Остаётся диалог по центру. Сверху обязательное, ниже возможности со строкой-итогом и переключателем, «Дополнительно» свёрнуто.</p></div>
+					<div class="pm-vcard-body">
+						<div class="pm-wire pm-wire--b"><div class="dlg"><i class="hl"></i><i class="hl"></i><i></i><i></i><i></i><i></i></div></div>
+						<div><div class="pm-list-title">Плюсы</div><ul class="pm-pros"><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Самый дешёвый путь: тот же диалог и тот же роут, меняется содержимое.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Переключатель в каждой строке прямо отвечает на вопрос «включено или нет».</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Для нового профиля достаточно трёх полей, остальное свёрнуто.</span></li></ul></div>
+						<div><div class="pm-list-title">Минусы</div><ul class="pm-cons"><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Раздел «Хранение» с пояснениями и схемой тесен в диалоге: нужна прокрутка внутри прокрутки.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Команды restic спрятаны за кнопкой, их не видно при правке.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Диалог нельзя открыть по ссылке и нельзя оставить на время: закрыл — потерял.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Диалог с десятью возможностями снова становится длинным.</span></li></ul></div>
+					</div>
+					<div class="pm-vcard-foot"><a class="btn" href="profile-b.html">Открыть макет B</a></div>
+				</article>
+				<article class="pm-vcard">
+					<div class="pm-vcard-head"><h2>C. Страница профиля и мастер</h2><p>Профиль читается как страница из карточек простым языком. «Изменить» открывает малый редактор одного раздела. Создание идёт по трём шагам.</p></div>
+					<div class="pm-vcard-body">
+						<div class="pm-wire pm-wire--c"><i class="hl"></i><i></i><i class="hl" style="grid-column: 1 / -1"></i><i></i><i class="hl"></i></div>
+						<div><div class="pm-list-title">Плюсы</div><ul class="pm-pros"><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Лучше всего для тех, кто не знает restic: текст вместо полей.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Мастер даёт готовые наборы хранения, ошибиться труднее.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Просмотр профиля нужен всё равно: имя в списке должно куда-то вести.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-check-circle" /></svg><span>Каждый малый редактор маленький и понятный.</span></li></ul></div>
+						<div><div class="pm-list-title">Минусы</div><ul class="pm-cons"><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Две новые поверхности вместо одной: страница чтения и мастер.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Править несколько разделов — значит открывать несколько диалогов и сохранять каждый.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Общей картины «всё вместе» в момент правки нет, как у A.</span></li><li><svg class="icon icon--xs"><use href="icons.svg#i-alert" /></svg><span>Опытному администратору медленнее.</span></li></ul></div>
+					</div>
+					<div class="pm-vcard-foot"><a class="btn" href="profile-c.html">Открыть страницу</a><a class="btn" href="profile-c.html?mode=create">Открыть мастер</a></div>
+				</article>
+			</div>
+			<div class="table-wrap pm-section-gap">
+				<table class="table pm-matrix">
+					<thead><tr><th>Критерий</th><th>A</th><th>B</th><th>C</th></tr></thead>
+					<tbody>
+						<tr><td>Видно, что включено</td><td>Точка и итог у каждого раздела, плюс сводка справа</td><td>Переключатель и итог в каждой строке</td><td>Статус на каждой карточке</td></tr>
+						<tr><td>Понятно, как это работает</td><td>Пояснения в разделе, схема «что останется»</td><td>То же, но в узком окне</td><td>Фразы простым языком, схема на карточке</td></tr>
+						<tr><td>Команды restic рядом</td><td>Всегда справа</td><td>За кнопкой</td><td>В отдельном окне</td></tr>
+						<tr><td>Создание первого профиля</td><td>Те же десять разделов</td><td>Три поля, остальное свёрнуто</td><td>Мастер из трёх шагов</td></tr>
+						<tr><td>Объём работы</td><td>Высокий</td><td>Низкий</td><td>Высокий</td></tr>
+						<tr><td>Ссылка на раздел</td><td>Есть</td><td>Нет</td><td>Есть на страницу, нет на редактор</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<section class="pm-rec">
+				<h2>Рекомендация: A для правки, мастер из C для создания</h2>
+				<p>Жалоба владельца состоит из двух частей: «непонятно, что включено» и «непонятно, как это работает». Вариант A отвечает на обе в одном экране: точка и итог показывают состояние, раздел раскрывается с пояснением, а справа видно итоговые команды. Ему же проще всего дать ссылку из списка: имя профиля ведёт на страницу.</p>
+				<p>Мастер из C стоит добавить вторым шагом, только для создания: он убирает десять разделов с первого экрана. Страницу чтения из C отдельно делать не нужно: свёрнутый вариант A уже работает как чтение.</p>
+				<p>B оставьте как запасной вариант, если нужно выпустить быстро: он правит жалобу частично, а раздел «Хранение» в диалоге остаётся тесным.</p>
+			</section>
+		</main>
+	</body>
+</html>

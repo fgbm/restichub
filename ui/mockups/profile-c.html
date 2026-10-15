@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Профиль, вариант C · ResticHub</title>
+		<link rel="stylesheet" href="mockups.css" />
+		<link rel="stylesheet" href="profile-mock.css" />
+		<script src="mockups.js"></script>
+		<script src="profile-mock.js"></script>
+	</head>
+	<body>
+		<div data-shell="profile"></div>
+		<div class="pm-mock-bar"><b>Макет профиля, вариант C: страница профиля и мастер</b><span>Другие макеты: <a href="profile-variants.html">сравнение</a> · <a href="profile-a.html">A</a> · <a href="profile-b.html">B</a> · <a href="profiles.html">список</a> · <a href="profile-c.html?mode=create">C: мастер, шаг 1</a> · <a href="profile-c.html?mode=create&step=2">шаг 2</a> · <a href="profile-c.html?mode=create&step=3">шаг 3</a></span></div>
+		<main class="page">
+			<div data-view="read" data-scope="edit">
+			<div class="page-header">
+				<div>
+					<div class="pm-crumbs"><a href="profiles.html">Профили</a><span>/</span><span>srv-web-nightly</span></div>
+					<h1 class="page-title">srv-web-nightly</h1>
+					<p class="page-subtitle">Копирует папки хоста в репозиторий <b data-live="repo"></b>. Используют 3 плана. Включено разделов: <span data-count-on></span>.</p>
+				</div>
+				<div class="page-actions"><button class="btn" type="button" data-open-dialog="ed-preview"><svg class="icon"><use href="icons.svg#i-eye" /></svg> Команды</button><button class="btn" type="button"><svg class="icon"><use href="icons.svg#i-copy" /></svg> Дублировать</button></div>
+			</div>
+
+				<div class="pm-view">
+				<section class="pm-card" data-feat="basics">
+					<div class="pm-card-head"><span class="pm-card-title">Основное</span><button class="btn btn--sm" type="button" data-open-dialog="ed-basics"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p><b data-live="name"></b> копирует в репозиторий <b data-live="repo"></b>.</p><p class="pm-sub">Имя и репозиторий нужны всегда.</p></div>
+				</section>
+				<section class="pm-card" data-feat="paths">
+					<div class="pm-card-head"><span class="pm-card-title">Что копируется</span><button class="btn btn--sm" type="button" data-open-dialog="ed-paths"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p>Эти пути попадают в каждую копию:</p><ul class="pm-paths"><li><span class="os">все системы</span><span data-lines="pathsAll"></span></li><li><span class="os">Linux</span><span data-lines="pathsLinux"></span></li><li><span class="os">Windows</span><span data-lines="pathsWin"></span></li><li><span class="os">macOS</span><span data-lines="pathsMac"></span></li></ul></div>
+				</section>
+				<section class="pm-card" data-feat="excludes">
+					<div class="pm-card-head"><span class="pm-card-title">Что пропускается</span><span class="status status--neutral" data-chip="excludes"></span><button class="btn btn--sm" type="button" data-open-dialog="ed-excludes"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p>Пропускаются файлы по шаблонам:</p><div data-lines="excludes"></div><p style="margin-top: var(--space-2)">И по спискам из файлов на хосте:</p><div data-lines="excludeFiles"></div></div>
+				</section>
+				<section class="pm-card" data-feat="tags">
+					<div class="pm-card-head"><span class="pm-card-title">Теги снимков</span><span class="status status--neutral" data-chip="tags"></span><button class="btn btn--sm" type="button" data-open-dialog="ed-tags"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p>Каждая копия получает теги:</p><div data-lines="tags"></div></div>
+				</section>
+				<section class="pm-card pm-card--wide" data-feat="retention">
+					<div class="pm-card-head"><span class="pm-card-title">Сколько хранить</span><span class="status status--neutral" data-chip="retention"></span><button class="btn btn--sm" type="button" data-open-dialog="ed-retention"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p class="pm-sub">Правила работают вместе: снимок остаётся, если его оставило хотя бы одно из них.</p><ul class="pm-plain" data-plain="retention"></ul><div class="pm-keepline" style="margin-top: var(--space-3)">В примере из 63 снимков за 60 дней останется примерно <b data-keep-total></b>.</div><div class="pm-timeline" data-timeline style="margin-top: var(--space-3)" role="img" aria-label="Снимки в примере"></div><div class="pm-axis"><span>60 дней назад</span><span>сегодня</span></div><div data-keep-line hidden></div></div>
+				</section>
+				<section class="pm-card" data-feat="options">
+					<div class="pm-card-head"><span class="pm-card-title">Как копировать</span><span class="status status--neutral" data-chip="options"></span><button class="btn btn--sm" type="button" data-open-dialog="ed-options"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p data-sum="options"></p><p class="pm-sub">Снимок файловой системы, границы томов, кэш и ограничения скорости.</p></div>
+				</section>
+				<section class="pm-card" data-feat="check">
+					<div class="pm-card-head"><span class="pm-card-title">Проверка репозитория</span><span class="status status--neutral" data-chip="check"></span><button class="btn btn--sm" type="button" data-open-dialog="ed-check"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p data-sum="check"></p><p class="pm-sub">Проверяет, что данные в репозитории целы и читаются.</p></div>
+				</section>
+				<section class="pm-card" data-feat="scripts">
+					<div class="pm-card-head"><span class="pm-card-title">Скрипты на хосте</span><span class="status status--neutral" data-chip="scripts"></span><button class="btn btn--sm" type="button" data-open-dialog="ed-scripts"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p data-sum="scripts"></p><p class="pm-sub">Свои команды до и после копирования, например заморозка базы. Правит только администратор.</p></div>
+				</section>
+				<section class="pm-card" data-feat="hooks">
+					<div class="pm-card-head"><span class="pm-card-title">Хуки</span><span class="status status--neutral" data-chip="hooks"></span><button class="btn btn--sm" type="button" data-open-dialog="ed-hooks"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p data-sum="hooks"></p><p class="pm-sub">Готовые команды из списка разрешённых на хосте.</p></div>
+				</section>
+				<section class="pm-card" data-feat="limits">
+					<div class="pm-card-head"><span class="pm-card-title">Лимиты выполнения <span class="pm-new">Новое</span></span><span class="status status--neutral" data-chip="limits"></span><button class="btn btn--sm" type="button" data-open-dialog="ed-limits"><svg class="icon icon--xs"><use href="icons.svg#i-settings" /></svg> Изменить</button></div>
+					<div class="pm-card-body"><p data-sum="limits"></p><p class="pm-sub">Останавливают зависшие и слишком долгие задания.</p></div>
+				</section>
+				</div>
+			<dialog class="dialog pm-edit-dialog" id="ed-basics" aria-labelledby="ed-basics-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-basics-t" style="color: var(--color-text)">Основное</div><div class="pm-sub">Имя профиля и репозиторий.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						
+						<div class="pm-fields" data-sec-body="basics"><div data-block="basics"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-paths" aria-labelledby="ed-paths-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-paths-t" style="color: var(--color-text)">Что копируется</div><div class="pm-sub">Пути для каждой системы.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						
+						<div class="pm-fields" data-sec-body="paths"><div data-block="paths"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-excludes" aria-labelledby="ed-excludes-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-excludes-t" style="color: var(--color-text)">Что пропускается</div><div class="pm-sub">Шаблоны и файлы исключений.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						<div class="pm-feat-head" style="padding: 0 0 var(--space-3)"><label class="switch" title="Включить или выключить: Что пропускается"><input type="checkbox" data-k="on_excludes" aria-label="Включить: Что пропускается" /></label><span class="pm-sub">Включить раздел «Что пропускается»</span></div>
+						<div class="pm-fields" data-sec-body="excludes"><div data-block="excludes"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-tags" aria-labelledby="ed-tags-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-tags-t" style="color: var(--color-text)">Теги снимков</div><div class="pm-sub">Метки каждой копии.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						<div class="pm-feat-head" style="padding: 0 0 var(--space-3)"><label class="switch" title="Включить или выключить: Теги снимков"><input type="checkbox" data-k="on_tags" aria-label="Включить: Теги снимков" /></label><span class="pm-sub">Включить раздел «Теги снимков»</span></div>
+						<div class="pm-fields" data-sec-body="tags"><div data-block="tags"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-retention" aria-labelledby="ed-retention-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-retention-t" style="color: var(--color-text)">Сколько хранить</div><div class="pm-sub">Правила удаления старых снимков.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						<div class="pm-feat-head" style="padding: 0 0 var(--space-3)"><label class="switch" title="Включить или выключить: Сколько хранить"><input type="checkbox" data-k="on_retention" aria-label="Включить: Сколько хранить" /></label><span class="pm-sub">Включить раздел «Сколько хранить»</span></div>
+						<div class="pm-fields" data-sec-body="retention"><div data-block="retention"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-options" aria-labelledby="ed-options-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-options-t" style="color: var(--color-text)">Как копировать</div><div class="pm-sub">Параметры резервного копирования.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						<div class="pm-feat-head" style="padding: 0 0 var(--space-3)"><label class="switch" title="Включить или выключить: Как копировать"><input type="checkbox" data-k="on_options" aria-label="Включить: Как копировать" /></label><span class="pm-sub">Включить раздел «Как копировать»</span></div>
+						<div class="pm-fields" data-sec-body="options"><div data-block="options"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-check" aria-labelledby="ed-check-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-check-t" style="color: var(--color-text)">Проверка репозитория</div><div class="pm-sub">Целостность данных.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						<div class="pm-feat-head" style="padding: 0 0 var(--space-3)"><label class="switch" title="Включить или выключить: Проверка репозитория"><input type="checkbox" data-k="on_check" aria-label="Включить: Проверка репозитория" /></label><span class="pm-sub">Включить раздел «Проверка репозитория»</span></div>
+						<div class="pm-fields" data-sec-body="check"><div data-block="check"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-scripts" aria-labelledby="ed-scripts-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-scripts-t" style="color: var(--color-text)">Скрипты на хосте</div><div class="pm-sub">Команды до и после копирования.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						<div class="pm-feat-head" style="padding: 0 0 var(--space-3)"><label class="switch" title="Включить или выключить: Скрипты на хосте"><input type="checkbox" data-k="on_scripts" aria-label="Включить: Скрипты на хосте" /></label><span class="pm-sub">Включить раздел «Скрипты на хосте»</span></div>
+						<div class="pm-fields" data-sec-body="scripts"><div data-block="scripts"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-hooks" aria-labelledby="ed-hooks-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-hooks-t" style="color: var(--color-text)">Хуки</div><div class="pm-sub">Разрешённые команды хоста.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						<div class="pm-feat-head" style="padding: 0 0 var(--space-3)"><label class="switch" title="Включить или выключить: Хуки"><input type="checkbox" data-k="on_hooks" aria-label="Включить: Хуки" /></label><span class="pm-sub">Включить раздел «Хуки»</span></div>
+						<div class="pm-fields" data-sec-body="hooks"><div data-block="hooks"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+			<dialog class="dialog pm-edit-dialog" id="ed-limits" aria-labelledby="ed-limits-t">
+				<form method="dialog">
+					<div class="dialog-head"><div><div class="dialog-title" id="ed-limits-t" style="color: var(--color-text)">Лимиты выполнения</div><div class="pm-sub">Защита от зависших заданий.</div></div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body">
+						<div class="pm-feat-head" style="padding: 0 0 var(--space-3)"><label class="switch" title="Включить или выключить: Лимиты выполнения"><input type="checkbox" data-k="on_limits" aria-label="Включить: Лимиты выполнения" /></label><span class="pm-sub">Включить раздел «Лимиты выполнения»</span></div>
+						<div class="pm-fields" data-sec-body="limits"><div data-block="limits"></div></div>
+					</div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Отмена</button><button class="btn btn--primary" type="button" data-close-dialog>Готово</button></div>
+				</form>
+			</dialog>
+				<dialog class="dialog pm-edit-dialog" id="ed-preview" aria-labelledby="ed-preview-t">
+					<div class="dialog-head"><div class="dialog-title" id="ed-preview-t" style="color: var(--color-text)">Команды restic</div><button class="btn btn--icon btn--ghost dialog-close" type="button" data-close-dialog aria-label="Закрыть"><svg class="icon"><use href="icons.svg#i-x" /></svg></button></div>
+					<div class="dialog-body"><div data-preview>
+	<div class="pm-os"><label for="os-3">Команды для хоста:</label>
+		<span class="select-wrap"><select class="select" id="os-3" data-preview-os>
+			<option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option>
+		</select><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></span></div>
+	<div data-preview-steps></div>
+</div></div>
+					<div class="dialog-foot"><button class="btn" type="button" data-close-dialog>Закрыть</button></div>
+				</dialog>
+			</div>
+			<div data-view="create" data-scope="new" hidden>
+			<div class="page-header">
+				<div>
+					<div class="pm-crumbs"><a href="profiles.html">Профили</a><span>/</span><span>Новый профиль</span></div>
+					<h1 class="page-title">Новый профиль</h1>
+					<p class="page-subtitle">Три шага. Всё, что не нужно сейчас, можно добавить позже на странице профиля.</p>
+				</div>
+				<div class="page-actions"></div>
+			</div>
+
+				<div class="pm-wizard">
+					<div class="pm-steps" role="list">
+						<span class="pm-stepper is-current" role="listitem" data-stepper="1"><span class="n">1</span> Что копировать</span>
+						<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+						<span class="pm-stepper" role="listitem" data-stepper="2"><span class="n">2</span> Куда и когда</span>
+						<svg class="icon icon--xs"><use href="icons.svg#i-chevron-right" /></svg>
+						<span class="pm-stepper" role="listitem" data-stepper="3"><span class="n">3</span> Сколько хранить</span>
+					</div>
+					<div class="pm-wizard-step" data-step="1">
+						<div class="pm-wizard-head"><h2>Что копировать</h2><p>Дайте профилю имя и укажите папки. Для разных систем пути можно задать отдельно.</p></div>
+						<div class="pm-wizard-body pm-stack">
+							<div class="field"><label class="field-label" for="w-name">Имя профиля<span class="req">*</span></label><input class="input" id="w-name" data-k="name" placeholder="Например, srv-web-nightly" /><div class="field-hint">Короткое имя, по нему профиль находят в списке и в планах.</div></div>
+							<div data-block="paths"></div>
+							<div><div class="pm-group-title" style="margin-bottom: var(--space-2)">Пропускать</div><div data-block="excludes"></div></div>
+						</div>
+						<div class="pm-wizard-foot"><a class="btn" href="profiles.html">Отмена</a><span class="grow"></span><button class="btn btn--primary" type="button" data-step-go="2">Далее <svg class="icon icon--xs"><use href="icons.svg#i-arrow-right" /></svg></button></div>
+					</div>
+					<div class="pm-wizard-step" data-step="2" hidden>
+						<div class="pm-wizard-head"><h2>Куда и когда</h2><p>Выберите репозиторий. Расписание и хост задаёт план, он создаётся из готового профиля.</p></div>
+						<div class="pm-wizard-body pm-stack">
+							<div data-block="repo"></div>
+							<div class="alert"><svg class="icon icon--xs"><use href="icons.svg#i-info" /></svg><span>Расписание не хранится в профиле. После сохранения мы предложим сразу создать план: выберите хост и время запуска.</span></div>
+							<div class="pm-grid2">
+								<div class="field"><label class="field-label" for="w-when">Когда запускать (для будущего плана)</label><span class="select-wrap"><select class="select" id="w-when"><option>Каждую ночь, 02:00</option><option>Каждый час</option><option>По будням, 19:00</option><option>Только вручную</option></select><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></span></div>
+								<div class="field"><label class="field-label" for="w-host">На каком хосте</label><span class="select-wrap"><select class="select" id="w-host"><option>Выберу позже</option><option>srv-app-02</option><option>nas-backup</option></select><svg class="icon"><use href="icons.svg#i-chevron-down" /></svg></span></div>
+							</div>
+						</div>
+						<div class="pm-wizard-foot"><button class="btn" type="button" data-step-go="1"><svg class="icon icon--xs"><use href="icons.svg#i-arrow-left" /></svg> Назад</button><span class="grow"></span><button class="btn btn--primary" type="button" data-step-go="3">Далее <svg class="icon icon--xs"><use href="icons.svg#i-arrow-right" /></svg></button></div>
+					</div>
+					<div class="pm-wizard-step" data-step="3" hidden>
+						<div class="pm-wizard-head"><h2>Сколько хранить</h2><p>Выберите готовый набор или настройте правила. Старые снимки сверх правил будут удаляться после каждой копии.</p></div>
+						<div class="pm-wizard-body">
+							<label class="switch" style="margin-bottom: var(--space-4)"><input type="checkbox" data-k="on_retention" checked aria-label="Удалять старые снимки" /><span>Удалять старые снимки по правилам</span></label>
+							<div data-block="retention"></div>
+						</div>
+						<div class="pm-wizard-foot"><button class="btn" type="button" data-step-go="2"><svg class="icon icon--xs"><use href="icons.svg#i-arrow-left" /></svg> Назад</button><span class="grow"></span><span class="pm-sub">Остальное — проверка, скрипты, хуки, лимиты — на странице профиля.</span><button class="btn btn--primary" type="button">Создать профиль</button></div>
+					</div>
+				</div>
+			</div>
+		</main>
+	</body>
+</html>
