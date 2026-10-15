@@ -14,7 +14,9 @@ use restichub_db::{
     AgentStatus, JobKind, JobResultCode, RepositoryId, SecretId, TenantTx, agents as agents_repo,
     plans as plans_repo, profiles as profiles_repo, repositories as repo,
 };
-use restichub_proto::agent::v1::{Job as ProtoJob, Step, UnlockAllStep, UnlockStep, step};
+use restichub_proto::agent::v1::{
+    Job as ProtoJob, Step, UnlockAllStep, UnlockStep, hook_parameter::Typed, step,
+};
 use time::OffsetDateTime;
 
 use crate::delivery::DeliveryError;
@@ -49,6 +51,8 @@ pub enum Refusal {
     UnsupportedKind,
     SecretUnavailable,
     JobInvalid,
+    /// The agent no longer reports a hook of the profile, or reports another schema (AC-HK-05).
+    HookUnavailable,
 }
 
 impl Refusal {
@@ -70,6 +74,7 @@ impl Refusal {
             Self::UnsupportedKind => "unsupported_kind",
             Self::SecretUnavailable => "secret_unavailable",
             Self::JobInvalid => "job_invalid",
+            Self::HookUnavailable => "hook_unavailable",
         }
     }
 
@@ -82,7 +87,8 @@ impl Refusal {
             | Self::CompileFailed
             | Self::StepMissing
             | Self::RequestMissing
-            | Self::SecretUnavailable => JobResultCode::ConfigError,
+            | Self::SecretUnavailable
+            | Self::HookUnavailable => JobResultCode::ConfigError,
             _ => JobResultCode::Failed,
         }
     }
@@ -172,6 +178,19 @@ pub async fn build(
     let access = repository_access(tx, provider, &repository, job.agent_id, job.id)
         .await
         .map_err(delivery_error)?;
+    let mut secrets = delivered_secrets(&repository);
+    secrets.extend(
+        resolve_hook_secrets(
+            tx,
+            provider,
+            &mut steps,
+            job.agent_id,
+            job.id,
+            repository_id,
+        )
+        .await
+        .map_err(delivery_error)?,
+    );
 
     let mut expires_at = now + MAX_SIGNED_LIFETIME;
     if let Some(row_expiry) = job.expires_at {
@@ -191,10 +210,50 @@ pub async fn build(
         tracing::warn!(job = %job.id, reason = ?rejection.reason, "the queue built a job that does not validate");
         BuildError::Refused(Refusal::JobInvalid)
     })?;
-    Ok(Built {
-        job,
-        secrets: delivered_secrets(&repository),
-    })
+    Ok(Built { job, secrets })
+}
+
+/// Replaces the secret reference of each hook parameter with the value of the secret and returns
+/// the secrets it read (FR-HK-03, ADR-0017).
+///
+/// The compiler leaves the identifier of the secret in the step. Only a secret of the purpose
+/// `hook_secret` passes, and each read writes a `secret_delivered` record in the transaction of the
+/// caller (AC-RP-03). A step that still holds an identifier never leaves the control plane.
+async fn resolve_hook_secrets(
+    tx: &mut TenantTx<'_>,
+    provider: &dyn restichub_secrets::KekProvider,
+    steps: &mut [Step],
+    agent_id: restichub_db::AgentId,
+    job_id: restichub_db::JobId,
+    repository_id: RepositoryId,
+) -> Result<Vec<SecretId>, DeliveryError> {
+    let reader = crate::delivery::SecretReader::new(provider);
+    let mut read = Vec::new();
+    for step in steps {
+        let Some(step::Kind::Hook(hook)) = step.kind.as_mut() else {
+            continue;
+        };
+        for parameter in &mut hook.parameters {
+            let Some(Typed::SecretValue(reference)) = &parameter.typed else {
+                continue;
+            };
+            let id = uuid::Uuid::parse_str(reference)
+                .map(SecretId::from_uuid)
+                .map_err(|_| DeliveryError::NotFound)?;
+            let value = reader
+                .read_hook_secret_for_delivery(
+                    tx,
+                    id,
+                    agent_id.as_uuid(),
+                    job_id.as_uuid(),
+                    repository_id.as_uuid(),
+                )
+                .await?;
+            parameter.typed = Some(Typed::SecretValue(value.expose_secret().to_owned()));
+            read.push(id);
+        }
+    }
+    Ok(read)
 }
 
 fn delivery_error(error: DeliveryError) -> BuildError {
@@ -248,7 +307,11 @@ async fn plan_steps(
     })?;
     let compiled = compile(&compiler_profile, &target).map_err(|error| {
         tracing::warn!(job = %job.id, cause = ?error, "the stored profile does not compile");
-        BuildError::Refused(Refusal::CompileFailed)
+        if error.is_hook() {
+            BuildError::Refused(Refusal::HookUnavailable)
+        } else {
+            BuildError::Refused(Refusal::CompileFailed)
+        }
     })?;
 
     let mut steps: Vec<Step> = compiled

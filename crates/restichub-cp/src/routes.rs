@@ -314,6 +314,12 @@ pub const ROUTES: &[Route] = &[
         handler: || routes!(crate::agents::get_agent),
     },
     Route {
+        method: "get",
+        path: "/api/v1/hooks",
+        access: Access::Protected(Operation::AgentsRead),
+        handler: || routes!(crate::hooks::list_hooks),
+    },
+    Route {
         method: "patch",
         path: "/api/v1/agents/{id}",
         access: Access::Protected(Operation::AgentsWrite),

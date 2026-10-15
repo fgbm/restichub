@@ -676,12 +676,14 @@ async fn run_stream(
     ) {
         return;
     }
+    let hooks = crate::hooks::from_hello(&hello, &capabilities);
     crate::agents::record_hello_facts(
         &state,
         identity.tenant,
         agent,
         &capabilities,
         &restore_roots,
+        &hooks,
     )
     .await;
 

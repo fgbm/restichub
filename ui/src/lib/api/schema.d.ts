@@ -354,6 +354,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lists the hooks that the active agents report.
+         * @description A hook is a candidate for a profile when every target agent of the profile reports it. An
+         *     agent that reports the same identifier with another schema gives a second entry.
+         */
+        get: operations["list_hooks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instance": {
         parameters: {
             query?: never;
@@ -1332,6 +1353,13 @@ export interface components {
             /** @description Lower-case hexadecimal. */
             certificate_serial: string;
             created_at: string;
+            /** @description Whether the agent trusted its hook allow-list file at its last connection (AC-HK-01). */
+            hook_allow_list: components["schemas"]["HookAllowListState"];
+            /**
+             * @description The hooks from the allow-list of the host, as the agent reported them (FR-HK-04). The list
+             *     holds no path. The control plane cannot change it.
+             */
+            hooks: components["schemas"]["HookView"][];
             hostname: string;
             id: string;
             labels: string[];
@@ -1584,6 +1612,17 @@ export interface components {
          * @enum {string}
          */
         BrowseState: "empty" | "pending" | "done" | "failed";
+        /** @description An active agent in the hook catalogue. */
+        CatalogueAgent: {
+            hook_allow_list: components["schemas"]["HookAllowListState"];
+            hostname: string;
+            id: string;
+        };
+        /** @description A hook and the agents that report it with this schema. */
+        CatalogueHook: components["schemas"]["HookView"] & {
+            /** @description The active agents that report the hook with exactly this schema. */
+            agent_ids: string[];
+        };
         ChangePasswordRequest: {
             current_password: string;
             /** @description At least 12 characters. */
@@ -1926,10 +1965,45 @@ export interface components {
          * @enum {string}
          */
         GroupBy: "host" | "paths" | "tags";
+        /**
+         * @description Whether an agent trusts its hook allow-list file (FR-HK-01, AC-HK-01).
+         * @enum {string}
+         */
+        HookAllowListState: "unknown" | "absent" | "loaded" | "insecure" | "invalid";
+        /** @description The hooks that the active agents of the tenant report (FR-HK-04). */
+        HookCatalogue: {
+            agents: components["schemas"]["CatalogueAgent"][];
+            hooks: components["schemas"]["CatalogueHook"][];
+        };
         /** @description One named hook parameter (FR-HK-03). */
         HookParameter: {
             name: string;
             value: string;
+        };
+        /**
+         * @description The type of a hook parameter in the API.
+         * @enum {string}
+         */
+        HookParameterType: "string" | "integer" | "enum" | "boolean" | "secret_ref";
+        /** @description One parameter of a reported hook (FR-HK-02). */
+        HookParameterView: {
+            /**
+             * Format: int32
+             * @description Longest string in bytes. Only a string parameter has it.
+             */
+            max_length?: number | null;
+            /** Format: int64 */
+            maximum?: number | null;
+            /** Format: int64 */
+            minimum?: number | null;
+            name: string;
+            /** @description Regular expression that the whole string must match. */
+            pattern?: string | null;
+            /** @description True when every use of the hook must set the parameter. */
+            required: boolean;
+            type: components["schemas"]["HookParameterType"];
+            /** @description The allowed values of an enumeration. */
+            values?: string[];
         };
         /**
          * @description Position of a hook in the job (FR-HK-05).
@@ -1941,6 +2015,13 @@ export interface components {
             hook_id: string;
             parameters?: components["schemas"]["HookParameter"][];
             phase: components["schemas"]["HookPhase"];
+        };
+        /** @description One hook that an agent reports (FR-HK-04). The view holds no path. */
+        HookView: {
+            hook_id: string;
+            parameters: components["schemas"]["HookParameterView"][];
+            /** @description The phases where the hook may run. An empty list allows every phase. */
+            phases: components["schemas"]["HookPhase"][];
         };
         /** @description The mode and the setup state of the installation. */
         InstanceResponse: {
@@ -2363,10 +2444,19 @@ export interface components {
             maintenance: boolean;
         };
         ProblemBody: {
+            /**
+             * @description The agent that does not report the hook or the schema. Only a refused hook of a profile
+             *     sets it (AC-HK-05).
+             */
+            agent_id?: string | null;
+            /** @description The host name of the agent in `agent_id`. */
+            agent_name?: string | null;
             /** @description In snake_case. */
             code: components["schemas"]["ErrorCode"];
             /** @description Only `invalid_argument` sets it. */
             field?: string | null;
+            /** @description The hook that the agent does not report. Only a refused hook of a profile sets it. */
+            hook_id?: string | null;
             /** @description In snake_case; only `invalid_argument` sets it. */
             reason?: string | null;
             request_id: string;
@@ -2609,7 +2699,7 @@ export interface components {
          *     change: a change makes every stored ciphertext of that purpose undecryptable.
          * @enum {string}
          */
-        SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password" | "webhook_secret" | "webhook_url";
+        SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password" | "webhook_secret" | "webhook_url" | "hook_secret";
         /**
          * @description The metadata of a secret in a response (FR-RP-05).
          *
@@ -4020,6 +4110,44 @@ export interface operations {
             };
             /** @description The token is used or already revoked. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_hooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The hooks that the active agents of the tenant report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HookCatalogue"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -250,8 +250,41 @@ impl Env {
     /// Like [`Env::connect_agent`], for an agent that announces `capabilities` only.
     pub async fn connect_agent_with(&self, hostname: &str, capabilities: Vec<String>) -> FakeAgent {
         let identity = self.enroll_agent(hostname).await;
-        self.open_agent_stream(identity, capabilities, default_restore_roots())
+        self.open_agent_stream(identity, capabilities, default_restore_roots(), None)
             .await
+    }
+
+    /// Like [`Env::connect_agent`], for an agent that reports a hook allow-list (FR-HK-04).
+    pub async fn connect_agent_reporting(&self, hostname: &str, report: HookReport) -> FakeAgent {
+        let capabilities = restichub_proto::AgentCapability::ALL
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect();
+        let identity = self.enroll_agent(hostname).await;
+        self.open_agent_stream(
+            identity,
+            capabilities,
+            default_restore_roots(),
+            Some(report),
+        )
+        .await
+    }
+
+    /// Opens a new stream of an enrolled identity with another hook report, as a restart after a
+    /// change of the allow-list does.
+    pub async fn reconnect_agent_reporting(
+        &self,
+        agent: &FakeAgent,
+        capabilities: Vec<String>,
+        report: HookReport,
+    ) -> FakeAgent {
+        self.open_agent_stream(
+            agent.identity.clone(),
+            capabilities,
+            default_restore_roots(),
+            Some(report),
+        )
+        .await
     }
 
     /// Like [`Env::connect_agent`], for an agent that reports `roots` as its restore roots.
@@ -261,7 +294,8 @@ impl Env {
             .map(|capability| capability.as_str().to_owned())
             .collect();
         let identity = self.enroll_agent(hostname).await;
-        self.open_agent_stream(identity, capabilities, roots).await
+        self.open_agent_stream(identity, capabilities, roots, None)
+            .await
     }
 
     /// Opens a new stream for an enrolled identity, as a restart or a downgrade does. This closes
@@ -271,6 +305,7 @@ impl Env {
             agent.identity.clone(),
             capabilities,
             default_restore_roots(),
+            None,
         )
         .await
     }
@@ -280,6 +315,7 @@ impl Env {
         identity: EnrolledIdentity,
         capabilities: Vec<String>,
         roots: Vec<String>,
+        report: Option<HookReport>,
     ) -> FakeAgent {
         let client_tls = ClientTlsConfig::new()
             .ca_certificate(Certificate::from_pem(der_to_pem(
@@ -304,7 +340,7 @@ impl Env {
             .connect(ReceiverStream::new(rx))
             .await
             .expect("the stream must open");
-        tx.send(hello(capabilities.clone(), roots))
+        tx.send(hello(capabilities.clone(), roots, report))
             .await
             .expect("cannot send the hello");
         let mut inbound = response.into_inner();
@@ -555,7 +591,22 @@ pub fn default_restore_roots() -> Vec<String> {
     vec![std::env::temp_dir().to_string_lossy().into_owned()]
 }
 
-fn hello(capabilities: Vec<String>, restore_roots: Vec<String>) -> AgentMessage {
+/// The hook allow-list that a fake agent reports in its hello (FR-HK-04).
+#[derive(Clone)]
+pub struct HookReport {
+    pub state: restichub_proto::agent::v1::HookAllowListState,
+    pub hooks: Vec<restichub_proto::agent::v1::HookMetadata>,
+}
+
+fn hello(
+    capabilities: Vec<String>,
+    restore_roots: Vec<String>,
+    report: Option<HookReport>,
+) -> AgentMessage {
+    let (hook_allow_list_state, hooks) = match report {
+        Some(report) => (report.state as i32, report.hooks),
+        None => (0, Vec::new()),
+    };
     AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
@@ -563,6 +614,8 @@ fn hello(capabilities: Vec<String>, restore_roots: Vec<String>) -> AgentMessage 
             agent_version: "0.1.0".to_owned(),
             capabilities,
             restore_roots,
+            hooks,
+            hook_allow_list_state,
             ..AgentHello::default()
         })),
     }

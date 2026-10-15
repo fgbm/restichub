@@ -4,10 +4,11 @@
 //! write (FR-PF-05) and the mapping to the compiler types (FR-PF-04). The handlers live in the
 //! parent module.
 //!
-//! The profile holds no secret today. The repository password and the backend credentials stay in
-//! the `secrets` table (ADR-0017). A hook parameter is refused until the agent reports the allow-list
-//! with the secret flag (FR-HK-04); a later secret hook parameter must be a secret reference
-//! (ADR-0017) and is masked in the view and in the audit diff.
+//! The profile holds no secret. The repository password and the backend credentials stay in the
+//! `secrets` table (ADR-0017). A hook parameter of the type `secret_ref` holds the identifier of a
+//! secret, never the value (FR-HK-03); the job builder resolves it at dispatch time. The shape of
+//! the other parameters follows the schema that the target agents report (FR-HK-04), so the check
+//! against the schema runs in [`super::hooks`].
 
 use std::collections::BTreeMap;
 
@@ -33,6 +34,10 @@ use crate::validation::{self, Reason};
 pub const MAX_PROFILE_NAME: usize = 48;
 /// Limit in characters of a hook identifier or a hook parameter name.
 pub const MAX_HOOK_ID: usize = 64;
+/// Limit in bytes of the text of one hook parameter value.
+pub const MAX_HOOK_VALUE: usize = 4096;
+/// Limit of the parameters of one hook.
+pub const MAX_HOOK_PARAMETERS: usize = restichub_compiler::hook::MAX_PARAMETERS;
 /// Limit in characters of one exclude, exclude file or tag.
 pub const MAX_PATTERN: usize = 4096;
 /// Limit in characters of one path entry. A Windows path is longer than a Unix path.
@@ -300,21 +305,20 @@ enum SaveOutcome {
 
 /// Runs the compiler against a synthetic target for each operating system (FR-PF-05).
 ///
-/// A template error and an unknown hook are wrong for every target, so they refuse the request.
-/// An operating-system or version mismatch is a warning, because a profile may target several
-/// operating systems. The hook allow-list is empty until the agent reports it (FR-HK-04), so the
-/// synthetic target holds the hook identifiers of the profile.
+/// A template error is wrong for every target, so it refuses the request. An operating-system or
+/// version mismatch is a warning, because a profile may target several operating systems. The
+/// synthetic target has no hooks: the hooks are checked against the report of the real agents
+/// (FR-HK-04).
 ///
 /// # Errors
 ///
 /// Returns a field error for a defect that no target accepts.
 pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, ApiError> {
-    let compiler_profile = profile.to_compiler_profile();
-    let allow_list: BTreeMap<String, AllowListedHook> = profile
-        .hooks
-        .iter()
-        .map(|hook| (hook.hook_id.clone(), AllowListedHook::default()))
-        .collect();
+    // The hooks depend on the allow-lists of the target agents, so the check against them runs
+    // apart from this one (AC-HK-05).
+    let mut compiler_profile = profile.to_compiler_profile();
+    compiler_profile.hooks.clear();
+    let allow_list: BTreeMap<String, AllowListedHook> = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for os in [
@@ -668,7 +672,7 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
     Ok(compiler_profile)
 }
 
-fn compiler_hook(hook: &HookRef) -> CompilerHookRef {
+pub(super) fn compiler_hook(hook: &HookRef) -> CompilerHookRef {
     CompilerHookRef {
         hook_id: hook.hook_id.clone(),
         phase: match hook.phase {
@@ -925,17 +929,41 @@ fn validate_hooks(hooks: Vec<HookRef>) -> Result<Vec<HookRef>, ApiError> {
     let mut result = Vec::with_capacity(hooks.len());
     for (index, hook) in hooks.into_iter().enumerate() {
         let hook_id = validate_identifier("hooks.hook_id", &hook.hook_id)?;
-        // A hook parameter may be secret, and the agent allow-list that reports the secret flag is
-        // not available yet (FR-HK-04). Refuse a parameter, so a secret value never reaches the
-        // profile row, the view or the audit diff.
-        if !hook.parameters.is_empty() {
-            let field = format!("hooks[{index}].parameters");
-            return Err(ApiError::invalid_field(field, Reason::Unavailable));
+        if hook.parameters.len() > MAX_HOOK_PARAMETERS {
+            return Err(ApiError::invalid_field(
+                format!("hooks[{index}].parameters"),
+                Reason::TooLong,
+            ));
+        }
+        let mut parameters = Vec::with_capacity(hook.parameters.len());
+        for (position, parameter) in hook.parameters.into_iter().enumerate() {
+            let field = format!("hooks[{index}].parameters[{position}]");
+            if !restichub_compiler::hook::is_valid_parameter_name(&parameter.name) {
+                return Err(ApiError::invalid_field(
+                    format!("{field}.name"),
+                    Reason::InvalidCharacter,
+                ));
+            }
+            // The text form of a typed value: a number, a flag, an enumeration value, a string or
+            // the identifier of a secret. Control characters never belong to it (FR-PR-10).
+            if parameter.value.len() > MAX_HOOK_VALUE {
+                return Err(ApiError::invalid_field(
+                    format!("{field}.value"),
+                    Reason::TooLong,
+                ));
+            }
+            if restichub_proto::validate::has_forbidden(&parameter.value) {
+                return Err(ApiError::invalid_field(
+                    format!("{field}.value"),
+                    Reason::InvalidCharacter,
+                ));
+            }
+            parameters.push(parameter);
         }
         result.push(HookRef {
             hook_id,
             phase: hook.phase,
-            parameters: Vec::new(),
+            parameters,
         });
     }
     Ok(result)

@@ -15,6 +15,7 @@
 //!
 //! The schedule is not a profile field: it belongs to the plan (FR-SC-01).
 
+mod hooks;
 mod settings;
 
 use std::collections::BTreeMap;
@@ -170,8 +171,10 @@ pub async fn create_profile(
     let validated = validate_create(body)?;
     let warnings = save_warnings(&validated)?;
     let profile_id = ProfileId::new();
+    let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     ensure_repository(&mut tx, validated.repository_id).await?;
+    hooks::check_profile_hooks(&mut tx, &validated.hooks, None, now).await?;
     repo::create(
         &mut tx,
         &validated.new_profile(profile_id, actor_user(&context.actor)),
@@ -232,6 +235,7 @@ pub async fn update_profile(
     let validated = validate_update(body, &current.name)?;
     let warnings = save_warnings(&validated)?;
     ensure_repository(&mut tx, validated.repository_id).await?;
+    hooks::check_profile_hooks(&mut tx, &validated.hooks, Some(profile_id), now).await?;
     repo::update(&mut tx, profile_id, &validated.update())
         .await
         .map_err(map_write_error)?;
@@ -350,7 +354,7 @@ pub async fn preview_profile(
     let compiler_profile = compiler_profile_from_row(&profile)?;
     let plan = compile(&compiler_profile, &target).map_err(compile_error_to_api)?;
     let access = repository_access(&repository);
-    let steps = preview(&plan, &access, &BTreeMap::new()).map_err(preview_error_to_api)?;
+    let steps = preview(&plan, &access, &target.allow_list).map_err(preview_error_to_api)?;
 
     Ok(Json(PreviewResponse {
         profile_id: profile_id.to_string(),
@@ -418,9 +422,8 @@ fn decode_cursor(value: &str) -> Result<ProfileCursor, String> {
 
 /// The compiler input facts of a registered agent (FR-PF-03).
 ///
-/// The hook allow-list is empty until the agent reports it (FR-HK-04). A profile with a hook
-/// therefore gives `unknown hook` in the preview, which is the FR-HK-04 behavior while no agent
-/// reports its allow-list.
+/// The hook allow-list is the report of the agent in its last `AgentHello` (FR-HK-04). A profile
+/// with a hook that the agent does not report gives `unknown hook` in the preview and at dispatch.
 pub(crate) fn target_facts(
     agent: &Agent,
     now: time::OffsetDateTime,
@@ -440,7 +443,7 @@ pub(crate) fn target_facts(
         labels: parse_labels(&agent.labels),
         restic_version,
         now,
-        allow_list: BTreeMap::new(),
+        allow_list: crate::hooks::allow_list_of(agent),
     })
 }
 
@@ -526,7 +529,12 @@ pub(crate) fn compile_for_agent(
 ) -> Result<Plan, ApiError> {
     let target = target_facts(agent, now)?;
     let compiler_profile = compiler_profile_from_row(profile)?;
-    compile(&compiler_profile, &target).map_err(compile_error_to_api)
+    compile(&compiler_profile, &target).map_err(|error| {
+        match hooks::hook_of(&error, &compiler_profile.hooks) {
+            Some(hook) => hooks::hook_error(&error, hook, agent),
+            None => compile_error_to_api(error),
+        }
+    })
 }
 
 /// The plans of the profile that no longer compile for the facts of their agent (FR-SC-11).

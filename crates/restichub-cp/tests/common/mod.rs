@@ -605,6 +605,36 @@ pub async fn seed_agent(db: &Database, tenant: TenantId, hostname: &str) -> rest
     id
 }
 
+/// Stores the hook report of an agent as its hello does (FR-HK-04). `hooks` maps a hook
+/// identifier to the schema; the agent reports the capability `hooks-v1`.
+pub async fn seed_agent_hooks(
+    db: &Database,
+    tenant: TenantId,
+    agent: restichub_db::AgentId,
+    hooks: &std::collections::BTreeMap<String, restichub_compiler::AllowListedHook>,
+    state: restichub_db::HookAllowListState,
+) {
+    let value = serde_json::to_value(hooks).expect("the hooks serialize");
+    let capabilities = vec!["hooks-v1".to_owned()];
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    restichub_db::agents::set_hello_facts(
+        &mut tx,
+        agent,
+        &restichub_db::agents::HelloFacts {
+            capabilities: &capabilities,
+            restore_roots: &[],
+            hooks: &value,
+            hook_allow_list: state,
+        },
+    )
+    .await
+    .expect("cannot store the hooks");
+    tx.commit().await.expect("cannot commit the hooks");
+}
+
 /// Inserts a job row of a tenant and returns its identifier.
 ///
 /// The control plane creates the row in production; a test seeds it directly for a route fixture.

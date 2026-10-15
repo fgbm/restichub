@@ -23,6 +23,7 @@ pub mod enrollment;
 pub mod enrollment_tokens;
 pub mod error;
 pub mod harden;
+pub mod hooks;
 pub mod instance;
 pub mod job_api;
 pub mod job_data;

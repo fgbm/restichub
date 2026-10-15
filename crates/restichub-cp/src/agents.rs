@@ -25,15 +25,16 @@ use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::validation::Reason;
 
-/// Stores the capabilities and the restore roots of the last connection of an agent for the
-/// diagnostics and the Restore screen (FR-PR-09, FR-RS-03). The job builder never reads the
+/// Stores the capabilities, the restore roots and the hooks of the last connection of an agent for
+/// the diagnostics, the Restore screen and the hook picker (FR-PR-09, FR-RS-03, FR-HK-04). The job builder never reads the
 /// capabilities: it uses the capabilities of the live connection.
-pub async fn record_hello_facts(
+pub(crate) async fn record_hello_facts(
     state: &AppState,
     tenant: restichub_db::TenantId,
     agent: AgentId,
     capabilities: &[restichub_proto::AgentCapability],
     restore_roots: &[String],
+    hooks: &crate::hooks::HelloHooks,
 ) {
     let names: Vec<String> = capabilities
         .iter()
@@ -41,7 +42,13 @@ pub async fn record_hello_facts(
         .collect();
     let result = async {
         let mut tx = state.db().begin_tenant(tenant).await?;
-        repo::set_hello_facts(&mut tx, agent, &names, restore_roots).await?;
+        let facts = repo::HelloFacts {
+            capabilities: &names,
+            restore_roots,
+            hooks: &hooks.hooks,
+            hook_allow_list: hooks.state,
+        };
+        repo::set_hello_facts(&mut tx, agent, &facts).await?;
         tx.commit().await
     }
     .await;
@@ -62,6 +69,11 @@ pub struct AgentView {
     /// Absolute directories where the agent restores files, from its last connection. A restore
     /// target must lie inside one of them.
     pub restore_roots: Vec<String>,
+    /// Whether the agent trusted its hook allow-list file at its last connection (AC-HK-01).
+    pub hook_allow_list: restichub_db::HookAllowListState,
+    /// The hooks from the allow-list of the host, as the agent reported them (FR-HK-04). The list
+    /// holds no path. The control plane cannot change it.
+    pub hooks: Vec<crate::hooks::HookView>,
     /// Lower-case hexadecimal.
     pub certificate_serial: String,
     /// In RFC 3339.
@@ -84,6 +96,8 @@ impl From<&repo::Agent> for AgentView {
             restic_version: agent.restic_version.clone(),
             labels: agent.labels.clone(),
             restore_roots: agent.restore_roots.clone(),
+            hook_allow_list: agent.hook_allow_list,
+            hooks: crate::hooks::views_of(agent),
             certificate_serial: to_hex(&agent.certificate_serial),
             certificate_expires_at: format_time(agent.certificate_expires_at),
             status: agent.status,
