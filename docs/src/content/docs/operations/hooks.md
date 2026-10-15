@@ -3,7 +3,7 @@ title: Allow-list hooks
 description: How a host administrator lists the programs that a profile can run before and after a backup on a host.
 ---
 
-An allow-list hook is a program that a host administrator lists in a file on the host. A profile refers to the hook by its ID and sends typed parameters. The agent starts only the programs in the file (ADR-0004).
+An allow-list hook is a program that a host administrator lists in a file on the host. A profile refers to the hook by its ID and sends typed parameters. The agent starts only the programs in the file.
 
 Use this mode when you do not want the control plane to send code to a host. A host with the [trust mode](scripts/) can also run server scripts. A profile can use both kinds.
 

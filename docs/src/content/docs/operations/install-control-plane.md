@@ -12,7 +12,7 @@ The control plane runs on one Linux server. This page installs the control plane
 | Control plane | Keeps the configuration, schedules the jobs, serves the API and the web interface |
 | PostgreSQL | Keeps the installation data |
 | Reverse proxy | Terminates the TLS of the web interface and gets the certificate |
-| Agent listener | Serves the agent protocol on its own port (ADR-0026) |
+| Agent listener | Serves the agent protocol on its own port |
 
 The repository holds a reference stack in `deploy/stage`. Copy the files from that directory into `/opt/restichub` on the server. Change every value for your installation.
 
@@ -50,7 +50,7 @@ The stack reads one file, `.env`, next to `compose.yaml`. The script `bootstrap.
 | `RESTICHUB_DOMAIN` | The host name of the control plane |
 | `RESTICHUB_ACME_EMAIL` | The email address for the certificate |
 | `RESTICHUB_IMAGE_TAG` | The image tag. `edge` follows the newest commit, `sha-<short>` pins one commit |
-| `RESTICHUB_TENANCY_MODE` | `single` or `multi` (ADR-0024) |
+| `RESTICHUB_TENANCY_MODE` | `single` or `multi` |
 | `RESTICHUB_TRUSTED_PROXIES` | The network of the reverse proxy in CIDR form |
 | `RESTICHUB_AGENT_ENDPOINT` | The public address of the agent listener that an agent reports |
 | `RESTICHUB_AGENT_PORT` | The published port of the agent listener. The default is 8443 |
@@ -119,7 +119,7 @@ Losing the database or the key encryption key loses the repository passwords and
 
 ## The agent listener
 
-The control plane publishes the agent listener on its own port. The listener terminates the TLS itself, so the reverse proxy must not terminate the connection (ADR-0026).
+The control plane publishes the agent listener on its own port. The listener terminates the TLS itself, so the reverse proxy must not terminate the connection.
 
 :::caution
 The agent listener port must be reachable from every agent network. Check the firewall rules of the server and of the network path.
@@ -134,5 +134,5 @@ Enroll each host as described in [Register an agent](register-an-agent.md).
 - [Register an agent](register-an-agent.md)
 - [Agent enrollment rate limit](enrollment-rate-limit.md)
 - [Root CA rotation](root-ca-rotation.md)
-- [ADR-0024](https://github.com/fgbm/restichub/blob/main/design/adr/0024-single-tenant-mode.md)
-- [ADR-0026](https://github.com/fgbm/restichub/blob/main/design/adr/0026-agent-pki-identity-and-key-rotation.md)
+- [Single-tenant mode](https://github.com/fgbm/restichub/blob/main/design/adr/0024-single-tenant-mode.md)
+- [Agent PKI identity and key rotation](https://github.com/fgbm/restichub/blob/main/design/adr/0026-agent-pki-identity-and-key-rotation.md)

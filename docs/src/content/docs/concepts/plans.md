@@ -3,7 +3,7 @@ title: Plans
 description: Assign a profile to a host with a schedule.
 ---
 
-A plan assigns one profile to one agent with a schedule. The control plane keeps the schedule and creates the jobs. The agent holds no schedule (ADR-0002).
+A plan assigns one profile to one agent with a schedule. The control plane keeps the schedule and creates the jobs. The agent holds no schedule.
 
 ## Plan fields
 
@@ -21,7 +21,7 @@ The profile and the agent belong to the same tenant. The control plane compiles 
 
 ## Schedule
 
-The control plane calculates each fire time from the cron expression and the time zone. A job names the plan and the fire time. The control plane creates one job for each fire time. The pair `(plan, fire time)` is unique, so two control plane instances create one job for one fire time (FR-SC-02, ADR-0010).
+The control plane calculates each fire time from the cron expression and the time zone. A job names the plan and the fire time. The control plane creates one job for each fire time. The pair `(plan, fire time)` is unique, so two control plane instances create one job for one fire time.
 
 The control plane applies the daylight saving rules of the accepted decision:
 

@@ -3,7 +3,7 @@ title: Agent packages
 description: The content of the agent package and the verification chain of the restic that the agent downloads.
 ---
 
-The agent package does not hold restic. The package and restic are two separate downloads. The agent downloads and verifies restic itself (ADR-0038). Unpack the package in any folder and run `restichub-agent register`. The agent copies itself into its program directory (`/opt/restichub-agent` on Linux, `%ProgramFiles%\ResticHub\Agent` on Windows) and installs the service from there. See [Register an agent](register-an-agent.md) for the commands and the layout.
+The agent package does not hold restic. The package and restic are two separate downloads. The agent downloads and verifies restic itself. Unpack the package in any folder and run `restichub-agent register`. The agent copies itself into its program directory (`/opt/restichub-agent` on Linux, `%ProgramFiles%\ResticHub\Agent` on Windows) and installs the service from there. See [Register an agent](register-an-agent.md) for the commands and the layout.
 
 ## Package content
 
@@ -32,7 +32,7 @@ The fingerprint is `CF8F 18F2 8445 7597 3F79 D4E1 91A6 868B D3F7 A907`. The rest
 
 ## The restic of the tests
 
-The CI tests that need a real restic use the script `packaging/fetch-restic.sh`. The file `packaging/restic.env` holds the pinned version and the fingerprint. ADR-0011 sets the target version. The pin is restic 0.19.1. The script runs the same chain with `gpg`. It does not touch the agent package.
+The CI tests that need a real restic use the script `packaging/fetch-restic.sh`. The file `packaging/restic.env` holds the pinned version and the fingerprint. The project sets the target version. The pin is restic 0.19.1. The script runs the same chain with `gpg`. It does not touch the agent package.
 
 A weekly workflow (`.github/workflows/restic-latest.yml`) runs the real-restic tests with the latest restic release. A change in the JSON output of restic shows up there before an operator updates.
 
@@ -44,4 +44,4 @@ A weekly workflow (`.github/workflows/restic-latest.yml`) runs the real-restic t
 
 ## The package check
 
-The workflow `.github/workflows/agent-packages.yml` builds each target. One step unpacks each package. It checks that the package holds the agent, `LICENSE`, `THIRD_PARTY_NOTICES` and `SHA256SUMS`, that the hashes match, and that the package holds no restic (AC-IN-01).
+The workflow `.github/workflows/agent-packages.yml` builds each target. One step unpacks each package. It checks that the package holds the agent, `LICENSE`, `THIRD_PARTY_NOTICES` and `SHA256SUMS`, that the hashes match, and that the package holds no restic.

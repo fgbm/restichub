@@ -3,7 +3,7 @@ title: Jobs
 description: How the queue sends jobs to the agents, and how it limits and retries them.
 ---
 
-A job is one run of a plan or one manual operation. The control plane keeps the jobs in a queue in the database. The queue dispatcher sends each job to an online agent over the open stream (FR-SC-03, ADR-0010).
+A job is one run of a plan or one manual operation. The control plane keeps the jobs in a queue in the database. The queue dispatcher sends each job to an online agent over the open stream.
 
 ## Job states
 
@@ -23,15 +23,15 @@ A job in a final state never changes again.
 
 The dispatcher builds each job when it sends the job for the first time. It compiles the stored profile of the plan again with the facts of the agent. If the profile no longer compiles, the job fails with the reason `compile_failed`. The control plane never sends a stored command.
 
-A job carries the secrets of its own repository only (AC-PR-03). The control plane reads each secret when it sends the job and writes a `secret_delivered` audit record. The record holds no secret value (AC-RP-03).
+A job carries the secrets of its own repository only. The control plane reads each secret when it sends the job and writes a `secret_delivered` audit record. The record holds no secret value.
 
-The control plane always sends `--retry-lock` with a restic command (FR-SC-05).
+The control plane always sends `--retry-lock` with a restic command.
 
-The control plane signs each job. The agent checks the signature before it runs the job (FR-PR-03). The control plane keeps the signed job, encrypted with the key of the tenant, until the job reaches a final state.
+The control plane signs each job. The agent checks the signature before it runs the job. The control plane keeps the signed job, encrypted with the key of the tenant, until the job reaches a final state.
 
 ## Lease and redelivery
 
-When the control plane sends a job, it starts a lease. The default lease is 60 seconds. The smallest lease is 15 seconds. If the agent does not confirm the job before the lease ends, the control plane sends the job again (FR-PR-06, AC-PR-04). It sends the same signed bytes and does not build the job again. A change to the profile does not change a job that the control plane sent. Each delivery writes the `secret_delivered` audit records. The job has the same identifier each time. The agent keeps a journal and runs a known job once.
+When the control plane sends a job, it starts a lease. The default lease is 60 seconds. The smallest lease is 15 seconds. If the agent does not confirm the job before the lease ends, the control plane sends the job again. It sends the same signed bytes and does not build the job again. A change to the profile does not change a job that the control plane sent. Each delivery writes the `secret_delivered` audit records. The job has the same identifier each time. The agent keeps a journal and runs a known job once.
 
 If the agent answers that it is busy, the control plane sends the job again after 10 seconds. A busy answer does not count as a delivery.
 
@@ -41,7 +41,7 @@ If the agent is offline, the job stays in the queue. The control plane reads no 
 
 ## Repository barriers
 
-Some operations need a repository for themselves. These are `init`, `check`, `forget`, `prune`, `unlock` and `unlock_all`. The queue calls them exclusive (FR-SC-04).
+Some operations need a repository for themselves. These are `init`, `check`, `forget`, `prune`, `unlock` and `unlock_all`. The queue calls them exclusive.
 
 - An exclusive job starts only when no other job runs on the repository.
 - No other job starts on the repository while an exclusive job runs.
@@ -51,7 +51,7 @@ Several backups can run on one repository at the same time. The repository limit
 
 ## Limits
 
-The queue applies three limits (FR-SC-08, AC-SC-08):
+The queue applies three limits:
 
 | Limit | Default | Setting |
 |---|---|---|
@@ -63,7 +63,7 @@ The same values can be set in the `[queue]` section of the configuration file, w
 
 ## Time limits
 
-A running job has no short fixed time limit (ADR-0039). A first backup of a large disk can take many hours. While restic makes progress, the job runs on until the maximum duration of its profile.
+A running job has no short fixed time limit. A first backup of a large disk can take many hours. While restic makes progress, the job runs on until the maximum duration of its profile.
 
 ### Acceptance window
 
@@ -73,7 +73,7 @@ A job in the queue has an acceptance window. A manual job has a window of one ho
 
 The agent watches the progress of each step. restic makes progress when the number of bytes or files changes, when the current files change, or when it prints a line of text. A repeated status line is not progress.
 
-The agent stops a step that makes no progress for the stall timeout. It stops the step in two stages: first the graceful signal, then the forced stop of the process tree after the grace period (FR-AG-10). The job fails with the reason `stalled`.
+The agent stops a step that makes no progress for the stall timeout. It stops the step in two stages: first the graceful signal, then the forced stop of the process tree after the grace period. The job fails with the reason `stalled`.
 
 | Step | Default stall timeout |
 |---|---|
@@ -101,7 +101,7 @@ A value that is not a number, or is out of range, is ignored. A profile that exi
 
 ### Lost jobs
 
-The control plane does not fail a running job because of the time that it ran. It fails the job with the reason `agent_lost` in two cases (AC-SC-10):
+The control plane does not fail a running job because of the time that it ran. It fails the job with the reason `agent_lost` in two cases:
 
 - The agent is offline and the control plane did not hear from it for 30 minutes.
 - The agent connects again and does not list the job in its hello message. The agent restarted and lost the job.
@@ -112,7 +112,7 @@ An agent that is older than this version does not know the stall timeout and doe
 
 ## Lock retries
 
-Restic exits with code 11 when another operation holds the repository lock. The control plane does not give up the plan. It queues the job again with a delay (FR-SC-05, AC-SC-05).
+Restic exits with code 11 when another operation holds the repository lock. The control plane does not give up the plan. It queues the job again with a delay.
 
 The control plane ends the job that reported the lock and queues a new job with a new identifier. The agent keeps a journal and returns the stored result for a known identifier, so a retry needs its own identifier. The new job has the same plan and fire time, and counts one more attempt. The first delay is 30 seconds. The delay doubles for each retry. The largest delay is one hour. After five lock results, the job moves to the final state `dead_letter` and the control plane writes a `job_dead_letter` audit record. Use this record as the alert.
 
@@ -126,13 +126,13 @@ The control plane ends the job that reported the lock and queues a new job with 
 
 A hard stop of restic can leave a lock in the repository. The control plane marks the lock in two cases. The agent reports a possible stale lock, or the agent is lost while a job runs. A job on a lost agent fails with the reason `agent_lost`. A running job fails with the reason `timed_out` when it stays past its maximum duration and a grace period of 10 minutes. The control plane marks its lock too. The agent stops a stalled step itself. It also stops a step past its maximum duration. It reports `possible_stale_lock` after a forced stop. A sent job that the agent did not confirm before it expired fails with the reason `unacknowledged_expired`, and its lock is marked too.
 
-When the mark is 30 minutes old and no job waits or runs on the repository, the control plane queues an `unlock` job (FR-SC-06, AC-SC-06). The job never removes the locks of a running operation. If a later job succeeded on the repository, the control plane queues no unlock.
+When the mark is 30 minutes old and no job waits or runs on the repository, the control plane queues an `unlock` job. The job never removes the locks of a running operation. If a later job succeeded on the repository, the control plane queues no unlock.
 
 Only an Admin can remove every lock. The action sends an `unlock_all` job. It needs the repository name as the confirmation. It refuses a repository that has a waiting or running job. The audit log keeps the event `repository_unlock_all`.
 
 ## Cancel
 
-An Operator can cancel a job (FR-SC-09).
+An Operator can cancel a job.
 
 - A waiting job ends at once with the result `cancelled`.
 - For a sent or running job, the control plane marks the job and sends a cancel message to the agent. The queue never sends a marked job. If the agent confirms a marked job late, the control plane sends the cancel message again. A marked job that the agent never confirmed fails with the result `cancelled` when its lease ends. If the agent of a running job is offline, the control plane answers with HTTP 409 `agent_offline`.
@@ -158,27 +158,27 @@ If the control plane cannot build a job, the job fails with a reason code:
 
 ## Steps, summary and progress
 
-The agent reports each step of a job as a typed result (FR-AG-09). The control plane stores one row for each step: the status, the exit code, the times and the error code. The agent can send a result twice, so a second write never changes a stored row.
+The agent reports each step of a job as a typed result. The control plane stores one row for each step: the status, the exit code, the times and the error code. The agent can send a result twice, so a second write never changes a stored row.
 
-A backup step also carries the restic summary. It holds the new, changed and unchanged files, and the data added to the repository. It also holds the processed files and bytes, the duration and the snapshot identifier. The control plane stores these values as they are. The web UI shows them without a change (FR-MN-02, AC-MN-04). A `check`, `forget`, `snapshots` and `stats` step carries its own typed summary.
+A backup step also carries the restic summary. It holds the new, changed and unchanged files, and the data added to the repository. It also holds the processed files and bytes, the duration and the snapshot identifier. The control plane stores these values as they are. The web UI shows them without a change. A `check`, `forget`, `snapshots` and `stats` step carries its own typed summary.
 
 While a step runs, the agent sends the progress of the step: files, bytes, percent and the file in work. The control plane keeps only the last progress of each job. The job detail shows it for a job that is `sent` or `running`, and removes it when the job ends. The web UI reads the job again every two seconds while the job can still change.
 
 ## Job log
 
-The agent sends the log of a job in chunks. It removes every secret before it sends a chunk (FR-AG-06), and a job log holds at most 1 MiB. The control plane stores one row for each line (FR-LG-01). Each line has a number, the step, the source (`stdout`, `stderr` or `agent`) and a level. The control plane derives the level from the text of the line: `error`, `warn` or `info`. The agent sends no line time, so the stored time is the time when the control plane stored the line.
+The agent sends the log of a job in chunks. It removes every secret before it sends a chunk, and a job log holds at most 1 MiB. The control plane stores one row for each line. Each line has a number, the step, the source (`stdout`, `stderr` or `agent`) and a level. The control plane derives the level from the text of the line: `error`, `warn` or `info`. The agent sends no line time, so the stored time is the time when the control plane stored the line.
 
-The agent sends the tail of the log again after a restart (AC-PR-07). The agent numbers its chunks for each source. The control plane keeps the number of the chunk with each line. It ignores a chunk that it stored before, in any order of arrival, so a repeated tail never stores a line twice.
+The agent sends the tail of the log again after a restart. The agent numbers its chunks for each source. The control plane keeps the number of the chunk with each line. It ignores a chunk that it stored before, in any order of arrival, so a repeated tail never stores a line twice.
 
 Each line counts as its text, one line break and 64 bytes of overhead. The control plane stops at 1 MiB of this count or at 100 000 lines for each job, so empty lines cannot fill the database. After that it keeps no new line and marks the log as truncated. The web UI shows the note. The control plane removes control characters from each line, except the tab. It also removes the Unicode format characters (category Cf, for example U+202E). It cuts a line at 8192 characters.
 
 A finished job takes step and log writes from the agent only during the log retention period after its end.
 
-The log storage is a separate component with a `LogStore` interface (FR-LG-01, ADR-0015). The `database` backend is the default. An `s3` backend is planned for the 1.0 release.
+The log storage is a separate component with a `LogStore` interface. The `database` backend is the default. An `s3` backend is planned for the 1.0 release.
 
 ### Log retention
 
-The control plane deletes log lines that are older than the retention period (FR-LG-02, AC-LG-01). A sweep runs each hour. The job, its steps and its summary stay: only the log text goes away (FR-LG-03). The job detail then shows that the log is deleted.
+The control plane deletes log lines that are older than the retention period. A sweep runs each hour. The job, its steps and its summary stay: only the log text goes away. The job detail then shows that the log is deleted.
 
 | Setting | Default | Variable |
 |---|---|---|
@@ -194,7 +194,7 @@ The configuration file holds the same value as `log_retention_days`. The value i
 | Admin | Run `unlock_all`. |
 | Viewer | Read the jobs, their steps and their logs. |
 
-A suspended tenant sends no job. Its agents stay connected (AC-TN-03).
+A suspended tenant sends no job. Its agents stay connected.
 
 ## API
 

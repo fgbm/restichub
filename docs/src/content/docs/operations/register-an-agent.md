@@ -3,7 +3,7 @@ title: Register an agent
 description: Register a host with the control plane and install the agent service.
 ---
 
-An agent registers by hand with a one-time enrollment token (ADR-0032). A person on the host unpacks the agent package anywhere, for example in the Downloads folder, and runs one command. The command `register` does everything: it installs the agent, enrolls the host, starts the service and reports the connection.
+An agent registers by hand with a one-time enrollment token. A person on the host unpacks the agent package anywhere, for example in the Downloads folder, and runs one command. The command `register` does everything: it installs the agent, enrolls the host, starts the service and reports the connection.
 
 ## The registration command
 
@@ -14,7 +14,7 @@ restichub-agent register --url https://<control-plane> --token <token>
 ```
 
 - `--url` is the control plane URL. The scheme must be `https`.
-- `--token` is the one-time enrollment token. ADR-0032 makes this flag the documented default.
+- `--token` is the one-time enrollment token. The documented default is this flag.
 - `--token-file PATH` reads the token from a file. A script uses this option.
 - `--token-stdin` reads the token from the standard input.
 - `--ca-file PATH` verifies the control plane with the CA in the file. Without this option the agent uses the system root certificates.
@@ -24,7 +24,7 @@ restichub-agent register --url https://<control-plane> --token <token>
 
 Run the command as `root` on Linux, or in an elevated PowerShell on Windows ("Run as administrator"). The agent checks the rights, creates its directories and proves that it can write there before it contacts the control plane. A failed check does not use the token.
 
-The command installs restic when the host has none (ADR-0038). This step runs after the checks of the rights and the directories, and before the request to the control plane. A host without internet access and without the offline files fails here, and the token stays unused.
+The command installs restic when the host has none. This step runs after the checks of the rights and the directories, and before the request to the control plane. A host without internet access and without the offline files fails here, and the token stays unused.
 
 When the enrollment succeeds, the command starts the service and waits up to 60 seconds for the connection to the control plane. Then it prints a summary:
 
@@ -66,14 +66,14 @@ The directory holds these files:
 - `ca-chain.pem`: the issuing CA and the root CA.
 - `identity.json`: the agent ID, the tenant ID, the control plane URL and the gRPC endpoint.
 - `signing-keys.json`: the job signing key set from the enrollment.
-- `signing-key-updates.json`: the signed key updates that the agent accepted. The agent verifies a job after a key rotation with this chain (ADR-0030).
-- `job-journal.json`: the accepted and completed jobs. A job that the control plane delivers again does not run a second time (ADR-0020).
+- `signing-key-updates.json`: the signed key updates that the agent accepted. The agent verifies a job after a key rotation with this chain.
+- `job-journal.json`: the accepted and completed jobs. A job that the control plane delivers again does not run a second time.
 
 The token never reaches a file and never reaches a log.
 
 ## Check the connection
 
-The agent connects to the control plane after the service starts. The agent keeps one stream open and answers the heartbeat of the control plane (FR-ID-07). The stream uses mTLS. The agent verifies the control plane with the installation root CA only, never with the system root certificates.
+The agent connects to the control plane after the service starts. The agent keeps one stream open and answers the heartbeat of the control plane. The stream uses mTLS. The agent verifies the control plane with the installation root CA only, never with the system root certificates.
 
 To check the connection:
 
@@ -82,7 +82,7 @@ To check the connection:
 3. Read the status. The status is `active` when the agent is enrolled.
 4. Read the "Last seen" time. The control plane writes this time while the stream is open. A time within the last minute shows a live connection.
 
-The control plane marks an agent offline after a grace period of 300 seconds without a heartbeat (FR-ID-08). A short network failure therefore does not change the status.
+The control plane marks an agent offline after a grace period of 300 seconds without a heartbeat. A short network failure therefore does not change the status.
 
 The agent writes one line when the control plane greets it:
 
@@ -104,7 +104,7 @@ An agent runs a repository job on demand. The control plane sends the job throug
 
 The agent runs `init` only when `test_access` exits with restic code 10. Restic code 10 means that the repository does not exist. Any other result stops the job, so the agent never initializes an existing repository a second time. A wrong password exits with code 12 and the job reports `config_error`.
 
-The repository password and the backend credentials travel inside the signed job only. The agent passes them to restic in the environment. They never reach an argument, a log, the job journal or an error message. The agent keeps the result of a finished job, so a job that the control plane delivers again does not run a second time (ADR-0020).
+The repository password and the backend credentials travel inside the signed job only. The agent passes them to restic in the environment. They never reach an argument, a log, the job journal or an error message. The agent keeps the result of a finished job, so a job that the control plane delivers again does not run a second time.
 
 To initialize a repository:
 
@@ -131,7 +131,7 @@ restichub-agent uninstall-service
 - `status` prints the identity, the certificate expiry, the restic version and path, the service state, the last connection, the last error and the control plane URL. It exits with a non-zero code when the agent is not connected.
 - `uninstall-service` stops and removes the service. It keeps the data.
 
-The agent installs itself, so you do not copy files by hand. The command copies the running agent into the program directory. Only SYSTEM and Administrators (Linux: `root`) can write there. If the service runs from that directory, the command stops it, replaces the file and starts it again. The service starts from the program directory. The check of threat T20 passes by construction: the command refuses an executable that another account can write.
+The agent installs itself, so you do not copy files by hand. The command copies the running agent into the program directory. Only SYSTEM and Administrators (Linux: `root`) can write there. If the service runs from that directory, the command stops it, replaces the file and starts it again. The service starts from the program directory. The command refuses an executable that another account can write.
 
 | Item | Linux | Windows |
 | --- | --- | --- |
@@ -151,7 +151,7 @@ On Linux the command writes `/etc/systemd/system/restichub-agent.service` and en
 | `service: installed, not running` | The service stopped at the start. | On Linux read `journalctl -u restichub-agent`. On Windows read the Application log. Fix the cause and run `install-service`. |
 | `connection: not connected ... after the wait` | The agent cannot reach the control plane. | Check the clock of the host, the firewall to port 8443 and the URL. Run `status` to read the last error. |
 | The log says that the identity cannot load | The identity directory is damaged or empty. The service exits with code 78 and does not restart. | Run `register --force` with a new token. |
-| The command refuses a directory or file (T20) | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
+| The command refuses a directory or file | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
 | `cannot stop the service` on Windows | A job still runs. | Wait for the job, or stop the service by hand. Run the command again. |
 
 ## The systemd hardening trade-off
@@ -164,7 +164,7 @@ The unit sets `CacheDirectory=restichub-agent` and `RESTIC_CACHE_DIR=/var/cache/
 
 ## The restic binary
 
-The agent package does not hold restic. The agent downloads restic itself (ADR-0038). `register` and `install-service` download it when the host has none. `run` never downloads. The service makes no network request for restic.
+The agent package does not hold restic. The agent downloads restic itself. `register` and `install-service` download it when the host has none. `run` never downloads. The service makes no network request for restic.
 
 The agent takes the latest release of restic from GitHub. It verifies the OpenPGP signature of the file `SHA256SUMS` with the release signing key of the restic project, which is part of the agent. Then it checks the hash of the archive. It installs only restic 0.18.1 or later, and it refuses a release of a major version above 0. A failed check installs nothing.
 
@@ -173,7 +173,7 @@ The agent stores the binary in a protected directory:
 - Linux: `/opt/restichub-agent/bin/restic`.
 - Windows: `%ProgramFiles%\ResticHub\Agent\bin\restic.exe`. Only SYSTEM and Administrators can write there.
 
-The protected configuration directory holds the file `restic.json` with the version and the SHA-256 of the installed binary. At each start, and before each restic process, the agent checks the binary against this record and refuses a different binary (threat T20). The control plane cannot set the restic path. If restic is absent or does not match, the service stops with a message that names the next step: run `restichub-agent restic update`.
+The protected configuration directory holds the file `restic.json` with the version and the SHA-256 of the installed binary. At each start, and before each restic process, the agent checks the binary against this record and refuses a different binary. The control plane cannot set the restic path. If restic is absent or does not match, the service stops with a message that names the next step: run `restichub-agent restic update`.
 
 ### Update restic
 
@@ -220,13 +220,13 @@ GitHub limits the number of requests without a token. If GitHub answers with a r
 
 A repository behind a proxy uses the proxy of the host. The agent passes `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` from its own environment to the restic child process, and the lower-case forms on Linux and macOS. Set these variables in the environment of the agent service, never in a job.
 
-The restic child holds no other variable of the agent, so a job cannot redirect the traffic of a repository (FR-AG-06).
+The restic child holds no other variable of the agent, so a job cannot redirect the traffic of a repository.
 
 ## Related
 
-- [ADR-0032](https://github.com/fgbm/restichub/blob/main/design/adr/0032-manual-agent-registration-and-service-install.md)
-- [ADR-0031](https://github.com/fgbm/restichub/blob/main/design/adr/0031-bundled-restic-in-agent-package.md)
-- [ADR-0038](https://github.com/fgbm/restichub/blob/main/design/adr/0038-agent-downloads-restic.md)
+- [Manual agent registration and service install](https://github.com/fgbm/restichub/blob/main/design/adr/0032-manual-agent-registration-and-service-install.md)
+- [Bundled restic in the agent package](https://github.com/fgbm/restichub/blob/main/design/adr/0031-bundled-restic-in-agent-package.md)
+- [Agent downloads restic](https://github.com/fgbm/restichub/blob/main/design/adr/0038-agent-downloads-restic.md)
 - [Agent enrollment rate limit](enrollment-rate-limit.md)
 - [Agent certificate rotation](certificate-rotation.md)
 - [Agent and control plane versions](agent-version-compatibility.md)

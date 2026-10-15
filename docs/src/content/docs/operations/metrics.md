@@ -3,13 +3,13 @@ title: Prometheus metrics
 description: How to scrape the metrics endpoint of the control plane and which metrics it gives.
 ---
 
-The control plane gives its state to Prometheus on `GET /metrics` (FR-MN-05, AC-MN-03). The endpoint uses the text format of Prometheus.
+The control plane gives its state to Prometheus on `GET /metrics`. The endpoint uses the text format of Prometheus.
 
 ## Access
 
 The endpoint is not public. It needs a credential with the Viewer role at the least. The identifiers of agents, plans and repositories are tenant data, so the control plane never gives them to an anonymous client. A session of a Platform Admin in the platform tenant gets HTTP 403, because the platform tenant holds no jobs. Switch to a tenant first, or use a token of that tenant.
 
-Use an API token with the Viewer role for the scraper. A token belongs to one tenant. The scrape gives the metrics of that tenant and no data of another tenant (AC-TN-01). To read many tenants, create one token in each tenant and add one scrape job for each token.
+Use an API token with the Viewer role for the scraper. A token belongs to one tenant. The scrape gives the metrics of that tenant and no data of another tenant. To read many tenants, create one token in each tenant and add one scrape job for each token.
 
 1. Create an API token with the role Viewer in the tenant.
 2. Put the token value in a file that only the Prometheus user can read.

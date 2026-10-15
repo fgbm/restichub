@@ -3,7 +3,7 @@ title: Job signing key compromise
 description: What an operator does when the job signing key leaked.
 ---
 
-The control plane signs each job with the current job signing key. A person who holds this key can make jobs that the agents accept. Use this procedure when the key, a backup of the control plane that holds it, or the key encryption key (KEK) leaked (T13, ADR-0030).
+The control plane signs each job with the current job signing key. A person who holds this key can make jobs that the agents accept. Use this procedure when the key, a backup of the control plane that holds it, or the key encryption key (KEK) leaked.
 
 ## Before you start
 

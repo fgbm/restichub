@@ -3,7 +3,7 @@ title: Agent and control plane versions
 description: Which agent versions work with which control plane version, and how to read the version marks.
 ---
 
-The agent and the control plane speak the agent protocol (ADR-0008). The protocol has a major and a minor number. The agent sends its protocol version, its package version and its restic version in the first message of each stream (FR-PR-09).
+The agent and the control plane speak the agent protocol. The protocol has a major and a minor number. The agent sends its protocol version, its package version and its restic version in the first message of each stream.
 
 ## The compatibility rule
 

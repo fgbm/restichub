@@ -3,7 +3,7 @@ title: Agent revocation
 description: What happens when an Admin revokes an agent, and the limits of the revocation.
 ---
 
-An Admin revokes an agent on the Hosts screen. The control plane uses the agent registry for the revocation. It uses no certificate revocation list (CRL) and no OCSP (ADR-0026).
+An Admin revokes an agent on the Hosts screen. The control plane uses the agent registry for the revocation. It uses no certificate revocation list (CRL) and no OCSP.
 
 ## What a revoke does
 
