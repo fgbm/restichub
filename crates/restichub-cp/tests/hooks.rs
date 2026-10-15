@@ -65,6 +65,7 @@ fn report(hooks: &[(&str, AllowListedHook)]) -> HookReport {
     HookReport {
         state: HookAllowListState::Loaded,
         hooks: hooks.iter().map(|(id, hook)| hook.to_proto(id)).collect(),
+        scripts: None,
     }
 }
 

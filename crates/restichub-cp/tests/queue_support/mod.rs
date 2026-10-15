@@ -254,6 +254,18 @@ impl Env {
             .await
     }
 
+    /// Like [`Env::connect_agent`], for an agent that reports the trust mode for server scripts
+    /// and the interpreters it found (FR-HK-08).
+    pub async fn connect_agent_trusting(
+        &self,
+        hostname: &str,
+        enabled: bool,
+        interpreters: Vec<restichub_proto::agent::v1::ScriptInterpreter>,
+    ) -> FakeAgent {
+        self.connect_agent_reporting(hostname, scripts_report(enabled, interpreters))
+            .await
+    }
+
     /// Like [`Env::connect_agent`], for an agent that reports a hook allow-list (FR-HK-04).
     pub async fn connect_agent_reporting(&self, hostname: &str, report: HookReport) -> FakeAgent {
         let capabilities = restichub_proto::AgentCapability::ALL
@@ -596,6 +608,31 @@ pub fn default_restore_roots() -> Vec<String> {
 pub struct HookReport {
     pub state: restichub_proto::agent::v1::HookAllowListState,
     pub hooks: Vec<restichub_proto::agent::v1::HookMetadata>,
+    /// The trust mode for server scripts and the interpreters (FR-HK-08).
+    pub scripts: Option<(
+        restichub_proto::agent::v1::ServerScriptsState,
+        Vec<restichub_proto::agent::v1::ScriptInterpreter>,
+    )>,
+}
+
+/// The report of a host without a hook allow-list and with the trust mode on or off (FR-HK-08).
+pub fn scripts_report(
+    enabled: bool,
+    interpreters: Vec<restichub_proto::agent::v1::ScriptInterpreter>,
+) -> HookReport {
+    use restichub_proto::agent::v1::{HookAllowListState, ServerScriptsState};
+    HookReport {
+        state: HookAllowListState::Absent,
+        hooks: Vec::new(),
+        scripts: Some((
+            if enabled {
+                ServerScriptsState::Enabled
+            } else {
+                ServerScriptsState::Disabled
+            },
+            interpreters,
+        )),
+    }
 }
 
 fn hello(
@@ -603,10 +640,16 @@ fn hello(
     restore_roots: Vec<String>,
     report: Option<HookReport>,
 ) -> AgentMessage {
-    let (hook_allow_list_state, hooks) = match report {
-        Some(report) => (report.state as i32, report.hooks),
-        None => (0, Vec::new()),
+    let (hook_allow_list_state, hooks, scripts) = match report {
+        Some(report) => (report.state as i32, report.hooks, report.scripts),
+        None => (0, Vec::new(), None),
     };
+    let (server_scripts_state, script_interpreters) = scripts.map_or((0, Vec::new()), |scripts| {
+        (
+            scripts.0 as i32,
+            scripts.1.into_iter().map(|kind| kind as i32).collect(),
+        )
+    });
     AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
@@ -616,6 +659,8 @@ fn hello(
             restore_roots,
             hooks,
             hook_allow_list_state,
+            server_scripts_state,
+            script_interpreters,
             ..AgentHello::default()
         })),
     }

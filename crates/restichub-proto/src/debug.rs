@@ -123,6 +123,15 @@ impl fmt::Debug for ScriptStep {
     }
 }
 
+impl fmt::Debug for script_env::Value {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StringValue(value) => formatter.debug_tuple("StringValue").field(value).finish(),
+            Self::SecretValue(_) => formatter.debug_tuple("SecretValue").field(&MASK).finish(),
+        }
+    }
+}
+
 impl fmt::Debug for Typed {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
