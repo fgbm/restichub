@@ -306,7 +306,11 @@ impl Jobs {
         let crate::scripts::PreparedScript {
             invocation,
             scratch,
+            dropped_path,
         } = prepared;
+        if let Some(line) = dropped_path {
+            log.note_search_path(step_id, &line);
+        }
         let outcome = self
             .supervise(step, &label, invocation, mode, cancel, deadline, log)
             .await;

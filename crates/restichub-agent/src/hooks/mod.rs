@@ -106,6 +106,9 @@ pub struct Invocation {
     /// variables. Only a server script sets it: the host trusts its code and the code needs the
     /// search path of the host (ADR-0037). An allow-list hook never inherits.
     pub inherit_environment: bool,
+    /// The value of `PATH` for a process that inherits the environment. `None` keeps the value of
+    /// the agent.
+    pub search_path: Option<std::ffi::OsString>,
 }
 
 impl std::fmt::Debug for Invocation {
@@ -244,6 +247,7 @@ impl Hook {
             timeout: self.timeout,
             secrets,
             inherit_environment: false,
+            search_path: None,
         })
     }
 }

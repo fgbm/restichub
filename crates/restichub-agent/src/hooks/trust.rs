@@ -13,8 +13,9 @@ use anyhow::{Context as _, Result};
 pub enum Trust {
     /// Root on Unix and Administrators or SYSTEM on Windows. The agent always uses this value.
     Host,
-    /// The account that runs the process, and only the file and its directory. A test uses it to
-    /// build a fixture without administrator rights; it is never the setting of a running agent.
+    /// The account that runs the process or root, and only the file and its directory. A test
+    /// uses it to build a fixture without administrator rights; it is never the setting of a
+    /// running agent.
     CurrentUser,
 }
 
@@ -30,7 +31,28 @@ pub fn check_file(path: &Path, trust: Trust) -> Result<()> {
     if !metadata.is_file() {
         anyhow::bail!("{} is not a regular file", path.display());
     }
-    check_chain(path, trust)
+    check_chain(path, trust, true)
+}
+
+/// Resolves a directory and checks it like a parent directory of a trusted file: the directory and
+/// every element above it, also after a link is resolved.
+///
+/// # Errors
+///
+/// Returns the reason in words when the directory is not trusted.
+pub fn check_directory(path: &Path, trust: Trust) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        anyhow::bail!("{} is not an absolute path", path.display());
+    }
+    let resolved = path
+        .canonicalize()
+        .with_context(|| format!("cannot resolve {}", path.display()))?;
+    if !resolved.is_dir() {
+        anyhow::bail!("{} is not a directory", resolved.display());
+    }
+    check_chain(path, trust, false)?;
+    check_chain(&resolved, trust, false)?;
+    Ok(resolved)
 }
 
 /// Resolves a program path and checks the result. A link passes only when the link, the target and
@@ -51,26 +73,28 @@ pub fn check_executable(path: &Path, trust: Trust) -> Result<PathBuf> {
     if !metadata.is_file() {
         anyhow::bail!("{} is not a regular file", resolved.display());
     }
-    check_chain(path, trust)?;
-    check_chain(&resolved, trust)?;
+    check_chain(path, trust, true)?;
+    check_chain(&resolved, trust, true)?;
     Ok(resolved)
 }
 
-/// Walks from the path up to the root and checks each element that exists.
-fn check_chain(path: &Path, trust: Trust) -> Result<()> {
+/// Walks from the path up to the root and checks each element that exists. A leaf that is a file
+/// gets the stricter check of a file.
+fn check_chain(path: &Path, trust: Trust, leaf_is_file: bool) -> Result<()> {
     let mut checked = 0_usize;
     for element in path.ancestors() {
         if element.as_os_str().is_empty() {
             break;
         }
-        if trust == Trust::CurrentUser && checked > 1 {
+        // The test trust covers a file and its directory, or only a directory.
+        if trust == Trust::CurrentUser && checked >= if leaf_is_file { 2 } else { 1 } {
             break;
         }
         // A link in the chain is not followed here: the resolved path is checked by the caller.
         if std::fs::symlink_metadata(element).is_err() {
             continue;
         }
-        check_element(element, checked == 0, trust)?;
+        check_element(element, leaf_is_file && checked == 0, trust)?;
         checked += 1;
     }
     Ok(())
@@ -81,11 +105,12 @@ fn check_element(path: &Path, _is_leaf: bool, trust: Trust) -> Result<()> {
     use std::os::unix::fs::MetadataExt as _;
     let metadata =
         std::fs::metadata(path).with_context(|| format!("cannot read {}", path.display()))?;
-    let owner = match trust {
-        Trust::Host => 0,
-        Trust::CurrentUser => current_uid(),
+    // Root also passes the test trust, so a system directory in `PATH` stays in a test.
+    let owned = match trust {
+        Trust::Host => metadata.uid() == 0,
+        Trust::CurrentUser => metadata.uid() == current_uid() || metadata.uid() == 0,
     };
-    if metadata.uid() != owner || metadata.mode() & 0o022 != 0 {
+    if !owned || metadata.mode() & 0o022 != 0 {
         anyhow::bail!(
             "{} must belong to the trusted account and must not be writable by a group or other accounts",
             path.display()

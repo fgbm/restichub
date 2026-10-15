@@ -252,7 +252,8 @@ pub(crate) fn spawn_job_restic(
 /// names. Nothing of the agent environment reaches it. A server script is the exception: the host
 /// trusts it, so it keeps the environment of the agent without the restic and ResticHub variables
 /// (ADR-0037). It runs in its own process group, so the
-/// agent stops its whole tree (FR-AG-10).
+/// agent stops its whole tree (FR-AG-10). The invocation can replace `PATH`, and on Windows the
+/// child gets a protected directory as `TEMP` and `TMP`.
 ///
 /// # Errors
 ///
@@ -273,15 +274,23 @@ pub(crate) fn spawn_job_hook(
         command.env_clear();
     }
     #[cfg(windows)]
-    if !invocation.inherit_environment {
-        let system_root = std::env::var_os("SystemRoot")
-            .unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
-        let mut search_path = PathBuf::from(&system_root);
-        search_path.push("System32");
-        command.env("PATH", search_path);
-        command.env("SystemRoot", system_root);
-        command.env("TEMP", scratch);
-        command.env("TMP", scratch);
+    {
+        if !invocation.inherit_environment {
+            let system_root = std::env::var_os("SystemRoot")
+                .unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
+            let mut search_path = PathBuf::from(&system_root);
+            search_path.push("System32");
+            command.env("PATH", search_path);
+            command.env("SystemRoot", system_root);
+        }
+        // The service `TEMP` can be a directory that a user can write.
+        let temp = if invocation.inherit_environment {
+            &invocation.working_dir
+        } else {
+            scratch
+        };
+        command.env("TEMP", temp);
+        command.env("TMP", temp);
     }
     #[cfg(not(windows))]
     {
@@ -292,6 +301,9 @@ pub(crate) fn spawn_job_hook(
                 "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             );
         }
+    }
+    if let Some(search_path) = &invocation.search_path {
+        command.env("PATH", search_path);
     }
     for (name, value) in &invocation.env {
         command.env(name, value.as_str());

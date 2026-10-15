@@ -232,3 +232,71 @@ fn fr_hk_09_the_bash_command_line_has_the_fixed_safe_flags() {
     assert_eq!(prepared.invocation.args[1], "--norc");
     assert_eq!(prepared.invocation.timeout, super::DEFAULT_TIMEOUT);
 }
+
+fn private_dir(parent: &std::path::Path, name: &str, mode: u32) -> std::path::PathBuf {
+    let dir = parent.join(name);
+    std::fs::create_dir_all(&dir).expect("cannot create the directory");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).expect("mode");
+    dir
+}
+
+fn enabled_store(dir: &std::path::Path) -> ScriptStore {
+    set_mode_at(
+        &dir.join("restichub-agent-server-scripts"),
+        true,
+        Trust::CurrentUser,
+    )
+    .expect("enable");
+    store(dir)
+}
+
+#[test]
+fn ac_hk_01_a_search_path_directory_that_others_can_write_is_not_in_the_script_environment() {
+    let dir = TempDir::new();
+    let good = private_dir(dir.path(), "good", 0o755);
+    let bad = private_dir(dir.path(), "bad", 0o777);
+    let path = std::env::join_paths([good.as_path(), bad.as_path()]).expect("join");
+    let store = enabled_store(dir.path()).with_search_path(path);
+    let prepared = store.prepare(&step("echo"), 0).expect("prepared");
+    let search = prepared
+        .invocation
+        .search_path
+        .clone()
+        .expect("the script gets a search path");
+    let kept: Vec<_> = std::env::split_paths(&search).collect();
+    assert_eq!(kept, vec![good]);
+    let note = prepared.dropped_path.as_deref().expect("a note");
+    assert!(note.contains(bad.to_str().expect("utf-8")));
+}
+
+#[test]
+fn ac_hk_01_a_relative_or_missing_search_path_entry_is_dropped() {
+    let dir = TempDir::new();
+    let good = private_dir(dir.path(), "good", 0o755);
+    let missing = dir.path().join("missing");
+    let path = std::env::join_paths([
+        std::path::PathBuf::from("relative"),
+        missing.clone(),
+        good.clone(),
+    ])
+    .expect("join");
+    let store = enabled_store(dir.path()).with_search_path(path);
+    let prepared = store.prepare(&step("echo"), 0).expect("prepared");
+    let search = prepared.invocation.search_path.clone().expect("path");
+    assert_eq!(
+        std::env::split_paths(&search).collect::<Vec<_>>(),
+        vec![good]
+    );
+    assert!(prepared.dropped_path.is_some());
+}
+
+#[test]
+fn ac_hk_01_a_search_path_of_trusted_directories_drops_nothing() {
+    let dir = TempDir::new();
+    let first = private_dir(dir.path(), "first", 0o755);
+    let second = private_dir(dir.path(), "second", 0o750);
+    let path = std::env::join_paths([first.as_path(), second.as_path()]).expect("join");
+    let store = enabled_store(dir.path()).with_search_path(path);
+    let prepared = store.prepare(&step("echo"), 0).expect("prepared");
+    assert!(prepared.dropped_path.is_none());
+}

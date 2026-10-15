@@ -8,10 +8,13 @@
 //! self-update cannot change the file.
 //!
 //! A script goes to a new file in a protected directory of the cache. The interpreter starts with
-//! fixed flags, a cleared environment and the variables of the step, and the directory is removed
-//! when the run ends (AC-HK-09). The values reach the script only as environment variables.
+//! fixed flags, the environment of the service without the restic variables and the variables of
+//! the step, and the directory is removed when the run ends (AC-HK-09). The search path keeps only
+//! directories that the host account controls. The values reach the script only as environment
+//! variables.
 
 mod interpreter;
+mod search_path;
 mod setting;
 #[cfg(test)]
 mod tests;
@@ -62,6 +65,7 @@ pub struct ScriptStore {
     path: PathBuf,
     trust: Trust,
     scratch_root: PathBuf,
+    search_path: Option<std::ffi::OsString>,
 }
 
 impl ScriptStore {
@@ -72,6 +76,7 @@ impl ScriptStore {
             path: mode_file_for(config_dir),
             trust: Trust::Host,
             scratch_root: cache.join("scripts"),
+            search_path: None,
         }
     }
 
@@ -82,7 +87,15 @@ impl ScriptStore {
             path,
             trust,
             scratch_root: cache.join("scripts"),
+            search_path: None,
         }
+    }
+
+    /// Filters this search path instead of the one of the process, for a test.
+    #[must_use]
+    pub fn with_search_path(mut self, path: std::ffi::OsString) -> Self {
+        self.search_path = Some(path);
+        self
     }
 
     /// Reads the setting file now (AC-HK-08).
@@ -160,7 +173,15 @@ impl ScriptStore {
         } else {
             Duration::from_secs(timeout_seconds.into()).min(MAX_TIMEOUT)
         };
+        let service_path = self
+            .search_path
+            .clone()
+            .or_else(|| std::env::var_os("PATH"));
+        let search = search_path::trusted(service_path.as_deref(), self.trust);
+        let dropped_path =
+            (!search.dropped.is_empty()).then(|| search_path::dropped_text(&search.dropped));
         Ok(PreparedScript {
+            dropped_path,
             invocation: Invocation {
                 program,
                 args: interpreter::arguments(kind, &file),
@@ -169,6 +190,7 @@ impl ScriptStore {
                 timeout,
                 secrets,
                 inherit_environment: true,
+                search_path: Some(search.value),
             },
             scratch: ScratchGuard { _scratch: scratch },
         })
@@ -178,6 +200,9 @@ impl ScriptStore {
 /// A script that is ready to start. Dropping it removes the script file.
 pub struct PreparedScript {
     pub invocation: Invocation,
+    /// The log line about the search path entries that the agent dropped, or `None` when it
+    /// dropped none.
+    pub dropped_path: Option<String>,
     pub scratch: ScratchGuard,
 }
 
