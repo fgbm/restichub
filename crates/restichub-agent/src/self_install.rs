@@ -98,7 +98,6 @@ pub fn migrate_restic(placement: &Placement) -> Result<bool> {
     if legacy.is_empty() {
         return Ok(false);
     }
-    crate::paths::ensure_program_dir(&placement.restic_dir)?;
     move_legacy(placement, &legacy)?;
     Ok(true)
 }
@@ -491,6 +490,7 @@ mod tests {
         std::fs::create_dir_all(&legacy).expect("legacy");
         std::fs::write(legacy.join(RESTIC_FILE_NAME), b"restic 1").expect("old restic");
         let placement = Placement::under(&base.join("program"), vec![legacy.clone()]);
+        std::fs::create_dir_all(&placement.restic_dir).expect("restic dir");
 
         assert!(migrate_restic(&placement).expect("migrate"));
 
