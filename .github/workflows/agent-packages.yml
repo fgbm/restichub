@@ -31,7 +31,7 @@ jobs:
         include:
           - os: linux
             arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             binary: target/release/restichub-agent
             rustflags: ''
           - os: linux
@@ -41,7 +41,7 @@ jobs:
             rustflags: ''
           - os: windows
             arch: amd64
-            runner: windows-latest
+            runner: windows-2025
             binary: target/release/restichub-agent.exe
             # The agent must start on a host without the Visual C++ Redistributable.
             rustflags: -C target-feature=+crt-static
@@ -68,7 +68,7 @@ jobs:
   package:
     name: Package (${{ matrix.os }}-${{ matrix.arch }})
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -114,7 +114,7 @@ jobs:
   # NFR-SEC-06: two builds of one commit in two directories give the same package.
   reproducible:
     name: Reproducible Linux package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

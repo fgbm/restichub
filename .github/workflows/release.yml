@@ -46,7 +46,7 @@ env:
 jobs:
   gates:
     name: Dependency gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,7 +63,7 @@ jobs:
 
   version:
     name: Resolve the version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
       contents: read
@@ -142,7 +142,7 @@ jobs:
         include:
           - os: linux
             arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             binary: restichub-agent
             rustflags: ''
@@ -154,7 +154,7 @@ jobs:
             rustflags: ''
           - os: windows
             arch: amd64
-            runner: windows-latest
+            runner: windows-2025
             target: x86_64-pc-windows-msvc
             binary: restichub-agent.exe
             # The agent must start on a host without the Visual C++ Redistributable.
@@ -229,7 +229,7 @@ jobs:
   inspect:
     name: Inspect the Windows agent
     needs: agent
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -258,7 +258,7 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
     steps:
@@ -290,7 +290,7 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
     steps:
@@ -341,7 +341,7 @@ jobs:
     name: Image manifest, signature and SBOM
     needs: [version, image-push]
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -406,7 +406,7 @@ jobs:
     name: Sign the artifacts
     needs: [version, agent, inspect, manifest]
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
@@ -486,7 +486,7 @@ jobs:
     name: Verify with the commands of the guide
     needs: [version, sign]
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: read
@@ -514,7 +514,7 @@ jobs:
     name: Draft the release
     needs: [version, manifest, sign, verify]
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
