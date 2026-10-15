@@ -11,7 +11,7 @@ use std::time::Duration;
 use common::*;
 use prost::Message as _;
 use restichub_canary_scan::{Canary, Scanner};
-use restichub_proto::agent::v1::{JobStatus, StepStatus, step_result::Output};
+use restichub_proto::agent::v1::{JobStatus, StepStatus, agent_message, step_result::Output};
 use tokio::sync::mpsc;
 
 const SUMMARY: &str = r#"{"message_type":"summary","files_new":4,"files_changed":0,"files_unmodified":0,"dirs_new":1,"dirs_changed":0,"dirs_unmodified":0,"data_blobs":4,"tree_blobs":1,"data_added":4096,"data_added_packed":2048,"total_files_processed":4,"total_bytes_processed":8000,"total_duration":0.5,"snapshot_id":"feedface"}"#;
@@ -48,9 +48,7 @@ async fn ac_pr_07_a_result_that_finished_offline_arrives_after_the_reconnect() {
     let ack = rx.recv().await.expect("the agent acknowledges the job");
     assert!(matches!(
         ack.payload,
-        Some(restichub_proto::agent::v1::agent_message::Payload::JobAck(
-            _
-        ))
+        Some(agent_message::Payload::JobAck(_))
     ));
     // The control plane goes away: every later send fails.
     drop(rx);
@@ -67,20 +65,27 @@ async fn ac_pr_07_a_result_that_finished_offline_arrives_after_the_reconnect() {
         while let Ok(message) = rx.try_recv() {
             messages.push(message);
         }
-        // The job that runs at this moment also sends its step results to the new stream, so
-        // only a batch with the job result is the stored copy.
-        if messages.iter().any(|message| {
-            matches!(
-                message.payload,
-                Some(restichub_proto::agent::v1::agent_message::Payload::JobResult(_))
-            )
-        }) {
+        // The job that runs at this moment sends its result to the new stream, but its step
+        // results went to the stream that is gone. The stored copy is a batch with a step result.
+        let holds = |is: fn(&agent_message::Payload) -> bool| {
+            messages
+                .iter()
+                .any(|message| message.payload.as_ref().is_some_and(is))
+        };
+        if holds(|payload| matches!(payload, agent_message::Payload::StepResult(_)))
+            && holds(|payload| matches!(payload, agent_message::Payload::JobResult(_)))
+        {
             collected = Some(messages);
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let messages = collected.expect("the stored result must arrive");
+    let mut messages = collected.expect("the stored result must arrive");
+    // The live job result can arrive before the stored copy; the replay stops at the first job
+    // result, so the job results go last.
+    messages.sort_by_key(|message| {
+        matches!(message.payload, Some(agent_message::Payload::JobResult(_)))
+    });
     let (tx, mut rx) = mpsc::channel(64);
     for message in messages {
         tx.send(message).await.expect("replay");

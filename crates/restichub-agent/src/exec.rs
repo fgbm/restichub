@@ -888,7 +888,8 @@ mod tests {
         // access check (FR-AG-04).
         let cache = temp_path("pinned-cache");
         let line = command_line();
-        let mut child = spawn_verified(&program, &expected, &line, &cache).expect("cannot start");
+        let mut child = retry_text_file_busy(|| spawn_verified(&program, &expected, &line, &cache))
+            .expect("cannot start");
         let status = child.wait().expect("cannot wait");
         assert!(status.success(), "the child must run the checked file");
         let _ = std::fs::remove_dir_all(&dir);
@@ -953,13 +954,15 @@ mod tests {
         .with_record(layout.clone());
         let line = command_line();
         let spawn = |expected: &str| {
-            super::spawn_job_restic(
-                &layout.binary_path(),
-                expected,
-                &line,
-                &base.join("cache"),
-                ProcessPriority::Unspecified,
-            )
+            retry_text_file_busy(|| {
+                super::spawn_job_restic(
+                    &layout.binary_path(),
+                    expected,
+                    &line,
+                    &base.join("cache"),
+                    ProcessPriority::Unspecified,
+                )
+            })
         };
         spawn(&jobs.expected_sha256().expect("hash")).expect("the first binary runs");
 
@@ -998,6 +1001,21 @@ mod tests {
             let _ = write!(text, "{byte:02x}");
         }
         text
+    }
+
+    /// Retries a spawn that fails with `ETXTBSY`. A test writes the fake binary while a parallel
+    /// test forks; the forked child holds the write handle until its own `exec`, so the kernel
+    /// refuses to run the new file for that moment.
+    fn retry_text_file_busy<T>(mut spawn: impl FnMut() -> anyhow::Result<T>) -> anyhow::Result<T> {
+        for _ in 0..100 {
+            match spawn() {
+                Err(error) if format!("{error:#}").contains("Text file busy") => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                other => return other,
+            }
+        }
+        spawn()
     }
 
     /// Reports whether a process is alive (Linux only; the signal needs `libc`).
