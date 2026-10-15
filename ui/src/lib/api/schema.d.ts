@@ -3033,6 +3033,17 @@ export interface components {
          */
         SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password" | "webhook_secret" | "webhook_url" | "hook_secret";
         /**
+         * @description The kind of the object that references a secret.
+         * @enum {string}
+         */
+        SecretUsageKind: "repository" | "channel" | "profile" | "job_template";
+        /** @description One object that references a secret. */
+        SecretUsageView: {
+            id: string;
+            kind: components["schemas"]["SecretUsageKind"];
+            name: string;
+        };
+        /**
          * @description The metadata of a secret in a response (FR-RP-05).
          *
          *     The view never holds the value. The API cannot return a secret value after a user saves it
@@ -3046,8 +3057,10 @@ export interface components {
             id: string;
             name: string;
             purpose: string;
-            /** @description In RFC 3339. */
+            /** @description The time of the last value replace. In RFC 3339. */
             updated_at: string;
+            /** @description The repositories, channels and profiles that use the secret. */
+            used_by: components["schemas"]["SecretUsageView"][];
         };
         /**
          * @description Whether a host trusts scripts from the control plane (FR-HK-08, ADR-0037).
@@ -8638,6 +8651,15 @@ export interface operations {
             };
             /** @description The secret is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description An object uses the secret. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

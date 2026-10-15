@@ -18,4 +18,9 @@ describe('Select', () => {
 		render(Select, { props: { label: 'Role', options, error: 'Required' } });
 		expect(screen.getByLabelText('Role')).toHaveAttribute('aria-invalid', 'true');
 	});
+
+	it('keeps the base class next to a class of the caller', () => {
+		render(Select, { props: { label: 'Role', options, class: 'extra' } });
+		expect(screen.getByLabelText('Role')).toHaveClass('rh-select', 'extra');
+	});
 });

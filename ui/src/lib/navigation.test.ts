@@ -100,6 +100,7 @@ describe('navigation', () => {
 			'/audit',
 			'/settings/access/users',
 			'/settings/access/api-tokens',
+			'/settings/access/secrets',
 			'/users',
 			'/api-tokens',
 			'/a-bookmark'
@@ -125,7 +126,7 @@ describe('navigation', () => {
 		expect(platformRedirectFor(null, false, '/hosts')).toBeNull();
 	});
 
-	it('puts users and API tokens under Settings, Access for an Admin', () => {
+	it('puts users, API tokens and secrets under Settings, Access for an Admin', () => {
 		const groups = settingsGroupsForRole('admin');
 		expect(groups.map((group) => group.labelKey)).toEqual([
 			'settings.group.access',
@@ -134,7 +135,8 @@ describe('navigation', () => {
 		]);
 		expect(groups[0].items.map((item) => item.href)).toEqual([
 			'/(app)/settings/access/users',
-			'/(app)/settings/access/api-tokens'
+			'/(app)/settings/access/api-tokens',
+			'/(app)/settings/access/secrets'
 		]);
 		expect(groups[1].items.map((item) => item.href)).toEqual([
 			'/(app)/settings/notifications/channels',

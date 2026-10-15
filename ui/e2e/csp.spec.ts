@@ -164,6 +164,10 @@ test('the old users and API tokens addresses open the settings screens', async (
 	await expect(page).toHaveURL(/\/settings\/access\/api-tokens$/);
 	await expect(page.getByRole('heading', { level: 1, name: 'API tokens' })).toBeVisible();
 
+	await follow(page, '/secrets');
+	await expect(page).toHaveURL(/\/settings\/access\/secrets$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'Secrets' })).toBeVisible();
+
 	await follow(page, '/users');
 	await expect(page).toHaveURL(/\/settings\/access\/users$/);
 	await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
