@@ -10,6 +10,7 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use prost::Message as _;
 use restichub_agent::jobs::Jobs;
+use restichub_agent::restore_roots::RestoreAccess;
 use restichub_db::AgentId;
 use restichub_proto::agent::v1::{AgentMessage, agent_message};
 use serde_json::{Value, json};
@@ -118,7 +119,15 @@ impl RealAgent {
             dir.join("cache"),
             &dir,
         )
-        .expect("the job journal must open");
+        .expect("the job journal must open")
+        .with_restore_access(RestoreAccess::new(
+            vec![
+                std::env::temp_dir()
+                    .canonicalize()
+                    .expect("cannot resolve the temporary directory"),
+            ],
+            Vec::new(),
+        ));
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         jobs.attach(&tx);
         Self {

@@ -145,6 +145,41 @@ async fn fr_rs_01_db_the_newest_snapshot_list_wins_and_the_sweep_removes_old_row
     Ok(())
 }
 
+/// ADR-0035: the sweep removes a snapshot list after the retention of the control plane, which is
+/// one hour, and keeps a fresh one.
+#[tokio::test]
+async fn adr_0035_db_a_snapshot_list_is_removed_after_the_retention() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+    seed_tenant(db.database(), tenant_a).await?;
+    let now = OffsetDateTime::now_utc();
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let stale = finished_job(&mut tx, tenant_a, "snapshots", now - Duration::hours(2)).await?;
+    let fresh = finished_job(&mut tx, tenant_a, "snapshots", now - Duration::minutes(10)).await?;
+    let request = JobRequest::Snapshots(SnapshotsRequest::default());
+    for (job, at) in [
+        (stale, now - Duration::hours(2)),
+        (fresh, now - Duration::minutes(10)),
+    ] {
+        restore::insert_request(&mut tx, job, &request).await?;
+        let payload = serde_json::json!({"truncated": false, "snapshots": []});
+        restore::insert_listing(&mut tx, job, "snapshots", &payload, at).await?;
+    }
+    let retention = Duration::hours(1);
+    let removed =
+        restore::delete_expired_listings(&mut tx, now - retention, now - retention).await?;
+    assert_eq!(removed, 1);
+    assert!(restore::get_listing(&mut tx, stale).await?.is_none());
+    assert!(restore::get_listing(&mut tx, fresh).await?.is_some());
+    tx.commit().await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// AC-TN-01: the tenant of a listing is the tenant of the transaction.
 #[tokio::test]
 async fn ac_tn_01_db_a_listing_of_another_tenant_is_invisible() -> TestResult {

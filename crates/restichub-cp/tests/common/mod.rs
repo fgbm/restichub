@@ -153,9 +153,9 @@ pub fn write_body(
         })),
         ("POST", "/api/v1/repositories/{id}/maintenance/run") => Some(json!({"task": "check"})),
         ("POST", "/api/v1/repositories/{id}/snapshots") => Some(json!({})),
-        ("POST", "/api/v1/repositories/{id}/ls") => Some(json!({"snapshot_id": "latest"})),
+        ("POST", "/api/v1/repositories/{id}/ls") => Some(json!({"snapshot_id": "0123abcd"})),
         ("POST", "/api/v1/repositories/{id}/restore") => Some(json!({
-            "snapshot_id": "latest",
+            "snapshot_id": "0123abcd",
             "target": "/srv/restore",
             "overwrite": "never"
         })),

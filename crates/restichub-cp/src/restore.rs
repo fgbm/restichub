@@ -15,6 +15,7 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use restichub_db::agents as agents_repo;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::jobs::{self as job_repo, Job, NewJob};
 use restichub_db::queue as queue_repo;
@@ -24,6 +25,7 @@ use restichub_db::restore::{
 };
 use restichub_db::{AgentId, JobId, JobKind, RepositoryId};
 use restichub_proto::AgentCapability;
+use restichub_proto::restore_path::{PathFlavor, components, is_within};
 use restichub_proto::validate::{MAX_LS_LIMIT, has_forbidden, is_absolute_path};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -47,6 +49,10 @@ const BROWSE_LIFETIME: time::Duration = time::Duration::minutes(2);
 
 /// How long a restore waits in the queue for its agent.
 const RESTORE_LIFETIME: time::Duration = time::Duration::hours(1);
+
+/// The browse jobs that wait or run on one agent. A further request gets HTTP 429, so a person
+/// cannot fill the queue of an agent that a backup needs.
+const MAX_PENDING_BROWSE: i64 = 8;
 
 /// A page of a tree that a finished job listed within this time answers a new request.
 const PAGE_CACHE: time::Duration = time::Duration::minutes(10);
@@ -120,7 +126,8 @@ pub struct LsQueryRequest {
     /// The agent that reads the repository. An absent value uses the maintenance agent.
     #[serde(default)]
     pub agent_id: Option<String>,
-    /// The identifier of the snapshot, `latest` or 8 to 64 lower-case hexadecimal characters.
+    /// The identifier of one snapshot: 8 to 64 lower-case hexadecimal characters. `latest` moves
+    /// between two reads, so the call refuses it.
     pub snapshot_id: String,
     /// The directory in the snapshot. Empty or `/` means the root.
     #[serde(default)]
@@ -172,7 +179,8 @@ pub struct RestoreBody {
     /// with a local path needs its maintenance agent, because the data stays on that host.
     #[serde(default)]
     pub agent_id: Option<String>,
-    /// The identifier of the snapshot, `latest` or 8 to 64 lower-case hexadecimal characters.
+    /// The identifier of one snapshot: 8 to 64 lower-case hexadecimal characters. `latest` moves
+    /// between two reads, so the call refuses it.
     pub snapshot_id: String,
     /// Restore only the paths that match. Empty means the whole snapshot. restic accepts either
     /// this list or `excludes`, not both.
@@ -181,14 +189,16 @@ pub struct RestoreBody {
     /// Skip the paths that match. Not allowed together with `includes`.
     #[serde(default)]
     pub excludes: Vec<String>,
-    /// An absolute directory on the target agent, such as `/srv/restore` or `D:\restore`.
+    /// An absolute directory on the agent that writes the files. It must lie inside one of the
+    /// roots that the agent reports in its `restore_roots`, and the agent refuses its own files.
     pub target: String,
     /// What to do with a file that exists in the target.
     pub overwrite: OverwriteMode,
     /// Check the restore and write no file. The summary still counts the files.
     #[serde(default)]
     pub dry_run: bool,
-    /// Read the restored files again and compare them with the snapshot.
+    /// Read the restored files again and compare them with the snapshot. restic refuses it with
+    /// `dry_run`.
     #[serde(default)]
     pub verify: bool,
 }
@@ -227,11 +237,10 @@ fn checked_list(
 }
 
 fn checked_snapshot(value: &str) -> Result<String, ApiError> {
-    let valid = value == "latest"
-        || (matches!(value.len(), 8..=64)
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    let valid = matches!(value.len(), 8..=64)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
     if valid {
         Ok(value.to_owned())
     } else {
@@ -310,6 +319,10 @@ fn checked_restore(body: &RestoreBody) -> Result<RestoreRequest, ApiError> {
     if !includes.is_empty() && !excludes.is_empty() {
         return Err(ApiError::invalid_field("excludes", Reason::InvalidBody));
     }
+    // restic stops with "--dry-run and --verify are mutually exclusive".
+    if body.dry_run && body.verify {
+        return Err(ApiError::invalid_field("verify", Reason::InvalidBody));
+    }
     Ok(RestoreRequest {
         snapshot_id,
         includes,
@@ -351,7 +364,6 @@ async fn create_job(
         return Err(ApiError::conflict());
     }
     if let Some(page) = check_cache
-        && page.snapshot_id != "latest"
         && let Some(listing) =
             restore_repo::cached_page(&mut tx, repository_id, page, now - PAGE_CACHE).await?
     {
@@ -361,6 +373,32 @@ async fn create_job(
     let agent_id = resolve_agent(&repository, explicit_agent, kind)?;
     ensure_agent_active(&mut tx, agent_id).await?;
     require_ready_agent(state, agent_id, kind)?;
+    if let JobRequest::Restore(restore) = request {
+        let os = agents_repo::get(&mut tx, agent_id)
+            .await?
+            .map(|agent| agent.os)
+            .unwrap_or_default();
+        check_restore_target(state, agent_id, &os, &restore.target)?;
+    } else {
+        check_browse_rate(state, context)?;
+        if let Some(pending) = restore_repo::find_pending(
+            &mut tx,
+            kind.as_str(),
+            agent_id,
+            repository_id,
+            request,
+            now,
+        )
+        .await?
+            && let Some(detail) = queue_repo::get_detail(&mut tx, pending).await?
+        {
+            tx.commit().await?;
+            return Ok(Created::Job(Box::new(detail)));
+        }
+        if restore_repo::count_pending_browse(&mut tx, agent_id, now).await? >= MAX_PENDING_BROWSE {
+            return Err(ApiError::rate_limited(5));
+        }
+    }
 
     job_repo::create(
         &mut tx,
@@ -379,6 +417,21 @@ async fn create_job(
     .await
     .map_err(map_write_error)?;
     restore_repo::insert_request(&mut tx, job_id, request).await?;
+    if !matches!(request, JobRequest::Restore(_)) {
+        // The listing sends the repository keys to this agent, so the record names it.
+        let mut event = context.audit_event(AuditAction::BrowseStart, "job", job_id.as_uuid());
+        event.diff = Some(diff(
+            None,
+            Some(&json!({
+                "repository_id": repository_id.to_string(),
+                "agent_id": agent_id.to_string(),
+                "kind": kind.as_str(),
+                "explicit_agent": explicit_agent.is_some(),
+            })),
+            &[],
+        ));
+        restichub_db::audit::insert(&mut tx, &event).await?;
+    }
     if let JobRequest::Restore(restore) = request {
         let mut event = context.audit_event(AuditAction::RestoreStart, "job", job_id.as_uuid());
         event.diff = Some(diff(
@@ -405,6 +458,48 @@ async fn create_job(
         return Err(ApiError::internal("the job is not found after the create"));
     };
     Ok(Created::Job(Box::new(detail)))
+}
+
+/// Refuses a restore target that the agent would refuse, before a job exists (FR-RS-03).
+///
+/// The roots come from the live connection. The agent checks the target again, resolves links and
+/// protects its own files, so this check is only the early answer.
+fn check_restore_target(
+    state: &AppState,
+    agent: AgentId,
+    os: &str,
+    target: &str,
+) -> Result<(), ApiError> {
+    let flavor = PathFlavor::from_os(os);
+    if components(flavor, target).is_none() {
+        return Err(ApiError::invalid_field("target", Reason::InvalidFormat));
+    }
+    let Some(roots) = state.agent_registry().restore_roots(agent) else {
+        return Err(ApiError::agent_offline());
+    };
+    if roots.iter().any(|root| is_within(flavor, target, root)) {
+        Ok(())
+    } else {
+        Err(ApiError::restore_target_denied())
+    }
+}
+
+/// Limits the snapshot list and tree page requests of one actor (ADR-0035).
+fn check_browse_rate(state: &AppState, context: &RequestContext) -> Result<(), ApiError> {
+    let actor = match &context.actor {
+        restichub_db::audit::Actor::User(id) => format!("user:{id}"),
+        restichub_db::audit::Actor::ApiToken(id) => format!("api_token:{id}"),
+        other => other.actor_type().to_owned(),
+    };
+    let key = format!("browse:{}:{actor}", context.tenant_id);
+    match state
+        .auth()
+        .browse_limiter
+        .check(&key, std::time::Instant::now())
+    {
+        Ok(()) => Ok(()),
+        Err(wait) => Err(ApiError::rate_limited(wait.as_secs().max(1))),
+    }
 }
 
 enum Created {

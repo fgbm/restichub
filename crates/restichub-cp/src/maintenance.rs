@@ -28,8 +28,12 @@ pub const JOB_EXPIRY_INTERVAL: Duration = Duration::from_secs(60);
 /// How long the control plane keeps the listing of one directory of a snapshot (AC-RS-02).
 pub const PAGE_RETENTION: time::Duration = time::Duration::hours(1);
 
-/// How long the control plane keeps a snapshot listing and the browse jobs (FR-RS-01).
-pub const SNAPSHOTS_RETENTION: time::Duration = time::Duration::days(7);
+/// How long the control plane keeps a snapshot listing. It holds host names and paths, so it goes
+/// soon after the person looked at it (FR-RS-01).
+pub const SNAPSHOTS_RETENTION: time::Duration = time::Duration::hours(1);
+
+/// How long the control plane keeps a finished browse job.
+pub const BROWSE_JOB_RETENTION: time::Duration = time::Duration::days(7);
 
 /// Removes the expired sessions and the expired and used setup tokens.
 ///
@@ -63,7 +67,7 @@ async fn cleanup_tenant(
     sessions::delete_expired(&mut tx, now).await?;
     restore::delete_expired_listings(&mut tx, now - PAGE_RETENTION, now - SNAPSHOTS_RETENTION)
         .await?;
-    restore::delete_old_browse_jobs(&mut tx, now - SNAPSHOTS_RETENTION).await?;
+    restore::delete_old_browse_jobs(&mut tx, now - BROWSE_JOB_RETENTION).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -205,4 +209,15 @@ pub fn spawn_limiter_sweep(
             create_user_tenant_limiter.sweep(now);
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adr_0035_a_snapshot_list_lives_one_hour() {
+        assert_eq!(SNAPSHOTS_RETENTION, time::Duration::hours(1));
+        assert!(BROWSE_JOB_RETENTION > SNAPSHOTS_RETENTION);
+    }
 }

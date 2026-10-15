@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 
 use crate::DbError;
-use crate::ids::{JobId, RepositoryId};
+use crate::ids::{AgentId, JobId, RepositoryId};
 use crate::tx::TenantTx;
 
 /// The policy for a file that exists in the restore target (FR-RS-04).
@@ -211,6 +211,59 @@ pub async fn cached_page(
     .await
     .map_err(DbError::Query)?;
     Ok(row.map(listing))
+}
+
+/// The browse job that already runs or waits with the same agent, repository and request.
+///
+/// The Restore screen asks for the same page again while a job loads it, so the control plane
+/// hands out that job instead of a second one.
+pub async fn find_pending(
+    tx: &mut TenantTx<'_>,
+    kind: &str,
+    agent: AgentId,
+    repository: RepositoryId,
+    request: &JobRequest,
+    now: OffsetDateTime,
+) -> Result<Option<JobId>, DbError> {
+    let value = serde_json::to_value(request).map_err(decode_error)?;
+    let row: Option<(JobId,)> = sqlx::query_as(
+        "SELECT j.id FROM jobs j \
+         JOIN job_requests r ON r.tenant_id = j.tenant_id AND r.job_id = j.id \
+         WHERE j.kind = $1 AND j.agent_id = $2 AND j.repository_id = $3 \
+           AND j.status IN ('queued', 'sent', 'running') \
+           AND (j.expires_at IS NULL OR j.expires_at > $5) \
+           AND r.request = $4 \
+         ORDER BY j.created_at DESC, j.id DESC LIMIT 1",
+    )
+    .bind(kind)
+    .bind(agent)
+    .bind(repository)
+    .bind(sqlx::types::Json(value))
+    .bind(now)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(|(id,)| id))
+}
+
+/// The number of browse jobs that wait or run on one agent.
+pub async fn count_pending_browse(
+    tx: &mut TenantTx<'_>,
+    agent: AgentId,
+    now: OffsetDateTime,
+) -> Result<i64, DbError> {
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM jobs \
+         WHERE kind IN ('snapshots', 'ls') AND agent_id = $1 \
+           AND status IN ('queued', 'sent', 'running') \
+           AND (expires_at IS NULL OR expires_at > $2)",
+    )
+    .bind(agent)
+    .bind(now)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(count)
 }
 
 /// Deletes the listings older than the given times and returns how many it deleted.

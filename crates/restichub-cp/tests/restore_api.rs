@@ -236,7 +236,7 @@ async fn fr_rs_01_the_job_list_hides_the_browse_jobs() {
             &env.operator,
             "POST",
             &restore_uri(repository),
-            Some(restore_body("latest", &target, json!({}))),
+            Some(restore_body("0123abcd", &target, json!({}))),
         )
         .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{restore}");
@@ -280,7 +280,7 @@ async fn fr_pr_09_an_agent_without_restore_v1_gets_no_ls_and_no_restore() {
             &env.operator,
             "POST",
             &restore_uri(repository),
-            Some(restore_body("latest", &target, json!({}))),
+            Some(restore_body("0123abcd", &target, json!({}))),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -290,7 +290,7 @@ async fn fr_pr_09_an_agent_without_restore_v1_gets_no_ls_and_no_restore() {
             &env.operator,
             "POST",
             &ls_uri(repository),
-            Some(json!({"snapshot_id": "latest"})),
+            Some(json!({"snapshot_id": "0123abcd"})),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -323,7 +323,7 @@ async fn fr_pr_09_an_agent_without_restore_v1_gets_no_ls_and_no_restore() {
             &mut tx,
             restichub_db::JobId::from_uuid(job),
             &JobRequest::Restore(RestoreRequest {
-                snapshot_id: "latest".to_owned(),
+                snapshot_id: "0123abcd".to_owned(),
                 includes: Vec::new(),
                 excludes: Vec::new(),
                 target: target.to_string_lossy().into_owned(),
@@ -369,21 +369,21 @@ async fn fr_rs_04_the_restore_api_refuses_a_bad_request() {
 
     for (body, field) in [
         (
-            restore_body("latest", std::path::Path::new("relative/dir"), json!({})),
+            restore_body("0123abcd", std::path::Path::new("relative/dir"), json!({})),
             "target",
         ),
         (restore_body("--dry-run", &target, json!({})), "snapshot_id"),
         (restore_body("ABCDEF12", &target, json!({})), "snapshot_id"),
         (
             restore_body(
-                "latest",
+                "0123abcd",
                 &target,
                 json!({"includes": ["/a"], "excludes": ["*.log"]}),
             ),
             "excludes",
         ),
         (
-            restore_body("latest", &target, json!({"includes": [""]})),
+            restore_body("0123abcd", &target, json!({"includes": [""]})),
             "includes",
         ),
     ] {
@@ -392,13 +392,13 @@ async fn fr_rs_04_the_restore_api_refuses_a_bad_request() {
         assert_eq!(error["field"], field, "{body}");
     }
     let (status, _) = post(restore_body(
-        "latest",
+        "0123abcd",
         &target,
         json!({"overwrite": "sometimes"}),
     ))
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, _) = post(restore_body("latest", &target, json!({"shell": "x"}))).await;
+    let (status, _) = post(restore_body("0123abcd", &target, json!({"shell": "x"}))).await;
     assert_eq!(
         status,
         StatusCode::BAD_REQUEST,
@@ -409,7 +409,7 @@ async fn fr_rs_04_the_restore_api_refuses_a_bad_request() {
             &env.operator,
             "POST",
             &ls_uri(repository),
-            Some(json!({"snapshot_id": "latest", "limit": 5001})),
+            Some(json!({"snapshot_id": "0123abcd", "limit": 5001})),
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
@@ -424,7 +424,7 @@ async fn fr_rs_04_the_restore_api_refuses_a_bad_request() {
             &env.operator,
             "POST",
             &restore_uri(offline),
-            Some(restore_body("latest", &target, json!({}))),
+            Some(restore_body("0123abcd", &target, json!({}))),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{error}");
@@ -439,7 +439,7 @@ async fn fr_rs_04_the_restore_api_refuses_a_bad_request() {
             &env.operator,
             "POST",
             &restore_uri(fresh),
-            Some(restore_body("latest", &target, json!({}))),
+            Some(restore_body("0123abcd", &target, json!({}))),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -451,7 +451,7 @@ async fn fr_rs_04_the_restore_api_refuses_a_bad_request() {
             "POST",
             &restore_uri(repository),
             Some(restore_body(
-                "latest",
+                "0123abcd",
                 &target,
                 json!({"agent_id": other.id.to_string()}),
             )),
@@ -473,8 +473,8 @@ async fn ac_au_02_the_roles_of_the_restore_endpoints() {
     let location = scripted_location("roles");
     let repository = initialized_repository(&env, agent.id, "pw", &location).await;
     let target = work_dir("roles-target");
-    let restore = Some(restore_body("latest", &target, json!({"dry_run": true})));
-    let ls = Some(json!({"snapshot_id": "latest"}));
+    let restore = Some(restore_body("0123abcd", &target, json!({"dry_run": true})));
+    let ls = Some(json!({"snapshot_id": "0123abcd"}));
 
     for token in [&env.viewer] {
         for (method, uri, body) in [

@@ -50,6 +50,10 @@ pub const CREATE_USER_RATE: u32 = 20;
 /// minting many API tokens, so a second bucket counts the tenant (threat T15).
 pub const CREATE_USER_TENANT_RATE: u32 = 60;
 
+/// The snapshot list and tree page requests of one actor in one minute (ADR-0035). Each request
+/// can start a job that reads a repository, so an actor cannot flood an agent with them.
+pub const BROWSE_RATE: u32 = 60;
+
 /// The enrollment limit for each source IP address in one minute (FR-ID-05, AC-ID-05).
 ///
 /// The 11th request from one address in one minute is refused with HTTP 429.
@@ -70,6 +74,7 @@ pub struct AuthState {
     pub create_user_tenant_limiter: Arc<RateLimiter>,
     pub enroll_ip_limiter: Arc<RateLimiter>,
     pub enroll_token_limiter: Arc<RateLimiter>,
+    pub browse_limiter: Arc<RateLimiter>,
     pub clock: Arc<dyn Clock>,
     pub hash_semaphore: Arc<Semaphore>,
 }
@@ -108,6 +113,7 @@ impl AuthState {
             RateLimiter::new(ENROLL_IP_RATE, window, crate::rate_limit::MAX_ENTRIES);
         let enroll_token_limiter =
             RateLimiter::new(ENROLL_TOKEN_RATE, window, crate::rate_limit::MAX_ENTRIES);
+        let browse_limiter = RateLimiter::new(BROWSE_RATE, window, crate::rate_limit::MAX_ENTRIES);
         let hash_semaphore = Arc::new(Semaphore::new(config.max_concurrent_hashes as usize));
         Self {
             config,
@@ -118,6 +124,7 @@ impl AuthState {
             create_user_tenant_limiter: Arc::new(create_user_tenant_limiter),
             enroll_ip_limiter: Arc::new(enroll_ip_limiter),
             enroll_token_limiter: Arc::new(enroll_token_limiter),
+            browse_limiter: Arc::new(browse_limiter),
             clock: Arc::new(SystemClock),
             hash_semaphore,
         }
@@ -135,6 +142,17 @@ impl AuthState {
     pub fn with_create_user_tenant_rate(mut self, capacity: u32) -> Self {
         let window = Duration::from_secs(60);
         self.create_user_tenant_limiter = Arc::new(RateLimiter::new(
+            capacity,
+            window,
+            crate::rate_limit::MAX_ENTRIES,
+        ));
+        self
+    }
+
+    /// Replaces the browse bucket, so a test can reach its limit quickly.
+    pub fn with_browse_rate(mut self, capacity: u32) -> Self {
+        let window = Duration::from_secs(60);
+        self.browse_limiter = Arc::new(RateLimiter::new(
             capacity,
             window,
             crate::rate_limit::MAX_ENTRIES,

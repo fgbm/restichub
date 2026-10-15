@@ -25,13 +25,15 @@ use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::validation::Reason;
 
-/// Stores the capabilities of the last connection of an agent for the diagnostics (FR-PR-09). The
-/// job builder never reads them: it uses the capabilities of the live connection.
-pub async fn record_capabilities(
+/// Stores the capabilities and the restore roots of the last connection of an agent for the
+/// diagnostics and the Restore screen (FR-PR-09, FR-RS-03). The job builder never reads the
+/// capabilities: it uses the capabilities of the live connection.
+pub async fn record_hello_facts(
     state: &AppState,
     tenant: restichub_db::TenantId,
     agent: AgentId,
     capabilities: &[restichub_proto::AgentCapability],
+    restore_roots: &[String],
 ) {
     let names: Vec<String> = capabilities
         .iter()
@@ -39,7 +41,7 @@ pub async fn record_capabilities(
         .collect();
     let result = async {
         let mut tx = state.db().begin_tenant(tenant).await?;
-        repo::set_capabilities(&mut tx, agent, &names).await?;
+        repo::set_hello_facts(&mut tx, agent, &names, restore_roots).await?;
         tx.commit().await
     }
     .await;
@@ -57,6 +59,9 @@ pub struct AgentView {
     pub agent_version: String,
     pub restic_version: String,
     pub labels: Vec<String>,
+    /// Absolute directories where the agent restores files, from its last connection. A restore
+    /// target must lie inside one of them.
+    pub restore_roots: Vec<String>,
     /// Lower-case hexadecimal.
     pub certificate_serial: String,
     /// In RFC 3339.
@@ -78,6 +83,7 @@ impl From<&repo::Agent> for AgentView {
             agent_version: agent.agent_version.clone(),
             restic_version: agent.restic_version.clone(),
             labels: agent.labels.clone(),
+            restore_roots: agent.restore_roots.clone(),
             certificate_serial: to_hex(&agent.certificate_serial),
             certificate_expires_at: format_time(agent.certificate_expires_at),
             status: agent.status,

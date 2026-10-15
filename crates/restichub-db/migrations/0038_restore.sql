@@ -13,6 +13,12 @@
 -- came from the agent. The sweep of the control plane removes an old listing.
 --
 -- `job_steps` gets the summary of a restore (FR-RS-04).
+--
+-- The agent reports its restore roots in `AgentHello` (FR-RS-03, ADR-0035). The control plane keeps
+-- the last report for the Restore screen, which suggests a root as the target. The live connection
+-- is the authority for the early refusal; the agent checks the target again.
+
+ALTER TABLE agents ADD COLUMN restore_roots text[] NOT NULL DEFAULT '{}';
 
 ALTER TABLE jobs DROP CONSTRAINT jobs_kind_check;
 ALTER TABLE jobs ADD CONSTRAINT jobs_kind_check CHECK (

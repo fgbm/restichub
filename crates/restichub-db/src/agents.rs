@@ -31,6 +31,8 @@ pub struct Agent {
     pub labels: Vec<String>,
     /// The capabilities that the agent announced in its last `AgentHello` (FR-PR-09).
     pub capabilities: Vec<String>,
+    /// The directories where the agent restores files, from its last `AgentHello` (FR-RS-03).
+    pub restore_roots: Vec<String>,
     pub certificate_serial: Vec<u8>,
     pub certificate_expires_at: OffsetDateTime,
     pub status: AgentStatus,
@@ -125,7 +127,7 @@ pub async fn list(
     };
     let mut agents: Vec<Agent> = sqlx::query_as::<_, AgentRow>(
         "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
-                capabilities, certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
+                capabilities, restore_roots, certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
                 revoked_at, revoked_by_user_id \
          FROM agents \
          WHERE ($1::text IS NULL OR status = $1) \
@@ -152,7 +154,7 @@ pub async fn list(
 pub async fn get(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option<Agent>, DbError> {
     let row = sqlx::query_as::<_, AgentRow>(
         "SELECT id, hostname, os, arch, agent_version, restic_version, labels, \
-                capabilities, certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
+                capabilities, restore_roots, certificate_serial, certificate_expires_at, status, last_seen_at, created_at, \
                 revoked_at, revoked_by_user_id \
          FROM agents WHERE id = $1",
     )
@@ -217,18 +219,24 @@ pub async fn touch_last_seen_batch(
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
-/// Stores the capabilities that the agent announced in its `AgentHello` (FR-PR-09).
-pub async fn set_capabilities(
+/// Stores the capabilities and the restore roots that the agent announced in its `AgentHello`
+/// (FR-PR-09, FR-RS-03).
+pub async fn set_hello_facts(
     tx: &mut TenantTx<'_>,
     id: AgentId,
     capabilities: &[String],
+    restore_roots: &[String],
 ) -> Result<(), DbError> {
-    sqlx::query("UPDATE agents SET capabilities = $2 WHERE id = $1 AND capabilities <> $2")
-        .bind(id)
-        .bind(capabilities)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+    sqlx::query(
+        "UPDATE agents SET capabilities = $2, restore_roots = $3 \
+         WHERE id = $1 AND (capabilities <> $2 OR restore_roots <> $3)",
+    )
+    .bind(id)
+    .bind(capabilities)
+    .bind(restore_roots)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     Ok(())
 }
 
@@ -278,6 +286,7 @@ type AgentRow = (
     String,
     Vec<String>,
     Vec<String>,
+    Vec<String>,
     Vec<u8>,
     OffsetDateTime,
     AgentStatus,
@@ -298,6 +307,7 @@ impl From<AgentRow> for Agent {
             restic_version,
             labels,
             capabilities,
+            restore_roots,
             certificate_serial,
             certificate_expires_at,
             status,
@@ -315,6 +325,7 @@ impl From<AgentRow> for Agent {
             restic_version,
             labels,
             capabilities,
+            restore_roots,
             certificate_serial,
             certificate_expires_at,
             status,

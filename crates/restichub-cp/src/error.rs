@@ -48,6 +48,7 @@ pub enum ErrorCode {
     AgentOffline,
     AlreadyQueued,
     AgentCapabilityMissing,
+    RestoreTargetDenied,
 }
 
 impl ErrorCode {
@@ -74,6 +75,7 @@ impl ErrorCode {
             Self::AgentOffline => "agent_offline",
             Self::AlreadyQueued => "already_queued",
             Self::AgentCapabilityMissing => "agent_capability_missing",
+            Self::RestoreTargetDenied => "restore_target_denied",
         }
     }
 }
@@ -294,6 +296,16 @@ impl ApiError {
         Self::new(
             StatusCode::CONFLICT,
             ErrorCode::AgentCapabilityMissing,
+            "Conflict",
+        )
+    }
+
+    /// Creates a `409 restore_target_denied` error: the target is outside the restore roots of the
+    /// agent (FR-RS-03). The user interface translates the code (NFR-DOC-04).
+    pub fn restore_target_denied() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::RestoreTargetDenied,
             "Conflict",
         )
     }

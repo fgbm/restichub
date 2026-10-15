@@ -130,6 +130,15 @@ pub fn test_queue() -> QueueConfig {
 
 impl Env {
     pub async fn start(db: TestDatabase, queue: QueueConfig) -> Self {
+        Self::start_with_browse_rate(db, queue, None).await
+    }
+
+    /// Like [`Env::start`], with a smaller snapshot browsing limit for each actor.
+    pub async fn start_with_browse_rate(
+        db: TestDatabase,
+        queue: QueueConfig,
+        browse_rate: Option<u32>,
+    ) -> Self {
         let clock = Arc::new(ManualClock::new(time::OffsetDateTime::now_utc()));
         let provider = common::test_kek();
         let ca_service = CaService::new(provider.clone());
@@ -145,7 +154,10 @@ impl Env {
             .await
             .expect("cannot create the job signing key set");
         let shared: Arc<dyn restichub_cp::clock::Clock> = clock.clone();
-        let auth = AuthState::new(AuthConfig::default()).with_clock(shared);
+        let mut auth = AuthState::new(AuthConfig::default()).with_clock(shared);
+        if let Some(rate) = browse_rate {
+            auth = auth.with_browse_rate(rate);
+        }
         let state = AppState::with_auth(db.database().clone(), auth)
             .with_kek(provider)
             .with_tenancy(TenancyConfig::multi())
@@ -238,20 +250,36 @@ impl Env {
     /// Like [`Env::connect_agent`], for an agent that announces `capabilities` only.
     pub async fn connect_agent_with(&self, hostname: &str, capabilities: Vec<String>) -> FakeAgent {
         let identity = self.enroll_agent(hostname).await;
-        self.open_agent_stream(identity, capabilities).await
+        self.open_agent_stream(identity, capabilities, default_restore_roots())
+            .await
+    }
+
+    /// Like [`Env::connect_agent`], for an agent that reports `roots` as its restore roots.
+    pub async fn connect_agent_with_roots(&self, hostname: &str, roots: Vec<String>) -> FakeAgent {
+        let capabilities = restichub_proto::AgentCapability::ALL
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect();
+        let identity = self.enroll_agent(hostname).await;
+        self.open_agent_stream(identity, capabilities, roots).await
     }
 
     /// Opens a new stream for an enrolled identity, as a restart or a downgrade does. This closes
     /// the stream that the identity held before.
     pub async fn reconnect_agent(&self, agent: &FakeAgent, capabilities: Vec<String>) -> FakeAgent {
-        self.open_agent_stream(agent.identity.clone(), capabilities)
-            .await
+        self.open_agent_stream(
+            agent.identity.clone(),
+            capabilities,
+            default_restore_roots(),
+        )
+        .await
     }
 
     async fn open_agent_stream(
         &self,
         identity: EnrolledIdentity,
         capabilities: Vec<String>,
+        roots: Vec<String>,
     ) -> FakeAgent {
         let client_tls = ClientTlsConfig::new()
             .ca_certificate(Certificate::from_pem(der_to_pem(
@@ -276,7 +304,7 @@ impl Env {
             .connect(ReceiverStream::new(rx))
             .await
             .expect("the stream must open");
-        tx.send(hello(capabilities.clone()))
+        tx.send(hello(capabilities.clone(), roots))
             .await
             .expect("cannot send the hello");
         let mut inbound = response.into_inner();
@@ -522,13 +550,19 @@ pub fn id_of(value: &Value) -> Uuid {
     Uuid::parse_str(value["id"].as_str().expect("the object id")).expect("the id is a UUID")
 }
 
-fn hello(capabilities: Vec<String>) -> AgentMessage {
+/// The temporary directory, where the tests restore (FR-RS-03).
+pub fn default_restore_roots() -> Vec<String> {
+    vec![std::env::temp_dir().to_string_lossy().into_owned()]
+}
+
+fn hello(capabilities: Vec<String>, restore_roots: Vec<String>) -> AgentMessage {
     AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
             protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
             agent_version: "0.1.0".to_owned(),
             capabilities,
+            restore_roots,
             ..AgentHello::default()
         })),
     }

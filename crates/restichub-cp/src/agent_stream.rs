@@ -100,6 +100,8 @@ struct StreamEntry {
     /// Set by the `AgentHello` of this connection. An entry without it is not online for the
     /// dispatcher (FR-PR-09).
     capabilities: Option<Vec<AgentCapability>>,
+    /// Taken from the same hello as the capabilities (FR-RS-03).
+    restore_roots: Vec<String>,
 }
 
 /// What a job send did.
@@ -184,6 +186,7 @@ impl StreamRegistry {
                 close,
                 out,
                 capabilities: None,
+                restore_roots: Vec::new(),
             },
         ) {
             let _ = previous.close.send(true);
@@ -191,18 +194,20 @@ impl StreamRegistry {
         generation
     }
 
-    /// Records the capabilities of the live connection and makes the stream ready for the
+    /// Records the hello facts of the live connection and makes the stream ready for the
     /// dispatcher. A newer stream of the agent keeps its own entry (FR-PR-09).
-    fn set_capabilities(
+    fn set_hello(
         &self,
         agent: AgentId,
         generation: u64,
         capabilities: Vec<AgentCapability>,
+        restore_roots: Vec<String>,
     ) -> bool {
         let mut inner = self.lock();
         match inner.streams.get_mut(&agent) {
             Some(entry) if entry.generation == generation => {
                 entry.capabilities = Some(capabilities);
+                entry.restore_roots = restore_roots;
                 true
             }
             _ => false,
@@ -217,6 +222,14 @@ impl StreamRegistry {
             .streams
             .get(&agent)
             .and_then(|entry| entry.capabilities.clone())
+    }
+
+    /// Roots of the live connection, or `None` when the agent is not online (FR-RS-03).
+    pub fn restore_roots(&self, agent: AgentId) -> Option<Vec<String>> {
+        let inner = self.lock();
+        let entry = inner.streams.get(&agent)?;
+        entry.capabilities.as_ref()?;
+        Some(entry.restore_roots.clone())
     }
 
     /// Removes the entry of a stream, unless a newer stream replaced it (FR-ID-08).
@@ -607,6 +620,21 @@ impl AgentService for AgentStreamService {
     }
 }
 
+/// The most restore roots of one agent and the longest root that the control plane keeps.
+const MAX_RESTORE_ROOTS: usize = 32;
+const MAX_ROOT_CHARS: usize = 1_024;
+
+/// Bounds the roots that an agent reported. A value that the control plane cannot show is dropped.
+fn clean_roots(roots: &[String]) -> Vec<String> {
+    roots
+        .iter()
+        .filter(|root| !root.is_empty() && root.chars().count() <= MAX_ROOT_CHARS)
+        .filter(|root| !restichub_proto::validate::has_forbidden(root))
+        .take(MAX_RESTORE_ROOTS)
+        .cloned()
+        .collect()
+}
+
 /// Runs the message loop of one stream: the heartbeat, the `last_seen_at` batch, the inbound
 /// messages and the rotation delivery (FR-ID-07, ADR-0026).
 ///
@@ -639,13 +667,23 @@ async fn run_stream(
         return;
     };
     let capabilities = AgentCapability::parse_list(&hello.capabilities);
-    if !state
-        .agent_registry()
-        .set_capabilities(agent, generation, capabilities.clone())
-    {
+    let restore_roots = clean_roots(&hello.restore_roots);
+    if !state.agent_registry().set_hello(
+        agent,
+        generation,
+        capabilities.clone(),
+        restore_roots.clone(),
+    ) {
         return;
     }
-    crate::agents::record_capabilities(&state, identity.tenant, agent, &capabilities).await;
+    crate::agents::record_hello_facts(
+        &state,
+        identity.tenant,
+        agent,
+        &capabilities,
+        &restore_roots,
+    )
+    .await;
 
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -951,7 +989,7 @@ mod tests {
         let generation = registry.open(agent, close_b, tx_b);
         assert!(*a.borrow_and_update(), "the first stream must close");
         assert!(registry.online_agents().is_empty(), "no hello yet");
-        assert!(registry.set_capabilities(agent, generation, Vec::new()));
+        assert!(registry.set_hello(agent, generation, Vec::new(), Vec::new()));
         assert_eq!(registry.online_agents(), vec![agent]);
         assert!(registry.close_by_agent(agent));
     }
