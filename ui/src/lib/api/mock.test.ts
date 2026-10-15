@@ -24,7 +24,9 @@ describe('the mock enrollment tokens', () => {
 		const revoked = (await api.listEnrollmentTokens()).find((token) => token.id === created.id);
 		expect(revoked?.revoked_at).not.toBeNull();
 
-		await expect(api.revokeEnrollmentToken(created.id)).rejects.toMatchObject({ code: 'token_already_revoked' });
+		await expect(api.revokeEnrollmentToken(created.id)).rejects.toMatchObject({
+			code: 'token_already_revoked'
+		});
 	});
 });
 
