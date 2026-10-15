@@ -631,7 +631,7 @@ export const en = {
 		'The profile no longer fits the host. Edit the profile for the system of the host.',
 	'jobs.reason.lock_retries_exhausted': 'The repository stayed locked after every retry.',
 	'jobs.reason.repository_locked':
-		'The repository is locked by another process. Wait for it to end and run the job again.',
+		'Another process locks the repository. Wait for it to end and run the job again.',
 	'jobs.reason.lock_retry': 'The repository was locked. A new attempt is queued.',
 	'jobs.reason.signed_job_unavailable': 'The stored job is not readable. Run the job again.',
 	'jobs.reason.agent_lost':
@@ -656,9 +656,9 @@ export const en = {
 	'jobs.reason.interrupted': 'Interrupted: the agent restarted while scripts ran',
 	'jobs.reason.timed_out': 'The job ran longer than its maximum duration.',
 	'jobs.reason.stalled':
-		'The job was stopped: restic made no progress for too long. Check the host, or raise the limit "Stop after no progress" in the profile.',
+		'The agent stopped the job: restic made no progress for too long. Check the host, or raise the limit "Stop after no progress" in the profile.',
 	'jobs.reason.max_duration_exceeded':
-		'The job was stopped: it ran longer than its maximum duration. Raise the limit in the profile if the job needs more time.',
+		'The agent stopped the job: it ran longer than its maximum duration. Raise the limit in the profile if the job needs more time.',
 	'jobs.reason.unacknowledged_expired':
 		'The host did not confirm the job before it expired. Check that the agent runs.',
 	'jobs.reason.agent_revoked': 'The host is revoked.',
@@ -954,7 +954,7 @@ export const en = {
 	'error.conflict':
 		'The record already exists or its state changed. Reload the page and try again.',
 	'error.token_used':
-		'A host already used this enrollment token. It cannot be cancelled. Create a new token if you need one.',
+		'A host already used this enrollment token. You cannot cancel it. Create a new token if you need one.',
 	'error.token_already_revoked': 'This enrollment token is already cancelled.',
 	'error.token_expired': 'This enrollment token has expired. Create a new token.',
 	'error.shared_account':

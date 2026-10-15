@@ -408,7 +408,7 @@ describe('the Hosts screen', () => {
 		await waitFor(() =>
 			expect(mocks.pushToast).toHaveBeenCalledWith(
 				'danger',
-				'A host already used this enrollment token. It cannot be cancelled.'
+				'A host already used this enrollment token. You cannot cancel it. Create a new token if you need one.'
 			)
 		);
 		await waitFor(() =>

@@ -155,7 +155,7 @@ describe('the Jobs screen', () => {
 		expect(await table.findByText('Succeeded with warnings')).toBeInTheDocument();
 		expect(
 			screen.getByText(
-				'The repository is locked by another process. Wait for it to end and run the job again.'
+				'Another process locks the repository. Wait for it to end and run the job again.'
 			)
 		).toBeInTheDocument();
 		expect(screen.getByText('Forget selected no snapshots')).toBeInTheDocument();
