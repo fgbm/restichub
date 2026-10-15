@@ -146,6 +146,7 @@ function problemError(code: string, field: string, reason: string): Error {
 
 // The mock starts without an agent. A review capture sets this storage key to see a filled list.
 const SAMPLE_AGENTS_KEY = 'restichub.mock.agents';
+const ENROLL_SOON_KEY = 'restichub.mock.enroll';
 
 // The mock starts without a profile. A review capture sets this storage key to see a filled list.
 const SAMPLE_PROFILES_KEY = 'restichub.mock.profiles';
@@ -1084,6 +1085,16 @@ export class MockApiService {
 			used_by_agent_id: null
 		};
 		this.enrollmentTokens = [...this.enrollmentTokens, token];
+		// A screenshot run sets this key to show the dialog after a host used the token.
+		if (typeof localStorage !== 'undefined' && localStorage.getItem(ENROLL_SOON_KEY) === 'soon') {
+			setTimeout(() => {
+				this.enrollmentTokens = this.enrollmentTokens.map((item) =>
+					item.id === token.id
+						? { ...item, used_at: new Date().toISOString(), used_by_agent_id: '8' }
+						: item
+				);
+			}, 1500);
+		}
 		return created;
 	}
 
