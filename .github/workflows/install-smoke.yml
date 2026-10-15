@@ -65,24 +65,29 @@ jobs:
         env:
           CP_BIN: target/debug/restichub-cp
         run: scripts/install-smoke.sh cp-up
-      - name: Install the agent binary as root (T20)
+      - name: Prepare /opt and the download folder
         run: |
-          sudo install -d -m 0755 -o root -g root /opt/restichub-agent
-          sudo install -m 0755 -o root -g root target/debug/restichub-agent /opt/restichub-agent/restichub-agent
           # The runner image makes /opt world-writable with a default ACL for the runner account.
           # The agent refuses such a location (T20), so the step restores a normal root-owned /opt.
           sudo chmod 0755 /opt
           sudo setfacl -b /opt
-          sudo setfacl -R -b /opt/restichub-agent
-          ls -ld /opt /opt/restichub-agent
-      - name: Register the agent and install the service
+          ls -ld /opt
+          mkdir -p "$HOME/Downloads"
+          cp target/debug/restichub-agent "$HOME/Downloads/restichub-agent"
+      - name: Register the agent from the download folder
         run: |
           set -euo pipefail
           scripts/install-smoke.sh ca
-          agent=/opt/restichub-agent/restichub-agent
-          sudo "$agent" register --url "https://localhost:8443" \
+          sudo "$HOME/Downloads/restichub-agent" register --url "https://localhost:8443" \
             --token-file "$SMOKE_DIR/enrollment-token" --ca-file "$SMOKE_DIR/ca.pem"
-          sudo "$agent" install-service
+      - name: The agent installed itself into the program directory
+        run: |
+          set -euo pipefail
+          test -x /opt/restichub-agent/bin/restichub-agent
+          test -x /opt/restichub-agent/bin/restic
+          test "$(stat -c '%U %a' /opt/restichub-agent)" = "root 755"
+          grep -q '/opt/restichub-agent/bin/restichub-agent' /etc/systemd/system/restichub-agent.service
+          sudo /opt/restichub-agent/bin/restichub-agent status
       - name: The service is enabled, active and connected
         run: |
           set -euo pipefail
@@ -141,22 +146,24 @@ jobs:
         env:
           CP_BIN: target/debug/restichub-cp.exe
         run: scripts/install-smoke.sh cp-up
-      - name: Install the agent binary under Program Files
-        shell: pwsh
-        run: |
-          $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          Copy-Item target\debug\restichub-agent.exe $dir
-      - name: Register the agent and install the service
+      - name: Register the agent from a user folder
         shell: bash
         run: |
           set -euo pipefail
           OPENSSL="$(cygpath -u "$PROGRAMFILES")/Git/usr/bin/openssl.exe" scripts/install-smoke.sh ca
-          agent="$(cygpath -u "$PROGRAMFILES")/ResticHub/Agent/restichub-agent.exe"
-          "$agent" register --url "https://localhost:8443" \
+          mkdir -p "$USERPROFILE/Downloads"
+          cp target/debug/restichub-agent.exe "$USERPROFILE/Downloads/restichub-agent.exe"
+          "$USERPROFILE/Downloads/restichub-agent.exe" register --url "https://localhost:8443" \
             --token-file "$(cygpath -w "$SMOKE_DIR/enrollment-token")" \
             --ca-file "$(cygpath -w "$SMOKE_DIR/ca.pem")"
-          "$agent" install-service
+      - name: The agent installed itself under Program Files
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
+          if (-not (Test-Path "$dir\restichub-agent.exe")) { throw 'agent missing' }
+          if (-not (Test-Path "$dir\bin\restic.exe")) { throw 'restic missing' }
+          & "$dir\restichub-agent.exe" status
+          if ($LASTEXITCODE -ne 0) { throw "status exit code $LASTEXITCODE" }
       - name: The service is running, automatic, LocalSystem and connected
         shell: pwsh
         run: |
@@ -171,6 +178,15 @@ jobs:
         run: |
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
           Restart-Service restichub-agent
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          bash scripts/install-smoke.sh connected $since 60
+      - name: A second install-service works while the service runs (FR-IN-08)
+        shell: pwsh
+        run: |
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $agent = Join-Path $env:ProgramFiles 'ResticHub\Agent\restichub-agent.exe'
+          & $agent install-service
+          if ($LASTEXITCODE -ne 0) { throw "install-service exit code $LASTEXITCODE" }
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           bash scripts/install-smoke.sh connected $since 60
       - name: Diagnostics

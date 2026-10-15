@@ -1,7 +1,7 @@
 //! The command bodies of the agent (FR-IN-07, FR-IN-08, FR-AG-01).
 
 use std::io::Read as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 
 use anyhow::{Context, Result, bail};
@@ -14,17 +14,49 @@ use crate::restic::{Restic, ResticBinary};
 use crate::restic_install::Installer;
 use crate::restic_release::Supply;
 use crate::restic_store::Layout;
+use crate::service::{HostService, ServiceManager};
+use crate::setup::{SetupReport, WaitOptions};
 
-/// Enrolls this host on a private runtime (FR-IN-07).
+/// The exit code of a service start without a usable identity. The systemd unit does not restart
+/// on it, because a restart cannot create the identity (FR-AG-01).
+pub const EXIT_NO_IDENTITY: u8 = 78;
+
+/// The identity is absent or damaged, so the service cannot run (FR-AG-01).
+#[derive(Debug)]
+pub struct NoIdentity {
+    dir: PathBuf,
+    cause: String,
+}
+
+impl std::fmt::Display for NoIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "cannot load the agent identity in {}: {}; register the agent again with a new enrollment token",
+            self.dir.display(),
+            self.cause
+        )
+    }
+}
+
+impl std::error::Error for NoIdentity {}
+
+/// Enrolls this host on a private runtime, then installs and starts the service and waits for the
+/// connection (FR-IN-07).
 ///
-/// The restic download runs after the preflight and before the enrollment request, so a host
+/// `--no-service` stops after the enrollment. The restic download runs after the preflight and before the enrollment request, so a host
 /// without restic and without network fails before the token is spent (ADR-0038, FR-IN-07).
 ///
 /// # Errors
 ///
-/// Returns an error when the runtime cannot start, or from [`provision_and_register`].
+/// Returns an error when the runtime cannot start, from [`provision_and_register`], when the
+/// service cannot be installed, or when the agent does not connect.
 pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     crate::preflight::ensure_elevated()?;
+    // The tree check runs first: the move of an old restic reads from it, so a directory that
+    // another account can write must be refused before anything leaves it (T20, FR-IN-07).
+    crate::preflight::prepare_directories(dir, &crate::paths::cache_dir())?;
+    place_program()?;
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -40,7 +72,16 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
             &supply,
         )
         .await
-    })
+    })?;
+    let restic = ResticBinary::installed(&installer.layout)?;
+    let report = start_after_register(
+        options,
+        dir,
+        &HostService,
+        restic.path(),
+        WaitOptions::default(),
+    )?;
+    finish_setup(report.as_ref(), hostname().ok().as_deref())
 }
 
 /// Checks the input, installs restic when it is absent and enrolls this host (FR-IN-07, ADR-0038).
@@ -59,7 +100,95 @@ pub async fn provision_and_register(
     crate::preflight::prepare_directories(dir, cache)?;
     installer.ensure(supply).await?;
     let restic = ResticBinary::installed(&installer.layout)?;
+    // The location rules run before the token is spent, so a refused location never leaves an
+    // enrolled host without a service (T20, FR-IN-07).
+    if !options.no_service {
+        crate::service::check_install_location(restic.path())?;
+    }
     register_async(options, dir, cache, &restic).await
+}
+
+/// Installs and starts the service after a successful enrollment, unless `--no-service` is set
+/// (FR-IN-07, FR-IN-08).
+///
+/// A failed install keeps the identity and names the command to run next.
+///
+/// # Errors
+///
+/// Returns an error when the service cannot be installed or started.
+pub fn start_after_register(
+    options: &RegisterOptions,
+    dir: &Path,
+    manager: &dyn ServiceManager,
+    restic: &Path,
+    wait: WaitOptions,
+) -> Result<Option<SetupReport>> {
+    if options.no_service {
+        return Ok(None);
+    }
+    crate::setup::install_and_wait(manager, dir, restic, wait)
+        .map(Some)
+        .context("the agent is registered, but the service is not ready; fix the cause and run: restichub-agent install-service")
+}
+
+/// Copies the running agent into the program directory and moves an old restic there (FR-IN-07).
+fn place_program() -> Result<()> {
+    let source = crate::self_install::running_image()?;
+    let outcome = crate::self_install::prepare(
+        &crate::self_install::Placement::host(),
+        &source,
+        &HostService,
+    )?;
+    if outcome.copied_agent {
+        println!(
+            "the agent is installed in {}",
+            crate::paths::program_dir().display()
+        );
+    }
+    if outcome.moved_restic {
+        println!(
+            "restic is moved into {}",
+            crate::paths::restic_dir().display()
+        );
+    }
+    Ok(())
+}
+
+/// Prints the final summary and fails when the agent is not connected.
+fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<()> {
+    let Some(report) = report else {
+        println!("registered; the service is not installed (--no-service)");
+        println!("{}", crate::setup::no_service_hint());
+        return Ok(());
+    };
+    println!("{}", crate::setup::render_report(report, hostname));
+    if report.connected() {
+        Ok(())
+    } else {
+        bail!("the agent is registered but not connected yet")
+    }
+}
+
+/// Installs and starts the service for the stored identity and waits for the connection
+/// (FR-IN-08).
+///
+/// An installed service gets the new executable path and restarts. A host without an identity is
+/// refused before restic is downloaded.
+///
+/// # Errors
+///
+/// Returns an error when the process is not elevated, the identity is absent, the service cannot be
+/// installed, or the agent does not connect.
+pub fn install_service(options: &ResticFileOptions) -> Result<()> {
+    crate::preflight::ensure_elevated()?;
+    let dir = crate::paths::config_dir();
+    crate::setup::require_identity(&dir)?;
+    crate::preflight::prepare_directories(&dir, &crate::paths::cache_dir())?;
+    place_program()?;
+    let restic = ensure_restic(options)?;
+    let report =
+        crate::setup::install_and_wait(&HostService, &dir, restic.path(), WaitOptions::default())?;
+    finish_setup(Some(&report), hostname().ok().as_deref())
 }
 
 /// Installs restic when it is absent and returns it (ADR-0038).
@@ -159,8 +288,7 @@ pub async fn register_async(
         },
     };
     identity.save(dir)?;
-    println!("the agent is registered");
-    print_identity(&identity)
+    Ok(())
 }
 
 /// Turns the local trust mode for server scripts on or off (FR-HK-08, ADR-0037).
@@ -201,15 +329,20 @@ fn check_register_input(options: &RegisterOptions, dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Prints the identity facts without secrets (FR-AG-04).
+/// Prints the identity, restic, the service and the connection without secrets (FR-AG-04).
 ///
 /// # Errors
 ///
-/// Returns an error when the identity is absent or the certificate is not valid.
+/// Returns an error when the agent is not connected, so the exit code is not zero.
 pub fn status(dir: &Path) -> Result<()> {
-    let identity = StoredIdentity::load(dir)
-        .with_context(|| format!("no agent identity in {}", dir.display()))?;
-    print_identity(&identity)
+    let restic = ResticBinary::installed(&Layout::host())
+        .ok()
+        .and_then(|restic| {
+            let version = restic.version().ok()?;
+            Some((version, restic.path().display().to_string()))
+        });
+    let report = crate::setup::collect_status(&HostService, dir, restic);
+    crate::setup::print_status(&report)
 }
 
 /// Loads the identity and serves the protocol stream until the shutdown signal (FR-AG-01, FR-ID-07).
@@ -221,8 +354,18 @@ pub fn status(dir: &Path) -> Result<()> {
 /// Returns an error when the identity is absent, restic is not the recorded binary, or the runtime
 /// cannot start.
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
-    let identity = StoredIdentity::load(dir)
-        .with_context(|| format!("no agent identity in {}", dir.display()))?;
+    let identity = StoredIdentity::load(dir).map_err(|error| {
+        if !is_missing_or_damaged(&error) {
+            return error;
+        }
+        let no_identity = NoIdentity {
+            dir: dir.to_path_buf(),
+            cause: format!("{error:#}"),
+        };
+        tracing::error!("{no_identity}");
+        crate::connection::record_failure(dir, "", &no_identity.to_string());
+        anyhow::Error::new(no_identity)
+    })?;
     // Rebuild the key ring, so a job that the current key signed verifies (ADR-0026, ADR-0030).
     let mut keys = crate::keys::KeyState::load(&identity, dir)?;
     let cache = crate::paths::cache_dir();
@@ -259,17 +402,13 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     ))
 }
 
-fn print_identity(identity: &StoredIdentity) -> Result<()> {
-    let expiry = identity.certificate_expiry()?;
-    println!("agent id:            {}", identity.agent_id);
-    println!("tenant id:           {}", identity.tenant_id);
-    println!("certificate expires: {expiry}");
-    println!("control plane url:   {}", identity.cp_url);
-    println!(
-        "grpc endpoint:       {}",
-        identity.grpc_endpoint.as_deref().unwrap_or("(not set)")
-    );
-    Ok(())
+/// A transient read error must not stop the service for good: exit code 78 tells systemd not to
+/// restart it (FR-AG-01).
+fn is_missing_or_damaged(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .is_none_or(|io| io.kind() == std::io::ErrorKind::NotFound)
 }
 
 fn restic_version(restic: &dyn Restic) -> Result<String> {
@@ -341,6 +480,18 @@ mod tests {
             ..RegisterOptions::default()
         };
         assert!(resolve_token(&options).is_err());
+    }
+
+    #[test]
+    fn fr_ag_01_only_a_missing_or_damaged_identity_is_a_no_identity_error() {
+        let missing = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound))
+            .context("cannot read identity.json");
+        let denied = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            .context("cannot read identity.json");
+        let damaged = anyhow::anyhow!("bad identity.json");
+        assert!(is_missing_or_damaged(&missing));
+        assert!(is_missing_or_damaged(&damaged));
+        assert!(!is_missing_or_damaged(&denied));
     }
 
     #[test]

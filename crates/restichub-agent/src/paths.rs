@@ -38,12 +38,51 @@ pub fn cache_dir() -> PathBuf {
     }
 }
 
-/// The directory of the downloaded restic binary (ADR-0038).
+/// The directory that holds the agent executable and restic (ADR-0038).
 ///
-/// Linux uses `/var/lib/restichub-agent/bin`. Windows uses the `bin` subdirectory of the
-/// configuration directory, which `create_protected_tree` already restricts.
+/// Linux uses `/opt/restichub-agent` and Windows uses `%ProgramFiles%\ResticHub\Agent`. Only the
+/// administrator account can write there; the identity, journal and cache stay in the data
+/// directories.
+#[must_use]
+pub fn program_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let program_files = std::env::var_os("ProgramFiles")
+            .map_or_else(|| PathBuf::from(r"C:\Program Files"), PathBuf::from);
+        program_files.join("ResticHub").join("Agent")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/opt/restichub-agent")
+    }
+}
+
+/// The directory of the downloaded restic binary: `bin` in the program directory (ADR-0038).
 #[must_use]
 pub fn restic_dir() -> PathBuf {
+    program_dir().join("bin")
+}
+
+/// Where the agent executable lives after the self-install (FR-IN-07).
+#[must_use]
+pub fn agent_exe() -> PathBuf {
+    agent_exe_in(&program_dir())
+}
+
+/// The agent executable path inside a program directory.
+#[must_use]
+pub fn agent_exe_in(program: &Path) -> PathBuf {
+    let name = format!("restichub-agent{}", std::env::consts::EXE_SUFFIX);
+    if cfg!(windows) {
+        program.join(name)
+    } else {
+        program.join("bin").join(name)
+    }
+}
+
+/// The restic directory of an install before the program directory existed (ADR-0038).
+#[must_use]
+pub fn legacy_restic_dir() -> PathBuf {
     #[cfg(windows)]
     {
         config_dir().join("bin")
@@ -51,6 +90,21 @@ pub fn restic_dir() -> PathBuf {
     #[cfg(not(windows))]
     {
         PathBuf::from("/var/lib/restichub-agent/bin")
+    }
+}
+
+/// The directory for agent data that is not configuration (FR-AG-04).
+///
+/// Linux uses `/var/lib/restichub-agent`. Windows keeps data in the configuration directory.
+#[must_use]
+pub fn data_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        config_dir()
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/var/lib/restichub-agent")
     }
 }
 
@@ -101,6 +155,80 @@ pub fn create_protected_dir(dir: &Path) -> Result<()> {
         })?;
         restrict(dir)
     }
+}
+
+/// Makes a program directory and every missing parent that only the administrator account can
+/// write (FR-IN-07, T20).
+///
+/// Linux levels are `0755`; the caller runs as root, so root owns them. Windows levels get the
+/// protected DACL and refuse a junction, with the `ResticHub` level as the top of the owned tree.
+///
+/// # Errors
+///
+/// Returns an error when a level cannot be created or protected, or when an existing Windows level
+/// is a reparse point or writable by another account.
+pub fn ensure_program_dir(dir: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        let host = program_dir();
+        let root = match host.parent() {
+            Some(root) if dir.starts_with(root) => root.to_path_buf(),
+            _ => dir.parent().map(Path::to_path_buf).unwrap_or_default(),
+        };
+        crate::winsec::create_protected_tree(dir, &root)
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+        let mut missing = Vec::new();
+        let mut level = Some(dir);
+        while let Some(current) = level {
+            match std::fs::symlink_metadata(current) {
+                Ok(meta) => {
+                    // An existing level is checked before anything is written below it. The
+                    // check follows no link, so a link cannot stand in for a root-owned level.
+                    // Only a root-owned level is judged by its mode: a level of another owner is
+                    // already refused, and a non-root run exists only in tests.
+                    let shared =
+                        meta.uid() == 0 && meta.mode() & 0o022 != 0 && meta.mode() & 0o1000 == 0;
+                    let foreign_owner = meta.uid() != 0 && meta.uid() != current_uid();
+                    if !meta.is_dir() || foreign_owner || shared {
+                        anyhow::bail!(
+                            "{} must be a directory that root owns and that no other account can write; remove it and run the command again",
+                            current.display()
+                        );
+                    }
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("cannot inspect {}", current.display()));
+                }
+            }
+            missing.push(current);
+            level = current.parent();
+        }
+        for level in missing.into_iter().rev() {
+            std::fs::create_dir(level)
+                .with_context(|| format!("cannot create the directory {}", level.display()))?;
+            std::fs::set_permissions(level, std::fs::Permissions::from_mode(0o755))
+                .with_context(|| format!("cannot set the mode of {}", level.display()))?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn current_uid() -> u32 {
+    // SAFETY: `geteuid` takes no argument and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn current_uid() -> u32 {
+    0
 }
 
 /// Writes a file that only the service account can read (FR-AG-04).
@@ -215,6 +343,24 @@ mod tests {
             & 0o777;
         assert_eq!(mode, 0o700);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_in_07_a_linked_program_level_is_refused() {
+        let base = temp_dir("program-level");
+        std::fs::create_dir_all(&base).expect("base");
+        let real = base.join("real");
+        std::fs::create_dir(&real).expect("real");
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("link");
+        let error = ensure_program_dir(&link.join("bin")).expect_err("a linked level");
+        assert!(
+            format!("{error:#}").contains("must be a directory"),
+            "{error:#}"
+        );
+        assert!(!real.join("bin").exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[cfg(unix)]
