@@ -118,6 +118,7 @@ fn short_timeouts() -> Timeouts {
         keepalive_interval: Duration::from_secs(5),
         keepalive_timeout: Duration::from_secs(5),
         tcp_keepalive: Duration::from_secs(5),
+        ..Timeouts::default()
     }
 }
 

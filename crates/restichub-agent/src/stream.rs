@@ -11,9 +11,15 @@
 //! and full jitter, base 1 s and maximum 60 s (ADR-0026). The attempt grows unless the stream lived
 //! at least one ping interval or answered a ping, so a server that closes at once is not hammered;
 //! a stream that was working and then failed, such as on a control plane restart, resets it too.
-//! An identity that the control plane refuses backs off at the maximum. A `SignedJob` is verified
-//! and run off this task ([`crate::jobs`]), and a `CancelJob` stops the running job (FR-AG-10). The
-//! agent starts no job on its own and holds no timer that starts one (ADR-0002).
+//! An identity that the control plane refuses backs off at the maximum, and so does a protocol
+//! version that the control plane refuses. A `SignedJob` is verified and run off this task
+//! ([`crate::jobs`]), and a `CancelJob` stops the running job (FR-AG-10). The agent starts no job
+//! on its own and holds no timer that starts one (ADR-0002).
+//!
+//! At two thirds of the certificate lifetime the agent asks for a new certificate over the open
+//! stream ([`crate::rotation`], FR-ID-03). It stores the answer and keeps the stream on the old
+//! certificate; the next connection uses the new one. A certificate that already expired cannot
+//! rotate: the agent logs that it must register again.
 
 use std::path::Path;
 use std::sync::mpsc::Receiver;
@@ -22,9 +28,11 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use hyper::Uri;
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, ControlMessage, KeyUpdateAck, Ping, Pong, SigningKeyUpdate,
-    agent_message, agent_service_client::AgentServiceClient, control_message,
+    AgentHello, AgentMessage, CertificateInstalled, CertificateRejectReason,
+    CertificateSigningRequest, ControlMessage, KeyUpdateAck, Ping, Pong, SigningKeyUpdate,
+    VersionRejectReason, agent_message, agent_service_client::AgentServiceClient, control_message,
 };
+use time::OffsetDateTime;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
@@ -32,6 +40,7 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity
 use crate::identity::StoredIdentity;
 use crate::jobs::Jobs;
 use crate::keys::{Applied, KeyState};
+use crate::rotation::{self, PendingRotation};
 
 /// The lower bound of the reconnect delay (ADR-0026).
 pub const BACKOFF_BASE: Duration = Duration::from_secs(1);
@@ -99,6 +108,12 @@ pub struct Timeouts {
     pub keepalive_timeout: Duration,
     /// Idle time before the first probe of a silent connection.
     pub tcp_keepalive: Duration,
+    /// The wait before the agent asks again after the control plane refused a rotation request
+    /// or did not answer it (FR-ID-03).
+    pub rotation_retry: Duration,
+    /// The clock that places the rotation at two thirds of the certificate lifetime. A test
+    /// replaces it (FR-ID-03).
+    pub now: fn() -> OffsetDateTime,
 }
 
 impl Timeouts {
@@ -117,6 +132,8 @@ impl Default for Timeouts {
             keepalive_interval: Duration::from_secs(30),
             keepalive_timeout: Duration::from_secs(20),
             tcp_keepalive: Duration::from_secs(60),
+            rotation_retry: Duration::from_secs(300),
+            now: OffsetDateTime::now_utc,
         }
     }
 }
@@ -137,6 +154,9 @@ pub enum Disconnect {
     /// The control plane refused the identity: the agent is revoked or unknown. Back off at the
     /// maximum (FR-ID-04).
     Refused,
+    /// The control plane refused the protocol version of the agent (FR-PR-09). Back off at the
+    /// maximum: only an update of the agent or of the control plane helps.
+    Incompatible,
 }
 
 /// Runs the connect loop with the operating system shutdown signal (FR-AG-01, FR-ID-08).
@@ -204,12 +224,15 @@ pub async fn run(
     stop: &mut watch::Receiver<bool>,
 ) -> Result<()> {
     let mut attempt = 0_u32;
+    let mut rotated: Option<StoredIdentity> = None;
     loop {
         if *stop.borrow() {
             return Ok(());
         }
+        let active = rotated.as_ref().unwrap_or(identity);
+        warn_when_expired(active, options.timeouts.now);
         let (refused, healthy) = match connect_once(
-            identity,
+            active,
             dir,
             keys,
             restic_version,
@@ -226,12 +249,18 @@ pub async fn run(
                 );
                 (true, false)
             }
+            // The stream already logged the reason (FR-PR-09).
+            Ok(Disconnect::Incompatible) => (true, false),
             Ok(Disconnect::Closed { healthy }) => (false, healthy),
             Err(error) => {
                 tracing::warn!(agent_id = %identity.agent_id, %error, "the agent stream stopped");
                 (false, false)
             }
         };
+        // A rotation stored a newer certificate during the stream; the next connection uses it.
+        if let Some(fresh) = fresher_identity(dir, rotated.as_ref().unwrap_or(identity)) {
+            rotated = Some(fresh);
+        }
         if *stop.borrow() {
             return Ok(());
         }
@@ -253,6 +282,32 @@ pub async fn run(
                 }
             }
         }
+    }
+}
+
+/// Reads the identity that a rotation stored, when it holds a newer certificate of the same agent
+/// (FR-ID-03).
+fn fresher_identity(dir: &Path, active: &StoredIdentity) -> Option<StoredIdentity> {
+    if !StoredIdentity::exists(dir) {
+        return None;
+    }
+    let stored = StoredIdentity::load(dir).ok()?;
+    let same_agent = stored.agent_id == active.agent_id && stored.tenant_id == active.tenant_id;
+    let newer = stored.certificate_expiry().ok()? > active.certificate_expiry().ok()?;
+    (same_agent && newer).then_some(stored)
+}
+
+/// Logs that an expired certificate cannot connect (FR-ID-03). The rotation needs a valid
+/// certificate, so the agent has to register again.
+fn warn_when_expired(identity: &StoredIdentity, now: fn() -> OffsetDateTime) {
+    if let Ok(expiry) = identity.certificate_expiry()
+        && expiry <= now()
+    {
+        tracing::error!(
+            agent_id = %identity.agent_id,
+            %expiry,
+            "the agent certificate is expired and cannot rotate; register the agent again with a new enrollment token"
+        );
     }
 }
 
@@ -302,9 +357,14 @@ pub async fn connect_once(
     jobs.send_stored_results().await;
     let started = tokio::time::Instant::now();
     let mut pinged = false;
+    let mut upkeep = Upkeep::new(identity, timeouts);
     loop {
         let received = tokio::select! {
             received = tokio::time::timeout(timeouts.idle(), inbound.message()) => received,
+            () = &mut upkeep.timer, if upkeep.armed => {
+                upkeep.request(&tx, timeouts).await;
+                continue;
+            }
             result = stop.changed() => {
                 if result.is_err() || *stop.borrow() {
                     return Ok(Disconnect::Closed { healthy: pinged || started.elapsed() >= timeouts.ping });
@@ -338,12 +398,119 @@ pub async fn connect_once(
         if matches!(message.payload, Some(control_message::Payload::Ping(_))) {
             pinged = true;
         }
-        if let Err(error) = handle_control(identity, keys, dir, jobs, &tx, message).await {
-            tracing::warn!(%error, "the agent stream stopped");
-            return Ok(Disconnect::Closed {
-                healthy: pinged || started.elapsed() >= timeouts.ping,
-            });
+        match handle_control(
+            identity,
+            keys,
+            dir,
+            jobs,
+            &tx,
+            &mut upkeep,
+            timeouts,
+            message,
+        )
+        .await
+        {
+            Ok(Handled::Go) => {}
+            Ok(Handled::Stop(disconnect)) => return Ok(disconnect),
+            Err(error) => {
+                tracing::warn!(%error, "the agent stream stopped");
+                return Ok(Disconnect::Closed {
+                    healthy: pinged || started.elapsed() >= timeouts.ping,
+                });
+            }
         }
+    }
+}
+
+/// What the stream does after one control message.
+enum Handled {
+    Go,
+    Stop(Disconnect),
+}
+
+/// The certificate rotation state of one connection (FR-ID-03).
+struct Upkeep {
+    /// The validity of the newest certificate that the agent holds. A rotation moves it, so the
+    /// next request comes at two thirds of the new lifetime.
+    validity: Option<(OffsetDateTime, OffsetDateTime)>,
+    pending: Option<PendingRotation>,
+    timer: std::pin::Pin<Box<tokio::time::Sleep>>,
+    armed: bool,
+}
+
+impl Upkeep {
+    fn new(identity: &StoredIdentity, timeouts: Timeouts) -> Self {
+        let validity = match identity.certificate_validity() {
+            Ok(validity) => Some(validity),
+            Err(error) => {
+                tracing::warn!(%error, "cannot read the certificate validity; the agent does not rotate");
+                None
+            }
+        };
+        let mut upkeep = Self {
+            validity,
+            pending: None,
+            timer: Box::pin(tokio::time::sleep(Duration::ZERO)),
+            armed: false,
+        };
+        upkeep.arm_at_due(timeouts);
+        upkeep
+    }
+
+    /// Waits until two thirds of the lifetime have passed.
+    fn arm_at_due(&mut self, timeouts: Timeouts) {
+        let Some((not_before, not_after)) = self.validity else {
+            self.armed = false;
+            return;
+        };
+        let wait = (rotation::rotation_due(not_before, not_after) - (timeouts.now)())
+            .try_into()
+            .unwrap_or(Duration::ZERO);
+        self.timer
+            .as_mut()
+            .reset(tokio::time::Instant::now() + wait);
+        self.armed = true;
+    }
+
+    /// Waits for the retry interval after a refusal or a failure.
+    fn arm_retry(&mut self, timeouts: Timeouts) {
+        self.pending = None;
+        self.timer
+            .as_mut()
+            .reset(tokio::time::Instant::now() + timeouts.rotation_retry);
+        self.armed = true;
+    }
+
+    /// Sends the certificate signing request with a new key pair (FR-ID-03).
+    async fn request(&mut self, tx: &mpsc::Sender<AgentMessage>, timeouts: Timeouts) {
+        match rotation::begin() {
+            Ok((pending, csr_der)) => {
+                let message = AgentMessage {
+                    payload: Some(agent_message::Payload::CertificateSigningRequest(
+                        CertificateSigningRequest { csr_der },
+                    )),
+                };
+                if tx.send(message).await.is_ok() {
+                    tracing::info!("the agent asked for a new certificate");
+                    self.pending = Some(pending);
+                    // No answer within the retry interval means the request or the answer got lost.
+                    self.arm_retry_keep_pending(timeouts);
+                    return;
+                }
+                self.arm_retry(timeouts);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "cannot prepare the certificate request");
+                self.arm_retry(timeouts);
+            }
+        }
+    }
+
+    fn arm_retry_keep_pending(&mut self, timeouts: Timeouts) {
+        self.timer
+            .as_mut()
+            .reset(tokio::time::Instant::now() + timeouts.rotation_retry);
+        self.armed = true;
     }
 }
 
@@ -359,21 +526,38 @@ fn refused(code: tonic::Code) -> bool {
 ///
 /// The identity comes from the certificate, never from a message (FR-PR-08). A signed job is
 /// verified with the key ring and run off this task; a cancellation stops the running job.
+#[allow(clippy::too_many_arguments)]
 async fn handle_control(
     identity: &StoredIdentity,
     keys: &mut KeyState,
     dir: &Path,
     jobs: &Jobs,
     tx: &mpsc::Sender<AgentMessage>,
+    upkeep: &mut Upkeep,
+    timeouts: Timeouts,
     message: ControlMessage,
-) -> Result<()> {
+) -> Result<Handled> {
     match message.payload {
         Some(control_message::Payload::ServerHello(hello)) => {
             tracing::info!(
                 major = hello.protocol_version_major,
                 minor = hello.protocol_version_minor,
+                control_plane_version = %hello.control_plane_version,
                 "the control plane greeted the agent"
             );
+        }
+        Some(control_message::Payload::VersionRejected(rejected)) => {
+            let reason = VersionRejectReason::try_from(rejected.reason).unwrap_or_default();
+            tracing::error!(
+                ?reason,
+                agent_major = restichub_proto::PROTOCOL_VERSION_MAJOR,
+                agent_minor = restichub_proto::PROTOCOL_VERSION_MINOR,
+                control_plane_major = rejected.server_protocol_version_major,
+                control_plane_minor = rejected.server_protocol_version_minor,
+                minimum_minor = rejected.minimum_protocol_version_minor,
+                "the control plane does not accept the protocol version of this agent; update the agent or the control plane so that both speak the same major version"
+            );
+            return Ok(Handled::Stop(Disconnect::Incompatible));
         }
         Some(control_message::Payload::Ping(ping)) => {
             let _ = tx.send(pong(&ping)).await;
@@ -416,13 +600,59 @@ async fn handle_control(
                 tracing::warn!(%error, "the signing key update was refused");
             }
         },
-        Some(control_message::Payload::CertificateIssued(_)) => {
-            // Certificate rotation needs the enrollment flow of another epic.
-            tracing::info!("a certificate rotation arrived; the agent ignores it");
+        Some(control_message::Payload::CertificateIssued(issued)) => {
+            let Some(pending) = upkeep.pending.take() else {
+                tracing::warn!("a certificate arrived without a request; the agent ignores it");
+                return Ok(Handled::Go);
+            };
+            let now = (timeouts.now)();
+            match install(identity, dir, &pending, &issued, now) {
+                Ok(serial) => {
+                    tracing::info!(
+                        "the agent stored a rotated certificate; the next connection uses it"
+                    );
+                    let _ = tx
+                        .send(AgentMessage {
+                            payload: Some(agent_message::Payload::CertificateInstalled(
+                                CertificateInstalled {
+                                    certificate_serial: serial,
+                                },
+                            )),
+                        })
+                        .await;
+                    upkeep.validity = StoredIdentity::load(dir)
+                        .and_then(|stored| stored.certificate_validity())
+                        .ok();
+                    upkeep.arm_at_due(timeouts);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "the agent refused the rotated certificate");
+                    upkeep.arm_retry(timeouts);
+                }
+            }
+        }
+        Some(control_message::Payload::CertificateRejected(rejected)) => {
+            let reason = CertificateRejectReason::try_from(rejected.reason).unwrap_or_default();
+            tracing::warn!(?reason, "the control plane refused the certificate request");
+            upkeep.arm_retry(timeouts);
         }
         None => {}
     }
-    Ok(())
+    Ok(Handled::Go)
+}
+
+/// Checks the issued certificate and stores it (FR-ID-03). Returns the serial for the
+/// confirmation.
+fn install(
+    identity: &StoredIdentity,
+    dir: &Path,
+    pending: &PendingRotation,
+    issued: &restichub_proto::agent::v1::CertificateIssued,
+    now: OffsetDateTime,
+) -> Result<Vec<u8>> {
+    let rotated = rotation::accept(identity, pending, issued, now)?;
+    StoredIdentity::install_rotation(dir, &rotated)?;
+    rotation::serial_of(&rotated.certificate_der)
 }
 
 /// Answers a heartbeat with the echoed nonce (FR-ID-07).

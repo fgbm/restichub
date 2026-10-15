@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, ErrorDetail, JobAck, JobRejected, JobResult, JobStatus, Pong,
-    RejectReason, SignedJob, StepProgress, StepResult, StepStatus, agent_message,
-    agent_service_client::AgentServiceClient, control_message, step,
+    AgentHello, AgentMessage, CertificateInstalled, CertificateSigningRequest, ErrorDetail, JobAck,
+    JobRejected, JobResult, JobStatus, Pong, RejectReason, SignedJob, StepProgress, StepResult,
+    StepStatus, agent_message, agent_service_client::AgentServiceClient, control_message, step,
 };
 use restichub_proto::signing::{
     Admission, Expected, InMemoryJournal, JobJournal, KeyRing, admit, verify_job,
@@ -93,6 +93,13 @@ pub struct AgentLoad {
     pub ack_delay: Duration,
     /// Label that the agent reports in `AgentHello.os`. `None` uses the host OS.
     pub os_label: Option<String>,
+    /// The restore roots that the agent reports in `AgentHello` (FR-RS-03).
+    pub restore_roots: Vec<String>,
+    /// The capabilities that the agent reports in `AgentHello`. `None` reports every capability
+    /// that this build knows (FR-PR-09).
+    pub capabilities: Option<Vec<String>>,
+    /// The certificate rotation of the agent (FR-ID-03).
+    pub renewal: crate::renewal::Renewal,
 }
 
 impl AgentLoad {
@@ -107,6 +114,9 @@ impl AgentLoad {
             clock_skew_micros: 0,
             ack_delay: Duration::ZERO,
             os_label: None,
+            restore_roots: Vec::new(),
+            capabilities: None,
+            renewal: crate::renewal::Renewal::default(),
         }
     }
 }
@@ -241,12 +251,10 @@ async fn connect_once(
     journal: &Arc<Mutex<InMemoryJournal>>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
+    let identity = config.load.renewal.identity(&config.identity);
     let tls = ClientTlsConfig::new()
         .ca_certificate(Certificate::from_pem(&config.ca_pem))
-        .identity(Identity::from_pem(
-            &config.identity.cert_pem,
-            &config.identity.key_pem,
-        ))
+        .identity(Identity::from_pem(&identity.cert_pem, &identity.key_pem))
         .domain_name(config.server_name.clone());
     let endpoint = Endpoint::from_shared(config.server_url.clone())
         .context("invalid server URL")?
@@ -259,7 +267,7 @@ async fn connect_once(
     let response = client.connect(ReceiverStream::new(rx)).await?;
     let mut inbound = response.into_inner();
 
-    send_hello(&tx, config.load.os_label.as_deref()).await?;
+    send_hello(&tx, &config.load).await?;
 
     let metrics = Arc::clone(&config.load.metrics);
     metrics.record_connect(started.elapsed().as_micros() as u64);
@@ -272,10 +280,15 @@ async fn connect_once(
         config: Arc::clone(config),
     };
 
+    let mut upkeep = Upkeep::new(&config.load.renewal, &identity.cert_pem);
     while !*shutdown.borrow() {
         let storm = storm_drop(config);
         let message = tokio::select! {
             message = inbound.message() => message?,
+            () = &mut upkeep.timer, if upkeep.armed => {
+                upkeep.request(&tx, config.load.renewal.retry).await;
+                continue;
+            }
             () = storm => break,
             result = shutdown.changed() => {
                 if result.is_err() || *shutdown.borrow() {
@@ -312,12 +325,44 @@ async fn connect_once(
                     );
                 }
             }
-            // Certificate rotation needs the enrollment of epic #1.
-            Some(
-                control_message::Payload::CertificateIssued(_)
-                | control_message::Payload::ServerHello(_),
-            )
-            | None => {}
+            Some(control_message::Payload::CertificateIssued(issued)) => {
+                let renewal = &config.load.renewal;
+                let Some(pending) = upkeep.pending.take() else {
+                    continue;
+                };
+                match renewal.accept(&pending, &issued, &config.identity.agent_id) {
+                    Ok(serial) => {
+                        let _ = tx
+                            .send(AgentMessage {
+                                payload: Some(agent_message::Payload::CertificateInstalled(
+                                    CertificateInstalled {
+                                        certificate_serial: serial,
+                                    },
+                                )),
+                            })
+                            .await;
+                        let renewed = renewal.identity(&config.identity);
+                        upkeep.rearm(renewal, &renewed.cert_pem);
+                    }
+                    Err(error) => {
+                        eprintln!("{}: rotation refused: {error:#}", config.identity.agent_id);
+                        upkeep.retry_later(renewal.retry);
+                    }
+                }
+            }
+            Some(control_message::Payload::CertificateRejected(rejected)) => {
+                eprintln!(
+                    "{}: certificate request refused: {rejected:?}",
+                    config.identity.agent_id
+                );
+                upkeep.retry_later(config.load.renewal.retry);
+            }
+            Some(control_message::Payload::VersionRejected(rejected)) => {
+                return Err(anyhow::anyhow!(
+                    "the protocol version is refused: {rejected:?}"
+                ));
+            }
+            Some(control_message::Payload::ServerHello(_)) | None => {}
         }
     }
 
@@ -344,21 +389,91 @@ async fn storm_drop(config: &AgentConfig) {
     config.load.storm_dropped.store(true, Ordering::Relaxed);
 }
 
-async fn send_hello(tx: &mpsc::Sender<AgentMessage>, os_label: Option<&str>) -> anyhow::Result<()> {
+async fn send_hello(tx: &mpsc::Sender<AgentMessage>, load: &AgentLoad) -> anyhow::Result<()> {
+    let capabilities = load.capabilities.clone().unwrap_or_else(|| {
+        restichub_proto::AgentCapability::ALL
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect()
+    });
     let hello = AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
             protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
             restic_version: "0.19.1".to_owned(),
-            os: os_label.unwrap_or(std::env::consts::OS).to_owned(),
+            os: load
+                .os_label
+                .as_deref()
+                .unwrap_or(std::env::consts::OS)
+                .to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
             supported_step_types: supported_step_types(),
+            capabilities,
+            restore_roots: load.restore_roots.clone(),
             ..AgentHello::default()
         })),
     };
     tx.send(hello).await.context("cannot send AgentHello")?;
     Ok(())
+}
+
+/// The rotation timer of one connection (FR-ID-03).
+struct Upkeep {
+    timer: std::pin::Pin<Box<tokio::time::Sleep>>,
+    armed: bool,
+    pending: Option<crate::renewal::PendingKey>,
+}
+
+impl Upkeep {
+    fn new(renewal: &crate::renewal::Renewal, cert_pem: &str) -> Self {
+        let mut upkeep = Self {
+            timer: Box::pin(tokio::time::sleep(Duration::ZERO)),
+            armed: false,
+            pending: None,
+        };
+        upkeep.rearm(renewal, cert_pem);
+        upkeep
+    }
+
+    fn rearm(&mut self, renewal: &crate::renewal::Renewal, cert_pem: &str) {
+        match renewal.wait_until_due(cert_pem) {
+            Some(wait) => {
+                self.timer
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + wait);
+                self.armed = true;
+            }
+            None => self.armed = false,
+        }
+    }
+
+    fn retry_later(&mut self, wait: Duration) {
+        self.pending = None;
+        self.timer
+            .as_mut()
+            .reset(tokio::time::Instant::now() + wait);
+        self.armed = true;
+    }
+
+    async fn request(&mut self, tx: &mpsc::Sender<AgentMessage>, retry: Duration) {
+        let Ok((pending, csr_der)) = crate::renewal::new_request() else {
+            self.retry_later(retry);
+            return;
+        };
+        let message = AgentMessage {
+            payload: Some(agent_message::Payload::CertificateSigningRequest(
+                CertificateSigningRequest { csr_der },
+            )),
+        };
+        if tx.send(message).await.is_ok() {
+            self.pending = Some(pending);
+        }
+        self.timer
+            .as_mut()
+            .reset(tokio::time::Instant::now() + retry);
+        self.armed = true;
+    }
 }
 
 fn supported_step_types() -> Vec<String> {

@@ -17,6 +17,7 @@ pub mod identity;
 pub mod job;
 pub mod metrics;
 pub mod profile;
+pub mod renewal;
 pub mod runner;
 
 #[cfg(feature = "test-util")]

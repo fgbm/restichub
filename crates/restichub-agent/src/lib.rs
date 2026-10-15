@@ -18,6 +18,7 @@ pub mod paths;
 pub mod pem;
 pub mod restic;
 pub mod restore_roots;
+pub mod rotation;
 mod scrub;
 pub mod service;
 pub mod stream;
