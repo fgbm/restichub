@@ -15,6 +15,7 @@ use restichub_proto::signing::KeyRing;
 
 use crate::agent::Backoff;
 use crate::executor::{Executor, FakeRestic, Profiled, ProfiledProfile, SimulatedProfile};
+use crate::fleet::{FleetConfig, TokenSource, enroll_fleet};
 use crate::identity::{self, AgentIdentity, TestPki};
 use crate::profile::{JobDuration, LoadProfile};
 use crate::runner::{LoadRun, RunConfig};
@@ -32,6 +33,13 @@ OPTIONS:
   --ca FILE           certificate authority that verifies the server
   --certs DIR         directory with ca.pem, agents.txt and clients/
   --write-certs DIR   make the test certificates in DIR and exit
+  --enroll-url URL    enroll the agents at this enrollment listener (HTTPS) instead of
+                      using test certificates; needs --ca and one token source
+  --token-file FILE   one enrollment token on each line, at least one for each agent
+  --api-url URL       make the tokens through the API of this control plane
+  --api-token-file F  file with the API token that --api-url uses
+  --enroll-concurrency N  enrollments at the same time (default 16)
+  --write-identities DIR  write the enrolled identities to DIR in the --certs layout
   --executor NAME     simulated (default) or fake-restic
   --fake-restic PATH  path to the restichub-fake-restic binary
   --tenant ID         tenant identifier (default tenant-1)
@@ -72,6 +80,13 @@ pub struct Options {
     pub profile_file: Option<PathBuf>,
     pub metrics_addr: String,
     pub summary: Option<PathBuf>,
+    pub enroll_url: Option<String>,
+    pub token_file: Option<PathBuf>,
+    pub api_url: Option<String>,
+    pub api_token_file: Option<PathBuf>,
+    pub enroll_concurrency: usize,
+    pub write_identities: Option<PathBuf>,
+    server_set: bool,
 }
 
 impl Default for Options {
@@ -93,6 +108,13 @@ impl Default for Options {
             profile_file: None,
             metrics_addr: "127.0.0.1:9100".to_owned(),
             summary: None,
+            enroll_url: None,
+            token_file: None,
+            api_url: None,
+            api_token_file: None,
+            enroll_concurrency: 16,
+            write_identities: None,
+            server_set: false,
         }
     }
 }
@@ -114,7 +136,25 @@ fn parse(args: &[String]) -> anyhow::Result<Options> {
         let name = args[index].split('=').next().unwrap_or_default().to_owned();
         match name.as_str() {
             "--agents" => options.agents = take_value(args, &mut index, &name)?.parse()?,
-            "--server" => options.server = take_value(args, &mut index, &name)?,
+            "--server" => {
+                options.server = take_value(args, &mut index, &name)?;
+                options.server_set = true;
+            }
+            "--enroll-url" => options.enroll_url = Some(take_value(args, &mut index, &name)?),
+            "--token-file" => {
+                options.token_file = Some(PathBuf::from(take_value(args, &mut index, &name)?));
+            }
+            "--api-url" => options.api_url = Some(take_value(args, &mut index, &name)?),
+            "--api-token-file" => {
+                options.api_token_file = Some(PathBuf::from(take_value(args, &mut index, &name)?));
+            }
+            "--enroll-concurrency" => {
+                options.enroll_concurrency = take_value(args, &mut index, &name)?.parse()?;
+            }
+            "--write-identities" => {
+                options.write_identities =
+                    Some(PathBuf::from(take_value(args, &mut index, &name)?));
+            }
             "--server-name" => options.server_name = take_value(args, &mut index, &name)?,
             "--ca" => options.ca = Some(PathBuf::from(take_value(args, &mut index, &name)?)),
             "--certs" => options.certs = Some(PathBuf::from(take_value(args, &mut index, &name)?)),
@@ -189,8 +229,23 @@ async fn run(options: &Options) -> anyhow::Result<()> {
         None if options.profile_file.is_some() => Some(profile.duration()),
         None => None,
     };
-    let (ca_pem, identities) = resolve_identity(options, agents)?;
-    let key_ring = resolve_key_ring(options)?;
+    let mut server_url = options.server.clone();
+    let mut tenant_id = options.tenant.clone();
+    let (ca_pem, identities, key_ring) = match &options.enroll_url {
+        Some(url) => {
+            let fleet = enroll_agents(options, url, agents).await?;
+            if let Some(endpoint) = fleet.grpc_endpoint.filter(|_| !options.server_set) {
+                server_url = endpoint;
+            }
+            tenant_id = fleet.tenant_id;
+            println!("enrolled {} agents at {url}", fleet.identities.len());
+            (fleet.ca_pem, fleet.identities, fleet.key_ring)
+        }
+        None => {
+            let (ca_pem, identities) = resolve_identity(options, agents)?;
+            (ca_pem, identities, resolve_key_ring(options)?)
+        }
+    };
     let executor: Arc<dyn Executor> = match options.executor {
         ExecutorKind::Simulated => Arc::new(Profiled {
             profile: ProfiledProfile::from_profile(&profile),
@@ -207,10 +262,10 @@ async fn run(options: &Options) -> anyhow::Result<()> {
 
     let config = RunConfig {
         profile,
-        server_url: options.server.clone(),
+        server_url: server_url.clone(),
         server_name: options.server_name.clone(),
         ca_pem,
-        tenant_id: options.tenant.clone(),
+        tenant_id,
         key_ring,
         identities,
         executor,
@@ -221,7 +276,7 @@ async fn run(options: &Options) -> anyhow::Result<()> {
     if let Some(addr) = run.metrics_addr() {
         println!("metrics on http://{addr}/metrics");
     }
-    println!("started {agents} agents against {}", options.server);
+    println!("started {agents} agents against {server_url}");
 
     match run_seconds {
         Some(seconds) => {
@@ -247,6 +302,79 @@ async fn run(options: &Options) -> anyhow::Result<()> {
         "{}",
         serde_json::to_string(&summary).context("cannot serialize the summary")?
     );
+    Ok(())
+}
+
+struct EnrolledFleet {
+    ca_pem: String,
+    identities: Vec<AgentIdentity>,
+    key_ring: KeyRing,
+    tenant_id: String,
+    grpc_endpoint: Option<String>,
+}
+
+async fn enroll_agents(
+    options: &Options,
+    url: &str,
+    agents: usize,
+) -> anyhow::Result<EnrolledFleet> {
+    let ca_path = options.ca.as_ref().ok_or_else(|| {
+        anyhow!("--enroll-url needs --ca FILE with the root CA of the installation")
+    })?;
+    let ca_pem = std::fs::read_to_string(ca_path)
+        .with_context(|| format!("cannot read the CA file {}", ca_path.display()))?;
+    let tokens = match (&options.token_file, &options.api_url) {
+        (Some(path), None) => TokenSource::File(path.clone()),
+        (None, Some(api_url)) => {
+            let path = options
+                .api_token_file
+                .as_ref()
+                .ok_or_else(|| anyhow!("--api-url needs --api-token-file FILE"))?;
+            let api_token = std::fs::read_to_string(path)
+                .with_context(|| format!("cannot read the API token file {}", path.display()))?;
+            TokenSource::Api {
+                url: api_url.clone(),
+                api_token: api_token.trim().to_owned(),
+            }
+        }
+        _ => bail!("--enroll-url needs exactly one of --token-file and --api-url"),
+    };
+    let fleet = enroll_fleet(&FleetConfig {
+        agents,
+        enroll_url: url.to_owned(),
+        tokens,
+        ca_pem: ca_pem.clone(),
+        server_name: options.server_name.clone(),
+        concurrency: options.enroll_concurrency,
+        hostname_prefix: "emulator".to_owned(),
+    })
+    .await?;
+    if let Some(dir) = &options.write_identities {
+        write_identities(dir, &ca_pem, &fleet.identities)?;
+    }
+    Ok(EnrolledFleet {
+        ca_pem,
+        identities: fleet.identities,
+        key_ring: fleet.key_ring,
+        tenant_id: fleet.tenant_id,
+        grpc_endpoint: fleet.grpc_endpoint,
+    })
+}
+
+fn write_identities(
+    dir: &std::path::Path,
+    ca_pem: &str,
+    identities: &[AgentIdentity],
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir.join("clients"))?;
+    std::fs::write(dir.join("ca.pem"), ca_pem)?;
+    for identity in identities {
+        let base = dir.join("clients").join(&identity.agent_id);
+        std::fs::write(base.with_extension("pem"), &identity.cert_pem)?;
+        std::fs::write(base.with_extension("key"), &identity.key_pem)?;
+    }
+    let ids: Vec<&str> = identities.iter().map(|i| i.agent_id.as_str()).collect();
+    std::fs::write(dir.join("agents.txt"), ids.join("\n"))?;
     Ok(())
 }
 
