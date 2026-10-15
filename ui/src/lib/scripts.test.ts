@@ -2,8 +2,9 @@
  * The helpers of the script editor keep the order of the scripts, convert a draft to the API shape
  * and find the hosts that cannot run a script (FR-HK-09, FR-HK-10, ADR-0037).
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { Agent, ScriptTemplate } from '#lib/api/index.ts';
+import { setLocale } from '#lib/i18n/index.ts';
 import {
 	blankScript,
 	canMove,
@@ -15,7 +16,9 @@ import {
 	hostsWithProblems,
 	interpretersFor,
 	move,
-	scriptOf
+	scriptOf,
+	templateDescription,
+	templateName
 } from './scripts';
 
 const TEMPLATE: ScriptTemplate = {
@@ -154,5 +157,36 @@ describe('hosts', () => {
 		expect(enableCommand('Windows')).toBe('restichub-agent.exe trust-server-scripts --enable');
 		expect(interpretersFor('windows')).toEqual(['powershell', 'cmd']);
 		expect(interpretersFor('linux')).toEqual(['bash', 'sh']);
+	});
+});
+
+describe('built-in template text', () => {
+	afterEach(() => setLocale('en'));
+
+	it('keeps the server text in English', () => {
+		setLocale('en');
+		expect(templateName(TEMPLATE)).toBe('PostgreSQL dump');
+	});
+
+	it('translates a built-in template by its slug in Russian', () => {
+		setLocale('ru');
+		const real = { ...TEMPLATE, name: 'PostgreSQL dump with pg_dump (Linux)' };
+		expect(templateName(real)).toBe('Дамп PostgreSQL через pg_dump (Linux)');
+		expect(templateDescription(real)).toContain('Перед резервным копированием');
+		expect(templateName({ ...TEMPLATE, id: 'builtin:postgres-linux' }, 'job')).toBe(
+			'Сервер PostgreSQL (Linux)'
+		);
+	});
+
+	it('keeps the server text for a built-in template without a translation', () => {
+		setLocale('ru');
+		expect(templateName({ ...TEMPLATE, id: 'builtin:future-template' })).toBe('PostgreSQL dump');
+	});
+
+	it('does not translate a template that a person made (FR-HK-11)', () => {
+		setLocale('ru');
+		const own = { ...TEMPLATE, id: 'tpl_1', builtin: false, name: 'Own dump' };
+		expect(templateName(own)).toBe('Own dump');
+		expect(draftFromTemplate(own).name).toBe('Own dump');
 	});
 });
