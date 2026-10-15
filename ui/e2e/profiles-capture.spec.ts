@@ -113,6 +113,13 @@ async function capture(page: Page, scheme: string, labels: Labels, suffix: strin
 	await page.locator('[data-section="retention"]').screenshot({
 		path: `${out}/edit-retention-section-${scheme}${suffix}-app.png`
 	});
+
+	// The page scrolled to the limits: the side panel and the save bar stay in view.
+	await page.locator('[data-section="limits"] .section__toggle').click();
+	await page.locator('[data-section="limits"]').scrollIntoViewIfNeeded();
+	await page.mouse.wheel(0, 2000);
+	await page.waitForTimeout(250);
+	await shot(page, `edit-limits${suffix}`, scheme);
 }
 
 test('capture the profile editor in Russian, light', async ({ page }) => {

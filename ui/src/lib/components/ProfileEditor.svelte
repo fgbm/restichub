@@ -683,12 +683,12 @@
 
 	.side {
 		position: sticky;
-		top: var(--rh-space-4);
+		top: calc(var(--rh-layout-topbar-height) + var(--rh-space-4));
 		display: flex;
 		grid-area: side;
 		flex-direction: column;
 		gap: var(--rh-space-3);
-		max-height: calc(100vh - 120px);
+		max-height: calc(100vh - var(--rh-layout-topbar-height) - 120px);
 		overflow-y: auto;
 	}
 
