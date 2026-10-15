@@ -484,9 +484,50 @@ fn platform_hidden_in_single(state: &AppState, tenant_id: TenantId) -> bool {
     state.tenancy().mode.is_single() && tenant_id == restichub_db::PLATFORM_TENANT_ID
 }
 
+/// The hashed credential of a request, kept to check it again while a stream is open.
+#[derive(Debug, Clone)]
+pub enum Credential {
+    Session(Vec<u8>),
+    Token(Vec<u8>),
+}
+
+impl Credential {
+    pub fn of(state: &AppState, headers: &axum::http::HeaderMap) -> Option<Self> {
+        let name = token::session_cookie_name(state.auth().config.insecure_cookies);
+        match (
+            token::session_cookie(headers, name),
+            token::bearer_token(headers),
+        ) {
+            (Some(value), None) => Some(Self::Session(token::hash_token(&value))),
+            (None, Some(value)) => Some(Self::Token(token::hash_token(&value))),
+            _ => None,
+        }
+    }
+
+    /// Authenticates again with no side effect: the session keeps its last-seen time, because an
+    /// open stream is not a request of the user.
+    pub async fn recheck(&self, state: &AppState) -> Result<RequestContext, ApiError> {
+        let context = match self {
+            Self::Session(hash) => authenticate_session_hash(state, hash, false).await?,
+            Self::Token(hash) => authenticate_bearer_hash(state, hash, false).await?,
+        };
+        if platform_hidden_in_single(state, context.tenant_id) {
+            return Err(ApiError::unauthenticated());
+        }
+        Ok(context)
+    }
+}
+
 async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestContext, ApiError> {
-    let hash = token::hash_token(value);
-    let lookup = auth::find_session(state.db(), &hash).await?;
+    authenticate_session_hash(state, &token::hash_token(value), true).await
+}
+
+async fn authenticate_session_hash(
+    state: &AppState,
+    hash: &[u8],
+    touch: bool,
+) -> Result<RequestContext, ApiError> {
+    let lookup = auth::find_session(state.db(), hash).await?;
     let Some(lookup) = lookup else {
         return Err(ApiError::unauthenticated());
     };
@@ -495,7 +536,7 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
         return Err(ApiError::unauthenticated());
     }
     let idle_deadline = lookup.last_seen_at + state.auth().config.session_idle;
-    if idle_deadline <= now {
+    if touch && idle_deadline <= now {
         return Err(ApiError::unauthenticated());
     }
     let mut tx = state.db().begin_tenant(lookup.tenant_id).await?;
@@ -532,7 +573,9 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
         }
         member.role
     };
-    sessions::touch(&mut tx, lookup.session_id, now).await?;
+    if touch {
+        sessions::touch(&mut tx, lookup.session_id, now).await?;
+    }
     tx.commit().await?;
     Ok(RequestContext {
         tenant_id: lookup.tenant_id,
@@ -547,8 +590,15 @@ async fn authenticate_session(state: &AppState, value: &str) -> Result<RequestCo
 }
 
 async fn authenticate_bearer(state: &AppState, value: &str) -> Result<RequestContext, ApiError> {
-    let hash = token::hash_token(value);
-    let lookup = auth::find_api_token(state.db(), &hash).await?;
+    authenticate_bearer_hash(state, &token::hash_token(value), true).await
+}
+
+async fn authenticate_bearer_hash(
+    state: &AppState,
+    hash: &[u8],
+    touch: bool,
+) -> Result<RequestContext, ApiError> {
+    let lookup = auth::find_api_token(state.db(), hash).await?;
     let Some(lookup) = lookup else {
         return Err(ApiError::unauthenticated());
     };
@@ -570,7 +620,9 @@ async fn authenticate_bearer(state: &AppState, value: &str) -> Result<RequestCon
         return Err(ApiError::unauthenticated());
     }
     let role = lookup.role;
-    api_tokens::touch(&mut tx, lookup.token_id, now).await?;
+    if touch {
+        api_tokens::touch(&mut tx, lookup.token_id, now).await?;
+    }
     tx.commit().await?;
     Ok(RequestContext {
         tenant_id: lookup.tenant_id,

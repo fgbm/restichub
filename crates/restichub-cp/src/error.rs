@@ -150,6 +150,10 @@ impl ApiError {
         )
     }
 
+    pub fn is_unauthenticated(&self) -> bool {
+        self.status == StatusCode::UNAUTHORIZED
+    }
+
     /// Sign-in returns this error for every failure: an unknown tenant, an unknown user, a wrong
     /// password, a disabled user and a suspended tenant. The control plane logs the real reason and
     /// never puts it in the response.

@@ -106,7 +106,7 @@ The stream shows only the events of your organization. Each event needs a read r
 
 An event holds identifiers and a status only. It holds no secret and no log line. Read the REST API for the data.
 
-The control plane keeps no event history. After a reconnect, the stream sends `resync` first. Ignore `Last-Event-ID` and read the data again. A comment line every 15 seconds keeps the connection open. A stream ends after at most 15 minutes, or when the session ends. The client then connects again.
+The control plane keeps no event history. After a reconnect, the stream sends `resync` first. Ignore `Last-Event-ID` and read the data again. A comment line every 15 seconds keeps the connection open. A stream ends after at most 15 minutes. It ends sooner when the access ends: after sign-out, when the user is disabled, when the role changes, when the organization is suspended or when the API token is revoked. The control plane checks this every 30 seconds. A stream also ends when the server stops, and when the client does not read it for 10 seconds. The client then connects again. One session or one API token can hold 4 streams, one address 100 streams, one organization 200 streams, and the server 2000 streams (`RESTICHUB_EVENTS_MAX_STREAMS`). A request above a limit gets HTTP 429.
 
 A session can hold 4 streams at the same time, and an organization can hold 200. More requests get HTTP 429.
 

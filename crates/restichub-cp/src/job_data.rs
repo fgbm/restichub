@@ -73,17 +73,19 @@ pub async fn handle_progress(
     };
     let result = async {
         let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
-            return Ok(());
+            return Ok(false);
         };
         // A job that is not running shows no progress.
         if !matches!(job.status, JobStatus::Sent | JobStatus::Running) {
-            return Ok(());
+            return Ok(false);
         }
-        job_steps::upsert_progress(&mut tx, job_id, &row).await
+        job_steps::upsert_progress(&mut tx, job_id, &row).await?;
+        Ok(true)
     }
     .await;
-    finish(tx, result, job_id, "progress").await;
-    state.events().job_progress(tenant, job_id);
+    if finish(tx, result, job_id, "progress").await {
+        state.events().job_progress(tenant, job_id);
+    }
 }
 
 /// Records the result of one step.
@@ -107,17 +109,18 @@ pub async fn handle_step_result(
     };
     let outcome = async {
         let Some(job) = owned_job(&mut tx, job_id, agent, cutoff).await? else {
-            return Ok(());
+            return Ok(false);
         };
         job_steps::upsert(&mut tx, job_id, &step).await?;
         if step.status == StepStatus::Success {
             browse::store_listing(&mut tx, &job, result.output.as_ref(), now).await?;
         }
-        Ok(())
+        Ok(true)
     }
     .await;
-    finish(tx, outcome, job_id, "step result").await;
-    state.events().job_progress(tenant, job_id);
+    if finish(tx, outcome, job_id, "step result").await {
+        state.events().job_progress(tenant, job_id);
+    }
 }
 
 /// Why the control plane never stores a log chunk (FR-LG-07).
@@ -207,7 +210,7 @@ pub async fn handle_job_result_data(
         job_steps::delete_progress(&mut tx, job_id).await
     }
     .await;
-    finish(tx, outcome, job_id, "job result data").await;
+    finish(tx, outcome.map(|()| true), job_id, "job result data").await;
 
     let store = DatabaseLogStore::new(state.db().clone());
     for chunk in result
@@ -284,19 +287,25 @@ async fn owned_job(
     Ok(found.filter(|row| classify(Some(row), agent, cutoff) == Ownership::Owned))
 }
 
+/// True when the write was stored and committed.
 async fn finish(
     tx: restichub_db::TenantTx<'_>,
-    result: Result<(), restichub_db::DbError>,
+    result: Result<bool, restichub_db::DbError>,
     job: JobId,
     what: &str,
-) {
+) -> bool {
     match result {
-        Ok(()) => {
-            if let Err(error) = tx.commit().await {
+        Ok(stored) => match tx.commit().await {
+            Ok(()) => stored,
+            Err(error) => {
                 tracing::warn!(%job, %error, "the {what} could not commit");
+                false
             }
+        },
+        Err(error) => {
+            tracing::warn!(%job, %error, "the {what} could not be stored");
+            false
         }
-        Err(error) => tracing::warn!(%job, %error, "the {what} could not be stored"),
     }
 }
 

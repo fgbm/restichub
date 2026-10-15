@@ -10,20 +10,23 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::State;
-use axum::http::{HeaderValue, header};
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use restichub_db::{AgentId, JobId, JobStatus, Role, SessionId, TenantId};
+use restichub_db::audit::Actor;
+use restichub_db::{AgentId, JobId, JobStatus, Role, TenantId};
 use serde::Serialize;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
+use uuid::Uuid;
 
-use crate::context::{Operation, RequestContext, minimum_role};
+use crate::context::{Credential, Operation, RequestContext, minimum_role};
 use crate::error::ApiError;
 use crate::server::AppState;
 
@@ -33,20 +36,32 @@ const OUTBOX_CAPACITY: usize = 64;
 #[derive(Debug, Clone, Copy)]
 pub struct EventLimits {
     pub per_session: usize,
+    pub per_token: usize,
     pub per_tenant: usize,
-    /// A stream ends after this time, so the client signs in again with its cookie and a revoked
-    /// session cannot keep a stream open for long.
+    pub per_ip: usize,
+    pub global: usize,
+    /// A stream ends after this time, so the client signs in again with its cookie.
     pub max_lifetime: Duration,
     pub heartbeat: Duration,
+    /// How often an open stream checks its credential, the role and the tenant again. A stream ends
+    /// when the access is gone.
+    pub recheck: Duration,
+    /// A client that does not read for this time loses its stream.
+    pub send_timeout: Duration,
 }
 
 impl Default for EventLimits {
     fn default() -> Self {
         Self {
             per_session: 4,
+            per_token: 4,
             per_tenant: 200,
+            per_ip: 100,
+            global: 2000,
             max_lifetime: Duration::from_secs(15 * 60),
             heartbeat: Duration::from_secs(15),
+            recheck: Duration::from_secs(30),
+            send_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -102,46 +117,62 @@ struct Payload {
 #[derive(Debug, Clone)]
 struct Published {
     id: u64,
-    tenant: TenantId,
     kind: EventKind,
     payload: Payload,
 }
 
 /// The in-process event bus (single control plane process, ADR-0002).
+///
+/// Each tenant has its own channel, so a burst of one tenant cannot make the streams of another
+/// tenant lag (ADR-0006).
 #[derive(Debug)]
 pub struct EventBus {
-    sender: broadcast::Sender<Arc<Published>>,
     next_id: AtomicU64,
     limits: EventLimits,
+    shutdown: watch::Sender<bool>,
     open: Mutex<Open>,
 }
 
 #[derive(Debug, Default)]
 struct Open {
+    total: usize,
     by_tenant: HashMap<TenantId, usize>,
-    by_session: HashMap<SessionId, usize>,
+    by_holder: HashMap<Uuid, usize>,
+    by_ip: HashMap<IpAddr, usize>,
+    channels: HashMap<TenantId, broadcast::Sender<Arc<Published>>>,
+}
+
+/// Who opens a stream, for the limits.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Opener {
+    pub tenant: TenantId,
+    /// The session or the API token, with its limit.
+    pub holder: Option<(Uuid, usize)>,
+    pub ip: Option<IpAddr>,
 }
 
 impl EventBus {
     pub fn new(limits: EventLimits) -> Self {
-        let (sender, _) = broadcast::channel(CHANNEL_CAPACITY);
         Self {
-            sender,
             next_id: AtomicU64::new(1),
             limits,
+            shutdown: watch::channel(false).0,
             open: Mutex::new(Open::default()),
         }
     }
 
+    /// Ends every open stream and refuses new ones, for the shutdown of the server.
+    pub fn close(&self) {
+        self.shutdown.send_replace(true);
+    }
+
     fn publish(&self, tenant: TenantId, kind: EventKind, payload: Payload) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        // No receiver is not an error: nobody listens.
-        let _ = self.sender.send(Arc::new(Published {
-            id,
-            tenant,
-            kind,
-            payload,
-        }));
+        let open = self.open.lock().unwrap_or_else(|error| error.into_inner());
+        // A tenant with no open stream has no channel: nobody listens.
+        if let Some(sender) = open.channels.get(&tenant) {
+            let _ = sender.send(Arc::new(Published { id, kind, payload }));
+        }
     }
 
     pub fn job_progress(&self, tenant: TenantId, job: JobId) {
@@ -189,25 +220,46 @@ impl EventBus {
         );
     }
 
-    fn admit(self: &Arc<Self>, tenant: TenantId, session: Option<SessionId>) -> Option<Slot> {
-        let mut open = self.open.lock().unwrap_or_else(|error| error.into_inner());
-        if open.by_tenant.get(&tenant).copied().unwrap_or(0) >= self.limits.per_tenant {
+    fn admit(
+        self: &Arc<Self>,
+        opener: Opener,
+    ) -> Option<(Slot, broadcast::Receiver<Arc<Published>>)> {
+        if *self.shutdown.borrow() {
             return None;
         }
-        if let Some(session) = session
-            && open.by_session.get(&session).copied().unwrap_or(0) >= self.limits.per_session
+        let limits = &self.limits;
+        let mut open = self.open.lock().unwrap_or_else(|error| error.into_inner());
+        if open.total >= limits.global
+            || at_limit(&open.by_tenant, &opener.tenant, limits.per_tenant)
+            || opener
+                .holder
+                .is_some_and(|(holder, limit)| at_limit(&open.by_holder, &holder, limit))
+            || opener
+                .ip
+                .is_some_and(|ip| at_limit(&open.by_ip, &ip, limits.per_ip))
         {
             return None;
         }
-        *open.by_tenant.entry(tenant).or_default() += 1;
-        if let Some(session) = session {
-            *open.by_session.entry(session).or_default() += 1;
+        open.total += 1;
+        *open.by_tenant.entry(opener.tenant).or_default() += 1;
+        if let Some((holder, _)) = opener.holder {
+            *open.by_holder.entry(holder).or_default() += 1;
         }
-        Some(Slot {
-            bus: Arc::clone(self),
-            tenant,
-            session,
-        })
+        if let Some(ip) = opener.ip {
+            *open.by_ip.entry(ip).or_default() += 1;
+        }
+        let receiver = open
+            .channels
+            .entry(opener.tenant)
+            .or_insert_with(|| broadcast::channel(CHANNEL_CAPACITY).0)
+            .subscribe();
+        Some((
+            Slot {
+                bus: Arc::clone(self),
+                opener,
+            },
+            receiver,
+        ))
     }
 
     pub fn open_streams(&self, tenant: TenantId) -> usize {
@@ -233,8 +285,7 @@ fn job_payload(job: JobId, status: Option<&'static str>) -> Payload {
 /// One admitted stream. The drop gives the slot back.
 struct Slot {
     bus: Arc<EventBus>,
-    tenant: TenantId,
-    session: Option<SessionId>,
+    opener: Opener,
 }
 
 impl Drop for Slot {
@@ -244,11 +295,22 @@ impl Drop for Slot {
             .open
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        release(&mut open.by_tenant, self.tenant);
-        if let Some(session) = self.session {
-            release(&mut open.by_session, session);
+        open.total -= 1;
+        release(&mut open.by_tenant, self.opener.tenant);
+        if let Some((holder, _)) = self.opener.holder {
+            release(&mut open.by_holder, holder);
+        }
+        if let Some(ip) = self.opener.ip {
+            release(&mut open.by_ip, ip);
+        }
+        if !open.by_tenant.contains_key(&self.opener.tenant) {
+            open.channels.remove(&self.opener.tenant);
         }
     }
+}
+
+fn at_limit<K: std::hash::Hash + Eq>(map: &HashMap<K, usize>, key: &K, limit: usize) -> bool {
+    map.get(key).copied().unwrap_or(0) >= limit
 }
 
 fn release<K: std::hash::Hash + Eq>(map: &mut HashMap<K, usize>, key: K) {
@@ -284,54 +346,82 @@ fn resync_event() -> SseEvent {
     responses(
         (
             status = 200,
-            description = "A `text/event-stream` body. The events are `resync`, `job.progress`, `job.status`, `job.log`, `host.online`, `host.offline` and `alert.changed`. The data of an event holds identifiers and a status only; the client reads the REST API for the rest. The stream ends after at most 15 minutes. The client reconnects and reads the state again after the first `resync` event.",
+            description = "A `text/event-stream` body. The events are `resync`, `job.progress`, `job.status`, `job.log`, `host.online`, `host.offline` and `alert.changed`. The data of an event holds identifiers and a status only; the client reads the REST API for the rest. The stream ends after at most 15 minutes, and earlier when the session, the token, the account, the role or the tenant no longer gives the access. The client reconnects and reads the state again after the first `resync` event.",
             content_type = "text/event-stream",
             body = String
         ),
-        (status = 429, description = "The session or the tenant has too many open streams.", body = crate::error::ProblemBody),
+        (status = 429, description = "The session, the token, the address, the tenant or the server has too many open streams.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
     )
 )]
 pub async fn events(
     State(state): State<AppState>,
     context: RequestContext,
+    headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     context.authorize(Operation::EventsRead)?;
     let bus = state.events_shared();
     let limits = bus.limits;
-    let slot = bus
-        .admit(context.tenant_id, context.session_id)
+    let opener = Opener {
+        tenant: context.tenant_id,
+        holder: match (context.session_id, &context.actor) {
+            (Some(session), _) => Some((session.as_uuid(), limits.per_session)),
+            (None, Actor::ApiToken(token)) => Some((token.as_uuid(), limits.per_token)),
+            (None, _) => None,
+        },
+        ip: context.source_ip,
+    };
+    let (slot, mut receiver) = bus
+        .admit(opener)
         .ok_or_else(|| ApiError::rate_limited(limits.heartbeat.as_secs().max(1)))?;
+    let credential = Credential::of(&state, &headers);
     let lifetime = lifetime_of(&state, &context, limits.max_lifetime);
     let (outbox, inbox) = mpsc::channel::<Result<SseEvent, Infallible>>(OUTBOX_CAPACITY);
-    let mut receiver = bus.sender.subscribe();
-    let tenant = context.tenant_id;
+    let mut shutdown = bus.shutdown.subscribe();
     let role = context.role;
     tokio::spawn(async move {
         let _slot = slot;
         let deadline = tokio::time::sleep(lifetime);
         tokio::pin!(deadline);
-        if outbox.send(Ok(resync_event())).await.is_err() {
-            return;
-        }
+        let mut recheck =
+            tokio::time::interval_at(tokio::time::Instant::now() + limits.recheck, limits.recheck);
+        recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut next = Some(resync_event());
         loop {
-            let event = tokio::select! {
+            if let Some(event) = next.take() {
+                // The send waits for a client that does not read, so the deadline, the shutdown and
+                // a send timeout bound it.
+                let sent = tokio::select! {
+                    () = &mut deadline => return,
+                    () = closed(&mut shutdown) => return,
+                    sent = tokio::time::timeout(limits.send_timeout, outbox.send(Ok(event))) => sent,
+                };
+                if !matches!(sent, Ok(Ok(()))) {
+                    return;
+                }
+            }
+            next = tokio::select! {
                 () = &mut deadline => return,
+                () = closed(&mut shutdown) => return,
                 () = outbox.closed() => return,
+                _ = recheck.tick() => {
+                    if !access_remains(&state, credential.as_ref(), &context, role).await {
+                        return;
+                    }
+                    None
+                }
                 received = receiver.recv() => match received {
                     Ok(published) => {
-                        if published.tenant != tenant || !may_read(role, published.kind) {
-                            continue;
+                        if may_read(role, published.kind) {
+                            Some(sse_event(&published))
+                        } else {
+                            None
                         }
-                        sse_event(&published)
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => resync_event(),
+                    Err(broadcast::error::RecvError::Lagged(_)) => Some(resync_event()),
                     Err(broadcast::error::RecvError::Closed) => return,
                 },
             };
-            if outbox.send(Ok(event)).await.is_err() {
-                return;
-            }
         }
     });
     let mut response = Sse::new(ReceiverStream::new(inbox))
@@ -345,6 +435,28 @@ pub async fn events(
     // Tells nginx not to buffer the stream.
     headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
     Ok(response)
+}
+
+async fn closed(shutdown: &mut watch::Receiver<bool>) {
+    // An error means that the bus is gone, which also ends the stream.
+    let _ = shutdown.wait_for(|closed| *closed).await;
+}
+
+/// False when the credential, the account, the role or the tenant no longer gives the access that
+/// the stream was opened with. A failure of the database keeps the stream.
+async fn access_remains(
+    state: &AppState,
+    credential: Option<&Credential>,
+    opened: &RequestContext,
+    role: Role,
+) -> bool {
+    let Some(credential) = credential else {
+        return true;
+    };
+    match credential.recheck(state).await {
+        Ok(now) => now.tenant_id == opened.tenant_id && now.role == role,
+        Err(error) => !error.is_unauthenticated(),
+    }
 }
 
 fn lifetime_of(state: &AppState, context: &RequestContext, maximum: Duration) -> Duration {
