@@ -243,8 +243,15 @@ async fn fr_id_03_a_new_certificate_starts_five_minutes_before_the_issue_time() 
     let (_, next) = rotation::issue(&env.state, env.tenant, agent, &presented, &csr, due)
         .await
         .expect("the rotation must be signed");
-    assert_eq!(next.not_before, due - Duration::minutes(5));
-    assert_eq!(next.not_after, due + Duration::days(30));
+    // The test CA starts a moment before the test, so the start is bound by the CA here.
+    // A certificate holds whole seconds.
+    let issued = due.replace_nanosecond(0).expect("whole seconds");
+    assert!(
+        next.not_before < issued,
+        "the certificate starts before the issue time"
+    );
+    assert!(next.not_before >= issued - Duration::minutes(5));
+    assert_eq!(next.not_after, issued + Duration::days(30));
     env.db.cleanup().await;
 }
 

@@ -834,6 +834,29 @@ fn validate_spki_p256(csr_der: &[u8]) -> Result<(), CaError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fr_id_03_a_leaf_starts_five_minutes_early_but_not_before_the_issuer() {
+        use super::{AGENT_CERT_LIFETIME, leaf_not_before};
+        use time::{Duration, OffsetDateTime};
+
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::days(100);
+        let long_ago = now - Duration::days(30);
+        assert_eq!(
+            leaf_not_before(now, AGENT_CERT_LIFETIME, long_ago),
+            now - Duration::minutes(5)
+        );
+        let issuer_start = now - Duration::minutes(2);
+        assert_eq!(
+            leaf_not_before(now, AGENT_CERT_LIFETIME, issuer_start),
+            issuer_start
+        );
+        // A short test lifetime shortens the backdate.
+        assert_eq!(
+            leaf_not_before(now, Duration::seconds(8), long_ago),
+            now - Duration::seconds(2)
+        );
+    }
+
     use uuid::Uuid;
 
     use super::{
