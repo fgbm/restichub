@@ -53,11 +53,12 @@ Set the environment variables before `bench.sh setup`:
 
 ## Scenarios of section 14.2
 
-Each scenario starts a fresh bench with one agent host and writes `report.md` into its output directory. Add the report to the issue #42.
+Each scenario starts a fresh bench with one agent host and writes `report.md` into its output directory. Add the reports of 14.2.1 and 14.2.3 to the issue #42 and the report of 14.2.4 to the issue #43. The scenario of this directory writes WARN rows for findings that do not stop the scenario.
 
 ```sh
 bench/s1/e2e/scenario-14.2.1.sh [OUT]   # a new tenant, from the creation to the first backup
 bench/s1/e2e/scenario-14.2.3.sh [OUT]   # recovery after a stale lock; about 40 minutes
+bench/s1/e2e/scenario-14.2.4.sh [OUT]   # agent revocation during a job (AC-ID-04); about 1 minute
 ```
 
 The scenario 14.2.3 kills a running backup with SIGKILL. The control plane waits 30 minutes (FR-SC-06) and runs `unlock` when the repository is idle. The scenario checks the lock list of the repository and the next backup. `KILL_TARGET` selects the victim:
@@ -69,7 +70,7 @@ The scenario 14.2.3 kills a running backup with SIGKILL. The control plane waits
 
 Known gap: when something other than the agent kills restic with SIGKILL, the agent reports a failed step without the stale lock mark (`possible_stale_lock` is set only after the agent stops restic itself). The control plane then runs no `unlock`. The run with `KILL_TARGET=restic` shows it.
 
-The scenarios 14.2.2 and 14.2.4 need Windows hosts or a person. See `windows-checklist.md`.
+The scenario 14.2.2 needs a Windows host. See `windows-checklist.md`. The scenario 14.2.4 runs on Linux hosts here; repeat it on a Windows host when you run the checklist.
 
 ## Timed runs
 

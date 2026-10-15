@@ -11,6 +11,7 @@
 #   agent   the agent process of the host (default): the control plane loses the agent in the
 #           middle of the job and marks the lock (`agent_lost`)
 #   restic  the restic process only, as AC-SC-06 words it; the agent sees a signal exit
+# AGENT_DOWN_SECONDS is the time that the killed agent stays down (default 150).
 
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -66,7 +67,9 @@ if wait "$watcher"; then
 	else
 		docker kill --signal=KILL "$container" >/dev/null
 		# The service manager of a real host starts the agent again; the container has no manager.
-		sleep 5
+		# The control plane fails a running job that the new connection does not list only when the
+		# job ran for 2 minutes or more, so the agent stays away for 150 seconds.
+		sleep "${AGENT_DOWN_SECONDS:-150}"
 		docker start "$container" >/dev/null
 		what="agent process of the host (container $container)"
 	fi
