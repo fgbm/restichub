@@ -985,6 +985,19 @@ export const en = {
 	'alerts.kind.job_warnings': 'Job with warnings',
 	'alerts.kind.agent_offline': 'Host offline',
 	'alerts.kind.stale_lock': 'Stale lock',
+	'alerts.errorText': 'Error text',
+	'alerts.duration.hours': '{n} h',
+	'alerts.duration.minutes': '{n} min',
+	'alerts.cond.rpo_violated':
+		'No successful backup for {elapsed} (last success at {at}, objective {rpo}).',
+	'alerts.cond.rpo_violated_never':
+		'No successful backup since the plan was created (objective {rpo}).',
+	'alerts.cond.agent_offline': 'The agent was not seen for {elapsed} (threshold {threshold} min).',
+	'alerts.cond.stale_lock':
+		'A repository lock has been stale for {elapsed} (threshold {threshold} min).',
+	'alerts.cond.job_dead_letter': 'The {what} job gave up after repeated repository lock retries.',
+	'alerts.cond.job_warnings': 'The {what} job finished with warnings.',
+	'alerts.cond.job_failed': 'The {what} job failed ({code}).',
 
 	// Alert rules (FR-MN-03)
 	'rules.title': 'Alert rules',

@@ -67,7 +67,7 @@
 	let timeZone = $state('');
 	let policy = $state<MissedRunPolicy>('run_all');
 	let enabled = $state(true);
-	// The objective in hours, as the person types it. Empty uses the schedule (ADR-0035).
+	// The objective in hours, as the person types it. Empty uses the schedule (ADR-0036).
 	let rpoHours = $state('');
 
 	let runs = $state<string[] | null>(null);

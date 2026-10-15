@@ -87,7 +87,8 @@ function sampleAlerts(): Alert[] {
 			repository_id: 'r_1',
 			repository_name: 'primary-s3',
 			job_id: 'j_s4',
-			message: 'The backup job failed (config_error): compile_failed',
+			params: { job_kind: 'backup', error_code: 'config_error' },
+			error_text: 'compile_failed',
 			url: 'https://backup.example.com/jobs/j_s4',
 			opened_at: iso(50),
 			resolved_at: null
@@ -103,7 +104,8 @@ function sampleAlerts(): Alert[] {
 			repository_id: null,
 			repository_name: null,
 			job_id: null,
-			message: 'The agent was not seen for 48 h (threshold 30 min).',
+			params: { elapsed_seconds: 48 * 3600, threshold_minutes: 30 },
+			error_text: null,
 			url: null,
 			opened_at: iso(60 * 47),
 			resolved_at: null
@@ -119,7 +121,12 @@ function sampleAlerts(): Alert[] {
 			repository_id: 'r_1',
 			repository_name: 'primary-s3',
 			job_id: null,
-			message: 'No successful backup for 31 h (objective 26 h).',
+			params: {
+				elapsed_seconds: 31 * 3600,
+				rpo_seconds: 26 * 3600,
+				last_success_at: iso(60 * 111)
+			},
+			error_text: null,
 			url: null,
 			opened_at: iso(60 * 80),
 			resolved_at: iso(60 * 60)
@@ -154,7 +161,7 @@ function sampleChannels(): NotificationChannel[] {
 }
 
 /// The objective of a plan: the stored value, else the value that the service computed. The mock
-/// knows the daily default only (ADR-0035).
+/// knows the daily default only (ADR-0036).
 function effectiveRpoSeconds(plan: Plan): number {
 	return plan.rpo_seconds ?? plan.effective_rpo_seconds ?? 26 * 3600;
 }

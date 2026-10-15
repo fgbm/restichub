@@ -146,7 +146,7 @@ describe('the Plans screen', () => {
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
 	});
 
-	it('sends the objective of the plan in seconds (ADR-0035)', async () => {
+	it('sends the objective of the plan in seconds (ADR-0036)', async () => {
 		const user = userEvent.setup();
 		mocks.listPlans.mockResolvedValueOnce([]).mockResolvedValueOnce([plan()]);
 		mocks.createPlan.mockResolvedValue({ plan: plan() });

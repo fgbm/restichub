@@ -108,7 +108,8 @@ function dashboard(overrides: Record<string, unknown> = {}) {
 					repository_id: 'r_1',
 					repository_name: 'primary-s3',
 					job_id: null,
-					message: 'No successful backup since the plan was created (objective 26 h).',
+					params: { elapsed_seconds: 40 * 3600, rpo_seconds: 26 * 3600 },
+					error_text: null,
 					url: null,
 					opened_at: PAST,
 					resolved_at: null

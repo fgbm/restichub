@@ -1283,6 +1283,35 @@ export interface components {
             items: components["schemas"]["AlertView"][];
             next_cursor?: string | null;
         };
+        /**
+         * @description The typed values of an alert condition. The interface and the messages build the text of the
+         *     condition from them, in the language of the reader, so the stored alert holds no sentence.
+         */
+        AlertParams: {
+            /**
+             * Format: int64
+             * @description Seconds since the last success of a plan, since the last contact with an agent, or since
+             *     a repository lock became stale. For a plan that never succeeded: since its creation.
+             */
+            elapsed_seconds?: number | null;
+            error_code?: string | null;
+            job_kind?: components["schemas"]["JobKind"] | null;
+            /**
+             * @description The finish time of the last succeeded backup, in RFC 3339. Absent when the plan never
+             *     succeeded.
+             */
+            last_success_at?: string | null;
+            /**
+             * Format: int64
+             * @description The recovery point objective of a plan, in seconds.
+             */
+            rpo_seconds?: number | null;
+            /**
+             * Format: int64
+             * @description The threshold of the rule at the time of the alert, in minutes.
+             */
+            threshold_minutes?: number | null;
+        };
         AlertRuleView: {
             enabled: boolean;
             kind: components["schemas"]["AlertKind"];
@@ -1300,12 +1329,16 @@ export interface components {
         AlertView: {
             agent_hostname?: string | null;
             agent_id?: string | null;
+            error_text?: string | null;
             id: string;
             job_id?: string | null;
             kind: components["schemas"]["AlertKind"];
-            /** @description The scrubbed and bounded text of the condition. */
-            message: string;
             opened_at: string;
+            /**
+             * @description The typed values of the condition. A client builds the sentence from them in the language of
+             *     the reader.
+             */
+            params: components["schemas"]["AlertParams"];
             plan_id?: string | null;
             plan_name?: string | null;
             repository_id?: string | null;
@@ -1576,7 +1609,7 @@ export interface components {
             /**
              * Format: int32
              * @description The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
-             *     default of the schedule (ADR-0035).
+             *     default of the schedule (ADR-0036).
              */
             rpo_seconds?: number | null;
             /** @description An IANA name, such as `Europe/Berlin`, validated before the write. */
@@ -2061,7 +2094,7 @@ export interface components {
             cron: string;
             /**
              * Format: int64
-             * @description The objective that the control plane applies, in seconds (ADR-0035).
+             * @description The objective that the control plane applies, in seconds (ADR-0036).
              */
             effective_rpo_seconds: number;
             enabled: boolean;
@@ -2367,7 +2400,7 @@ export interface components {
          *     change: a change makes every stored ciphertext of that purpose undecryptable.
          * @enum {string}
          */
-        SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password" | "webhook_secret";
+        SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password" | "webhook_secret" | "webhook_url";
         /**
          * @description The metadata of a secret in a response (FR-RP-05).
          *
@@ -2562,7 +2595,10 @@ export interface components {
             recipients?: string[] | null;
             /** @description Generates a new signing secret for a webhook. The response returns it once. */
             rotate_secret?: boolean | null;
-            /** @description The full new target of a webhook. The path and the query stay write-only. */
+            /**
+             * @description The full new target of a webhook. The path and the query stay write-only: the control plane
+             *     stores them encrypted.
+             */
             url?: string | null;
         };
         /** @description The body of a schedule update. It replaces both schedules. */
@@ -4289,6 +4325,24 @@ export interface operations {
             };
             /** @description The channel is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The actor or the tenant sent too many tests. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The server runs the most tests that it allows. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

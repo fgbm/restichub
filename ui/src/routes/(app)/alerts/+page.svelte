@@ -7,6 +7,7 @@
 	import type { SelectOption, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
+	import { alertCondition } from '#lib/alert-text.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -58,7 +59,12 @@
 			render: kindCell
 		},
 		{ key: 'subject', header: t('alerts.subject'), value: subjectOf, render: subjectCell },
-		{ key: 'message', header: t('alerts.message'), value: (row) => row.message },
+		{
+			key: 'message',
+			header: t('alerts.message'),
+			value: (row) => `${alertCondition(row)} ${row.error_text ?? ''}`.trim(),
+			render: messageCell
+		},
 		{
 			key: 'opened_at',
 			header: t('alerts.opened'),
@@ -142,6 +148,15 @@
 		{/if}
 		{#if contextOf(alert)}
 			<span class="alert__meta">{contextOf(alert)}</span>
+		{/if}
+	</span>
+{/snippet}
+
+{#snippet messageCell(alert: Alert)}
+	<span class="alert">
+		<span>{alertCondition(alert)}</span>
+		{#if alert.error_text}
+			<span class="alert__meta" title={t('alerts.errorText')}>{alert.error_text}</span>
 		{/if}
 	</span>
 {/snippet}

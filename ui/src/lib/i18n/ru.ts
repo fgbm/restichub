@@ -991,6 +991,19 @@ export const ru: Record<MessageKey, string> = {
 	'alerts.kind.job_warnings': 'Задание с предупреждениями',
 	'alerts.kind.agent_offline': 'Хост не в сети',
 	'alerts.kind.stale_lock': 'Устаревшая блокировка',
+	'alerts.errorText': 'Текст ошибки',
+	'alerts.duration.hours': '{n} ч',
+	'alerts.duration.minutes': '{n} мин',
+	'alerts.cond.rpo_violated':
+		'Нет успешной резервной копии уже {elapsed} (последняя: {at}, цель {rpo}).',
+	'alerts.cond.rpo_violated_never': 'Нет успешной копии с момента создания плана (цель {rpo}).',
+	'alerts.cond.agent_offline': 'Агент не выходил на связь {elapsed} (порог {threshold} мин).',
+	'alerts.cond.stale_lock':
+		'Блокировка репозитория устарела уже {elapsed} (порог {threshold} мин).',
+	'alerts.cond.job_dead_letter':
+		'Задача «{what}» остановлена после повторных попыток из-за блокировки репозитория.',
+	'alerts.cond.job_warnings': 'Задача «{what}» завершилась с предупреждениями.',
+	'alerts.cond.job_failed': 'Задача «{what}» завершилась ошибкой ({code}).',
 
 	// Alert rules (FR-MN-03)
 	'rules.title': 'Правила оповещений',

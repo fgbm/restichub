@@ -30,7 +30,8 @@ function alert(overrides: Record<string, unknown> = {}) {
 		repository_id: 'r_1',
 		repository_name: 'primary-s3',
 		job_id: 'j_9',
-		message: 'The backup job failed (config_error): compile_failed',
+		params: { job_kind: 'backup', error_code: 'config_error' },
+		error_text: 'compile_failed',
 		url: 'https://backup.example.com/jobs/j_9',
 		opened_at: PAST,
 		resolved_at: null,
@@ -50,7 +51,8 @@ describe('the Alerts screen', () => {
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
 		expect(mocks.listAlerts).toHaveBeenCalledWith({ status: 'open', limit: 50 });
 		expect(screen.getByText('Job failed')).toBeInTheDocument();
-		expect(screen.getByText(/compile_failed/)).toBeInTheDocument();
+		expect(screen.getByText('The backup job failed (config_error).')).toBeInTheDocument();
+		expect(screen.getByText('compile_failed')).toBeInTheDocument();
 		expect(screen.getByRole('link', { name: /Open the job/ })).toHaveAttribute('href', '/jobs/j_9');
 		expect(screen.getByText('win-fs01 · primary-s3')).toBeInTheDocument();
 	});
@@ -73,7 +75,8 @@ describe('the Alerts screen', () => {
 						kind: 'rpo_violated',
 						status: 'resolved',
 						job_id: null,
-						message: 'No successful backup for 31 h (objective 26 h).',
+						params: { elapsed_seconds: 31 * 3600, rpo_seconds: 26 * 3600 },
+						error_text: null,
 						resolved_at: '2026-10-15T09:00:00Z'
 					})
 				],

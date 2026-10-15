@@ -18,6 +18,7 @@
 	import type { IconName, StatusTone } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
+	import { alertCondition } from '#lib/alert-text.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -313,7 +314,7 @@
 										<span class="cell__name">
 											{alert.plan_name ?? alert.repository_name ?? alert.agent_hostname}
 										</span>
-										<span class="cell__meta">{alert.message}</span>
+										<span class="cell__meta">{alertCondition(alert)}</span>
 									</div>
 									<time
 										class="cell__meta"
