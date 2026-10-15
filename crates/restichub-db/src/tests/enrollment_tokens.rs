@@ -52,6 +52,7 @@ async fn ac_id_01_a_used_or_expired_token_is_refused() -> TestResult {
             labels: &labels,
             expires_at: now + Duration::minutes(15),
             created_by: user,
+            replaces_agent_id: None,
         },
     )
     .await?;
@@ -63,6 +64,7 @@ async fn ac_id_01_a_used_or_expired_token_is_refused() -> TestResult {
             labels: &labels,
             expires_at: now - Duration::minutes(1),
             created_by: user,
+            replaces_agent_id: None,
         },
     )
     .await?;
@@ -112,6 +114,7 @@ async fn ac_id_01_a_token_of_another_tenant_is_refused() -> TestResult {
             labels: &labels,
             expires_at: now + Duration::minutes(15),
             created_by: user_b,
+            replaces_agent_id: None,
         },
     )
     .await?;
@@ -155,6 +158,7 @@ async fn ac_id_01_a_revoked_token_is_refused_and_a_second_revoke_changes_nothing
                 labels: &["host".to_owned()],
                 expires_at: now + Duration::hours(1),
                 created_by: user,
+                replaces_agent_id: None,
             },
         )
         .await?;
@@ -206,6 +210,7 @@ async fn ac_id_01_the_exchange_consumes_a_token_across_tenants_and_returns_its_t
                 labels: &["host".to_owned()],
                 expires_at: now + Duration::hours(1),
                 created_by: user,
+                replaces_agent_id: None,
             },
         )
         .await?;
@@ -272,6 +277,7 @@ async fn ac_id_01_a_revoke_and_a_consume_race_resolves_to_one_winner() -> TestRe
                 labels: &["host".to_owned()],
                 expires_at: now + Duration::hours(1),
                 created_by: user,
+                replaces_agent_id: None,
             },
         )
         .await?;

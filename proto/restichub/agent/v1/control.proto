@@ -32,6 +32,11 @@ message ControlMessage {
     SigningKeyUpdate signing_key_update = 5;
     // Ping is the application-level heartbeat (FR-ID-07).
     Ping ping = 6;
+    // VersionRejected refuses the protocol version of the agent and ends the
+    // stream (FR-PR-09).
+    VersionRejected version_rejected = 7;
+    // CertificateRejected refuses a rotation request (FR-ID-03).
+    CertificateRejected certificate_rejected = 8;
   }
 }
 
@@ -58,6 +63,9 @@ message AgentMessage {
     CertificateSigningRequest certificate_signing_request = 9;
     // KeyUpdateAck confirms a signing key set update (ADR-0026, FR-PR-11).
     KeyUpdateAck key_update_ack = 10;
+    // CertificateInstalled confirms that the agent stored a rotated
+    // certificate (FR-ID-03, ADR-0026).
+    CertificateInstalled certificate_installed = 11;
   }
 }
 
@@ -69,6 +77,64 @@ message ServerHello {
   uint32 protocol_version_minor = 2;
   // Capabilities that the control plane accepts.
   repeated string accepted_capabilities = 3;
+  // Package version of the control plane, in semantic versioning form.
+  string control_plane_version = 4;
+}
+
+// VersionRejected tells the agent why the control plane refuses its protocol
+// version (FR-PR-09). The control plane closes the stream after it.
+message VersionRejected {
+  // Why the version is refused.
+  VersionRejectReason reason = 1;
+  // Major version of the control plane protocol.
+  uint32 server_protocol_version_major = 2;
+  // Minor version of the control plane protocol.
+  uint32 server_protocol_version_minor = 3;
+  // Smallest agent minor version that the control plane accepts.
+  uint32 minimum_protocol_version_minor = 4;
+}
+
+// VersionRejectReason is the reason why the control plane refuses a protocol
+// version (FR-PR-09).
+enum VersionRejectReason {
+  VERSION_REJECT_REASON_UNSPECIFIED = 0;
+  // The agent speaks another major version.
+  VERSION_REJECT_REASON_MAJOR_MISMATCH = 1;
+  // The agent minor version is older than the previous minor version of the
+  // control plane.
+  VERSION_REJECT_REASON_MINOR_TOO_OLD = 2;
+}
+
+// CertificateRejected refuses a rotation request (FR-ID-03). The old
+// certificate stays valid. The agent retries later.
+message CertificateRejected {
+  // Why the request is refused.
+  CertificateRejectReason reason = 1;
+}
+
+// CertificateRejectReason is the reason why the control plane refuses a
+// rotation request (FR-ID-03).
+enum CertificateRejectReason {
+  CERTIFICATE_REJECT_REASON_UNSPECIFIED = 0;
+  // The current certificate is not yet old enough for a rotation.
+  CERTIFICATE_REJECT_REASON_TOO_EARLY = 1;
+  // The request is not a valid request for an agent certificate.
+  CERTIFICATE_REJECT_REASON_INVALID_REQUEST = 2;
+  // The request holds the public key of the current certificate.
+  CERTIFICATE_REJECT_REASON_SAME_KEY = 3;
+  // The agent is revoked.
+  CERTIFICATE_REJECT_REASON_REVOKED = 4;
+  // The control plane cannot issue a certificate now.
+  CERTIFICATE_REJECT_REASON_UNAVAILABLE = 5;
+}
+
+// CertificateInstalled tells the control plane that the agent stored the new
+// certificate. The control plane then refuses the old certificate serial
+// (ADR-0026).
+message CertificateInstalled {
+  // Serial number of the installed certificate, as in the DER encoding without
+  // a leading zero byte.
+  bytes certificate_serial = 1;
 }
 
 // CancelJob stops a job. The agent cancels the current step first (FR-AG-10).

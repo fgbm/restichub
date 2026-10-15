@@ -198,6 +198,10 @@ pub fn write_body(
         ("PATCH", "/api/v1/notification-channels/{id}") => Some(json!({"enabled": true})),
         ("PUT", "/api/v1/alert-rules") => Some(json!({"items": []})),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
+        // A key that is never current: the matrix checks the right and compromises nothing.
+        ("POST", "/api/v1/platform/signing-keys/compromise") => Some(json!({
+            "expected_current_key_id": "00000000-0000-0000-0000-000000000000",
+        })),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
         })),
@@ -397,6 +401,7 @@ pub async fn seed_enrollment_token_value(
             labels,
             expires_at,
             created_by,
+            replaces_agent_id: None,
         },
     )
     .await
@@ -597,6 +602,7 @@ pub async fn seed_agent(db: &Database, tenant: TenantId, hostname: &str) -> rest
             certificate_serial: &serial,
             certificate_expires_at: OffsetDateTime::now_utc() + time::Duration::days(30),
             last_seen_at: None,
+            machine_id_hash: None,
         },
     )
     .await
@@ -795,6 +801,7 @@ pub async fn seed_enrollment_token(
             labels: &["host".to_owned()],
             expires_at: OffsetDateTime::now_utc() + time::Duration::minutes(15),
             created_by,
+            replaces_agent_id: None,
         },
     )
     .await

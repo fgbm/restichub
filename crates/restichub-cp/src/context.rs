@@ -37,6 +37,7 @@ pub enum Operation {
     PlatformTenantsWrite,
     PlatformUsersRead,
     PlatformUsersWrite,
+    PlatformSigningKeysWrite,
     AuthMe,
     AuthSignOut,
     AuthPasswordChange,
@@ -77,6 +78,7 @@ impl Operation {
                 | Self::PlatformTenantsWrite
                 | Self::PlatformUsersRead
                 | Self::PlatformUsersWrite
+                | Self::PlatformSigningKeysWrite
         )
     }
 
@@ -128,13 +130,14 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 35] = [
+    pub const ALL: [Operation; 36] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
         Operation::PlatformTenantsWrite,
         Operation::PlatformUsersRead,
         Operation::PlatformUsersWrite,
+        Operation::PlatformSigningKeysWrite,
         Operation::AuthMe,
         Operation::AuthSignOut,
         Operation::AuthPasswordChange,
@@ -179,7 +182,8 @@ impl Operation {
             | Operation::PlatformTenantsRead
             | Operation::PlatformTenantsWrite
             | Operation::PlatformUsersRead
-            | Operation::PlatformUsersWrite => OperationClass::Platform,
+            | Operation::PlatformUsersWrite
+            | Operation::PlatformSigningKeysWrite => OperationClass::Platform,
             Operation::AuditRead
             | Operation::UsersRead
             | Operation::UsersWrite
@@ -229,6 +233,7 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::PlatformTenantsWrite => Role::PlatformAdmin,
         Operation::PlatformUsersRead => Role::PlatformAdmin,
         Operation::PlatformUsersWrite => Role::PlatformAdmin,
+        Operation::PlatformSigningKeysWrite => Role::PlatformAdmin,
         Operation::AuthMe => Role::Viewer,
         Operation::AuthSignOut => Role::Viewer,
         Operation::AuthPasswordChange => Role::Viewer,

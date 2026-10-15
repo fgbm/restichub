@@ -22,13 +22,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use restichub_db::agents as agent_repo;
-use restichub_db::{AgentId, AgentStatus, Database, TenantId};
+use restichub_db::audit::{self, Actor, AuditAction, AuditEvent};
+use restichub_db::queue as queue_repo;
+use restichub_db::{AgentId, AgentStatus, Database, JobId, TenantId};
 use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{
-    AgentMessage, ControlMessage, Ping, ServerHello, SigningKeyUpdate, agent_message,
+    AgentMessage, CancelJob, CertificateRejectReason, CertificateRejected, ControlMessage, Ping,
+    ServerHello, SigningKeyUpdate, VersionRejectReason, VersionRejected, agent_message,
     agent_service_server::{AgentService, AgentServiceServer},
     control_message,
 };
+use restichub_proto::version::{Version, VersionCheck};
 use rustls_pki_types::CertificateDer;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::Stream;
@@ -39,6 +43,7 @@ use uuid::Uuid;
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
 use crate::job_signing::{JobSigningService, RotationEvent};
+use crate::rotation::PresentedCertificate;
 use crate::server::AppState;
 
 /// Application heartbeat period (FR-ID-07, spike P4).
@@ -59,6 +64,22 @@ pub const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// It holds the greeting and the whole bounded key chain, so the connect handler never blocks on a
 /// full buffer before the response stream reaches the client.
 const OUTBOUND_CHANNEL: usize = 128;
+
+/// How often each control plane instance checks the registry for the streams that it holds. A
+/// revoke on another instance closes the stream within this time plus the query (FR-ID-04,
+/// AC-ID-04).
+pub const REVOCATION_SWEEP_INTERVAL: Duration = Duration::from_secs(2);
+
+/// The wait between two requests of one stream, answered or refused. It spares the registry a
+/// query for a request flood; the limit that holds is in the registry row (FR-ID-03). A short
+/// certificate lifetime shortens the wait.
+const CERTIFICATE_REQUEST_COOLDOWN: Duration = Duration::from_secs(30);
+
+/// A quarter of the certificate lifetime, but not more than [`CERTIFICATE_REQUEST_COOLDOWN`].
+fn certificate_request_cooldown(state: &AppState) -> Duration {
+    let quarter = Duration::try_from(state.agent_cert_lifetime() / 4).unwrap_or_default();
+    quarter.min(CERTIFICATE_REQUEST_COOLDOWN)
+}
 
 /// The largest accepted key identifier in a `KeyUpdateAck`.
 const MAX_KEY_ID_LEN: usize = 64;
@@ -83,6 +104,11 @@ struct PeerIdentity {
     agent: AgentId,
     /// The certificate serial without a leading zero, as the registry guard compares it.
     serial: Vec<u8>,
+    /// The certificate of the TLS handshake of this stream. A confirmed rotation
+    /// replaces it, so the open stream can rotate again.
+    presented: PresentedCertificate,
+    /// The certificate of the last rotation that waits for its confirmation.
+    issued: Option<PresentedCertificate>,
 }
 
 impl PeerIdentity {
@@ -95,6 +121,10 @@ impl PeerIdentity {
 /// a reconnect removes only its own entry (FR-ID-08).
 struct StreamEntry {
     generation: u64,
+    tenant: TenantId,
+    /// The serial that the stream authenticated with, in lower-case hexadecimal. A confirmed
+    /// rotation replaces it.
+    serial_hex: String,
     close: watch::Sender<bool>,
     out: mpsc::Sender<ControlMessage>,
     /// Set by the `AgentHello` of this connection. An entry without it is not online for the
@@ -174,6 +204,8 @@ impl StreamRegistry {
     fn open(
         &self,
         agent: AgentId,
+        tenant: TenantId,
+        serial_hex: String,
         close: watch::Sender<bool>,
         out: mpsc::Sender<ControlMessage>,
     ) -> u64 {
@@ -183,6 +215,8 @@ impl StreamRegistry {
             agent,
             StreamEntry {
                 generation,
+                tenant,
+                serial_hex,
                 close,
                 out,
                 capabilities: None,
@@ -232,6 +266,25 @@ impl StreamRegistry {
         Some(entry.restore_roots.clone())
     }
 
+    /// Records the serial that a confirmed rotation made the enrolled one, so the sweep does not
+    /// close the stream (ADR-0026).
+    fn set_serial(&self, agent: AgentId, generation: u64, serial_hex: String) {
+        if let Some(entry) = self.lock().streams.get_mut(&agent)
+            && entry.generation == generation
+        {
+            entry.serial_hex = serial_hex;
+        }
+    }
+
+    /// The open streams with their tenant and serial, for the revocation sweep (FR-ID-04).
+    fn open_streams(&self) -> Vec<(TenantId, AgentId, String)> {
+        self.lock()
+            .streams
+            .iter()
+            .map(|(agent, entry)| (entry.tenant, *agent, entry.serial_hex.clone()))
+            .collect()
+    }
+
     /// Removes the entry of a stream, unless a newer stream replaced it (FR-ID-08).
     fn remove(&self, agent: AgentId, generation: u64) {
         let mut inner = self.lock();
@@ -255,15 +308,40 @@ impl StreamRegistry {
             .unwrap_or(false)
     }
 
-    /// Closes the open streams of the given agents. The batch flush calls it for a revoked or an
-    /// expired row (FR-ID-04, FR-ID-07).
-    fn close_many(&self, agents: &[AgentId]) {
+    /// Closes the open streams that still hold the serial of the snapshot. The batch flush calls it
+    /// for a revoked or an expired row (FR-ID-04, FR-ID-07). A confirmation that changed the serial
+    /// after the snapshot keeps its stream, because the registry query saw the old serial.
+    fn close_many_with_serial(&self, streams: &[(AgentId, String)]) {
         let inner = self.lock();
-        for agent in agents {
-            if let Some(entry) = inner.streams.get(agent) {
+        for (agent, serial) in streams {
+            if let Some(entry) = inner.streams.get(agent)
+                && entry.serial_hex == *serial
+            {
                 let _ = entry.close.send(true);
             }
         }
+    }
+
+    /// Like [`cancel_jobs_and_close`], for a stream that still holds the serial of the snapshot.
+    /// The check and the sends share one lock, so a confirmation cannot slip in between and the
+    /// agent gets no cancellation on a stream that stays (FR-ID-03, FR-ID-04).
+    fn cancel_jobs_and_close_with_serial(
+        &self,
+        agent: AgentId,
+        serial: &str,
+        jobs: &[JobId],
+    ) -> bool {
+        let inner = self.lock();
+        let Some(entry) = inner.streams.get(&agent) else {
+            return false;
+        };
+        if entry.serial_hex != serial {
+            return false;
+        }
+        for job in jobs {
+            let _ = entry.out.try_send(cancel_message(*job));
+        }
+        entry.close.send(true).is_ok()
     }
 
     /// Sends a control message to the open stream of an agent. False when the agent is offline.
@@ -425,10 +503,19 @@ fn peer_identity(der: &[u8]) -> Result<PeerIdentity, Status> {
         .ok_or_else(|| Status::unauthenticated("the client certificate holds no identity URI"))?;
     let (tenant, agent) = parse_identity_uri(uri)
         .ok_or_else(|| Status::unauthenticated("the identity URI is not valid"))?;
+    let serial = normalise_serial(cert.raw_serial()).to_vec();
+    let presented = PresentedCertificate {
+        serial: serial.clone(),
+        public_key: cert.public_key().subject_public_key.data.to_vec(),
+        not_before: cert.validity().not_before.to_datetime(),
+        not_after: cert.validity().not_after.to_datetime(),
+    };
     Ok(PeerIdentity {
         tenant,
         agent,
-        serial: normalise_serial(cert.raw_serial()).to_vec(),
+        serial,
+        presented,
+        issued: None,
     })
 }
 
@@ -444,39 +531,105 @@ fn parse_identity_uri(uri: &str) -> Option<(TenantId, AgentId)> {
 /// Checks the registry row of an agent at every stream open (ADR-0026, section Revocation).
 ///
 /// The row must exist in the tenant of the identity URI, be active, list the certificate serial and
-/// not be expired. An unknown or revoked agent is refused.
+/// not be expired. An unknown or revoked agent is refused. A certificate that a rotation issued
+/// and the agent did not confirm yet is accepted too: the agent proves with it that it stored the
+/// new key, so the check makes it the enrolled one and the old serial is refused from then on
+/// (FR-ID-03).
 async fn check_registry(
     db: &Database,
     identity: &PeerIdentity,
     now: time::OffsetDateTime,
 ) -> Result<(), Status> {
+    let unavailable =
+        |_: restichub_db::DbError| Status::internal("the agent registry is not available");
     let mut tx = db
         .begin_tenant(identity.tenant)
         .await
-        .map_err(|_| Status::internal("the agent registry is not available"))?;
-    let agent = agent_repo::get(&mut tx, identity.agent)
+        .map_err(unavailable)?;
+    let agent = agent_repo::get_for_update(&mut tx, identity.agent)
         .await
-        .map_err(|_| Status::internal("the agent registry is not available"))?;
-    tx.commit()
-        .await
-        .map_err(|_| Status::internal("the agent registry is not available"))?;
+        .map_err(unavailable)?;
     let Some(agent) = agent else {
         return Err(Status::permission_denied("the agent is not enrolled"));
     };
     if agent.status != AgentStatus::Active {
         return Err(Status::permission_denied("the agent is revoked"));
     }
-    if normalise_serial(&agent.certificate_serial) != identity.serial.as_slice() {
-        return Err(Status::permission_denied(
-            "the certificate serial is not the enrolled one",
-        ));
+    if normalise_serial(&agent.certificate_serial) == identity.serial.as_slice() {
+        if agent.certificate_expires_at <= now {
+            return Err(Status::permission_denied(
+                "the agent certificate is expired",
+            ));
+        }
+    } else {
+        let pending = agent
+            .pending_certificate_serial
+            .as_deref()
+            .is_some_and(|serial| normalise_serial(serial) == identity.serial.as_slice());
+        let promoted = pending
+            && agent_repo::promote_pending_certificate(
+                &mut tx,
+                identity.agent,
+                &identity.serial,
+                now,
+            )
+            .await
+            .map_err(unavailable)?;
+        if !promoted {
+            if report_superseded_use(&mut tx, identity, &agent, now).await {
+                let _ = tx.commit().await;
+            }
+            return Err(Status::permission_denied(
+                "the certificate serial is not the enrolled one",
+            ));
+        }
     }
-    if agent.certificate_expires_at <= now {
-        return Err(Status::permission_denied(
-            "the agent certificate is expired",
-        ));
-    }
+    tx.commit().await.map_err(unavailable)?;
     Ok(())
+}
+
+/// How long one superseded-certificate event silences the next one for the same agent.
+const SUPERSEDED_EVENT_QUIET: time::Duration = time::Duration::hours(1);
+
+/// Records a connection that presented the serial the last rotation replaced (T17).
+///
+/// The honest agent drops the old certificate after the confirmation, so this connection means a
+/// copy of the old key or an agent that lost its new identity. The refusal stays; the audit event
+/// and the Hosts mark tell the operator. `true` when the transaction holds a change to commit.
+async fn report_superseded_use(
+    tx: &mut restichub_db::TenantTx<'_>,
+    identity: &PeerIdentity,
+    agent: &agent_repo::Agent,
+    now: time::OffsetDateTime,
+) -> bool {
+    let marked = agent_repo::mark_superseded_certificate_used(
+        tx,
+        identity.agent,
+        &identity.serial,
+        now,
+        now - SUPERSEDED_EVENT_QUIET,
+    )
+    .await;
+    if !matches!(marked, Ok(true)) {
+        return false;
+    }
+    let mut event = AuditEvent::new(AuditAction::AgentSupersededCertificateUsed, "agent");
+    event.actor = Actor::Agent(identity.agent.as_uuid());
+    event.object_id = Some(identity.agent.as_uuid());
+    event.diff = Some(audit::diff(
+        None,
+        Some(&serde_json::json!({
+            "presented_certificate_serial": identity.serial_hex(),
+            "enrolled_certificate_serial": hex(&agent.certificate_serial),
+        })),
+        &[],
+    ));
+    if let Err(error) = audit::insert(tx, &event).await {
+        tracing::warn!(agent = %identity.agent, cause = ?error, "cannot write the superseded certificate event");
+        return false;
+    }
+    tracing::warn!(agent = %identity.agent, "a superseded agent certificate was presented");
+    true
 }
 
 /// Writes the first `last_seen_at` under the registry guard.
@@ -570,6 +723,7 @@ impl AgentService for AgentStreamService {
                 protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
                 protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
                 accepted_capabilities: Vec::new(),
+                control_plane_version: env!("CARGO_PKG_VERSION").to_owned(),
             })),
         };
         let _ = tx.try_send(hello);
@@ -592,10 +746,13 @@ impl AgentService for AgentStreamService {
         }
 
         let (close_tx, close_rx) = watch::channel(false);
-        let generation = self
-            .state
-            .agent_registry()
-            .open(identity.agent, close_tx, tx.clone());
+        let generation = self.state.agent_registry().open(
+            identity.agent,
+            identity.tenant,
+            identity.serial_hex(),
+            close_tx,
+            tx.clone(),
+        );
 
         let mut inbound = request.into_inner();
         let state = self.state.clone();
@@ -643,7 +800,7 @@ fn clean_roots(roots: &[String]) -> Vec<String> {
 #[allow(clippy::too_many_arguments)]
 async fn run_stream(
     state: AppState,
-    identity: PeerIdentity,
+    mut identity: PeerIdentity,
     agent: AgentId,
     generation: u64,
     inbound: &mut Streaming<AgentMessage>,
@@ -668,6 +825,39 @@ async fn run_stream(
     };
     let capabilities = AgentCapability::parse_list(&hello.capabilities);
     let restore_roots = clean_roots(&hello.restore_roots);
+    // The registry keeps the facts of a refused hello too, so the Hosts screen can mark the agent
+    // as unsupported (FR-PR-09).
+    crate::agents::record_hello_facts(
+        &state,
+        identity.tenant,
+        agent,
+        &hello,
+        &capabilities,
+        &restore_roots,
+    )
+    .await;
+    let version = Version {
+        major: hello.protocol_version_major,
+        minor: hello.protocol_version_minor,
+    };
+    if let Some(reason) = refusal_reason(Version::CURRENT.check_agent(version)) {
+        tracing::warn!(
+            %agent,
+            agent_major = version.major,
+            agent_minor = version.minor,
+            "the agent protocol version is refused"
+        );
+        let _ = tx.try_send(ControlMessage {
+            payload: Some(control_message::Payload::VersionRejected(VersionRejected {
+                reason: reason as i32,
+                server_protocol_version_major: Version::CURRENT.major,
+                server_protocol_version_minor: Version::CURRENT.minor,
+                minimum_protocol_version_minor: Version::CURRENT.minimum_minor(),
+            })),
+        });
+        state.agent_registry().remove(agent, generation);
+        return;
+    }
     if !state.agent_registry().set_hello(
         agent,
         generation,
@@ -676,14 +866,6 @@ async fn run_stream(
     ) {
         return;
     }
-    crate::agents::record_hello_facts(
-        &state,
-        identity.tenant,
-        agent,
-        &capabilities,
-        &restore_roots,
-    )
-    .await;
 
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -693,6 +875,7 @@ async fn run_stream(
     heartbeat.tick().await;
     last_seen.tick().await;
     let mut last_activity = tokio::time::Instant::now();
+    let mut last_request: Option<tokio::time::Instant> = None;
     let mut active = false;
 
     loop {
@@ -701,7 +884,8 @@ async fn run_stream(
                 Ok(Some(message)) => {
                     last_activity = tokio::time::Instant::now();
                     active = true;
-                    handle_message(&state, &identity, message).await;
+                    handle_message(&state, &mut identity, generation, &tx, &mut last_request, message)
+                        .await;
                 }
                 Ok(None) | Err(_) => break,
             },
@@ -774,9 +958,10 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
     let Ok(update) = signing.current_step(state.db()).await else {
         return;
     };
-    if let Some(pending) = state
-        .agent_registry()
-        .note_rotation(event.pending_key_id, &event.current_key_id)
+    if let Some(pending_key_id) = event.pending_key_id
+        && let Some(pending) = state
+            .agent_registry()
+            .note_rotation(pending_key_id, &event.current_key_id)
     {
         retire(state, pending);
     }
@@ -792,7 +977,14 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
 /// The identity comes from the certificate, never from the message. An acknowledgement is accepted
 /// only for the current key identifier of the signing service and within the length bound, so a
 /// flood of other identifiers cannot grow the registry.
-async fn handle_message(state: &AppState, identity: &PeerIdentity, message: AgentMessage) {
+async fn handle_message(
+    state: &AppState,
+    identity: &mut PeerIdentity,
+    generation: u64,
+    tx: &mpsc::Sender<ControlMessage>,
+    last_request: &mut Option<tokio::time::Instant>,
+    message: AgentMessage,
+) {
     match message.payload {
         Some(agent_message::Payload::KeyUpdateAck(ack)) => {
             if ack.key_id.len() > MAX_KEY_ID_LEN {
@@ -806,6 +998,65 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
             }
             if let Some(pending) = state.agent_registry().ack(identity.agent, &ack.key_id) {
                 retire(state, pending);
+            }
+        }
+        Some(agent_message::Payload::CertificateSigningRequest(request)) => {
+            if last_request.is_some_and(|at| at.elapsed() < certificate_request_cooldown(state)) {
+                reject_certificate(tx, CertificateRejectReason::TooEarly);
+                return;
+            }
+            *last_request = Some(tokio::time::Instant::now());
+            let now = state.auth().clock.now();
+            let payload = match crate::rotation::issue(
+                state,
+                identity.tenant,
+                identity.agent,
+                &identity.presented,
+                &request.csr_der,
+                now,
+            )
+            .await
+            {
+                Ok((issued, next)) => {
+                    identity.issued = Some(next);
+                    control_message::Payload::CertificateIssued(issued)
+                }
+                Err(reason) => {
+                    tracing::info!(agent = %identity.agent, ?reason, "the certificate rotation is refused");
+                    control_message::Payload::CertificateRejected(CertificateRejected {
+                        reason: reason as i32,
+                    })
+                }
+            };
+            let _ = tx.try_send(ControlMessage {
+                payload: Some(payload),
+            });
+        }
+        Some(agent_message::Payload::CertificateInstalled(installed)) => {
+            let serial = normalise_serial(&installed.certificate_serial).to_vec();
+            let now = state.auth().clock.now();
+            match crate::rotation::confirm(state, identity.tenant, identity.agent, &serial, now)
+                .await
+            {
+                Ok(true) => {
+                    // The open stream keeps running under the new serial; the old certificate is
+                    // refused for every later connection (ADR-0026).
+                    state
+                        .agent_registry()
+                        .set_serial(identity.agent, generation, hex(&serial));
+                    if let Some(next) = identity.issued.take()
+                        && next.serial == serial
+                    {
+                        identity.presented = next;
+                    }
+                    identity.serial = serial;
+                }
+                Ok(false) => {
+                    tracing::info!(agent = %identity.agent, "the certificate confirmation names no pending certificate");
+                }
+                Err(error) => {
+                    tracing::warn!(agent = %identity.agent, cause = ?error, "the certificate confirmation failed");
+                }
             }
         }
         // The first message was the hello. Capabilities do not change within a connection.
@@ -846,10 +1097,25 @@ async fn handle_message(state: &AppState, identity: &PeerIdentity, message: Agen
         Some(agent_message::Payload::LogChunk(chunk)) => {
             crate::job_data::handle_log_chunk(state, identity.tenant, identity.agent, &chunk).await;
         }
-        Some(agent_message::Payload::CertificateSigningRequest(_)) => {
-            // Certificate rotation belongs to another part of the plan.
-        }
         None => {}
+    }
+}
+
+fn reject_certificate(tx: &mpsc::Sender<ControlMessage>, reason: CertificateRejectReason) {
+    let _ = tx.try_send(ControlMessage {
+        payload: Some(control_message::Payload::CertificateRejected(
+            CertificateRejected {
+                reason: reason as i32,
+            },
+        )),
+    });
+}
+
+fn refusal_reason(check: VersionCheck) -> Option<VersionRejectReason> {
+    match check {
+        VersionCheck::Compatible => None,
+        VersionCheck::MajorMismatch => Some(VersionRejectReason::MajorMismatch),
+        VersionCheck::MinorTooOld => Some(VersionRejectReason::MinorTooOld),
     }
 }
 
@@ -887,6 +1153,88 @@ impl AgentStreamService {
     }
 }
 
+/// Sends a cancellation for each running job of an agent and closes its stream (FR-ID-04,
+/// AC-ID-04).
+///
+/// The messages are queued before the close, and the response stream drains its buffer before it
+/// ends, so the agent gets the cancellations first. True when a stream was open.
+pub fn cancel_jobs_and_close(registry: &StreamRegistry, agent: AgentId, jobs: &[JobId]) -> bool {
+    for job in jobs {
+        let _ = registry.send_to_agent(agent, cancel_message(*job));
+    }
+    registry.close_by_agent(agent)
+}
+
+fn cancel_message(job: JobId) -> ControlMessage {
+    ControlMessage {
+        payload: Some(control_message::Payload::CancelJob(CancelJob {
+            job_id: job.to_string(),
+            grace_period_seconds: crate::job_api::CANCEL_GRACE_SECONDS,
+        })),
+    }
+}
+
+/// Closes the open streams that the registry no longer allows (FR-ID-04).
+///
+/// A revoke on another control plane instance reaches this instance only through the registry
+/// row, so every instance checks the rows of its own streams. The check also catches a stream
+/// whose serial a rotation on another instance replaced.
+pub async fn sweep_revoked(state: &AppState) {
+    let mut by_tenant: HashMap<TenantId, Vec<(AgentId, String)>> = HashMap::new();
+    for (tenant, agent, serial) in state.agent_registry().open_streams() {
+        by_tenant.entry(tenant).or_default().push((agent, serial));
+    }
+    for (tenant, streams) in by_tenant {
+        let ids: Vec<Uuid> = streams.iter().map(|(agent, _)| agent.as_uuid()).collect();
+        let serials: Vec<String> = streams.iter().map(|(_, serial)| serial.clone()).collect();
+        let result = async {
+            let mut tx = state.db().begin_tenant(tenant).await?;
+            let stale = agent_repo::disallowed_streams(&mut tx, &ids, &serials).await?;
+            let mut jobs = Vec::with_capacity(stale.len());
+            for id in stale {
+                let agent = AgentId::from_uuid(id);
+                jobs.push((
+                    agent,
+                    queue_repo::active_job_ids_for_agent(&mut tx, agent).await?,
+                ));
+            }
+            tx.commit().await?;
+            Ok::<_, restichub_db::DbError>(jobs)
+        }
+        .await;
+        match result {
+            Ok(closing) => {
+                for (agent, jobs) in closing {
+                    let Some((_, serial)) = streams.iter().find(|(id, _)| *id == agent) else {
+                        continue;
+                    };
+                    state
+                        .agent_registry()
+                        .cancel_jobs_and_close_with_serial(agent, serial, &jobs);
+                }
+            }
+            Err(error) => tracing::warn!(cause = ?error, "the revocation sweep failed"),
+        }
+    }
+}
+
+/// Starts the periodic revocation sweep of the streams of this instance (FR-ID-04).
+pub fn spawn_revocation_sweep(state: AppState, interval: Duration) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // The first tick of `interval` fires immediately. Skip it.
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            sweep_revoked(&state).await;
+            if let Some(signing) = state.job_signing() {
+                signing.announce_remote_change(state.db()).await;
+            }
+        }
+    })
+}
+
 /// Flushes the buffered `last_seen_at` writes in one statement for each tenant.
 ///
 /// A row that the guarded statement did not update is revoked, expired or no longer the enrolled
@@ -902,13 +1250,12 @@ pub async fn flush_last_seen(db: &Database, registry: &StreamRegistry, now: time
             Ok(updated) => {
                 let _ = tx.commit().await;
                 let updated: HashSet<Uuid> = updated.into_iter().collect();
-                let stale: Vec<AgentId> = entries
-                    .iter()
-                    .map(|(agent, _)| *agent)
-                    .filter(|agent| !updated.contains(&agent.as_uuid()))
+                let stale: Vec<(AgentId, String)> = entries
+                    .into_iter()
+                    .filter(|(agent, _)| !updated.contains(&agent.as_uuid()))
                     .collect();
                 if !stale.is_empty() {
-                    registry.close_many(&stale);
+                    registry.close_many_with_serial(&stale);
                 }
             }
             Err(error) => {
@@ -955,7 +1302,7 @@ pub fn agent_service(state: AppState) -> AgentServiceServer<AgentStreamService> 
 #[cfg(test)]
 mod tests {
     use super::{StreamRegistry, hex, normalise_serial, parse_identity_uri};
-    use restichub_db::AgentId;
+    use restichub_db::{AgentId, JobId, TenantId};
     use uuid::Uuid;
 
     #[test]
@@ -983,15 +1330,42 @@ mod tests {
         let agent = AgentId::new();
         let (close_a, mut a) = tokio::sync::watch::channel(false);
         let (tx_a, _rx_a) = tokio::sync::mpsc::channel(1);
-        registry.open(agent, close_a, tx_a);
+        registry.open(agent, TenantId::new(), String::new(), close_a, tx_a);
         let (close_b, _b) = tokio::sync::watch::channel(false);
         let (tx_b, _rx_b) = tokio::sync::mpsc::channel(1);
-        let generation = registry.open(agent, close_b, tx_b);
+        let generation = registry.open(agent, TenantId::new(), String::new(), close_b, tx_b);
         assert!(*a.borrow_and_update(), "the first stream must close");
         assert!(registry.online_agents().is_empty(), "no hello yet");
         assert!(registry.set_hello(agent, generation, Vec::new(), Vec::new()));
         assert_eq!(registry.online_agents(), vec![agent]);
         assert!(registry.close_by_agent(agent));
+    }
+
+    /// FR-ID-03: a confirmation that lands between the snapshot and the registry query keeps the
+    /// stream alive and sends no cancellation.
+    #[test]
+    fn fr_id_03_a_confirmation_after_the_snapshot_keeps_the_stream() {
+        let registry = StreamRegistry::new();
+        let agent = AgentId::new();
+        let (close, mut closed) = tokio::sync::watch::channel(false);
+        let (tx, mut out) = tokio::sync::mpsc::channel(4);
+        let generation = registry.open(agent, TenantId::new(), "aa".to_owned(), close, tx);
+        let snapshot = registry.open_streams();
+        assert_eq!(snapshot[0].2, "aa");
+
+        registry.set_serial(agent, generation, "bb".to_owned());
+        let jobs = [JobId::new()];
+        assert!(!registry.cancel_jobs_and_close_with_serial(agent, "aa", &jobs));
+        registry.close_many_with_serial(&[(agent, "aa".to_owned())]);
+        assert!(!*closed.borrow_and_update(), "the stream must stay open");
+        assert!(out.try_recv().is_err(), "no cancellation may be sent");
+
+        assert!(registry.cancel_jobs_and_close_with_serial(agent, "bb", &jobs));
+        assert!(*closed.borrow_and_update());
+        assert!(
+            out.try_recv().is_ok(),
+            "the cancellation precedes the close"
+        );
     }
 
     #[test]
@@ -1000,7 +1374,7 @@ mod tests {
         let agent = AgentId::new();
         let (close, _rx) = tokio::sync::watch::channel(false);
         let (tx, _out) = tokio::sync::mpsc::channel(1);
-        registry.open(agent, close, tx);
+        registry.open(agent, TenantId::new(), String::new(), close, tx);
         // The acknowledgement arrives before the rotation is recorded.
         assert!(registry.ack(agent, "key-2").is_none());
         let pending = Uuid::now_v7();

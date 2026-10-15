@@ -190,7 +190,13 @@ pub async fn enroll(
         } => {
             let agent_id = replaces_agent_id.unwrap_or_else(AgentId::new);
             let issued = store
-                .issue_agent_certificate(tenant_id.as_uuid(), agent_id.as_uuid(), &csr_der)
+                .issue_agent_certificate_at(
+                    tenant_id.as_uuid(),
+                    agent_id.as_uuid(),
+                    &csr_der,
+                    OffsetDateTime::now_utc(),
+                    state.agent_cert_lifetime(),
+                )
                 .map_err(map_ca_error)?;
 
             let machine_hash = machine_id

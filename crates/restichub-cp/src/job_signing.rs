@@ -25,7 +25,9 @@ use restichub_db::audit::{self, AuditAction, AuditEvent};
 use restichub_db::signing::{self, NewSigningKey, SigningKeyRow, Version};
 use restichub_db::{Database, DbError, PLATFORM_TENANT_ID, SigningKeyRole};
 use restichub_proto::agent::v1::{Job, KeyUpdate, SignedJob, SigningKeyUpdate};
-use restichub_proto::signing::{EnrollmentKey, sign_enrollment_keys, sign_job, sign_key_update};
+use restichub_proto::signing::{
+    EnrollmentKey, sign_enrollment_keys, sign_job, sign_job_bytes, sign_key_update,
+};
 use restichub_secrets::{
     CryptoError, KekError, KekId, KekProvider, WrappedSigningKey, unwrap_signing_key,
     wrap_signing_key,
@@ -77,6 +79,8 @@ pub enum JobSigningError {
     Missing,
     #[error("every stored job signing key is retired; the installation has no active key set")]
     AllRetired,
+    #[error("the current job signing key is not the one that the caller expected")]
+    StaleCurrentKey,
     #[error("a job signing key is still in its rotation overlap; the next rotation must wait")]
     RotationPending,
     #[error("the installation holds no active {role:?} job signing key")]
@@ -171,6 +175,11 @@ impl KeySet {
         sign_job(job, self.current.id(), &self.current.key)
     }
 
+    /// Makes the signature of serialized job bytes with the current key.
+    pub fn sign_job_bytes(&self, bytes: Vec<u8>) -> SignedJob {
+        sign_job_bytes(bytes, self.current.id(), &self.current.key)
+    }
+
     /// The signed key set that the control plane sends to an agent over the stream (FR-PR-11).
     ///
     /// The current key signs the next key. The message names the next key and the revoked keys, so
@@ -220,8 +229,9 @@ struct CachedSet {
 /// One signing key rotation, announced to the agent streams (ADR-0026).
 #[derive(Debug, Clone)]
 pub struct RotationEvent {
-    /// The old current key that retires when every online agent acknowledged the new set.
-    pub pending_key_id: Uuid,
+    /// The old current key that retires when every online agent acknowledged the new set. Absent
+    /// when another instance made the change: that instance owns the retirement.
+    pub pending_key_id: Option<Uuid>,
     /// The new current key that the agents acknowledge.
     pub current_key_id: String,
 }
@@ -232,6 +242,8 @@ pub struct JobSigningService {
     provider: Arc<dyn KekProvider>,
     cache: Arc<Mutex<Option<CachedSet>>>,
     events: broadcast::Sender<RotationEvent>,
+    /// The current key id that this instance announced last, to see a change by another instance.
+    announced: Arc<Mutex<Option<String>>>,
 }
 
 impl JobSigningService {
@@ -243,6 +255,36 @@ impl JobSigningService {
             provider,
             cache: Arc::new(Mutex::new(None)),
             events,
+            announced: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Sends a rotation to the open streams of this instance and remembers the current key.
+    fn announce(&self, event: RotationEvent) {
+        if let Ok(mut announced) = self.announced.lock() {
+            *announced = Some(event.current_key_id.clone());
+        }
+        let _ = self.events.send(event);
+    }
+
+    /// Announces a change of the current key that another instance made, so the streams of this
+    /// instance deliver the fresh key set without a reconnect (ADR-0026). The first call only
+    /// records the current key.
+    pub async fn announce_remote_change(&self, db: &Database) {
+        let Some(current) = self.current_key_id(db).await else {
+            return;
+        };
+        let previous = {
+            let Ok(mut announced) = self.announced.lock() else {
+                return;
+            };
+            announced.replace(current.clone())
+        };
+        if previous.is_some_and(|previous| previous != current) {
+            let _ = self.events.send(RotationEvent {
+                pending_key_id: None,
+                current_key_id: current,
+            });
         }
     }
 
@@ -293,6 +335,16 @@ impl JobSigningService {
     /// key (ADR-0026).
     pub async fn sign_job(&self, db: &Database, job: &Job) -> Result<SignedJob, JobSigningError> {
         Ok(self.current_set(db).await?.sign_job(job))
+    }
+
+    /// Signs serialized job bytes with the current key, with the same version check as
+    /// [`Self::sign_job`].
+    pub async fn sign_job_bytes(
+        &self,
+        db: &Database,
+        bytes: Vec<u8>,
+    ) -> Result<SignedJob, JobSigningError> {
+        Ok(self.current_set(db).await?.sign_job_bytes(bytes))
     }
 
     /// Builds the signed set update for an agent (FR-PR-11).
@@ -380,6 +432,22 @@ impl JobSigningService {
         db: &Database,
     ) -> Result<(Vec<EnrollmentKey>, Vec<u8>), JobSigningError> {
         Ok(self.current_set(db).await?.enrollment_keys())
+    }
+
+    /// The identifiers of the keys that are retired, for a compromise or a rotation. A stored
+    /// signed job with such a signer is signed again before it goes out (ADR-0030).
+    pub async fn retired_key_ids(
+        &self,
+        db: &Database,
+    ) -> Result<std::collections::HashSet<String>, JobSigningError> {
+        let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
+        let rows = signing::list(&mut tx).await?;
+        tx.commit().await?;
+        Ok(rows
+            .iter()
+            .filter(|row| row.retired_at.is_some())
+            .map(|row| row.id.to_string())
+            .collect())
     }
 
     /// The identifier of the current signing key, or `None` when the set is absent.
@@ -479,12 +547,107 @@ impl JobSigningService {
         tx.commit().await?;
 
         // Announce the rotation, so each open stream delivers the fresh key set (ADR-0026).
-        let _ = self.events.send(RotationEvent {
-            pending_key_id: current,
+        self.announce(RotationEvent {
+            pending_key_id: Some(current),
             current_key_id: next.to_string(),
         });
 
         self.load(db).await?.ok_or(JobSigningError::Missing)
+    }
+
+    /// Handles a compromise of the job signing key (ADR-0030).
+    ///
+    /// The next key becomes the current key and a new next key is generated, as in a rotation. The
+    /// old current key, and any key that still waits in its overlap, retire at once with the
+    /// reason `compromise`, so the update that introduces the new next key names them as revoked.
+    /// A key that a compromise retired is never part of the re-sync chain, so an agent that was
+    /// offline during the compromise enrolls again. The operation and its audit record commit in
+    /// one transaction under the rotation lock. Returns the identifiers of the retired keys.
+    ///
+    /// The caller names the key that it believes is current. When another compromise or a
+    /// rotation changed it, the call stops, so two calls retire at most one key set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JobSigningError::StaleCurrentKey`] when the current key is another one, and an
+    /// error when the key set is damaged or the registry is not reachable.
+    pub async fn mark_compromised(
+        &self,
+        db: &Database,
+        now: OffsetDateTime,
+        expected_current_key_id: &str,
+        audit_template: &AuditEvent,
+    ) -> Result<Vec<Uuid>, JobSigningError> {
+        let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
+        tx.lock(SIGNING_KEY_LOCK).await?;
+        let rows = signing::list(&mut tx).await?;
+        let current = active_row(&rows, SigningKeyRole::Current)?.id;
+        if current.to_string() != expected_current_key_id {
+            return Err(JobSigningError::StaleCurrentKey);
+        }
+        let next_row = active_row(&rows, SigningKeyRole::Next)?;
+        let next = next_row.id;
+        let material = self.unwrap_row(next_row)?;
+
+        let mut retired = Vec::new();
+        retired.extend(signing::retire_compromised(&mut tx, current, now).await?);
+        for row in rows
+            .iter()
+            .filter(|row| row.retire_after.is_some() && row.retired_at.is_none())
+        {
+            retired.extend(signing::retire_compromised(&mut tx, row.id, now).await?);
+        }
+        let rows_after = signing::list(&mut tx).await?;
+
+        let wrapped = wrap_signing_key(
+            self.provider.current(),
+            PLATFORM_TENANT_ID.as_uuid(),
+            next,
+            SigningKeyRole::Current.as_str(),
+            material.key.as_bytes(),
+        )?;
+        signing::set_role_and_wrapped(
+            &mut tx,
+            next,
+            SigningKeyRole::Current,
+            wrapped.kek_id.as_str(),
+            &wrapped.nonce,
+            &wrapped.ciphertext,
+        )
+        .await?;
+        let new_next = self
+            .generate_and_insert(
+                &mut tx,
+                SigningKeyRole::Next,
+                Some(&material),
+                &revoked_key_ids(&rows_after),
+                now,
+            )
+            .await?;
+        let new_next_id = Uuid::parse_str(new_next.id()).map_err(|_| JobSigningError::Missing)?;
+
+        let mut event = audit_template.clone();
+        event.object_id = Some(current);
+        event.diff = Some(audit::diff(
+            None,
+            Some(&serde_json::json!({
+                "current": next.to_string(),
+                "next": new_next_id.to_string(),
+                "compromised": retired.iter().map(Uuid::to_string).collect::<Vec<_>>(),
+            })),
+            &[],
+        ));
+        audit::insert(&mut tx, &event).await?;
+        for id in &retired {
+            audit_retire(&mut tx, *id).await?;
+        }
+        tx.commit().await?;
+
+        self.announce(RotationEvent {
+            pending_key_id: Some(current),
+            current_key_id: next.to_string(),
+        });
+        Ok(retired)
     }
 
     /// Retires the old keys whose overlap ended. Returns the number of retired keys (ADR-0026).

@@ -373,7 +373,10 @@ impl From<CryptoError> for ApiError {
 
 impl From<crate::job_signing::JobSigningError> for ApiError {
     fn from(error: crate::job_signing::JobSigningError) -> Self {
-        Self::internal(cause_chain(&error))
+        match error {
+            crate::job_signing::JobSigningError::StaleCurrentKey => Self::conflict(),
+            other => Self::internal(cause_chain(&other)),
+        }
     }
 }
 

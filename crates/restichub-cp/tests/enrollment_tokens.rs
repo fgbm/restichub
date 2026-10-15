@@ -217,6 +217,7 @@ async fn ac_id_01_an_expired_token_gives_the_token_expired_code_on_revoke() {
             labels: &[],
             expires_at: OffsetDateTime::now_utc() - time::Duration::hours(1),
             created_by: admin,
+            replaces_agent_id: None,
         },
     )
     .await

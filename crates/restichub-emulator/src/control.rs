@@ -320,6 +320,7 @@ impl AgentService for ControlPlane {
                 protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
                 protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
                 accepted_capabilities: vec!["backup".to_owned()],
+                control_plane_version: env!("CARGO_PKG_VERSION").to_owned(),
             })),
         };
         let _ = tx.try_send(hello);

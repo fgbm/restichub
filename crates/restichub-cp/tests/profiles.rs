@@ -44,6 +44,7 @@ async fn seed_agent_full(
             certificate_serial: &serial,
             certificate_expires_at: OffsetDateTime::now_utc() + time::Duration::days(30),
             last_seen_at: None,
+            machine_id_hash: None,
         },
     )
     .await

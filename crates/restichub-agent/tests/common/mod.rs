@@ -221,6 +221,7 @@ async fn seed_enrollment_token_value(
             labels,
             expires_at,
             created_by,
+            replaces_agent_id: None,
         },
     )
     .await
@@ -362,6 +363,14 @@ pub struct StreamFixture {
 
 /// Makes a fresh tenant, a one-time token and a running agent listener.
 pub async fn stream_fixture(name: &str) -> Option<StreamFixture> {
+    stream_fixture_with_lifetime(name, None).await
+}
+
+/// Like [`stream_fixture`], with a short agent certificate lifetime (FR-ID-03).
+pub async fn stream_fixture_with_lifetime(
+    name: &str,
+    lifetime: Option<std::time::Duration>,
+) -> Option<StreamFixture> {
     let db = test_database().await?;
     let tenant = create_tenant(db.database(), name).await;
     let creator = create_user(db.database(), tenant, "agent-admin", "phc", "admin").await;
@@ -373,7 +382,7 @@ pub async fn stream_fixture(name: &str) -> Option<StreamFixture> {
         OffsetDateTime::now_utc() + Duration::hours(1),
     )
     .await;
-    let server = StreamServer::start(db.database()).await;
+    let server = StreamServer::start_with_lifetime(db.database(), lifetime).await;
     Some(StreamFixture {
         db,
         tenant,
@@ -396,13 +405,18 @@ pub struct StreamServer {
 impl StreamServer {
     /// Binds a loopback port and serves the listener with the installation CA.
     pub async fn start(db: &Database) -> Self {
+        Self::start_with_lifetime(db, None).await
+    }
+
+    /// Like [`StreamServer::start`], with a short agent certificate lifetime (FR-ID-03).
+    pub async fn start_with_lifetime(db: &Database, lifetime: Option<std::time::Duration>) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("cannot bind the listener");
         let addr = listener.local_addr().expect("the listener address");
         // The agent dials the endpoint host and verifies the name, so use the certificate DNS name.
         let endpoint = format!("https://localhost:{}", addr.port());
-        let (state, ca) = pki_state(db, &endpoint).await;
+        let (state, ca) = pki_state_with_lifetime(db, &endpoint, lifetime).await;
         let sans = server_cert_sans(Some(&endpoint), addr);
         let issued = CaService::new(test_kek())
             .issue_server_certificate(&ca, &sans)
@@ -490,6 +504,15 @@ impl Drop for StreamServer {
 
 /// Builds the application state with a real certificate authority and job signing key set.
 pub async fn pki_state(db: &Database, endpoint: &str) -> (AppState, Arc<CaStore>) {
+    pki_state_with_lifetime(db, endpoint, None).await
+}
+
+/// Like [`pki_state`], with a short agent certificate lifetime (FR-ID-03).
+pub async fn pki_state_with_lifetime(
+    db: &Database,
+    endpoint: &str,
+    lifetime: Option<std::time::Duration>,
+) -> (AppState, Arc<CaStore>) {
     let provider = test_kek();
     let ca = CaService::new(provider.clone());
     let store = Arc::new(
@@ -507,7 +530,24 @@ pub async fn pki_state(db: &Database, endpoint: &str) -> (AppState, Arc<CaStore>
         .with_kek(provider)
         .with_tenancy(TenancyConfig::multi())
         .with_pki(store.clone(), job_signing, Some(endpoint.to_owned()));
+    let state = match lifetime {
+        Some(lifetime) => state.with_agent_cert_lifetime(lifetime),
+        None => state,
+    };
     (state, store)
+}
+
+/// Reads the time of the last certificate rotation of an agent (FR-ID-03).
+pub async fn last_rotation(db: &Database, tenant: TenantId, agent: Uuid) -> Option<OffsetDateTime> {
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let row = restichub_db::agents::get(&mut tx, restichub_db::AgentId::from_uuid(agent))
+        .await
+        .expect("cannot read the agent");
+    tx.commit().await.expect("cannot commit the read");
+    row.and_then(|agent| agent.last_certificate_rotation_at)
 }
 
 /// Reads `last_seen_at` of an agent through a tenant transaction.

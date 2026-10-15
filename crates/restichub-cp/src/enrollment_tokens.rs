@@ -10,9 +10,9 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use restichub_db::{AgentId, EnrollmentTokenId};
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::enrollment_tokens as repo;
+use restichub_db::{AgentId, EnrollmentTokenId};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
