@@ -47,7 +47,7 @@ Set the environment variables before `bench.sh setup`:
 | `CHECK_CRON` | `30 3 * * *` | schedule of `check` |
 | `NO_PLANS` | 0 | 1: no repository and no plan (the idle hosts of AC-AG-02) |
 | `AGENT_MEM_LIMIT` | 128m | memory limit of each agent host |
-| `COMPOSE_PROJECT_NAME`, `CP_WEB_PORT`, `CP_AGENT_PORT` | `restichub-bench-s1`, 18080, 18443 | the project name and the published ports |
+| `COMPOSE_PROJECT_NAME`, `CP_WEB_PORT`, `CP_AGENT_PORT`, `STATE_DIR` | `restichub-bench-s1`, 18080, 18443, `state/` | the project name, the published ports and the state directory; set all four to run a second bench next to the first |
 | `BUILD_NETWORK` | `default` | the network of the image build; use `host` when the build containers have no DNS or no route to the internet |
 | `RESTICHUB_CP_IMAGE` | `restichub-cp` | use a prebuilt image of the control plane |
 
@@ -98,7 +98,7 @@ If the run stops early, for example because the host restarts, the run is not va
 
 ### AC-NFR-06: the traffic capture (issue #41)
 
-`capture.sh` runs a `tcpdump` container in the network namespace of the control plane and of one agent host. It rotates the files each hour. `capture.sh report` lists each source and destination and marks the destinations that the bench does not configure. A person confirms each row marked `NO`.
+`capture.sh` runs a `tcpdump` container in the network namespace of the control plane and of one agent host. It rotates the files each hour. Start it before the agents connect (`run.sh` does so): the report lists the start of each connection, and a connection that was open before the capture has no start. `capture.sh report` lists each source and destination and marks the destinations that the bench does not configure. A person confirms each row marked `NO`.
 
 Configured connections: the agent talks to `cp:8443`, to `rest-server:8000` and to the DNS of the Docker network. The control plane talks to `postgres:5432` and answers on `8443` and `8080`.
 

@@ -12,7 +12,7 @@ x-agent: &agent
   environment:
     CP_URL: https://cp:8443
   volumes:
-    - ./state/tokens:/tokens
+    - ${STATE_DIR:-./state}/tokens:/tokens
   restart: unless-stopped
   mem_limit: ${AGENT_MEM_LIMIT:-128m}
 

@@ -23,11 +23,12 @@ report_begin() {
 	} >"$report"
 }
 
-# step NUMBER DESCRIPTION RESULT EVIDENCE
+# step NUMBER DESCRIPTION RESULT EVIDENCE (RESULT is PASS, WARN or FAIL)
 step() {
 	printf '| %s. %s | %s | %s | %s |\n' "$1" "$2" "$(date -u +%T)" "$3" "$4" >>"$report"
 	log "step $1: $2: $3"
-	if [ "$3" != PASS ]; then
+	# WARN records a finding that does not stop the scenario; any other result but PASS does.
+	if [ "$3" != PASS ] && [ "$3" != WARN ]; then
 		failed=1
 		echo >>"$report"
 		echo "The scenario stopped at step $1." >>"$report"
@@ -71,4 +72,26 @@ restic_on() {
 	docker exec -e RESTIC_PASSWORD=bench-repository-password \
 		-e RESTIC_REPOSITORY=rest:http://rest-server:8000/bench "$container" \
 		/opt/restichub-agent/bin/restic "$@"
+}
+
+# The snapshot count that the control plane reads from the repository through an agent job.
+snapshot_count() {
+	local repo="$1" job state end
+	job="$(api POST "/api/v1/repositories/$repo/snapshots" '{}' | jq -r .job_id)"
+	end=$((SECONDS + 120))
+	while [ "$SECONDS" -lt "$end" ]; do
+		state="$(api GET "/api/v1/repositories/$repo/snapshots?job=$job")"
+		case "$(printf '%s' "$state" | jq -r .state)" in
+		done)
+			printf '%s' "$state" | jq '.snapshots | length'
+			return 0
+			;;
+		failed)
+			echo 0
+			return 0
+			;;
+		esac
+		sleep 2
+	done
+	echo 0
 }

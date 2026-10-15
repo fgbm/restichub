@@ -63,8 +63,11 @@ duration="${DURATION_SECONDS:-$duration}"
 
 "$bench_dir/bench.sh" reset
 "$bench_dir/bench.sh" init
-"$bench_dir/bench.sh" start
+"$bench_dir/bench.sh" build
+"$bench_dir/bench.sh" up
+# The capture starts before the agents connect, so it sees the start of each stream connection.
 if [ "$capture" = 1 ]; then "$bench_dir/capture.sh" start "$out"; fi
+"$bench_dir/bench.sh" setup
 
 log "collecting for ${duration}s into $out"
 "$bench_dir/collect.sh" "$out" "$duration"

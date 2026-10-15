@@ -2,7 +2,8 @@
 # Shared helpers of the bench S1 scripts. Source this file; do not run it.
 
 bench_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-state_dir="$bench_dir/state"
+export STATE_DIR="${STATE_DIR:-$bench_dir/state}"
+state_dir="$STATE_DIR"
 env_file="$bench_dir/bench.env"
 project="${COMPOSE_PROJECT_NAME:-restichub-bench-s1}"
 export COMPOSE_PROJECT_NAME="$project"

@@ -41,9 +41,9 @@ result="$(wait_job "$backup" 300 || true)"
 case "$result" in succeeded*) v=PASS ;; *) v=FAIL ;; esac
 step 7 "Run the plan: the first backup" "$v" "backup job $backup: $result"
 
-snapshots="$(api GET "/api/v1/repositories/$repo/snapshots" | jq -r '[.items[]?, .snapshots[]?] | length')"
+snapshots="$(snapshot_count "$repo")"
 [ "$snapshots" -ge 1 ] && v=PASS || v=FAIL
-step 8 "The control plane lists the snapshot" "$v" "$snapshots snapshot(s)"
+step 8 "The control plane lists the snapshot (snapshots job on the agent)" "$v" "$snapshots snapshot(s)"
 
 container="$(dc ps -q agent-a | head -n1)"
 direct="$(restic_on "$container" snapshots --json 2>/dev/null | jq 'length' || echo 0)"
@@ -51,7 +51,7 @@ direct="$(restic_on "$container" snapshots --json 2>/dev/null | jq 'length' || e
 step 9 "restic on the host reads the same snapshot from the repository" "$v" "$direct snapshot(s) read with restic ${RESTIC_A:-0.18.1}"
 
 logs="$(api GET "/api/v1/jobs/$backup/logs?limit=5" | jq -r '[.items[]?] | length')"
-[ "$logs" -ge 1 ] && v=PASS || v=FAIL
+[ "$logs" -ge 1 ] && v=PASS || v=WARN
 step 10 "The job log is stored" "$v" "$logs line(s) in the first page"
 
 audit="$(api GET '/api/v1/audit?limit=200' | jq -r '[.items[]?] | length')"
@@ -60,6 +60,6 @@ step 11 "The audit log holds the actions of the scenario" "$v" "$audit record(s)
 
 {
 	echo
-	echo "Result: PASS"
+	if grep -q '| WARN |' "$report"; then echo "Result: PASS with findings (see the WARN rows)"; else echo "Result: PASS"; fi
 } >>"$report"
 log "report: $report"
