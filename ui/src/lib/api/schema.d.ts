@@ -638,6 +638,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/signing-keys/compromise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Marks the current job signing key as compromised.
+         * @description The next key becomes the current key and a new next key is created. The old current key retires with the reason `compromise` and the signed update revokes it on every open agent stream. An agent that was offline enrolls again.
+         */
+        post: operations["mark_compromised"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants": {
         parameters: {
             query?: never;
@@ -1324,6 +1344,11 @@ export interface components {
          * @enum {string}
          */
         AgentStatus: "active" | "revoked";
+        /**
+         * @description How the version of an agent relates to the control plane. The Hosts screen shows it.
+         * @enum {string}
+         */
+        AgentVersionStatus: "current" | "update_available" | "unsupported" | "unknown";
         AgentView: {
             agent_version: string;
             arch: string;
@@ -1331,12 +1356,18 @@ export interface components {
             certificate_expires_at: string;
             /** @description Lower-case hexadecimal. */
             certificate_serial: string;
+            /** @description The package version of the control plane that serves the request. */
+            control_plane_version: string;
             created_at: string;
             hostname: string;
             id: string;
             labels: string[];
+            /** @description In RFC 3339. Null until the first rotation of the certificate. */
+            last_certificate_rotation_at?: string | null;
             last_seen_at?: string | null;
             os: string;
+            /** @description The protocol version of the last hello, `major.minor`. Null before the first hello. */
+            protocol_version?: string | null;
             restic_version: string;
             /**
              * @description Absolute directories where the agent restores files, from its last connection. A restore
@@ -1346,6 +1377,7 @@ export interface components {
             revoked_at?: string | null;
             revoked_by_user_id?: string | null;
             status: components["schemas"]["AgentStatus"];
+            version_status: components["schemas"]["AgentVersionStatus"];
         };
         /**
          * @description The kind of an alert. The string value of each variant is stored: do not change a string.
@@ -1450,6 +1482,7 @@ export interface components {
          * @example secret_delivered
          * @example agent_enroll
          * @example agent_revoke
+         * @example agent_certificate_rotate
          * @example agent_update
          * @example remote_install
          * @example tenant_create
@@ -1477,6 +1510,7 @@ export interface components {
          * @example profile_delete
          * @example signing_key_rotate
          * @example signing_key_retire
+         * @example signing_key_compromise
          * @example channel_create
          * @example channel_update
          * @example channel_delete
@@ -1632,6 +1666,10 @@ export interface components {
             /** Format: int64 */
             packs_checked: number;
             repair_suggested: boolean;
+        };
+        CompromiseResponse: {
+            /** @description The identifiers of the keys that the action retired for a compromise. */
+            retired_key_ids: string[];
         };
         CreateAccountRequest: {
             display_name: string;
@@ -5130,6 +5168,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    mark_compromised: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key set is rotated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompromiseResponse"];
+                };
             };
             /** @description The request is not authenticated. */
             401: {
