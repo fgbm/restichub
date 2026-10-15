@@ -14,7 +14,7 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 
 use crate::DbError;
-use crate::enums::StepStatus;
+use crate::enums::{PlannedKind, PlannedPhase, StepStatus};
 use crate::ids::JobId;
 use crate::tx::TenantTx;
 
@@ -399,11 +399,13 @@ pub async fn list(tx: &mut TenantTx<'_>, job: JobId) -> Result<Vec<JobStep>, DbE
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct PlannedStep {
     pub step_id: String,
-    /// The kind of the step, such as `backup`, `hook` or `script`. Empty for an older job.
-    pub kind: String,
+    /// `None` for a job from an older version.
+    pub kind: Option<PlannedKind>,
     /// The display name: the name of a script or the identifier of a hook. Empty for the others.
     pub name: String,
-    pub phase: String,
+    pub phase: Option<PlannedPhase>,
+    /// The SHA-256 hash of a script body, in lowercase hex (ADR-0037).
+    pub content_sha256: Option<String>,
 }
 
 /// Stores the step list that the control plane signed into a job, in order.
@@ -414,9 +416,10 @@ pub async fn plan(tx: &mut TenantTx<'_>, job: JobId, step_ids: &[String]) -> Res
         .iter()
         .map(|step_id| PlannedStep {
             step_id: step_id.clone(),
-            kind: String::new(),
+            kind: None,
             name: String::new(),
-            phase: String::new(),
+            phase: None,
+            content_sha256: None,
         })
         .collect();
     plan_described(tx, job, &steps).await
@@ -430,16 +433,18 @@ pub async fn plan_described(
 ) -> Result<(), DbError> {
     for (position, step) in steps.iter().take(MAX_STEPS_PER_JOB as usize).enumerate() {
         sqlx::query(
-            "INSERT INTO job_planned_steps (tenant_id, job_id, step_id, position, kind, name, phase) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING",
+            "INSERT INTO job_planned_steps \
+             (tenant_id, job_id, step_id, position, kind, name, phase, content_sha256) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING",
         )
         .bind(tx.tenant())
         .bind(job)
         .bind(&step.step_id)
         .bind(i32::try_from(position).unwrap_or(i32::MAX))
-        .bind(&step.kind)
+        .bind(step.kind)
         .bind(step.name.chars().take(128).collect::<String>())
-        .bind(&step.phase)
+        .bind(step.phase)
+        .bind(&step.content_sha256)
         .execute(tx.as_conn())
         .await
         .map_err(DbError::Query)?;
@@ -462,7 +467,8 @@ pub async fn list_planned_described(
     job: JobId,
 ) -> Result<Vec<PlannedStep>, DbError> {
     sqlx::query_as::<_, PlannedStep>(
-        "SELECT step_id, kind, name, phase FROM job_planned_steps WHERE job_id = $1 \
+        "SELECT step_id, kind, name, phase, content_sha256 FROM job_planned_steps \
+         WHERE job_id = $1 \
          ORDER BY position",
     )
     .bind(job)

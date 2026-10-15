@@ -29,7 +29,9 @@ ALTER TABLE agents ADD CONSTRAINT agents_hooks_object_check CHECK (jsonb_typeof(
 -- The built-in templates ship with the control plane and have no row.
 --
 -- `job_planned_steps` also keeps the kind, the name and the phase of each step, so the job detail
--- lists every script in order before it runs (FR-HK-11).
+-- lists every script in order before it runs (FR-HK-11). A script step also keeps the SHA-256 hash
+-- of its body, so the job record shows which content ran (ADR-0037). A step of an older job has no
+-- kind and no phase.
 
 ALTER TABLE agents ADD COLUMN server_scripts text NOT NULL DEFAULT 'unknown';
 ALTER TABLE agents ADD COLUMN script_interpreters text[] NOT NULL DEFAULT '{}';
@@ -42,11 +44,21 @@ ALTER TABLE profiles ADD CONSTRAINT profiles_scripts_array_check CHECK (
     jsonb_typeof(scripts) = 'array'
 );
 
-ALTER TABLE job_planned_steps ADD COLUMN kind text NOT NULL DEFAULT '';
+ALTER TABLE job_planned_steps ADD COLUMN kind text;
 ALTER TABLE job_planned_steps ADD COLUMN name text NOT NULL DEFAULT '';
-ALTER TABLE job_planned_steps ADD COLUMN phase text NOT NULL DEFAULT '';
+ALTER TABLE job_planned_steps ADD COLUMN phase text;
+ALTER TABLE job_planned_steps ADD COLUMN content_sha256 text;
 ALTER TABLE job_planned_steps ADD CONSTRAINT job_planned_steps_name_check CHECK (
-    char_length(name) <= 128 AND char_length(kind) <= 32 AND char_length(phase) <= 16
+    char_length(name) <= 128
+);
+ALTER TABLE job_planned_steps ADD CONSTRAINT job_planned_steps_kind_check CHECK (
+    kind IS NULL OR kind IN ('backup', 'hook', 'script', 'other')
+);
+ALTER TABLE job_planned_steps ADD CONSTRAINT job_planned_steps_phase_check CHECK (
+    phase IS NULL OR phase IN ('before', 'after', 'on_success', 'on_error', 'finally')
+);
+ALTER TABLE job_planned_steps ADD CONSTRAINT job_planned_steps_content_sha256_check CHECK (
+    content_sha256 IS NULL OR content_sha256 ~ '^[0-9a-f]{64}$'
 );
 
 CREATE TABLE script_templates (

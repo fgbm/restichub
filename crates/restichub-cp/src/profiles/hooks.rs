@@ -185,8 +185,9 @@ async fn ensure_hook_secret(
     value: &str,
     field: String,
 ) -> Result<(), ApiError> {
-    let id = Uuid::parse_str(value)
-        .map_err(|_| ApiError::invalid_field(field.clone(), Reason::InvalidFormat))?;
+    let Ok(id) = Uuid::parse_str(value) else {
+        return Err(ApiError::invalid_field(field, Reason::InvalidFormat));
+    };
     let metadata = restichub_db::secrets::get(tx, SecretId::from_uuid(id)).await?;
     match metadata {
         Some(metadata) if metadata.purpose == SecretPurpose::HookSecret.as_str() => Ok(()),

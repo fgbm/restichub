@@ -918,3 +918,27 @@ mod tests {
         assert_eq!(StepStatus::parse("nope"), None);
     }
 }
+
+/// The kind of a planned step, as the job detail shows it (FR-HK-11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum PlannedKind {
+    Backup,
+    Hook,
+    Script,
+    /// A step of another kind: the job detail needs no more.
+    Other,
+}
+
+/// The phase of a hook or a script step (FR-HK-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum PlannedPhase {
+    Before,
+    After,
+    OnSuccess,
+    OnError,
+    Finally,
+}

@@ -11,7 +11,9 @@ use axum::extract::{Path, Query, State};
 use restichub_db::job_logs;
 use restichub_db::job_steps::{self, JobProgress, JobStep, StepOutput};
 use restichub_db::jobs as job_repo;
-use restichub_db::{JobKind, JobStatus, LogLevel, LogStream, StepStatus};
+use restichub_db::{
+    JobKind, JobStatus, LogLevel, LogStream, PlannedKind, PlannedPhase, StepStatus,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -29,12 +31,11 @@ const DEFAULT_LOG_LIMIT: i64 = 500;
 #[derive(Debug, Serialize, ToSchema)]
 pub struct StepView {
     pub step_id: String,
-    /// The kind of the step, such as `backup`, `hook` or `script`. Empty for a job from an older
-    /// version.
-    pub kind: String,
+    /// Absent for a job from an older version.
+    pub kind: Option<PlannedKind>,
     /// The name of a script or the identifier of a hook, or empty.
     pub name: String,
-    pub phase: String,
+    pub phase: Option<PlannedPhase>,
     pub status: StepStatus,
     /// The exit code of restic, or -1 when no process ran.
     pub exit_code: i32,
@@ -55,9 +56,9 @@ impl StepView {
         let described = planned.iter().find(|entry| entry.step_id == step.step_id);
         let mut view = Self::from(step);
         if let Some(entry) = described {
-            view.kind.clone_from(&entry.kind);
+            view.kind = entry.kind;
             view.name.clone_from(&entry.name);
-            view.phase.clone_from(&entry.phase);
+            view.phase = entry.phase;
         }
         view
     }
@@ -67,9 +68,9 @@ impl From<&JobStep> for StepView {
     fn from(step: &JobStep) -> Self {
         Self {
             step_id: step.step_id.clone(),
-            kind: String::new(),
+            kind: None,
             name: String::new(),
-            phase: String::new(),
+            phase: None,
             status: step.status,
             exit_code: step.exit_code,
             started_at: step.started_at.map(format_time),
@@ -86,11 +87,13 @@ impl From<&JobStep> for StepView {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PlannedStepView {
     pub step_id: String,
-    /// The kind of the step, such as `backup`, `hook` or `script`. Empty for an older job.
-    pub kind: String,
+    /// Absent for a job from an older version.
+    pub kind: Option<PlannedKind>,
     /// The name of a script or the identifier of a hook, or empty.
     pub name: String,
-    pub phase: String,
+    pub phase: Option<PlannedPhase>,
+    /// The SHA-256 hash of the script body, in lowercase hex. Present for a script step only.
+    pub content_sha256: Option<String>,
 }
 
 /// Last progress of the running step. It holds no value once the job ends.
@@ -240,9 +243,10 @@ pub async fn get_job(
             .iter()
             .map(|step| PlannedStepView {
                 step_id: step.step_id.clone(),
-                kind: step.kind.clone(),
+                kind: step.kind,
                 name: step.name.clone(),
-                phase: step.phase.clone(),
+                phase: step.phase,
+                content_sha256: step.content_sha256.clone(),
             })
             .collect(),
         summary,

@@ -521,32 +521,44 @@ fn reject_reason_code(reason: i32) -> &'static str {
 pub(crate) fn planned_steps(
     steps: &[restichub_proto::agent::v1::Step],
 ) -> Vec<restichub_db::job_steps::PlannedStep> {
+    use restichub_db::{PlannedKind, PlannedPhase};
     use restichub_proto::agent::v1::{HookPhase, step};
     let phase = |wire: i32| match HookPhase::try_from(wire) {
-        Ok(HookPhase::Before) => "before",
-        Ok(HookPhase::After) => "after",
-        Ok(HookPhase::OnSuccess) => "on_success",
-        Ok(HookPhase::OnError) => "on_error",
-        Ok(HookPhase::Finally) => "finally",
-        _ => "",
+        Ok(HookPhase::Before) => Some(PlannedPhase::Before),
+        Ok(HookPhase::After) => Some(PlannedPhase::After),
+        Ok(HookPhase::OnSuccess) => Some(PlannedPhase::OnSuccess),
+        Ok(HookPhase::OnError) => Some(PlannedPhase::OnError),
+        Ok(HookPhase::Finally) => Some(PlannedPhase::Finally),
+        _ => None,
     };
     steps
         .iter()
         .map(|planned| {
-            let (kind, name, step_phase) = match planned.kind.as_ref() {
-                Some(step::Kind::Backup(_)) => ("backup", String::new(), ""),
-                Some(step::Kind::Hook(hook)) => ("hook", hook.hook_id.clone(), phase(hook.phase)),
-                Some(step::Kind::Script(script)) => {
-                    ("script", script.name.clone(), phase(script.phase))
+            let (kind, name, step_phase, content_sha256) = match planned.kind.as_ref() {
+                Some(step::Kind::Backup(_)) => {
+                    (Some(PlannedKind::Backup), String::new(), None, None)
                 }
-                Some(_) => ("other", String::new(), ""),
-                None => ("", String::new(), ""),
+                Some(step::Kind::Hook(hook)) => (
+                    Some(PlannedKind::Hook),
+                    hook.hook_id.clone(),
+                    phase(hook.phase),
+                    None,
+                ),
+                Some(step::Kind::Script(script)) => (
+                    Some(PlannedKind::Script),
+                    script.name.clone(),
+                    phase(script.phase),
+                    Some(crate::scripts::body_hash(&script.body)),
+                ),
+                Some(_) => (Some(PlannedKind::Other), String::new(), None, None),
+                None => (None, String::new(), None, None),
             };
             restichub_db::job_steps::PlannedStep {
                 step_id: planned.step_id.clone(),
-                kind: kind.to_owned(),
+                kind,
                 name,
-                phase: step_phase.to_owned(),
+                phase: step_phase,
+                content_sha256,
             }
         })
         .collect()

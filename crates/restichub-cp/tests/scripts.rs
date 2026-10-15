@@ -791,6 +791,16 @@ async fn ac_hk_11_the_signed_job_carries_the_resolved_secret_and_the_planned_ste
         detail["planned_steps"],
         json!(["script-0", "script-2", "backup", "script-1"])
     );
+    // The job record holds the hash of each script body and none for another step (ADR-0037).
+    let hashes: Vec<Option<&str>> = detail["planned"]
+        .as_array()
+        .expect("the planned steps")
+        .iter()
+        .map(|entry| entry["content_sha256"].as_str())
+        .collect();
+    let dump_hash = restichub_cp::scripts::body_hash(&format!("echo dump # {BODY_CANARY}\n"));
+    assert_eq!(hashes[0], Some(dump_hash.as_str()));
+    assert_eq!(hashes[2], None);
 
     // The delivery names the secret and never its value (AC-RP-03).
     let delivered = audit_rows(&env, "secret_delivered").await;
