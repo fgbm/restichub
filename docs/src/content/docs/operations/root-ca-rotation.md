@@ -22,7 +22,7 @@ The control plane rotates the issuing CA by itself. Do not rotate the issuing CA
 
 - Plan a maintenance window. Every agent must register again, so no agent runs a job until you finish.
 - Copy the control plane database and the key encryption key (KEK).
-- Make one enrollment token for each host. See [Register an agent](register-an-agent.md).
+- Make one enrollment token for each host. See [Register an agent](/restichub/operations/register-an-agent/).
 
 ## Procedure
 
@@ -31,7 +31,7 @@ The control plane rotates the issuing CA by itself. Do not rotate the issuing CA
 3. Remove every row of the `ca_keys` table.
 4. Start the control plane. It creates a new root CA and a new issuing CA.
 5. Register each agent again with `--force` and a new enrollment token. The agent pins the new root CA.
-6. Revoke the old host entries after the new entries appear. See [Agent revocation](agent-revocation.md).
+6. Revoke the old host entries after the new entries appear. See [Agent revocation](/restichub/operations/agent-revocation/).
 
 ## Result
 
