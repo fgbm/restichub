@@ -98,7 +98,7 @@ test('the icons and an open dialog need no inline style', async ({ page }) => {
 	await expect(page.locator('main svg.icon[data-icon="host"]')).toBeVisible();
 
 	// The organization switcher marks the current organization and the platform entry with an icon.
-	await page.getByRole('button', { name: 'Switch organization' }).click();
+	await page.getByRole('button', { name: /Switch organization/ }).click();
 	await expect(
 		page.getByRole('menuitemradio', { name: /acme/ }).locator('svg.icon[data-icon="check"]')
 	).toBeVisible();
