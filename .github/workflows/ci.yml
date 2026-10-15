@@ -331,6 +331,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm audit --audit-level=high
 
   ui-csp:
     name: Web UI CSP

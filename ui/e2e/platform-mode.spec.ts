@@ -18,7 +18,7 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 	page
 }) => {
 	await signIn(page);
-	const switcher = page.getByRole('button', { name: 'Switch organization' });
+	const switcher = page.getByRole('button', { name: /Switch organization/ });
 	await expect(switcher).toHaveText('acme');
 	expect(await tabNames(page)).toEqual([
 		'Overview',
@@ -75,7 +75,7 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 
 test('the current organization leaves the platform mode for its overview', async ({ page }) => {
 	await signIn(page);
-	const switcher = page.getByRole('button', { name: 'Switch organization' });
+	const switcher = page.getByRole('button', { name: /Switch organization/ });
 	await switcher.click();
 	await page.getByRole('menuitem', { name: 'Platform administration' }).click();
 	await expect(page).toHaveURL(/\/platform\/tenants$/);

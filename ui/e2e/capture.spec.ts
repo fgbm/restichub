@@ -50,7 +50,7 @@ for (const scheme of ['light', 'dark'] as const) {
 		await page.getByText('win-fs01').waitFor();
 		await shot(page, 'hosts-data', scheme);
 
-		await page.getByRole('button', { name: 'Switch organization' }).click();
+		await page.getByRole('button', { name: /Switch organization/ }).click();
 		await page.getByRole('menu').waitFor();
 		await shot(page, 'switcher-open', scheme);
 		await page.keyboard.press('Escape');
@@ -91,7 +91,7 @@ for (const scheme of ['light', 'dark'] as const) {
 		await shot(page, 'token-value-dialog', scheme);
 		await page.keyboard.press('Escape');
 
-		await page.getByRole('button', { name: 'Switch organization' }).click();
+		await page.getByRole('button', { name: /Switch organization/ }).click();
 		await page.getByRole('menuitem', { name: 'Platform administration' }).click();
 		await page.getByRole('heading', { level: 1 }).waitFor();
 		await page.getByText('initech').waitFor();
@@ -113,7 +113,7 @@ for (const scheme of ['light', 'dark'] as const) {
 		await page.locator('tbody tr').first().waitFor();
 		await shot(page, 'platform-audit', scheme);
 
-		await page.getByRole('button', { name: 'Switch organization' }).click();
+		await page.getByRole('button', { name: /Switch organization/ }).click();
 		await page.getByRole('menu').waitFor();
 		await shot(page, 'switcher-platform-mode', scheme);
 		await page.getByRole('menuitemradio', { name: /acme/ }).click();
