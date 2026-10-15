@@ -48,6 +48,7 @@ use restichub_proto::signing::{
 use tokio::sync::mpsc;
 
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
+use crate::restore_roots::RestoreAccess;
 
 mod log;
 mod runner;
@@ -96,6 +97,9 @@ pub struct Jobs {
     resent: Arc<Mutex<HashSet<String>>>,
     /// The grace period between the graceful stop and the forced kill (FR-AG-10).
     stop_grace: Duration,
+    /// The roots where a restore may write and the files of the agent that it may never touch
+    /// (FR-RS-03, ADR-0035).
+    restore: Arc<RestoreAccess>,
 }
 
 impl Jobs {
@@ -113,6 +117,7 @@ impl Jobs {
         let mut journal = FileJournal::load(dir.join(JOURNAL_FILE))?;
         journal.prune(now_timestamp());
         journal.persist()?;
+        let restore = RestoreAccess::for_host(dir, &cache, &program);
         Ok(Self {
             program,
             expected_sha256,
@@ -123,7 +128,21 @@ impl Jobs {
             written: Arc::new(Mutex::new(0)),
             resent: Arc::new(Mutex::new(HashSet::new())),
             stop_grace: STOP_GRACE,
+            restore: Arc::new(restore),
         })
+    }
+
+    /// Replaces the restore roots and the protected paths (FR-RS-03).
+    #[must_use]
+    pub fn with_restore_access(mut self, access: RestoreAccess) -> Self {
+        self.restore = Arc::new(access);
+        self
+    }
+
+    /// Roots for `AgentHello`, so the control plane can suggest a target (FR-RS-03).
+    #[must_use]
+    pub fn restore_roots(&self) -> Vec<String> {
+        self.restore.root_strings()
     }
 
     /// Sets the grace period between the graceful stop and the forced kill (FR-AG-10).
@@ -160,6 +179,17 @@ impl Jobs {
             }
         };
         let job_id = validated.job().job_id.clone();
+        if validated
+            .job()
+            .steps
+            .iter()
+            .any(|step| self.restore_denied(step))
+        {
+            let _ = self
+                .send(rejected(job_id, RejectReason::RestoreTargetDenied))
+                .await;
+            return;
+        }
         match self.dispatch(&validated, expected.now) {
             Dispatch::Rejected(reason) => {
                 let _ = self.send(rejected(job_id, reason)).await;
@@ -382,6 +412,24 @@ impl Jobs {
                 }
             }
             let started_at = now_timestamp();
+            // A link can change between the admission and the start, so the target is checked
+            // again before the restore writes (FR-RS-03).
+            if self.restore_denied(step) {
+                failed += 1;
+                progress.stopped_code = Some(StepOutcome::failed().exit_code);
+                stopped_status = Some(StepStatus::Failed);
+                step_results.push(
+                    self.send_step_result(
+                        &job_id,
+                        step,
+                        &StepOutcome::failed(),
+                        started_at,
+                        started_at,
+                    )
+                    .await,
+                );
+                break;
+            }
             let mut limit = step_timeout(step.timeout_seconds, job.timeout_seconds);
             if let Some(deadline) = job_deadline {
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -494,6 +542,20 @@ impl Jobs {
                 ..result
             }))
             .await;
+    }
+
+    /// True when the step is a restore whose target the agent must refuse (FR-RS-03, ADR-0035).
+    fn restore_denied(&self, step: &Step) -> bool {
+        let Some(step::Kind::Restore(restore)) = step.kind.as_ref() else {
+            return false;
+        };
+        match self.restore.check(&restore.target) {
+            Ok(()) => false,
+            Err(reason) => {
+                tracing::warn!(%reason, "a restore target is refused");
+                true
+            }
+        }
     }
 
     /// Sends the result of one step through the current stream (FR-AG-09) and returns it.

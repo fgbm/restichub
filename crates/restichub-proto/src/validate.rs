@@ -101,7 +101,7 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
         }
         step::Kind::Ls(ls) => {
             check_repository_id(job, repository_ids, &ls.repository_id)?;
-            check_required_format(job, &ls.snapshot_id, is_snapshot_id)?;
+            check_required_format(job, &ls.snapshot_id, is_concrete_snapshot_id)?;
             check_free(job, std::iter::once(&ls.path))?;
             if ls.limit > MAX_LS_LIMIT {
                 return Err(reject(job, RejectReason::Malformed));
@@ -109,9 +109,9 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
         }
         step::Kind::Restore(restore) => {
             check_repository_id(job, repository_ids, &restore.repository_id)?;
-            check_required_format(job, &restore.snapshot_id, is_snapshot_id)?;
+            check_required_format(job, &restore.snapshot_id, is_concrete_snapshot_id)?;
             check_required_free(job, &restore.target)?;
-            if !is_absolute_path(&restore.target) {
+            if !is_restore_target(&restore.target) {
                 return Err(reject(job, RejectReason::Malformed));
             }
             check_patterns(job, restore.includes.iter())?;
@@ -120,7 +120,15 @@ fn check_step(job: &Job, repository_ids: &[&str], step: &Step) -> Result<(), Rej
             if !restore.includes.is_empty() && !restore.excludes.is_empty() {
                 return Err(reject(job, RejectReason::Malformed));
             }
-            if OverwriteMode::try_from(restore.overwrite).is_err() {
+            // An unset policy would leave the choice to the restic default.
+            if !matches!(
+                OverwriteMode::try_from(restore.overwrite),
+                Ok(mode) if mode != OverwriteMode::Unspecified
+            ) {
+                return Err(reject(job, RejectReason::Malformed));
+            }
+            // restic stops with "--dry-run and --verify are mutually exclusive".
+            if restore.dry_run && restore.verify {
                 return Err(reject(job, RejectReason::Malformed));
             }
         }
@@ -406,6 +414,19 @@ fn is_snapshot_id(value: &str) -> bool {
     matches!(value.len(), 8..=64) && value.bytes().all(is_lower_hex)
 }
 
+/// Returns true for a snapshot identifier that names one snapshot. `latest` moves between two
+/// reads, so a restore and a listing never accept it.
+fn is_concrete_snapshot_id(value: &str) -> bool {
+    value != "latest" && is_snapshot_id(value)
+}
+
+/// Returns true for an absolute target path without a `.` or `..` component, in either syntax.
+fn is_restore_target(value: &str) -> bool {
+    use crate::restore_path::{PathFlavor, components};
+    components(PathFlavor::Posix, value).is_some()
+        || components(PathFlavor::Windows, value).is_some()
+}
+
 fn is_lower_hex(byte: u8) -> bool {
     byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
 }
@@ -589,7 +610,7 @@ mod tests {
             })),
             step(step::Kind::Ls(LsStep {
                 repository_id: string("repo-1"),
-                snapshot_id: string("latest"),
+                snapshot_id: string("0123abcd"),
                 path: string("/srv"),
                 ..LsStep::default()
             })),
@@ -597,6 +618,7 @@ mod tests {
                 repository_id: string("repo-1"),
                 snapshot_id: string("0123abcd"),
                 target: string("/restore"),
+                overwrite: OverwriteMode::Never as i32,
                 ..RestoreStep::default()
             })),
             step(step::Kind::Unlock(UnlockStep {
@@ -762,7 +784,7 @@ mod tests {
             })),
             step(step::Kind::Ls(LsStep {
                 repository_id: string("repo-1"),
-                snapshot_id: string("latest"),
+                snapshot_id: string("0123abcd"),
                 path: string(BAD_OPTION),
                 ..LsStep::default()
             })),
@@ -802,7 +824,7 @@ mod tests {
             }))]),
             job_with(vec![step(step::Kind::Ls(LsStep {
                 repository_id: string("repo-1"),
-                snapshot_id: string("latest"),
+                snapshot_id: string("0123abcd"),
                 path: string(newline),
                 ..LsStep::default()
             }))]),
@@ -1084,8 +1106,9 @@ mod tests {
         let restore = |change: fn(&mut RestoreStep)| {
             let mut restore = RestoreStep {
                 repository_id: string("repo-1"),
-                snapshot_id: string("latest"),
+                snapshot_id: string("0123abcd"),
                 target: string("/restore"),
+                overwrite: OverwriteMode::Never as i32,
                 ..RestoreStep::default()
             };
             change(&mut restore);
@@ -1098,6 +1121,23 @@ mod tests {
         assert!(malformed(&restore(|r| r.excludes = vec![string("")])));
         assert!(malformed(&restore(|r| r.overwrite = 99)));
         assert!(malformed(&restore(|r| {
+            r.overwrite = OverwriteMode::Unspecified as i32;
+        })));
+        assert!(malformed(&restore(|r| r.snapshot_id = string("latest"))));
+        assert!(malformed(&restore(|r| {
+            r.dry_run = true;
+            r.verify = true;
+        })));
+        assert_eq!(
+            validate_job(&restore(|r| r.dry_run = true)),
+            Ok(()),
+            "a dry run alone is valid"
+        );
+        assert!(malformed(&restore(|r| r.target = string("/srv/../etc"))));
+        assert!(malformed(&restore(
+            |r| r.target = string("C:\\srv\\..\\etc")
+        )));
+        assert!(malformed(&restore(|r| {
             r.includes = vec![string("/srv")];
             r.excludes = vec![string("*.log")];
         })));
@@ -1108,13 +1148,19 @@ mod tests {
         let ls = |path: &str, limit: u64| {
             job_with(vec![step(step::Kind::Ls(LsStep {
                 repository_id: string("repo-1"),
-                snapshot_id: string("latest"),
+                snapshot_id: string("0123abcd"),
                 path: string(path),
                 limit,
                 ..LsStep::default()
             }))])
         };
         assert_eq!(validate_job(&ls("", 0)), Ok(()));
+        let latest = job_with(vec![step(step::Kind::Ls(LsStep {
+            repository_id: string("repo-1"),
+            snapshot_id: string("latest"),
+            ..LsStep::default()
+        }))]);
+        assert!(malformed(&latest), "a listing names one snapshot");
         assert_eq!(validate_job(&ls("/C/Users", MAX_LS_LIMIT)), Ok(()));
         assert!(malformed(&ls("/etc", MAX_LS_LIMIT + 1)));
     }

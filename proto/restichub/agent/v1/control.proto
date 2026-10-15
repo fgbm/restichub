@@ -162,6 +162,11 @@ message AgentHello {
   // "forget-all-tags". The control plane sends a field that an older agent
   // does not know only to an agent that lists the matching capability.
   repeated string capabilities = 10;
+  // Absolute directories where the agent restores files (FR-RS-03, ADR-0035).
+  // Only root or Administrators configure them on the host. The control plane
+  // uses them to suggest a target and to refuse early. The agent checks the
+  // target again.
+  repeated string restore_roots = 11;
 }
 
 // HookMetadata is the public part of one allow-list hook (FR-HK-04).
@@ -248,6 +253,9 @@ enum RejectReason {
   // The agent cannot record the accepted job (ADR-0020). It refuses the job
   // rather than risk a second run.
   REJECT_REASON_INTERNAL = 16;
+  // The target of a restore is outside the restore roots of the agent, or it
+  // holds the files of the agent itself (ADR-0035).
+  REJECT_REASON_RESTORE_TARGET_DENIED = 17;
 }
 
 // Pong answers a Ping from the control plane (FR-ID-07).

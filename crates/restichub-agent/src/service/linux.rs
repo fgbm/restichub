@@ -24,12 +24,16 @@ fn unit_path() -> PathBuf {
 
 /// The systemd unit text for the running agent (FR-AG-01, AC-IN-03).
 ///
-/// `ProtectSystem=strict` makes the whole file system read-only except the identity directory and
-/// the cache directory. A read of a backup source stays possible. A write to a local repository
-/// fails, so the operator adds every local repository path to `ReadWritePaths`. `ProtectHome` stays
-/// off, because a backup source is often below `/home`.
+/// `ProtectSystem=strict` makes the whole file system read-only except the identity directory, the
+/// cache directory and the restore roots (FR-RS-03). A read of a backup source stays possible. A
+/// write to a local repository fails, so the operator adds every local repository path to
+/// `ReadWritePaths`. `ProtectHome` stays off, because a backup source is often below `/home`.
 #[must_use]
-pub fn unit_contents(exe: &Path, config_dir: &Path) -> String {
+pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -> String {
+    let restore_paths: String = restore_roots
+        .iter()
+        .map(|root| format!(" \"{}\"", root.display()))
+        .collect();
     format!(
         "[Unit]\n\
          Description=ResticHub agent\n\
@@ -63,7 +67,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path) -> String {
          RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX\n\
          CacheDirectory=restichub-agent\n\
          Environment=RESTIC_CACHE_DIR={cache}\n\
-         ReadWritePaths=\"{config}\"\n\
+         ReadWritePaths=\"{config}\"{restore_paths}\n\
          \n\
          [Install]\n\
          WantedBy=multi-user.target\n",
@@ -71,6 +75,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path) -> String {
         capabilities = CAPABILITIES,
         cache = CACHE_DIR,
         config = config_dir.display(),
+        restore_paths = restore_paths,
     )
 }
 
@@ -84,8 +89,20 @@ pub fn install() -> Result<()> {
     // A binary that another account can replace defeats the service hardening (T20).
     super::location::check(&exe)?;
     let config = crate::paths::config_dir();
+    // A path in `ReadWritePaths` must exist, or systemd refuses to start the unit. The default root
+    // is created here with the access of root only; an extra root is the choice of the operator.
+    crate::restore_roots::ensure_default_root()?;
+    let access = crate::restore_roots::RestoreAccess::for_host(&config, Path::new(CACHE_DIR), &exe);
+    for root in access.roots() {
+        if !root.is_dir() {
+            bail!(
+                "the restore root {} does not exist; create it and run install-service again",
+                root.display()
+            );
+        }
+    }
     let path = unit_path();
-    std::fs::write(&path, unit_contents(&exe, &config))
+    std::fs::write(&path, unit_contents(&exe, &config, access.roots()))
         .with_context(|| format!("cannot write {}", path.display()))?;
     systemctl(&["daemon-reload"])?;
     systemctl(&["enable", "--now", SERVICE_NAME])?;
@@ -134,9 +151,14 @@ mod tests {
         let unit = unit_contents(
             Path::new("/opt/restichub-agent/restichub-agent"),
             Path::new("/etc/restichub-agent"),
+            &[PathBuf::from("/var/lib/restichub-restore")],
         );
         assert!(unit.contains("ExecStart=\"/opt/restichub-agent/restichub-agent\" run"));
-        assert!(unit.contains("ReadWritePaths=\"/etc/restichub-agent\""));
+        assert!(
+            unit.contains(
+                "ReadWritePaths=\"/etc/restichub-agent\" \"/var/lib/restichub-restore\"\n"
+            )
+        );
         assert!(unit.contains("NoNewPrivileges=true"));
         assert!(unit.contains("ProtectSystem=strict"));
         assert!(unit.contains("PrivateTmp=true"));
@@ -148,6 +170,7 @@ mod tests {
         let unit = unit_contents(
             Path::new("/opt/restichub-agent/restichub-agent"),
             Path::new("/etc/restichub-agent"),
+            &[PathBuf::from("/var/lib/restichub-restore")],
         );
         // The default `KillMode=control-group` also stops a restic tree after an agent stop.
         assert!(
@@ -161,6 +184,7 @@ mod tests {
         let unit = unit_contents(
             Path::new("/opt/restichub-agent/restichub-agent"),
             Path::new("/etc/restichub-agent"),
+            &[PathBuf::from("/var/lib/restichub-restore")],
         );
         // A backup source below /home must stay readable, so ProtectHome must be absent.
         assert!(
@@ -175,5 +199,18 @@ mod tests {
         }
         assert!(unit.contains("CacheDirectory=restichub-agent"));
         assert!(unit.contains("RESTIC_CACHE_DIR=/var/cache/restichub-agent"));
+    }
+
+    #[test]
+    fn fr_rs_03_the_unit_can_write_every_restore_root() {
+        let unit = unit_contents(
+            Path::new("/opt/restichub-agent/restichub-agent"),
+            Path::new("/etc/restichub-agent"),
+            &[
+                PathBuf::from("/var/lib/restichub-restore"),
+                PathBuf::from("/srv/restore"),
+            ],
+        );
+        assert!(unit.contains("ReadWritePaths=\"/etc/restichub-agent\" \"/var/lib/restichub-restore\" \"/srv/restore\"\n"));
     }
 }

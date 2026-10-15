@@ -510,6 +510,7 @@ fn reject_reason_code(reason: i32) -> &'static str {
         Ok(RejectReason::NotYetValid) => "not_yet_valid",
         Ok(RejectReason::Busy) => "busy",
         Ok(RejectReason::Internal) => "internal_error",
+        Ok(RejectReason::RestoreTargetDenied) => "restore_target_denied",
         Ok(RejectReason::Unspecified) | Err(_) => "rejected",
     }
 }

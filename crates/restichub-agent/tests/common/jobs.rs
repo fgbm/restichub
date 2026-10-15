@@ -18,6 +18,7 @@ use restichub_agent::identity::StoredIdentity;
 use restichub_agent::jobs::Jobs;
 use restichub_agent::keys::KeyState;
 use restichub_agent::restic::Restic;
+use restichub_agent::restore_roots::RestoreAccess;
 use restichub_agent::stream::{self, Backoff, StreamOptions};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -106,7 +107,27 @@ pub fn program_jobs(dir: &Path) -> Jobs {
         program.display()
     );
     let expected = sha256_hex(&program);
+    Jobs::open(program, expected, dir.join("cache"), dir)
+        .expect("the job journal must open")
+        .with_restore_access(temp_roots())
+}
+
+/// A job runner with the restore roots of a production host: the temporary directory is outside
+/// them (FR-RS-03).
+#[must_use]
+pub fn program_jobs_with_host_roots(dir: &Path) -> Jobs {
+    let program = fake_restic();
+    let expected = sha256_hex(&program);
     Jobs::open(program, expected, dir.join("cache"), dir).expect("the job journal must open")
+}
+
+/// The temporary directory as the only restore root, so a test restores anywhere below it.
+#[must_use]
+pub fn temp_roots() -> RestoreAccess {
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .expect("cannot resolve the temporary directory");
+    RestoreAccess::new(vec![root], Vec::new())
 }
 
 /// A job runner with a short grace period, so a test reaches the forced kill quickly (FR-AG-10).
@@ -134,6 +155,7 @@ pub fn real_jobs(dir: &Path, program: &Path) -> Jobs {
     let expected = sha256_hex(program);
     Jobs::open(program.to_path_buf(), expected, dir.join("cache"), dir)
         .expect("the job journal must open")
+        .with_restore_access(temp_roots())
 }
 
 /// Runs the connect loop of the real agent until the test stops it.

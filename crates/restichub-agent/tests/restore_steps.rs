@@ -72,7 +72,7 @@ async fn ac_rs_02_the_first_page_of_a_million_entries_is_small_and_fast() {
         &jobs,
         &fixture.job(
             "job-ls",
-            vec![ls_step("repo-1", "latest", "/data", 0, 1_000)],
+            vec![ls_step("repo-1", "0123abcd", "/data", 0, 1_000)],
         ),
     )
     .await;
@@ -98,7 +98,7 @@ async fn ac_rs_02_the_first_page_of_a_million_entries_is_small_and_fast() {
     );
     assert_eq!(
         fixture.argv(),
-        vec!["ls --json -- latest /data".to_owned()],
+        vec!["ls --json -- 0123abcd /data".to_owned()],
         "the directory goes after --"
     );
 }
@@ -118,7 +118,7 @@ async fn ac_rs_02_a_later_page_skips_the_earlier_entries_and_the_last_page_ends_
                 jobs,
                 &fixture.job(
                     name,
-                    vec![ls_step("repo-1", "latest", "/data", offset, 1_000)],
+                    vec![ls_step("repo-1", "0123abcd", "/data", offset, 1_000)],
                 ),
             )
             .await;
@@ -178,8 +178,7 @@ async fn fr_rs_04_a_restore_reports_progress_and_a_typed_summary() {
         excludes: vec!["*.log".to_owned()],
         dry_run: true,
         overwrite: OverwriteMode::IfNewer as i32,
-        verify: true,
-        ..restore_args("repo-1", "latest", &target)
+        ..restore_args("repo-1", "0123abcd", &target)
     };
     let result = run(
         &jobs,
@@ -221,7 +220,7 @@ async fn fr_rs_04_a_restore_reports_progress_and_a_typed_summary() {
     assert_eq!(
         fixture.argv(),
         vec![format!(
-            "restore --json --exclude=*.log --target={} --dry-run --overwrite=if-newer --verify -- latest",
+            "restore --json --exclude=*.log --target={} --dry-run --overwrite=if-newer -- 0123abcd",
             target.display()
         )]
     );
@@ -238,11 +237,11 @@ async fn fr_pr_10_a_restore_value_never_becomes_an_option() {
     for (index, restore) in [
         RestoreStep {
             includes: vec![hostile.to_owned()],
-            ..restore_args("repo-1", "latest", &target)
+            ..restore_args("repo-1", "0123abcd", &target)
         },
         RestoreStep {
             excludes: vec!["-x".to_owned()],
-            ..restore_args("repo-1", "latest", &target)
+            ..restore_args("repo-1", "0123abcd", &target)
         },
     ]
     .into_iter()
@@ -266,7 +265,7 @@ async fn fr_pr_10_a_restore_value_never_becomes_an_option() {
     );
     assert!(argv[1].contains("--exclude=-x"), "{}", argv[1]);
     assert!(
-        argv.iter().all(|line| line.ends_with("-- latest")),
+        argv.iter().all(|line| line.ends_with("-- 0123abcd")),
         "{argv:?}"
     );
 
@@ -275,20 +274,38 @@ async fn fr_pr_10_a_restore_value_never_becomes_an_option() {
     for (index, bad) in [
         RestoreStep {
             snapshot_id: "--dry-run".to_owned(),
-            ..restore_args("repo-1", "latest", &target)
+            ..restore_args("repo-1", "0123abcd", &target)
         },
         RestoreStep {
             target: "-rf".to_owned(),
-            ..restore_args("repo-1", "latest", &target)
+            ..restore_args("repo-1", "0123abcd", &target)
         },
         RestoreStep {
             target: "relative/dir".to_owned(),
-            ..restore_args("repo-1", "latest", &target)
+            ..restore_args("repo-1", "0123abcd", &target)
         },
         RestoreStep {
             includes: vec!["/srv".to_owned()],
             excludes: vec!["*.log".to_owned()],
-            ..restore_args("repo-1", "latest", &target)
+            ..restore_args("repo-1", "0123abcd", &target)
+        },
+        // FR-RS-03: restic refuses `--dry-run` with `--verify`.
+        RestoreStep {
+            dry_run: true,
+            verify: true,
+            ..restore_args("repo-1", "0123abcd", &target)
+        },
+        RestoreStep {
+            overwrite: OverwriteMode::Unspecified as i32,
+            ..restore_args("repo-1", "0123abcd", &target)
+        },
+        RestoreStep {
+            snapshot_id: "latest".to_owned(),
+            ..restore_args("repo-1", "0123abcd", &target)
+        },
+        RestoreStep {
+            snapshot_id: "0123abcd:/etc".to_owned(),
+            ..restore_args("repo-1", "0123abcd", &target)
         },
     ]
     .into_iter()
@@ -311,4 +328,82 @@ async fn fr_pr_10_a_restore_value_never_becomes_an_option() {
         }
     }
     assert_eq!(fixture.argv().len(), 2, "the refused jobs start no restic");
+}
+
+/// FR-RS-03: the agent refuses a restore target outside its restore roots or on its own files, and
+/// restic never starts.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_rs_03_a_target_outside_the_roots_or_on_the_agent_files_is_rejected() {
+    let fixture = Fixture::new("restore-roots");
+    let jobs = program_jobs_with_host_roots(&fixture.dir);
+    let outside = temp_config_dir("restore-roots-outside");
+    let targets = [
+        PathBuf::from("/"),
+        PathBuf::from("/etc"),
+        fixture.dir.clone(),
+        fixture.dir.join("identity.json"),
+        outside,
+    ];
+    for (index, target) in targets.iter().enumerate() {
+        let (tx, mut rx) = mpsc::channel(8);
+        jobs.attach(&tx);
+        let job = fixture.job(
+            &format!("job-denied-{index}"),
+            vec![make_step(
+                "restore",
+                step::Kind::Restore(restore_args("repo-1", "0123abcd", target)),
+            )],
+        );
+        jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+        let message = rx.recv().await.expect("the agent must answer");
+        match message.payload {
+            Some(agent_message::Payload::JobRejected(rejected)) => assert_eq!(
+                RejectReason::try_from(rejected.reason).ok(),
+                Some(RejectReason::RestoreTargetDenied),
+                "{}",
+                target.display()
+            ),
+            other => panic!("the job must be rejected: {other:?}"),
+        }
+    }
+    assert!(
+        fixture.argv().is_empty(),
+        "a refused restore starts no restic"
+    );
+}
+
+/// FR-RS-03: a link inside a root that points to the configuration directory is refused.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_rs_03_a_link_to_the_configuration_directory_is_rejected() {
+    let fixture = Fixture::new("restore-link");
+    let jobs = program_jobs(&fixture.dir).with_restore_access(
+        restichub_agent::restore_roots::RestoreAccess::new(
+            vec![
+                std::env::temp_dir()
+                    .canonicalize()
+                    .expect("cannot resolve the temporary directory"),
+            ],
+            vec![fixture.dir.clone()],
+        ),
+    );
+    let link = temp_config_dir("restore-link-target");
+    std::os::unix::fs::symlink(&fixture.dir, &link).expect("cannot create the link");
+    let (tx, mut rx) = mpsc::channel(8);
+    jobs.attach(&tx);
+    let job = fixture.job(
+        "job-link",
+        vec![make_step(
+            "restore",
+            step::Kind::Restore(restore_args("repo-1", "0123abcd", &link)),
+        )],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    let message = rx.recv().await.expect("the agent must answer");
+    assert!(matches!(
+        message.payload,
+        Some(agent_message::Payload::JobRejected(ref rejected))
+            if rejected.reason == RejectReason::RestoreTargetDenied as i32
+    ));
+    let _ = std::fs::remove_file(&link);
 }

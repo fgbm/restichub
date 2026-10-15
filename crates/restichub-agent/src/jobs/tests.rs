@@ -2,7 +2,7 @@
 
 use ed25519_dalek::SigningKey;
 use restichub_proto::agent::v1::{
-    BackupStep, CheckStep, ForgetStep, HookStep, InitStep, Job, LsStep, PruneStep,
+    BackupStep, CheckStep, ForgetStep, HookStep, InitStep, Job, LsStep, OverwriteMode, PruneStep,
     RepositoryAccess, RestoreStep, SnapshotsFilter, SnapshotsStep, StatsStep, Step, TestAccessStep,
     UnlockAllStep, UnlockStep, step,
 };
@@ -304,13 +304,14 @@ fn fr_pr_02_accepts_the_step_kinds_of_the_agent_core() {
         }),
         step::Kind::Ls(LsStep {
             repository_id: "repo-1".to_owned(),
-            snapshot_id: "latest".to_owned(),
+            snapshot_id: "0123abcd".to_owned(),
             ..LsStep::default()
         }),
         step::Kind::Restore(RestoreStep {
             repository_id: "repo-1".to_owned(),
-            snapshot_id: "latest".to_owned(),
+            snapshot_id: "0123abcd".to_owned(),
             target: "/restore".to_owned(),
+            overwrite: OverwriteMode::Never as i32,
             ..RestoreStep::default()
         }),
         step::Kind::Prune(PruneStep {

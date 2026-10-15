@@ -17,6 +17,7 @@ mod output;
 pub mod paths;
 pub mod pem;
 pub mod restic;
+pub mod restore_roots;
 mod scrub;
 pub mod service;
 pub mod stream;

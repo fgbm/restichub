@@ -101,6 +101,8 @@ pub fn install() -> Result<()> {
     let exe = std::env::current_exe().context("cannot find the agent executable")?;
     // A binary that another account can replace defeats the service hardening (T20).
     super::location::check(&exe)?;
+    // The default restore root gets the access of SYSTEM and Administrators only (FR-RS-03).
+    crate::restore_roots::ensure_default_root()?;
     let manager = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,

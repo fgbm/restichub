@@ -327,6 +327,85 @@ async fn ac_rs_04_include_and_exclude_select_the_files_of_the_table() {
     }
 }
 
+/// The pattern that matches one path only. The Restore screen builds the same pattern
+/// (`escapeGlob` in `ui/src/lib/restore.ts`): restic reads a backslash as a separator on Windows,
+/// so each special character stands in a one-character class.
+fn escape_glob(path: &str) -> String {
+    let mut escaped = String::new();
+    for character in path.chars() {
+        match character {
+            '*' | '?' | '[' => escaped.push_str(&format!("[{character}]")),
+            '\\' => escaped.push_str("[\\\\]"),
+            other => escaped.push(other),
+        }
+    }
+    match escaped.strip_prefix('!') {
+        Some(rest) => format!("[!]{rest}"),
+        None => escaped,
+    }
+}
+
+/// FR-RS-02: a path with a wildcard character that the user selects in the tree restores only
+/// itself. Without the escape, `[ab].txt` would select `a.txt` and `b.txt`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_rs_04_a_path_with_wildcard_characters_restores_only_itself() {
+    let Some((source, snapshot)) = backed_up(
+        "ac-rs-04-glob",
+        &[
+            ("a.txt", b"a"),
+            ("b.txt", b"b"),
+            ("[ab].txt", b"class"),
+            ("a*.txt", b"star"),
+            ("w?.txt", b"mark"),
+            ("c].txt", b"close"),
+            ("back\\slash.txt", b"slash"),
+        ],
+    )
+    .await
+    else {
+        return;
+    };
+    let data = source.data.to_string_lossy().into_owned();
+    let table: [(&str, &str, &[&str]); 7] = [
+        ("plain", "a.txt", &["a.txt"]),
+        ("class", "[ab].txt", &["[ab].txt"]),
+        ("star", "a*.txt", &["a*.txt"]),
+        ("mark", "w?.txt", &["w?.txt"]),
+        ("close", "c].txt", &["c].txt"]),
+        // `tree` reads a backslash as a separator.
+        ("backslash", "back\\slash.txt", &["back/slash.txt"]),
+        ("unescaped class", "", &[]),
+    ];
+    for (index, (case, name, expected)) in table.into_iter().enumerate() {
+        let target = directory(&format!("ac-rs-04-glob-{index}-target"));
+        // The last row shows what the raw name does: it selects the two files of the class.
+        let (pattern, expected): (String, Vec<&str>) = if name.is_empty() {
+            (format!("{data}/[ab].txt"), vec!["a.txt", "b.txt"])
+        } else {
+            (escape_glob(&format!("{data}/{name}")), expected.to_vec())
+        };
+        let (result, _) = restore_on_agent_b(
+            &source,
+            &snapshot,
+            RestoreStep {
+                includes: vec![pattern],
+                ..restore_args("repo-1", &snapshot, &target)
+            },
+            &format!("job-glob-{index}"),
+        )
+        .await;
+        assert_eq!(
+            result.result().outcome,
+            JobStatus::Succeeded as i32,
+            "{case}: {}",
+            result.log_text()
+        );
+        let files = tree(&target, &source.data);
+        assert_eq!(names(&files), expected, "{case}");
+    }
+}
+
 fn set_modified(path: &Path, time: SystemTime) {
     std::fs::File::options()
         .write(true)

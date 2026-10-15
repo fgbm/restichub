@@ -295,7 +295,7 @@ pub async fn connect_once(
         Err(status) => return Err(anyhow::anyhow!("the stream did not open: {status}")),
     };
     let mut inbound = response.into_inner();
-    send_hello(&tx, restic_version).await?;
+    send_hello(&tx, restic_version, jobs.restore_roots()).await?;
     // The results go through this stream now, and a result that a dropped stream lost reaches the
     // control plane (ADR-0020).
     jobs.attach(&tx);
@@ -520,7 +520,11 @@ fn endpoint_host(uri: &Uri) -> Result<String> {
 }
 
 /// Sends the first message of the agent: the identity and the capabilities (FR-PR-09).
-async fn send_hello(tx: &mpsc::Sender<AgentMessage>, restic_version: &str) -> Result<()> {
+async fn send_hello(
+    tx: &mpsc::Sender<AgentMessage>,
+    restic_version: &str,
+    restore_roots: Vec<String>,
+) -> Result<()> {
     let hello = AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
@@ -533,6 +537,7 @@ async fn send_hello(tx: &mpsc::Sender<AgentMessage>, restic_version: &str) -> Re
                 .iter()
                 .map(|capability| capability.as_str().to_owned())
                 .collect(),
+            restore_roots,
             ..AgentHello::default()
         })),
     };
@@ -602,11 +607,26 @@ mod tests {
     #[tokio::test]
     async fn fr_pr_09_the_hello_announces_the_forget_all_tags_capability() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        send_hello(&tx, "0.19.0").await.expect("the hello is sent");
+        send_hello(&tx, "0.19.0", vec!["/var/lib/restichub-restore".to_owned()])
+            .await
+            .expect("the hello is sent");
         let message = rx.recv().await.expect("a message");
         let Some(agent_message::Payload::AgentHello(hello)) = message.payload else {
             panic!("the first message must be an AgentHello");
         };
         assert!(restichub_proto::AgentCapability::ForgetAllTags.is_listed(&hello.capabilities));
+    }
+
+    #[tokio::test]
+    async fn fr_rs_03_the_hello_reports_the_restore_roots() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        send_hello(&tx, "0.19.0", vec!["/srv/restore".to_owned()])
+            .await
+            .expect("the hello is sent");
+        let message = rx.recv().await.expect("a message");
+        let Some(agent_message::Payload::AgentHello(hello)) = message.payload else {
+            panic!("the first message must be an AgentHello");
+        };
+        assert_eq!(hello.restore_roots, vec!["/srv/restore".to_owned()]);
     }
 }
