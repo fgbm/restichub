@@ -1570,7 +1570,16 @@ export class MockApiService {
 			excludes: request.excludes ?? [],
 			exclude_files: request.exclude_files ?? [],
 			tags: request.tags ?? [],
-			options: request.options ?? current.options,
+			// An omitted limit keeps the stored value (ADR-0039).
+			options: request.options
+				? {
+						...request.options,
+						stall_timeout_minutes:
+							request.options.stall_timeout_minutes ?? current.options?.stall_timeout_minutes,
+						max_duration_minutes:
+							request.options.max_duration_minutes ?? current.options?.max_duration_minutes
+					}
+				: current.options,
 			hooks: request.hooks ?? [],
 			scripts: request.scripts ?? [],
 			retention: request.retention ?? null,
