@@ -41,6 +41,12 @@ export interface EventSourceLike {
 
 export type EventSourceFactory = (url: string) => EventSourceLike;
 
+/**
+ * Asks the server whether the session is still valid. `denied` is HTTP 401 or 403: a new stream
+ * would fail the same way. The browser hides the status of a failed stream, so a request tells it.
+ */
+export type SessionProbe = () => Promise<'ok' | 'denied'>;
+
 const CLOSED = 2;
 const FIRST_RETRY_MS = 2000;
 const MAX_RETRY_MS = 30_000;
@@ -55,7 +61,8 @@ export class EventStream {
 
 	constructor(
 		private readonly create: EventSourceFactory,
-		private readonly onState: (connected: boolean) => void = () => {}
+		private readonly onState: (connected: boolean) => void = () => {},
+		private readonly probe: SessionProbe = async () => 'ok'
 	) {}
 
 	subscribe(listener: Listener): () => void {
@@ -99,11 +106,20 @@ export class EventStream {
 	private scheduleReopen(): void {
 		if (this.retry) return;
 		this.source?.close();
-		this.retry = setTimeout(() => {
-			this.retry = null;
-			if (this.running) this.open();
-		}, this.delay);
+		this.retry = setTimeout(() => void this.reopen(), this.delay);
 		this.delay = Math.min(this.delay * 2, MAX_RETRY_MS);
+	}
+
+	private async reopen(): Promise<void> {
+		this.retry = null;
+		if (!this.running) return;
+		const verdict = await this.probe().catch(() => 'ok' as const);
+		if (!this.running) return;
+		if (verdict === 'denied') {
+			this.stop();
+			return;
+		}
+		this.open();
 	}
 
 	private dispatch(type: EventType, data: string): void {
@@ -156,4 +172,31 @@ export function coalesce(run: () => Promise<void> | void, wait: number): () => v
 		timer = setTimeout(() => void fire(), wait);
 	};
 	return schedule;
+}
+
+/**
+ * Reads again after an event, at most once for a burst. An event that arrives while the first load
+ * runs is not lost: `loaded()` starts one more read for it.
+ */
+export function eventReader(
+	isLoading: () => boolean,
+	read: () => Promise<void> | void,
+	wait: number
+): { notify: () => void; loaded: () => void } {
+	let missed = false;
+	const soon = coalesce(() => {
+		if (isLoading()) {
+			missed = true;
+			return;
+		}
+		return read();
+	}, wait);
+	return {
+		notify: soon,
+		loaded: () => {
+			if (!missed) return;
+			missed = false;
+			soon();
+		}
+	};
 }

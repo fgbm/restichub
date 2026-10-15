@@ -42,6 +42,12 @@ describe('ac_ui_03 the hard-coded text lint', () => {
 		expect(messages("<p>{ready ? 'Ready' : 'Waiting'}</p>")).toHaveLength(2);
 	});
 
+	it('ac_ui_03_reports_a_string_in_an_attribute_expression', () => {
+		expect(messages("<i aria-label={'Delete'}></i>")).toHaveLength(1);
+		expect(messages("<i title={busy ? 'Wait' : 'Go'}></i>")).toHaveLength(2);
+		expect(messages("<i aria-label={t('common.delete')}></i>")).toEqual([]);
+	});
+
 	it('ac_ui_03_accepts_a_catalog_text_and_technical_values', () => {
 		expect(messages("<p>{t('common.save')}</p>")).toEqual([]);
 		expect(messages('<input placeholder="ops@example.com" />')).toEqual([]);

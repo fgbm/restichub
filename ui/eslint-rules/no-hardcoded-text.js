@@ -5,13 +5,15 @@
  *
  * The rule reports a text node and a text attribute (`title`, `aria-label`, `placeholder`, `alt`,
  * `label`) of a Svelte template that holds a letter. A text from `t(...)` is an expression, so it
- * passes. A technical value such as a product name needs an `{'...'}` expression or the catalog.
+ * passes. A string literal inside an expression, such as `{'Name'}` or `{ok ? 'Yes' : 'No'}`, counts
+ * as text in a node and in an attribute, so a technical value such as a product name goes to the
+ * catalog too.
  */
 const TEXT_ATTRIBUTES = new Set(['title', 'aria-label', 'placeholder', 'alt', 'label']);
 const RAW_TEXT_ELEMENTS = new Set(['script', 'style', 'code', 'pre', 'kbd', 'samp']);
 
-// An example value such as `30d`, `ops@example.com` or `https://host/` is data, not a sentence.
-const looksTechnical = (text) => /^[\w.@:/…-]+$/u.test(text) && /[\d@:/.]/.test(text);
+// An example value such as `30d`, `ops@example.com`, `https://host/` or `D:\restore` is data, not a sentence.
+const looksTechnical = (text) => /^[\w.@:/\\…-]+$/u.test(text) && /[\d@:/.]/.test(text);
 
 const needsCatalog = (text) => /\p{L}/u.test(text) && !looksTechnical(text.trim());
 
@@ -85,6 +87,12 @@ export default {
 				for (const value of node.value) {
 					if (value.type === 'SvelteLiteral' && needsCatalog(value.value)) {
 						context.report({ node: value, messageId: 'attribute', data: { name } });
+					} else if (value.type === 'SvelteMustacheTag') {
+						for (const literal of shownLiterals(value.expression)) {
+							if (needsCatalog(literalText(literal) ?? '')) {
+								context.report({ node: literal, messageId: 'attribute', data: { name } });
+							}
+						}
 					}
 				}
 			}

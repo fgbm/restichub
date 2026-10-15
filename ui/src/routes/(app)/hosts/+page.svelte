@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { coalesce } from '#lib/events.ts';
+	import { eventReader } from '#lib/events.ts';
 	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
@@ -213,10 +213,9 @@
 			error = messageOf(problem);
 		} finally {
 			loading = false;
+			reader.loaded();
 		}
 	}
-
-	onMount(load);
 
 	// A used token leaves the pending list and a new host appears without a manual reload.
 	const REFRESH_MS = 10_000;
@@ -247,12 +246,15 @@
 		return () => clearInterval(timer);
 	});
 
-	const refreshSoon = coalesce(() => (loading ? undefined : refresh()), 300);
-	onMount(() =>
-		onEvent((event) => {
-			if (event.type.startsWith('host.') || event.type === 'resync') refreshSoon();
-		})
-	);
+	const reader = eventReader(() => loading, refresh, 300);
+	// The subscription comes before the first load, so an event during the load is not lost.
+	onMount(() => {
+		const off = onEvent((event) => {
+			if (event.type.startsWith('host.') || event.type === 'resync') reader.notify();
+		});
+		void load();
+		return off;
+	});
 
 	function openAdd(): void {
 		labels = '';

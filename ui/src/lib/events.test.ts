@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { coalesce, EVENTS_PATH, EventStream } from './events.ts';
-import type { EventSourceLike, StreamEvent } from './events.ts';
+import { coalesce, EVENTS_PATH, eventReader, EventStream } from './events.ts';
+import type { EventSourceLike, SessionProbe, StreamEvent } from './events.ts';
 
 class FakeSource implements EventSourceLike {
 	readyState = 0;
@@ -91,19 +91,19 @@ describe('ac_ui_02 the event stream client', () => {
 		expect(sources).toHaveLength(1);
 	});
 
-	it('reopens a closed source after a growing delay', () => {
+	it('reopens a closed source after a growing delay', async () => {
 		stream.start();
 		sources[0].close();
 		sources[0].onerror?.(new Event('error'));
-		vi.advanceTimersByTime(1999);
+		await vi.advanceTimersByTimeAsync(1999);
 		expect(sources).toHaveLength(1);
-		vi.advanceTimersByTime(1);
+		await vi.advanceTimersByTimeAsync(1);
 		expect(sources).toHaveLength(2);
 		sources[1].close();
 		sources[1].onerror?.(new Event('error'));
-		vi.advanceTimersByTime(3999);
+		await vi.advanceTimersByTimeAsync(3999);
 		expect(sources).toHaveLength(2);
-		vi.advanceTimersByTime(1);
+		await vi.advanceTimersByTimeAsync(1);
 		expect(sources).toHaveLength(3);
 	});
 
@@ -115,6 +115,74 @@ describe('ac_ui_02 the event stream client', () => {
 		expect(states).toEqual([true, false]);
 		vi.advanceTimersByTime(60_000);
 		expect(sources).toHaveLength(1);
+	});
+});
+
+describe('ac_ui_02 the event stream client after a refusal', () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	function refused(verdict: 'ok' | 'denied'): { sources: FakeSource[]; stream: EventStream } {
+		const sources: FakeSource[] = [];
+		const probe: SessionProbe = async () => verdict;
+		const stream = new EventStream(
+			() => {
+				const source = new FakeSource();
+				sources.push(source);
+				return source;
+			},
+			() => {},
+			probe
+		);
+		stream.start();
+		sources[0].close();
+		sources[0].onerror?.(new Event('error'));
+		return { sources, stream };
+	}
+
+	it('stops when the session is gone or forbidden', async () => {
+		const { sources, stream } = refused('denied');
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(sources).toHaveLength(1);
+		stream.start();
+		expect(sources).toHaveLength(2);
+		stream.stop();
+	});
+
+	it('reopens when the session is valid', async () => {
+		const { sources, stream } = refused('ok');
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(sources).toHaveLength(2);
+		stream.stop();
+	});
+});
+
+describe('eventReader', () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	it('reads again for an event that came during the load', async () => {
+		let loading = true;
+		const read = vi.fn(async () => {});
+		const reader = eventReader(() => loading, read, 100);
+		reader.notify();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(read).not.toHaveBeenCalled();
+		loading = false;
+		reader.loaded();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(read).toHaveBeenCalledTimes(1);
+	});
+
+	it('reads at once for an event after the load, and not again for a quiet load', async () => {
+		const read = vi.fn(async () => {});
+		const reader = eventReader(() => false, read, 100);
+		reader.loaded();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(read).not.toHaveBeenCalled();
+		reader.notify();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(read).toHaveBeenCalledTimes(1);
 	});
 });
 
