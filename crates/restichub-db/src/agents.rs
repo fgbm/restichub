@@ -37,7 +37,7 @@ macro_rules! agent_columns {
 macro_rules! duplicate_join {
     () => {
         "LEFT JOIN LATERAL ( \
-             SELECT o.id, o.hostname FROM agents o \
+             SELECT o.id, o.hostname, o.created_at, o.last_seen_at FROM agents o \
              WHERE a.machine_id_hash IS NOT NULL AND a.status = 'active' \
                AND o.tenant_id = a.tenant_id AND o.machine_id_hash = a.machine_id_hash \
                AND o.id <> a.id AND o.status = 'active' \
