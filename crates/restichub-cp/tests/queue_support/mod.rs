@@ -898,6 +898,7 @@ where
 /// An emulated agent that runs the jobs with the given executor.
 pub struct Emulator {
     pub id: AgentId,
+    pub config: Arc<restichub_emulator::agent::AgentConfig>,
     shutdown: tokio::sync::watch::Sender<bool>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -970,12 +971,21 @@ impl Env {
                 base: Duration::from_millis(50),
                 max: Duration::from_millis(200),
             },
-            load: AgentLoad::new(Arc::new(Metrics::default())),
+            load: {
+                let mut load = AgentLoad::new(Arc::new(Metrics::default()));
+                load.restore_roots = default_restore_roots();
+                load
+            },
         });
         let (shutdown, rx) = tokio::sync::watch::channel(false);
-        let task = tokio::spawn(run_agent(config, rx));
+        let task = tokio::spawn(run_agent(Arc::clone(&config), rx));
         eventually_online(&self.state, id).await;
-        Emulator { id, shutdown, task }
+        Emulator {
+            id,
+            config,
+            shutdown,
+            task,
+        }
     }
 }
 
