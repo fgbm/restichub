@@ -406,11 +406,11 @@
 {/snippet}
 
 {#snippet lastSeenCell(agent: Agent)}
-	{@render timeCell(agent.last_seen_at)}
+	<span class="nowrap">{@render timeCell(agent.last_seen_at)}</span>
 {/snippet}
 
 {#snippet createdCell(agent: Agent)}
-	{@render timeCell(agent.created_at)}
+	<span class="nowrap">{@render timeCell(agent.created_at)}</span>
 {/snippet}
 
 {#snippet hostCell(agent: Agent)}
@@ -430,9 +430,9 @@
 			</StatusPill>
 		</span>
 		{#if agent.possible_duplicate_of && agent.status === 'active'}
-			<span title={t('hosts.duplicateTitle')}>
+			<span title={t('hosts.duplicateTitle', { name: agent.possible_duplicate_of.hostname })}>
 				<Badge tone="warning">
-					{t('hosts.duplicate', { name: agent.possible_duplicate_of.hostname })}
+					{t('hosts.duplicate')}
 				</Badge>
 			</span>
 		{/if}
@@ -593,7 +593,7 @@
 							icon: 'key',
 							onSelect: () => openReregister(agent)
 						},
-						...(agent.possible_duplicate_of
+						...(agent.possible_duplicate_of?.is_older
 							? [
 									{
 										label: t('hosts.replaceOld'),
@@ -622,7 +622,11 @@
 <Dialog
 	bind:open={addOpen}
 	size={createdToken && !registeredHost ? 'lg' : 'md'}
-	title={createdToken ? t('hosts.tokenTitle') : t('hosts.addTitle')}
+	title={registeredHost
+		? t('hosts.registeredTitle')
+		: createdToken
+			? t('hosts.tokenTitle')
+			: t('hosts.addTitle')}
 	description={createdToken ? undefined : t('hosts.addDescription')}
 	onsubmit={createdToken ? closeAdd : createToken}
 >
@@ -725,7 +729,13 @@
 	bind:open={replaceOpen}
 	title={t('hosts.replaceTitle')}
 	message={t('hosts.replaceBody', {
-		old: replaceTarget?.possible_duplicate_of?.hostname ?? ''
+		old: replaceTarget?.possible_duplicate_of?.hostname ?? '',
+		oldSeen: replaceTarget?.possible_duplicate_of?.last_seen_at
+			? relativeTime(replaceTarget.possible_duplicate_of.last_seen_at)
+			: t('common.never'),
+		newSeen: replaceTarget?.last_seen_at
+			? relativeTime(replaceTarget.last_seen_at)
+			: t('common.never')
 	})}
 	confirmLabel={t('hosts.replace')}
 	cancelLabel={t('common.cancel')}
@@ -809,9 +819,13 @@
 
 	.status {
 		display: inline-flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--rh-space-2);
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--rh-space-1);
+	}
+
+	.nowrap {
+		white-space: nowrap;
 	}
 
 	.host {

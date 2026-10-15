@@ -200,7 +200,8 @@ function makeAgents(): Agent[] {
 			expiresInMinutes?: number;
 			rotatedMinutesAgo?: number | null;
 			waiting?: boolean;
-			duplicateOf?: { id: string; hostname: string };
+			duplicateOf?: { id: string; hostname: string; isOlder: boolean; lastSeenMinutes: number };
+			createdMinutesAgo?: number;
 		} = {}
 	): Agent => ({
 		id,
@@ -219,8 +220,18 @@ function makeAgents(): Agent[] {
 					: [],
 		last_seen_at: iso(seen),
 		first_connected_at: options.waiting ? null : iso(60 * 24 * 30),
-		possible_duplicate_of: options.duplicateOf ?? null,
-		created_at: iso(60 * 24 * 30),
+		possible_duplicate_of: options.duplicateOf
+			? {
+					id: options.duplicateOf.id,
+					hostname: options.duplicateOf.hostname,
+					created_at: iso(
+						options.duplicateOf.isOlder ? 60 * 24 * 30 : (options.createdMinutesAgo ?? 0)
+					),
+					last_seen_at: iso(options.duplicateOf.lastSeenMinutes),
+					is_older: options.duplicateOf.isOlder
+				}
+			: null,
+		created_at: iso(options.createdMinutesAgo ?? 60 * 24 * 30),
 		certificate_expires_at: iso(-(options.expiresInMinutes ?? 24 * 60 * 20)),
 		last_certificate_rotation_at:
 			options.rotatedMinutesAgo === undefined || options.rotatedMinutesAgo === null
@@ -248,7 +259,7 @@ function makeAgents(): Agent[] {
 		agent('1', 'win-fs01', 'windows', 'amd64', '0.4.2', 14, {
 			expiresInMinutes: 24 * 27 * 60,
 			rotatedMinutesAgo: 3 * 24 * 60,
-			duplicateOf: { id: '7', hostname: 'win-fs01-new' }
+			duplicateOf: { id: '7', hostname: 'win-fs01-new', isOlder: false, lastSeenMinutes: 5 }
 		}),
 		agent('2', 'srv-db-01', 'linux', 'amd64', '0.4.2', 26, {
 			expiresInMinutes: 2 * 24 * 60,
@@ -275,7 +286,8 @@ function makeAgents(): Agent[] {
 		}),
 		agent('7', 'win-fs01-new', 'windows', 'amd64', '0.4.2', 5, {
 			expiresInMinutes: 29 * 24 * 60,
-			duplicateOf: { id: '1', hostname: 'win-fs01' }
+			createdMinutesAgo: 20,
+			duplicateOf: { id: '1', hostname: 'win-fs01', isOlder: true, lastSeenMinutes: 14 }
 		}),
 		agent('8', 'ws-reception', 'windows', 'amd64', '0.4.2', 2, {
 			expiresInMinutes: 29 * 24 * 60,
@@ -1036,7 +1048,12 @@ export class MockApiService {
 
 	async replaceAgent(id: string, oldAgentId: string): Promise<ReplaceAgentResponse> {
 		const agent = this.agents.find((item) => item.id === id);
-		if (!agent || agent.possible_duplicate_of?.id !== oldAgentId) throw new Error('not found');
+		if (
+			!agent ||
+			agent.possible_duplicate_of?.id !== oldAgentId ||
+			!agent.possible_duplicate_of.is_older
+		)
+			throw new Error('not found');
 		this.agents = this.agents.map((item) => {
 			if (item.id === oldAgentId) {
 				return {
@@ -1048,7 +1065,7 @@ export class MockApiService {
 			}
 			return item.id === id ? { ...item, possible_duplicate_of: null } : item;
 		});
-		return { plans_moved: 0, repositories_moved: 0 };
+		return { plans_moved: 0, repositories_moved: 0, queued_jobs_moved: 0 };
 	}
 
 	async listEnrollmentTokens(): Promise<EnrollmentToken[]> {

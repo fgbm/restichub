@@ -71,3 +71,20 @@ test('an Admin renames a host', async ({ page }) => {
 
 	await expect(page.getByText('win-fs01-renamed', { exact: true })).toBeVisible();
 });
+
+test('the hosts table fits 1440 px without a horizontal scroll (FR-ID-11)', async ({ page }) => {
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Hosts', exact: true })
+		.click();
+	await page.getByText('win-fs01', { exact: true }).waitFor();
+
+	const overflow = await page
+		.locator('.table-scroll')
+		.evaluate((element) => element.scrollWidth - element.clientWidth);
+	expect(overflow).toBeLessThanOrEqual(0);
+	await expect(page.getByText('Duplicate').first()).toBeVisible();
+});

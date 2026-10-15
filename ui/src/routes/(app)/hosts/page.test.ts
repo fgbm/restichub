@@ -316,28 +316,50 @@ describe('the Hosts screen', () => {
 		expect(screen.getAllByText('Active')).toHaveLength(1);
 	});
 
-	it('flags a possible duplicate and replaces the old record (FR-ID-01)', async () => {
+	it('offers the replacement only on the newer record (FR-ID-11, AC-ID-09)', async () => {
 		const user = userEvent.setup({ pointerEventsCheck: 0 });
 		mocks.listAgents.mockResolvedValue([
 			agent({
 				id: 'a_01',
 				hostname: 'old-host',
-				possible_duplicate_of: { id: 'a_02', hostname: 'new-host' }
+				possible_duplicate_of: {
+					id: 'a_02',
+					hostname: 'new-host',
+					created_at: PAST,
+					last_seen_at: PAST,
+					is_older: false
+				}
 			}),
 			agent({
 				id: 'a_02',
 				hostname: 'new-host',
-				possible_duplicate_of: { id: 'a_01', hostname: 'old-host' }
+				possible_duplicate_of: {
+					id: 'a_01',
+					hostname: 'old-host',
+					created_at: PAST,
+					last_seen_at: PAST,
+					is_older: true
+				}
 			})
 		]);
-		mocks.replaceAgent.mockResolvedValue({ plans_moved: 2, repositories_moved: 0 });
+		mocks.replaceAgent.mockResolvedValue({
+			plans_moved: 2,
+			repositories_moved: 0,
+			queued_jobs_moved: 0
+		});
 		render(Hosts);
 
-		await screen.findByText('Possible duplicate of old-host');
-		expect(screen.getByText('Possible duplicate of new-host')).toBeInTheDocument();
+		await screen.findByText('new-host');
+		expect(screen.getAllByText('Duplicate')).toHaveLength(2);
+		await user.click(screen.getByRole('button', { name: 'More actions for old-host' }));
+		await screen.findByText('Re-register');
+		expect(screen.queryByText('Replace the old record')).not.toBeInTheDocument();
+		await user.keyboard('{Escape}');
+
 		await user.click(screen.getByRole('button', { name: 'More actions for new-host' }));
 		await user.click(await screen.findByText('Replace the old record'));
 		const dialog = await screen.findByRole('dialog');
+		expect(within(dialog).getByText(/Last contact/)).toBeInTheDocument();
 		await user.click(within(dialog).getByRole('button', { name: 'Replace' }));
 
 		await waitFor(() => expect(mocks.replaceAgent).toHaveBeenCalledWith('a_02', 'a_01'));
@@ -424,6 +446,8 @@ describe('the Hosts screen', () => {
 
 			await vi.advanceTimersByTimeAsync(10_000);
 			await within(dialog).findByText('Host registered: brand-new');
+			expect(within(dialog).getByRole('heading', { name: 'Host registered' })).toBeInTheDocument();
+			expect(within(dialog).queryByText('Copy the enrollment token')).not.toBeInTheDocument();
 		} finally {
 			vi.useRealTimers();
 		}

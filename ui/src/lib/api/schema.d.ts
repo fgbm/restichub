@@ -93,8 +93,10 @@ export interface paths {
         put?: never;
         /**
          * Replaces the old duplicate record of a host.
-         * @description Both records must be active and must report the same machine identifier. The move and the
-         *     revoke commit in one transaction.
+         * @description Both records must be active and must report the same machine identifier. This record must be
+         *     newer than the old one, and the old one must have been silent for the online window, otherwise
+         *     the answer is HTTP 404 or HTTP 409 `agent_recently_online`. The move and the revoke commit in
+         *     one transaction; the running jobs of the old record are cancelled as for a revoke (FR-ID-04).
          */
         post: operations["replace_agent"];
         delete?: never;
@@ -387,8 +389,9 @@ export interface paths {
         /**
          * Revokes an unused enrollment token of the tenant (a soft change).
          * @description A used, an already revoked or an expired token gives HTTP 409 with the code `token_used`,
-         *     `token_already_revoked` or `token_expired` and changes nothing. An unknown token gives HTTP 404. The conditional update and the re-read answer without a time-of-check gap, and a
-         *     failed revoke writes no audit record.
+         *     `token_already_revoked` or `token_expired` and changes nothing. An unknown token gives HTTP 404.
+         *     The conditional update and the re-read answer without a time-of-check gap, and a failed revoke
+         *     writes no audit record.
          */
         delete: operations["revoke_enrollment_token"];
         options?: never;
@@ -2097,8 +2100,15 @@ export interface components {
             repositories: components["schemas"]["DashboardRepository"][];
         };
         DuplicateOfView: {
+            created_at: string;
             hostname: string;
             id: string;
+            /**
+             * @description True when the other record was created before this one. Only the newer record offers the
+             *     replacement of the older one (FR-ID-11).
+             */
+            is_older: boolean;
+            last_seen_at?: string | null;
         };
         EnrollRequest: {
             agent_version: string;
@@ -2107,8 +2117,8 @@ export interface components {
             csr: string;
             hostname: string;
             /**
-             * @description The stable identifier of the machine, for the duplicate warning. The control plane stores a
-             *     tenant-keyed hash only. Optional: an older agent or an unsupported system sends none.
+             * @description An application-specific digest of the machine identifier, for the duplicate warning. The
+             *     control plane stores a keyed hash of it only. Optional: an older agent or an unsupported system sends none.
              */
             machine_id?: string | null;
             os: string;
@@ -2181,7 +2191,7 @@ export interface components {
         /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online";
         /**
          * @description What a failed script does to the job.
          * @enum {string}
@@ -2833,7 +2843,7 @@ export interface components {
         ReenrollAgentRequest: {
             /**
              * Format: int64
-             * @description The time to live in seconds. Between 60 and 86400. The default is 3600.
+             * @description The time to live in seconds. Between 60 and 3600. The default is 3600.
              */
             ttl_seconds?: number | null;
         };
@@ -2847,6 +2857,8 @@ export interface components {
         ReplaceAgentResponse: {
             /** Format: int64 */
             plans_moved: number;
+            /** Format: int64 */
+            queued_jobs_moved: number;
             /** Format: int64 */
             repositories_moved: number;
         };
@@ -3771,6 +3783,15 @@ export interface operations {
             };
             /** @description The pair is not a possible duplicate. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The old record was online recently (`agent_recently_online`). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -337,6 +337,7 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.status.waiting': 'Ожидает подключения',
 	'hosts.waitingTitle': 'Агент зарегистрировался, но ещё не подключился.',
 	'hosts.registered': 'Хост зарегистрирован: {name}',
+	'hosts.registeredTitle': 'Хост зарегистрирован',
 	'hosts.reregister': 'Зарегистрировать заново',
 	'hosts.reregisterTitle': 'Зарегистрировать хост заново?',
 	'hosts.reregisterBody':
@@ -346,12 +347,13 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.reregisterNote':
 		'Токен действует один раз и истекает через час. Выполните команду на компьютере хоста «{name}».',
 	'hosts.reregisterCommand': 'restichub-agent register --force --url {url} --token {token}',
-	'hosts.duplicate': 'Возможный дубль хоста «{name}»',
-	'hosts.duplicateTitle': 'Другой активный хост сообщил об этом же компьютере.',
+	'hosts.duplicate': 'Дубль',
+	'hosts.duplicateTitle':
+		'Возможный дубль хоста «{name}»: другой активный хост сообщил об этом же компьютере.',
 	'hosts.replaceOld': 'Заменить старую запись',
 	'hosts.replaceTitle': 'Заменить старую запись?',
 	'hosts.replaceBody':
-		'Это действие перенесёт планы, ссылки на хост обслуживания и метки хоста «{old}» на этот хост. Затем оно отзовёт «{old}». Продолжить?',
+		'Это действие перенесёт планы, ссылки на хост обслуживания, задания в очереди и метки хоста «{old}» на этот хост. Затем оно отзовёт «{old}» и отменит его выполняющиеся задания. Последний контакт: «{old}» — {oldSeen}, этот хост — {newSeen}. Продолжить?',
 	'hosts.replace': 'Заменить',
 	'hosts.replaced': 'Старая запись заменена. Перенесено планов: {plans}.',
 	'hosts.revoke': 'Отозвать',

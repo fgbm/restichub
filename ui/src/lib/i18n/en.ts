@@ -331,6 +331,7 @@ export const en = {
 	'hosts.status.waiting': 'Waiting for connection',
 	'hosts.waitingTitle': 'The agent registered but has not connected yet.',
 	'hosts.registered': 'Host registered: {name}',
+	'hosts.registeredTitle': 'Host registered',
 	'hosts.reregister': 'Re-register',
 	'hosts.reregisterTitle': 'Re-register the host?',
 	'hosts.reregisterBody':
@@ -340,12 +341,13 @@ export const en = {
 	'hosts.reregisterNote':
 		'The token works once and expires in one hour. Run the command on the computer of the host "{name}".',
 	'hosts.reregisterCommand': 'restichub-agent register --force --url {url} --token {token}',
-	'hosts.duplicate': 'Possible duplicate of {name}',
-	'hosts.duplicateTitle': 'Another active host reported the same computer.',
+	'hosts.duplicate': 'Duplicate',
+	'hosts.duplicateTitle':
+		'Possible duplicate of {name}: another active host reported the same computer.',
 	'hosts.replaceOld': 'Replace the old record',
 	'hosts.replaceTitle': 'Replace the old record?',
 	'hosts.replaceBody':
-		'This action moves the plans, the maintenance host references and the labels of the host "{old}" to this host. It then revokes "{old}". Continue?',
+		'This action moves the plans, the maintenance host references, the queued jobs and the labels of the host "{old}" to this host. It then revokes "{old}" and cancels its running jobs. Last contact: "{old}" {oldSeen}, this host {newSeen}. Continue?',
 	'hosts.replace': 'Replace',
 	'hosts.replaced': 'The old record is replaced. Plans moved: {plans}.',
 	'hosts.revoke': 'Revoke',
