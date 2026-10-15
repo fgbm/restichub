@@ -1,3 +1,4 @@
+// @ts-nocheck -- an ESLint rule works on untyped syntax tree nodes.
 /*
  * AC-UI-03: a template shows no user text that skips the i18n catalogs.
  *

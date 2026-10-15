@@ -19,7 +19,7 @@ function messages(source: string): string[] {
 			{
 				files: ['**/*.svelte'],
 				languageOptions: { parser: svelteParser },
-				plugins: { local: { rules: { 'no-hardcoded-text': rule } } },
+				plugins: { local: { rules: { 'no-hardcoded-text': rule as never } } },
 				rules: { 'local/no-hardcoded-text': 'error' }
 			}
 		],
