@@ -210,6 +210,48 @@ async fn adr_0035_browse_requests_have_an_actor_limit_and_an_agent_cap() {
     env.db.cleanup().await;
 }
 
+/// ADR-0035: parallel requests cannot pass the cap of waiting browse jobs of one agent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn adr_0035_parallel_browse_requests_respect_the_agent_cap() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = std::sync::Arc::new(Env::start_with_browse_rate(db, test_queue(), Some(1000)).await);
+    let agent = env.connect_agent("parallel-host").await;
+    let repository =
+        initialized_repository(&env, agent.id, "pw", &work_dir("parallel").join("repo")).await;
+    let second =
+        initialized_repository(&env, agent.id, "pw", &work_dir("parallel").join("repo2")).await;
+
+    let mut set = tokio::task::JoinSet::new();
+    for index in 0..16 {
+        let env = std::sync::Arc::clone(&env);
+        set.spawn(async move {
+            // Two repositories of one agent: the lock of the repository row alone cannot serialize them.
+            let repository = if index % 2 == 0 { repository } else { second };
+            post(&env, &ls_uri(repository), page(&format!("/p{index}")))
+                .await
+                .0
+        });
+    }
+    let mut accepted = 0;
+    while let Some(status) = set.join_next().await {
+        if status.expect("the request task must finish") == StatusCode::ACCEPTED {
+            accepted += 1;
+        }
+    }
+    assert_eq!(accepted, 8, "the cap is 8 waiting browse jobs");
+
+    let mut tx = env.scoped().await;
+    let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'ls'")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("cannot count the jobs");
+    tx.commit().await.expect("cannot end the read");
+    assert!(jobs <= 8, "{jobs} browse jobs wait");
+    env.db.cleanup().await;
+}
+
 /// ADR-0035: a snapshot list or a page that starts a job writes `browse_start` with the agent that
 /// gets the repository keys.
 #[tokio::test]

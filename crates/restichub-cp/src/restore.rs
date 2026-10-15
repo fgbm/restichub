@@ -381,6 +381,7 @@ async fn create_job(
         check_restore_target(state, agent_id, &os, &restore.target)?;
     } else {
         check_browse_rate(state, context)?;
+        restore_repo::lock_agent(&mut tx, agent_id).await?;
         if let Some(pending) = restore_repo::find_pending(
             &mut tx,
             kind.as_str(),

@@ -246,6 +246,17 @@ pub async fn find_pending(
     Ok(row.map(|(id,)| id))
 }
 
+/// Locks the agent row until the end of the transaction. Two control plane instances then count
+/// and insert the browse jobs of one agent one after the other, so the cap holds (ADR-0035).
+pub async fn lock_agent(tx: &mut TenantTx<'_>, agent: AgentId) -> Result<(), DbError> {
+    sqlx::query("SELECT 1 FROM agents WHERE id = $1 FOR UPDATE")
+        .bind(agent)
+        .fetch_optional(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(())
+}
+
 /// The number of browse jobs that wait or run on one agent.
 pub async fn count_pending_browse(
     tx: &mut TenantTx<'_>,
