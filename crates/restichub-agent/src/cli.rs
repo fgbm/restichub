@@ -14,13 +14,13 @@ USAGE:
   restichub-agent <command> [options]
 
 COMMANDS:
-  register           enroll this host with a control plane
-  install-service    download restic if absent, then write and enable the operating system service
+  register           enroll this host, then install and start the service and wait for the connection
+  install-service    download restic if absent, then write, enable and start the operating system service
   restic update      download the latest restic and replace the installed one
   uninstall-service  stop and remove the operating system service
   run                run the agent (the protocol stream)
   trust-server-scripts  turn the local trust mode for server scripts on or off
-  status             print the stored identity facts
+  status             print the identity, restic, the service and the connection; exit code 1 when not connected
   version            print the agent version
   help               print this help
 
@@ -35,6 +35,7 @@ REGISTER OPTIONS:
   --token-stdin      read the token from the standard input
   --ca-file PATH     CA certificate that verifies the control plane
   --force            replace an existing identity (re-register)
+  --no-service       only enroll; do not install or start the service
   --help             print this help
 
 RESTIC OPTIONS (register, install-service, restic update):
@@ -73,6 +74,7 @@ pub struct RegisterOptions {
     pub token_stdin: bool,
     pub ca_file: Option<PathBuf>,
     pub force: bool,
+    pub no_service: bool,
     pub restic: ResticFileOptions,
 }
 
@@ -135,6 +137,7 @@ fn parse_register(args: &[String]) -> Result<RegisterOptions> {
                 options.ca_file = Some(PathBuf::from(take_value(args, &mut index, &name)?));
             }
             "--force" => options.force = true,
+            "--no-service" => options.no_service = true,
             "--help" | "-h" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -323,6 +326,17 @@ mod tests {
             Command::ResticUpdate(options) if options.allow_downgrade && options.no_restart
         ));
         assert!(parse_args(&["install-service", "--no-restart"]).is_err());
+    }
+
+    #[test]
+    fn fr_in_07_register_installs_the_service_unless_told_otherwise() {
+        let plain = parse_args(&["register", "--url", "https://cp.example", "--token", "t"])
+            .expect("command");
+        assert!(matches!(plain, Command::Register(options) if !options.no_service));
+        let only = parse_args(&["register", "--url", "https://cp.example", "--no-service"])
+            .expect("command");
+        assert!(matches!(only, Command::Register(options) if options.no_service));
+        assert!(parse_args(&["install-service", "--no-service"]).is_err());
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -
          ExecStart=\"{exe}\" run\n\
          Restart=on-failure\n\
          RestartSec=5\n\
+         RestartPreventExitStatus={no_identity}\n\
          UMask=0077\n\
          LimitCORE=0\n\
          NoNewPrivileges=true\n\
@@ -72,6 +73,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -
          [Install]\n\
          WantedBy=multi-user.target\n",
         exe = exe.display(),
+        no_identity = crate::commands::EXIT_NO_IDENTITY,
         capabilities = CAPABILITIES,
         cache = CACHE_DIR,
         config = config_dir.display(),
@@ -85,7 +87,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -
 ///
 /// Returns an error when the unit cannot be written or `systemctl` fails.
 pub fn install(restic: &Path) -> Result<()> {
-    let exe = std::env::current_exe().context("cannot find the agent executable")?;
+    let exe = crate::paths::agent_exe();
     // A binary that another account can replace defeats the service hardening (T20).
     super::location::check(&exe, restic)?;
     let config = crate::paths::config_dir();
@@ -107,8 +109,45 @@ pub fn install(restic: &Path) -> Result<()> {
     std::fs::write(&path, unit_contents(&exe, &config, access.roots()))
         .with_context(|| format!("cannot write {}", path.display()))?;
     systemctl(&["daemon-reload"])?;
-    systemctl(&["enable", "--now", SERVICE_NAME])?;
-    println!("the unit {} is installed and enabled", path.display());
+    systemctl(&["enable", SERVICE_NAME])?;
+    // A restart also starts a stopped unit, and it makes a running unit use the new unit file.
+    systemctl(&["restart", SERVICE_NAME])?;
+    Ok(())
+}
+
+/// Reads `systemctl` output; a missing unit is a state, not an error.
+///
+/// # Errors
+///
+/// Returns an error when the `systemctl` program does not start, for example when it is not installed.
+pub fn state() -> Result<super::ServiceState> {
+    use super::{ServiceState, StartType};
+    if !unit_path().exists() {
+        return Ok(ServiceState::NOT_INSTALLED);
+    }
+    let active = systemctl_text(&["is-active", SERVICE_NAME])?;
+    let enabled = systemctl_text(&["is-enabled", SERVICE_NAME])?;
+    Ok(ServiceState {
+        installed: true,
+        running: active == "active",
+        start_type: match enabled.as_str() {
+            "enabled" | "enabled-runtime" => StartType::Automatic,
+            "disabled" => StartType::Disabled,
+            "static" | "indirect" => StartType::Manual,
+            _ => StartType::Unknown,
+        },
+    })
+}
+
+/// Stops the active unit and leaves an absent or stopped one alone.
+///
+/// # Errors
+///
+/// Returns an error when `systemctl` cannot stop the unit.
+pub fn stop() -> Result<()> {
+    if unit_path().exists() && systemctl_text(&["is-active", SERVICE_NAME])? == "active" {
+        systemctl(&["stop", SERVICE_NAME])?;
+    }
     Ok(())
 }
 
@@ -156,6 +195,20 @@ pub fn uninstall() -> Result<()> {
     Ok(())
 }
 
+/// The first output line of a query. `is-active` and `is-enabled` exit non-zero for a plain "no".
+fn systemctl_text(args: &[&str]) -> Result<String> {
+    let output = Command::new("systemctl")
+        .args(args)
+        .output()
+        .context("cannot run systemctl")?;
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_owned())
+}
+
 fn systemctl(args: &[&str]) -> Result<()> {
     let status = Command::new("systemctl")
         .args(args)
@@ -187,6 +240,7 @@ mod tests {
             )
         );
         assert!(unit.contains("NoNewPrivileges=true"));
+        assert!(unit.contains("RestartPreventExitStatus=78\n"));
         assert!(unit.contains("ProtectSystem=strict"));
         assert!(unit.contains("PrivateTmp=true"));
         assert!(unit.contains("WantedBy=multi-user.target"));

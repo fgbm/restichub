@@ -7,6 +7,7 @@
 pub mod acl;
 pub mod cli;
 pub mod commands;
+pub mod connection;
 pub mod enroll;
 pub mod exec;
 pub mod hooks;
@@ -29,7 +30,9 @@ pub mod restore_roots;
 pub mod rotation;
 pub mod scripts;
 mod scrub;
+pub mod self_install;
 pub mod service;
+pub mod setup;
 pub mod stream;
 pub mod verify;
 #[cfg(windows)]

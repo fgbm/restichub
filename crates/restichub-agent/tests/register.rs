@@ -10,6 +10,8 @@ use restichub_agent::cli::RegisterOptions;
 use restichub_agent::commands;
 use restichub_agent::identity::StoredIdentity;
 use restichub_agent::restic::Restic;
+use restichub_agent::service::{ServiceManager, ServiceState, StartType};
+use restichub_agent::setup::WaitOptions;
 use x509_parser::prelude::{FromDer as _, GeneralName, X509Certificate};
 
 /// A restic double for the enrollment tests. The hash check has its own unit tests (AC-AG-11).
@@ -22,6 +24,52 @@ impl Restic for FakeRestic {
 
     fn version(&self) -> anyhow::Result<String> {
         Ok("0.19.1".to_owned())
+    }
+}
+
+/// A service manager double. A start writes the status file like a service that connected.
+struct FakeService {
+    dir: PathBuf,
+    starts: std::sync::Mutex<Vec<PathBuf>>,
+}
+
+impl FakeService {
+    fn new(dir: &Path) -> Self {
+        Self {
+            dir: dir.to_path_buf(),
+            starts: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn starts(&self) -> Vec<PathBuf> {
+        self.starts.lock().expect("lock").clone()
+    }
+}
+
+impl ServiceManager for FakeService {
+    fn install_and_start(&self, restic: &Path) -> anyhow::Result<()> {
+        self.starts.lock().expect("lock").push(restic.to_path_buf());
+        restichub_agent::connection::record_connected(&self.dir, "https://cp.example");
+        Ok(())
+    }
+
+    fn state(&self) -> anyhow::Result<ServiceState> {
+        Ok(ServiceState {
+            installed: true,
+            running: true,
+            start_type: StartType::Automatic,
+        })
+    }
+
+    fn stop(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+fn quick() -> WaitOptions {
+    WaitOptions {
+        timeout: std::time::Duration::from_secs(2),
+        poll: std::time::Duration::from_millis(10),
     }
 }
 
@@ -106,6 +154,89 @@ async fn ac_in_02_register_enrolls_the_host_and_stores_no_token() {
         );
     }
 
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture.db.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_in_07_register_installs_and_starts_the_service_and_reports_the_connection() {
+    let Some(fixture) = common::fixture("agent-register-service").await else {
+        return;
+    };
+    let dir = common::temp_config_dir("register-service");
+    let register_options = options(&fixture, false);
+    commands::register_async(
+        &register_options,
+        &dir,
+        &dir.with_extension("cache"),
+        &FakeRestic,
+    )
+    .await
+    .expect("the agent must register");
+    let service = FakeService::new(&dir);
+
+    let report = commands::start_after_register(
+        &register_options,
+        &dir,
+        &service,
+        Path::new("/opt/restichub-agent/restic"),
+        quick(),
+    )
+    .expect("the service setup must run")
+    .expect("a report");
+
+    assert_eq!(
+        service.starts(),
+        [PathBuf::from("/opt/restichub-agent/restic")]
+    );
+    assert!(report.connected());
+    let summary = restichub_agent::setup::render_report(&report, Some("host-1"));
+    assert!(
+        summary.contains("registered as host-1 (agent id "),
+        "{summary}"
+    );
+    assert!(summary.contains("installed and running"), "{summary}");
+    // ADR-0032: the one-time token is nowhere in the status file.
+    let status =
+        std::fs::read(dir.join(restichub_agent::connection::STATUS_FILE)).expect("the status file");
+    assert!(!contains(&status, fixture.token.as_bytes()));
+
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture.db.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_in_07_no_service_registers_without_touching_the_service() {
+    let Some(fixture) = common::fixture("agent-register-no-service").await else {
+        return;
+    };
+    let dir = common::temp_config_dir("register-no-service");
+    let register_options = RegisterOptions {
+        no_service: true,
+        ..options(&fixture, false)
+    };
+    commands::register_async(
+        &register_options,
+        &dir,
+        &dir.with_extension("cache"),
+        &FakeRestic,
+    )
+    .await
+    .expect("the agent must register");
+    let service = FakeService::new(&dir);
+
+    let report = commands::start_after_register(
+        &register_options,
+        &dir,
+        &service,
+        Path::new("/opt/restichub-agent/restic"),
+        quick(),
+    )
+    .expect("no service setup is not an error");
+
+    assert!(report.is_none());
+    assert!(service.starts().is_empty());
+    assert!(StoredIdentity::load(&dir).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
     fixture.db.cleanup().await;
 }

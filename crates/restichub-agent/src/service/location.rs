@@ -48,14 +48,14 @@ fn check_unix(path: &Path) -> Result<()> {
     // A group or an account other than root with write access can replace the binary.
     if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
         anyhow::bail!(
-            "{} is writable by an account other than root; install the agent under /opt/restichub-agent and keep it root-owned",
+            "{} is writable by an account other than root; run `restichub-agent register` or `install-service` so that the agent installs itself under /opt/restichub-agent",
             path.display()
         );
     }
     // An extended POSIX ACL can grant a write that the mode does not show.
     if crate::acl::has_extended_acl(path)? {
         anyhow::bail!(
-            "{} holds an extended access control list; install the agent under /opt/restichub-agent and keep it root-owned",
+            "{} holds an extended access control list; run `restichub-agent register` or `install-service` so that the agent installs itself under /opt/restichub-agent",
             path.display()
         );
     }
@@ -74,7 +74,7 @@ fn check_parent_dir(path: &Path) -> Result<()> {
 
 #[cfg(windows)]
 fn install_hint() -> String {
-    "install the agent under %ProgramFiles%\\ResticHub\\Agent and keep it owned by SYSTEM and Administrators".to_owned()
+    "run `restichub-agent register` or `install-service` so that the agent installs itself under %ProgramFiles%\\ResticHub\\Agent".to_owned()
 }
 
 #[cfg(not(any(unix, windows)))]

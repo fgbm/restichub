@@ -10,6 +10,9 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("restichub-agent: {error:#}");
+            if error.downcast_ref::<commands::NoIdentity>().is_some() {
+                return ExitCode::from(commands::EXIT_NO_IDENTITY);
+            }
             ExitCode::FAILURE
         }
     }
@@ -49,7 +52,7 @@ fn run() -> anyhow::Result<()> {
         }
         Command::InstallService(options) => {
             init_tracing();
-            service::install(&options)
+            commands::install_service(&options)
         }
         Command::ResticUpdate(options) => {
             init_tracing();
