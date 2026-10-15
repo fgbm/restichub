@@ -833,7 +833,12 @@
 				required
 			/>
 		{/if}
-		<a class="manage-secrets" href={resolve('/(app)/settings/access/secrets')}>
+		<a
+			class="manage-secrets"
+			href={resolve('/(app)/settings/access/secrets')}
+			target="_blank"
+			rel="noopener"
+		>
 			{t('secrets.manage')}
 		</a>
 		{#if kind === 's3'}

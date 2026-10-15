@@ -325,6 +325,7 @@ export const en = {
 	'secrets.usage.repository': 'Repository',
 	'secrets.usage.profile': 'Profile',
 	'secrets.usage.channel': 'Channel',
+	'secrets.usage.jobTemplate': 'Job template',
 	'secrets.replace': 'Replace value',
 	'secrets.replaceTitle': 'Replace the value of the secret',
 	'secrets.replaceHidden': 'The old value stays hidden',

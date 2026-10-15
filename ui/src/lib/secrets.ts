@@ -33,12 +33,17 @@ export function purposeKey(purpose: string): MessageKey | null {
 export const USAGE_KEYS: Record<SecretUsageKind, MessageKey> = {
 	repository: 'secrets.usage.repository',
 	profile: 'secrets.usage.profile',
-	channel: 'secrets.usage.channel'
+	channel: 'secrets.usage.channel',
+	job_template: 'secrets.usage.jobTemplate'
 };
 
 export function usageHref(
 	usage: SecretUsage
-): '/(app)/repositories' | '/(app)/profiles' | '/(app)/settings/notifications/channels' {
+):
+	| '/(app)/repositories'
+	| '/(app)/profiles'
+	| '/(app)/settings/notifications/channels'
+	| '/(app)/settings/scripts/jobs' {
 	switch (usage.kind) {
 		case 'repository':
 			return '/(app)/repositories';
@@ -46,6 +51,8 @@ export function usageHref(
 			return '/(app)/profiles';
 		case 'channel':
 			return '/(app)/settings/notifications/channels';
+		case 'job_template':
+			return '/(app)/settings/scripts/jobs';
 	}
 }
 

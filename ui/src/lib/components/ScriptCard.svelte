@@ -222,7 +222,12 @@
 									<Button variant="ghost" icon="plus" onclick={() => onNewSecret(index)}>
 										{t('scripts.secret.new')}
 									</Button>
-									<a class="param__manage" href={resolve('/(app)/settings/access/secrets')}>
+									<a
+										class="param__manage"
+										href={resolve('/(app)/settings/access/secrets')}
+										target="_blank"
+										rel="noopener"
+									>
 										{t('secrets.manage')}
 									</a>
 								{/if}

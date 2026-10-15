@@ -3132,7 +3132,7 @@ export interface components {
          * @description The kind of the object that references a secret.
          * @enum {string}
          */
-        SecretUsageKind: "repository" | "channel" | "profile";
+        SecretUsageKind: "repository" | "channel" | "profile" | "job_template";
         /** @description One object that references a secret. */
         SecretUsageView: {
             id: string;
@@ -8786,6 +8786,15 @@ export interface operations {
             };
             /** @description The secret is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description An object uses the secret. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -25,7 +25,10 @@
 		wasReplaced
 	} from '#lib/secrets.ts';
 	import type { CreatablePurpose } from '#lib/secrets.ts';
+	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+
+	const canWrite = $derived(['admin', 'platform_admin'].includes(getSession()?.role ?? ''));
 
 	let secrets = $state<Secret[]>([]);
 	let loading = $state(true);
@@ -185,7 +188,7 @@
 		}
 	}
 
-	// The secret values never reach this component after a dialog closes.
+	// Drop typed values when a dialog closes.
 	$effect(() => {
 		if (!createOpen) newValue = '';
 	});
@@ -193,6 +196,15 @@
 		if (!replaceOpen) replaceValue = '';
 	});
 </script>
+
+{#snippet rowActions(secret: Secret)}
+	{#if canReplaceValue(secret)}
+		<Button size="sm" onclick={() => openReplace(secret)}>{t('secrets.replace')}</Button>
+	{/if}
+	<Button size="sm" icon="trash" onclick={() => openDelete(secret)}>
+		{t('secrets.delete')}
+	</Button>
+{/snippet}
 
 {#snippet nameCell(secret: Secret)}
 	<span class="secret-name">{secret.name}</span>
@@ -243,7 +255,9 @@
 	count={loading ? undefined : secrets.length}
 >
 	{#snippet actions()}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('secrets.create')}</Button>
+		{#if canWrite}
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('secrets.create')}</Button>
+		{/if}
 	{/snippet}
 
 	<Table
@@ -252,17 +266,9 @@
 		{loading}
 		{error}
 		rowKey={(secret) => secret.id}
+		rowActions={canWrite ? rowActions : undefined}
 		filterPlaceholder={t('secrets.searchPlaceholder')}
-	>
-		{#snippet rowActions(secret)}
-			{#if canReplaceValue(secret)}
-				<Button size="sm" onclick={() => openReplace(secret)}>{t('secrets.replace')}</Button>
-			{/if}
-			<Button size="sm" icon="trash" onclick={() => openDelete(secret)}>
-				{t('secrets.delete')}
-			</Button>
-		{/snippet}
-	</Table>
+	/>
 
 	<Alert variant="inline" icon="lock" title={t('secrets.note')} />
 </SettingsLayout>

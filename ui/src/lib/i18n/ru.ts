@@ -332,6 +332,7 @@ export const ru: Record<MessageKey, string> = {
 	'secrets.usage.repository': 'Репозиторий',
 	'secrets.usage.profile': 'Профиль',
 	'secrets.usage.channel': 'Канал',
+	'secrets.usage.jobTemplate': 'Шаблон задания',
 	'secrets.replace': 'Заменить значение',
 	'secrets.replaceTitle': 'Заменить значение секрета',
 	'secrets.replaceHidden': 'Старое значение остаётся скрытым',

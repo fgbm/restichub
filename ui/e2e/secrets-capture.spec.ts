@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
-// Captures the Secrets screen for a review. It runs only with CAPTURE and CAPTURE_DIR set, so CI
+// Captures the Secrets screen as screenshots. It runs only with CAPTURE and CAPTURE_DIR set, so CI
 // skips it.
 const dir = process.env.CAPTURE_DIR;
 test.skip(!process.env.CAPTURE || !dir, 'set CAPTURE and CAPTURE_DIR to write the screenshots');

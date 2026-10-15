@@ -15,11 +15,13 @@ const mocks = vi.hoisted(() => ({
 	pushToast: vi.fn()
 }));
 
+const session = vi.hoisted(() => ({ role: 'admin' }));
+
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
-		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: 'admin' },
+		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
 		tenant: { id: 't_01', name: 'acme' },
-		role: 'admin'
+		role: session.role
 	})
 }));
 
@@ -66,6 +68,7 @@ const REPO = {
 };
 
 beforeEach(() => {
+	session.role = 'admin';
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.listSecrets.mockResolvedValue([FREE, SCRIPT, REPO]);
 	mocks.createSecret.mockResolvedValue(FREE);
@@ -85,6 +88,15 @@ describe('Secrets screen', () => {
 			'/repositories'
 		);
 		expect(screen.getByText('Not used')).toBeInTheDocument();
+	});
+
+	it('shows no change action to a Viewer', async () => {
+		session.role = 'viewer';
+		render(Secrets);
+		await screen.findByText('db.password');
+		expect(screen.queryByRole('button', { name: 'Add secret' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Replace value' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
 	});
 
 	it('hides the replace action for the password of a repository', async () => {
