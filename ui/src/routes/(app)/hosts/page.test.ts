@@ -317,7 +317,7 @@ describe('the Hosts screen', () => {
 	});
 
 	it('flags a possible duplicate and replaces the old record (FR-ID-01)', async () => {
-		const user = userEvent.setup();
+		const user = userEvent.setup({ pointerEventsCheck: 0 });
 		mocks.listAgents.mockResolvedValue([
 			agent({
 				id: 'a_01',

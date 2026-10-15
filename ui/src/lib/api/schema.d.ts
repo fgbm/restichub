@@ -2056,7 +2056,7 @@ export interface components {
             offline: number;
             online: number;
             total: number;
-            /** @description Hosts that wait for their first connection. */
+            /** @description Counted in neither `online` nor `offline`: the host never opened a stream. */
             waiting: number;
         };
         DashboardPlan: {
