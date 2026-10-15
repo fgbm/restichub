@@ -30,8 +30,8 @@ pub const RETENTION_INTERVAL: Duration = Duration::from_secs(3600);
 /// Bounds one delete statement, so a sweep never holds a long lock.
 const SWEEP_BATCH: i64 = 5000;
 
-/// The most bytes that the control plane accepts in one log chunk. The agent sends 8 KiB.
-pub const MAX_CHUNK_BYTES: usize = 64 * 1024;
+/// The most bytes that the control plane accepts in one log chunk. The agent splits longer text.
+pub const MAX_CHUNK_BYTES: usize = restichub_proto::MAX_LOG_CHUNK_BYTES;
 
 /// The most characters of one stored line. The database check holds the same value.
 const MAX_LINE_CHARS: usize = 8192;

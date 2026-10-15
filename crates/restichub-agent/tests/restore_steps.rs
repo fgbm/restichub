@@ -313,6 +313,7 @@ async fn fr_pr_10_a_restore_value_never_becomes_an_option() {
     {
         let (tx, mut rx) = mpsc::channel(8);
         jobs.attach(&tx);
+        jobs.greeted(false);
         let job = fixture.job(
             &format!("job-bad-{index}"),
             vec![make_step("restore", step::Kind::Restore(bad))],
@@ -347,6 +348,7 @@ async fn ac_rs_05_a_target_outside_the_roots_or_on_the_agent_files_is_rejected()
     for (index, target) in targets.iter().enumerate() {
         let (tx, mut rx) = mpsc::channel(8);
         jobs.attach(&tx);
+        jobs.greeted(false);
         let job = fixture.job(
             &format!("job-denied-{index}"),
             vec![make_step(
@@ -391,6 +393,7 @@ async fn ac_rs_05_a_link_to_the_configuration_directory_is_rejected() {
     std::os::unix::fs::symlink(&fixture.dir, &link).expect("cannot create the link");
     let (tx, mut rx) = mpsc::channel(8);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let job = fixture.job(
         "job-link",
         vec![make_step(
@@ -419,6 +422,7 @@ async fn adr_0035_browse_jobs_have_their_own_room() {
     let jobs = program_jobs(&slow.dir);
     let (tx, mut rx) = mpsc::channel(64);
     jobs.attach(&tx);
+    jobs.greeted(false);
 
     for index in 0..3 {
         let job = slow.job(

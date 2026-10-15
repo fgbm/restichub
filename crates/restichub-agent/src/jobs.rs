@@ -33,6 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -49,6 +50,7 @@ use restichub_proto::signing::{
 use tokio::sync::mpsc;
 
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
+use crate::log_spool::LogSpool;
 use crate::restic_store::Layout;
 use crate::restore_roots::RestoreAccess;
 use crate::scripts::ScriptStore;
@@ -58,12 +60,14 @@ mod log;
 mod outcome;
 mod phases;
 mod runner;
+mod spooling;
 mod watchdog;
 
 use log::JobLog;
 use outcome::{Progress, interrupted_error, job_error, job_outcome};
 use phases::{PhaseMode, Phased, ScriptFailure, Sink};
 use runner::{CancelHandle, StepError, StepOutcome};
+use spooling::LogMode;
 use watchdog::StepLimits;
 
 /// The grace period between the graceful stop signal and the forced kill of the process tree
@@ -130,6 +134,13 @@ pub struct Jobs {
     restore: Arc<RestoreAccess>,
     /// The agent reads it again at each job (FR-HK-08).
     scripts: Arc<ScriptStore>,
+    /// The log chunks that the control plane did not acknowledge yet (FR-LG-07).
+    log_spool: Arc<LogSpool>,
+    /// The [`LogMode`] of the open stream, as a code.
+    log_mode: Arc<AtomicU8>,
+    /// Wakes the drain task when a chunk waits in the spool.
+    log_wake: Arc<tokio::sync::Notify>,
+    log_drain: Arc<Mutex<Option<tokio::task::AbortHandle>>>,
 }
 
 impl Jobs {
@@ -165,7 +176,19 @@ impl Jobs {
             cleanup_grace: CLEANUP_GRACE,
             restore: Arc::new(restore),
             scripts: Arc::new(scripts),
+            log_spool: Arc::new(LogSpool::open(dir, LogSpool::max_bytes_from_env())),
+            log_mode: Arc::new(AtomicU8::new(LogMode::Direct as u8)),
+            log_wake: Arc::new(tokio::sync::Notify::new()),
+            log_drain: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Replaces the log spool, for a test that needs a small cap (FR-LG-07).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_log_spool(mut self, spool: LogSpool) -> Self {
+        self.log_spool = Arc::new(spool);
+        self
     }
 
     /// Replaces the place and the trust rule of the server scripts setting (FR-HK-08).
@@ -247,9 +270,15 @@ impl Jobs {
 
     /// Sets the stream that carries the results (ADR-0020).
     ///
-    /// The connect loop calls it after the stream opens, before it sends the stored results.
+    /// The connect loop calls it after the stream opens, before it sends the stored results. Log
+    /// chunks wait in the spool until [`Self::greeted`] tells what the control plane accepts, so
+    /// they keep their order across the greeting (FR-LG-07).
     pub fn attach(&self, tx: &mpsc::Sender<AgentMessage>) {
+        self.set_log_mode(LogMode::Pending);
+        // Nothing went out on this stream yet, whatever the stream before it got.
+        self.log_spool.rewind_all();
         *lock(&self.connection) = Some(tx.clone());
+        self.start_log_drain(tx.clone());
     }
 
     /// Verifies, admits and dispatches one signed job (FR-PR-03, FR-PR-06, ADR-0020).
@@ -486,6 +515,11 @@ impl Jobs {
     /// The log tail and the step results go out only if this process did not send them yet. False
     /// when no stream is open or a send fails.
     async fn send_result(&self, mut result: JobResult) -> bool {
+        // The spool resends the whole log in order, so the tail would only come first and
+        // reorder the lines (FR-LG-07).
+        if self.log_spool.holds(&result.job_id) {
+            result.log_tail.clear();
+        }
         if lock(&self.resent).contains(&result.job_id) {
             result.log_tail.clear();
             result.steps.clear();
@@ -810,6 +844,7 @@ impl Jobs {
         progress.script_failure = script_failure;
 
         self.send_log(&mut log).await;
+        self.close_log(&mut log);
         let outcome = job_outcome(&progress);
         let status = stopped_status.unwrap_or(match outcome {
             JobStatus::SucceededWithWarnings => StepStatus::Warning,
@@ -852,6 +887,9 @@ impl Jobs {
             tracing::warn!(%error, "cannot write the job journal");
         }
         self.release(&job_id);
+        // The result follows the last lines of the log. The wait is bounded and holds no lock of
+        // the stream task, so a cancel and the pings do not wait for it.
+        self.wait_log_sent(&job_id).await;
         // The step results and the log went out while the job ran. The stored copy goes out at
         // every connection until the entry expires (ADR-0020, FR-AG-12).
         let _ = self

@@ -116,6 +116,7 @@ The file `.env` of the stack holds more values. The script `bootstrap.sh` writes
 | Variable | Default | Meaning |
 |---|---|---|
 | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | see "Job time limits" | The stall timeout of a job that carries none. |
+| `RESTICHUB_LOG_SPOOL_MAX_BYTES` | `67108864` (64 MiB) | The most bytes of unconfirmed job log that the agent keeps on disk for all jobs. See [Jobs](/restichub/concepts/jobs/#job-log). |
 
 The agent also honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. See [Register an agent](/restichub/operations/register-an-agent/#the-proxy-of-the-download). The agent has no other `RESTICHUB_` variable.
 
