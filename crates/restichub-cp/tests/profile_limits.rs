@@ -53,7 +53,7 @@ async fn ac_ag_12_a_profile_stores_its_job_limits() {
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let options = &created["profile"]["options"];
     assert_eq!(options["stall_timeout_minutes"], 60);
-    assert_eq!(options["max_duration_minutes"], 0);
+    assert_eq!(options["max_duration_minutes"], 2880);
 
     let (status, _, created) = send(
         &app,

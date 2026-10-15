@@ -25,8 +25,8 @@ use tokio::sync::mpsc;
 
 use super::log::JobLog;
 use super::runner::{
-    CancelHandle, DRAIN_TIMEOUT, LINES_PER_TURN, LOG_FLUSH_BYTES, LOG_INTERVAL, LimitStop,
-    POLL_INTERVAL, StepOutcome, interrupt, kill_tree,
+    CancelHandle, DRAIN_TIMEOUT, LINES_PER_TURN, LOG_FLUSH_BYTES, LOG_INTERVAL, POLL_INTERVAL,
+    StepOutcome, interrupt, kill_tree,
 };
 use super::{Jobs, lock, now_timestamp};
 use crate::hooks::{Invocation, Refusal};
@@ -492,7 +492,7 @@ impl Jobs {
         if cancelled {
             StepOutcome::cancelled(false)
         } else if timed_out {
-            StepOutcome::limit_exceeded(LimitStop::MaxDuration, false)
+            StepOutcome::timed_out()
         } else if code == 0 {
             StepOutcome::new(StepStatus::Success, 0)
         } else {

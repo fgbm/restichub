@@ -342,7 +342,7 @@ function makeProfiles(): Profile[] {
 				limit_upload_kib: 0,
 				limit_download_kib: 0,
 				stall_timeout_minutes: 60,
-				max_duration_minutes: 0
+				max_duration_minutes: 2880
 			},
 			hooks: [],
 			scripts: [],
@@ -367,7 +367,7 @@ function makeProfiles(): Profile[] {
 				limit_upload_kib: 2048,
 				limit_download_kib: 0,
 				stall_timeout_minutes: 60,
-				max_duration_minutes: 0
+				max_duration_minutes: 2880
 			},
 			hooks: [],
 			scripts: [],
@@ -1540,7 +1540,7 @@ export class MockApiService {
 				limit_upload_kib: 0,
 				limit_download_kib: 0,
 				stall_timeout_minutes: 60,
-				max_duration_minutes: 0
+				max_duration_minutes: 2880
 			},
 			hooks: request.hooks ?? [],
 			scripts: request.scripts ?? [],

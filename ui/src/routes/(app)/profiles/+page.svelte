@@ -77,7 +77,7 @@
 	let limitUpload = $state('');
 	let limitDownload = $state('');
 	let stallMinutes = $state('60');
-	let maxDurationMinutes = $state('');
+	let maxDurationMinutes = $state('2880');
 	let retentionEnabled = $state(false);
 	let keepLast = $state('0');
 	let keepHourly = $state('0');
@@ -293,7 +293,7 @@
 		limitUpload = '';
 		limitDownload = '';
 		stallMinutes = '60';
-		maxDurationMinutes = '';
+		maxDurationMinutes = '2880';
 		retentionEnabled = false;
 		keepLast = '0';
 		keepHourly = '0';

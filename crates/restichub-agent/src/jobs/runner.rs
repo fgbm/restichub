@@ -59,6 +59,8 @@ pub(super) enum StepError {
     MaxDuration,
     /// restic made no progress for the stall timeout (ADR-0039).
     Stalled,
+    /// A hook ran longer than its own timeout (FR-HK-02).
+    TimedOut,
     NotStarted,
 }
 
@@ -72,6 +74,7 @@ impl StepError {
             Self::Cancelled => "step_cancelled",
             Self::MaxDuration => "step_max_duration",
             Self::Stalled => "step_stalled",
+            Self::TimedOut => "step_timeout",
             Self::NotStarted => "step_not_started",
         }
     }
@@ -130,6 +133,13 @@ impl StepOutcome {
         Self {
             possible_stale_lock,
             ..Self::new(StepStatus::Cancelled, -1)
+        }
+    }
+
+    pub(super) fn timed_out() -> Self {
+        Self {
+            error: Some(StepError::TimedOut),
+            ..Self::new(StepStatus::Failed, -1)
         }
     }
 

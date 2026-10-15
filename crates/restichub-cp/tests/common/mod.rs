@@ -580,7 +580,7 @@ pub async fn seed_profile(
             limit_upload_kib: 0,
             limit_download_kib: 0,
             stall_timeout_minutes: 60,
-            max_duration_minutes: 0,
+            max_duration_minutes: 2880,
             retention: None,
             check_options: None,
             hooks: serde_json::json!([]),

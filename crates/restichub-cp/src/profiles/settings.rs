@@ -94,19 +94,54 @@ pub struct BackupOptions {
     #[serde(default = "default_stall_timeout_minutes")]
     pub stall_timeout_minutes: u32,
     /// Minutes after which the agent stops the job whatever its progress. Zero means no limit.
-    /// At most 43200 (ADR-0039).
-    #[serde(default)]
+    /// At most 43200. The default is 2880 (ADR-0039).
+    #[serde(default = "default_max_duration_minutes")]
     pub max_duration_minutes: u32,
 }
 
 /// The stall timeout of a profile that does not set one (ADR-0039).
 pub const DEFAULT_STALL_TIMEOUT_MINUTES: u32 = 60;
+/// The maximum duration of a profile that does not set one (ADR-0039).
+pub const DEFAULT_MAX_DURATION_MINUTES: u32 = 48 * 60;
+const STALL_TIMEOUT_VARIABLE: &str = "RESTICHUB_JOB_STALL_TIMEOUT_SECS";
+const MAX_DURATION_VARIABLE: &str = "RESTICHUB_JOB_MAX_DURATION_SECS";
 const MIN_STALL_TIMEOUT_MINUTES: u32 = 5;
 const MAX_STALL_TIMEOUT_MINUTES: u32 = 10_080;
 const MAX_DURATION_MINUTES: u32 = 43_200;
 
+/// The stall timeout of a new profile: the environment variable or the built-in default.
 fn default_stall_timeout_minutes() -> u32 {
-    DEFAULT_STALL_TIMEOUT_MINUTES
+    minutes_from_variable(
+        STALL_TIMEOUT_VARIABLE,
+        DEFAULT_STALL_TIMEOUT_MINUTES,
+        MIN_STALL_TIMEOUT_MINUTES..=MAX_STALL_TIMEOUT_MINUTES,
+    )
+}
+
+/// The maximum duration of a new profile: the environment variable or the built-in default.
+fn default_max_duration_minutes() -> u32 {
+    minutes_from_variable(
+        MAX_DURATION_VARIABLE,
+        DEFAULT_MAX_DURATION_MINUTES,
+        0..=MAX_DURATION_MINUTES,
+    )
+}
+
+/// Reads seconds from `name`. A missing or invalid value, or one outside `range`, gives `fallback`.
+fn minutes_from_variable(name: &str, fallback: u32, range: std::ops::RangeInclusive<u32>) -> u32 {
+    minutes_from_seconds(std::env::var(name).ok().as_deref(), fallback, range)
+}
+
+fn minutes_from_seconds(
+    value: Option<&str>,
+    fallback: u32,
+    range: std::ops::RangeInclusive<u32>,
+) -> u32 {
+    value
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .map(|seconds| seconds.div_ceil(60))
+        .filter(|minutes| range.contains(minutes))
+        .unwrap_or(fallback)
 }
 
 impl Default for BackupOptions {
@@ -117,8 +152,8 @@ impl Default for BackupOptions {
             exclude_caches: false,
             limit_upload_kib: 0,
             limit_download_kib: 0,
-            stall_timeout_minutes: DEFAULT_STALL_TIMEOUT_MINUTES,
-            max_duration_minutes: 0,
+            stall_timeout_minutes: default_stall_timeout_minutes(),
+            max_duration_minutes: default_max_duration_minutes(),
         }
     }
 }
@@ -1270,4 +1305,18 @@ fn stored_scripts_value(scripts: &Value) -> Value {
 fn format_time(value: time::OffsetDateTime) -> String {
     use time::format_description::well_known::Rfc3339;
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+}
+
+#[cfg(test)]
+mod limit_variable_tests {
+    use super::minutes_from_seconds;
+
+    #[test]
+    fn ac_pf_job_limits_variable_gives_minutes_in_range() {
+        assert_eq!(minutes_from_seconds(None, 60, 5..=100), 60);
+        assert_eq!(minutes_from_seconds(Some("1800"), 60, 5..=100), 30);
+        assert_eq!(minutes_from_seconds(Some("61"), 60, 5..=100), 60);
+        assert_eq!(minutes_from_seconds(Some("junk"), 60, 5..=100), 60);
+        assert_eq!(minutes_from_seconds(Some("0"), 2880, 0..=43_200), 0);
+    }
 }

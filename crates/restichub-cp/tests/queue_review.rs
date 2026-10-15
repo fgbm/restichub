@@ -79,7 +79,7 @@ async fn cancel(env: &Env, job: Uuid) {
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
 }
 
-/// ADR-0039: a job of a connected agent has no wall-clock limit.
+/// ADR-0039: a connected agent keeps a job past the old 12 hour limit; the default is 48 hours.
 #[tokio::test]
 async fn ac_sc_10_a_running_job_of_a_connected_agent_is_not_failed_by_the_clock() {
     let Some(db) = common::test_db().await else {
@@ -96,7 +96,7 @@ async fn ac_sc_10_a_running_job_of_a_connected_agent_is_not_failed_by_the_clock(
     env.pass().await;
     assert_eq!(env.job_status(job).await, "running");
     let limits = &env.job(job).await["limits"];
-    assert_eq!(limits["max_duration_seconds"], serde_json::Value::Null);
+    assert_eq!(limits["max_duration_seconds"], 48 * 3600);
     assert_eq!(limits["stall_timeout_seconds"], 3600);
 
     // Only the loss of the agent ends the job.

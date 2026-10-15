@@ -12,6 +12,8 @@ use tokio::time::Instant;
 /// The stall timeout of a step kind when the job gives none (ADR-0039).
 const DEFAULT_STALL: Duration = Duration::from_secs(60 * 60);
 
+const STALL_VARIABLE: &str = "RESTICHUB_JOB_STALL_TIMEOUT_SECS";
+
 /// `check` and `prune` print nothing for long periods while they work.
 const LONG_STALL: Duration = Duration::from_secs(6 * 60 * 60);
 
@@ -30,13 +32,20 @@ impl StepLimits {
         let stall = if job_stall_seconds > 0 {
             Duration::from_secs(u64::from(job_stall_seconds))
         } else {
-            default_stall(step)
+            default_stall(step, std::env::var(STALL_VARIABLE).ok().as_deref())
         };
         Self { max, stall }
     }
 }
 
-fn default_stall(step: &Step) -> Duration {
+/// The default of a job that carries no stall timeout: the environment variable, else the kind default.
+fn default_stall(step: &Step, variable: Option<&str>) -> Duration {
+    if let Some(seconds) = variable
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+    {
+        return Duration::from_secs(seconds);
+    }
     match step.kind {
         Some(step::Kind::Check(_) | step::Kind::Prune(_)) => LONG_STALL,
         _ => DEFAULT_STALL,
@@ -106,6 +115,18 @@ mod tests {
             current_files: vec![file.to_owned()],
             ..StepProgress::default()
         }
+    }
+
+    #[test]
+    fn ac_ag_job_limits_stall_variable_overrides_the_default() {
+        let backup = Step::default();
+        assert_eq!(default_stall(&backup, None), DEFAULT_STALL);
+        assert_eq!(
+            default_stall(&backup, Some("600")),
+            Duration::from_secs(600)
+        );
+        assert_eq!(default_stall(&backup, Some("junk")), DEFAULT_STALL);
+        assert_eq!(default_stall(&backup, Some("0")), DEFAULT_STALL);
     }
 
     #[test]
