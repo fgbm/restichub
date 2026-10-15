@@ -33,6 +33,7 @@
 		TextField
 	} from './ui/index.ts';
 	import type { SelectOption } from './ui/index.ts';
+	import { formatMinutes } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import {
 		SUMMARY_ORDER,
@@ -41,7 +42,8 @@
 		emptyDraft,
 		enabledCount,
 		settingsOf,
-		summarize
+		summarize,
+		minutesToHours
 	} from '#lib/profile-form.ts';
 	import type { Os, ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
 	import { setPageTitle } from '#lib/stores/page-title.svelte.ts';
@@ -559,7 +561,6 @@
 				title={t(titles.limits)}
 				summary={summaries.limits.text}
 				state={summaries.limits.state}
-				badge={t('pe.new')}
 				bind:open={open.limits}
 			>
 				<p class="lead">{t('pe.limits.lead')}</p>
@@ -568,9 +569,15 @@
 						id="profile-stall-timeout"
 						type="number"
 						label={t('pe.limits.stall')}
-						help={t('pe.limits.stallHelp', { count: limitDefaults?.stall_timeout_minutes ?? '' })}
+						help={limitDefaults
+							? t('pe.limits.stallHelp', {
+									value: formatMinutes(limitDefaults.stall_timeout_minutes)
+								})
+							: undefined}
 						placeholder={limitDefaults
-							? t('pe.limits.stallPlaceholder', { count: limitDefaults.stall_timeout_minutes })
+							? t('pe.limits.stallPlaceholder', {
+									count: limitDefaults.stall_timeout_minutes
+								})
 							: undefined}
 						error={fieldError(formProblem, 'options.stall_timeout_minutes')}
 						bind:value={draft.stallMinutes}
@@ -578,15 +585,21 @@
 					<TextField
 						id="profile-max-duration"
 						type="number"
+						step="any"
 						label={t('pe.limits.max')}
-						help={t('pe.limits.maxHelp', { count: limitDefaults?.max_duration_minutes ?? '' })}
+						help={limitDefaults
+							? t('pe.limits.maxHelp', { value: formatMinutes(limitDefaults.max_duration_minutes) })
+							: undefined}
 						placeholder={limitDefaults
-							? t('pe.limits.maxPlaceholder', { count: limitDefaults.max_duration_minutes })
+							? t('pe.limits.maxPlaceholder', {
+									count: minutesToHours(limitDefaults.max_duration_minutes)
+								})
 							: undefined}
 						error={fieldError(formProblem, 'options.max_duration_minutes')}
-						bind:value={draft.maxDurationMinutes}
+						bind:value={draft.maxDurationHours}
 					/>
 				</div>
+				<p class="muted"><RichText text={t('pe.limits.env')} /></p>
 			</ProfileSection>
 		</div>
 

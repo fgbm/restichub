@@ -3,7 +3,7 @@ title: Agent certificate rotation
 description: How an agent renews its certificate, and what to do when a certificate expired.
 ---
 
-Each agent has a client certificate for the mTLS stream to the control plane (ADR-0026). The certificate has a limited lifetime. The agent renews it by itself, so an operator does nothing in normal use.
+Each agent has a client certificate for the mTLS stream to the control plane. The certificate has a limited lifetime. The agent renews it by itself, so an operator does nothing in normal use.
 
 ## Lifetime and rotation window
 
@@ -37,7 +37,7 @@ The Hosts screen and the agents API show the certificate expiry and the time of 
 
 ## A certificate that a rotation replaced
 
-After a rotation, the old certificate must not connect. If a connection presents it, the control plane refuses the connection. It writes the audit record `agent_superseded_certificate_used` at most once an hour, and the Hosts screen shows a warning for the host. This can mean a copy of the old private key (T17). Check the host. If the host is not safe, revoke the agent and register it again.
+After a rotation, the old certificate must not connect. If a connection presents it, the control plane refuses the connection. It writes the audit record `agent_superseded_certificate_used` at most once an hour, and the Hosts screen shows a warning for the host. This can mean a copy of the old private key. Check the host. If the host is not safe, revoke the agent and register it again.
 
 ## When the agent did not rotate
 

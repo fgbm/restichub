@@ -106,6 +106,11 @@ export function formatClock(value: string): string {
 	);
 }
 
+/** A whole number of minutes as hours and minutes, such as "1h 30m". */
+export function formatMinutes(minutes: number): string {
+	return formatSeconds(minutes * 60);
+}
+
 /** Seconds as hours, minutes and seconds, such as "2 min 41 s". */
 export function formatSeconds(seconds: number): string {
 	const base = new Date(0).toISOString();

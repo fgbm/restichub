@@ -1,35 +1,37 @@
 /* Docs theme: dense product-console layout with a technical text look. Built on Starlight custom properties. */
 :root {
-	--sl-text-body: 0.875rem;
-	--sl-text-sm: 0.8125rem;
-	--sl-text-h1: 1.5rem;
-	--sl-text-h2: 1.25rem;
-	--sl-text-h3: 1.0625rem;
-	--sl-text-h4: 0.9375rem;
+	--sl-text-body: 0.9375rem;
+	--sl-text-sm: 0.875rem;
+	--sl-text-h1: 2rem;
+	--sl-text-h2: 1.4rem;
+	--sl-text-h3: 1.15rem;
+	--sl-text-h4: 1rem;
 	--sl-line-height: 1.5;
-	--sl-content-width: 50rem;
+	--sl-content-width: 46rem;
 	--sl-nav-height: 3.5rem;
 	--sl-font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-	--__sl-font-headings: var(--sl-font-system-mono);
+	--__sl-font-headings: var(--sl-font);
 }
 
-/* Headings: mono face and a muted marker. */
-.sl-markdown-content :is(h1, h2, h3, h4) { font-family: var(--sl-font-system-mono); font-weight: 600; letter-spacing: -.01em; }
+/* Headings. */
+.sl-markdown-content :is(h1, h2, h3, h4) { font-family: var(--sl-font); font-weight: 600; letter-spacing: 0; }
 .sl-markdown-content :is(h2, h3, h4) a { color: inherit; }
-.sl-markdown-content h2::before { content: '# '; color: var(--sl-color-text-accent); }
-.sl-markdown-content h3::before { content: '## '; color: var(--sl-color-gray-4); }
+
+/* Content sits next to the sidebar, not centered in the free space. */
+.sl-container { margin-inline: 0; }
 
 /* Starlight spaces blocks with this long selector; the same selector keeps the tighter gap. */
 .sl-markdown-content :not(a, strong, em, del, span, input, code, br) + :not(a, strong, em, del, span, input, code, br, :where(.not-content *)) { margin-top: .85rem; }
 
 /* Code. */
-.sl-markdown-content code { border-radius: 3px; background: var(--sl-color-gray-6); border: 1px solid var(--sl-color-gray-5); padding: .05rem .3rem; }
-.sl-markdown-content pre code { border: 0; padding: 0; }
+.sl-markdown-content code { border-radius: 3px; background: var(--sl-color-gray-6); border: 0; padding: 0 .12rem; margin: 0; }
+.sl-markdown-content pre code { padding: 0; }
 .sl-markdown-content pre { border-radius: 3px; }
 
 /* Tables. */
-.sl-markdown-content table { font-size: .8125rem; }
-.sl-markdown-content th { background: var(--sl-color-gray-6); font-family: var(--sl-font-system-mono); font-size: .75rem; text-transform: uppercase; }
+.sl-markdown-content table { font-size: inherit; }
+.sl-markdown-content :is(th, td) { font-size: inherit; }
+.sl-markdown-content th { background: var(--sl-color-gray-6); font-family: var(--sl-font); font-weight: 600; }
 
 /* Numbered steps. */
 .sl-markdown-content ol { counter-reset: rhstep; list-style: none; padding-inline-start: 0; }
@@ -46,7 +48,7 @@ header.header { border-bottom: 1px solid var(--sl-color-gray-5); }
 /* Starlight marks the current page with aria-current=page. */
 .sidebar-content a[aria-current='page'] { background: var(--sl-color-accent-low); color: var(--sl-color-text-accent); font-weight: 600; }
 /* Group icons (Lucide), one per top-level group in sidebar order. */
-.sidebar-content details > summary .large { font-family: var(--sl-font-system-mono); font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; display: flex; align-items: center; gap: .5rem; }
+.sidebar-content details > summary .large { font-family: var(--sl-font); font-size: .875rem; font-weight: 600; display: flex; align-items: center; gap: .5rem; }
 .sidebar-content details > summary .large::before { content: ''; width: 1rem; height: 1rem; flex: none; background: currentColor; -webkit-mask: var(--rh-icon) center / contain no-repeat; mask: var(--rh-icon) center / contain no-repeat; }
 .sidebar-content ul.top-level > li:nth-child(1) { --rh-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z'/%3E%3Cpath d='m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z'/%3E%3C/svg%3E"); }
 .sidebar-content ul.top-level > li:nth-child(2) { --rh-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.4 3.6a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'/%3E%3C/svg%3E"); }

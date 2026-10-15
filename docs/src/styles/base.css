@@ -34,7 +34,7 @@
 
 /* Landing page. */
 .rh-hero { margin: 1rem 0 2rem; }
-.rh-hero h2 { font-family: var(--sl-font-system-mono); border: 0; margin: 0 0 .5rem; font-size: 1.6rem; line-height: 1.2; }
+.rh-hero h2 { font-family: var(--sl-font); border: 0; margin: 0 0 .5rem; font-size: 1.6rem; line-height: 1.2; }
 .rh-hero p { margin: 0 0 1.25rem; color: var(--sl-color-gray-2); font-size: 1.05rem; max-width: 40rem; }
 .rh-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; margin: 0 0 2.5rem; }
 .rh-card {

@@ -3,7 +3,7 @@ title: Alerts and notification channels
 description: How the control plane raises alerts, which kinds exist, and how to send them by email or by webhook.
 ---
 
-The control plane watches each organization and raises an alert when a backup needs attention (FR-MN-03, FR-MN-04, ADR-0036). It sends a message to each enabled channel of the organization. When the condition clears, it sends a recovery message.
+The control plane watches each organization and raises an alert when a backup needs attention. It sends a message to each enabled channel of the organization. When the condition clears, it sends a recovery message.
 
 ## Alert kinds
 
@@ -42,7 +42,7 @@ The age of a plan is the time since its last successful backup. A plan without a
 
 ## Delivery
 
-A loop in each control plane instance evaluates the rules every 30 seconds. A message therefore reaches a channel well inside 5 minutes of a violation (AC-MN-01).
+A loop in each control plane instance evaluates the rules every 30 seconds. A message therefore reaches a channel well inside 5 minutes of a violation.
 
 The control plane stores each message in a queue before it sends it. A failed send repeats after 30 seconds, 2 minutes, 10 minutes and 1 hour. After the fifth failure, the control plane drops the message and keeps the error text. The queue holds at most 1000 pending messages for an organization.
 
@@ -50,7 +50,7 @@ Two control plane instances send each message once. A crash between the send and
 
 ## Email channels
 
-An Admin adds an email channel in **Settings**, **Channels**. The channel holds 1 to 20 recipients. The installation needs an SMTP server. See [Configure alerts](/operations/alert-configuration/). Without it, an email channel cannot send, and the test button shows the error `smtp_not_configured`.
+An Admin adds an email channel in **Settings**, **Channels**. The channel holds 1 to 20 recipients. The installation needs an SMTP server. See [Configure alerts](../alert-configuration/). Without it, an email channel cannot send, and the test button shows the error `smtp_not_configured`.
 
 The message is plain text with the subject `[ResticHub] <alert> - <plan> (<organization>)`. It holds the organization, the host, the plan, the repository, the error text and a link to the job.
 
@@ -110,7 +110,7 @@ The key of the HMAC is the signing secret. To check a request:
 
 ### Address policy
 
-The control plane refuses to send to a private network (ADR-0036). It resolves the host name, checks every address, and connects to the checked address itself. It refuses:
+The control plane refuses to send to a private network. It resolves the host name, checks every address, and connects to the checked address itself. It refuses:
 
 - loopback addresses, such as `127.0.0.1` and `::1`;
 - private addresses, such as `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and `fc00::/7`;
@@ -120,7 +120,7 @@ The control plane refuses to send to a private network (ADR-0036). It resolves t
 
 A host name that resolves to one forbidden address among others is refused too. The control plane never follows a redirect. An answer other than 2xx is a failure. A send takes at most 10 seconds.
 
-To reach a private receiver, the administrator adds its network to the allow-list. See [Configure alerts](/operations/alert-configuration/).
+To reach a private receiver, the administrator adds its network to the allow-list. See [Configure alerts](../alert-configuration/).
 
 ## Audit
 

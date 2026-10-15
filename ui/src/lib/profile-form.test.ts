@@ -138,7 +138,7 @@ describe('summarize', () => {
 		expect(
 			summarize(emptyDraft(), '', none, { stall_timeout_minutes: 30, max_duration_minutes: 90 })
 				.limits.text
-		).toBe('no progress 30 min (default) · at most 90 min (default)');
+		).toBe('no progress 30m (default) · at most 1h 30m (default)');
 	});
 
 	it('sums up a stored profile', () => {
@@ -192,13 +192,17 @@ describe('settingsOf', () => {
 		expect(empty.stall_timeout_minutes).toBeUndefined();
 		expect(empty.max_duration_minutes).toBeUndefined();
 		draft.stallMinutes = '15';
-		draft.maxDurationMinutes = '180';
+		draft.maxDurationHours = '3';
 		expect(settingsOf(draft, context).options).toMatchObject({
 			stall_timeout_minutes: 15,
 			max_duration_minutes: 180
 		});
 		draft.stallMinutes = '0';
 		expect(settingsOf(draft, context).options.stall_timeout_minutes).toBe(0);
+		draft.maxDurationHours = '1.5';
+		expect(settingsOf(draft, context).options.max_duration_minutes).toBe(90);
+		draft.maxDurationHours = '0';
+		expect(settingsOf(draft, context).options.max_duration_minutes).toBe(0);
 	});
 
 	it('keeps the stored scripts of an Operator', () => {
@@ -235,7 +239,7 @@ describe('settingsOf', () => {
 		const defaults = { stall_timeout_minutes: 60, max_duration_minutes: 2880 };
 		const fresh = emptyDraft('r_1', defaults);
 		expect(fresh.stallMinutes).toBe('60');
-		expect(fresh.maxDurationMinutes).toBe('2880');
+		expect(fresh.maxDurationHours).toBe('48');
 		expect(emptyDraft('r_1').stallMinutes).toBe('');
 		const draft = draftFromProfile(
 			stored({
@@ -243,7 +247,7 @@ describe('settingsOf', () => {
 			})
 		);
 		expect(draft.stallMinutes).toBe('30');
-		expect(draft.maxDurationMinutes).toBe('0');
+		expect(draft.maxDurationHours).toBe('0');
 	});
 });
 

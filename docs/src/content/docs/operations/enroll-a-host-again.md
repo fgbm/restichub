@@ -11,7 +11,7 @@ An agent that enrolled but did not open a stream yet has the status "Waiting for
 
 ## Enroll a host again
 
-Use this procedure when the agent lost its identity, or when you must move the agent to a new installation. The host keeps its identifier, plans, maintenance host references and labels (FR-ID-10, ADR-0041).
+Use this procedure when the agent lost its identity, or when you must move the agent to a new installation. The host keeps its identifier, plans, maintenance host references and labels.
 
 1. Open the Hosts screen as an Admin.
 2. Open the menu of the host and select "Re-register".

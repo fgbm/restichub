@@ -3,11 +3,11 @@ title: Repositories
 description: Store the backups of the hosts, and keep the repository clean with the maintenance host.
 ---
 
-A repository is the place where restic stores the backups. The control plane keeps the address of the repository and its secrets. The agent receives the secrets for one job only (ADR-0003).
+A repository is the place where restic stores the backups. The control plane keeps the address of the repository and its secrets. The agent receives the secrets for one job only.
 
 ## Maintenance
 
-Each repository has one maintenance host, the maintenance agent. Only this host runs `forget`, `prune` and `check` (FR-RP-08). A backup host never receives these steps. Use a dedicated host for the maintenance.
+Each repository has one maintenance host, the maintenance agent. Only this host runs `forget`, `prune` and `check`. A backup host never receives these steps. Use a dedicated host for the maintenance.
 
 A repository without a maintenance host gets no maintenance job. The repository dialog shows a warning, and the control plane creates no `forget`, `prune` or `check` job for the repository.
 
@@ -28,11 +28,11 @@ An Operator or an Admin can run the retention or the check at once from the repo
 
 ### Barriers
 
-A maintenance job is exclusive (FR-SC-04). It starts after the running backups of the repository end. The backups that the control plane queues after it wait until it ends (AC-SC-03). The [Jobs](/restichub/concepts/jobs/) page shows the maintenance jobs with the backups.
+A maintenance job is exclusive. It starts after the running backups of the repository end. The backups that the control plane queues after it wait until it ends. The [Jobs](/restichub/concepts/jobs/) page shows the maintenance jobs with the backups.
 
 ### Retention of several profiles
 
-Several profiles can use one repository. The retention of a profile removes only the snapshots of that profile (ADR-0034):
+Several profiles can use one repository. The retention of a profile removes only the snapshots of that profile:
 
 - The control plane adds the tag `restichub-profile-<profile id>` to every backup of a profile.
 - The tag prefix `restichub-` is reserved. A profile tag, a keep tag and a retention filter tag cannot start with it.

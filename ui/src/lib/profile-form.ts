@@ -3,6 +3,7 @@
  * summary of each section, the retention preview and the command preview (FR-PF-01, FR-PF-04).
  */
 import type { GroupBy, JobLimitDefaults, Profile } from '#lib/api/index.ts';
+import { formatMinutes } from '#lib/format.ts';
 import { getLocale, t } from '#lib/i18n/index.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
 import { draftOf, scriptOf } from '#lib/scripts.ts';
@@ -44,7 +45,7 @@ export interface ProfileDraft {
 	filterPaths: string;
 	readDataSubset: string;
 	stallMinutes: string;
-	maxDurationMinutes: string;
+	maxDurationHours: string;
 	enabled: Record<SectionKey, boolean>;
 	scripts: ScriptDraft[];
 }
@@ -114,6 +115,20 @@ function optionalMinutes(value: string): number | undefined {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+// The form shows hours; the API stores minutes. A value that is not a whole number of minutes rounds to the nearest minute.
+function optionalHoursAsMinutes(value: string): number | undefined {
+	const text = String(value ?? '')
+		.trim()
+		.replace(',', '.');
+	if (text === '') return undefined;
+	const hours = Number(text);
+	return Number.isFinite(hours) && hours > 0 ? Math.max(1, Math.round(hours * 60)) : 0;
+}
+
+export function minutesToHours(minutes: number): string {
+	return String(Math.round((minutes / 60) * 100) / 100);
+}
+
 function joinLines(values: string[] | undefined): string {
 	return (values ?? []).join('\n');
 }
@@ -145,7 +160,7 @@ export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): Prof
 		filterPaths: '',
 		readDataSubset: '',
 		stallMinutes: defaults ? String(defaults.stall_timeout_minutes) : '',
-		maxDurationMinutes: defaults ? String(defaults.max_duration_minutes) : '',
+		maxDurationHours: defaults ? minutesToHours(defaults.max_duration_minutes) : '',
 		enabled: {
 			excludes: false,
 			tags: false,
@@ -178,7 +193,7 @@ export function draftFromProfile(profile: Profile): ProfileDraft {
 		draft.stallMinutes = String(options.stall_timeout_minutes);
 	}
 	if (options?.max_duration_minutes != null) {
-		draft.maxDurationMinutes = String(options.max_duration_minutes);
+		draft.maxDurationHours = minutesToHours(options.max_duration_minutes);
 	}
 	const retention = profile.retention;
 	if (retention) {
@@ -250,7 +265,7 @@ export function settingsOf(
 			limit_upload_kib: on.options ? numberOrZero(draft.limitUpload) : 0,
 			limit_download_kib: on.options ? numberOrZero(draft.limitDownload) : 0,
 			stall_timeout_minutes: optionalMinutes(draft.stallMinutes),
-			max_duration_minutes: optionalMinutes(draft.maxDurationMinutes)
+			max_duration_minutes: optionalHoursAsMinutes(draft.maxDurationHours)
 		},
 		// An Operator keeps the scripts as they are stored: only an Admin changes them.
 		scripts: context.canEditScripts
@@ -490,13 +505,19 @@ function switchable(
 	return { state: 'on', text };
 }
 
-function limitText(field: string, fallback: number | undefined, kind: 'stall' | 'max'): string {
-	const value = optionalMinutes(field);
+function limitText(
+	value: number | undefined,
+	fallback: number | undefined,
+	kind: 'stall' | 'max'
+): string {
 	if (value === 0 && kind === 'max') return t('pe.sum.maxNone');
-	if (value) return t(kind === 'stall' ? 'pe.sum.stall' : 'pe.sum.max', { count: value });
+	if (value)
+		return t(kind === 'stall' ? 'pe.sum.stall' : 'pe.sum.max', { count: formatMinutes(value) });
 	if (fallback === undefined)
 		return t(kind === 'stall' ? 'pe.sum.stallServer' : 'pe.sum.maxServer');
-	return t(kind === 'stall' ? 'pe.sum.stallDefault' : 'pe.sum.maxDefault', { count: fallback });
+	return t(kind === 'stall' ? 'pe.sum.stallDefault' : 'pe.sum.maxDefault', {
+		count: formatMinutes(fallback)
+	});
 }
 
 export function summarize(
@@ -549,8 +570,8 @@ export function summarize(
 		: { state: 'off', text: t('pe.sum.off') };
 
 	const limits = [
-		limitText(draft.stallMinutes, defaults?.stall_timeout_minutes, 'stall'),
-		limitText(draft.maxDurationMinutes, defaults?.max_duration_minutes, 'max')
+		limitText(optionalMinutes(draft.stallMinutes), defaults?.stall_timeout_minutes, 'stall'),
+		limitText(optionalHoursAsMinutes(draft.maxDurationHours), defaults?.max_duration_minutes, 'max')
 	];
 
 	const scriptTotal = scriptCounts.before + scriptCounts.after;
