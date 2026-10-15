@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { coalesce } from '#lib/events.ts';
+	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
 		Agent,
@@ -232,12 +234,25 @@
 		}
 	}
 
-	onMount(() => {
-		const timer = setInterval(() => {
-			if (!document.hidden && !loading) void refresh();
-		}, REFRESH_MS);
+	// The stream pushes a change of a host. The poll covers a stream that is down.
+	const STREAM_REFRESH_MS = 60_000;
+
+	$effect(() => {
+		const timer = setInterval(
+			() => {
+				if (!document.hidden && !loading) void refresh();
+			},
+			isStreamConnected() ? STREAM_REFRESH_MS : REFRESH_MS
+		);
 		return () => clearInterval(timer);
 	});
+
+	const refreshSoon = coalesce(() => (loading ? undefined : refresh()), 300);
+	onMount(() =>
+		onEvent((event) => {
+			if (event.type.startsWith('host.') || event.type === 'resync') refreshSoon();
+		})
+	);
 
 	function openAdd(): void {
 		labels = '';

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { coalesce } from '#lib/events.ts';
+	import { onEvent } from '#lib/stores/events.svelte.ts';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Alert, AlertKind } from '#lib/api/index.ts';
@@ -93,8 +95,11 @@
 		return t('table.error');
 	}
 
-	async function load(): Promise<void> {
-		loading = true;
+	async function load(silent = false): Promise<void> {
+		if (!silent) {
+			loading = true;
+			extended = false;
+		}
 		error = null;
 		try {
 			const page = await service.listAlerts({ status: filter, limit: PAGE_SIZE });
@@ -117,6 +122,7 @@
 				cursor: nextCursor
 			});
 			alerts = [...alerts, ...page.items];
+			extended = true;
 			nextCursor = page.next_cursor ?? null;
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
@@ -125,7 +131,19 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => void load());
+
+	// A page that the user extended with "load more" shows its rows until the next full load.
+	let extended = false;
+	const reloadSoon = coalesce(
+		() => (extended || loading || loadingMore ? undefined : load(true)),
+		500
+	);
+	onMount(() =>
+		onEvent((event) => {
+			if (event.type === 'alert.changed' || event.type === 'resync') reloadSoon();
+		})
+	);
 </script>
 
 {#snippet kindCell(alert: Alert)}
@@ -190,7 +208,7 @@
 	description={t('alerts.description')}
 	count={loading ? undefined : alerts.length}
 >
-	<Button icon="refresh" onclick={load}>{t('common.refresh')}</Button>
+	<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
 </PageHeader>
 
 <Table
@@ -212,7 +230,7 @@
 				aria-label={t('alerts.filter')}
 				options={filterOptions}
 				bind:value={filter}
-				onchange={load}
+				onchange={() => load()}
 			/>
 		</div>
 	{/snippet}

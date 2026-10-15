@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { coalesce } from '#lib/events.ts';
+	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -44,6 +46,9 @@
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	const POLL_MS = 2000;
+	// The stream pushes the changes, so a connected page polls only as a safety net.
+	const STREAM_POLL_MS = 30_000;
+	const EVENT_WAIT_MS = 150;
 	const LOG_PAGE = 1000;
 	const DOWNLOAD_PAGE = 2000;
 	// The viewer holds this many lines at most. A bigger log shows its first lines.
@@ -278,9 +283,22 @@
 
 	$effect(() => {
 		if (!live) return;
-		const timer = setInterval(() => void refresh(), POLL_MS);
+		const timer = setInterval(() => void refresh(), isStreamConnected() ? STREAM_POLL_MS : POLL_MS);
 		return () => clearInterval(timer);
 	});
+
+	// A step that ends or a log chunk arrives in a burst, so one read serves the burst. A read that
+	// is busy runs again after it ends.
+	const refreshSoon = coalesce(async () => {
+		while (busy) await new Promise((resolve) => setTimeout(resolve, 50));
+		await refresh();
+	}, EVENT_WAIT_MS);
+
+	onMount(() =>
+		onEvent((event) => {
+			if (event.type === 'resync' || event.job_id === id) refreshSoon();
+		})
+	);
 
 	async function copyLog(shown: JobLogLine[]): Promise<void> {
 		try {

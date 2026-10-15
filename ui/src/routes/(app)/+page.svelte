@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { coalesce } from '#lib/events.ts';
+	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
@@ -122,9 +124,9 @@
 		return t('table.error');
 	}
 
-	async function load(): Promise<void> {
+	async function load(silent = false): Promise<void> {
 		if (!hasTenant) return;
-		loading = true;
+		if (!silent) loading = true;
 		error = null;
 		try {
 			dashboard = await service.getDashboard();
@@ -135,7 +137,23 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => void load());
+
+	// The server caches the facts for a short time, so the page reads them at most once a second.
+	const reloadSoon = coalesce(() => load(true), 1000);
+	onMount(() =>
+		onEvent((event) => {
+			if (event.type !== 'job.progress' && event.type !== 'job.log') reloadSoon();
+		})
+	);
+
+	$effect(() => {
+		const timer = setInterval(
+			() => void (!document.hidden && load(true)),
+			isStreamConnected() ? 120_000 : 30_000
+		);
+		return () => clearInterval(timer);
+	});
 
 	function hours(seconds: number): string {
 		const minutes = Math.round(seconds / 60);
@@ -151,7 +169,7 @@
 
 <PageHeader title={t('overview.title')} description={t('overview.description')}>
 	{#if hasTenant}
-		<Button icon="refresh" onclick={load}>{t('common.refresh')}</Button>
+		<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
 	{/if}
 </PageHeader>
 
@@ -164,7 +182,7 @@
 		</div>
 	{:else if error && !dashboard}
 		<Alert tone="danger" title={error}>
-			<Button size="sm" onclick={load}>{t('common.retry')}</Button>
+			<Button size="sm" onclick={() => load()}>{t('common.retry')}</Button>
 		</Alert>
 	{:else if dashboard && firstRun}
 		<div class="overview">

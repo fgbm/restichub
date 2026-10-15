@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { coalesce } from '#lib/events.ts';
+	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Job, JobStatus } from '#lib/api/index.ts';
@@ -162,8 +164,11 @@
 		return t('table.error');
 	}
 
-	async function load(): Promise<void> {
-		loading = true;
+	async function load(silent = false): Promise<void> {
+		if (!silent) {
+			loading = true;
+			extended = false;
+		}
 		error = null;
 		try {
 			const page = await service.listJobs({
@@ -190,6 +195,7 @@
 			});
 			jobs = [...jobs, ...page.items];
 			nextCursor = page.next_cursor ?? null;
+			extended = true;
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
 		} finally {
@@ -197,7 +203,30 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => void load());
+
+	// A page that the user extended with "load more" keeps its rows until the next full load.
+	let extended = false;
+	async function reload(): Promise<void> {
+		if (extended || loading || loadingMore) return;
+		await load(true);
+	}
+
+	const reloadSoon = coalesce(reload, 300);
+	onMount(() =>
+		onEvent((event) => {
+			if (event.type === 'job.status' || event.type === 'resync') reloadSoon();
+		})
+	);
+
+	// The stream pushes the changes. The poll covers a stream that is down.
+	$effect(() => {
+		const timer = setInterval(
+			() => void (!document.hidden && reload()),
+			isStreamConnected() ? 60_000 : 15_000
+		);
+		return () => clearInterval(timer);
+	});
 
 	async function confirmCancel(): Promise<void> {
 		if (!cancelTarget) return;
@@ -264,7 +293,7 @@
 	description={t('jobs.description')}
 	count={loading ? undefined : jobs.length}
 >
-	<Button icon="refresh" onclick={load}>{t('common.refresh')}</Button>
+	<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
 </PageHeader>
 
 {#if empty}
@@ -291,7 +320,7 @@
 					aria-label={t('jobs.filterStatus')}
 					options={statusOptions}
 					bind:value={statusFilter}
-					onchange={load}
+					onchange={() => load()}
 				/>
 			</div>
 		{/snippet}
