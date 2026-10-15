@@ -116,11 +116,9 @@ jobs:
       - name: Check the binary
         if: matrix.os == 'linux'
         run: |
-          file "target/${{ matrix.target }}/release/restichub-agent"
-          if ! ldd "target/${{ matrix.target }}/release/restichub-agent" 2>&1 | grep -q 'not a dynamic'; then
-            echo "::error::the Linux agent is not static"
-            exit 1
-          fi
+          out="$(file "target/${{ matrix.target }}/release/restichub-agent")"
+          echo "$out"
+          echo "$out" | grep -Eq 'statically linked|static-pie linked' || { echo "::error::the Linux agent is not static"; exit 1; }
       - name: Assemble the package
         shell: bash
         env:
