@@ -338,6 +338,46 @@ fn ac_pf_02_vss_on_windows_agent_is_accepted() {
     assert!(compile(&profile, &target).is_ok());
 }
 
+fn backup_args(profile: &Profile, target: &TargetFacts) -> Vec<String> {
+    let plan = plan(profile, target);
+    let validated = validated(&plan, &repository());
+    let backup = plan
+        .steps
+        .iter()
+        .find(|planned| matches!(planned.step.kind, Some(step::Kind::Backup(_))))
+        .expect("a backup step");
+    arg::build_command(&validated, &backup.step)
+        .expect("a command")
+        .args()
+        .to_vec()
+}
+
+#[test]
+fn ac_ag_14_exclude_cloud_files_reaches_only_a_windows_backup() {
+    let mut profile = profile();
+    profile.options = BackupOptions {
+        exclude_cloud_files: true,
+        ..BackupOptions::default()
+    };
+    let mut windows = target();
+    windows.os = OperatingSystem::Windows;
+    assert!(backup_args(&profile, &windows).contains(&"--exclude-cloud-files".to_owned()));
+    assert!(!backup_args(&profile, &target()).contains(&"--exclude-cloud-files".to_owned()));
+
+    profile.options.exclude_cloud_files = false;
+    assert!(!backup_args(&profile, &windows).contains(&"--exclude-cloud-files".to_owned()));
+}
+
+#[test]
+fn ac_ag_12_the_plan_carries_the_job_limits() {
+    let mut profile = profile();
+    profile.limits = crate::profile::JobLimits {
+        stall_timeout_seconds: 1800,
+        max_duration_seconds: 86_400,
+    };
+    assert_eq!(plan(&profile, &target()).limits, profile.limits);
+}
+
 #[test]
 fn ac_pf_02_missing_hook_is_rejected() {
     let mut profile = profile();

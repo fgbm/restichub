@@ -317,7 +317,33 @@ impl Env {
         capabilities: Vec<String>,
         roots: Vec<String>,
     ) -> FakeAgent {
-        open_stream_on(&self.listener, &self.state, identity, capabilities, roots).await
+        open_stream_on(
+            &self.listener,
+            &self.state,
+            identity,
+            capabilities,
+            roots,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Opens a new stream for an enrolled identity whose hello lists `held` as its jobs
+    /// (ADR-0039).
+    pub async fn reconnect_agent_holding(&self, agent: &FakeAgent, held: Vec<String>) -> FakeAgent {
+        let capabilities = restichub_proto::AgentCapability::ALL
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect();
+        open_stream_on(
+            &self.listener,
+            &self.state,
+            agent.identity.clone(),
+            capabilities,
+            default_restore_roots(),
+            held,
+        )
+        .await
     }
 
     /// Opens a stream for an identity that the test enrolled or rotated by itself.
@@ -384,6 +410,7 @@ impl Env {
             identity,
             capabilities,
             default_restore_roots(),
+            Vec::new(),
         )
         .await
     }
@@ -642,11 +669,12 @@ async fn open_stream_on(
     identity: EnrolledIdentity,
     capabilities: Vec<String>,
     roots: Vec<String>,
+    held: Vec<String>,
 ) -> FakeAgent {
     let (tx, mut inbound) = raw_stream(listener, &identity)
         .await
         .expect("the stream must open");
-    tx.send(hello(capabilities, roots))
+    tx.send(hello(capabilities, roots, held))
         .await
         .expect("cannot send the hello");
     let (mut hello_seen, mut update_seen) = (false, false);
@@ -682,7 +710,11 @@ pub fn default_restore_roots() -> Vec<String> {
     vec![std::env::temp_dir().to_string_lossy().into_owned()]
 }
 
-fn hello(capabilities: Vec<String>, restore_roots: Vec<String>) -> AgentMessage {
+fn hello(
+    capabilities: Vec<String>,
+    restore_roots: Vec<String>,
+    held_job_ids: Vec<String>,
+) -> AgentMessage {
     AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
@@ -690,6 +722,7 @@ fn hello(capabilities: Vec<String>, restore_roots: Vec<String>) -> AgentMessage 
             agent_version: "0.1.0".to_owned(),
             capabilities,
             restore_roots,
+            held_job_ids,
             ..AgentHello::default()
         })),
     }
