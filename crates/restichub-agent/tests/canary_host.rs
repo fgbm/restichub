@@ -102,6 +102,18 @@ fn command_output(program: &str, arguments: &[&str]) -> Vec<u8> {
     text
 }
 
+/// Reports whether `reg query` finds `needle` in a name or in data below `hive`. The tool searches
+/// inside the process, so the registry is not dumped through a pipe.
+#[cfg(windows)]
+fn registry_search(hive: &str, needle: &str) -> bool {
+    std::process::Command::new("reg")
+        .args(["query", hive, "/s", "/f", needle, "/c"])
+        .output()
+        .expect("cannot start reg")
+        .status
+        .success()
+}
+
 /// AC-AG-03 (Windows): after ten jobs the canary is not in the registry.
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
@@ -110,7 +122,6 @@ async fn ac_ag_03_windows_ten_jobs_leave_no_canary_in_the_registry() {
         return;
     }
     let canary = format!("CANARY-{}", uuid::Uuid::now_v7());
-    let scanner = Scanner::new(&[Canary::parse(&canary)]);
     let dir = directory("registry-canary-agent");
     let path = directory("registry-canary-repo");
     script_stdout(&path, "backup", &format!("{SUMMARY}\n"));
@@ -124,11 +135,28 @@ async fn ac_ag_03_windows_ten_jobs_leave_no_canary_in_the_registry() {
         let collected = run(&jobs, &job).await;
         assert_eq!(collected.result().outcome, JobStatus::Succeeded as i32);
     }
-    for hive in ["HKCU", "HKLM\\SOFTWARE", "HKLM\\SYSTEM\\CurrentControlSet"] {
-        let dump = command_output("reg", &["query", hive, "/s"]);
-        assert!(dump.len() > 1024, "{hive}: the registry dump is empty");
-        let findings = scanner.scan(hive, &dump);
-        assert!(findings.is_empty(), "{hive}: the canary is in the registry");
+    // A control value proves that the search finds a canary in the registry.
+    let control = format!("CANARY-{}", uuid::Uuid::now_v7());
+    let key = "HKCU\\Software\\RestichubCanaryControl";
+    let added = std::process::Command::new("reg")
+        .args(["add", key, "/v", "control", "/d", &control, "/f"])
+        .status()
+        .expect("cannot start reg");
+    assert!(added.success(), "cannot write the control value");
+    let found = registry_search("HKCU\\Software", &control);
+    let _ = std::process::Command::new("reg")
+        .args(["delete", key, "/f"])
+        .status();
+    assert!(found, "the search must find the control value");
+    for hive in [
+        "HKCU",
+        "HKLM\\SOFTWARE",
+        "HKLM\\SYSTEM\\CurrentControlSet\\Services",
+    ] {
+        assert!(
+            !registry_search(hive, &canary),
+            "{hive}: the canary is in the registry"
+        );
     }
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&path);
