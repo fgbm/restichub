@@ -56,7 +56,7 @@ A new profile starts with the Standard preset. You can pick another preset or ch
 
 ## Job limits
 
-The limits protect against jobs that hang or run too long. They always apply. An empty field uses the default.
+The limits protect against jobs that hang or run too long. The stall limit always applies. You can turn off the maximum duration with 0. An empty field uses the default.
 
 | Limit | Default | Environment variable for the whole stack |
 |---|---|---|
