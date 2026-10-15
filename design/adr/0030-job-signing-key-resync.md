@@ -23,7 +23,8 @@ ADR-0026 fixes the job signing key rotation. The control plane sends the key set
 
 - An agent more than one rotation behind reaches the current key without a re-enrollment.
 - The retired rows stay in the database. The chain is built from them.
-- A compromise uses the enrollment path, because the chain must not carry a compromised key.
+- A compromise never puts the compromised key in the chain. An agent at most one rotation behind holds the new current key as its next key. It follows the chain without a re-enrollment, because the step that the new current key signed stays in the chain. An agent that is two or more rotations behind enrolls again.
+- A stored signed job whose signer key is retired is signed again with the current key before a redelivery.
 
 ## Alternatives
 

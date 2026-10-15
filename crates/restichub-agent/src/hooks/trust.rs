@@ -109,14 +109,11 @@ fn check_chain(path: &Path, trust: Trust, leaf_is_file: bool) -> Result<()> {
     Ok(())
 }
 
-/// The place of one element in the chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Role {
-    /// The file that the chain ends in.
     File,
     /// The directory that holds the file, or the leaf directory.
     Directory,
-    /// A directory above that.
     Ancestor,
 }
 

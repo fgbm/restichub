@@ -230,6 +230,45 @@ fn parse_serve_subcommand_is_the_default() {
 }
 
 #[test]
+fn fr_pr_11_the_compromise_command_needs_the_expected_key_id() {
+    let missing = parse_args(["compromise-signing-key".to_owned()]);
+    assert!(matches!(missing, Err(ConfigError::ExpectedKeyIdRequired)));
+    let without_value = parse_args([
+        "compromise-signing-key".to_owned(),
+        "--expected-key-id".to_owned(),
+    ]);
+    assert!(matches!(
+        without_value,
+        Err(ConfigError::ExpectedKeyIdMissing)
+    ));
+    let spaced = parse_args([
+        "compromise-signing-key".to_owned(),
+        "--expected-key-id".to_owned(),
+        "k1".to_owned(),
+    ]);
+    assert!(matches!(
+        spaced,
+        Ok(Command::CompromiseSigningKey { expected_key_id, .. }) if expected_key_id == "k1"
+    ));
+    let joined = parse_args([
+        "compromise-signing-key".to_owned(),
+        "--expected-key-id=k2".to_owned(),
+    ]);
+    assert!(matches!(
+        joined,
+        Ok(Command::CompromiseSigningKey { expected_key_id, .. }) if expected_key_id == "k2"
+    ));
+    let stray = parse_args(["migrate".to_owned(), "--expected-key-id=k3".to_owned()]);
+    assert!(matches!(stray, Err(ConfigError::UnknownArgument(_))));
+}
+
+#[test]
+fn parse_show_signing_key_subcommand() {
+    let command = parse_args(["show-signing-key".to_owned()]);
+    assert!(matches!(command, Ok(Command::ShowSigningKey(_))));
+}
+
+#[test]
 fn parse_unknown_argument() {
     let command = parse_args(["--nope".to_owned()]);
     assert!(matches!(command, Err(ConfigError::UnknownArgument(_))));

@@ -211,6 +211,10 @@ pub fn write_body(
         }
         ("PUT", "/api/v1/alert-rules") => Some(json!({"items": []})),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
+        // A key that is never current: the matrix checks the right and compromises nothing.
+        ("POST", "/api/v1/platform/signing-keys/compromise") => Some(json!({
+            "expected_current_key_id": "00000000-0000-0000-0000-000000000000",
+        })),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
         })),
@@ -640,6 +644,10 @@ pub async fn seed_agent_hooks(
         &restichub_db::agents::HelloFacts {
             capabilities: &capabilities,
             restore_roots: &[],
+            agent_version: "",
+            restic_version: "",
+            protocol_version_major: restichub_proto::version::Version::CURRENT.major,
+            protocol_version_minor: restichub_proto::version::Version::CURRENT.minor,
             hooks: &value,
             hook_allow_list: state,
             server_scripts: restichub_db::ServerScriptsState::Unknown,
@@ -673,6 +681,10 @@ pub async fn seed_agent_scripts(
         &restichub_db::agents::HelloFacts {
             capabilities: &capabilities,
             restore_roots: &[],
+            agent_version: "",
+            restic_version: "",
+            protocol_version_major: restichub_proto::version::Version::CURRENT.major,
+            protocol_version_minor: restichub_proto::version::Version::CURRENT.minor,
             hooks: &hooks,
             hook_allow_list: restichub_db::HookAllowListState::Absent,
             server_scripts: state,

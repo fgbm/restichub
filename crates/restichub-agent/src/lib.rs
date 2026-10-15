@@ -25,6 +25,7 @@ pub mod restic_install;
 pub mod restic_release;
 pub mod restic_store;
 pub mod restore_roots;
+pub mod rotation;
 pub mod scripts;
 mod scrub;
 pub mod service;

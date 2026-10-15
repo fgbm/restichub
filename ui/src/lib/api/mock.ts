@@ -190,7 +190,13 @@ function makeAgents(): Agent[] {
 		arch: string,
 		version: string,
 		seen: number,
-		status: Agent['status'] = 'active'
+		options: {
+			status?: Agent['status'];
+			versionStatus?: Agent['version_status'];
+			protocol?: string;
+			expiresInMinutes?: number;
+			rotatedMinutesAgo?: number | null;
+		} = {}
 	): Agent => ({
 		id,
 		hostname,
@@ -199,31 +205,66 @@ function makeAgents(): Agent[] {
 		agent_version: version,
 		restic_version: '0.19.0',
 		labels: [],
+		status: options.status ?? 'active',
 		restore_roots:
 			os === 'windows'
 				? ['C:\\ProgramData\\ResticHub\\Restore']
 				: os === 'linux'
 					? ['/var/lib/restichub-restore']
 					: [],
-		status,
 		last_seen_at: iso(seen),
 		created_at: iso(60 * 24 * 30),
-		certificate_expires_at: iso(-60 * 24 * 60),
+		certificate_expires_at: iso(-(options.expiresInMinutes ?? 24 * 60 * 20)),
+		last_certificate_rotation_at:
+			options.rotatedMinutesAgo === undefined || options.rotatedMinutesAgo === null
+				? null
+				: iso(options.rotatedMinutesAgo),
+		superseded_certificate_used_at: null,
 		certificate_serial: '0f' + id.padStart(14, '0'),
-		revoked_at: status === 'revoked' ? iso(60) : null,
+		protocol_version: options.protocol ?? '1.1',
+		control_plane_version: '0.4.2',
+		version_status: options.versionStatus ?? 'current',
+		revoked_at: options.status === 'revoked' ? iso(60) : null,
 		hook_allow_list: 'absent',
 		hooks: [],
 		// A Linux host that turned the trust mode on lists its interpreters (FR-HK-08).
-		server_scripts: os === 'linux' && status === 'active' && id !== '4' ? 'enabled' : 'disabled',
-		script_interpreters: os === 'linux' && status === 'active' && id !== '4' ? ['bash', 'sh'] : []
+		server_scripts:
+			os === 'linux' && (options.status ?? 'active') === 'active' && id !== '4'
+				? 'enabled'
+				: 'disabled',
+		script_interpreters:
+			os === 'linux' && (options.status ?? 'active') === 'active' && id !== '4'
+				? ['bash', 'sh']
+				: []
 	});
 	return [
-		agent('1', 'win-fs01', 'windows', 'amd64', '0.4.2', 14),
-		agent('2', 'srv-db-01', 'linux', 'amd64', '0.4.2', 26),
-		agent('3', 'win-dc01', 'windows', 'amd64', '0.4.1', 60),
-		agent('4', 'nas-backup', 'linux', 'arm64', '0.4.2', 120),
-		agent('5', 'mac-build-01', 'darwin', 'arm64', '0.4.0', 60 * 48),
-		agent('6', 'srv-app-02', 'linux', 'amd64', '0.3.9', 180, 'revoked')
+		agent('1', 'win-fs01', 'windows', 'amd64', '0.4.2', 14, {
+			expiresInMinutes: 24 * 27 * 60,
+			rotatedMinutesAgo: 3 * 24 * 60
+		}),
+		agent('2', 'srv-db-01', 'linux', 'amd64', '0.4.2', 26, {
+			expiresInMinutes: 2 * 24 * 60,
+			rotatedMinutesAgo: null
+		}),
+		agent('3', 'win-dc01', 'windows', 'amd64', '0.4.1', 60, {
+			versionStatus: 'update_available',
+			expiresInMinutes: 18 * 24 * 60,
+			rotatedMinutesAgo: 12 * 24 * 60
+		}),
+		agent('4', 'nas-backup', 'linux', 'arm64', '0.4.2', 120, {
+			expiresInMinutes: 22 * 24 * 60,
+			rotatedMinutesAgo: 8 * 24 * 60
+		}),
+		agent('5', 'mac-build-01', 'darwin', 'arm64', '0.1.0', 60 * 48, {
+			versionStatus: 'unsupported',
+			protocol: '0.9',
+			expiresInMinutes: 9 * 24 * 60
+		}),
+		agent('6', 'srv-app-02', 'linux', 'amd64', '0.3.9', 180, {
+			status: 'revoked',
+			versionStatus: 'update_available',
+			expiresInMinutes: 14 * 24 * 60
+		})
 	];
 }
 

@@ -236,6 +236,12 @@ pub const ROUTES: &[Route] = &[
         },
     },
     Route {
+        method: "post",
+        path: "/api/v1/platform/signing-keys/compromise",
+        access: Access::Protected(Operation::PlatformSigningKeysWrite),
+        handler: || routes!(crate::signing_keys::mark_compromised),
+    },
+    Route {
         method: "get",
         path: "/api/v1/users",
         access: Access::Protected(Operation::UsersRead),

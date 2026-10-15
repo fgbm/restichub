@@ -431,7 +431,8 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
 
 /// Records a `JobRejected` from the stream: the job fails with the typed reason (FR-PR-03).
 ///
-/// A rejection frees the repository, so the control plane can start the next job. The identity
+/// A rejection frees the repository, so the control plane can start the next job. A rejection that
+/// names no job only leaves a log line. The identity
 /// comes from the certificate, never from the message (FR-PR-08), so a rejection for another agent
 /// or tenant changes no row.
 pub async fn handle_job_rejected(
@@ -441,6 +442,13 @@ pub async fn handle_job_rejected(
     rejected: &JobRejected,
 ) {
     let Some(job_id) = parse_job_id_value(&rejected.job_id) else {
+        // The agent names no job when it cannot trust the signature, so this is the trace of a
+        // forged or damaged job (T3).
+        tracing::warn!(
+            %agent,
+            reason = reject_reason_code(rejected.reason),
+            "the agent rejected a job that it could not identify"
+        );
         return;
     };
     let now = state.auth().clock.now();
