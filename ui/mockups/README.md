@@ -31,6 +31,11 @@ Open the pages through the server. A `file://` address does not load the icon sp
 | `host.html` | The host detail. |
 | `job.html` | The job run. |
 | `repositories.html` | The repositories. |
+| `profile-variants.html` | The three profile editor variants with a recommendation. |
+| `profile-a.html` | Profile editor A: full page. |
+| `profile-b.html` | Profile editor B: dialog. |
+| `profile-c.html` | Profile editor C: profile page and creation wizard. |
+| `profiles.html` | The Profiles list. |
 | `audit.html` | The audit log and the change panel. |
 | `users.html` | Settings, Access: the users and the create dialog. |
 | `api-tokens.html` | Settings, Access: the tokens and the value-once dialog. |
@@ -109,3 +114,4 @@ The third column tells if the element needs keyboard behavior, an ARIA role or a
 
 A screen uses custom properties from `mockups.css` only.
 The pages name no third party product and no design system.
+The profile pages also load `profile-mock.css` and `profile-mock.js`. The script draws the field blocks, the retention preview and the command preview from static sample data.
