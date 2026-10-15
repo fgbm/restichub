@@ -6,6 +6,7 @@
 #   s2.sh up           start the control plane (compose by default; CP_MODE=native for a local binary)
 #   s2.sh setup        create the administrator, the API token and the installation CA file
 #   s2.sh run          up + setup + emulator + load + collector + wait + report (the whole run)
+#   s2.sh enroll       enroll AGENTS agents once and keep the identities (about an hour for 500)
 #   s2.sh emulate      enroll AGENTS agents and keep them connected for DURATION seconds
 #   s2.sh load         create one repository, profile and plan for each enrolled agent
 #   s2.sh collect      sample the CPU and RAM until the file $OUT/collect.stop exists
@@ -21,6 +22,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 
 OUT="${OUT:-$here/out}"
+IDENTITIES="${IDENTITIES:-$OUT/identities}"
 AGENTS="${AGENTS:-500}"
 DURATION="${DURATION:-14400}"
 INTERVAL_MIN="${INTERVAL_MIN:-15}"
@@ -173,12 +175,20 @@ fetch_ca() {
 	fi
 }
 
-emulate() {
-	rm -rf "$OUT/identities"
+# The control plane accepts 10 enrollments each minute from one address (FR-ID-05), so the
+# enrollment of 500 agents takes about an hour. It runs once; `emulate` reuses the identities.
+enroll() {
 	"$EMULATOR" --agents "$AGENTS" \
 		--enroll-url "$listener" --ca "$OUT/ca.pem" \
 		--api-url "$web" --api-token-file "$OUT/api-token" \
-		--write-identities "$OUT/identities" \
+		--identities "$IDENTITIES" --enroll-only --metrics-addr none
+}
+
+emulate() {
+	"$EMULATOR" --agents "$AGENTS" \
+		--enroll-url "$listener" --ca "$OUT/ca.pem" \
+		--api-url "$web" --api-token-file "$OUT/api-token" \
+		--identities "$IDENTITIES" \
 		--step-seconds "$STEP_SECONDS" --progress-ticks 2 \
 		--duration "$DURATION" --metrics-addr none \
 		--summary "$OUT/emulator-summary.json"
@@ -401,6 +411,7 @@ restart_test() {
 run() {
 	up
 	setup
+	enroll
 	"$0" collect >"$OUT/collect.log" 2>&1 &
 	local collector=$!
 	"$0" emulate >"$OUT/emulator.log" 2>&1 &
@@ -419,6 +430,7 @@ case "${1:-}" in
 up) up ;;
 down) down ;;
 setup) setup ;;
+enroll) enroll ;;
 emulate) emulate ;;
 load) load ;;
 collect) collect ;;
@@ -426,7 +438,7 @@ report) report ;;
 restart-test) restart_test ;;
 run) run ;;
 *)
-	sed -n '2,15p' "$0" >&2
+	sed -n '2,17p' "$0" >&2
 	exit 2
 	;;
 esac

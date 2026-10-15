@@ -1,0 +1,39 @@
+# HELP restichub_last_success_timestamp_seconds Unix time of the last successful backup of a plan.
+# TYPE restichub_last_success_timestamp_seconds gauge
+# HELP restichub_job_duration_seconds Duration of the jobs that ran, by kind.
+# TYPE restichub_job_duration_seconds histogram
+# HELP restichub_job_dispatch_delay_seconds Time from the moment a job may run to its first send to the agent.
+# TYPE restichub_job_dispatch_delay_seconds histogram
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="0.05"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="0.1"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="0.25"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="0.5"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="1"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="2"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="3"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="5"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="10"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="30"} 0
+restichub_job_dispatch_delay_seconds_bucket{tenant="01a14042-73ea-7096-9fb0-4d0783903116",le="+Inf"} 0
+restichub_job_dispatch_delay_seconds_sum{tenant="01a14042-73ea-7096-9fb0-4d0783903116"} 0
+restichub_job_dispatch_delay_seconds_count{tenant="01a14042-73ea-7096-9fb0-4d0783903116"} 0
+# HELP restichub_jobs_total Jobs that reached a final status.
+# TYPE restichub_jobs_total counter
+restichub_jobs_total{tenant="01a14042-73ea-7096-9fb0-4d0783903116",status="succeeded"} 0
+restichub_jobs_total{tenant="01a14042-73ea-7096-9fb0-4d0783903116",status="failed"} 0
+restichub_jobs_total{tenant="01a14042-73ea-7096-9fb0-4d0783903116",status="expired"} 0
+restichub_jobs_total{tenant="01a14042-73ea-7096-9fb0-4d0783903116",status="dead_letter"} 0
+# HELP restichub_agent_up 1 when the agent holds an open stream, else 0.
+# TYPE restichub_agent_up gauge
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1dd2-7242-b25c-e6f3f49bc56b"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1dda-7435-b4b2-664f1a7abe97"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1de8-70bc-96e4-47546f83a6ea"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1dee-73b2-b6f2-ce00040ce90e"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1e13-73ce-9665-017fbe1b2c5b"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1e22-7520-b76d-006bf54711fe"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1f06-716c-a7de-326dda1607e0"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1f0c-73b2-b2a1-05ac3170579f"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-1f69-7398-bb5f-62ad2eec7e15"} 0
+restichub_agent_up{tenant="01a14042-73ea-7096-9fb0-4d0783903116",agent="01a14043-2cc5-7705-86c8-ef0b8fb829db"} 0
+# HELP restichub_repo_lock_held 1 when a job of the repository reported a held lock and has not ended, else 0.
+# TYPE restichub_repo_lock_held gauge

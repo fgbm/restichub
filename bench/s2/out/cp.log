@@ -1,0 +1,21 @@
+2026-10-15T15:50:45.899241Z  INFO restichub_cp: starting the control plane listen_addr=127.0.0.1:8080
+2026-10-15T15:50:45.905419Z  WARN restichub_cp: server.insecure_cookies is on: the session cookie drops the Secure attribute and the __Host- prefix; a plain HTTP network can then read the session and another host on the same parent domain can set a cookie with the same name (cookie tossing); use this setting only for local development over plain HTTP
+2026-10-15T15:50:54.126252Z  INFO restichub_cp: the job signing key set is ready current_key_id=01a14042-5ee6-77fd-9ce3-35df11a240e6 next_key_id=01a14042-5f15-74a2-a2b0-da39118d4162
+2026-10-15T15:50:54.604292Z  WARN restichub_cp::setup: the setup is required; use this one-time setup token with POST /api/v1/setup before it expires setup_token=wuVIrS4TOT-LBw-82a5odjj8el-vTvGTCmLcYFKMu7Y expires_at=2026-10-16 15:50:54.340294346 +00:00:00
+2026-10-15T15:50:56.293438Z  INFO restichub_cp: the agent listener is ready addr=127.0.0.1:8443
+2026-10-15T15:50:56.293911Z  INFO restichub_cp: the control plane is ready
+2026-10-15T15:50:59.529467Z  INFO request{method=POST uri=/api/v1/setup request_id=01a14042-6bcf-742f-ae6b-624788932aba}: restichub_cp::setup: the first Admin of the single-tenant installation is created
+2026-10-15T15:51:01.744901Z  WARN sqlx::pool::acquire: acquired connection, but time to acquire exceeded slow threshold acquired_after_secs=2.008758857 slow_acquire_threshold_secs=2.0
+2026-10-15T15:51:03.194767Z  WARN request{method=POST uri=/api/v1/auth/sign-in request_id=01a14042-75ae-7408-9c47-01a1fc617508}: sqlx::pool::acquire: acquired connection, but time to acquire exceeded slow threshold acquired_after_secs=3.402219202 slow_acquire_threshold_secs=2.0
+2026-10-15T15:51:43.088765Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1dee-73b2-b6f2-ce00040ce90e
+2026-10-15T15:51:43.111874Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1de8-70bc-96e4-47546f83a6ea
+2026-10-15T15:51:43.113470Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1e22-7520-b76d-006bf54711fe
+2026-10-15T15:51:43.091637Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1dd2-7242-b25c-e6f3f49bc56b
+2026-10-15T15:51:43.128519Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1e13-73ce-9665-017fbe1b2c5b
+2026-10-15T15:51:43.134562Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1dda-7435-b4b2-664f1a7abe97
+2026-10-15T15:51:43.285843Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1f0c-73b2-b2a1-05ac3170579f
+2026-10-15T15:51:43.359906Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1f69-7398-bb5f-62ad2eec7e15
+2026-10-15T15:51:43.362397Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-1f06-716c-a7de-326dda1607e0
+2026-10-15T15:51:46.466297Z  WARN sqlx::pool::acquire: acquired connection, but time to acquire exceeded slow threshold acquired_after_secs=4.29148655 slow_acquire_threshold_secs=2.0
+2026-10-15T15:51:46.704566Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14042-73ea-7096-9fb0-4d0783903116 agent_id=01a14043-2cc5-7705-86c8-ef0b8fb829db
+2026-10-15T15:56:00.374216Z  INFO restichub_cp: shutdown signal received

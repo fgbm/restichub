@@ -39,7 +39,11 @@ OPTIONS:
   --api-url URL       make the tokens through the API of this control plane
   --api-token-file F  file with the API token that --api-url uses
   --enroll-concurrency N  enrollments at the same time (default 16)
-  --write-identities DIR  write the enrolled identities to DIR in the --certs layout
+  --enroll-per-minute N  enrollments started in a minute (default 9; the control plane
+                      accepts 10 from one address, 0 turns the pacing off)
+  --identities DIR    keep the enrolled identities in DIR; a later run reuses them and
+                      enrolls only the missing agents
+  --enroll-only       enroll the agents and exit
   --executor NAME     simulated (default) or fake-restic
   --fake-restic PATH  path to the restichub-fake-restic binary
   --tenant ID         tenant identifier (default tenant-1)
@@ -85,7 +89,9 @@ pub struct Options {
     pub api_url: Option<String>,
     pub api_token_file: Option<PathBuf>,
     pub enroll_concurrency: usize,
-    pub write_identities: Option<PathBuf>,
+    pub enroll_per_minute: u32,
+    pub identities: Option<PathBuf>,
+    pub enroll_only: bool,
     server_set: bool,
 }
 
@@ -113,7 +119,9 @@ impl Default for Options {
             api_url: None,
             api_token_file: None,
             enroll_concurrency: 16,
-            write_identities: None,
+            enroll_per_minute: 9,
+            identities: None,
+            enroll_only: false,
             server_set: false,
         }
     }
@@ -151,10 +159,13 @@ fn parse(args: &[String]) -> anyhow::Result<Options> {
             "--enroll-concurrency" => {
                 options.enroll_concurrency = take_value(args, &mut index, &name)?.parse()?;
             }
-            "--write-identities" => {
-                options.write_identities =
-                    Some(PathBuf::from(take_value(args, &mut index, &name)?));
+            "--enroll-per-minute" => {
+                options.enroll_per_minute = take_value(args, &mut index, &name)?.parse()?;
             }
+            "--identities" => {
+                options.identities = Some(PathBuf::from(take_value(args, &mut index, &name)?));
+            }
+            "--enroll-only" => options.enroll_only = true,
             "--server-name" => options.server_name = take_value(args, &mut index, &name)?,
             "--ca" => options.ca = Some(PathBuf::from(take_value(args, &mut index, &name)?)),
             "--certs" => options.certs = Some(PathBuf::from(take_value(args, &mut index, &name)?)),
@@ -239,6 +250,9 @@ async fn run(options: &Options) -> anyhow::Result<()> {
             }
             tenant_id = fleet.tenant_id;
             println!("enrolled {} agents at {url}", fleet.identities.len());
+            if options.enroll_only {
+                return Ok(());
+            }
             (fleet.ca_pem, fleet.identities, fleet.key_ring)
         }
         None => {
@@ -346,12 +360,11 @@ async fn enroll_agents(
         ca_pem: ca_pem.clone(),
         server_name: options.server_name.clone(),
         concurrency: options.enroll_concurrency,
+        per_minute: options.enroll_per_minute,
         hostname_prefix: "emulator".to_owned(),
+        store: options.identities.clone(),
     })
     .await?;
-    if let Some(dir) = &options.write_identities {
-        write_identities(dir, &ca_pem, &fleet.identities)?;
-    }
     Ok(EnrolledFleet {
         ca_pem,
         identities: fleet.identities,
@@ -359,23 +372,6 @@ async fn enroll_agents(
         tenant_id: fleet.tenant_id,
         grpc_endpoint: fleet.grpc_endpoint,
     })
-}
-
-fn write_identities(
-    dir: &std::path::Path,
-    ca_pem: &str,
-    identities: &[AgentIdentity],
-) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dir.join("clients"))?;
-    std::fs::write(dir.join("ca.pem"), ca_pem)?;
-    for identity in identities {
-        let base = dir.join("clients").join(&identity.agent_id);
-        std::fs::write(base.with_extension("pem"), &identity.cert_pem)?;
-        std::fs::write(base.with_extension("key"), &identity.key_pem)?;
-    }
-    let ids: Vec<&str> = identities.iter().map(|i| i.agent_id.as_str()).collect();
-    std::fs::write(dir.join("agents.txt"), ids.join("\n"))?;
-    Ok(())
 }
 
 fn resolve_profile(options: &Options) -> anyhow::Result<LoadProfile> {
