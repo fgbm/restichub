@@ -391,6 +391,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/job-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the job templates: the built-in ones, then those of the tenant. */
+        get: operations["list_job_templates"];
+        put?: never;
+        /** Creates a job template. Only an Admin can. */
+        post: operations["create_job_template"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/job-templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one job template. */
+        get: operations["get_job_template"];
+        put?: never;
+        post?: never;
+        /** Removes a job template. Only an Admin can. */
+        delete: operations["delete_job_template"];
+        options?: never;
+        head?: never;
+        /** Updates a job template. Only an Admin can. An absent field keeps its value. */
+        patch: operations["update_job_template"];
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -1105,6 +1142,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/script-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the script templates: the built-in ones, then those of the tenant. */
+        get: operations["list_script_templates"];
+        put?: never;
+        /** Creates a script template. Only an Admin can. */
+        post: operations["create_script_template"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/script-templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads one script template. */
+        get: operations["get_script_template"];
+        put?: never;
+        post?: never;
+        /** Removes a script template. Only an Admin can. A profile keeps the script that it copied. */
+        delete: operations["delete_script_template"];
+        options?: never;
+        head?: never;
+        /** Updates a script template. Only an Admin can. An absent field keeps its value. */
+        patch: operations["update_script_template"];
+        trace?: never;
+    };
     "/api/v1/secrets": {
         parameters: {
             query?: never;
@@ -1373,6 +1447,13 @@ export interface components {
             restore_roots: string[];
             revoked_at?: string | null;
             revoked_by_user_id?: string | null;
+            /** @description The interpreters the agent found, for example `bash`. Empty unless the mode is enabled. */
+            script_interpreters: string[];
+            /**
+             * @description Whether the host trusts scripts from the control plane (FR-HK-08, ADR-0037). The host
+             *     administrator changes it with `restichub-agent trust-server-scripts`.
+             */
+            server_scripts: components["schemas"]["ServerScriptsState"];
             status: components["schemas"]["AgentStatus"];
         };
         /**
@@ -1510,6 +1591,13 @@ export interface components {
          * @example channel_delete
          * @example alert_rule_update
          * @example alert_sent
+         * @example script_template_create
+         * @example script_template_update
+         * @example script_template_delete
+         * @example job_template_create
+         * @example job_template_update
+         * @example job_template_delete
+         * @example script_run
          */
         AuditAction: string;
         AuditItem: {
@@ -1716,6 +1804,11 @@ export interface components {
             /** @description Returned only here. */
             token: string;
         };
+        CreateJobTemplateRequest: {
+            description?: string;
+            name: string;
+            scripts?: components["schemas"]["ScriptDef"][];
+        };
         /** @description The request body of a plan create (FR-SC-01, FR-SC-07, FR-SC-11). */
         CreatePlanRequest: {
             agent_id: string;
@@ -1746,6 +1839,11 @@ export interface components {
             /** @description The identifier of the repository that the profile uses. */
             repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
+            /**
+             * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
+             *     Admin can set them.
+             */
+            scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];
         };
         /**
@@ -1768,6 +1866,17 @@ export interface components {
             s3_access_key?: string | null;
             /** @description Credential that signs the S3 request. Mandatory for the S3 backend. */
             s3_secret_key?: string | null;
+        };
+        CreateScriptTemplateRequest: {
+            body: string;
+            description?: string;
+            failure_policy: components["schemas"]["FailurePolicy"];
+            interpreter: components["schemas"]["Interpreter"];
+            name: string;
+            parameters?: components["schemas"]["ScriptTemplateParameter"][];
+            phase: components["schemas"]["HookPhase"];
+            /** Format: int32 */
+            timeout_seconds?: number;
         };
         /**
          * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
@@ -1947,8 +2056,18 @@ export interface components {
             revoked_by_user_id?: string | null;
             used_at?: string | null;
         };
+        /**
+         * @description The kind of a script variable.
+         * @enum {string}
+         */
+        EnvKind: "string" | "secret_ref";
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied";
+        /**
+         * @description What a failed script does to the job.
+         * @enum {string}
+         */
+        FailurePolicy: "abort_backup" | "continue";
         /** @description Counts that `restic forget` reported, summed over the groups. */
         ForgetSummary: {
             /** Format: int64 */
@@ -2029,6 +2148,11 @@ export interface components {
             setup_required: boolean;
             tenancy_mode: components["schemas"]["TenancyMode"];
         };
+        /**
+         * @description The program that runs a script.
+         * @enum {string}
+         */
+        Interpreter: "powershell" | "cmd" | "bash" | "sh";
         /** @description The request body of an init or a test-access action. */
         JobActionRequest: {
             /**
@@ -2040,6 +2164,11 @@ export interface components {
         /** @description One job with its steps, its summary and its progress (FR-MN-02). */
         JobDetailView: components["schemas"]["JobView"] & {
             log: components["schemas"]["LogInfo"];
+            /**
+             * @description The same steps with their kind, name and phase, so the job detail shows every script and
+             *     hook in order before it runs (FR-HK-11).
+             */
+            planned: components["schemas"]["PlannedStepView"][];
             /**
              * @description The identifiers of all steps that the control plane signed into the job, in run order. Empty
              *     before the control plane sent the job. A step that did not start has no entry in `steps`.
@@ -2080,6 +2209,22 @@ export interface components {
          * @enum {string}
          */
         JobStatus: "queued" | "sent" | "running" | "succeeded" | "failed" | "expired" | "dead_letter";
+        JobTemplateListResponse: {
+            items: components["schemas"]["JobTemplateView"][];
+        };
+        /** @description A job template: an ordered set of scripts from which a profile is made. */
+        JobTemplateView: {
+            builtin: boolean;
+            /** @description In RFC 3339. Absent for a built-in template. */
+            created_at?: string | null;
+            description: string;
+            /** @description A UUID, or `builtin:<name>` for a template of the control plane. */
+            id: string;
+            name: string;
+            scripts: components["schemas"]["ScriptDef"][];
+            /** @description In RFC 3339. Absent for a built-in template. */
+            updated_at?: string | null;
+        };
         /**
          * @description What started a job.
          * @enum {string}
@@ -2314,6 +2459,11 @@ export interface components {
          * @enum {string}
          */
         OverwriteMode: "always" | "if-changed" | "if-newer" | "never";
+        /**
+         * @description The type of a template parameter. The value becomes an environment variable of the script.
+         * @enum {string}
+         */
+        ParameterKind: "string" | "secret_ref" | "integer" | "boolean";
         PlanListResponse: {
             items: components["schemas"]["PlanView"][];
             next_cursor?: string | null;
@@ -2364,6 +2514,16 @@ export interface components {
             plan_id: string;
             /** @description Stable snake_case code. */
             reason: string;
+        };
+        /** @description One planned step of a job (FR-HK-11). */
+        PlannedStepView: {
+            /** @description The kind of the step, such as `backup`, `hook` or `script`. Empty for an older job. */
+            kind: string;
+            /** @description The name of a script or the identifier of a hook, or empty. */
+            name: string;
+            /** @description The phase of a hook or a script, or empty. */
+            phase: string;
+            step_id: string;
         };
         /** @description One membership of an account in the platform account list (ADR-0028). */
         PlatformMembershipView: {
@@ -2508,6 +2668,7 @@ export interface components {
             paths: components["schemas"]["ProfilePaths"];
             repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
+            scripts: components["schemas"]["ScriptDef"][];
             tags: string[];
             /** @description In RFC 3339. */
             updated_at: string;
@@ -2673,6 +2834,67 @@ export interface components {
             /** @description The time zone that the user interface renders each run in. */
             time_zone: string;
         };
+        /** @description A script of a profile or of a job template. */
+        ScriptDef: {
+            /** @description The text of the script. At most 65536 bytes. */
+            body: string;
+            env?: components["schemas"]["ScriptEnvDef"][];
+            failure_policy: components["schemas"]["FailurePolicy"];
+            interpreter: components["schemas"]["Interpreter"];
+            /** @description The name in the job log. 1 to 128 characters. */
+            name: string;
+            phase: components["schemas"]["HookPhase"];
+            /** @description The identifier of the template that the script came from. It has no effect on the run. */
+            template_id?: string | null;
+            /**
+             * Format: int32
+             * @description Zero means the default limit of one hour.
+             */
+            timeout_seconds?: number;
+        };
+        /**
+         * @description One environment variable of a script. The agent gives it to the script as an environment
+         *     variable and nowhere else.
+         */
+        ScriptEnvDef: {
+            kind: components["schemas"]["EnvKind"];
+            /** @description Letters, digits and underscore, not first a digit. */
+            name: string;
+            /** @description The text, or the identifier of the secret. */
+            value: string;
+        };
+        ScriptTemplateListResponse: {
+            items: components["schemas"]["ScriptTemplateView"][];
+        };
+        /** @description One declared parameter of a script template. */
+        ScriptTemplateParameter: {
+            /** @description The default value. A secret reference has none. */
+            default?: string | null;
+            /** @description The label in the form. 1 to 64 characters. */
+            label: string;
+            /** @description The name of the environment variable. */
+            name: string;
+            type: components["schemas"]["ParameterKind"];
+        };
+        /** @description A script template, built-in or of the tenant. */
+        ScriptTemplateView: {
+            body: string;
+            builtin: boolean;
+            /** @description In RFC 3339. Absent for a built-in template. */
+            created_at?: string | null;
+            description: string;
+            failure_policy: components["schemas"]["FailurePolicy"];
+            /** @description A UUID, or `builtin:<name>` for a template of the control plane. */
+            id: string;
+            interpreter: components["schemas"]["Interpreter"];
+            name: string;
+            parameters: components["schemas"]["ScriptTemplateParameter"][];
+            phase: components["schemas"]["HookPhase"];
+            /** Format: int32 */
+            timeout_seconds: number;
+            /** @description In RFC 3339. Absent for a built-in template. */
+            updated_at?: string | null;
+        };
         /**
          * @description The metadata of one secret with the marker that the value is set (FR-RP-05).
          *
@@ -2717,6 +2939,11 @@ export interface components {
             /** @description In RFC 3339. */
             updated_at: string;
         };
+        /**
+         * @description Whether a host trusts scripts from the control plane (FR-HK-08, ADR-0037).
+         * @enum {string}
+         */
+        ServerScriptsState: "unknown" | "disabled" | "enabled" | "insecure";
         SetRoleRequest: {
             role: components["schemas"]["Role"];
         };
@@ -2879,7 +3106,16 @@ export interface components {
             exit_code: number;
             /** @description In RFC 3339. */
             finished_at?: string | null;
+            /**
+             * @description The kind of the step, such as `backup`, `hook` or `script`. Empty for a job from an older
+             *     version.
+             */
+            kind: string;
+            /** @description The name of a script or the identifier of a hook, or empty. */
+            name: string;
             output: components["schemas"]["StepOutput"];
+            /** @description The phase of a hook or a script, or empty. */
+            phase: string;
             /** @description True after a hard kill that can leave a stale lock. */
             possible_stale_lock: boolean;
             /** @description In RFC 3339. */
@@ -2962,6 +3198,12 @@ export interface components {
              */
             url?: string | null;
         };
+        /** @description The body of an update. An absent field keeps its value. */
+        UpdateJobTemplateRequest: {
+            description?: string | null;
+            name?: string | null;
+            scripts?: components["schemas"]["ScriptDef"][] | null;
+        };
         /** @description The body of a schedule update. It replaces both schedules. */
         UpdateMaintenanceRequest: {
             check: components["schemas"]["MaintenanceScheduleInput"];
@@ -2995,6 +3237,8 @@ export interface components {
             paths?: components["schemas"]["ProfilePaths"];
             repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
+            /** @description The full new script list. Only an Admin can change it (FR-HK-12). */
+            scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];
         };
         /**
@@ -3013,6 +3257,18 @@ export interface components {
             rest_password?: string | null;
             s3_access_key?: string | null;
             s3_secret_key?: string | null;
+        };
+        /** @description The body of an update. An absent field keeps its value. */
+        UpdateScriptTemplateRequest: {
+            body?: string | null;
+            description?: string | null;
+            failure_policy?: components["schemas"]["FailurePolicy"] | null;
+            interpreter?: components["schemas"]["Interpreter"] | null;
+            name?: string | null;
+            parameters?: components["schemas"]["ScriptTemplateParameter"][] | null;
+            phase?: components["schemas"]["HookPhase"] | null;
+            /** Format: int32 */
+            timeout_seconds?: number | null;
         };
         /** @description Absent fields leave the value unchanged. */
         UpdateUserRequest: {
@@ -4177,6 +4433,283 @@ export interface operations {
             };
         };
     };
+    list_job_templates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The job templates. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobTemplateListResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_job_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateJobTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description The template is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobTemplateView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists, or the tenant holds the most templates. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_job_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the template. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobTemplateView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The template is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_job_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the template. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The template is built-in. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The template is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    update_job_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the template. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateJobTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated template. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobTemplateView"];
+                };
+            };
+            /** @description A field is not valid, or the template is built-in. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The template is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     list_jobs: {
         parameters: {
             query?: never;
@@ -4363,6 +4896,11 @@ export interface operations {
                 after_seq: number | null;
                 /** @description The most lines in the page, from 1 to 2000. The default is 500. */
                 limit: number | null;
+                /**
+                 * @description Reads the lines of one step only, for example `script-0` (FR-HK-11). The default is every
+                 *     line of the job. Use an empty value for the lines of the job itself.
+                 */
+                step_id: string | null;
             };
             cookie?: never;
         };
@@ -7327,6 +7865,283 @@ export interface operations {
                 };
             };
             /** @description A job waits or runs on the repository. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_script_templates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The script templates. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScriptTemplateListResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_script_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateScriptTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description The template is created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScriptTemplateView"];
+                };
+            };
+            /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists, or the tenant holds the most templates. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_script_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the template. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScriptTemplateView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The template is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_script_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the template. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The template is built-in. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The template is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    update_script_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the template. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateScriptTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated template. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScriptTemplateView"];
+                };
+            };
+            /** @description A field is not valid, or the template is built-in. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The template is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The name exists. */
             409: {
                 headers: {
                     [name: string]: unknown;
