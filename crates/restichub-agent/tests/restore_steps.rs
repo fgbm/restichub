@@ -333,7 +333,7 @@ async fn fr_pr_10_a_restore_value_never_becomes_an_option() {
 /// FR-RS-03: the agent refuses a restore target outside its restore roots or on its own files, and
 /// restic never starts.
 #[tokio::test(flavor = "multi_thread")]
-async fn fr_rs_03_a_target_outside_the_roots_or_on_the_agent_files_is_rejected() {
+async fn ac_rs_05_a_target_outside_the_roots_or_on_the_agent_files_is_rejected() {
     let fixture = Fixture::new("restore-roots");
     let jobs = program_jobs_with_host_roots(&fixture.dir);
     let outside = temp_config_dir("restore-roots-outside");
@@ -375,7 +375,7 @@ async fn fr_rs_03_a_target_outside_the_roots_or_on_the_agent_files_is_rejected()
 /// FR-RS-03: a link inside a root that points to the configuration directory is refused.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn fr_rs_03_a_link_to_the_configuration_directory_is_rejected() {
+async fn ac_rs_05_a_link_to_the_configuration_directory_is_rejected() {
     let fixture = Fixture::new("restore-link");
     let jobs = program_jobs(&fixture.dir).with_restore_access(
         restichub_agent::restore_roots::RestoreAccess::new(

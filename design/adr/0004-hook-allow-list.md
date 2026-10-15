@@ -18,7 +18,7 @@ Each hook has an ID, an executable, an argument template and a parameter schema.
 
 - A compromised control plane cannot execute arbitrary commands on hosts.
 - A host administrator must install the allow-list on each host. Packages and configuration management tools can do this.
-- The allow-list is the only local configuration that the agent keeps on purpose.
+- The allow-list is the only local configuration that the agent keeps on purpose. One more root-only file follows the same rule: the list of restore roots ([ADR-0035](0035-restore-and-snapshot-browsing.md)).
 - The UI shows only hooks that all target agents have.
 
 ## Alternatives

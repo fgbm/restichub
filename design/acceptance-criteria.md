@@ -137,6 +137,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-RS-02 | FR-RS-02 | A snapshot with 1 million files. **Expected:** the first page of the tree shows in the UI in 5 s or less. Next pages load on request. | L |
 | AC-RS-03 | FR-RS-03 | Restore 10 GB from agent A to agent B. **Expected:** the SHA-256 of all files agrees. Traffic through the CP is less than 1 % of the data volume. After the job, agent B contains no canary. | A |
 | AC-RS-04 | FR-RS-04 | Restore with `--dry-run`. **Expected:** the file system does not change. Include, exclude and overwrite modes give the results in the table-driven test. | A |
+| AC-RS-05 | FR-RS-03 | Restore to `/`, to `/etc`, to the configuration directory of the agent, to a link that points to it, and to a path outside the restore roots. **Expected:** the agent rejects each job with `RESTORE_TARGET_DENIED`, the control plane refuses a target outside the reported roots before a job exists, and no file changes. A path inside the default root works. | A |
 
 ## 10. Monitoring and logs
 

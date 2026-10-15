@@ -102,7 +102,7 @@ On Linux the command writes `/etc/systemd/system/restichub-agent.service` and en
 
 The unit keeps five capabilities: `CAP_DAC_READ_SEARCH`, `CAP_DAC_OVERRIDE`, `CAP_CHOWN`, `CAP_FOWNER` and `CAP_FSETID`. Restic runs as `root`, so these five are the only capabilities that the bounding set keeps. Without them restic cannot read a file of another account, or keep the owner and the mode of a restored file.
 
-`ProtectSystem=strict` makes the whole file system read-only, except the identity directory through `ReadWritePaths` and the cache directory. A read of a backup source stays possible. Restic writes to a local repository, so add every local repository path to `ReadWritePaths`. `ProtectHome` stays off, because a backup source is often below `/home`.
+`ProtectSystem=strict` makes the whole file system read-only, except the identity directory through `ReadWritePaths` and the cache directory. A read of a backup source stays possible. Restic writes to a local repository, so add every local repository path to `ReadWritePaths`. The unit also lists the restore roots there (`/var/lib/restichub-restore` and each root from `/etc/restichub-agent-restore-roots.txt`). `install-service` creates the default root. Run it again after you add a root, because systemd reads the list at the start of the unit. `ProtectHome` stays off, because a backup source is often below `/home`.
 
 The unit sets `CacheDirectory=restichub-agent` and `RESTIC_CACHE_DIR=/var/cache/restichub-agent`, so the restic cache stays in a directory that the unit can write.
 

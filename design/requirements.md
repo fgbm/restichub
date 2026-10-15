@@ -176,7 +176,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 |---|---|---|
 | FR-RS-01 | Snapshot list with filters by host, tag, path and date. | M |
 | FR-RS-02 | Snapshot file tree (`ls --json`) with paging. File search (`find`). | M (ls), 1.0 (find) |
-| FR-RS-03 | Restore to the source agent or to a different agent. The target agent gets the repository secrets for the restore job only. Data does not go through the CP. | M |
+| FR-RS-03 | Restore to the source agent or to a different agent. The target agent gets the repository secrets for the restore job only. Data does not go through the CP. The agent restores only below the restore roots that root or Administrators configure on the host, and never over its own files (ADR-0035). | M |
 | FR-RS-04 | Restore options: target path, include and exclude, `--dry-run`, overwrite mode, `--verify`. | M |
 | FR-RS-05 | Download of one file or an archive in the browser (`dump`, streamed through the CP) with a size limit. | 1.0 |
 | FR-RS-06 | Scheduled test restore: sample files, restore to a temporary directory, compare, report "restore verified". | 1.0 |

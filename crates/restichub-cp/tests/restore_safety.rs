@@ -27,7 +27,7 @@ fn page(path: &str) -> Value {
 /// FR-RS-03: the control plane refuses a target outside the roots that the agent reported, and a
 /// target that is not a path of the agent operating system.
 #[tokio::test]
-async fn fr_rs_03_a_target_outside_the_agent_roots_is_refused_before_a_job_exists() {
+async fn ac_rs_05_a_target_outside_the_agent_roots_is_refused_before_a_job_exists() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -65,7 +65,7 @@ async fn fr_rs_03_a_target_outside_the_agent_roots_is_refused_before_a_job_exist
 
 /// FR-RS-03: the list of agents shows the restore roots that the last hello reported.
 #[tokio::test]
-async fn fr_rs_03_the_agent_list_shows_the_restore_roots() {
+async fn ac_rs_05_the_agent_list_shows_the_restore_roots() {
     let Some(db) = common::test_db().await else {
         return;
     };

@@ -295,12 +295,12 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_the_default_root_is_below_var_lib() {
+    fn ac_rs_05_the_default_root_is_below_var_lib() {
         assert_eq!(default_root(), PathBuf::from("/var/lib/restichub-restore"));
     }
 
     #[test]
-    fn fr_rs_03_a_target_inside_a_root_is_accepted() {
+    fn ac_rs_05_a_target_inside_a_root_is_accepted() {
         let base = temp_dir("inside");
         let root = base.join("restore");
         let config = base.join("config");
@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_the_filesystem_root_and_system_paths_are_refused() {
+    fn ac_rs_05_the_filesystem_root_and_system_paths_are_refused() {
         let base = temp_dir("system");
         let root = base.join("restore");
         std::fs::create_dir_all(&root).expect("cannot create the root");
@@ -332,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_a_path_outside_the_roots_is_refused() {
+    fn ac_rs_05_a_path_outside_the_roots_is_refused() {
         let base = temp_dir("outside");
         let root = base.join("restore");
         std::fs::create_dir_all(&root).expect("cannot create the root");
@@ -351,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_the_config_dir_and_what_lies_inside_or_above_it_are_refused() {
+    fn ac_rs_05_the_config_dir_and_what_lies_inside_or_above_it_are_refused() {
         let base = temp_dir("config");
         let config = base.join("restore").join("config");
         std::fs::create_dir_all(&config).expect("cannot create the config");
@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_a_link_to_the_config_dir_is_refused() {
+    fn ac_rs_05_a_link_to_the_config_dir_is_refused() {
         let base = temp_dir("link");
         let root = base.join("restore");
         let config = base.join("config");
@@ -394,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_a_link_out_of_the_root_is_refused() {
+    fn ac_rs_05_a_link_out_of_the_root_is_refused() {
         let base = temp_dir("escape");
         let root = base.join("restore");
         let outside = base.join("outside");
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_a_dot_dot_component_is_refused() {
+    fn ac_rs_05_a_dot_dot_component_is_refused() {
         let base = temp_dir("dotdot");
         let root = base.join("restore");
         std::fs::create_dir_all(&root).expect("cannot create the root");
@@ -429,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_a_root_of_slash_allows_an_in_place_restore_but_not_the_agent_files() {
+    fn ac_rs_05_a_root_of_slash_allows_an_in_place_restore_but_not_the_agent_files() {
         let base = temp_dir("slash");
         let config = base.join("config");
         std::fs::create_dir_all(&config).expect("cannot create the config");
@@ -445,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_the_roots_file_lists_absolute_paths() {
+    fn ac_rs_05_the_roots_file_lists_absolute_paths() {
         let (roots, skipped) =
             parse_roots("# comment\n\n/srv/restore\n  /data  \nrelative\n../x\n");
         assert_eq!(
@@ -456,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_a_roots_file_of_a_user_account_is_ignored() {
+    fn ac_rs_05_a_roots_file_of_a_user_account_is_ignored() {
         let base = temp_dir("untrusted");
         let file = base.join("roots.txt");
         std::fs::write(&file, "/srv/extra\n").expect("cannot write the file");
@@ -474,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_the_roots_file_is_a_sibling_of_the_config_dir() {
+    fn ac_rs_05_the_roots_file_is_a_sibling_of_the_config_dir() {
         assert_eq!(
             roots_file_for(Path::new("/etc/restichub-agent")),
             PathBuf::from("/etc/restichub-agent-restore-roots.txt")
@@ -482,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_rs_03_the_roots_are_reported_as_text() {
+    fn ac_rs_05_the_roots_are_reported_as_text() {
         let access = RestoreAccess::new(vec![PathBuf::from("/srv/restore")], Vec::new());
         assert_eq!(access.root_strings(), vec!["/srv/restore".to_owned()]);
     }
