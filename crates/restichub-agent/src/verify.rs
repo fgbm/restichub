@@ -168,14 +168,19 @@ fn check_chain(
         }
     }
 
-    valid_at(leaf, now)?;
+    valid_at(leaf, "leaf", now)?;
     leaf.verify_signature(Some(chain[0].public_key()))
         .map_err(|error| anyhow::anyhow!("the leaf is not signed by the issuing CA: {error}"))?;
     if leaf.validity().not_after.to_datetime() > chain[0].validity().not_after.to_datetime() {
         bail!("the leaf certificate outlives its issuing CA");
     }
     for index in 0..chain.len() - 1 {
-        valid_at(&chain[index], now)?;
+        let label = if index == 0 {
+            "issuing CA"
+        } else {
+            "intermediate CA"
+        };
+        valid_at(&chain[index], label, now)?;
         if chain[index].validity().not_after.to_datetime()
             > chain[index + 1].validity().not_after.to_datetime()
         {
@@ -188,16 +193,33 @@ fn check_chain(
             })?;
     }
     let root = chain.last().context("the CA chain is empty")?;
-    valid_at(root, now)?;
+    valid_at(root, "root CA", now)?;
     root.verify_signature(None)
         .map_err(|error| anyhow::anyhow!("the root certificate is not self-signed: {error}"))?;
     Ok(())
 }
 
-fn valid_at(certificate: &X509Certificate<'_>, now: OffsetDateTime) -> Result<()> {
+/// How far the host clock may differ from the control plane clock (FR-AG-04).
+///
+/// The control plane backdates the leaf `not_before` by the same time, so a small lag of the host
+/// clock does not refuse a fresh certificate. The tolerance never applies to `not_after`.
+pub const CLOCK_TOLERANCE: time::Duration = time::Duration::minutes(5);
+
+pub const CLOCK_HINT: &str = "set the host clock to the correct time (Windows: run `w32tm /resync` in an elevated PowerShell, or Settings > Time & language > Date & time; Linux: run `timedatectl set-ntp true`, or `chronyc makestep`)";
+
+fn valid_at(certificate: &X509Certificate<'_>, label: &str, now: OffsetDateTime) -> Result<()> {
     let validity = certificate.validity();
-    if now < validity.not_before.to_datetime() || now > validity.not_after.to_datetime() {
-        bail!("a chain certificate is not valid at the current time");
+    let not_before = validity.not_before.to_datetime();
+    let not_after = validity.not_after.to_datetime();
+    if now > not_after {
+        bail!(
+            "the {label} certificate expired at {not_after} (the local time is {now}); if the host clock is wrong, {CLOCK_HINT}"
+        );
+    }
+    if now + CLOCK_TOLERANCE < not_before {
+        bail!(
+            "the {label} certificate is valid from {not_before} until {not_after}, and the local time is {now}; the host clock is behind the control plane, so {CLOCK_HINT}"
+        );
     }
     Ok(())
 }
@@ -229,6 +251,14 @@ mod tests {
     }
 
     fn issued(agent_key: &KeyPair, san: &str) -> (Vec<u8>, Vec<Vec<u8>>) {
+        issued_valid(agent_key, san, None)
+    }
+
+    fn issued_valid(
+        agent_key: &KeyPair,
+        san: &str,
+        leaf_validity: Option<(OffsetDateTime, OffsetDateTime)>,
+    ) -> (Vec<u8>, Vec<Vec<u8>>) {
         let root_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("root key");
         let mut root_params = CertificateParams::new(Vec::new()).expect("root parameters");
         root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -253,6 +283,10 @@ mod tests {
         leaf_params
             .subject_alt_names
             .push(SanType::URI(san.to_owned().try_into().expect("SAN URI")));
+        if let Some((not_before, not_after)) = leaf_validity {
+            leaf_params.not_before = not_before;
+            leaf_params.not_after = not_after;
+        }
         let leaf = leaf_params
             .signed_by(agent_key, &issuing)
             .expect("leaf certificate");
@@ -309,5 +343,43 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    fn check_with_validity(not_before: OffsetDateTime, not_after: OffsetDateTime) -> Result<()> {
+        let key = agent_key();
+        let (leaf, chain) =
+            issued_valid(&key, &san_uri(TENANT, AGENT), Some((not_before, not_after)));
+        check_certificate(key.public_key_raw(), AGENT, TENANT, &leaf, &chain, now())
+    }
+
+    #[test]
+    fn ac_in_02_a_leaf_that_starts_in_two_minutes_passes() {
+        let start = now() + time::Duration::minutes(2);
+        check_with_validity(start, start + time::Duration::days(30))
+            .expect("a small clock lag must pass");
+    }
+
+    #[test]
+    fn ac_in_02_a_leaf_that_starts_in_ten_minutes_names_the_leaf_and_the_clock() {
+        let start = now() + time::Duration::minutes(10);
+        let error = check_with_validity(start, start + time::Duration::days(30))
+            .expect_err("a large clock lag must fail")
+            .to_string();
+        assert!(
+            error.contains("the leaf certificate is valid from"),
+            "{error}"
+        );
+        assert!(error.contains("the local time is"), "{error}");
+        assert!(error.contains("w32tm /resync"), "{error}");
+        assert!(error.contains("timedatectl"), "{error}");
+    }
+
+    #[test]
+    fn ac_in_02_an_expired_leaf_is_refused_without_a_tolerance() {
+        let end = now() - time::Duration::minutes(1);
+        let error = check_with_validity(end - time::Duration::days(1), end)
+            .expect_err("an expired leaf must fail")
+            .to_string();
+        assert!(error.contains("the leaf certificate expired at"), "{error}");
     }
 }
