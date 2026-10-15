@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
-// Captures the Profiles screen for a review. It runs only with CAPTURE and CAPTURE_DIR set, so CI
+// Captures the Profiles list and the profile editor page for a review. It runs only with CAPTURE and CAPTURE_DIR set, so CI
 // skips it (FR-PF-01, FR-PF-04).
 const dir = process.env.CAPTURE_DIR;
 test.skip(!process.env.CAPTURE || !dir, 'set CAPTURE and CAPTURE_DIR to write the screenshots');
@@ -92,40 +92,37 @@ async function capture(page: Page, scheme: string, labels: Labels, suffix: strin
 	await createRepository(page, labels);
 
 	await open(page, labels, labels.profiles);
-	await page.getByText('web-daily').waitFor();
-	await shot(page, `profiles-list${suffix}`, scheme);
+	await page.getByText('web-daily').first().waitFor();
+	await shot(page, `list${suffix}`, scheme);
 
-	// The create dialog, at the top and at the bottom.
+	// A new profile with every section collapsed except the first two.
 	await page.getByRole('button', { name: labels.addProfile, exact: true }).click();
 	await page.locator('#profile-name').fill('mac-files');
 	await page.locator('#profile-paths-all').fill('/Users');
-	await page.locator('#profile-tags').fill('macos');
-	await page.locator('input[type="checkbox"]').first().check();
-	await page.locator('.rh-dialog__body').evaluate((element) => element.scrollTo(0, 0));
 	await page.waitForTimeout(150);
-	await shot(page, `profiles-create-top${suffix}`, scheme);
-	await page
-		.locator('.rh-dialog__body')
-		.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+	await shot(page, `new-collapsed${suffix}`, scheme);
+
+	// The sample profile with the retention section open.
+	await open(page, labels, labels.profiles);
+	await page.getByRole('link', { name: 'web-daily', exact: true }).click();
+	await page.locator('#profile-name').waitFor();
+	await page.locator('[data-section="retention"] .section__toggle').click();
+	await page.locator('[data-section="retention"]').scrollIntoViewIfNeeded();
 	await page.waitForTimeout(150);
-	await shot(page, `profiles-create-bottom${suffix}`, scheme);
-	await page.keyboard.press('Escape');
-
-	// The preview of a Windows profile for a Windows host: the Windows paths are used.
-	await page.getByRole('button', { name: labels.moreActions('win-files'), exact: true }).click();
-	await page.getByRole('menuitem').first().click();
-	await page.locator('#preview-host').selectOption({ label: 'win-fs01' });
-	await expect(page.getByText('C:\\Data', { exact: false })).toBeVisible();
-	await shot(page, `profiles-preview-windows${suffix}`, scheme);
-	await page.keyboard.press('Escape');
-}
-
-for (const scheme of ['light', 'dark'] as const) {
-	test(`capture the profiles screen in the ${scheme} theme`, async ({ page }) => {
-		await capture(page, scheme, EN, '');
+	await shot(page, `edit-retention${suffix}`, scheme);
+	await page.locator('[data-section="retention"]').screenshot({
+		path: `${out}/edit-retention-section-${scheme}${suffix}-app.png`
 	});
 }
 
-test('capture the profiles screen in Russian', async ({ page }) => {
+test('capture the profile editor in Russian, light', async ({ page }) => {
 	await capture(page, 'light', RU, '-ru');
+});
+
+test('capture the profile editor in Russian, dark', async ({ page }) => {
+	await capture(page, 'dark', RU, '-ru');
+});
+
+test('capture the profile editor in English, light', async ({ page }) => {
+	await capture(page, 'light', EN, '');
 });

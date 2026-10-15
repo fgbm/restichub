@@ -56,7 +56,7 @@
 			onclick={toggle}
 		>
 			<Icon name={open ? 'chevron-down' : 'chevron-right'} size="xs" />
-			<span class="dot dot--{state}" title={stateLabel} data-state={state}></span>
+			<span class="dot dot--{state}" title={stateLabel} aria-hidden="true" data-state={state}></span>
 			<span class="section__title">
 				{title}{#if required}<span class="section__req" aria-hidden="true">*</span>{/if}
 			</span>

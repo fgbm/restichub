@@ -191,6 +191,14 @@
 		}
 	}
 
+	// A script that the operator adds to a switched-off section turns the section on.
+	let scriptCount = 0;
+	$effect(() => {
+		const count = draft.scripts.length;
+		if (count > scriptCount && !draft.enabled.scripts) draft.enabled.scripts = true;
+		scriptCount = count;
+	});
+
 	onMount(load);
 	onDestroy(() => setPageTitle(null));
 
