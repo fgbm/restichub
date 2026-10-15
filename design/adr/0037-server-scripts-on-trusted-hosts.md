@@ -24,6 +24,10 @@ A script that comes from the control plane (CP) is code that runs as SYSTEM or r
 8. Only an Admin can edit scripts and script templates. An Operator can run the jobs. Each change of a script or of a template writes an audit record with the SHA-256 hash of the content. Each run writes the hash in the job record.
 9. The CP ships a set of read-only built-in script templates. A tenant has its own script templates and job templates.
 
+### Note (2026-10-15)
+
+[ADR-0040](0040-remove-allow-list-hooks.md) removes the allow-list file. In decision 1, the owner and permission rule of the setting file no longer refers to that file. The rule is as follows. Only root or Administrators own the trust mode file and each directory above it. No other account can write them. The wire error code `hook_failed` and the secret purpose `hook_secret` keep their names for compatibility. They now belong to the script step.
+
 ## Consequences
 
 - A CP or tenant Admin compromise gives code execution on the hosts with the trust mode. It gives none on other hosts (threat T33).

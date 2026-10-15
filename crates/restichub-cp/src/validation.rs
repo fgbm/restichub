@@ -62,7 +62,6 @@ pub enum Reason {
     Mismatch,
     /// The host did not turn on the trust mode for server scripts (FR-HK-10).
     ServerScriptsDisabled,
-    /// The field no longer exists (ADR-0040).
     Removed,
 }
 
