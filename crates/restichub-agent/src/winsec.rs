@@ -134,10 +134,6 @@ pub fn create_protected_tree(dir: &Path, root: &Path) -> Result<()> {
 }
 
 /// Tells whether the process token is elevated and a member of Administrators (FR-IN-07).
-///
-/// # Errors
-///
-/// Returns an error when the token cannot be read.
 pub fn is_elevated_administrator() -> Result<bool> {
     let mut token: HANDLE = std::ptr::null_mut();
     // SAFETY: the pseudo handle of the current process is always valid and the out parameter is a
