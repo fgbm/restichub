@@ -5,7 +5,7 @@ description: How to run scripts before and after a backup, how a host administra
 
 A server script is a script that you write in the web interface. The control plane sends it with the job. The agent runs it on the host before or after the backup. Each script is a step of the job with its own status, duration and log.
 
-A host runs server scripts only when its administrator turns on the local trust mode. The mode is off by default (ADR-0037). A host without the mode can still run [allow-list hooks](hooks/).
+A host runs server scripts only when its administrator turns on the local trust mode. The mode is off by default (ADR-0037). A host without the mode runs no script.
 
 ## Risk
 
@@ -138,7 +138,7 @@ ReadWritePaths=/var/backups
 
 ## Job detail
 
-The job detail lists every script and hook in order before the job runs. Each step shows its status, start time, duration and exit code. Select a step to read its own log. The backup step has its own log too. The complete log of the job stays below the steps.
+The job detail lists every script in order before the job runs. Each step shows its status, start time, duration and exit code. Select a step to read its own log. The backup step has its own log too. The complete log of the job stays below the steps.
 
 ## Audit
 

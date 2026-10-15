@@ -73,7 +73,7 @@ A root must be writable only by root or Administrators. The root and each existi
 
 A root of `/` allows a restore to any other directory, for example `/srv/data`. A file of the agent, a parent of one and a path inside one stay refused. The target `/` is not possible, because it holds the files of the agent. Set the root `/` only when you want this. The screen shows a warning for a system path such as `/etc`.
 
-The agent always refuses a target that is, holds or lies inside its own files. These are the configuration directory, the cache directory, the directory of the agent and restic binaries, and the allow-list. It follows symbolic links first. A root of `/` does not change this rule.
+The agent always refuses a target that is, holds or lies inside its own files. These are the configuration directory, the cache directory, and the directory of the agent and restic binaries. It follows symbolic links first. A root of `/` does not change this rule.
 
 ## API
 

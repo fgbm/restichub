@@ -12,7 +12,7 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | Job signing keys (current and next) | Control plane database, wrapped by the KEK (ADR-0026) |
 | CA private keys (root and issuing) | Control plane database, wrapped by the KEK (ADR-0026) |
 | Agent private keys | Each agent host |
-| Hook allow-lists | Each agent host |
+| Trust mode file | Each agent host |
 | Audit log | Control plane database |
 
 ## 2. Trust boundaries
@@ -28,7 +28,7 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | ID | Threat | Control | Residual risk |
 |---|---|---|---|
 | T1 | A compromised agent reads or deletes a repository during a job. | Secrets only for one job (ADR-0003). Dedicated maintenance agent. Storage controls in NFR-SEC-08. | **Accepted.** An attacker with root on the host during a job can delete the repository if the backend permits deletion. |
-| T2 | A compromised control plane executes code on all hosts. | Hook allow-list on agents (ADR-0004). Server scripts only on hosts with the local trust mode (T33). Typed steps without raw arguments (FR-PR-01). A restore writes only below the restore roots of the host, and never on the files of the agent (ADR-0035, like ADR-0004). | The control plane can still send restic steps, for example `forget` with a short retention. It can restore any snapshot of a repository below a restore root of an agent. Storage controls in NFR-SEC-08 limit the damage. An administrator who sets the root `/` accepts an in-place restore of any path except the files of the agent. |
+| T2 | A compromised control plane executes code on all hosts. | Server scripts only on hosts with the local trust mode (T33). Typed steps without raw arguments (FR-PR-01). A restore writes only below the restore roots of the host, and never on the files of the agent (ADR-0035). | The control plane can still send restic steps, for example `forget` with a short retention. It can restore any snapshot of a repository below a restore root of an agent. Storage controls in NFR-SEC-08 limit the damage. An administrator who sets the root `/` accepts an in-place restore of any path except the files of the agent. |
 | T3 | An attacker writes to the database and inserts jobs. | Job signatures with a key outside the database (ADR-0005). | None if the signing key stays safe. |
 | T4 | Replay of an old job. | Job journal and maximum lifetime (ADR-0020). | A redelivered job returns the stored result. It does not run again. |
 | T5 | A database dump discloses secrets. | Envelope encryption with a KEK outside the database (ADR-0017, ADR-0023). | If an attacker gets the KEK and the dump, all secrets are disclosed. |

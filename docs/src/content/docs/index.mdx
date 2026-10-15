@@ -15,6 +15,6 @@ ResticHub is in the design phase. There is no usable release yet.
 - The control plane decides when a job starts.
 - An agent on each host runs restic and sends the results to the control plane.
 - The agent gets repository secrets for one job only.
-- Hooks run only from an allow-list on the host.
+- Scripts from the control plane run only on a host with the local trust mode.
 
 Read [Concepts](concepts/overview/) to learn the main terms.
