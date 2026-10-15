@@ -116,7 +116,7 @@ For each script, the agent does these steps:
 
 1. It checks the trust mode and the script again.
 2. It writes the script to a new file in a protected directory of its cache. Only the agent account can use the directory.
-3. It starts the interpreter with the fixed flags. The environment is the environment of the agent, without the variables that start with `RESTIC`, plus the parameters of the script. The search path (`PATH`) holds only directories that root or Administrators own and that no other account can write, with every directory above them. The agent drops each other directory and names it once for each job in the log of the first script. On Windows, `TEMP` and `TMP` point to the protected directory. The working directory is the protected directory.
+3. It starts the interpreter with the fixed flags. The environment is the environment of the agent, plus the parameters of the script. It has no variable that starts with `RESTIC`. The search path (`PATH`) holds only directories that root or Administrators own. No other account can write in them or in the directories above them. The agent drops each other directory and names it once for each job in the log of the first script. On Windows, `TEMP` and `TMP` point to the protected directory. The working directory is the protected directory.
 4. It reads the output. It masks secret values and keeps at most 256 KiB for each script.
 5. It deletes the file and the directory.
 
