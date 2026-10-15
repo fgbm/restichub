@@ -332,10 +332,10 @@ async fn db_the_hook_removal_migration_audits_each_profile_with_hooks() -> TestR
 
     let before: Vec<_> = MIGRATOR
         .iter()
-        .filter(|migration| migration.version <= 43)
+        .filter(|migration| migration.version <= 44)
         .cloned()
         .collect();
-    let up_to_43 = Migrator {
+    let up_to_44 = Migrator {
         migrations: Cow::Owned(before),
         ignore_missing: false,
         locking: true,
@@ -343,7 +343,7 @@ async fn db_the_hook_removal_migration_audits_each_profile_with_hooks() -> TestR
         table_name: Cow::Borrowed("_sqlx_migrations"),
         create_schemas: Cow::Owned(Vec::new()),
     };
-    up_to_43.run(&pool).await?;
+    up_to_44.run(&pool).await?;
 
     let tenant = uuid::Uuid::now_v7();
     let with_hooks = uuid::Uuid::now_v7();
@@ -374,7 +374,7 @@ async fn db_the_hook_removal_migration_audits_each_profile_with_hooks() -> TestR
 
     let sql = MIGRATOR
         .iter()
-        .find(|migration| migration.version == 44)
+        .find(|migration| migration.version == 45)
         .expect("the hook removal migration is present")
         .sql
         .as_str()
