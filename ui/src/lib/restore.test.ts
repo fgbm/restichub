@@ -36,6 +36,13 @@ describe('restore helpers (FR-RS-02, FR-RS-04)', () => {
 		}
 	});
 
+	it('fr_rs_03_reads_a_backslash_as_a_separator_for_a_windows_target_only', () => {
+		expect(isWithinRoots('C:\\Restore\\a', ['C:\\restore'], true)).toBe(true);
+		expect(isWithinRoots('/srv/restore\\a', ['/srv/restore'], false)).toBe(false);
+		expect(isWithinRoots('/srv/restore/a', ['/srv\\restore'], false)).toBe(false);
+		expect(isWithinRoots('/srv/restore/a', ['/srv/restore'], false)).toBe(true);
+	});
+
 	it('fr_rs_04_knows_an_absolute_path', () => {
 		for (const path of ['/srv', 'C:\\data', 'd:/data']) expect(isAbsolutePath(path)).toBe(true);
 		for (const path of ['srv', '', '../etc', 'C:data']) expect(isAbsolutePath(path)).toBe(false);

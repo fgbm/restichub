@@ -71,7 +71,9 @@ export function escapeGlob(path: string): string {
 }
 
 function normalize(path: string, windows: boolean): string {
-	const unified = path.trim().replaceAll('\\', '/').replace(/\/+$/, '');
+	const trimmed = path.trim();
+	// A backslash is a name character on Linux, so only a Windows path gets it as a separator.
+	const unified = (windows ? trimmed.replaceAll('\\', '/') : trimmed).replace(/\/+$/, '');
 	return windows ? unified.toLowerCase() : unified;
 }
 
