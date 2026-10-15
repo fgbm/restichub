@@ -288,8 +288,11 @@ async fn first_send(
         ciphertext: sealed.ciphertext,
         secrets: built.secrets,
     };
-    let timeout = i32::try_from(build::JOB_TIMEOUT_SECONDS).unwrap_or(i32::MAX);
-    queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, &stored).await?;
+    let timeout = Some(i32::try_from(built.job.job().timeout_seconds).unwrap_or(i32::MAX))
+        .filter(|seconds| *seconds > 0);
+    let stall = Some(i32::try_from(built.job.job().stall_timeout_seconds).unwrap_or(i32::MAX))
+        .filter(|seconds| *seconds > 0);
+    queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, stall, &stored).await?;
     let required = compat::required_capabilities(&built.job.job().steps);
     restichub_db::job_steps::plan_described(
         tx,

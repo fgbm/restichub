@@ -20,6 +20,7 @@ pub struct Profile {
     /// the filter of the `forget` step. A user tag may not use its reserved prefix.
     pub profile_tag: Option<String>,
     pub options: BackupOptions,
+    pub limits: JobLimits,
     pub hooks: Vec<HookRef>,
     /// Code that the control plane sends (FR-HK-09, ADR-0037).
     pub scripts: Vec<crate::script::ScriptRef>,
@@ -61,6 +62,16 @@ pub struct BackupOptions {
     pub limit_upload_kib: u64,
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     pub limit_download_kib: u64,
+}
+
+/// The time limits of a job (ADR-0039). Zero means the default of the stall timeout and no
+/// maximum duration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JobLimits {
+    /// Seconds without progress after which the agent stops a step.
+    pub stall_timeout_seconds: u32,
+    /// Seconds after which the agent stops the job, whatever its progress.
+    pub max_duration_seconds: u32,
 }
 
 /// A hook of the profile, by allow-list identifier (FR-HK-02, FR-HK-03).

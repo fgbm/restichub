@@ -3,7 +3,7 @@ title: Register an agent
 description: Register a host with the control plane and install the agent service.
 ---
 
-An agent registers by hand with a one-time enrollment token (ADR-0032). A person on the host unpacks the agent package and runs one command.
+An agent registers by hand with a one-time enrollment token (ADR-0032). A person on the host unpacks the agent package anywhere, for example in the Downloads folder, and runs one command. The command `register` does everything: it installs the agent, enrolls the host, starts the service and reports the connection.
 
 ## The registration command
 
@@ -19,11 +19,23 @@ restichub-agent register --url https://<control-plane> --token <token>
 - `--token-stdin` reads the token from the standard input.
 - `--ca-file PATH` verifies the control plane with the CA in the file. Without this option the agent uses the system root certificates.
 - `--force` replaces an existing identity. Use it to register the host again.
+- `--no-service` enrolls the host and installs no service. Run `install-service` later.
 - `--restic-archive PATH`, `--restic-sums PATH` and `--restic-sums-sig PATH` give the restic release files of an offline host (see "The restic binary"). Give all three or none.
 
 Run the command as `root` on Linux, or in an elevated PowerShell on Windows ("Run as administrator"). The agent checks the rights, creates its directories and proves that it can write there before it contacts the control plane. A failed check does not use the token.
 
 The command installs restic when the host has none (ADR-0038). This step runs after the checks of the rights and the directories, and before the request to the control plane. A host without internet access and without the offline files fails here, and the token stays unused.
+
+When the enrollment succeeds, the command starts the service and waits up to 60 seconds for the connection to the control plane. Then it prints a summary:
+
+```text
+registered as backup-host-01 (agent id 0192f1e0-0000-7000-8000-000000000001)
+organization:  0192f1e0-0000-7000-8000-000000000002
+service:       installed and running
+connection:    connected to https://<control-plane>
+```
+
+If a step fails, the summary names what failed and the next command to run. The exit code is not zero when the agent is not connected. The identity stays, so the next command is `install-service` or `status`, not a new registration.
 
 The token is single use. The control plane consumes the token at the first successful registration. A used token, an expired token and a revoked token give a clear error.
 
@@ -106,15 +118,41 @@ An init and a local-path repository run on the maintenance agent of the reposito
 
 ## Install the service
 
-Put the agent where only `root` or an administrator can change it. The recommended path is `/opt/restichub-agent` on Linux and `%ProgramFiles%\ResticHub\Agent` on Windows. The command refuses a binary that another account can write, and a directory that SYSTEM and Administrators do not own alone (threat T20).
+`register` installs the service already. Use `install-service` when you registered with `--no-service`, or when the service needs a repair. The command refuses a host without an identity and tells you to run `register` first. It is idempotent. It starts the service and waits for the connection like `register`.
 
-Run the command as `root` on Linux, or as an administrator on Windows:
+Run the commands as `root` on Linux, or as an administrator on Windows:
 
 ```sh
 restichub-agent install-service
+restichub-agent status
+restichub-agent uninstall-service
 ```
 
-The command installs restic first when the host has none (see "The restic binary"). On Linux the command writes `/etc/systemd/system/restichub-agent.service` and enables the unit. On Windows the command writes a Windows service that runs as LocalSystem. The service starts after a reboot. The command `uninstall-service` stops and removes the service. Both commands are idempotent.
+- `status` prints the identity, the certificate expiry, the restic version and path, the service state, the last connection, the last error and the control plane URL. It exits with a non-zero code when the agent is not connected.
+- `uninstall-service` stops and removes the service. It keeps the data.
+
+The agent installs itself, so you do not copy files by hand. The command copies the running agent into the program directory. Only SYSTEM and Administrators (Linux: `root`) can write there. If the service runs from that directory, the command stops it, replaces the file and starts it again. The service starts from the program directory. The check of threat T20 passes by construction: the command refuses an executable that another account can write.
+
+| Item | Linux | Windows |
+| --- | --- | --- |
+| Agent executable | `/opt/restichub-agent/bin/restichub-agent` | `%ProgramFiles%\ResticHub\Agent\restichub-agent.exe` |
+| Restic | `/opt/restichub-agent/bin/restic` | `%ProgramFiles%\ResticHub\Agent\bin\restic.exe` |
+| Identity, status file, restic record, cache, journal | `/etc/restichub-agent`, `/var/lib/restichub-agent`, `/var/cache/restichub-agent` | `%ProgramData%\ResticHub\Agent` |
+
+An older install kept restic in `/var/lib/restichub-agent/bin` or in `%ProgramData%\ResticHub\Agent\bin`. `register` and `install-service` move restic into the program directory, point the service at the new path and remove the old copies. The identity stays, so the host does not register again.
+
+On Linux the command writes `/etc/systemd/system/restichub-agent.service` and enables the unit. On Windows the command writes a Windows service that runs as LocalSystem. The service starts after a reboot.
+
+### Troubleshooting
+
+| Message or symptom | Cause | Action |
+| --- | --- | --- |
+| `register first: restichub-agent register ...` | `install-service` found no valid identity. | Run `register` with a new token. |
+| `service: installed, not running` | The service stopped at the start. | On Linux read `journalctl -u restichub-agent`. On Windows read the Application log. Fix the cause and run `install-service`. |
+| `connection: not connected ... after the wait` | The agent cannot reach the control plane. | Check the clock of the host, the firewall to port 8443 and the URL. Run `status` to read the last error. |
+| The log says that the identity cannot load | The identity directory is damaged or empty. The service exits with code 78 and does not restart. | Run `register --force` with a new token. |
+| The command refuses a directory or file (T20) | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
+| `cannot stop the service` on Windows | A job still runs. | Wait for the job, or stop the service by hand. Run the command again. |
 
 ## The systemd hardening trade-off
 
@@ -132,8 +170,8 @@ The agent takes the latest release of restic from GitHub. It verifies the OpenPG
 
 The agent stores the binary in a protected directory:
 
-- Linux: `/var/lib/restichub-agent/bin/restic`.
-- Windows: `%ProgramData%\ResticHub\Agent\bin\restic.exe`. Only SYSTEM and Administrators have access.
+- Linux: `/opt/restichub-agent/bin/restic`.
+- Windows: `%ProgramFiles%\ResticHub\Agent\bin\restic.exe`. Only SYSTEM and Administrators can write there.
 
 The protected configuration directory holds the file `restic.json` with the version and the SHA-256 of the installed binary. At each start, and before each restic process, the agent checks the binary against this record and refuses a different binary (threat T20). The control plane cannot set the restic path. If restic is absent or does not match, the service stops with a message that names the next step: run `restichub-agent restic update`.
 

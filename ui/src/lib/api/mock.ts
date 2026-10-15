@@ -41,6 +41,7 @@ import type {
 	JobActionRequest,
 	JobDetail,
 	JobListResponse,
+	JobLimitDefaults,
 	JobLogPage,
 	JobLogQuery,
 	JobQuery,
@@ -340,7 +341,9 @@ function makeProfiles(): Profile[] {
 				one_file_system: true,
 				exclude_caches: true,
 				limit_upload_kib: 0,
-				limit_download_kib: 0
+				limit_download_kib: 0,
+				stall_timeout_minutes: 60,
+				max_duration_minutes: 2880
 			},
 			hooks: [],
 			scripts: [],
@@ -363,7 +366,9 @@ function makeProfiles(): Profile[] {
 				one_file_system: false,
 				exclude_caches: false,
 				limit_upload_kib: 2048,
-				limit_download_kib: 0
+				limit_download_kib: 0,
+				stall_timeout_minutes: 60,
+				max_duration_minutes: 2880
 			},
 			hooks: [],
 			scripts: [],
@@ -1515,6 +1520,10 @@ export class MockApiService {
 		return { ...job };
 	}
 
+	async getJobLimitDefaults(): Promise<JobLimitDefaults> {
+		return { stall_timeout_minutes: 60, max_duration_minutes: 2880 };
+	}
+
 	async listProfiles(): Promise<Profile[]> {
 		return [...this.profiles];
 	}
@@ -1534,7 +1543,9 @@ export class MockApiService {
 				one_file_system: false,
 				exclude_caches: false,
 				limit_upload_kib: 0,
-				limit_download_kib: 0
+				limit_download_kib: 0,
+				stall_timeout_minutes: 60,
+				max_duration_minutes: 2880
 			},
 			hooks: request.hooks ?? [],
 			scripts: request.scripts ?? [],

@@ -141,3 +141,30 @@ test('editing a profile keeps the retention fields', async ({ page }) => {
 	await page.getByText('Limit the rules to some snapshots').click();
 	await expect(page.locator('#profile-filter-hosts')).toHaveValue('web-*');
 });
+
+test('the limits section saves the stall timeout and the maximum duration', async ({ page }) => {
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.profiles', 'sample'));
+	await signIn(page);
+	await createRepository(page);
+
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Profiles', exact: true })
+		.click();
+	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Edit the profile' });
+	await expect(dialog.getByRole('heading', { name: 'Limits' })).toBeVisible();
+	// A backup has no short fixed limit: the stall timeout is 60 minutes and the maximum is 48 hours.
+	await expect(page.locator('#profile-stall-timeout')).toHaveValue('60');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('2880');
+	await page.locator('#profile-stall-timeout').fill('90');
+	await page.locator('#profile-max-duration').fill('720');
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('The profile is updated.')).toBeVisible();
+
+	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await expect(page.locator('#profile-stall-timeout')).toHaveValue('90');
+	await expect(page.locator('#profile-max-duration')).toHaveValue('720');
+});

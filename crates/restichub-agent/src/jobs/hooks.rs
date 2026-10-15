@@ -492,7 +492,7 @@ impl Jobs {
         if cancelled {
             StepOutcome::cancelled(false)
         } else if timed_out {
-            StepOutcome::timed_out(false)
+            StepOutcome::timed_out()
         } else if code == 0 {
             StepOutcome::new(StepStatus::Success, 0)
         } else {

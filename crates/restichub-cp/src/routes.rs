@@ -626,6 +626,12 @@ pub const ROUTES: &[Route] = &[
         handler: || routes!(crate::profiles::list_profiles),
     },
     Route {
+        method: "get",
+        path: "/api/v1/profiles/defaults",
+        access: Access::Protected(Operation::ProfilesRead),
+        handler: || routes!(crate::profiles::job_limit_defaults),
+    },
+    Route {
         method: "post",
         path: "/api/v1/profiles",
         access: Access::Protected(Operation::ProfilesWrite),
