@@ -27,6 +27,7 @@ pub mod restic_store;
 pub mod restore_roots;
 pub mod rotation;
 mod scrub;
+pub mod self_install;
 pub mod service;
 pub mod setup;
 pub mod stream;

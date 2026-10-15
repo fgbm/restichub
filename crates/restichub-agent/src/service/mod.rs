@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -67,6 +67,13 @@ pub trait ServiceManager {
     ///
     /// Returns an error when the manager cannot be asked.
     fn state(&self) -> Result<ServiceState>;
+
+    /// Stops a running service and waits for it. A service that is absent or stopped is fine.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the running service does not stop.
+    fn stop(&self) -> Result<()>;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -86,6 +93,21 @@ impl ServiceManager for HostService {
         {
             let _ = restic;
             anyhow::bail!("the service install is a 1.0 feature on this operating system")
+        }
+    }
+
+    fn stop(&self) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            linux::stop()
+        }
+        #[cfg(windows)]
+        {
+            windows::stop()
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        {
+            Ok(())
         }
     }
 
@@ -112,8 +134,7 @@ impl ServiceManager for HostService {
 /// Returns an error when the executable, restic or a parent directory is writable by another
 /// account.
 pub fn check_install_location(restic: &Path) -> Result<()> {
-    let exe = std::env::current_exe().context("cannot find the agent executable")?;
-    location::check(&exe, restic)
+    location::check(&crate::paths::agent_exe(), restic)
 }
 
 /// Stops and removes the operating system service (FR-IN-08).

@@ -332,6 +332,10 @@ mod tests {
         fn state(&self) -> Result<ServiceState> {
             Ok(self.state)
         }
+
+        fn stop(&self) -> Result<()> {
+            Ok(())
+        }
     }
 
     const RUNNING: ServiceState = ServiceState {

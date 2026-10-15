@@ -53,6 +53,7 @@ impl std::error::Error for NoIdentity {}
 /// service cannot be installed, or when the agent does not connect.
 pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     crate::preflight::ensure_elevated()?;
+    place_program()?;
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -127,6 +128,29 @@ pub fn start_after_register(
         .context("the agent is registered, but the service is not ready; fix the cause and run: restichub-agent install-service")
 }
 
+/// Copies the running agent into the program directory and moves an old restic there (FR-IN-07).
+fn place_program() -> Result<()> {
+    let source = std::env::current_exe().context("cannot find the agent executable")?;
+    let outcome = crate::self_install::prepare(
+        &crate::self_install::Placement::host(),
+        &source,
+        &HostService,
+    )?;
+    if outcome.copied_agent {
+        println!(
+            "the agent is installed in {}",
+            crate::paths::program_dir().display()
+        );
+    }
+    if outcome.moved_restic {
+        println!(
+            "restic is moved into {}",
+            crate::paths::restic_dir().display()
+        );
+    }
+    Ok(())
+}
+
 /// Prints the final summary and fails when the agent is not connected.
 fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<()> {
     let Some(report) = report else {
@@ -156,6 +180,7 @@ pub fn install_service(options: &ResticFileOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     let dir = crate::paths::config_dir();
     crate::setup::require_identity(&dir)?;
+    place_program()?;
     crate::preflight::prepare_directories(&dir, &crate::paths::cache_dir())?;
     let restic = ensure_restic(options)?;
     let report =

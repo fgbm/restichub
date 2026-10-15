@@ -109,7 +109,7 @@ fn status(
 /// Returns an error when the service cannot be created, updated or started, usually without
 /// administrator rights.
 pub fn install(restic: &Path) -> Result<()> {
-    let exe = std::env::current_exe().context("cannot find the agent executable")?;
+    let exe = crate::paths::agent_exe();
     // A binary that another account can replace defeats the service hardening (T20).
     super::location::check(&exe, restic)?;
     // The default restore root gets the access of SYSTEM and Administrators only (FR-RS-03).
@@ -229,6 +229,26 @@ pub fn state() -> Result<super::ServiceState> {
         running,
         start_type,
     })
+}
+
+/// Stops the service when it runs and waits until it is stopped.
+///
+/// # Errors
+///
+/// Returns an error when the service exists and does not stop.
+pub fn stop() -> Result<()> {
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .context("cannot open the service manager; run as an administrator")?;
+    let access = ServiceAccess::QUERY_STATUS | ServiceAccess::STOP;
+    match manager.open_service(SERVICE_NAME, access) {
+        Ok(service) => stop_and_wait(&service),
+        Err(windows_service::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Stops the Windows service, waits for it and starts it again, when it is installed.

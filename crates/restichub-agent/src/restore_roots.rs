@@ -87,6 +87,8 @@ impl RestoreAccess {
     pub fn for_host(config_dir: &Path, cache_dir: &Path, program: &Path) -> Self {
         let mut protected = vec![config_dir.to_path_buf(), cache_dir.to_path_buf()];
         protected.push(roots_file_for(config_dir));
+        protected.push(crate::paths::program_dir());
+        protected.push(crate::paths::data_dir());
         if let Some(dir) = program.parent() {
             protected.push(dir.to_path_buf());
         }
@@ -459,6 +461,26 @@ mod tests {
             access.check(bin.join("restic").to_str().expect("utf-8")),
             Err(TargetDenied::ProtectedPath)
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn t20_the_program_and_data_directories_are_protected_paths() {
+        let base = temp_dir("program-dir");
+        let access = RestoreAccess::for_host(
+            &base.join("config"),
+            &base.join("cache"),
+            &base.join("bin").join("restic"),
+        );
+        for dir in [crate::paths::program_dir(), crate::paths::data_dir()] {
+            let target = dir.join("restore");
+            assert_eq!(
+                access.check(target.to_str().expect("utf-8")),
+                Err(TargetDenied::ProtectedPath),
+                "{}",
+                target.display()
+            );
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 

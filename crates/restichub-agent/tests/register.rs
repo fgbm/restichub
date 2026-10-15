@@ -60,6 +60,10 @@ impl ServiceManager for FakeService {
             start_type: StartType::Automatic,
         })
     }
+
+    fn stop(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 fn quick() -> WaitOptions {

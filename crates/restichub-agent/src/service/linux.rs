@@ -87,7 +87,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -
 ///
 /// Returns an error when the unit cannot be written or `systemctl` fails.
 pub fn install(restic: &Path) -> Result<()> {
-    let exe = std::env::current_exe().context("cannot find the agent executable")?;
+    let exe = crate::paths::agent_exe();
     // A binary that another account can replace defeats the service hardening (T20).
     super::location::check(&exe, restic)?;
     let config = crate::paths::config_dir();
@@ -137,6 +137,18 @@ pub fn state() -> Result<super::ServiceState> {
             _ => StartType::Unknown,
         },
     })
+}
+
+/// Stops the unit when it runs.
+///
+/// # Errors
+///
+/// Returns an error when `systemctl` cannot stop the unit.
+pub fn stop() -> Result<()> {
+    if unit_path().exists() && systemctl_text(&["is-active", SERVICE_NAME])? == "active" {
+        systemctl(&["stop", SERVICE_NAME])?;
+    }
+    Ok(())
 }
 
 /// Refuses a restore root that another account can change (FR-RS-03).
