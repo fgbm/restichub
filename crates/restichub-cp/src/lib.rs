@@ -23,6 +23,7 @@ pub mod delivery;
 pub mod enrollment;
 pub mod enrollment_tokens;
 pub mod error;
+pub mod events;
 pub mod harden;
 pub mod instance;
 pub mod job_api;

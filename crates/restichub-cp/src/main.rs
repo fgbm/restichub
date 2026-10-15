@@ -169,7 +169,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     // is a control plane task, not job scheduling (ADR-0002).
     restichub_cp::alerts::spawn(
         state.db().clone(),
-        alert_sender,
+        alert_sender.with_events(state.events_shared()),
         kek,
         state.auth().clock.clone(),
         restichub_cp::alerts::INTERVAL,

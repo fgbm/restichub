@@ -9,7 +9,9 @@ use restichub_cp::routes::ROUTES;
 use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens};
 use serde_json::Value;
 
-use common::{app, create_tenant_with_key, create_user, request, seed_session, send};
+use common::{
+    app, create_tenant_with_key, create_user, request, seed_session, send, send_response,
+};
 
 /// The four roles in the order of the requirements section 2.
 const ROLES: [Role; 4] = [
@@ -160,7 +162,10 @@ async fn ac_au_02_role_operation_matrix() {
                 &id,
                 &id,
             );
-            let (status, _, _) = send(&app, request(&method, &path, Some(&cookie), body)).await;
+            // The status is enough, and the event stream never ends, so the body stays unread.
+            let status = send_response(&app, request(&method, &path, Some(&cookie), body))
+                .await
+                .status();
 
             let allowed_by_role = role.rank() >= minimum.rank();
             // A platform operation needs the Platform Admin right (ADR-0029). A tenant data

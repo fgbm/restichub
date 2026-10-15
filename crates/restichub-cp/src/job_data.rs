@@ -83,6 +83,7 @@ pub async fn handle_progress(
     }
     .await;
     finish(tx, result, job_id, "progress").await;
+    state.events().job_progress(tenant, job_id);
 }
 
 /// Records the result of one step.
@@ -116,6 +117,7 @@ pub async fn handle_step_result(
     }
     .await;
     finish(tx, outcome, job_id, "step result").await;
+    state.events().job_progress(tenant, job_id);
 }
 
 /// Records one log chunk.
@@ -140,7 +142,9 @@ pub async fn handle_log_chunk(
         .await
     {
         tracing::warn!(job = %job_id, %error, "the log chunk could not be stored");
+        return;
     }
+    state.events().job_log(tenant, job_id);
 }
 
 /// Records the steps and the log tail of a job result, and removes the progress.

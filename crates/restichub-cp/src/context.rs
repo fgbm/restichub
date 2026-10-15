@@ -69,6 +69,7 @@ pub enum Operation {
     ScriptsRead,
     ScriptsWrite,
     DashboardRead,
+    EventsRead,
 }
 
 impl Operation {
@@ -114,6 +115,7 @@ impl Operation {
                 | Self::ScriptsRead
                 | Self::ScriptsWrite
                 | Self::DashboardRead
+                | Self::EventsRead
         )
     }
 
@@ -134,7 +136,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 38] = [
+    pub const ALL: [Operation; 39] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -173,6 +175,7 @@ impl Operation {
         Operation::ScriptsRead,
         Operation::ScriptsWrite,
         Operation::DashboardRead,
+        Operation::EventsRead,
     ];
 
     /// The class of an operation, for the platform-tenant allow-list. The `match` lists every
@@ -216,7 +219,8 @@ impl Operation {
             | Operation::ChannelsWrite
             | Operation::ScriptsRead
             | Operation::ScriptsWrite
-            | Operation::DashboardRead => OperationClass::Tenant,
+            | Operation::DashboardRead
+            | Operation::EventsRead => OperationClass::Tenant,
         }
     }
 }
@@ -278,6 +282,8 @@ pub fn minimum_role(operation: Operation) -> Role {
         // Only an Admin changes code that runs on a host (ADR-0037, threat T33).
         Operation::ScriptsWrite => Role::Admin,
         Operation::DashboardRead => Role::Viewer,
+        // The kind of an event adds its own read operation (`events::EventKind`).
+        Operation::EventsRead => Role::Viewer,
     }
 }
 

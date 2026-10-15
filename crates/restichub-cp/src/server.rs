@@ -229,6 +229,7 @@ pub struct AppState {
     log_retention_days: u32,
     metrics_cache: Arc<SnapshotCache>,
     dashboard_cache: Arc<crate::dashboard::DashboardCache>,
+    events: Arc<crate::events::EventBus>,
     sender: Option<crate::alerts::sender::Sender>,
 }
 
@@ -256,6 +257,7 @@ impl AppState {
             log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
             metrics_cache: Arc::new(SnapshotCache::default()),
             dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
+            events: Arc::new(crate::events::EventBus::default()),
             sender: None,
         }
     }
@@ -277,6 +279,7 @@ impl AppState {
             log_retention_days: crate::log_store::DEFAULT_RETENTION_DAYS,
             metrics_cache: Arc::new(SnapshotCache::default()),
             dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
+            events: Arc::new(crate::events::EventBus::default()),
             sender: None,
         }
     }
@@ -362,6 +365,20 @@ impl AppState {
     pub fn with_dashboard_ttl(mut self, ttl: time::Duration) -> Self {
         self.dashboard_cache = Arc::new(crate::dashboard::DashboardCache::new(ttl));
         self
+    }
+
+    /// Sets the limits of the event streams. A test sets a short heartbeat or a low limit.
+    pub fn with_event_limits(mut self, limits: crate::events::EventLimits) -> Self {
+        self.events = Arc::new(crate::events::EventBus::new(limits));
+        self
+    }
+
+    pub fn events(&self) -> &crate::events::EventBus {
+        &self.events
+    }
+
+    pub fn events_shared(&self) -> Arc<crate::events::EventBus> {
+        Arc::clone(&self.events)
     }
 
     pub fn dashboard_cache(&self) -> &crate::dashboard::DashboardCache {

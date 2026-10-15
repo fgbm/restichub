@@ -197,6 +197,9 @@ const FIXTURES: &[(&str, Fixture)] = &[
     // The preview computes the fire times of a schedule in the request body. It names no tenant
     // object.
     ("/api/v1/plans/preview", Fixture::Exempt),
+    // The stream is no JSON collection. `tests/events.rs` proves that a stream receives no event of
+    // another tenant.
+    ("/api/v1/events", Fixture::Exempt),
     ("/api/v1/dashboard", Fixture::Collection),
     ("/api/v1/alerts", Fixture::Collection),
     ("/api/v1/alert-rules", Fixture::Collection),

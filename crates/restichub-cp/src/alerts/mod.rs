@@ -128,8 +128,17 @@ async fn handle_tenant(
     tenant: &restichub_db::tenants::Tenant,
     deadline: tokio::time::Instant,
 ) {
-    if let Err(error) = evaluate::evaluate_tenant(db, tenant.id, clock.now()).await {
-        tracing::warn!(tenant = %tenant.id, %error, "the alert evaluation of a tenant failed");
+    match evaluate::evaluate_tenant(db, tenant.id, clock.now()).await {
+        Ok(report) => {
+            if let Some(events) = sender.events()
+                && (report.opened > 0 || report.resolved > 0)
+            {
+                events.alert_changed(tenant.id);
+            }
+        }
+        Err(error) => {
+            tracing::warn!(tenant = %tenant.id, %error, "the alert evaluation of a tenant failed");
+        }
     }
     if let Err(error) = deliver::deliver_tenant(
         db,
