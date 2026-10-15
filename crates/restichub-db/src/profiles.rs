@@ -102,9 +102,7 @@ pub struct NewProfile<'a> {
     pub exclude_caches: bool,
     pub limit_upload_kib: i64,
     pub limit_download_kib: i64,
-    /// Minutes without progress after which the agent stops a step (ADR-0039).
     pub stall_timeout_minutes: i32,
-    /// Minutes after which the agent stops the job. Zero means no limit (ADR-0039).
     pub max_duration_minutes: i32,
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
@@ -131,10 +129,9 @@ pub struct ProfileUpdate<'a> {
     pub exclude_caches: bool,
     pub limit_upload_kib: i64,
     pub limit_download_kib: i64,
-    /// Minutes without progress after which the agent stops a step (ADR-0039).
-    pub stall_timeout_minutes: i32,
-    /// Minutes after which the agent stops the job. Zero means no limit (ADR-0039).
-    pub max_duration_minutes: i32,
+    /// `None` keeps the stored value.
+    pub stall_timeout_minutes: Option<i32>,
+    pub max_duration_minutes: Option<i32>,
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub hooks: Value,
@@ -284,7 +281,8 @@ pub async fn update(
                 use_fs_snapshot = $11, one_file_system = $12, exclude_caches = $13, \
                 limit_upload_kib = $14, limit_download_kib = $15, retention = $16, \
                 check_options = $17, hooks = $18, scripts = $19, \
-                stall_timeout_minutes = $20, max_duration_minutes = $21, updated_at = now() \
+                stall_timeout_minutes = COALESCE($20, stall_timeout_minutes), \
+                max_duration_minutes = COALESCE($21, max_duration_minutes), updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)

@@ -175,6 +175,8 @@ pub(crate) enum Accepted {
     Progress(StepProgress),
     /// The collector keeps the line for the typed output.
     Consumed,
+    /// A status line without log text. restic repeats it while it waits on a backend.
+    Status(String),
 }
 
 /// Turns the standard output of one step into the typed output (FR-AG-08).
@@ -312,8 +314,8 @@ impl Collector {
             (OutputKind::Backup | OutputKind::Restore, Some("error")) => {
                 Accepted::Log(backup_error(&message))
             }
-            // A status or an unknown message type carries no log text (ADR-0011).
-            (_, Some("verbose_status" | "status")) => Accepted::Consumed,
+            // A status carries no log text (ADR-0011).
+            (_, Some("verbose_status" | "status")) => Accepted::Status(line.to_owned()),
             _ => Accepted::Log(line.to_owned()),
         }
     }

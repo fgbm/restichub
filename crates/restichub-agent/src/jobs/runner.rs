@@ -272,6 +272,7 @@ impl StepOutput {
                     self.watchdog.status(&progress, now);
                     self.progress = Some(progress);
                 }
+                Accepted::Status(line) => self.watchdog.status_line(&line, now),
                 Accepted::Consumed => self.watchdog.output(now),
             },
             Pipe::Stderr => {

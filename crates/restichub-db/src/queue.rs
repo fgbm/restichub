@@ -590,22 +590,27 @@ pub async fn mark_agent_lost(
 /// Lists and locks the running jobs that outlived their maximum duration and the grace period.
 ///
 /// The agent enforces the maximum duration, so a job past it is gone: the agent restarted, or it
-/// lost the job. A job without a stored maximum duration has no wall-clock limit (ADR-0039).
+/// lost the job. A job without a stored maximum duration still ends at the hard `ceiling` after
+/// its start, so no job stays `running` forever (ADR-0039).
 pub async fn timed_out_running(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
     grace: time::Duration,
+    ceiling: time::Duration,
 ) -> Result<Vec<JobId>, DbError> {
     let rows = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM jobs \
-         WHERE status = 'running' AND timeout_seconds > 0 \
-           AND COALESCE(started_at, sent_at, created_at) \
-               + make_interval(secs => timeout_seconds) \
-               + make_interval(secs => $2) < $1 \
+         WHERE status = 'running' \
+           AND ((timeout_seconds > 0 \
+                 AND COALESCE(started_at, sent_at, created_at) \
+                     + make_interval(secs => timeout_seconds) \
+                     + make_interval(secs => $2) < $1) \
+                OR COALESCE(started_at, sent_at, created_at) + make_interval(secs => $3) < $1) \
          FOR UPDATE SKIP LOCKED",
     )
     .bind(now)
     .bind(grace.as_seconds_f64())
+    .bind(ceiling.as_seconds_f64())
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

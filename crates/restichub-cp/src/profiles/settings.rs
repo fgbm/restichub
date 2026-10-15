@@ -90,13 +90,31 @@ pub struct BackupOptions {
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     #[serde(default)]
     pub limit_download_kib: u64,
-    /// Minutes without progress after which the agent stops a step. From 5 to 10080 (ADR-0039).
-    #[serde(default = "default_stall_timeout_minutes")]
-    pub stall_timeout_minutes: u32,
+    /// Minutes without progress after which the agent stops a step. From 5 to 10080. A missing
+    /// value gives the default of a new profile and keeps the stored value of an update (ADR-0039).
+    #[serde(default)]
+    pub stall_timeout_minutes: Option<u32>,
     /// Minutes after which the agent stops the job whatever its progress. Zero means no limit.
-    /// At most 43200. The default is 2880 (ADR-0039).
-    #[serde(default = "default_max_duration_minutes")]
+    /// At most 43200. A missing value behaves as the stall timeout does (ADR-0039).
+    #[serde(default)]
+    pub max_duration_minutes: Option<u32>,
+}
+
+/// The job limits that a new profile gets when the request names none (ADR-0039).
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+pub struct JobLimitDefaults {
+    pub stall_timeout_minutes: u32,
     pub max_duration_minutes: u32,
+}
+
+impl JobLimitDefaults {
+    #[must_use]
+    pub fn current() -> Self {
+        Self {
+            stall_timeout_minutes: default_stall_timeout_minutes(),
+            max_duration_minutes: default_max_duration_minutes(),
+        }
+    }
 }
 
 /// The stall timeout of a profile that does not set one (ADR-0039).
@@ -144,6 +162,18 @@ fn minutes_from_seconds(
         .unwrap_or(fallback)
 }
 
+impl BackupOptions {
+    fn stall_minutes(&self) -> u32 {
+        self.stall_timeout_minutes
+            .unwrap_or_else(default_stall_timeout_minutes)
+    }
+
+    fn max_minutes(&self) -> u32 {
+        self.max_duration_minutes
+            .unwrap_or_else(default_max_duration_minutes)
+    }
+}
+
 impl Default for BackupOptions {
     fn default() -> Self {
         Self {
@@ -152,26 +182,31 @@ impl Default for BackupOptions {
             exclude_caches: false,
             limit_upload_kib: 0,
             limit_download_kib: 0,
-            stall_timeout_minutes: default_stall_timeout_minutes(),
-            max_duration_minutes: default_max_duration_minutes(),
+            stall_timeout_minutes: None,
+            max_duration_minutes: None,
         }
     }
 }
 
 fn validate_limits(options: &BackupOptions) -> Result<(), ApiError> {
-    if options.stall_timeout_minutes < MIN_STALL_TIMEOUT_MINUTES {
-        return Err(ApiError::invalid_field(
-            "options.stall_timeout_minutes",
-            Reason::TooShort,
-        ));
+    if let Some(minutes) = options.stall_timeout_minutes {
+        if minutes < MIN_STALL_TIMEOUT_MINUTES {
+            return Err(ApiError::invalid_field(
+                "options.stall_timeout_minutes",
+                Reason::TooShort,
+            ));
+        }
+        if minutes > MAX_STALL_TIMEOUT_MINUTES {
+            return Err(ApiError::invalid_field(
+                "options.stall_timeout_minutes",
+                Reason::TooLong,
+            ));
+        }
     }
-    if options.stall_timeout_minutes > MAX_STALL_TIMEOUT_MINUTES {
-        return Err(ApiError::invalid_field(
-            "options.stall_timeout_minutes",
-            Reason::TooLong,
-        ));
-    }
-    if options.max_duration_minutes > MAX_DURATION_MINUTES {
+    if options
+        .max_duration_minutes
+        .is_some_and(|minutes| minutes > MAX_DURATION_MINUTES)
+    {
         return Err(ApiError::invalid_field(
             "options.max_duration_minutes",
             Reason::TooLong,
@@ -574,9 +609,13 @@ impl TryFrom<&Profile> for ProfileView {
                 exclude_caches: profile.exclude_caches,
                 limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
                 limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
-                stall_timeout_minutes: u32::try_from(profile.stall_timeout_minutes)
-                    .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
-                max_duration_minutes: u32::try_from(profile.max_duration_minutes).unwrap_or(0),
+                stall_timeout_minutes: Some(
+                    u32::try_from(profile.stall_timeout_minutes)
+                        .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
+                ),
+                max_duration_minutes: Some(
+                    u32::try_from(profile.max_duration_minutes).unwrap_or(0),
+                ),
             },
             hooks: hooks_from_row(profile)?,
             scripts: crate::scripts::from_row(&profile.scripts)?,
@@ -659,10 +698,8 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
-            stall_timeout_minutes: i32::try_from(self.options.stall_timeout_minutes)
-                .unwrap_or(i32::MAX),
-            max_duration_minutes: i32::try_from(self.options.max_duration_minutes)
-                .unwrap_or(i32::MAX),
+            stall_timeout_minutes: i32::try_from(self.options.stall_minutes()).unwrap_or(i32::MAX),
+            max_duration_minutes: i32::try_from(self.options.max_minutes()).unwrap_or(i32::MAX),
             retention: self.retention_value(),
             check_options: self.check_value(),
             hooks: self.hooks_value(),
@@ -687,10 +724,14 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
-            stall_timeout_minutes: i32::try_from(self.options.stall_timeout_minutes)
-                .unwrap_or(i32::MAX),
-            max_duration_minutes: i32::try_from(self.options.max_duration_minutes)
-                .unwrap_or(i32::MAX),
+            stall_timeout_minutes: self
+                .options
+                .stall_timeout_minutes
+                .map(|minutes| i32::try_from(minutes).unwrap_or(i32::MAX)),
+            max_duration_minutes: self
+                .options
+                .max_duration_minutes
+                .map(|minutes| i32::try_from(minutes).unwrap_or(i32::MAX)),
             retention: self.retention_value(),
             check_options: self.check_value(),
             hooks: self.hooks_value(),
@@ -750,8 +791,8 @@ impl ValidatedProfile {
                 limit_download_kib: self.options.limit_download_kib,
             },
             limits: CompilerJobLimits {
-                stall_timeout_seconds: self.options.stall_timeout_minutes.saturating_mul(60),
-                max_duration_seconds: self.options.max_duration_minutes.saturating_mul(60),
+                stall_timeout_seconds: self.options.stall_minutes().saturating_mul(60),
+                max_duration_seconds: self.options.max_minutes().saturating_mul(60),
             },
             hooks: self.hooks.iter().map(compiler_hook).collect(),
             scripts: self
@@ -794,9 +835,11 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
             exclude_caches: profile.exclude_caches,
             limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
             limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
-            stall_timeout_minutes: u32::try_from(profile.stall_timeout_minutes)
-                .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
-            max_duration_minutes: u32::try_from(profile.max_duration_minutes).unwrap_or(0),
+            stall_timeout_minutes: Some(
+                u32::try_from(profile.stall_timeout_minutes)
+                    .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
+            ),
+            max_duration_minutes: Some(u32::try_from(profile.max_duration_minutes).unwrap_or(0)),
         },
         hooks: hooks_from_row(profile)?,
         scripts: crate::scripts::from_row(&profile.scripts)?,

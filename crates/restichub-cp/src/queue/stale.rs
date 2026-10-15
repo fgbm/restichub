@@ -24,6 +24,28 @@ pub const STALE_LOCK_WAIT: time::Duration = time::Duration::minutes(30);
 
 /// How long a running job may outlive its maximum duration before the control plane fails it. The grace
 /// covers the clock skew and the time that the agent needs to stop the job.
+const CEILING_VARIABLE: &str = "RESTICHUB_JOB_HARD_CEILING_SECS";
+
+/// Above the longest maximum duration of a profile (30 days).
+const DEFAULT_CEILING: time::Duration = time::Duration::days(31);
+
+const MIN_CEILING_SECONDS: i64 = 3600;
+
+/// The time after which the control plane fails a job that is still `running`, whatever its
+/// limits (ADR-0039). The variable overrides the default.
+#[must_use]
+pub fn hard_ceiling() -> time::Duration {
+    ceiling_from(std::env::var(CEILING_VARIABLE).ok().as_deref())
+}
+
+fn ceiling_from(value: Option<&str>) -> time::Duration {
+    value
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .map_or(DEFAULT_CEILING, |seconds| {
+            time::Duration::seconds(seconds.max(MIN_CEILING_SECONDS))
+        })
+}
+
 pub const TIMEOUT_GRACE: time::Duration = time::Duration::minutes(10);
 
 /// How long an unlock job stays valid in the queue.
@@ -45,7 +67,7 @@ pub async fn recover_tenant(
     // The agent enforces the maximum duration of a job that carries one. A running job far past it
     // is gone, also when the agent is online again: it restarted and lost the job. Its lock
     // becomes a suspect. A job without a maximum duration has no wall-clock limit (ADR-0039).
-    for id in queue_repo::timed_out_running(&mut tx, now, TIMEOUT_GRACE).await? {
+    for id in queue_repo::timed_out_running(&mut tx, now, TIMEOUT_GRACE, hard_ceiling()).await? {
         queue_repo::mark_timed_out(&mut tx, id, now).await?;
     }
 
@@ -112,6 +134,9 @@ pub async fn recover_tenant(
 /// a job and the hello of a new connection can cross.
 const UNLISTED_GRACE: time::Duration = time::Duration::minutes(2);
 
+/// The most job identifiers that the control plane reads from one hello.
+const MAX_LISTED_JOBS: usize = 4096 + 64;
+
 /// Fails the running jobs that a connecting agent does not list (ADR-0039).
 ///
 /// The agent restarted and lost the job, so the job can never report. Its lock becomes a suspect.
@@ -123,6 +148,7 @@ pub async fn fail_unlisted_running(
 ) {
     let listed: Vec<uuid::Uuid> = listed
         .iter()
+        .take(MAX_LISTED_JOBS)
         .filter_map(|id| crate::jobs::parse_job_id_value(id))
         .map(|id| id.as_uuid())
         .collect();

@@ -12,6 +12,9 @@ use tokio::time::Instant;
 /// The stall timeout of a step kind when the job gives none (ADR-0039).
 const DEFAULT_STALL: Duration = Duration::from_secs(60 * 60);
 
+const MIN_STALL_VARIABLE_SECS: u64 = 60;
+const MAX_STALL_VARIABLE_SECS: u64 = 7 * 24 * 60 * 60;
+
 const STALL_VARIABLE: &str = "RESTICHUB_JOB_STALL_TIMEOUT_SECS";
 
 /// `check` and `prune` print nothing for long periods while they work.
@@ -30,7 +33,11 @@ impl StepLimits {
     /// The limits of `step` in a job whose stall timeout is `job_stall_seconds`.
     pub(super) fn for_step(step: &Step, max: Option<Duration>, job_stall_seconds: u32) -> Self {
         let stall = if job_stall_seconds > 0 {
-            Duration::from_secs(u64::from(job_stall_seconds))
+            let job = Duration::from_secs(u64::from(job_stall_seconds));
+            match step.kind {
+                Some(step::Kind::Check(_) | step::Kind::Prune(_)) => job.max(LONG_STALL),
+                _ => job,
+            }
         } else {
             default_stall(step, std::env::var(STALL_VARIABLE).ok().as_deref())
         };
@@ -42,7 +49,7 @@ impl StepLimits {
 fn default_stall(step: &Step, variable: Option<&str>) -> Duration {
     if let Some(seconds) = variable
         .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|seconds| *seconds > 0)
+        .map(|seconds| seconds.clamp(MIN_STALL_VARIABLE_SECS, MAX_STALL_VARIABLE_SECS))
     {
         return Duration::from_secs(seconds);
     }
@@ -68,6 +75,7 @@ pub(super) struct Watchdog {
     stall: Duration,
     last_progress: Instant,
     seen: Option<Seen>,
+    last_status_line: Option<String>,
 }
 
 impl Watchdog {
@@ -76,6 +84,7 @@ impl Watchdog {
             stall,
             last_progress: now,
             seen: None,
+            last_status_line: None,
         }
     }
 
@@ -99,6 +108,14 @@ impl Watchdog {
         }
     }
 
+    /// A status line without parsed counters is progress only when its text changed.
+    pub(super) fn status_line(&mut self, line: &str, now: Instant) {
+        if self.last_status_line.as_deref() != Some(line) {
+            self.last_status_line = Some(line.to_owned());
+            self.last_progress = now;
+        }
+    }
+
     pub(super) fn is_stalled(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.last_progress) >= self.stall
     }
@@ -118,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn ac_ag_job_limits_stall_variable_overrides_the_default() {
+    fn ac_ag_12_stall_variable_overrides_the_default() {
         let backup = Step::default();
         assert_eq!(default_stall(&backup, None), DEFAULT_STALL);
         assert_eq!(
@@ -126,11 +143,14 @@ mod tests {
             Duration::from_secs(600)
         );
         assert_eq!(default_stall(&backup, Some("junk")), DEFAULT_STALL);
-        assert_eq!(default_stall(&backup, Some("0")), DEFAULT_STALL);
+        assert_eq!(
+            default_stall(&backup, Some("1")),
+            Duration::from_secs(MIN_STALL_VARIABLE_SECS)
+        );
     }
 
     #[test]
-    fn ac_ag_12_a_step_that_makes_progress_for_longer_than_the_old_limit_is_not_stalled() {
+    fn ac_ag_12_a_step_that_makes_progress_for_over_twelve_hours_is_not_stalled() {
         let start = Instant::now();
         let twelve_hours = Duration::from_secs(12 * 3600);
         let mut watchdog = Watchdog::new(Duration::from_secs(3600), start);
@@ -172,6 +192,18 @@ mod tests {
     }
 
     #[test]
+    fn ac_ag_12_an_unchanged_status_line_is_not_progress() {
+        let start = Instant::now();
+        let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
+        watchdog.status_line("{\"message_type\":\"status\"}", start);
+        let later = start + Duration::from_secs(60);
+        watchdog.status_line("{\"message_type\":\"status\"}", later);
+        assert!(watchdog.is_stalled(later));
+        watchdog.status_line("{\"message_type\":\"status\",\"percent_done\":0.5}", later);
+        assert!(!watchdog.is_stalled(later));
+    }
+
+    #[test]
     fn ac_ag_12_any_other_output_is_progress() {
         let start = Instant::now();
         let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
@@ -193,7 +225,16 @@ mod tests {
         assert_eq!(StepLimits::for_step(&check, None, 0).stall, LONG_STALL);
         assert_eq!(StepLimits::for_step(&prune, None, 0).stall, LONG_STALL);
         assert_eq!(
-            StepLimits::for_step(&check, None, 120).stall,
+            StepLimits::for_step(&check, None, 3600).stall,
+            LONG_STALL,
+            "a check in a job with a short stall timeout keeps its own default"
+        );
+        assert_eq!(
+            StepLimits::for_step(&prune, None, 7 * 3600).stall,
+            Duration::from_secs(7 * 3600)
+        );
+        assert_eq!(
+            StepLimits::for_step(&backup, None, 120).stall,
             Duration::from_secs(120)
         );
     }

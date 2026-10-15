@@ -29,6 +29,9 @@ use crate::server::AppState;
 /// applies its own default to a zero value (ADR-0039).
 const LEGACY_JOB_TIMEOUT_SECONDS: u32 = 12 * 3600;
 
+/// The maximum duration of a maintenance job: the default of a profile (ADR-0039).
+const MAINTENANCE_MAX_DURATION_SECONDS: u32 = 48 * 3600;
+
 /// The longest lifetime that the control plane signs. The agent rejects a lifetime above 24 h
 /// (FR-PR-03).
 const MAX_SIGNED_LIFETIME: time::Duration = time::Duration::hours(23);
@@ -155,6 +158,7 @@ pub async fn build(
             if repository.maintenance_agent_id != Some(job.agent_id) {
                 return Err(BuildError::Refused(Refusal::NotMaintenanceAgent));
             }
+            limits.max_duration_seconds = MAINTENANCE_MAX_DURATION_SECONDS;
             super::maintenance::steps(tx, job, repository_id, now).await?
         }
         JobKind::Unlock => vec![simple_step(

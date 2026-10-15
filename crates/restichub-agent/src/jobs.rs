@@ -267,6 +267,7 @@ impl Jobs {
                 .into_iter()
                 .map(|result| result.job_id),
         );
+        ids.truncate(MAX_HELD_JOB_IDS);
         ids
     }
 
@@ -901,7 +902,15 @@ impl Jobs {
         let snapshot = {
             let mut journal = lock(&self.journal);
             journal.record_completed(&job_id, result.clone());
-            journal.prune(now_timestamp());
+            let now = now_timestamp();
+            journal.keep_until(
+                &job_id,
+                Timestamp {
+                    seconds: now.seconds + RESULT_RETENTION.as_secs() as i64,
+                    nanos: 0,
+                },
+            );
+            journal.prune(now);
             journal.snapshot()
         };
         if let Err(error) = self.write_journal(snapshot).await {
@@ -1053,6 +1062,12 @@ fn step_timeout(step_seconds: u32, job_seconds: u32) -> Option<Duration> {
     };
     (seconds > 0).then(|| Duration::from_secs(u64::from(seconds)))
 }
+
+/// How long the journal keeps the result of a finished job for the control plane to collect.
+const RESULT_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Bounds `AgentHello.held_job_ids`: the journal entries plus the running jobs.
+const MAX_HELD_JOB_IDS: usize = 4096 + 64;
 
 /// Reads the wall clock as a protocol timestamp.
 fn now_timestamp() -> Timestamp {
