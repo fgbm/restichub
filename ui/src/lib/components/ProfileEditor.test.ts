@@ -127,7 +127,7 @@ beforeEach(() => {
 	mocks.listProfiles.mockResolvedValue([profile()]);
 	mocks.getJobLimitDefaults.mockResolvedValue({
 		stall_timeout_minutes: 45,
-		max_duration_minutes: 1000
+		max_duration_minutes: 1080
 	});
 	mocks.listRepositories.mockResolvedValue([{ id: 'r_1', name: 'offsite' }]);
 	mocks.listAgents.mockResolvedValue([agent()]);
@@ -227,9 +227,7 @@ describe('Profile editor sections', () => {
 			screen.getByRole('button', { name: /Repository check.*read 5% of the data/ })
 		).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: /Tags.*web/ })).toBeInTheDocument();
-		expect(
-			screen.getByRole('button', { name: /Run limits.*45 min \(default\)/ })
-		).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /Run limits.*45m \(default\)/ })).toBeInTheDocument();
 	});
 
 	it('has no hooks section', async () => {
@@ -330,7 +328,7 @@ describe('Profile editor tags and limits', () => {
 		await screen.findByLabelText(/^Profile/);
 		await expand(u, /^Run limits/);
 		expect(screen.getByLabelText(/^Stop after no progress/)).toHaveValue(45);
-		expect(screen.getByLabelText(/^Maximum duration/)).toHaveValue(1000);
+		expect(screen.getByLabelText(/^Maximum duration/)).toHaveValue(18);
 		expect(screen.getByRole('button', { name: /Retention.*last 3/ })).toBeInTheDocument();
 	});
 
@@ -340,7 +338,7 @@ describe('Profile editor tags and limits', () => {
 		await screen.findByLabelText(/^Profile/);
 		await expand(u, /^Run limits/);
 		await u.type(screen.getByLabelText(/^Stop after no progress/), '90');
-		await u.type(screen.getByLabelText(/^Maximum duration/), '120');
+		await u.type(screen.getByLabelText(/^Maximum duration/), '2');
 		await u.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
 		const options = mocks.updateProfile.mock.calls[0][1].options;
@@ -366,6 +364,6 @@ describe('Profile editor tags and limits', () => {
 		render(ProfileEditor, { profileId: 'p_1' });
 		await expand(u, /^Run limits/);
 		expect(screen.getByLabelText(/^Stop after no progress/)).toHaveValue(30);
-		expect(screen.getByLabelText(/^Maximum duration/)).toHaveValue(600);
+		expect(screen.getByLabelText(/^Maximum duration/)).toHaveValue(10);
 	});
 });

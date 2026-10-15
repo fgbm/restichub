@@ -1356,7 +1356,6 @@ export const ru: Record<MessageKey, string> = {
 	'pe.collapseAll': 'Свернуть всё',
 	'pe.notFound': 'Такого профиля нет.',
 	'pe.backToList': 'К списку профилей',
-	'pe.new': 'Новое',
 	'pe.state.on': 'Включено',
 	'pe.state.off': 'Выключено',
 	'pe.state.warn': 'Требует внимания',
@@ -1390,12 +1389,14 @@ export const ru: Record<MessageKey, string> = {
 		'Защита от зависших и слишком долгих заданий. Пустое поле оставляет значение серверу: новый профиль получает значение по умолчанию, изменяемый сохраняет прежнее.',
 	'pe.limits.stall': 'Остановить, если нет прогресса, минут',
 	'pe.limits.stallHelp':
-		'Если агент не сообщает о прогрессе дольше этого срока, задание останавливается как зависшее. По умолчанию {count} минут; значение для всего стека задаёт переменная окружения RESTICHUB_JOB_STALL_TIMEOUT_SECS.',
+		'Задание без прогресса дольше этого срока считается зависшим. По умолчанию {value}.',
 	'pe.limits.stallPlaceholder': '{count} (по умолчанию)',
-	'pe.limits.max': 'Максимальная длительность, минут',
+	'pe.limits.max': 'Максимальная длительность, часов',
 	'pe.limits.maxHelp':
-		'Задание, которое идёт дольше, останавливается, даже если прогресс есть. Ноль означает без ограничения. Не больше 43200. По умолчанию {count} минут; значение по умолчанию для всего стека задаёт переменная окружения RESTICHUB_JOB_MAX_DURATION_SECS.',
+		'Более долгое задание останавливается. По умолчанию {value}, 0 — без ограничения.',
 	'pe.limits.maxPlaceholder': '{count} (по умолчанию)',
+	'pe.limits.env':
+		'Значения по умолчанию для всей установки задают переменные <code>RESTICHUB_JOB_STALL_TIMEOUT_SECS</code> и <code>RESTICHUB_JOB_MAX_DURATION_SECS</code>',
 	'pe.retention.howto.title': 'Как работают правила',
 	'pe.retention.howto.union':
 		'Снимок остаётся, если его оставило <b>хотя бы одно</b> правило. Правила не вычитаются, а складываются.',
@@ -1518,11 +1519,11 @@ export const ru: Record<MessageKey, string> = {
 	'pe.sum.checkStructure': 'только структура репозитория',
 	'pe.sum.checkSubset': 'читать {value} данных',
 	'pe.sum.scripts': 'до: {before} · после: {after}',
-	'pe.sum.stall': 'без прогресса {count} мин',
-	'pe.sum.stallDefault': 'без прогресса {count} мин (по умолчанию)',
-	'pe.sum.max': 'не дольше {count} мин',
-	'pe.sum.maxDefault': 'не дольше {count} мин (по умолчанию)',
-	'pe.sum.maxNone': 'без ограничения по времени',
+	'pe.sum.stall': 'без прогресса {count}',
+	'pe.sum.stallDefault': 'без прогресса {count} (по умолчанию)',
+	'pe.sum.max': 'не дольше {count}',
+	'pe.sum.maxDefault': 'не дольше {count} (по умолчанию)',
+	'pe.sum.maxNone': 'без ограничения',
 	'pe.sum.maxServer': 'предельное время: по умолчанию сервера',
 	'pe.sum.stallServer': 'без прогресса: по умолчанию сервера'
 };

@@ -1348,7 +1348,6 @@ export const en = {
 	'pe.collapseAll': 'Collapse all',
 	'pe.notFound': 'The profile does not exist.',
 	'pe.backToList': 'Back to the profiles',
-	'pe.new': 'New',
 	'pe.state.on': 'On',
 	'pe.state.off': 'Off',
 	'pe.state.warn': 'Needs attention',
@@ -1383,12 +1382,13 @@ export const en = {
 		'A guard against a job that hangs or runs too long. An empty field leaves the value to the server: a new profile gets the default, an edited profile keeps the stored value.',
 	'pe.limits.stall': 'Stop after no progress (minutes)',
 	'pe.limits.stallHelp':
-		'If the agent reports no progress for longer than this time, the job stops as hung. The default is {count} minutes. The environment variable RESTICHUB_JOB_STALL_TIMEOUT_SECS sets the value for the whole stack.',
+		'A job with no progress for longer than this is hung. The default is {value}.',
 	'pe.limits.stallPlaceholder': '{count} (default)',
-	'pe.limits.max': 'Maximum duration (minutes)',
-	'pe.limits.maxHelp':
-		'A job that runs longer stops, even if it makes progress. Zero means no limit. At most 43200. The default is {count} minutes. The environment variable RESTICHUB_JOB_MAX_DURATION_SECS sets the default for the whole stack.',
+	'pe.limits.max': 'Maximum duration (hours)',
+	'pe.limits.maxHelp': 'A job that runs longer stops. The default is {value}; 0 means no limit.',
 	'pe.limits.maxPlaceholder': '{count} (default)',
+	'pe.limits.env':
+		'The variables <code>RESTICHUB_JOB_STALL_TIMEOUT_SECS</code> and <code>RESTICHUB_JOB_MAX_DURATION_SECS</code> set the defaults for the whole installation.',
 	'pe.retention.howto.title': 'How the rules work',
 	'pe.retention.howto.union':
 		'A snapshot stays if <b>at least one</b> rule keeps it. The rules add up. They do not subtract.',
@@ -1513,11 +1513,11 @@ export const en = {
 	'pe.sum.checkStructure': 'repository structure only',
 	'pe.sum.checkSubset': 'read {value} of the data',
 	'pe.sum.scripts': 'before: {before} · after: {after}',
-	'pe.sum.stall': 'no progress {count} min',
-	'pe.sum.stallDefault': 'no progress {count} min (default)',
-	'pe.sum.max': 'at most {count} min',
-	'pe.sum.maxDefault': 'at most {count} min (default)',
-	'pe.sum.maxNone': 'no time limit',
+	'pe.sum.stall': 'no progress {count}',
+	'pe.sum.stallDefault': 'no progress {count} (default)',
+	'pe.sum.max': 'at most {count}',
+	'pe.sum.maxDefault': 'at most {count} (default)',
+	'pe.sum.maxNone': 'no limit',
 	'pe.sum.maxServer': 'longest time: server default',
 	'pe.sum.stallServer': 'no progress: server default'
 } as const;

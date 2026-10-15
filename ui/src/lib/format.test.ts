@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatDuration, formatSeconds, formatTimeInZoneWithLocal } from './format';
+import {
+	formatBytes,
+	formatDuration,
+	formatMinutes,
+	formatSeconds,
+	formatTimeInZoneWithLocal
+} from './format';
 
 describe('formatTimeInZoneWithLocal', () => {
 	it('shows the local time in the style of the zone time, without seconds', () => {
@@ -43,5 +49,14 @@ describe('formatSeconds', () => {
 	it('rounds to whole seconds and shows two units', () => {
 		expect(formatSeconds(192.4)).toBe('3m 12s');
 		expect(formatSeconds(0.2)).toBe('0s');
+	});
+});
+
+describe('formatMinutes', () => {
+	it('shows hours and minutes', () => {
+		expect(formatMinutes(60)).toBe('1h');
+		expect(formatMinutes(2880)).toBe('48h');
+		expect(formatMinutes(90)).toBe('1h 30m');
+		expect(formatMinutes(30)).toBe('30m');
 	});
 });
