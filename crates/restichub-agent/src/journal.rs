@@ -179,6 +179,15 @@ impl FileJournal {
             .collect()
     }
 
+    /// The identifiers of every job in the journal, finished or not.
+    #[must_use]
+    pub fn job_ids(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .map(|entry| entry.job_id.clone())
+            .collect()
+    }
+
     /// Keeps the entry of `job_id` until `until` at the latest (ADR-0020, ADR-0039).
     ///
     /// A job without a fixed time limit can end after the acceptance window of its signature.

@@ -766,6 +766,7 @@ pub mod api;
 pub mod host;
 pub mod jobs;
 pub mod scripts;
+pub mod spool;
 pub mod steps;
 
 #[allow(unused_imports)]

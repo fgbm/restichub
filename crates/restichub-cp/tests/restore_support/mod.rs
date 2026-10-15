@@ -130,6 +130,7 @@ impl RealAgent {
         ));
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         jobs.attach(&tx);
+        jobs.greeted(false);
         Self {
             jobs,
             dir,

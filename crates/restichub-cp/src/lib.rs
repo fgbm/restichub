@@ -31,6 +31,7 @@ pub mod job_detail;
 pub mod job_signing;
 pub mod jobs;
 pub mod json;
+pub(crate) mod log_acks;
 pub mod log_store;
 pub mod maintenance;
 pub mod maintenance_scheduler;

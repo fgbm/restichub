@@ -349,6 +349,8 @@ async fn connect_once(
                     }
                 }
             }
+            // The emulator keeps no log spool, so an acknowledgement frees nothing.
+            Some(control_message::Payload::LogAck(_)) => {}
             Some(control_message::Payload::CertificateRejected(rejected)) => {
                 eprintln!(
                     "{}: certificate request refused: {rejected:?}",
