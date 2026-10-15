@@ -549,19 +549,19 @@ mod tests {
         paths::create_protected_file(&dir.join(ROTATION_MARKER), b"1").expect("the marker");
         std::fs::rename(staged(&dir, KEY_FILE), dir.join(KEY_FILE)).expect("move the key");
 
-        // The next rotation fails while it stages its key.
-        std::fs::create_dir(staged(&dir, KEY_FILE)).expect("block the staged key");
         let next = Rotated {
             key_pem: "next key".to_owned(),
             certificate_der: vec![9],
             ca_chain_der: vec![vec![8]],
         };
-        assert!(StoredIdentity::install_rotation(&dir, &next).is_err());
+        StoredIdentity::install_rotation(&dir, &next).expect("the rotation must install");
 
         let key = std::fs::read_to_string(dir.join(KEY_FILE)).expect("the key");
         let cert = std::fs::read_to_string(dir.join(CERT_FILE)).expect("the certificate");
-        assert_eq!(key, "earlier key");
-        assert_eq!(cert, pem::encode("CERTIFICATE", &earlier.certificate_der));
+        assert_eq!(key, "next key");
+        assert_eq!(cert, pem::encode("CERTIFICATE", &next.certificate_der));
+        assert!(!dir.join(ROTATION_MARKER).exists());
+        assert!(!staged(&dir, CERT_FILE).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
