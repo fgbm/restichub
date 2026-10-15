@@ -1685,11 +1685,6 @@ export interface components {
         BackupOptions: {
             exclude_caches?: boolean;
             /**
-             * @description Skip cloud-only placeholder files, for example OneDrive. Windows targets only
-             *     (restic `--exclude-cloud-files`).
-             */
-            exclude_cloud_files?: boolean;
-            /**
              * Format: int64
              * @description Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
              */
@@ -1702,7 +1697,7 @@ export interface components {
             /**
              * Format: int32
              * @description Minutes after which the agent stops the job whatever its progress. Zero means no limit.
-             *     At most 43200 (ADR-0039).
+             *     At most 43200. The default is 2880 (ADR-0039).
              */
             max_duration_minutes?: number;
             one_file_system?: boolean;
@@ -2220,7 +2215,6 @@ export interface components {
         };
         /** @description One job with its steps, its summary and its progress (FR-MN-02). */
         JobDetailView: components["schemas"]["JobView"] & {
-            /** @description The limits of the run (ADR-0039). */
             limits: components["schemas"]["LimitsView"];
             log: components["schemas"]["LogInfo"];
             /**
@@ -2332,7 +2326,6 @@ export interface components {
             /** @description In RFC 3339. */
             updated_at: string;
         };
-        /** @description The limits of the run of a job (ADR-0039). */
         LimitsView: {
             /**
              * Format: int32
