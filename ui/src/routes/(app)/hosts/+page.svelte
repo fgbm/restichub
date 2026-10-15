@@ -25,7 +25,9 @@
 	} from '#lib/components/ui/index.ts';
 	import type { TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
+	import { enableCommand } from '#lib/scripts.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -98,6 +100,12 @@
 			value: (row) => statusLabel(row),
 			render: statusCell
 		},
+		{
+			key: 'server_scripts',
+			header: t('hosts.serverScripts'),
+			value: (row) => scriptsLabel(row),
+			render: scriptsCell
+		},
 		{ key: 'agent_version', header: t('hosts.agent'), render: versionCell },
 		{
 			key: 'last_seen_at',
@@ -107,6 +115,18 @@
 		},
 		{ key: 'created_at', header: t('hosts.created'), render: createdCell }
 	]);
+
+	let scriptsTarget = $state<Agent | null>(null);
+	let scriptsOpen = $state(false);
+
+	function scriptsLabel(agent: Agent): string {
+		return t(`hosts.serverScripts.${agent.server_scripts}` as MessageKey);
+	}
+
+	function openScripts(agent: Agent): void {
+		scriptsTarget = agent;
+		scriptsOpen = true;
+	}
 
 	function statusLabel(agent: Agent): string {
 		return t(agent.status === 'revoked' ? 'hosts.status.revoked' : 'hosts.status.active');
@@ -282,6 +302,19 @@
 	</StatusPill>
 {/snippet}
 
+{#snippet scriptsCell(agent: Agent)}
+	<button
+		type="button"
+		class="host__scripts"
+		aria-label={`${t('hosts.serverScripts')}: ${agent.hostname}`}
+		onclick={() => openScripts(agent)}
+	>
+		<StatusPill tone={agent.server_scripts === 'enabled' ? 'info' : 'neutral'}>
+			{scriptsLabel(agent)}
+		</StatusPill>
+	</button>
+{/snippet}
+
 {#snippet versionCell(agent: Agent)}
 	<span class="host__version">{agent.agent_version}</span>
 {/snippet}
@@ -422,6 +455,40 @@
 	{/snippet}
 </Dialog>
 
+<Dialog
+	bind:open={scriptsOpen}
+	size="md"
+	title={t('hosts.serverScripts')}
+	description={scriptsTarget ? scriptsTarget.hostname : undefined}
+>
+	{#if scriptsTarget}
+		<dl class="scripts">
+			<dt>{t('hosts.serverScripts')}</dt>
+			<dd>{scriptsLabel(scriptsTarget)}</dd>
+			<dt>{t('hosts.serverScripts.interpreters')}</dt>
+			<dd>
+				{scriptsTarget.script_interpreters.length > 0
+					? scriptsTarget.script_interpreters.join(', ')
+					: t('common.none')}
+			</dd>
+		</dl>
+		{#if scriptsTarget.server_scripts === 'enabled'}
+			<Alert
+				variant="inline"
+				tone="attention"
+				icon="shield"
+				title={t('hosts.serverScripts.risk')}
+			/>
+		{:else}
+			<p class="scripts__hint">{t('hosts.serverScripts.enableHint')}</p>
+			<CopyField value={enableCommand(scriptsTarget.os)} />
+		{/if}
+	{/if}
+	{#snippet footer()}
+		<Button onclick={() => (scriptsOpen = false)}>{t('common.close')}</Button>
+	{/snippet}
+</Dialog>
+
 <ConfirmDialog
 	bind:open={cancelOpen}
 	title={t('hosts.pending.cancelTitle')}
@@ -467,6 +534,34 @@
 </Dialog>
 
 <style>
+	.host__scripts {
+		padding: 0;
+		border: 0;
+		background: none;
+		cursor: pointer;
+	}
+
+	.scripts {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: var(--rh-space-2) var(--rh-space-4);
+		margin: 0 0 var(--rh-space-3);
+	}
+
+	.scripts dt {
+		color: var(--rh-color-text-muted);
+	}
+
+	.scripts dd {
+		margin: 0;
+	}
+
+	.scripts__hint {
+		margin: 0 0 var(--rh-space-2);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
 	.host {
 		display: flex;
 		flex-direction: column;
