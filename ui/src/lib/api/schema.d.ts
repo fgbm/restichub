@@ -1700,7 +1700,6 @@ export interface components {
          * @enum {string}
          */
         BrowseState: "empty" | "pending" | "done" | "failed";
-        /** @description An active agent in the hook catalogue. */
         CatalogueAgent: {
             hook_allow_list: components["schemas"]["HookAllowListState"];
             hostname: string;
@@ -2056,10 +2055,7 @@ export interface components {
             revoked_by_user_id?: string | null;
             used_at?: string | null;
         };
-        /**
-         * @description The kind of a script variable.
-         * @enum {string}
-         */
+        /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied";
@@ -2099,10 +2095,7 @@ export interface components {
             name: string;
             value: string;
         };
-        /**
-         * @description The type of a hook parameter in the API.
-         * @enum {string}
-         */
+        /** @enum {string} */
         HookParameterType: "string" | "integer" | "enum" | "boolean" | "secret_ref";
         /** @description One parameter of a reported hook (FR-HK-02). */
         HookParameterView: {
@@ -2121,7 +2114,6 @@ export interface components {
             /** @description True when every use of the hook must set the parameter. */
             required: boolean;
             type: components["schemas"]["HookParameterType"];
-            /** @description The allowed values of an enumeration. */
             values?: string[];
         };
         /**
@@ -2139,7 +2131,7 @@ export interface components {
         HookView: {
             hook_id: string;
             parameters: components["schemas"]["HookParameterView"][];
-            /** @description The phases where the hook may run. An empty list allows every phase. */
+            /** @description Every phase is allowed when the list is empty. */
             phases: components["schemas"]["HookPhase"][];
         };
         /** @description The mode and the setup state of the installation. */
@@ -2148,10 +2140,7 @@ export interface components {
             setup_required: boolean;
             tenancy_mode: components["schemas"]["TenancyMode"];
         };
-        /**
-         * @description The program that runs a script.
-         * @enum {string}
-         */
+        /** @enum {string} */
         Interpreter: "powershell" | "cmd" | "bash" | "sh";
         /** @description The request body of an init or a test-access action. */
         JobActionRequest: {
@@ -2521,7 +2510,6 @@ export interface components {
             kind: string;
             /** @description The name of a script or the identifier of a hook, or empty. */
             name: string;
-            /** @description The phase of a hook or a script, or empty. */
             phase: string;
             step_id: string;
         };
@@ -2609,7 +2597,6 @@ export interface components {
              *     sets it (AC-HK-05).
              */
             agent_id?: string | null;
-            /** @description The host name of the agent in `agent_id`. */
             agent_name?: string | null;
             /** @description In snake_case. */
             code: components["schemas"]["ErrorCode"];
@@ -2841,7 +2828,7 @@ export interface components {
             env?: components["schemas"]["ScriptEnvDef"][];
             failure_policy: components["schemas"]["FailurePolicy"];
             interpreter: components["schemas"]["Interpreter"];
-            /** @description The name in the job log. 1 to 128 characters. */
+            /** @description Shown in the job log. 1 to 128 characters. */
             name: string;
             phase: components["schemas"]["HookPhase"];
             /** @description The identifier of the template that the script came from. It has no effect on the run. */
@@ -2860,7 +2847,6 @@ export interface components {
             kind: components["schemas"]["EnvKind"];
             /** @description Letters, digits and underscore, not first a digit. */
             name: string;
-            /** @description The text, or the identifier of the secret. */
             value: string;
         };
         ScriptTemplateListResponse: {
@@ -2868,11 +2854,10 @@ export interface components {
         };
         /** @description One declared parameter of a script template. */
         ScriptTemplateParameter: {
-            /** @description The default value. A secret reference has none. */
+            /** @description Fills the form. A secret reference has none. */
             default?: string | null;
-            /** @description The label in the form. 1 to 64 characters. */
+            /** @description Shown in the form. 1 to 64 characters. */
             label: string;
-            /** @description The name of the environment variable. */
             name: string;
             type: components["schemas"]["ParameterKind"];
         };
@@ -3114,7 +3099,6 @@ export interface components {
             /** @description The name of a script or the identifier of a hook, or empty. */
             name: string;
             output: components["schemas"]["StepOutput"];
-            /** @description The phase of a hook or a script, or empty. */
             phase: string;
             /** @description True after a hard kill that can leave a stale lock. */
             possible_stale_lock: boolean;
@@ -3237,7 +3221,7 @@ export interface components {
             paths?: components["schemas"]["ProfilePaths"];
             repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
-            /** @description The full new script list. Only an Admin can change it (FR-HK-12). */
+            /** @description Replaces the whole list. Only an Admin can change it (FR-HK-12). */
             scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];
         };

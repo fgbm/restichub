@@ -21,7 +21,7 @@ pub struct Profile {
     pub profile_tag: Option<String>,
     pub options: BackupOptions,
     pub hooks: Vec<HookRef>,
-    /// Scripts from the control plane (FR-HK-09, ADR-0037).
+    /// Code that the control plane sends (FR-HK-09, ADR-0037).
     pub scripts: Vec<crate::script::ScriptRef>,
     /// Policy that produces the `forget` and `prune` steps.
     pub retention: Option<Retention>,

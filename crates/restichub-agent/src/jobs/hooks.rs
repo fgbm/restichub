@@ -107,7 +107,6 @@ pub(super) struct PhaseReport {
     pub(super) warned: bool,
 }
 
-/// The hook or the script that a step holds.
 enum Planned<'a> {
     Hook(&'a HookStep),
     Script(&'a ScriptStep),
@@ -122,7 +121,6 @@ impl Planned<'_> {
         }
     }
 
-    /// The name in the job error and in the log.
     fn label(&self) -> String {
         match self {
             Self::Hook(hook) => hook.hook_id.clone(),
@@ -319,6 +317,7 @@ impl Jobs {
 
     /// Starts the process of an invocation, supervises it and returns its outcome (FR-HK-03,
     /// FR-AG-10).
+    #[allow(clippy::too_many_arguments)]
     async fn supervise(
         &self,
         step: &Step,

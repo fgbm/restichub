@@ -403,7 +403,6 @@ pub struct PlannedStep {
     pub kind: String,
     /// The display name: the name of a script or the identifier of a hook. Empty for the others.
     pub name: String,
-    /// The phase of a hook or a script, or empty.
     pub phase: String,
 }
 

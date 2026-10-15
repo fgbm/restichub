@@ -36,7 +36,6 @@ pub const MAX_HOOK_PARAMETERS: usize = 32;
 /// The most bytes in the body of a script (FR-HK-09).
 pub const MAX_SCRIPT_BODY_BYTES: usize = 64 * 1024;
 
-/// The most characters in the name of a script.
 pub const MAX_SCRIPT_NAME_CHARS: usize = 128;
 
 /// The most environment variables that one script step carries.

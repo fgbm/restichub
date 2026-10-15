@@ -229,7 +229,7 @@ pub struct UpdateProfileRequest {
     pub options: BackupOptions,
     #[serde(default)]
     pub hooks: Vec<HookRef>,
-    /// The full new script list. Only an Admin can change it (FR-HK-12).
+    /// Replaces the whole list. Only an Admin can change it (FR-HK-12).
     #[serde(default)]
     pub scripts: Vec<ScriptDef>,
     #[serde(default)]

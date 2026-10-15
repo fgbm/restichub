@@ -10,7 +10,6 @@ use crate::hooks::{Trust, trust};
 /// The most bytes that the agent reads from the setting file.
 const MAX_BYTES: u64 = 4096;
 
-/// The only key of the file.
 const KEY: &str = "server_scripts";
 
 /// Whether the host trusts scripts from the control plane.
@@ -24,7 +23,6 @@ pub enum ScriptMode {
 }
 
 impl ScriptMode {
-    /// The value for `AgentHello`.
     #[must_use]
     pub fn to_proto(self) -> ServerScriptsState {
         match self {

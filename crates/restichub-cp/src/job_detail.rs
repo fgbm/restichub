@@ -34,7 +34,6 @@ pub struct StepView {
     pub kind: String,
     /// The name of a script or the identifier of a hook, or empty.
     pub name: String,
-    /// The phase of a hook or a script, or empty.
     pub phase: String,
     pub status: StepStatus,
     /// The exit code of restic, or -1 when no process ran.
@@ -91,7 +90,6 @@ pub struct PlannedStepView {
     pub kind: String,
     /// The name of a script or the identifier of a hook, or empty.
     pub name: String,
-    /// The phase of a hook or a script, or empty.
     pub phase: String,
 }
 

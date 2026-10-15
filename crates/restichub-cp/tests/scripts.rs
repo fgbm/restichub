@@ -384,7 +384,6 @@ async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile() {
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // An Admin saves the script.
     let (status, created) = env
         .call(
             &env.admin,
@@ -413,7 +412,6 @@ async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{saved}");
-    // A change of the text needs the Admin.
     let (status, _) = env
         .call(
             &env.operator,
@@ -909,7 +907,6 @@ async fn ac_hk_11_the_log_api_returns_the_lines_of_one_step() {
         .await
         .1;
     assert_eq!(lines(&none).len(), 0);
-    // The paging of one step uses the same keyset.
     let second = env
         .call(
             &env.viewer,

@@ -476,7 +476,6 @@ pub struct ProblemBody {
     /// sets it (AC-HK-05).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
-    /// The host name of the agent in `agent_id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
     /// The hook that the agent does not report. Only a refused hook of a profile sets it.

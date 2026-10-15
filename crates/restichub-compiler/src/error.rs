@@ -192,7 +192,6 @@ impl CompileError {
         )
     }
 
-    /// The field of the error, when it names one.
     #[must_use]
     pub fn field(&self) -> Option<&FieldPath> {
         match self {

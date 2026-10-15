@@ -124,9 +124,7 @@ impl AgentStatus {
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum HookAllowListState {
-    /// The agent does not report the state.
     Unknown,
-    /// The host has no allow-list file.
     Absent,
     Loaded,
     /// Another account can change the file or its directory, so no hook runs.

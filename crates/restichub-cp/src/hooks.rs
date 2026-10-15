@@ -85,7 +85,6 @@ pub(crate) fn allow_list_of(agent: &Agent) -> BTreeMap<String, AllowListedHook> 
     serde_json::from_value(agent.hooks.clone()).unwrap_or_default()
 }
 
-/// The type of a hook parameter in the API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HookParameterType {
@@ -114,7 +113,6 @@ pub struct HookParameterView {
     pub minimum: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maximum: Option<i64>,
-    /// The allowed values of an enumeration.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
 }
@@ -123,7 +121,7 @@ pub struct HookParameterView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct HookView {
     pub hook_id: String,
-    /// The phases where the hook may run. An empty list allows every phase.
+    /// Every phase is allowed when the list is empty.
     pub phases: Vec<HookPhase>,
     pub parameters: Vec<HookParameterView>,
 }
@@ -194,7 +192,6 @@ fn parameter_view(name: &str, spec: &restichub_compiler::HookParameterSpec) -> H
     view
 }
 
-/// An active agent in the hook catalogue.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CatalogueAgent {
     pub id: String,

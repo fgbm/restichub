@@ -116,8 +116,7 @@ pub struct Jobs {
     /// Place and trust rule of the allow-list file. The agent reads the file again at each job
     /// (FR-HK-01).
     hooks: Arc<HookStore>,
-    /// Place and trust rule of the server scripts setting. The agent reads it again at each job
-    /// (FR-HK-08).
+    /// The agent reads it again at each job (FR-HK-08).
     scripts: Arc<ScriptStore>,
 }
 

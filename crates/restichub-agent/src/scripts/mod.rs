@@ -31,7 +31,6 @@ pub use setting::{ScriptMode, mode_file, mode_file_for, set_mode};
 /// The time limit of a script whose step names none.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3600);
 
-/// The longest time limit of a script.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(24 * 3600);
 
 /// Why the agent cannot run a script step.
@@ -41,7 +40,6 @@ pub enum ScriptRefusal {
     Disabled,
     /// The step breaks a rule, or the host lacks the interpreter. The text names no value.
     Invalid(String),
-    /// The agent cannot write the script file.
     Unavailable(String),
 }
 

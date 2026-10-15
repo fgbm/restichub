@@ -63,13 +63,12 @@ impl ParameterKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptTemplateParameter {
-    /// The name of the environment variable.
     pub name: String,
-    /// The label in the form. 1 to 64 characters.
+    /// Shown in the form. 1 to 64 characters.
     pub label: String,
     #[serde(rename = "type")]
     pub kind: ParameterKind,
-    /// The default value. A secret reference has none.
+    /// Fills the form. A secret reference has none.
     #[serde(default, rename = "default", skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
 }

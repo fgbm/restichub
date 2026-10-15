@@ -14,7 +14,6 @@ use crate::error::{CompileError, FieldPath};
 use crate::profile::HookPhase;
 use crate::target::{OperatingSystem, TargetFacts};
 
-/// The program that runs a script (FR-HK-09).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScriptInterpreter {
@@ -37,7 +36,6 @@ impl ScriptInterpreter {
         }
     }
 
-    /// The wire value.
     #[must_use]
     pub fn to_proto(self) -> ProtoInterpreter {
         match self {
@@ -65,7 +63,6 @@ impl ScriptInterpreter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailurePolicy {
-    /// A failed `before` script stops the backup.
     AbortBackup,
     /// The job goes on. The job still ends as failed.
     Continue,
@@ -87,7 +84,6 @@ pub struct ScriptEnvRef {
     pub value: ScriptEnvValue,
 }
 
-/// A script of the profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptRef {
     pub name: String,

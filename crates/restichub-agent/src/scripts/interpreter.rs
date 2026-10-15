@@ -63,7 +63,7 @@ fn candidates(kind: ScriptInterpreter) -> Vec<PathBuf> {
     }
 }
 
-/// The name of the script file. PowerShell and cmd choose the language by the extension.
+/// PowerShell and cmd choose the language by the extension.
 pub(super) fn file_name(kind: ScriptInterpreter) -> &'static str {
     match kind {
         ScriptInterpreter::Powershell => "script.ps1",
@@ -72,7 +72,7 @@ pub(super) fn file_name(kind: ScriptInterpreter) -> &'static str {
     }
 }
 
-/// The bytes of the script file. Windows PowerShell reads UTF-8 only with a byte order mark, and a
+/// Windows PowerShell reads UTF-8 only with a byte order mark, and a
 /// batch file needs CRLF line ends for labels.
 pub(super) fn file_bytes(kind: ScriptInterpreter, body: &str) -> Vec<u8> {
     match kind {
@@ -89,7 +89,6 @@ pub(super) fn file_bytes(kind: ScriptInterpreter, body: &str) -> Vec<u8> {
     }
 }
 
-/// The arguments of the interpreter, with the script file last.
 pub(super) fn arguments(kind: ScriptInterpreter, file: &Path) -> Vec<String> {
     let file = file.to_string_lossy().into_owned();
     match kind {

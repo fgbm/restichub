@@ -44,7 +44,7 @@ pub struct Profile {
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub hooks: Value,
-    /// The scripts of the profile, an array (FR-HK-09).
+    /// Definitions as a JSON array (FR-HK-09).
     pub scripts: Value,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

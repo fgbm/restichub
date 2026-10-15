@@ -36,7 +36,6 @@ use crate::validation::Reason;
 
 pub use templates::*;
 
-/// The most scripts in one profile.
 pub const MAX_SCRIPTS: usize = 32;
 
 /// The most body bytes of all scripts in one profile. The signed job must fit in a message.
@@ -45,7 +44,6 @@ pub const MAX_TOTAL_BODY_BYTES: usize = 1024 * 1024;
 /// The longest time limit of a script in seconds.
 pub const MAX_TIMEOUT_SECONDS: u32 = 86_400;
 
-/// The program that runs a script.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Interpreter {
@@ -100,9 +98,7 @@ impl From<CompilerInterpreter> for Interpreter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FailurePolicy {
-    /// A failed `before` script stops the backup.
     AbortBackup,
-    /// The job goes on and ends with warnings.
     Continue,
 }
 
@@ -123,11 +119,9 @@ impl FailurePolicy {
     }
 }
 
-/// The kind of a script variable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EnvKind {
-    /// The value is plain text.
     String,
     /// The value is the identifier of a secret of the purpose `hook_secret`.
     SecretRef,
@@ -141,7 +135,6 @@ pub struct ScriptEnvDef {
     /// Letters, digits and underscore, not first a digit.
     pub name: String,
     pub kind: EnvKind,
-    /// The text, or the identifier of the secret.
     pub value: String,
 }
 
@@ -149,7 +142,7 @@ pub struct ScriptEnvDef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptDef {
-    /// The name in the job log. 1 to 128 characters.
+    /// Shown in the job log. 1 to 128 characters.
     pub name: String,
     pub interpreter: Interpreter,
     pub phase: HookPhase,
@@ -230,7 +223,6 @@ pub(crate) fn parse_phase(value: &str) -> Option<HookPhase> {
     }
 }
 
-/// The compiler input of one script.
 #[must_use]
 pub fn compiler_script(script: &ScriptDef) -> ScriptRef {
     ScriptRef {

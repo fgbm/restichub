@@ -10,7 +10,6 @@ use super::templates::{
 use super::{EnvKind, FailurePolicy, Interpreter, ScriptDef, ScriptEnvDef};
 use crate::profiles::HookPhase;
 
-/// A built-in template in its static form.
 struct Builtin {
     slug: &'static str,
     name: &'static str,
@@ -19,7 +18,6 @@ struct Builtin {
     phase: HookPhase,
     timeout_seconds: u32,
     failure_policy: FailurePolicy,
-    /// Name, label, type and default of each parameter.
     parameters: &'static [(
         &'static str,
         &'static str,
@@ -353,12 +351,11 @@ fn view(template: &Builtin) -> ScriptTemplateView {
     }
 }
 
-/// The built-in script templates.
 pub(super) fn script_templates() -> Vec<ScriptTemplateView> {
     BUILTINS.iter().map(view).collect()
 }
 
-/// One built-in script template by its name after `builtin:`.
+/// Looks up by the name after `builtin:`.
 pub(super) fn script_template(slug: &str) -> Option<ScriptTemplateView> {
     BUILTINS
         .iter()
@@ -427,7 +424,6 @@ fn job(
     }
 }
 
-/// The built-in job templates.
 pub(super) fn job_templates() -> Vec<JobTemplateView> {
     vec![
         job(
@@ -457,7 +453,7 @@ pub(super) fn job_templates() -> Vec<JobTemplateView> {
     ]
 }
 
-/// One built-in job template by its name after `builtin:`.
+/// Looks up by the name after `builtin:`.
 pub(super) fn job_template(slug: &str) -> Option<JobTemplateView> {
     job_templates()
         .into_iter()

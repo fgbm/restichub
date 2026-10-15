@@ -14,7 +14,6 @@ use crate::tx::TenantTx;
 /// Per-tenant cap that keeps the settings page small.
 pub const MAX_TEMPLATES: i64 = 200;
 
-/// A script template row.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ScriptTemplate {
     pub id: ScriptTemplateId,
@@ -25,7 +24,6 @@ pub struct ScriptTemplate {
     pub body: String,
     pub timeout_seconds: i32,
     pub failure_policy: String,
-    /// An array of declared parameters.
     pub parameters: Value,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -34,7 +32,6 @@ pub struct ScriptTemplate {
 const COLUMNS: &str = "id, name, description, interpreter, phase, body, timeout_seconds, \
                        failure_policy, parameters, created_at, updated_at";
 
-/// The fields of a new script template row.
 #[derive(Debug, Clone)]
 pub struct NewScriptTemplate<'a> {
     pub id: ScriptTemplateId,
@@ -49,7 +46,6 @@ pub struct NewScriptTemplate<'a> {
     pub created_by: Option<UserId>,
 }
 
-/// The mutable fields of a script template row.
 #[derive(Debug, Clone)]
 pub struct ScriptTemplateUpdate<'a> {
     pub name: &'a str,
@@ -172,7 +168,7 @@ pub struct JobTemplate {
     pub id: JobTemplateId,
     pub name: String,
     pub description: String,
-    /// An array of scripts, in the shape of `profiles.scripts`.
+    /// Same shape as `profiles.scripts`.
     pub scripts: Value,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -180,7 +176,6 @@ pub struct JobTemplate {
 
 const JOB_COLUMNS: &str = "id, name, description, scripts, created_at, updated_at";
 
-/// The fields of a new job template row.
 #[derive(Debug, Clone)]
 pub struct NewJobTemplate<'a> {
     pub id: JobTemplateId,

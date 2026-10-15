@@ -9,7 +9,6 @@ pub enum AgentCapability {
     /// (FR-HK-03). An older agent rejects the step.
     HooksV1,
     /// The agent runs the `script` step on a host with the local trust mode (FR-HK-09, ADR-0037).
-    /// An older agent rejects the step.
     ScriptsV1,
 }
 

@@ -608,7 +608,7 @@ pub fn default_restore_roots() -> Vec<String> {
 pub struct HookReport {
     pub state: restichub_proto::agent::v1::HookAllowListState,
     pub hooks: Vec<restichub_proto::agent::v1::HookMetadata>,
-    /// The trust mode for server scripts and the interpreters (FR-HK-08).
+    /// Trust mode and interpreters (FR-HK-08).
     pub scripts: Option<(
         restichub_proto::agent::v1::ServerScriptsState,
         Vec<restichub_proto::agent::v1::ScriptInterpreter>,
