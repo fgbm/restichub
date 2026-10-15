@@ -24,6 +24,12 @@ export interface StepRow {
 	id: string;
 	state: 'done' | 'running' | 'pending';
 	step: JobStep | null;
+	/** The kind of the step, such as `script`, `hook` or `backup`. Empty for an older job. */
+	kind: string;
+	/** The name of a script or the identifier of a hook, or empty. */
+	name: string;
+	/** The phase of a hook or a script, or empty. */
+	phase: string;
 }
 
 /**
@@ -43,10 +49,15 @@ export function stepRows(job: JobDetail): StepRow[] {
 				? progressId
 				: (pending[0] ?? null)
 			: null;
+	const described = new Map((job.planned ?? []).map((entry) => [entry.step_id, entry]));
 	return ids.map((id) => {
 		const step = results.get(id) ?? null;
-		if (step) return { id, state: 'done', step };
-		return { id, state: id === runningId ? 'running' : 'pending', step: null };
+		const entry = described.get(id);
+		const kind = step?.kind || entry?.kind || '';
+		const name = step?.name || entry?.name || '';
+		const phase = step?.phase || entry?.phase || '';
+		if (step) return { id, state: 'done', step, kind, name, phase };
+		return { id, state: id === runningId ? 'running' : 'pending', step: null, kind, name, phase };
 	});
 }
 

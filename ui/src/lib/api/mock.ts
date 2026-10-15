@@ -155,6 +155,16 @@ const SAMPLE_REPOSITORIES_KEY = 'restichub.mock.repositories';
 // The mock starts without a plan. A review capture or an e2e test sets this storage key to see a
 // filled list.
 const SAMPLE_PLANS_KEY = 'restichub.mock.plans';
+
+// A review capture or an e2e test sets this storage key, besides the profile and the plan keys, to
+// see a profile with scripts, its plan and a finished job with a log for each step (FR-HK-11).
+const SAMPLE_SCRIPTS_KEY = 'restichub.mock.scripts';
+
+function scriptsSample(): boolean {
+	return (
+		typeof localStorage !== 'undefined' && localStorage.getItem(SAMPLE_SCRIPTS_KEY) === 'sample'
+	);
+}
 // A review capture or an e2e test sets this storage key to drive the mock as a Platform Admin
 // without a membership. The sign-in then survives a full page load, so a direct visit to an
 // address keeps the session, the way a session cookie does.
@@ -345,7 +355,7 @@ function makeProfiles(): Profile[] {
 			updated_at: iso(60 * 6),
 			created_by: 'u_01'
 		}
-	];
+	].filter((item) => item.id !== 'p_3' || scriptsSample());
 }
 
 /// The sample scripts of the profile `db-nightly`: a check and a dump before the backup, and a
@@ -418,7 +428,7 @@ function makePlans(): Plan[] {
 	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_PLANS_KEY) !== 'sample') {
 		return [];
 	}
-	return [
+	const plans: Plan[] = [
 		{
 			id: 'pl_1',
 			name: 'nightly-web',
@@ -458,6 +468,7 @@ function makePlans(): Plan[] {
 			updated_at: iso(60 * 6)
 		}
 	];
+	return plans.filter((item) => item.id !== SCRIPTED_PLAN || scriptsSample());
 }
 
 /// Sample jobs of the sample plan, one for each lifecycle state that the Jobs screen shows
@@ -506,7 +517,7 @@ function makeJobs(): MockJob[] {
 	scripted.job.agent_id = '2';
 	scripted.job.agent_hostname = 'srv-db-01';
 	return [
-		scripted,
+		...(scriptsSample() ? [scripted] : []),
 		job('j_s1', 'running', null, null, 12, 11, null),
 		job('j_s2', 'queued', null, null, 3, null, null),
 		job('j_s3', 'succeeded', 'succeeded', null, 60 * 24 + 40, 60 * 24 + 38, 60 * 24 + 20),
