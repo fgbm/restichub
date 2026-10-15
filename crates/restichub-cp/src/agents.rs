@@ -130,6 +130,11 @@ pub struct AgentView {
 pub struct DuplicateOfView {
     pub id: String,
     pub hostname: String,
+    pub created_at: String,
+    pub last_seen_at: Option<String>,
+    /// True when the other record was created before this one. Only the newer record offers the
+    /// replacement of the older one (FR-ID-11).
+    pub is_older: bool,
 }
 
 impl From<&repo::Agent> for AgentView {
@@ -172,6 +177,9 @@ impl From<&repo::Agent> for AgentView {
                 DuplicateOfView {
                     id: other.id.to_string(),
                     hostname: other.hostname.clone(),
+                    created_at: format_time(other.created_at),
+                    last_seen_at: other.last_seen_at.map(format_time),
+                    is_older: other.created_at < agent.created_at,
                 }
             }),
         }
@@ -381,7 +389,7 @@ pub async fn revoke_agent(
 #[derive(Debug, Default, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReenrollAgentRequest {
-    /// The time to live in seconds. Between 60 and 86400. The default is 3600.
+    /// The time to live in seconds. Between 60 and 3600. The default is 3600.
     pub ttl_seconds: Option<i64>,
 }
 
@@ -418,7 +426,7 @@ pub async fn reenroll_agent(
 > {
     context.authorize(Operation::AgentsWrite)?;
     let agent_id = parse_agent_id(&id)?;
-    let ttl = crate::enrollment_tokens::validate_ttl(body.ttl_seconds)?;
+    let ttl = crate::enrollment_tokens::validate_bound_ttl(body.ttl_seconds)?;
     let agent = context
         .tenant_tx(&state, async |tx| Ok(repo::get(tx, agent_id).await?))
         .await?
@@ -443,13 +451,16 @@ pub struct ReplaceAgentRequest {
 pub struct ReplaceAgentResponse {
     pub plans_moved: u64,
     pub repositories_moved: u64,
+    pub queued_jobs_moved: u64,
 }
 
 /// Moves the plans, maintenance host references and labels of an old duplicate record to this host
 /// and revokes the old record (FR-ID-01).
 ///
-/// Both records must be active and must report the same machine identifier. The move and the
-/// revoke commit in one transaction.
+/// Both records must be active and must report the same machine identifier. This record must be
+/// newer than the old one, and the old one must have been silent for the online window, otherwise
+/// the answer is HTTP 404 or HTTP 409 `agent_recently_online`. The move and the revoke commit in
+/// one transaction; the running jobs of the old record are cancelled as for a revoke (FR-ID-04).
 #[utoipa::path(
     post,
     path = "/api/v1/agents/{id}/replace",
@@ -461,7 +472,8 @@ pub struct ReplaceAgentResponse {
         (status = 200, description = "The old record is replaced.", body = ReplaceAgentResponse),
         (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The pair is not a possible duplicate.", body = crate::error::ProblemBody)
+        (status = 404, description = "The pair is not a possible duplicate.", body = crate::error::ProblemBody),
+        (status = 409, description = "The old record was online recently (`agent_recently_online`).", body = crate::error::ProblemBody)
     )
 )]
 pub async fn replace_agent(
@@ -480,9 +492,31 @@ pub async fn replace_agent(
     let actor = context.actor_user(&state).await?;
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    let Some(moved) = repo::replace(&mut tx, new_id, old_id, actor, now).await? else {
-        return Err(ApiError::not_found());
+    let moved = match repo::replace(
+        &mut tx,
+        new_id,
+        old_id,
+        actor,
+        now,
+        crate::reenroll_limits::replace_online_window(),
+    )
+    .await?
+    {
+        repo::ReplaceOutcome::Replaced(moved) => moved,
+        repo::ReplaceOutcome::NotPair => return Err(ApiError::not_found()),
+        repo::ReplaceOutcome::OldRecentlyOnline => return Err(ApiError::agent_recently_online()),
     };
+    let mut revoke_event = context.audit_event(AuditAction::AgentRevoke, "agent", old_id.as_uuid());
+    revoke_event.diff = Some(diff(
+        Some(&serde_json::json!({"status": AgentStatus::Active.as_str()})),
+        Some(&serde_json::json!({
+            "status": AgentStatus::Revoked.as_str(),
+            "reason": "replaced",
+            "replaced_by_agent_id": new_id.to_string(),
+        })),
+        &[],
+    ));
+    restichub_db::audit::insert(&mut tx, &revoke_event).await?;
     let mut event = context.audit_event(AuditAction::AgentReplace, "agent", new_id.as_uuid());
     event.diff = Some(diff(
         None,
@@ -491,15 +525,17 @@ pub async fn replace_agent(
             "old_agent_id": old_id.to_string(),
             "plans_moved": moved.plans,
             "repositories_moved": moved.repositories,
+            "queued_jobs_moved": moved.queued_jobs,
         })),
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
     tx.commit().await?;
-    state.agent_registry().close_by_agent(old_id);
+    crate::agent_stream::cancel_jobs_and_close(state.agent_registry(), old_id, &moved.active_jobs);
     Ok(Json(ReplaceAgentResponse {
         plans_moved: moved.plans,
         repositories_moved: moved.repositories,
+        queued_jobs_moved: moved.queued_jobs,
     }))
 }
 

@@ -63,7 +63,7 @@ async fn the_openapi_document_holds_the_routes() -> Result<(), Box<dyn std::erro
             .get("info")
             .and_then(|info| info.get("version"))
             .and_then(Value::as_str),
-        Some(env!("CARGO_PKG_VERSION"))
+        Some(restichub_common::BUILD_VERSION)
     );
     let paths = document.get("paths");
     assert!(paths.and_then(|paths| paths.get("/healthz")).is_some());

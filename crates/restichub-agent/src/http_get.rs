@@ -290,7 +290,7 @@ impl HttpsClient {
             .header(header::ACCEPT, accept)
             .header(
                 header::USER_AGENT,
-                concat!("restichub-agent/", env!("CARGO_PKG_VERSION")),
+                &format!("restichub-agent/{}", restichub_common::BUILD_VERSION),
             )
             .body(Empty::<Bytes>::new())
             .context("cannot build the request")?;

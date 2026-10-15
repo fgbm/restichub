@@ -160,6 +160,11 @@ pub(crate) async fn issue_token(
     let (value, display_prefix) = token::random_enrollment_token()?;
     let hash = token::hash_token(&value);
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    if let Some(agent) = replaces {
+        // One spendable bound token per host: a leaked older token cannot take the host over
+        // (FR-ID-10, T8).
+        repo::revoke_unused_for_agent(&mut tx, agent, Some(created_by), now).await?;
+    }
     let id = repo::create(
         &mut tx,
         &repo::NewEnrollmentToken {
@@ -256,8 +261,9 @@ pub async fn list_enrollment_tokens(
 /// Revokes an unused enrollment token of the tenant (a soft change).
 ///
 /// A used, an already revoked or an expired token gives HTTP 409 with the code `token_used`,
-/// `token_already_revoked` or `token_expired` and changes nothing. An unknown token gives HTTP 404. The conditional update and the re-read answer without a time-of-check gap, and a
-/// failed revoke writes no audit record.
+/// `token_already_revoked` or `token_expired` and changes nothing. An unknown token gives HTTP 404.
+/// The conditional update and the re-read answer without a time-of-check gap, and a failed revoke
+/// writes no audit record.
 #[utoipa::path(
     delete,
     path = "/api/v1/enrollment-tokens/{id}",
@@ -322,9 +328,23 @@ fn labels(input: &Option<Vec<String>>) -> Result<Vec<String>, ApiError> {
 }
 
 pub(crate) fn validate_ttl(input: Option<i64>) -> Result<i64, ApiError> {
+    validate_ttl_up_to(input, repo::MAX_TTL_SECONDS)
+}
+
+/// The time to live of a token bound to a host: the default and the highest value are the lower
+/// of the normal limit and the limit for bound tokens (FR-ID-10).
+pub(crate) fn validate_bound_ttl(input: Option<i64>) -> Result<i64, ApiError> {
+    let max = crate::reenroll_limits::reenroll_token_max_ttl_secs().min(repo::MAX_TTL_SECONDS);
+    match input {
+        None => Ok(repo::DEFAULT_TTL_SECONDS.min(max)),
+        Some(_) => validate_ttl_up_to(input, max),
+    }
+}
+
+fn validate_ttl_up_to(input: Option<i64>, max: i64) -> Result<i64, ApiError> {
     match input {
         None => Ok(repo::DEFAULT_TTL_SECONDS),
-        Some(ttl) if (MIN_TTL_SECONDS..=repo::MAX_TTL_SECONDS).contains(&ttl) => Ok(ttl),
+        Some(ttl) if (MIN_TTL_SECONDS..=max).contains(&ttl) => Ok(ttl),
         Some(_) => Err(ApiError::invalid_field("ttl_seconds", Reason::Unknown)),
     }
 }

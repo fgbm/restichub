@@ -46,6 +46,7 @@ pub mod rate_limit;
 pub mod repositories;
 pub mod repository_maintenance;
 pub mod restore;
+pub mod reenroll_limits;
 pub mod rotation;
 pub mod routes;
 pub mod schedule;

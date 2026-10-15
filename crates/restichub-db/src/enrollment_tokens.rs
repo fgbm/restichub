@@ -196,6 +196,30 @@ pub async fn revoke(
     Ok(result.rows_affected() == 1)
 }
 
+/// Revokes the unused tokens that are bound to one host (FR-ID-10).
+///
+/// A new bound token and a successful re-registration call it, so at most one bound token of a host
+/// is spendable. `actor` is `None` when the enrollment itself revokes the rest. Returns the number
+/// of revoked tokens.
+pub async fn revoke_unused_for_agent(
+    tx: &mut TenantTx<'_>,
+    agent: AgentId,
+    actor: Option<UserId>,
+    now: OffsetDateTime,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE enrollment_tokens SET revoked_at = $2, revoked_by_user_id = $3 \
+         WHERE replaces_agent_id = $1 AND used_at IS NULL AND revoked_at IS NULL",
+    )
+    .bind(agent)
+    .bind(now)
+    .bind(actor)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
+}
+
 /// Records the host that a spent token enrolled, so the console can name it (FR-ID-01).
 pub async fn set_used_by(
     tx: &mut TenantTx<'_>,
@@ -269,6 +293,8 @@ pub enum EnrollmentRefusal {
     Used,
     Expired,
     Revoked,
+    /// A token bound to a host that is revoked or gone (FR-ID-10).
+    AgentNotActive,
 }
 
 impl EnrollmentRefusal {
@@ -278,6 +304,7 @@ impl EnrollmentRefusal {
             Self::Used => "used",
             Self::Expired => "expired",
             Self::Revoked => "revoked",
+            Self::AgentNotActive => "agent_not_active",
         }
     }
 
@@ -287,6 +314,7 @@ impl EnrollmentRefusal {
             "used" => Some(Self::Used),
             "expired" => Some(Self::Expired),
             "revoked" => Some(Self::Revoked),
+            "agent_not_active" => Some(Self::AgentNotActive),
             _ => None,
         }
     }
@@ -315,8 +343,8 @@ pub enum EnrollmentConsume {
 /// Consumes a one-time token by its hash across the installation (FR-ID-01, FR-TN-03, AC-ID-01).
 ///
 /// The token belongs to one tenant, which the enrollment endpoint does not know before the lookup.
-/// The `SECURITY DEFINER` function `enroll_consume_token` of migrations 0025 and 0042 does the lookup and the
-/// atomic consume under one row lock. On a hit the function returns the tenant, so the caller
+/// The `SECURITY DEFINER` function `enroll_consume_token` of migrations 0025 and 0042 does the
+/// lookup and the atomic consume under one row lock. On a hit the function returns the tenant, so the caller
 /// continues in a tenant transaction and creates the agent row in the same transaction; a consumed
 /// token therefore never stays without an agent. The caller records the refusal reason in the
 /// tenant of the refused token. The function reads the time from the database server, so a clock of

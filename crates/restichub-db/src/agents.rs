@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::enums::{AgentStatus, HookAllowListState, ServerScriptsState};
-use crate::ids::{AgentId, UserId};
+use crate::ids::{AgentId, JobId, UserId};
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -27,12 +27,13 @@ macro_rules! agent_columns {
          a.pending_certificate_expires_at, a.last_certificate_rotation_at, \
          a.last_rotation_request_at, a.previous_certificate_serial, \
          a.superseded_certificate_used_at, a.protocol_version_major, \
-         a.protocol_version_minor, d.id AS duplicate_id, d.hostname AS duplicate_hostname"
+         a.protocol_version_minor, d.id AS duplicate_id, d.hostname AS duplicate_hostname, \
+         d.created_at AS duplicate_created_at, d.last_seen_at AS duplicate_last_seen_at"
     };
 }
 
 /// Joins the oldest other active host of the tenant with the same machine hash. Both records of a
-/// pair get the join, so both show the warning (FR-ID-01).
+/// pair get the join, so both show the warning (FR-ID-11).
 macro_rules! duplicate_join {
     () => {
         "LEFT JOIN LATERAL ( \
@@ -102,6 +103,8 @@ pub struct Agent {
 pub struct DuplicateOf {
     pub id: AgentId,
     pub hostname: String,
+    pub created_at: OffsetDateTime,
+    pub last_seen_at: Option<OffsetDateTime>,
 }
 
 /// The facts of an `AgentHello` that the registry keeps (FR-PR-09, FR-RS-03).
@@ -404,12 +407,15 @@ pub struct Reenrollment<'a> {
     pub certificate_serial: &'a [u8],
     pub certificate_expires_at: OffsetDateTime,
     pub machine_id_hash: Option<&'a [u8]>,
+    pub now: OffsetDateTime,
 }
 
 /// Replaces the certificate and the host facts of an active agent and keeps its identifier, labels
 /// and hostname (FR-ID-01).
 ///
-/// The row waits for a connection again. The old serial no longer matches the row, so the stream
+/// The row waits for a connection again, and its silence counts from `now`, so the alert for an
+/// unreachable host does not open before the first connection (FR-ID-10). The hash is written as
+/// the agent reports it, also when the agent reports none. The old serial no longer matches the row, so the stream
 /// layer refuses the old certificate at once. `true` when the row changed; a missing or revoked
 /// agent gives `false`.
 pub async fn reenroll(
@@ -420,8 +426,8 @@ pub async fn reenroll(
     let result = sqlx::query(
         "UPDATE agents SET os = $2, arch = $3, agent_version = $4, restic_version = $5, \
                 certificate_serial = $6, certificate_expires_at = $7, \
-                machine_id_hash = COALESCE($8, machine_id_hash), \
-                last_seen_at = NULL, first_connected_at = NULL, \
+                machine_id_hash = $8, \
+                last_seen_at = $9, first_connected_at = NULL, \
                 pending_certificate_serial = NULL, pending_certificate_expires_at = NULL, \
                 previous_certificate_serial = NULL, superseded_certificate_used_at = NULL \
          WHERE id = $1 AND status = 'active'",
@@ -434,6 +440,7 @@ pub async fn reenroll(
     .bind(facts.certificate_serial)
     .bind(facts.certificate_expires_at)
     .bind(facts.machine_id_hash)
+    .bind(facts.now)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -441,30 +448,48 @@ pub async fn reenroll(
 }
 
 /// What [`replace`] moved from the old record to the new one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Replaced {
     pub plans: u64,
     pub repositories: u64,
+    pub queued_jobs: u64,
+    /// The sent and running jobs of the old agent. The caller cancels them after the commit
+    /// (FR-ID-04, AC-ID-04).
+    pub active_jobs: Vec<JobId>,
 }
 
-/// Moves the plans, the maintenance host references and the labels of the old agent to the new
-/// one, then revokes the old agent (FR-ID-01).
+/// The result of [`replace`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplaceOutcome {
+    Replaced(Replaced),
+    /// The pair does not qualify: a record is missing or revoked, the hashes differ, or the first
+    /// record is not newer than the second.
+    NotPair,
+    /// The old record had a sign of life inside the online window.
+    OldRecentlyOnline,
+}
+
+/// Moves the plans, the maintenance host references, the queued jobs and the labels of the old
+/// agent to the new one, then revokes the old agent (FR-ID-11).
 ///
-/// The caller runs it in one transaction. It returns `None` when the pair does not qualify: both
-/// rows must be active, differ, and carry the same machine hash. The check lives in the statement,
-/// so a request cannot move data between unrelated hosts.
+/// The caller runs it in one transaction. The pair qualifies when both rows are active, differ,
+/// carry the same machine hash, and the new row was created after the old row. The old row must have
+/// been silent for `online_window`. The checks live in the statement, so a request cannot move data
+/// between unrelated hosts or in the wrong direction.
 pub async fn replace(
     tx: &mut TenantTx<'_>,
     new: AgentId,
     old: AgentId,
     actor: UserId,
     now: OffsetDateTime,
-) -> Result<Option<Replaced>, DbError> {
-    let paired: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT n.id FROM agents n JOIN agents o ON o.tenant_id = n.tenant_id \
+    online_window: time::Duration,
+) -> Result<ReplaceOutcome, DbError> {
+    let paired: Option<(Option<OffsetDateTime>,)> = sqlx::query_as(
+        "SELECT o.last_seen_at FROM agents n JOIN agents o ON o.tenant_id = n.tenant_id \
          WHERE n.id = $1 AND o.id = $2 AND n.id <> o.id \
            AND n.status = 'active' AND o.status = 'active' \
            AND n.machine_id_hash IS NOT NULL AND n.machine_id_hash = o.machine_id_hash \
+           AND n.created_at > o.created_at \
          FOR UPDATE OF n, o",
     )
     .bind(new)
@@ -472,8 +497,11 @@ pub async fn replace(
     .fetch_optional(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    if paired.is_none() {
-        return Ok(None);
+    let Some((old_last_seen,)) = paired else {
+        return Ok(ReplaceOutcome::NotPair);
+    };
+    if old_last_seen.is_some_and(|seen| seen > now - online_window) {
+        return Ok(ReplaceOutcome::OldRecentlyOnline);
     }
     let plans = sqlx::query("UPDATE plans SET agent_id = $1 WHERE agent_id = $2")
         .bind(new)
@@ -491,6 +519,16 @@ pub async fn replace(
     .await
     .map_err(DbError::Query)?
     .rows_affected();
+    let queued_jobs = sqlx::query(
+        "UPDATE jobs SET agent_id = $1, updated_at = now() \
+         WHERE agent_id = $2 AND status = 'queued'",
+    )
+    .bind(new)
+    .bind(old)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?
+    .rows_affected();
     sqlx::query(
         "UPDATE agents AS n SET labels = ARRAY( \
              SELECT DISTINCT label FROM unnest(n.labels || o.labels) AS label ORDER BY label) \
@@ -501,10 +539,13 @@ pub async fn replace(
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
+    let active_jobs = crate::queue::active_job_ids_for_agent(tx, old).await?;
     revoke(tx, old, actor, now).await?;
-    Ok(Some(Replaced {
+    Ok(ReplaceOutcome::Replaced(Replaced {
         plans,
         repositories,
+        queued_jobs,
+        active_jobs,
     }))
 }
 
@@ -674,14 +715,22 @@ struct AgentRow {
     protocol_version_minor: Option<i32>,
     duplicate_id: Option<Uuid>,
     duplicate_hostname: Option<String>,
+    duplicate_created_at: Option<OffsetDateTime>,
+    duplicate_last_seen_at: Option<OffsetDateTime>,
 }
 
 impl From<AgentRow> for Agent {
     fn from(row: AgentRow) -> Self {
-        let possible_duplicate_of = match (row.duplicate_id, row.duplicate_hostname) {
-            (Some(id), Some(hostname)) => Some(DuplicateOf {
+        let possible_duplicate_of = match (
+            row.duplicate_id,
+            row.duplicate_hostname,
+            row.duplicate_created_at,
+        ) {
+            (Some(id), Some(hostname), Some(created_at)) => Some(DuplicateOf {
                 id: AgentId::from_uuid(id),
                 hostname,
+                created_at,
+                last_seen_at: row.duplicate_last_seen_at,
             }),
             _ => None,
         };

@@ -55,8 +55,8 @@ pub struct EnrollRequest {
     pub arch: String,
     pub agent_version: String,
     pub restic_version: String,
-    /// The stable identifier of the machine, for the duplicate warning. The control plane stores a
-    /// tenant-keyed hash only. Optional: an older agent or an unsupported system sends none.
+    /// An application-specific digest of the machine identifier, for the duplicate warning. The
+    /// control plane stores a keyed hash of it only. Optional: an older agent or an unsupported system sends none.
     pub machine_id: Option<String>,
 }
 
@@ -199,9 +199,10 @@ pub async fn enroll(
                 )
                 .map_err(map_ca_error)?;
 
-            let machine_hash = machine_id
-                .as_deref()
-                .map(|value| machine_id_hash(tenant_id, value));
+            let machine_hash = match (machine_id.as_deref(), state.kek()) {
+                (Some(value), Some(kek)) => Some(machine_id_hash(kek, tenant_id, value)),
+                _ => None,
+            };
             let mut tx = tx.into_tenant_tx()?;
             let reenrolled = replaces_agent_id.is_some();
             if reenrolled {
@@ -216,15 +217,19 @@ pub async fn enroll(
                         certificate_serial: &issued.serial,
                         certificate_expires_at: issued.not_after,
                         machine_id_hash: machine_hash.as_deref(),
+                        now,
                     },
                 )
                 .await?;
                 if !changed {
-                    // The host is gone or revoked since the token was issued. The transaction rolls
-                    // back, so the token stays unspent.
+                    // The host is revoked or gone. The refusal is a security signal, so it is
+                    // audited and the spent token stays spent (T8).
+                    write_refusal(&mut tx, token_id, EnrollmentRefusal::AgentNotActive).await?;
+                    tx.commit().await?;
                     tracing::info!(%source_ip, %tenant_id, "enrollment refused: bound host not active");
                     return Err(refused());
                 }
+                enrollment_tokens::revoke_unused_for_agent(&mut tx, agent_id, None, now).await?;
             } else {
                 agent_repo::create(
                     &mut tx,
@@ -429,17 +434,21 @@ async fn write_enroll(
     Ok(())
 }
 
-/// The tenant-keyed hash of a machine identifier (FR-ID-01).
+/// The keyed hash of a machine identifier (FR-ID-11, ADR-0041).
 ///
-/// The hash covers the tenant, so the same machine in two tenants gives unrelated values and a
-/// tenant never learns that a machine is enrolled elsewhere (FR-TN-01).
-pub(crate) fn machine_id_hash(tenant: TenantId, machine_id: &str) -> Vec<u8> {
-    use sha2::{Digest as _, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(b"restichub-machine-id-v1");
-    hasher.update(tenant.as_uuid().as_bytes());
-    hasher.update(machine_id.trim().to_ascii_lowercase().as_bytes());
-    hasher.finalize().to_vec()
+/// The key derives from the KEK and the tenant, so the same machine in two tenants gives unrelated
+/// values, a tenant never learns that a machine is enrolled elsewhere (FR-TN-01), and a database
+/// dump alone confirms no machine.
+pub(crate) fn machine_id_hash(
+    kek: &dyn restichub_secrets::KekProvider,
+    tenant: TenantId,
+    machine_id: &str,
+) -> Vec<u8> {
+    let mut context = b"restichub-machine-id-v2".to_vec();
+    context.extend_from_slice(tenant.as_uuid().as_bytes());
+    let key = restichub_secrets::derive_key(kek.current(), &context);
+    restichub_secrets::hmac_sha256(&*key, machine_id.trim().to_ascii_lowercase().as_bytes())
+        .to_vec()
 }
 
 fn to_hex(bytes: &[u8]) -> String {

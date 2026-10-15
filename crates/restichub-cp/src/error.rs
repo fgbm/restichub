@@ -52,6 +52,7 @@ pub enum ErrorCode {
     TokenUsed,
     TokenAlreadyRevoked,
     TokenExpired,
+    AgentRecentlyOnline,
 }
 
 impl ErrorCode {
@@ -82,6 +83,7 @@ impl ErrorCode {
             Self::TokenUsed => "token_used",
             Self::TokenAlreadyRevoked => "token_already_revoked",
             Self::TokenExpired => "token_expired",
+            Self::AgentRecentlyOnline => "agent_recently_online",
         }
     }
 }
@@ -345,6 +347,16 @@ impl ApiError {
     /// Creates a `409 token_expired` error: the enrollment token is past its time to live.
     pub fn token_expired() -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::TokenExpired, "Conflict")
+    }
+
+    /// Creates a `409 agent_recently_online` error: the old record of a replacement had a sign of
+    /// life in the online window (FR-ID-11).
+    pub fn agent_recently_online() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::AgentRecentlyOnline,
+            "Conflict",
+        )
     }
 
     /// Creates a `409 already_queued` error: the plan already holds a queued manual run.

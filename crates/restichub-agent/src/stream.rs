@@ -299,13 +299,36 @@ pub async fn run(
         } else {
             next_attempt(attempt, healthy)
         };
+        let current = rotated.as_ref().unwrap_or(identity);
         tokio::select! {
-            () = tokio::time::sleep(delay) => {}
+            () = wait_before_retry(dir, current, delay, refused) => {}
             result = stop.changed() => {
                 if result.is_err() || *stop.borrow() {
                     return Ok(());
                 }
             }
+        }
+    }
+}
+
+/// How often a refused agent looks for an identity that a registration stored in the meantime.
+const IDENTITY_POLL: Duration = Duration::from_secs(2);
+
+/// Sleeps for `delay`. After a refusal it also ends early when the identity file holds a newer
+/// certificate: the control plane closes the stream of a re-registered host before the register
+/// command has stored the new identity (FR-ID-10).
+async fn wait_before_retry(dir: &Path, current: &StoredIdentity, delay: Duration, refused: bool) {
+    if !refused {
+        tokio::time::sleep(delay).await;
+        return;
+    }
+    let mut waited = Duration::ZERO;
+    while waited < delay {
+        let step = IDENTITY_POLL.min(delay - waited);
+        tokio::time::sleep(step).await;
+        waited += step;
+        if fresher_identity(dir, current).is_some() {
+            return;
         }
     }
 }
