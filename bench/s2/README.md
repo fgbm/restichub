@@ -68,6 +68,7 @@ The script restarts the control plane container, counts the agents that hold a s
 | `IDENTITIES` | `$OUT/identities` | Store of the enrolled identities |
 | `EMULATOR` | `target/release/restichub-emulator` | Path of the emulator |
 | `STEP_SECONDS` | 2 | Wall time of one simulated step |
+| `RAMP_PER_SECOND` | 20 | Agents that connect each second at the start |
 | `WARMUP_SECONDS` | 300 | Seconds of the load that the report skips |
 | `CP_CPUS` | 2 | CPU share for the percentage (matches `cpus` in `compose.yaml`) |
 | `CPU_LIMIT_PCT`, `RAM_LIMIT_MB`, `DELAY_LIMIT_SECONDS` | 70, 3072, 3 | Targets |

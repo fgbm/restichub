@@ -51,6 +51,7 @@ OPTIONS:
   --key HEX           job signing public key, 32 bytes in hex
   --step-seconds SEC  wall time of one simulated step (default 0.1)
   --progress-ticks N  progress messages for each simulated step (default 0)
+  --ramp-up N         agents that start each second (default 0: all at once)
   --duration SEC      stop after SEC seconds (default: the profile length, or run until Ctrl+C)
   --profile FILE      load profile file (JSON); overrides --agents, --duration,
                       --step-seconds and --progress-ticks
@@ -92,6 +93,7 @@ pub struct Options {
     pub enroll_per_minute: u32,
     pub identities: Option<PathBuf>,
     pub enroll_only: bool,
+    pub ramp_up: f64,
     server_set: bool,
 }
 
@@ -122,6 +124,7 @@ impl Default for Options {
             enroll_per_minute: 9,
             identities: None,
             enroll_only: false,
+            ramp_up: 0.0,
             server_set: false,
         }
     }
@@ -166,6 +169,7 @@ fn parse(args: &[String]) -> anyhow::Result<Options> {
                 options.identities = Some(PathBuf::from(take_value(args, &mut index, &name)?));
             }
             "--enroll-only" => options.enroll_only = true,
+            "--ramp-up" => options.ramp_up = take_value(args, &mut index, &name)?.parse()?,
             "--server-name" => options.server_name = take_value(args, &mut index, &name)?,
             "--ca" => options.ca = Some(PathBuf::from(take_value(args, &mut index, &name)?)),
             "--certs" => options.certs = Some(PathBuf::from(take_value(args, &mut index, &name)?)),
@@ -392,6 +396,7 @@ fn resolve_profile(options: &Options) -> anyhow::Result<LoadProfile> {
             max_seconds: step_seconds,
         },
         progress_rate,
+        ramp_up_per_second: options.ramp_up,
         ..LoadProfile::default()
     };
     profile.validate()?;

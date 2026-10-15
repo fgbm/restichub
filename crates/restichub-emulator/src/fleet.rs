@@ -32,7 +32,7 @@ use crate::lock;
 /// Where the enrollment tokens come from.
 #[derive(Debug, Clone)]
 pub enum TokenSource {
-    /// A text file with one token on each line.
+    /// One token on each line.
     File(PathBuf),
     /// The enrollment token route of the API, called with an API token.
     Api { url: String, api_token: String },
@@ -45,7 +45,6 @@ pub struct FleetConfig {
     /// Base URL of the enrollment listener.
     pub enroll_url: String,
     pub tokens: TokenSource,
-    /// Root CA of the installation, in PEM.
     pub ca_pem: String,
     pub server_name: String,
     /// How many enrollments run at the same time.
@@ -66,7 +65,7 @@ pub struct Fleet {
     pub grpc_endpoint: Option<String>,
 }
 
-/// What every agent of the installation shares. The store keeps it in `fleet.json`.
+/// The facts that all agents of the installation share, kept in `fleet.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Shared {
     tenant_id: String,
@@ -288,7 +287,7 @@ fn key_ring_from(keys: &[SharedKey]) -> anyhow::Result<KeyRing> {
     Ok(key_ring)
 }
 
-/// The store directory has the layout of `--certs`: `ca.pem`, `agents.txt` and `clients/`.
+/// Keeps identities in the layout of `--certs`: `agents.txt` and `clients/`.
 struct Store {
     dir: Option<PathBuf>,
     list: Mutex<()>,

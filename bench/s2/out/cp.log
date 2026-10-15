@@ -1,8 +1,0 @@
-2026-10-15T16:12:47.749639Z  INFO restichub_cp: starting the control plane listen_addr=127.0.0.1:8080
-2026-10-15T16:12:47.749878Z  WARN restichub_cp: server.insecure_cookies is on: the session cookie drops the Secure attribute and the __Host- prefix; a plain HTTP network can then read the session and another host on the same parent domain can set a cookie with the same name (cookie tossing); use this setting only for local development over plain HTTP
-2026-10-15T16:12:49.537587Z  INFO restichub_cp: the job signing key set is ready current_key_id=01a14056-71ab-74af-86c8-128d1f7f1cc0 next_key_id=01a14056-71dd-70e5-88a8-b6a8b75aa1eb
-2026-10-15T16:12:49.584637Z  WARN restichub_cp::setup: the setup is required; use this one-time setup token with POST /api/v1/setup before it expires setup_token=MiYSPDp7n0RUUusEdIuvPDepPLwJs49Tg7gZqJOxwks expires_at=2026-10-16 16:12:49.571437524 +00:00:00
-2026-10-15T16:12:49.791573Z  INFO restichub_cp: the agent listener is ready addr=127.0.0.1:8443
-2026-10-15T16:12:49.791712Z  INFO restichub_cp: the control plane is ready
-2026-10-15T16:12:50.783892Z  INFO request{method=POST uri=/api/v1/setup request_id=01a14056-73cf-76ea-a45a-d23f74fd7db6}: restichub_cp::setup: the first Admin of the single-tenant installation is created
-2026-10-15T16:12:52.448000Z  INFO restichub_cp::enrollment: agent enrolled source_ip=127.0.0.1 tenant_id=01a14056-76aa-72e6-9b54-61c9ed5df666 agent_id=01a14056-7d4f-7298-ac0e-132f193c44a6

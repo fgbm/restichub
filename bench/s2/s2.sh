@@ -33,6 +33,7 @@ EMULATOR="${EMULATOR:-$root/target/release/restichub-emulator}"
 SAMPLE_SECONDS="${SAMPLE_SECONDS:-5}"
 SCRAPE_SECONDS="${SCRAPE_SECONDS:-60}"
 STEP_SECONDS="${STEP_SECONDS:-2}"
+RAMP_PER_SECOND="${RAMP_PER_SECOND:-20}"
 WARMUP_SECONDS="${WARMUP_SECONDS:-300}"
 CPU_LIMIT_PCT="${CPU_LIMIT_PCT:-70}"
 RAM_LIMIT_MB="${RAM_LIMIT_MB:-3072}"
@@ -196,7 +197,7 @@ emulate() {
 		--api-url "$web" --api-token-file "$OUT/api-token" \
 		--identities "$IDENTITIES" \
 		--step-seconds "$STEP_SECONDS" --progress-ticks 2 \
-		--duration "$DURATION" --metrics-addr none \
+		--ramp-up "$RAMP_PER_SECOND" --duration "$DURATION" --metrics-addr none \
 		--summary "$OUT/emulator-summary.json"
 }
 
@@ -423,7 +424,7 @@ run() {
 	"$0" collect >"$OUT/collect.log" 2>&1 &
 	local collector=$!
 	"$0" emulate >"$OUT/emulator.log" 2>&1 &
-	local emulator=$!
+	emulator=$!
 	# A failed step must not leave the emulator and the collector behind.
 	trap 'touch "$OUT/collect.stop"; kill "$emulator" 2>/dev/null || true' EXIT
 	load
