@@ -68,7 +68,7 @@ pub trait ServiceManager {
     /// Returns an error when the manager cannot be asked.
     fn state(&self) -> Result<ServiceState>;
 
-    /// Stops a running service and waits for it. A service that is absent or stopped is fine.
+    /// Stops the running service and waits; an absent or stopped service is not an error.
     ///
     /// # Errors
     ///

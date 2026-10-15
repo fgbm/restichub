@@ -39,8 +39,8 @@ A download must keep the integrity model of ADR-0031. The restic project signs t
 
 ### Location and record
 
-- The binary lives in a protected directory: `/var/lib/restichub-agent/bin` on Linux and the `bin` directory inside the protected tree `%ProgramData%\ResticHub\Agent` on Windows. Only root or Administrators can write there.
-- The directory of the binary is in the protected set of the restore access (FR-RS-03). A restore never writes there.
+- The binary lives in a protected directory: `/opt/restichub-agent/bin` on Linux and `%ProgramFiles%\ResticHub\Agent\bin` on Windows (see the note of 2026-10-15). Only root or Administrators can write there.
+- The program directory and the data directory are in the protected set of the restore access (FR-RS-03). A restore never writes there.
 - After an install the agent writes a record `restic.json` in the protected configuration directory. The record holds the version and the SHA-256 of the installed binary.
 - At every start the agent reads the record and checks that the binary hash equals the recorded hash. The agent checks the hash again before each spawn (T20). A missing record, a missing binary or a different hash stops the start with a message that names `restichub-agent restic update`.
 - The agent no longer embeds a restic hash at build time. The build script and the `dev-unpinned-restic` feature are gone.
@@ -83,3 +83,12 @@ A download must keep the integrity model of ADR-0031. The restic project signs t
 | Use a general OpenPGP library | About 100 more crates in a program that runs as root, for one signature algorithm. |
 | Pin the hash of one restic version in the agent | A restic update then needs a new agent build. |
 | Wait for the portal | The portal does not exist yet. `Source` leaves room for it. |
+
+## Note of 2026-10-15: program directory
+
+The owner decided on 2026-10-15 to keep executables apart from data.
+
+- Executables live in the program directory. Windows uses `%ProgramFiles%\ResticHub\Agent\restichub-agent.exe` and `%ProgramFiles%\ResticHub\Agent\bin\restic.exe`. Linux uses `/opt/restichub-agent/bin/restichub-agent` and `/opt/restichub-agent/bin/restic`.
+- Data lives in the data directories only: `%ProgramData%\ResticHub\Agent` on Windows, and `/etc/restichub-agent` and `/var/lib/restichub-agent` on Linux. The identity, the journal, the cache and the record `restic.json` stay there.
+- The earlier locations `%ProgramData%\ResticHub\Agent\bin` and `/var/lib/restichub-agent/bin` are legacy. `register` and `install-service` move restic from there into the program directory, remove the old copies and keep the identity and the record.
+- The agent copies itself into the program directory. Only SYSTEM and Administrators can write there (Linux: root-owned, mode 0755). The service starts from there. This keeps the location check of threat T20 true by construction.

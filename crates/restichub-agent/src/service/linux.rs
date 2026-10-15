@@ -139,7 +139,7 @@ pub fn state() -> Result<super::ServiceState> {
     })
 }
 
-/// Stops the unit when it runs.
+/// Stops the active unit and leaves an absent or stopped one alone.
 ///
 /// # Errors
 ///
