@@ -27,6 +27,7 @@ pub(super) fn trusted(path: Option<&OsStr>, trust: Trust) -> SearchPath {
     for entry in entries {
         match trust::check_directory(&entry, trust) {
             Ok(resolved) => {
+                let resolved = without_verbatim_prefix(resolved);
                 if !kept.contains(&resolved) {
                     kept.push(resolved);
                 }
@@ -37,6 +38,27 @@ pub(super) fn trusted(path: Option<&OsStr>, trust: Trust) -> SearchPath {
     SearchPath {
         value: std::env::join_paths(&kept).unwrap_or_default(),
         dropped,
+    }
+}
+
+/// Turns `\\?\C:\dir` into `C:\dir` and `\\?\UNC\host\share` into `\\host\share`. `canonicalize`
+/// returns the verbatim form on Windows, and cmd.exe, PowerShell and many programs do not search a
+/// directory in that form. Any other path stays as it is.
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path;
+    };
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest)
+            if rest.as_bytes().get(1) == Some(&b':')
+                && rest.as_bytes()[0].is_ascii_alphabetic() =>
+        {
+            PathBuf::from(rest)
+        }
+        _ => path,
     }
 }
 
@@ -77,4 +99,27 @@ pub(super) fn dropped_text(dropped: &[PathBuf]) -> String {
         },
         names.join(", ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ac_hk_01_the_verbatim_prefix_leaves_the_search_path() {
+        let cases = [
+            (r"\\?\C:\Windows\System32", r"C:\Windows\System32"),
+            (r"\\?\UNC\host\share\bin", r"\\host\share\bin"),
+            (r"C:\Windows", r"C:\Windows"),
+            (r"\\?\Volume{1234}\bin", r"\\?\Volume{1234}\bin"),
+            ("/usr/bin", "/usr/bin"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                without_verbatim_prefix(PathBuf::from(input)),
+                PathBuf::from(expected),
+                "{input}"
+            );
+        }
+    }
 }

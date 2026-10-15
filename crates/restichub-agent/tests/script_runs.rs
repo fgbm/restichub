@@ -529,3 +529,57 @@ async fn ac_hk_13_a_failed_cmd_script_aborts_the_backup() {
     assert!(host.mark("finally").contains("done"));
     assert!(host.leftovers().is_empty());
 }
+
+/// Runs a script on Windows that calls `whoami` by name and records its `PATH`.
+#[cfg(windows)]
+async fn run_whoami_script(name: &str, interpreter: ScriptInterpreter, body: &str) -> Host {
+    let host = Host::new(name);
+    host.enable();
+    let job = host.job(
+        "job-whoami",
+        vec![
+            interpreted(
+                "script-0",
+                interpreter,
+                HookPhase::Before,
+                ScriptFailurePolicy::AbortBackup,
+                body,
+                vec![variable("MARKS", &host.marks().display().to_string())],
+            ),
+            backup_step("repo-1", &["/srv"]),
+        ],
+    );
+    let collected = run(&host.jobs(), &job).await;
+    assert_eq!(
+        status_of(&collected, "script-0"),
+        StepStatus::Success,
+        "{}",
+        collected.log_text()
+    );
+    let path = host.mark("path");
+    assert!(!path.contains(r"\\?\"), "{path}");
+    assert!(path.to_lowercase().contains("system32"), "{path}");
+    assert!(!host.mark("who").trim().is_empty());
+    host
+}
+
+/// ADR-0037, AC-HK-01 on Windows: a cmd script finds `whoami` by name, and its `PATH` holds no
+/// verbatim `\\?\` entry.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_hk_01_a_cmd_script_runs_a_system_program_by_name() {
+    let body =
+        "whoami > \"%MARKS%\\who\"\nif errorlevel 1 exit /b 1\n>\"%MARKS%\\path\" echo %PATH%\n";
+    run_whoami_script("script-cmd-path", ScriptInterpreter::Cmd, body).await;
+}
+
+/// ADR-0037, AC-HK-01 on Windows: a PowerShell script finds `whoami` by name, and its `PATH` holds
+/// no verbatim `\\?\` entry.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_hk_01_a_powershell_script_runs_a_system_program_by_name() {
+    let body = "whoami | Set-Content -Path (Join-Path $env:MARKS 'who')\r\n\
+                if ($LASTEXITCODE -ne 0) { exit 1 }\r\n\
+                Set-Content -Path (Join-Path $env:MARKS 'path') -Value $env:PATH\r\n";
+    run_whoami_script("script-ps-path", ScriptInterpreter::Powershell, body).await;
+}
