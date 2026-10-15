@@ -11,7 +11,7 @@ An agent that enrolled but did not open a stream yet has the status "Waiting for
 
 ## Enroll a host again
 
-Use this procedure when the agent lost its identity, or when you must move the agent to a new installation. The host keeps its identifier, plans, maintenance host references and labels (FR-ID-01).
+Use this procedure when the agent lost its identity, or when you must move the agent to a new installation. The host keeps its identifier, plans, maintenance host references and labels (FR-ID-10, ADR-0041).
 
 1. Open the Hosts screen as an Admin.
 2. Open the menu of the host and select "Re-register".
@@ -20,20 +20,25 @@ Use this procedure when the agent lost its identity, or when you must move the a
 
 The token is bound to the host. The command prints that it replaced the host. The control plane then refuses the old certificate at once, and it closes the open stream of the old agent. The audit log gets the action `agent_reenroll`.
 
-A token that is bound to a host appears in the list "Pending registrations" with the name of the host. The token expires after one hour by default. A revoked host cannot enroll again.
+A token that is bound to a host appears in the list "Pending registrations" with the name of the host. The token takes over the identity of the host, so it expires after one hour at most. Set `RESTICHUB_REENROLL_TOKEN_MAX_TTL_SECS` to change the limit. A new token for the same host cancels the earlier unused tokens of that host, and a successful registration cancels the others. A revoked host cannot enroll again, and the audit log records the attempt.
+
+The host shows "Waiting for connection" until the new agent connects. It raises no "Host unreachable" alert in this time.
 
 ## Possible duplicates
 
-The agent sends a stable identifier of the computer when it enrolls: the `MachineGuid` on Windows and the file `/etc/machine-id` on Linux. The agent does not write the identifier in a log. The control plane keeps only a hash of it. The hash depends on the tenant, so a tenant cannot learn that a computer is enrolled in another tenant.
+The agent sends a digest of a stable identifier of the computer when it enrolls: the `MachineGuid` on Windows and the file `/etc/machine-id` on Linux. The raw identifier stays on the computer. The control plane keeps only a keyed hash of the digest. The key comes from the KEK and the tenant, so a tenant cannot learn that a computer is enrolled in another tenant, and a database dump does not confirm that a computer is enrolled. Virtual machines that were cloned from one image can share an identifier. The warning is a hint, and you decide.
 
 When an enrollment token that is not bound to a host enrolls a computer with a known identifier, both records show "Possible duplicate of <hostname>".
 
 To merge the records:
 
-1. Open the menu of the host that you keep.
-2. Select "Replace the old record" and confirm.
+1. Open the menu of the newer record. Only the newer record offers the replacement.
+2. Select "Replace the old record". The dialog shows the last contact of both records.
+3. Confirm.
 
-The control plane moves the plans, the maintenance host references and the labels of the old record to the host that you keep. It then revokes the old record. All changes happen in one transaction. The audit log gets the action `agent_replace`. Both records must be active.
+The control plane moves the plans, the maintenance host references, the queued jobs and the labels of the old record to the newer record. It then revokes the old record and cancels its running jobs, as for a revoke. The audit log gets the actions `agent_replace` and `agent_revoke`. Both records must be active.
+
+The control plane refuses the replacement with HTTP 409 `agent_recently_online` when the old record had a sign of life in the last 5 minutes. Set `RESTICHUB_REPLACE_ONLINE_WINDOW_SECS` to change the window.
 
 ## Pending registrations
 
