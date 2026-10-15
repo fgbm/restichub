@@ -1,4 +1,4 @@
-# ADR-0035: Alerts, notification channels and the recovery point objective
+# ADR-0036: Alerts, notification channels and the recovery point objective
 
 - Status: accepted
 - Date: 2026-10-15

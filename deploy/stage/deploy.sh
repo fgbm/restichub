@@ -41,6 +41,29 @@ ssh "$host" "chmod 0700 '$dir/bootstrap.sh' && chmod 0644 '$dir/compose.yaml' '$
 echo "== create the environment file if it is missing =="
 ssh "$host" "cd '$dir' && { [ -e .env ] || ./bootstrap.sh .env '$domain' '$acme_email'; }"
 
+# The alert settings go to the environment file on the server when the local environment sets
+# them. The values travel on standard input, so no password shows in a process list.
+alert_vars="RESTICHUB_PUBLIC_ORIGIN RESTICHUB_NOTIFICATIONS_LANGUAGE RESTICHUB_SMTP_HOST RESTICHUB_SMTP_PORT RESTICHUB_SMTP_SECURITY RESTICHUB_SMTP_USERNAME RESTICHUB_SMTP_PASSWORD RESTICHUB_SMTP_FROM RESTICHUB_WEBHOOK_ALLOW_HTTP RESTICHUB_WEBHOOK_ALLOW_NETWORKS"
+alert_lines="$(mktemp)"
+trap 'rm -f "$alert_lines"' EXIT
+alert_names=""
+for name in $alert_vars; do
+	value="${!name:-}"
+	[ -n "$value" ] || continue
+	case "$value" in
+	*$'\n'*)
+		echo "$name holds a line break" >&2
+		exit 1
+		;;
+	esac
+	printf '%s=%s\n' "$name" "$value" >>"$alert_lines"
+	alert_names="${alert_names:+$alert_names|}$name"
+done
+if [ -n "$alert_names" ]; then
+	echo "== set the alert settings on the server =="
+	ssh "$host" "cd '$dir' && umask 077 && { grep -v -E '^($alert_names)=' .env || true; cat; } > .env.new && mv .env.new .env" <"$alert_lines"
+fi
+
 echo "== pull the image and start the stack =="
 ssh "$host" "docker compose -f '$compose' pull"
 ssh "$host" "docker compose -f '$compose' up -d"

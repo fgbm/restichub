@@ -3,7 +3,7 @@ title: Alerts and notification channels
 description: How the control plane raises alerts, which kinds exist, and how to send them by email or by webhook.
 ---
 
-The control plane watches each organization and raises an alert when a backup needs attention (FR-MN-03, FR-MN-04, ADR-0035). It sends a message to each enabled channel of the organization. When the condition clears, it sends a recovery message.
+The control plane watches each organization and raises an alert when a backup needs attention (FR-MN-03, FR-MN-04, ADR-0036). It sends a message to each enabled channel of the organization. When the condition clears, it sends a recovery message.
 
 ## Alert kinds
 
@@ -107,7 +107,7 @@ The key of the HMAC is the signing secret. To check a request:
 
 ### Address policy
 
-The control plane refuses to send to a private network (ADR-0035). It resolves the host name, checks every address, and connects to the checked address itself. It refuses:
+The control plane refuses to send to a private network (ADR-0036). It resolves the host name, checks every address, and connects to the checked address itself. It refuses:
 
 - loopback addresses, such as `127.0.0.1` and `::1`;
 - private addresses, such as `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and `fc00::/7`;

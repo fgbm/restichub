@@ -101,3 +101,9 @@ RESTICHUB_AGENT_ENDPOINT=https://agents.example.com:8443
 ```
 
 The host is the placeholder `agents.example.com` by default. Set the real host and the published port. `RESTICHUB_AGENT_PORT` changes the published port (the default is `8443`). `RESTICHUB_AGENT_MAX_CONNECTIONS` bounds the established connections (the default is `2200`). The control plane issues the listener certificate from the installation CA with the endpoint host and the listen address as the subject alternative names.
+
+## Alerts
+
+The control plane sends alert messages through the email and webhook channels (ADR-0036). `deploy.sh` copies the alert settings from your local environment (or `stage.local.env`) to the environment file on the server when they are set. The settings are `RESTICHUB_PUBLIC_ORIGIN`, `RESTICHUB_NOTIFICATIONS_LANGUAGE`, `RESTICHUB_SMTP_HOST`, `RESTICHUB_SMTP_PORT`, `RESTICHUB_SMTP_SECURITY`, `RESTICHUB_SMTP_USERNAME`, `RESTICHUB_SMTP_PASSWORD`, `RESTICHUB_SMTP_FROM`, `RESTICHUB_WEBHOOK_ALLOW_HTTP` and `RESTICHUB_WEBHOOK_ALLOW_NETWORKS`. The compose file passes a variable to the control plane only when the environment file sets it.
+
+A password goes to the server on standard input, never in a process argument. An SMTP password needs `RESTICHUB_SMTP_SECURITY=tls` or `starttls`; the control plane refuses to start with `none`. See the page "Alert configuration" in the documentation for the meaning of each variable.
