@@ -197,7 +197,16 @@ fn load_roots(file: &Path) -> Vec<PathBuf> {
                         "the restore roots file holds lines that are not absolute paths"
                     );
                 }
-                roots.extend(extra);
+                for root in extra {
+                    match check_root(&root) {
+                        Ok(()) => roots.push(root),
+                        Err(error) => tracing::warn!(
+                            root = %root.display(),
+                            error = %format!("{error:#}"),
+                            "the restore root is ignored"
+                        ),
+                    }
+                }
             }
             Err(error) => tracing::warn!(
                 file = %file.display(),
@@ -209,6 +218,69 @@ fn load_roots(file: &Path) -> Vec<PathBuf> {
         Err(error) => tracing::warn!(%error, "cannot read the restore roots file"),
     }
     roots
+}
+
+/// The roots of the roots file that `load_roots` ignores, with the reason. `install-service`
+/// refuses to continue while this list is not empty, so the administrator learns about the root.
+#[must_use]
+pub fn rejected_roots(config_dir: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(text) = read_trusted(&roots_file_for(config_dir)) else {
+        return Vec::new();
+    };
+    parse_roots(&text)
+        .0
+        .into_iter()
+        .filter_map(|root| {
+            let error = check_root(&root).err()?;
+            Some((root, format!("{error:#}")))
+        })
+        .collect()
+}
+
+/// Refuses a root that another account can change, or whose existing ancestor another account can
+/// change. Such an account could swap a directory for a link and lead a restore out of the root
+/// (T31).
+fn check_root(root: &Path) -> Result<()> {
+    let resolved = resolve(root).with_context(|| format!("cannot resolve {}", root.display()))?;
+    let mut current = Some(resolved.as_path());
+    while let Some(path) = current {
+        if std::fs::symlink_metadata(path).is_ok() {
+            check_root_part(path, path == resolved)?;
+        }
+        current = path.parent();
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn check_root_part(path: &Path, _is_root: bool) -> Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    let metadata =
+        std::fs::metadata(path).with_context(|| format!("cannot read {}", path.display()))?;
+    if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+        anyhow::bail!(
+            "{} must belong to root and must not be writable by a group or other accounts",
+            path.display()
+        );
+    }
+    if crate::acl::has_extended_acl(path)? {
+        anyhow::bail!("{} holds an extended access control list", path.display());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn check_root_part(path: &Path, is_root: bool) -> Result<()> {
+    if is_root {
+        crate::winsec::check_admin_only(path)
+    } else {
+        crate::winsec::check_parent(path)
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn check_root_part(_path: &Path, _is_root: bool) -> Result<()> {
+    Ok(())
 }
 
 /// Reads the roots file after the same ownership checks as the install location (T20).
@@ -470,6 +542,25 @@ mod tests {
         }
         let roots = load_roots(&file);
         assert_eq!(roots, vec![default_root()]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn ac_rs_05_a_root_writable_by_others_is_ignored() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let base = temp_dir("writable-root");
+        let root = base.join("open");
+        std::fs::create_dir_all(&root).expect("cannot create the root");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777))
+            .expect("cannot set the mode");
+        assert!(check_root(&root).is_err());
+        // A directory below the open root fails through its ancestor.
+        let below = root.join("below");
+        std::fs::create_dir_all(&below).expect("cannot create the directory");
+        std::fs::set_permissions(&below, std::fs::Permissions::from_mode(0o700))
+            .expect("cannot set the mode");
+        assert!(check_root(&below).is_err());
+        assert!(check_root(&root.join("missing").join("x")).is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
 

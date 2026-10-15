@@ -103,6 +103,12 @@ pub fn install() -> Result<()> {
     super::location::check(&exe)?;
     // The default restore root gets the access of SYSTEM and Administrators only (FR-RS-03).
     crate::restore_roots::ensure_default_root()?;
+    if let Some((root, reason)) = crate::restore_roots::rejected_roots(&crate::paths::config_dir())
+        .into_iter()
+        .next()
+    {
+        anyhow::bail!("the restore root {} is not safe: {reason}", root.display());
+    }
     let manager = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,

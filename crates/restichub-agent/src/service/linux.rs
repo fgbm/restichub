@@ -92,6 +92,7 @@ pub fn install() -> Result<()> {
     // A path in `ReadWritePaths` must exist, or systemd refuses to start the unit. The default root
     // is created here with the access of root only; an extra root is the choice of the operator.
     crate::restore_roots::ensure_default_root()?;
+    refuse_rejected_roots(&config)?;
     let access = crate::restore_roots::RestoreAccess::for_host(&config, Path::new(CACHE_DIR), &exe);
     for root in access.roots() {
         if !root.is_dir() {
@@ -107,6 +108,17 @@ pub fn install() -> Result<()> {
     systemctl(&["daemon-reload"])?;
     systemctl(&["enable", "--now", SERVICE_NAME])?;
     println!("the unit {} is installed and enabled", path.display());
+    Ok(())
+}
+
+/// Refuses a restore root that another account can change (FR-RS-03).
+fn refuse_rejected_roots(config: &Path) -> Result<()> {
+    if let Some((root, reason)) = crate::restore_roots::rejected_roots(config)
+        .into_iter()
+        .next()
+    {
+        bail!("the restore root {} is not safe: {reason}", root.display());
+    }
     Ok(())
 }
 
