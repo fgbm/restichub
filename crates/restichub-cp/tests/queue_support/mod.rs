@@ -139,6 +139,24 @@ impl Env {
         queue: QueueConfig,
         browse_rate: Option<u32>,
     ) -> Self {
+        Self::start_configured(db, queue, browse_rate, None).await
+    }
+
+    /// Like [`Env::start`], with a short certificate lifetime for the agents (FR-ID-03).
+    pub async fn start_with_lifetime(
+        db: TestDatabase,
+        queue: QueueConfig,
+        lifetime: Duration,
+    ) -> Self {
+        Self::start_configured(db, queue, None, Some(lifetime)).await
+    }
+
+    async fn start_configured(
+        db: TestDatabase,
+        queue: QueueConfig,
+        browse_rate: Option<u32>,
+        lifetime: Option<Duration>,
+    ) -> Self {
         let clock = Arc::new(ManualClock::new(time::OffsetDateTime::now_utc()));
         let provider = common::test_kek();
         let ca_service = CaService::new(provider.clone());
@@ -167,6 +185,10 @@ impl Env {
                 signing_service,
                 Some(common::AGENT_ENDPOINT.to_owned()),
             );
+        let state = match lifetime {
+            Some(lifetime) => state.with_agent_cert_lifetime(lifetime),
+            None => state,
+        };
         let listener = Listener::start(state.clone(), store).await;
         let tenant = create_tenant_with_key(db.database(), "queue-tenant").await;
         let creator = create_user(db.database(), tenant, "queue-admin", "phc", "admin").await;
@@ -281,55 +303,75 @@ impl Env {
         capabilities: Vec<String>,
         roots: Vec<String>,
     ) -> FakeAgent {
-        let client_tls = ClientTlsConfig::new()
-            .ca_certificate(Certificate::from_pem(der_to_pem(
-                "CERTIFICATE",
-                &self.listener.root_der,
-            )))
-            .identity(Identity::from_pem(
-                client_chain_pem(&identity),
-                identity.key_pem.clone(),
-            ))
-            .domain_name("localhost");
-        let channel = Endpoint::from_shared(self.listener.https_url())
-            .expect("the endpoint URL")
-            .tls_config(client_tls)
-            .expect("the client TLS config")
-            .connect()
+        open_stream_on(&self.listener, &self.state, identity, capabilities, roots).await
+    }
+
+    /// Opens a stream for an identity that the test enrolled or rotated by itself.
+    pub async fn connect_enrolled(&self, identity: EnrolledIdentity) -> FakeAgent {
+        let capabilities = restichub_proto::AgentCapability::ALL
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect();
+        self.open_agent_stream(identity, capabilities, default_restore_roots())
             .await
-            .expect("the TLS channel");
-        let mut client = AgentServiceClient::new(channel);
-        let (tx, rx) = mpsc::channel::<AgentMessage>(64);
-        let response = client
-            .connect(ReceiverStream::new(rx))
+    }
+
+    /// Opens a stream with the given identity without the hello, as a test that plays a wrong or
+    /// a changed agent needs. The error is the status of a refused open.
+    pub async fn open_raw(
+        &self,
+        identity: &EnrolledIdentity,
+    ) -> Result<(mpsc::Sender<AgentMessage>, Streaming<ControlMessage>), tonic::Status> {
+        raw_stream(&self.listener, identity).await
+    }
+
+    /// Starts a second control plane instance on the same database, with its own stream
+    /// registry and its own listener.
+    pub async fn start_instance(&self) -> Instance {
+        let provider = common::test_kek();
+        let store = Arc::new(
+            CaService::new(provider.clone())
+                .load(self.db.database())
+                .await
+                .expect("cannot load the CA")
+                .expect("the CA exists"),
+        );
+        let signing_service = restichub_cp::job_signing::JobSigningService::new(provider.clone());
+        signing_service
+            .ensure_initialized(self.db.database())
             .await
-            .expect("the stream must open");
-        tx.send(hello(capabilities.clone(), roots))
-            .await
-            .expect("cannot send the hello");
-        let mut inbound = response.into_inner();
-        let (mut hello_seen, mut update_seen) = (false, false);
-        for _ in 0..8 {
-            let message = next_message(&mut inbound).await;
-            match message.payload {
-                Some(control_message::Payload::ServerHello(_)) => hello_seen = true,
-                Some(control_message::Payload::SigningKeyUpdate(_)) => update_seen = true,
-                _ => {}
-            }
-            if hello_seen && update_seen {
-                break;
-            }
-        }
-        assert!(hello_seen && update_seen, "the stream hello must arrive");
-        let agent_id = AgentId::from_uuid(Uuid::parse_str(&identity.agent_id).expect("agent id"));
-        // The dispatcher sees the stream only after the hello fixed its capabilities.
-        eventually_online(&self.state, agent_id).await;
-        FakeAgent {
-            id: agent_id,
+            .expect("cannot load the job signing key set");
+        let shared: Arc<dyn restichub_cp::clock::Clock> = self.clock.clone();
+        let state = AppState::with_auth(
+            self.db.database().clone(),
+            AuthState::new(AuthConfig::default()).with_clock(shared),
+        )
+        .with_kek(provider)
+        .with_tenancy(TenancyConfig::multi())
+        .with_queue(test_queue())
+        .with_pki(
+            store.clone(),
+            signing_service,
+            Some(common::AGENT_ENDPOINT.to_owned()),
+        );
+        let listener = Listener::start(state.clone(), store).await;
+        Instance { state, listener }
+    }
+
+    /// Opens a stream to a second instance for an enrolled identity.
+    pub async fn connect_to(&self, instance: &Instance, identity: EnrolledIdentity) -> FakeAgent {
+        let capabilities = restichub_proto::AgentCapability::ALL
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect();
+        open_stream_on(
+            &instance.listener,
+            &instance.state,
             identity,
-            tx,
-            inbound,
-        }
+            capabilities,
+            default_restore_roots(),
+        )
+        .await
     }
 
     /// The capabilities that the registry holds for the agent.
@@ -546,6 +588,77 @@ impl Env {
     }
 }
 
+/// A second control plane instance (see [`Env::start_instance`]).
+pub struct Instance {
+    pub state: AppState,
+    pub listener: Listener,
+}
+
+async fn raw_stream(
+    listener: &Listener,
+    identity: &EnrolledIdentity,
+) -> Result<(mpsc::Sender<AgentMessage>, Streaming<ControlMessage>), tonic::Status> {
+    let client_tls = ClientTlsConfig::new()
+        .ca_certificate(Certificate::from_pem(der_to_pem(
+            "CERTIFICATE",
+            &listener.root_der,
+        )))
+        .identity(Identity::from_pem(
+            client_chain_pem(identity),
+            identity.key_pem.clone(),
+        ))
+        .domain_name("localhost");
+    let channel = Endpoint::from_shared(listener.https_url())
+        .expect("the endpoint URL")
+        .tls_config(client_tls)
+        .expect("the client TLS config")
+        .connect()
+        .await
+        .map_err(|error| tonic::Status::unavailable(error.to_string()))?;
+    let mut client = AgentServiceClient::new(channel);
+    let (tx, rx) = mpsc::channel::<AgentMessage>(64);
+    let response = client.connect(ReceiverStream::new(rx)).await?;
+    Ok((tx, response.into_inner()))
+}
+
+/// Opens a stream to `listener`, sends the hello and drains the greeting.
+async fn open_stream_on(
+    listener: &Listener,
+    state: &AppState,
+    identity: EnrolledIdentity,
+    capabilities: Vec<String>,
+    roots: Vec<String>,
+) -> FakeAgent {
+    let (tx, mut inbound) = raw_stream(listener, &identity)
+        .await
+        .expect("the stream must open");
+    tx.send(hello(capabilities, roots))
+        .await
+        .expect("cannot send the hello");
+    let (mut hello_seen, mut update_seen) = (false, false);
+    for _ in 0..8 {
+        let message = next_message(&mut inbound).await;
+        match message.payload {
+            Some(control_message::Payload::ServerHello(_)) => hello_seen = true,
+            Some(control_message::Payload::SigningKeyUpdate(_)) => update_seen = true,
+            _ => {}
+        }
+        if hello_seen && update_seen {
+            break;
+        }
+    }
+    assert!(hello_seen && update_seen, "the stream hello must arrive");
+    let agent_id = AgentId::from_uuid(Uuid::parse_str(&identity.agent_id).expect("agent id"));
+    // The dispatcher sees the stream only after the hello fixed its capabilities.
+    eventually_online(state, agent_id).await;
+    FakeAgent {
+        id: agent_id,
+        identity,
+        tx,
+        inbound,
+    }
+}
+
 pub fn id_of(value: &Value) -> Uuid {
     Uuid::parse_str(value["id"].as_str().expect("the object id")).expect("the id is a UUID")
 }
@@ -568,7 +681,7 @@ fn hello(capabilities: Vec<String>, restore_roots: Vec<String>) -> AgentMessage 
     }
 }
 
-async fn next_message(inbound: &mut Streaming<ControlMessage>) -> ControlMessage {
+pub async fn next_message(inbound: &mut Streaming<ControlMessage>) -> ControlMessage {
     tokio::time::timeout(Duration::from_secs(10), inbound.message())
         .await
         .expect("the message must arrive")
@@ -866,6 +979,6 @@ impl Env {
     }
 }
 
-async fn eventually_online(state: &AppState, agent: AgentId) {
+pub async fn eventually_online(state: &AppState, agent: AgentId) {
     eventually(|| async { state.agent_registry().is_online(agent) }).await;
 }
