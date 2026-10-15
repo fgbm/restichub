@@ -143,6 +143,9 @@ impl StoredIdentity {
     /// Returns an error when a staged file cannot be written or moved.
     pub fn install_rotation(dir: &Path, rotated: &Rotated) -> Result<()> {
         let dir = recover(dir);
+        // An interrupted earlier rotation with a complete staged set finishes first. Dropping the
+        // set after some files moved would leave a new key with an old certificate.
+        finish_rotation(&dir)?;
         discard_staged(&dir);
         paths::create_protected_file(&staged(&dir, KEY_FILE), rotated.key_pem.as_bytes())?;
         paths::create_protected_file(
@@ -518,6 +521,47 @@ mod tests {
         assert_eq!(loaded.certificate_der, sample().certificate_der);
         assert!(loaded.key_pem.contains("MIIB"));
         assert!(!staged(&dir, KEY_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_id_03_a_new_rotation_finishes_a_half_moved_staged_set_first() {
+        let dir = temp_dir("rotation-half-moved");
+        sample().save(&dir).expect("the save must succeed");
+        let earlier = Rotated {
+            key_pem: "earlier key".to_owned(),
+            certificate_der: vec![1, 2, 3],
+            ca_chain_der: vec![vec![4, 5]],
+        };
+        // The earlier run staged a complete set, moved the key and stopped.
+        paths::create_protected_file(&staged(&dir, KEY_FILE), earlier.key_pem.as_bytes())
+            .expect("stage the key");
+        paths::create_protected_file(
+            &staged(&dir, CERT_FILE),
+            pem::encode("CERTIFICATE", &earlier.certificate_der).as_bytes(),
+        )
+        .expect("stage the certificate");
+        paths::create_protected_file(
+            &staged(&dir, CA_CHAIN_FILE),
+            pem::encode("CERTIFICATE", &earlier.ca_chain_der[0]).as_bytes(),
+        )
+        .expect("stage the chain");
+        paths::create_protected_file(&dir.join(ROTATION_MARKER), b"1").expect("the marker");
+        std::fs::rename(staged(&dir, KEY_FILE), dir.join(KEY_FILE)).expect("move the key");
+
+        // The next rotation fails while it stages its key.
+        std::fs::create_dir(staged(&dir, KEY_FILE)).expect("block the staged key");
+        let next = Rotated {
+            key_pem: "next key".to_owned(),
+            certificate_der: vec![9],
+            ca_chain_der: vec![vec![8]],
+        };
+        assert!(StoredIdentity::install_rotation(&dir, &next).is_err());
+
+        let key = std::fs::read_to_string(dir.join(KEY_FILE)).expect("the key");
+        let cert = std::fs::read_to_string(dir.join(CERT_FILE)).expect("the certificate");
+        assert_eq!(key, "earlier key");
+        assert_eq!(cert, pem::encode("CERTIFICATE", &earlier.certificate_der));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
