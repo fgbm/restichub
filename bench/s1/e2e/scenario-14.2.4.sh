@@ -78,7 +78,7 @@ case "$job_state" in
 failed* | cancelled*) v=PASS ;;
 *) v=WARN ;;
 esac
-step 6 "The job row of the revoked agent" "$v" "status $job_state (a revoked agent cannot report; the row stays running until the lost-agent sweep)"
+step 6 "The job row of the revoked agent" "$v" "status $job_state (a revoked agent cannot report, so the control plane fails the job at the revoke)"
 
 sleep 20
 open="$(connected)"

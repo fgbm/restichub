@@ -220,6 +220,21 @@ pub(super) fn status_for_exit(code: i32) -> StepStatus {
     }
 }
 
+/// True when restic probably ended without removing its lock (AC-SC-06).
+///
+/// Exit code 2 is a panic of the Go runtime on every platform. A process that Windows terminates
+/// from outside has no signal: it carries the code that the killer chose (1, -1 or an NTSTATUS),
+/// so any code that restic does not use itself counts. An extra unlock is safe, because the
+/// step removes only stale locks.
+fn lock_possibly_left(status: &std::process::ExitStatus) -> bool {
+    #[cfg(unix)]
+    if std::os::unix::process::ExitStatusExt::signal(status).is_some() {
+        return true;
+    }
+    let code = status.code().unwrap_or(-1);
+    code == 2 || (cfg!(windows) && !matches!(code, 0 | 3 | 10..=12 | 130))
+}
+
 /// Starts the collector of a step with the parameters that shape its output (AC-RS-02, FR-RS-04).
 fn collector_for(step: &Step, kind: OutputKind, job_id: &str) -> Collector {
     let collector = Collector::new(kind, job_id, &step.step_id);
@@ -375,7 +390,7 @@ impl Jobs {
         let mut hard_killed = false;
         // An `ls` page that is full needs no more of the listing, so the agent stops restic.
         let mut page_done = false;
-        let code = loop {
+        let (code, left_lock) = loop {
             let reaped = {
                 let mut slot = lock(&cancel.child);
                 match slot.as_mut() {
@@ -383,7 +398,7 @@ impl Jobs {
                         Ok(Some(status)) => {
                             let code = status.code().unwrap_or(-1);
                             *slot = None;
-                            Some(code)
+                            Some((code, lock_possibly_left(&status)))
                         }
                         Ok(None) => None,
                         Err(error) => {
@@ -395,8 +410,8 @@ impl Jobs {
                     None => None,
                 }
             };
-            if let Some(code) = reaped {
-                break code;
+            if let Some(exit) = reaped {
+                break exit;
             }
             if stopped_at.is_none() {
                 if output.collector.page_complete() {
@@ -468,7 +483,11 @@ impl Jobs {
                 ..StepOutcome::new(StepStatus::Success, 0)
             }
         } else {
-            StepOutcome::from_exit(code)
+            // A signal from outside kills restic before it can remove its lock (AC-SC-06).
+            StepOutcome {
+                possible_stale_lock: left_lock,
+                ..StepOutcome::from_exit(code)
+            }
         };
         outcome.output = output.collector.finish();
         outcome

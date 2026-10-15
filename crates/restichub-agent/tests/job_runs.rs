@@ -389,6 +389,78 @@ async fn ac_ag_07_a_step_that_ignores_the_signal_is_killed_after_the_grace_perio
     let _ = std::fs::remove_dir_all(&path);
 }
 
+/// AC-SC-06: restic killed by a signal from outside leaves a possible stale lock, so the control
+/// plane can schedule the `unlock`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_sc_06_a_restic_killed_from_outside_reports_a_possible_stale_lock() {
+    let dir = config_dir("job-runs-outside-kill");
+    let path = repository("job-runs-outside-kill-repo");
+    common::script_exit_codes(&path, 0, 0);
+    common::script_sleep(&path, 200);
+    common::script_kill(&path);
+
+    let jobs = common::program_jobs(&dir);
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    jobs.greeted(false);
+    let job = job(
+        "job-outside-kill",
+        vec![access("repo-1", &path)],
+        vec![test_access_step("repo-1")],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+
+    let (steps, result) = collect_job(&mut rx).await;
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].status, StepStatus::Failed as i32);
+    assert!(
+        steps[0].possible_stale_lock,
+        "a signal exit reports a possible stale lock"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+/// Runs one `test_access` step that ends with `code` and returns its `possible_stale_lock` flag.
+async fn stale_flag_for_exit(name: &str, code: i32) -> bool {
+    let dir = config_dir(name);
+    let path = repository(&format!("{name}-repo"));
+    common::script_exit_codes(&path, code, 0);
+    let jobs = common::program_jobs(&dir);
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    jobs.greeted(false);
+    let job = job(
+        name,
+        vec![access("repo-1", &path)],
+        vec![test_access_step("repo-1")],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    let (steps, _) = collect_job(&mut rx).await;
+    let flag = steps[0].possible_stale_lock;
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+    flag
+}
+
+/// AC-SC-06: exit code 2 is a panic of the Go runtime, which leaves the lock in place.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_sc_06_a_go_panic_exit_code_reports_a_possible_stale_lock() {
+    assert!(stale_flag_for_exit("job-runs-panic-exit", 2).await);
+}
+
+/// AC-SC-06: Windows has no signal, so a restic that an outside tool terminates ends with the code
+/// of that tool. On Linux, code 1 is an ordinary failure of restic.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_sc_06_an_unknown_exit_code_marks_a_stale_lock_on_windows_only() {
+    assert_eq!(
+        stale_flag_for_exit("job-runs-unknown-exit", 1).await,
+        cfg!(windows)
+    );
+}
+
 /// Reads the messages until the job result arrives and returns the step results before it.
 async fn collect_job(rx: &mut mpsc::Receiver<AgentMessage>) -> (Vec<StepResult>, JobResult) {
     let mut steps = Vec::new();

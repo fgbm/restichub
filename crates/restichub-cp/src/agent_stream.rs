@@ -1238,7 +1238,7 @@ pub async fn sweep_revoked(state: &AppState) {
                 let agent = AgentId::from_uuid(id);
                 jobs.push((
                     agent,
-                    queue_repo::active_job_ids_for_agent(&mut tx, agent).await?,
+                    queue_repo::cancellable_job_ids_for_agent(&mut tx, agent).await?,
                 ));
             }
             tx.commit().await?;

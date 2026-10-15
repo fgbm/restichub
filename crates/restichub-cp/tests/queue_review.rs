@@ -148,7 +148,6 @@ async fn ac_sc_10_a_hello_that_does_not_list_a_running_job_fails_it() {
     env.pass().await;
     let id = decode_job_id(&w.agent.job().await);
     w.agent.start(env, &id).await;
-    env.clock.advance(3 * 60);
 
     // A hello that lists the job keeps it running.
     let listed = env

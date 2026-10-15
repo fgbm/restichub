@@ -13,6 +13,9 @@
 //!   Windows, so a test covers the forced kill of the process tree (FR-AG-10, AC-AG-07). Without
 //!   it the double exits with code 130 on `CTRL_BREAK`.
 //!
+//! - `<location>.restichub-kill` makes the double end itself with `SIGKILL` after the sleep, as an
+//!   outside kill does (AC-SC-06, Linux only).
+//!
 //! Further optional sibling files script the output of one restic command; `<command>` is the first
 //! argument, such as `backup`, `check` or `snapshots`:
 //!
@@ -56,6 +59,7 @@ fn main() {
         true,
     );
     sleep_for(&format!("{repository}.restichub-sleep"));
+    kill_self(&format!("{repository}.restichub-kill"));
     let codes = std::fs::read_to_string(format!("{repository}.restichub-fake")).unwrap_or_default();
     let mut codes = codes.split_whitespace();
     let test_access = codes
@@ -71,6 +75,16 @@ fn main() {
         .and_then(|value| value.trim().parse().ok());
     let code = scripted.unwrap_or(if command == "init" { init } else { test_access });
     std::process::exit(code);
+}
+
+/// Ends the process with `SIGKILL` when the control file exists.
+fn kill_self(path: &str) {
+    if cfg!(unix) && std::path::Path::new(path).exists() {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &std::process::id().to_string()])
+            .status();
+        std::thread::sleep(Duration::from_secs(30));
+    }
 }
 
 /// Prints a generated `ls` listing of the directory in the last argument.

@@ -62,7 +62,7 @@ step 3 "Run a backup of a 1 GB data set" PASS "job $first"
 if wait "$watcher"; then
 	pid="$(cat "$killer_out")"
 	if [ "$target" = restic ]; then
-		docker exec "$container" kill -KILL "$pid"
+		docker exec "$container" sh -c "kill -KILL $pid"
 		what="restic backup process $pid"
 	else
 		docker kill --signal=KILL "$container" >/dev/null
