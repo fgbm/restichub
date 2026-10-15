@@ -53,16 +53,15 @@ use crate::restore_roots::RestoreAccess;
 
 mod log;
 mod runner;
+mod watchdog;
 
 use log::JobLog;
 use runner::{CancelHandle, StepError, StepOutcome};
+use watchdog::StepLimits;
 
 /// The grace period between the graceful stop signal and the forced kill of the process tree
 /// (FR-AG-10, AC-AG-06).
 pub const STOP_GRACE: Duration = Duration::from_secs(30);
-
-/// The timeout of a step that gives none and whose job gives none either (FR-AG-05).
-const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// The largest number of jobs that the agent runs at the same time (ADR-0020).
 const MAX_CONCURRENT_JOBS: usize = 4;
@@ -169,6 +168,21 @@ impl Jobs {
     #[must_use]
     pub fn restore_roots(&self) -> Vec<String> {
         self.restore.root_strings()
+    }
+
+    /// Identifiers of the jobs that run now or whose stored result is not yet expired, for
+    /// `AgentHello` (ADR-0039). The agent re-sends a stored result at each connection, so the
+    /// control plane must not fail such a job as lost.
+    #[must_use]
+    pub fn held_job_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = lock(&self.running).keys().cloned().collect();
+        ids.extend(
+            lock(&self.journal)
+                .stored_results()
+                .into_iter()
+                .map(|result| result.job_id),
+        );
+        ids
     }
 
     /// Sets the grace period between the graceful stop and the forced kill (FR-AG-10).
@@ -472,7 +486,7 @@ impl Jobs {
                 );
                 break;
             }
-            let mut limit = step_timeout(step.timeout_seconds, job.timeout_seconds);
+            let mut max = step_timeout(step.timeout_seconds, job.timeout_seconds);
             if let Some(deadline) = job_deadline {
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                 if remaining.is_zero() {
@@ -492,13 +506,19 @@ impl Jobs {
                     );
                     break;
                 }
-                limit = limit.min(remaining);
+                max = Some(max.map_or(remaining, |max| max.min(remaining)));
             }
             if is_init {
                 progress.init_ran = true;
             }
             let outcome = self
-                .run_step(&validated, step, &cancel, Some(limit), &mut log)
+                .run_step(
+                    &validated,
+                    step,
+                    &cancel,
+                    StepLimits::for_step(step, max, job.stall_timeout_seconds),
+                    &mut log,
+                )
                 .await;
             let finished_at = now_timestamp();
             step_results.push(
@@ -508,6 +528,12 @@ impl Jobs {
             if is_test_access {
                 probe_repository = repository_id(step);
                 progress.probe_missing = outcome.exit_code == 10;
+            }
+            if matches!(
+                outcome.error,
+                Some(StepError::Stalled | StepError::MaxDuration)
+            ) {
+                progress.limit = outcome.error;
             }
             match outcome.status {
                 StepStatus::Success => {
@@ -559,7 +585,7 @@ impl Jobs {
             steps_succeeded: succeeded,
             steps_failed: failed,
             outcome: outcome as i32,
-            error: job_error(outcome),
+            error: job_error(outcome, progress.limit),
             steps: step_results.iter().map(compact).collect(),
             log_tail: log.tail(),
         };
@@ -703,17 +729,16 @@ fn repository_id(step: &Step) -> Option<String> {
     }
 }
 
-/// The timeout of one step: its own value, the job value when the step gives none, or the default
-/// (FR-AG-05).
+/// The maximum duration of one step: its own value, or the job value when the step gives none.
+/// Zero in both means no limit (FR-AG-05, ADR-0039).
 #[must_use]
-fn step_timeout(step_seconds: u32, job_seconds: u32) -> Duration {
-    if step_seconds > 0 {
-        Duration::from_secs(u64::from(step_seconds))
-    } else if job_seconds > 0 {
-        Duration::from_secs(u64::from(job_seconds))
+fn step_timeout(step_seconds: u32, job_seconds: u32) -> Option<Duration> {
+    let seconds = if step_seconds > 0 {
+        step_seconds
     } else {
-        DEFAULT_STEP_TIMEOUT
-    }
+        job_seconds
+    };
+    (seconds > 0).then(|| Duration::from_secs(u64::from(seconds)))
 }
 
 /// What the steps of one job did, as input of [`job_outcome`].
@@ -730,6 +755,8 @@ struct Progress {
     init_invalid: bool,
     /// Exit code 3 of a step: restic finished but could not read some files.
     warned: bool,
+    /// The limit that stopped a step (ADR-0039).
+    limit: Option<StepError>,
 }
 
 /// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
@@ -778,8 +805,10 @@ fn succeeded(progress: &Progress) -> JobStatus {
 }
 
 /// The stable code that explains a failed or cancelled outcome (NFR-DOC-04). It holds no secret.
-fn job_error(outcome: JobStatus) -> Option<ErrorDetail> {
+fn job_error(outcome: JobStatus, limit: Option<StepError>) -> Option<ErrorDetail> {
     let code = match outcome {
+        JobStatus::Failed if limit == Some(StepError::Stalled) => "stalled",
+        JobStatus::Failed if limit == Some(StepError::MaxDuration) => "max_duration_exceeded",
         JobStatus::ConfigError => "wrong_password",
         JobStatus::NotInitialized => "repository_missing",
         JobStatus::Failed => "step_failed",

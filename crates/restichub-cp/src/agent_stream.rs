@@ -872,7 +872,7 @@ async fn run_stream(
             &state,
             identity.tenant,
             agent,
-            &hello.running_job_ids,
+            &hello.held_job_ids,
         )
         .await;
     }

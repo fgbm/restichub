@@ -28,7 +28,7 @@ Each queued job carried `timeout_seconds` of 12 hours. The agent enforced it as 
 ### The control plane does not use a wall clock
 
 - A running job fails as `agent_lost` only when the agent is not connected and the control plane did not hear from the agent for the lost window (30 minutes, `STALE_LOCK_WAIT`), as before.
-- `AgentHello` lists the identifiers of the jobs that the agent runs now (`running_job_ids`). When an agent connects, the control plane fails a `running` job of that agent that the agent does not list, because the agent restarted and lost the job. A job that started less than a short grace ago is not failed, because the acknowledgement and the hello can cross.
+- `AgentHello` lists the identifiers of the jobs that the agent runs now or holds a stored result of (`held_job_ids`); the agent sends the stored results right after the hello. When an agent connects, the control plane fails a `running` job of that agent that the agent does not list, because the agent restarted and lost the job. A job that started less than a short grace ago is not failed, because the acknowledgement and the hello can cross.
 - The control plane fails a running job as `timed_out` only when the job carries a maximum duration (`timeout_seconds` greater than zero). The grace period stays 10 minutes.
 - Rows that exist before the migration keep their stored `timeout_seconds`. The migration sets the value of `running` and `sent` rows that carry the old 12 hour value to NULL, so a job that runs now is not killed by the old limit.
 

@@ -355,7 +355,13 @@ pub async fn connect_once(
         Err(status) => return Err(anyhow::anyhow!("the stream did not open: {status}")),
     };
     let mut inbound = response.into_inner();
-    send_hello(&tx, restic_version, jobs.restore_roots()).await?;
+    send_hello(
+        &tx,
+        restic_version,
+        jobs.restore_roots(),
+        jobs.held_job_ids(),
+    )
+    .await?;
     // The results go through this stream now, and a result that a dropped stream lost reaches the
     // control plane (ADR-0020).
     jobs.attach(&tx);
@@ -788,6 +794,7 @@ async fn send_hello(
     tx: &mpsc::Sender<AgentMessage>,
     restic_version: &str,
     restore_roots: Vec<String>,
+    held_job_ids: Vec<String>,
 ) -> Result<()> {
     let hello = AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
@@ -802,6 +809,7 @@ async fn send_hello(
                 .map(|capability| capability.as_str().to_owned())
                 .collect(),
             restore_roots,
+            held_job_ids,
             ..AgentHello::default()
         })),
     };
@@ -907,9 +915,14 @@ mod tests {
     #[tokio::test]
     async fn fr_pr_09_the_hello_announces_the_forget_all_tags_capability() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        send_hello(&tx, "0.19.0", vec!["/var/lib/restichub-restore".to_owned()])
-            .await
-            .expect("the hello is sent");
+        send_hello(
+            &tx,
+            "0.19.0",
+            vec!["/var/lib/restichub-restore".to_owned()],
+            Vec::new(),
+        )
+        .await
+        .expect("the hello is sent");
         let message = rx.recv().await.expect("a message");
         let Some(agent_message::Payload::AgentHello(hello)) = message.payload else {
             panic!("the first message must be an AgentHello");
@@ -920,7 +933,7 @@ mod tests {
     #[tokio::test]
     async fn fr_rs_03_the_hello_reports_the_restore_roots() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        send_hello(&tx, "0.19.0", vec!["/srv/restore".to_owned()])
+        send_hello(&tx, "0.19.0", vec!["/srv/restore".to_owned()], Vec::new())
             .await
             .expect("the hello is sent");
         let message = rx.recv().await.expect("a message");

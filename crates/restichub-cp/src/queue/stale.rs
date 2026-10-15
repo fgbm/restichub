@@ -129,7 +129,8 @@ pub async fn fail_unlisted_running(
     let now = state.auth().clock.now();
     let outcome = async {
         let mut tx = state.db().begin_tenant(tenant).await?;
-        for id in queue_repo::running_unlisted(&mut tx, agent, &listed, now - UNLISTED_GRACE).await?
+        for id in
+            queue_repo::running_unlisted(&mut tx, agent, &listed, now - UNLISTED_GRACE).await?
         {
             queue_repo::mark_agent_lost(&mut tx, id, now, now).await?;
         }
