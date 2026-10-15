@@ -8,12 +8,13 @@
 //! repository only (AC-PR-03). [`crate::delivery::SecretReader`] writes the `secret_delivered` audit record in the
 //! transaction of the caller (AC-RP-03); the dispatcher commits before it sends.
 
-use restichub_compiler::{ValidatedJob, compile};
+use restichub_compiler::{JobLimits, ValidatedJob, compile};
 use restichub_db::jobs::Job;
 use restichub_db::{
     AgentStatus, JobKind, JobResultCode, RepositoryId, SecretId, TenantTx, agents as agents_repo,
     plans as plans_repo, profiles as profiles_repo, repositories as repo,
 };
+use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{Job as ProtoJob, Step, UnlockAllStep, UnlockStep, step};
 use time::OffsetDateTime;
 
@@ -22,8 +23,9 @@ use crate::jobs::{delivered_secrets, repository_access, timestamp};
 use crate::profiles::{compiler_profile_from_row, target_facts};
 use crate::server::AppState;
 
-/// The job timeout that the queue grants an agent (FR-AG-05).
-pub(super) const JOB_TIMEOUT_SECONDS: u32 = 12 * 3600;
+/// The fixed job timeout that an agent without [`AgentCapability::JobLimitsV1`] still needs: it
+/// applies its own default to a zero value (ADR-0039).
+const LEGACY_JOB_TIMEOUT_SECONDS: u32 = 12 * 3600;
 
 /// The longest lifetime that the control plane signs. The agent rejects a lifetime above 24 h
 /// (FR-PR-03).
@@ -130,8 +132,13 @@ pub async fn build(
         return Err(BuildError::Refused(Refusal::RepositoryMissing));
     };
 
+    let mut limits = JobLimits::default();
     let mut steps = match job.kind {
-        JobKind::Backup => plan_steps(tx, job, &agent, repository_id, now).await?,
+        JobKind::Backup => {
+            let (steps, plan_limits) = plan_steps(tx, job, &agent, repository_id, now).await?;
+            limits = plan_limits;
+            steps
+        }
         // Only the maintenance agent of the repository receives these steps (FR-RP-08, AC-RP-04).
         JobKind::Forget | JobKind::Prune | JobKind::Check => {
             if repository.maintenance_agent_id != Some(job.agent_id) {
@@ -183,7 +190,13 @@ pub async fn build(
         agent_id: job.agent_id.to_string(),
         issued_at: Some(timestamp(now)),
         expires_at: Some(timestamp(expires_at)),
-        timeout_seconds: JOB_TIMEOUT_SECONDS,
+        timeout_seconds: match limits.max_duration_seconds {
+            0 if !capabilities.contains(&AgentCapability::JobLimitsV1) => {
+                LEGACY_JOB_TIMEOUT_SECONDS
+            }
+            seconds => seconds,
+        },
+        stall_timeout_seconds: limits.stall_timeout_seconds,
         repositories: vec![access],
         steps,
     };
@@ -222,7 +235,7 @@ async fn plan_steps(
     agent: &restichub_db::agents::Agent,
     repository_id: RepositoryId,
     now: OffsetDateTime,
-) -> Result<Vec<Step>, BuildError> {
+) -> Result<(Vec<Step>, JobLimits), BuildError> {
     let Some(plan_id) = job.plan_id else {
         return Err(BuildError::Refused(Refusal::PlanMissing));
     };
@@ -251,6 +264,7 @@ async fn plan_steps(
         BuildError::Refused(Refusal::CompileFailed)
     })?;
 
+    let limits = compiled.limits;
     let mut steps: Vec<Step> = compiled
         .steps
         .into_iter()
@@ -263,7 +277,7 @@ async fn plan_steps(
     for step in &mut steps {
         force_retry_lock(step);
     }
-    Ok(steps)
+    Ok((steps, limits))
 }
 
 /// The control plane always sends `--retry-lock` (FR-SC-05).

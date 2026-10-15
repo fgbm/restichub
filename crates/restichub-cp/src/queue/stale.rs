@@ -22,7 +22,7 @@ use crate::server::AppState;
 /// How long the control plane waits after it loses an agent that held a lock (FR-SC-06).
 pub const STALE_LOCK_WAIT: time::Duration = time::Duration::minutes(30);
 
-/// How long a running job may outlive its job timeout before the control plane fails it. The grace
+/// How long a running job may outlive its maximum duration before the control plane fails it. The grace
 /// covers the clock skew and the time that the agent needs to stop the job.
 pub const TIMEOUT_GRACE: time::Duration = time::Duration::minutes(10);
 
@@ -42,10 +42,10 @@ pub async fn recover_tenant(
     }
     let cutoff = now - STALE_LOCK_WAIT;
 
-    // The agent enforces the job timeout. A running job far past it is gone, also when the agent
-    // is online again: it restarted and lost the job. Its lock becomes a suspect.
-    let default_timeout = i32::try_from(crate::jobs::JOB_TIMEOUT_SECONDS).unwrap_or(i32::MAX);
-    for id in queue_repo::timed_out_running(&mut tx, now, TIMEOUT_GRACE, default_timeout).await? {
+    // The agent enforces the maximum duration of a job that carries one. A running job far past it
+    // is gone, also when the agent is online again: it restarted and lost the job. Its lock
+    // becomes a suspect. A job without a maximum duration has no wall-clock limit (ADR-0039).
+    for id in queue_repo::timed_out_running(&mut tx, now, TIMEOUT_GRACE).await? {
         queue_repo::mark_timed_out(&mut tx, id, now).await?;
     }
 
@@ -106,6 +106,39 @@ pub async fn recover_tenant(
         restichub_db::audit::insert(&mut tx, &event).await?;
     }
     tx.commit().await
+}
+
+/// How long a job must run before a hello that does not list it fails it. The acknowledgement of
+/// a job and the hello of a new connection can cross.
+const UNLISTED_GRACE: time::Duration = time::Duration::minutes(2);
+
+/// Fails the running jobs that a connecting agent does not list (ADR-0039).
+///
+/// The agent restarted and lost the job, so the job can never report. Its lock becomes a suspect.
+pub async fn fail_unlisted_running(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    listed: &[String],
+) {
+    let listed: Vec<uuid::Uuid> = listed
+        .iter()
+        .filter_map(|id| crate::jobs::parse_job_id_value(id))
+        .map(|id| id.as_uuid())
+        .collect();
+    let now = state.auth().clock.now();
+    let outcome = async {
+        let mut tx = state.db().begin_tenant(tenant).await?;
+        for id in queue_repo::running_unlisted(&mut tx, agent, &listed, now - UNLISTED_GRACE).await?
+        {
+            queue_repo::mark_agent_lost(&mut tx, id, now, now).await?;
+        }
+        tx.commit().await
+    }
+    .await;
+    if let Err(error) = outcome {
+        tracing::warn!(%agent, %error, "cannot fail the jobs that the agent lost");
+    }
 }
 
 /// Records what a `StepResult` says about the repository lock of a job (FR-AG-10, FR-SC-05).

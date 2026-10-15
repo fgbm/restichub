@@ -10,7 +10,7 @@ use restichub_proto::agent::v1::{
 
 use crate::error::{CompileError, FieldPath};
 use crate::option::ResticOption;
-use crate::profile::{CheckOptions, GroupBy, HookPhase, Profile, Retention};
+use crate::profile::{CheckOptions, GroupBy, HookPhase, JobLimits, Profile, Retention};
 use crate::target::{OperatingSystem, ResticVersion, TargetFacts};
 use crate::template::{self, TemplateError};
 
@@ -21,6 +21,8 @@ const RESERVED_TAG_PREFIX: &str = "restichub-";
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     pub steps: Vec<PlannedStep>,
+    /// The limits for the signed job (ADR-0039).
+    pub limits: JobLimits,
 }
 
 /// One step and whether only the maintenance agent runs it (FR-RP-08).
@@ -54,7 +56,10 @@ pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileE
     let steps = build_steps(profile, target)?;
     check_contract(profile, &steps)?;
 
-    Ok(Plan { steps })
+    Ok(Plan {
+        steps,
+        limits: profile.limits,
+    })
 }
 
 fn validate_platform(profile: &Profile, target: &TargetFacts) -> Result<(), CompileError> {
@@ -66,7 +71,7 @@ fn validate_platform(profile: &Profile, target: &TargetFacts) -> Result<(), Comp
         });
     }
 
-    for (option, field) in emitted_options(profile) {
+    for (option, field) in emitted_options(profile, target.os == OperatingSystem::Windows) {
         let required = option.minimum_version();
         if target.restic_version < required {
             return Err(CompileError::IncompatibleOption {
@@ -81,13 +86,17 @@ fn validate_platform(profile: &Profile, target: &TargetFacts) -> Result<(), Comp
     Ok(())
 }
 
-fn emitted_options(profile: &Profile) -> Vec<(ResticOption, FieldPath)> {
+fn emitted_options(profile: &Profile, windows: bool) -> Vec<(ResticOption, FieldPath)> {
     let mut options = Vec::new();
     let backup = &profile.options;
     let flags = [
         (backup.use_fs_snapshot, ResticOption::UseFsSnapshot),
         (backup.one_file_system, ResticOption::OneFileSystem),
         (backup.exclude_caches, ResticOption::ExcludeCaches),
+        (
+            backup.exclude_cloud_files && windows,
+            ResticOption::ExcludeCloudFiles,
+        ),
         (backup.limit_upload_kib > 0, ResticOption::LimitUpload),
         (backup.limit_download_kib > 0, ResticOption::LimitDownload),
     ];
@@ -163,6 +172,7 @@ fn option_name(option: ResticOption) -> &'static str {
         ResticOption::UseFsSnapshot => "use_fs_snapshot",
         ResticOption::OneFileSystem => "one_file_system",
         ResticOption::ExcludeCaches => "exclude_caches",
+        ResticOption::ExcludeCloudFiles => "exclude_cloud_files",
         ResticOption::LimitUpload => "limit_upload_kib",
         ResticOption::LimitDownload => "limit_download_kib",
         _ => "option",
@@ -299,6 +309,8 @@ fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileE
             use_fs_snapshot: options.use_fs_snapshot,
             one_file_system: options.one_file_system,
             exclude_caches: options.exclude_caches,
+            exclude_cloud_files: options.exclude_cloud_files
+                && target.os == OperatingSystem::Windows,
             limit_upload_kib: options.limit_upload_kib,
             limit_download_kib: options.limit_download_kib,
             retry_lock: true,

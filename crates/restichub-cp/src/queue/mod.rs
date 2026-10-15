@@ -288,7 +288,8 @@ async fn first_send(
         ciphertext: sealed.ciphertext,
         secrets: built.secrets,
     };
-    let timeout = i32::try_from(build::JOB_TIMEOUT_SECONDS).unwrap_or(i32::MAX);
+    let timeout = Some(i32::try_from(built.job.job().timeout_seconds).unwrap_or(i32::MAX))
+        .filter(|seconds| *seconds > 0);
     queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, &stored).await?;
     let required = compat::required_capabilities(&built.job.job().steps);
     let step_ids: Vec<String> = built

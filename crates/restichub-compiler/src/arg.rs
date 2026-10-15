@@ -128,6 +128,11 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
             push_flag(&mut args, backup.use_fs_snapshot, "--use-fs-snapshot");
             push_flag(&mut args, backup.one_file_system, "--one-file-system");
             push_flag(&mut args, backup.exclude_caches, "--exclude-caches");
+            push_flag(
+                &mut args,
+                backup.exclude_cloud_files,
+                "--exclude-cloud-files",
+            );
             push_rate(&mut args, "--limit-upload", backup.limit_upload_kib);
             push_rate(&mut args, "--limit-download", backup.limit_download_kib);
             push_flag(&mut args, backup.retry_lock, RETRY_LOCK);

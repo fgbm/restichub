@@ -26,8 +26,8 @@ pub use job::ValidatedJob;
 pub use option::ResticOption;
 pub use preview::{PreviewError, PreviewStep, preview};
 pub use profile::{
-    BackupOptions, CheckOptions, GroupBy, HookParameter, HookPhase, HookRef, Profile, ProfilePaths,
-    Retention, SnapshotFilter,
+    BackupOptions, CheckOptions, GroupBy, HookParameter, HookPhase, HookRef, JobLimits, Profile,
+    ProfilePaths, Retention, SnapshotFilter,
 };
 pub use target::{
     AllowListedHook, Architecture, HookParameterSpec, OperatingSystem, ResticVersion, TargetFacts,

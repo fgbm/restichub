@@ -304,6 +304,7 @@ async fn create_repository_job(
         issued_at: Some(timestamp(now)),
         expires_at: Some(timestamp(expires_at)),
         timeout_seconds: JOB_TIMEOUT_SECONDS,
+        stall_timeout_seconds: 0,
         repositories: vec![access],
         steps: repository_steps(kind, &repository_id.to_string()),
     };

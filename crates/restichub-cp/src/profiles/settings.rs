@@ -15,9 +15,9 @@ use restichub_compiler::{
     AllowListedHook, Architecture, BackupOptions as CompilerBackupOptions,
     CheckOptions as CompilerCheckOptions, CompileError, GroupBy as CompilerGroupBy,
     HookParameter as CompilerHookParameter, HookPhase as CompilerHookPhase,
-    HookRef as CompilerHookRef, OperatingSystem, Profile as CompilerProfile,
-    ProfilePaths as CompilerProfilePaths, ResticVersion, Retention as CompilerRetention,
-    SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
+    HookRef as CompilerHookRef, JobLimits as CompilerJobLimits, OperatingSystem,
+    Profile as CompilerProfile, ProfilePaths as CompilerProfilePaths, ResticVersion,
+    Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
 };
 use restichub_db::profiles::{NewProfile, Profile, ProfileUpdate};
 use restichub_db::{ProfileId, RepositoryId, UserId};
@@ -68,7 +68,7 @@ pub struct ProfilePaths {
 }
 
 /// The restic flags that a profile sets (FR-PF-01).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BackupOptions {
     /// Use a file system snapshot. VSS on Windows only (FR-PF-01).
@@ -84,6 +84,64 @@ pub struct BackupOptions {
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     #[serde(default)]
     pub limit_download_kib: u64,
+    /// Skip cloud-only placeholder files, for example OneDrive. Windows targets only
+    /// (restic `--exclude-cloud-files`).
+    #[serde(default)]
+    pub exclude_cloud_files: bool,
+    /// Minutes without progress after which the agent stops a step. From 5 to 10080 (ADR-0039).
+    #[serde(default = "default_stall_timeout_minutes")]
+    pub stall_timeout_minutes: u32,
+    /// Minutes after which the agent stops the job whatever its progress. Zero means no limit.
+    /// At most 43200 (ADR-0039).
+    #[serde(default)]
+    pub max_duration_minutes: u32,
+}
+
+/// The stall timeout of a profile that does not set one (ADR-0039).
+pub const DEFAULT_STALL_TIMEOUT_MINUTES: u32 = 60;
+const MIN_STALL_TIMEOUT_MINUTES: u32 = 5;
+const MAX_STALL_TIMEOUT_MINUTES: u32 = 10_080;
+const MAX_DURATION_MINUTES: u32 = 43_200;
+
+fn default_stall_timeout_minutes() -> u32 {
+    DEFAULT_STALL_TIMEOUT_MINUTES
+}
+
+impl Default for BackupOptions {
+    fn default() -> Self {
+        Self {
+            use_fs_snapshot: false,
+            one_file_system: false,
+            exclude_caches: false,
+            limit_upload_kib: 0,
+            limit_download_kib: 0,
+            exclude_cloud_files: false,
+            stall_timeout_minutes: DEFAULT_STALL_TIMEOUT_MINUTES,
+            max_duration_minutes: 0,
+        }
+    }
+}
+
+fn validate_limits(options: &BackupOptions) -> Result<(), ApiError> {
+    if options.stall_timeout_minutes < MIN_STALL_TIMEOUT_MINUTES {
+        return Err(ApiError::invalid_field(
+            "options.stall_timeout_minutes",
+            Reason::TooShort,
+        ));
+    }
+    if options.stall_timeout_minutes > MAX_STALL_TIMEOUT_MINUTES {
+        return Err(ApiError::invalid_field(
+            "options.stall_timeout_minutes",
+            Reason::TooLong,
+        ));
+    }
+    if options.max_duration_minutes > MAX_DURATION_MINUTES {
+        return Err(ApiError::invalid_field(
+            "options.max_duration_minutes",
+            Reason::TooLong,
+        ));
+    }
+    Ok(())
 }
 
 /// Position of a hook in the job (FR-HK-05).
@@ -457,6 +515,10 @@ impl TryFrom<&Profile> for ProfileView {
                 exclude_caches: profile.exclude_caches,
                 limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
                 limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
+                exclude_cloud_files: profile.exclude_cloud_files,
+                stall_timeout_minutes: u32::try_from(profile.stall_timeout_minutes)
+                    .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
+                max_duration_minutes: u32::try_from(profile.max_duration_minutes).unwrap_or(0),
             },
             hooks: hooks_from_row(profile)?,
             retention: retention_from_row(profile)?,
@@ -537,6 +599,11 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
+            exclude_cloud_files: self.options.exclude_cloud_files,
+            stall_timeout_minutes: i32::try_from(self.options.stall_timeout_minutes)
+                .unwrap_or(i32::MAX),
+            max_duration_minutes: i32::try_from(self.options.max_duration_minutes)
+                .unwrap_or(i32::MAX),
             retention: self.retention_value(),
             check_options: self.check_value(),
             hooks: self.hooks_value(),
@@ -560,6 +627,11 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
+            exclude_cloud_files: self.options.exclude_cloud_files,
+            stall_timeout_minutes: i32::try_from(self.options.stall_timeout_minutes)
+                .unwrap_or(i32::MAX),
+            max_duration_minutes: i32::try_from(self.options.max_duration_minutes)
+                .unwrap_or(i32::MAX),
             retention: self.retention_value(),
             check_options: self.check_value(),
             hooks: self.hooks_value(),
@@ -612,6 +684,11 @@ impl ValidatedProfile {
                 exclude_caches: self.options.exclude_caches,
                 limit_upload_kib: self.options.limit_upload_kib,
                 limit_download_kib: self.options.limit_download_kib,
+                exclude_cloud_files: self.options.exclude_cloud_files,
+            },
+            limits: CompilerJobLimits {
+                stall_timeout_seconds: self.options.stall_timeout_minutes.saturating_mul(60),
+                max_duration_seconds: self.options.max_duration_minutes.saturating_mul(60),
             },
             hooks: self.hooks.iter().map(compiler_hook).collect(),
             retention: self.retention.as_ref().map(compiler_retention),
@@ -649,6 +726,10 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
             exclude_caches: profile.exclude_caches,
             limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
             limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
+            exclude_cloud_files: profile.exclude_cloud_files,
+            stall_timeout_minutes: u32::try_from(profile.stall_timeout_minutes)
+                .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
+            max_duration_minutes: u32::try_from(profile.max_duration_minutes).unwrap_or(0),
         },
         hooks: hooks_from_row(profile)?,
         retention: retention_from_row(profile)?,
@@ -765,6 +846,7 @@ fn validate_profile(
     ensure_count("exclude_files", exclude_files.len(), MAX_EXCLUDE_FILES)?;
     let tags = validate_tags("tags", tags)?;
     ensure_count("tags", tags.len(), MAX_TAGS)?;
+    validate_limits(&options)?;
     let hooks = validate_hooks(hooks)?;
     let retention = match retention {
         Some(retention) => Some(validate_retention(retention)?),
@@ -1077,6 +1159,9 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
             "exclude_caches": profile.options.exclude_caches,
             "limit_upload_kib": profile.options.limit_upload_kib,
             "limit_download_kib": profile.options.limit_download_kib,
+            "exclude_cloud_files": profile.options.exclude_cloud_files,
+            "stall_timeout_minutes": profile.options.stall_timeout_minutes,
+            "max_duration_minutes": profile.options.max_duration_minutes,
         },
         "hooks": profile.hooks,
         "retention": profile.retention,
@@ -1104,6 +1189,9 @@ pub fn stored_value(profile: &Profile) -> Value {
             "exclude_caches": profile.exclude_caches,
             "limit_upload_kib": profile.limit_upload_kib,
             "limit_download_kib": profile.limit_download_kib,
+            "exclude_cloud_files": profile.exclude_cloud_files,
+            "stall_timeout_minutes": profile.stall_timeout_minutes,
+            "max_duration_minutes": profile.max_duration_minutes,
         },
         "hooks": profile.hooks,
         "retention": profile.retention,

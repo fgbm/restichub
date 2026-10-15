@@ -19,7 +19,8 @@ package restichub.agent.v1;
 message Step {
   // Identifier of the step in the job.
   string step_id = 1;
-  // Time in seconds after which the agent cancels the step (FR-AG-05).
+  // Time in seconds after which the agent cancels the step. Zero means the
+  // job value, or no limit (FR-AG-05, ADR-0039).
   uint32 timeout_seconds = 2;
   oneof kind {
     // BackupStep runs "restic backup".
@@ -88,6 +89,9 @@ message BackupStep {
   bool retry_lock = 11;
   // Process and I/O priority of the restic process (FR-AG-15).
   ProcessPriority priority = 12;
+  // Skip cloud-only placeholder files with "--exclude-cloud-files". Windows
+  // only. An agent that does not know the field backs the files up.
+  bool exclude_cloud_files = 13;
 }
 
 // CheckStep tests the repository structure.

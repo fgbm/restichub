@@ -181,7 +181,7 @@ pub async fn mark_dispatched(
     id: JobId,
     now: OffsetDateTime,
     lease_until: OffsetDateTime,
-    timeout_seconds: i32,
+    timeout_seconds: Option<i32>,
     signed: &StoredSignedJob,
 ) -> Result<bool, DbError> {
     let secrets: Vec<Uuid> = signed.secrets.iter().map(|id| id.as_uuid()).collect();
@@ -541,6 +541,29 @@ pub async fn lost_running(
     .map_err(DbError::Query)
 }
 
+/// Lists and locks the running jobs of an agent that the agent does not list as its own, and that
+/// started before `cutoff` (ADR-0039).
+pub async fn running_unlisted(
+    tx: &mut TenantTx<'_>,
+    agent: AgentId,
+    listed: &[Uuid],
+    cutoff: OffsetDateTime,
+) -> Result<Vec<JobId>, DbError> {
+    let rows = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM jobs \
+         WHERE status = 'running' AND agent_id = $1 AND NOT (id = ANY($2)) \
+           AND COALESCE(started_at, sent_at, created_at) <= $3 \
+         FOR UPDATE SKIP LOCKED",
+    )
+    .bind(agent)
+    .bind(listed)
+    .bind(cutoff)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(JobId::from_uuid).collect())
+}
+
 /// Fails a running job because its agent is lost, and marks the repository lock as possibly stale.
 pub async fn mark_agent_lost(
     tx: &mut TenantTx<'_>,
@@ -562,27 +585,25 @@ pub async fn mark_agent_lost(
     Ok(result.rows_affected() == 1)
 }
 
-/// Lists and locks the running jobs that outlived their job timeout and the grace period.
+/// Lists and locks the running jobs that outlived their maximum duration and the grace period.
 ///
-/// The agent enforces the timeout, so a job past it is gone: the agent restarted, or it lost the
-/// job. A job without a stored timeout is an on-demand job and uses `default_timeout_seconds`.
+/// The agent enforces the maximum duration, so a job past it is gone: the agent restarted, or it
+/// lost the job. A job without a stored maximum duration has no wall-clock limit (ADR-0039).
 pub async fn timed_out_running(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
     grace: time::Duration,
-    default_timeout_seconds: i32,
 ) -> Result<Vec<JobId>, DbError> {
     let rows = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM jobs \
-         WHERE status = 'running' \
+         WHERE status = 'running' AND timeout_seconds > 0 \
            AND COALESCE(started_at, sent_at, created_at) \
-               + make_interval(secs => COALESCE(timeout_seconds, $3)) \
+               + make_interval(secs => timeout_seconds) \
                + make_interval(secs => $2) < $1 \
          FOR UPDATE SKIP LOCKED",
     )
     .bind(now)
     .bind(grace.as_seconds_f64())
-    .bind(default_timeout_seconds)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

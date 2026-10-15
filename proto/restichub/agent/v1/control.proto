@@ -233,6 +233,9 @@ message AgentHello {
   // uses them to suggest a target and to refuse early. The agent checks the
   // target again.
   repeated string restore_roots = 11;
+  // Identifiers of the jobs that the agent runs at this moment. The control
+  // plane fails a running job that is missing here (ADR-0039).
+  repeated string running_job_ids = 12;
 }
 
 // HookMetadata is the public part of one allow-list hook (FR-HK-04).
