@@ -59,7 +59,12 @@ wait_for() {
 	return 1
 }
 
-# The process identifiers of the restic processes in an agent host. The host image has no `ps`.
+# The process identifiers of the restic processes in an agent host. The agent starts restic from a
+# verified file descriptor, so the process name is a number: the command line identifies it.
 restic_pids() {
-	docker exec "$1" sh -c 'for p in /proc/[0-9]*; do [ "$(cat "$p/comm" 2>/dev/null)" = restic ] && echo "${p#/proc/}"; done; true'
+	docker exec "$1" sh -c 'for p in /proc/[0-9]*; do
+		case "$(tr "\0" " " <"$p/cmdline" 2>/dev/null)" in
+		/proc/self/fd/*) echo "${p#/proc/}" ;;
+		esac
+	done; true'
 }

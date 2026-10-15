@@ -29,20 +29,31 @@ plan="$(api POST /api/v1/plans "$(jq -nc --arg p "$profile" --arg a "$agent" \
 	'{name:"lock",profile_id:$p,agent_id:$a,cron:"0 3 * * *",time_zone:"UTC",missed_run_policy:"skip"}')" | jq -r '.plan.id')"
 step 2 "Create the repository, the profile and the plan" PASS "repository $repo, plan $plan"
 
-# A large file keeps the backup running long enough to kill it.
-docker exec "$container" sh -c 'head -c 400000000 /dev/urandom > /data/big.bin'
+# A large file keeps the backup running long enough to kill it. The killer runs in the host and
+# polls fast, because the backup of the data set ends in seconds. It waits one second after it sees
+# the restic backup process, so the process holds its lock, and then it sends SIGKILL.
+docker exec "$container" sh -c 'head -c 1000000000 /dev/urandom > /data/big.bin'
+killer_out="$out/killer.txt"
+docker exec "$container" sh -c '
+	end=$(( $(date +%s) + 180 ))
+	while [ "$(date +%s)" -lt "$end" ]; do
+		for p in /proc/[0-9]*; do
+			if tr "\0" " " <"$p/cmdline" 2>/dev/null | grep -q "^/proc/self/fd/[0-9]* backup "; then
+				pid="${p#/proc/}"
+				sleep 1
+				kill -KILL "$pid" && echo "killed $pid at $(date -u +%T)" && exit 0
+			fi
+		done
+		sleep 0.05
+	done
+	echo "no restic backup process seen"; exit 1' >"$killer_out" 2>&1 &
+killer=$!
+sleep 1
 first="$(api POST "/api/v1/plans/$plan/run" | jq -r .id)"
-pid=""
-for _ in $(seq 1 600); do
-	pid="$(restic_pids "$container" | head -n1)"
-	[ -n "$pid" ] && break
-	sleep 0.2
-done
-[ -n "$pid" ] && v=PASS || v=FAIL
-step 3 "Wait for the restic process of the backup" "$v" "pid $pid in the agent host"
+step 3 "Run a backup of a 1 GB data set" PASS "job $first"
 
-docker exec "$container" kill -KILL "$pid"
-step 4 "Stop the restic process with SIGKILL" PASS "pid $pid killed at $(date -u +%T)"
+wait "$killer" && v=PASS || v=FAIL
+step 4 "Stop the restic backup process with SIGKILL" "$v" "$(cat "$killer_out")"
 
 result="$(wait_job "$first" 300 || true)"
 case "$result" in failed*) v=PASS ;; *) v=FAIL ;; esac
