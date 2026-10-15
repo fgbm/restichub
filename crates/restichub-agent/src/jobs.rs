@@ -16,7 +16,7 @@
 //!
 //! A `hook` step runs a program from the hook allow-list ([`crate::hooks`], ADR-0004). The agent
 //! checks the hook and its parameters before it acknowledges the job and again before it starts
-//! the hook ([`hooks`]). The agent starts no job on its own and holds no timer that starts one
+//! the hook (`hooks`). The agent starts no job on its own and holds no timer that starts one
 //! (ADR-0002).
 //!
 //! While a step runs, the agent sends progress and scrubbed log chunks. The result of the job holds
