@@ -42,7 +42,7 @@ impl Executor for Reporting {
     }
 }
 
-/// Collects the arrival time of every `job.progress` event until the job ends.
+// The stream never ends on its own, so the reader stops at the first idle second after `done`.
 async fn arrivals(mut body: Body, done: Arc<std::sync::atomic::AtomicBool>) -> Vec<Instant> {
     let mut times = Vec::new();
     loop {
