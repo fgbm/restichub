@@ -10,6 +10,7 @@
 mod common;
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use common::*;
 use restichub_canary_scan::{Canary, Scanner};
@@ -23,12 +24,10 @@ fn directory(name: &str) -> PathBuf {
     dir
 }
 
-/// The scan skips a larger file: a host holds big caches and images that no job of the test wrote.
-const MAX_SCANNED_BYTES: u64 = 32 * 1024 * 1024;
-
-/// Scans every readable file under `root`. A host directory holds files of other programs that are
-/// locked or private, so an unreadable file is skipped.
-fn scan_tree(scanner: &Scanner, root: &Path, scanned: &mut usize) -> usize {
+/// Scans every readable file under `root` that changed since `since`. A host directory holds big
+/// files of other programs that are locked or private, so the scan skips an unreadable file and
+/// an older one: only the jobs of the test can have written the canary.
+fn scan_tree(scanner: &Scanner, root: &Path, since: SystemTime, scanned: &mut usize) -> usize {
     let Ok(entries) = std::fs::read_dir(root) else {
         return 0;
     };
@@ -38,11 +37,12 @@ fn scan_tree(scanner: &Scanner, root: &Path, scanned: &mut usize) -> usize {
             continue;
         };
         if file_type.is_dir() {
-            findings += scan_tree(scanner, &entry.path(), scanned);
+            findings += scan_tree(scanner, &entry.path(), since, scanned);
         } else if file_type.is_file()
             && entry
                 .metadata()
-                .is_ok_and(|metadata| metadata.len() <= MAX_SCANNED_BYTES)
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|modified| modified >= since)
             && let Ok(found) = scanner.scan_file(&entry.path())
         {
             *scanned += 1;
@@ -62,6 +62,7 @@ async fn ac_ag_03_ten_jobs_leave_no_canary_in_the_temporary_directory() {
     script_stdout(&path, "backup", &format!("{SUMMARY}\n"));
     script_stderr(&path, "backup", "Fatal: {PASSWORD} is {PASSWORD}\n");
     let jobs = program_jobs(&dir);
+    let since = SystemTime::now() - Duration::from_secs(2);
     for index in 0..10 {
         let job = job(
             &format!("job-host-{index}"),
@@ -72,7 +73,7 @@ async fn ac_ag_03_ten_jobs_leave_no_canary_in_the_temporary_directory() {
         assert_eq!(collected.result().outcome, JobStatus::Succeeded as i32);
     }
     let mut scanned = 0;
-    let findings = scan_tree(&scanner, &std::env::temp_dir(), &mut scanned);
+    let findings = scan_tree(&scanner, &std::env::temp_dir(), since, &mut scanned);
     assert!(scanned > 0, "the scan read no file");
     assert_eq!(findings, 0, "the canary is in the temporary directory");
     let _ = std::fs::remove_dir_all(&dir);
