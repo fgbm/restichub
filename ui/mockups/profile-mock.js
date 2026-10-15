@@ -9,6 +9,7 @@
 
 	var uid = 0;
 	var MAX_DURATION_DEFAULT = 48;
+	var STALL_DEFAULT = 60;
 
 	/* ------------------------------------------------------------- sample data */
 
@@ -366,7 +367,7 @@
 			return (
 				'<p class="pm-lead">Защита от зависших и слишком долгих заданий. Лимиты действуют всегда: если поле пустое, берётся значение по умолчанию.</p>' +
 				'<div class="pm-grid2">' +
-				text('stall', 'Остановить, если нет прогресса, минут', s.stall, 'Если агент не сообщает о прогрессе дольше этого срока, задание останавливается как зависшее. Пусто — без этого лимита.', { placeholder: 'Без лимита', type: 'numeric' }) +
+				text('stall', 'Остановить, если нет прогресса, минут', s.stall, 'Если агент не сообщает о прогрессе дольше этого срока, задание останавливается как зависшее. По умолчанию <b>60 минут</b>; значение для всего стека задаёт переменная окружения <span class="code">RESTICHUB_JOB_STALL_TIMEOUT_SECS</span>.', { placeholder: '60 (по умолчанию)', type: 'numeric' }) +
 				text('maxDur', 'Максимальная длительность, часов', s.maxDur, 'Задание, которое идёт дольше, останавливается, даже если прогресс есть. По умолчанию <b>48 часов</b>; значение по умолчанию для всего стека задаёт переменная окружения <span class="code">RESTICHUB_JOB_MAX_DURATION_SECS</span>.', { placeholder: '48 (по умолчанию)', type: 'numeric' }) +
 				'</div>'
 			);
@@ -767,7 +768,7 @@
 		out.scripts = off(state, 'on_scripts', sc > 0, 'до: ' + state.scriptsBefore + ' · после: ' + state.scriptsAfter, 'Скриптов нет');
 
 		var lim = [];
-		if (num(state.stall)) lim.push('без прогресса ' + num(state.stall) + ' мин');
+		lim.push(num(state.stall) ? 'без прогресса ' + num(state.stall) + ' мин' : 'без прогресса ' + STALL_DEFAULT + ' мин (по умолчанию)');
 		lim.push(num(state.maxDur) ? 'не дольше ' + num(state.maxDur) + ' ч' : 'не дольше ' + MAX_DURATION_DEFAULT + ' ч (по умолчанию)');
 		out.limits = { on: true, text: lim.join(' · ') };
 		return out;
@@ -853,7 +854,7 @@
 				return '<div class="pm-step"><div class="pm-step-title">' + step.title + '</div><pre class="pm-cmd' + (step.kind === 'script' ? ' pm-cmd--script' : '') + '">' + esc(step.cmd) + '</pre></div>';
 			}).join('');
 			var lim = [];
-			if (num(state.stall)) lim.push('нет прогресса ' + num(state.stall) + ' мин');
+			lim.push('нет прогресса ' + (num(state.stall) || STALL_DEFAULT) + ' мин');
 			lim.push('всего ' + (num(state.maxDur) || MAX_DURATION_DEFAULT) + ' ч');
 			if (lim.length) html += '<div class="pm-step-note">' + icon('clock', 'xs') + ' Остановка задания: ' + lim.join(', ') + '</div>';
 			target.innerHTML = html;
