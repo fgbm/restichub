@@ -128,7 +128,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-HK-09 | A typed script step has an interpreter, a name, a phase, an order and a timeout. It also has a body of 64 KiB at most, a failure policy and typed environment parameters. A parameter value is a plain string or a secret reference. The agent gives the values to the script as environment variables only. The job signature covers the body. | M |
 | FR-HK-10 | The CP and the agent refuse a script step for a host without the trust mode. The job has a typed reason. | M |
 | FR-HK-11 | Each script is a job step with its own status, start time, duration, exit code and log. The job detail shows the steps in order. | M |
-| FR-HK-12 | An Admin edits scripts, script templates and job templates. Each change and each run is in the audit log with the SHA-256 hash of the script. The CP ships read-only built-in templates. | M |
+| FR-HK-12 | An Admin edits scripts, script templates and job templates. Each change and each run is in the audit log with the SHA-256 hash of the script. The CP ships read-only built-in templates. A Viewer reads a profile without the script bodies and without the values of string variables, and the templates return 403. | M |
 
 ### 3.5. Repositories and secrets
 
@@ -238,7 +238,7 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-UI-01 | UI sections: Dashboard, Agents, Repositories, Profiles, Plans, Jobs (live logs), Restore, Settings, Audit. Analytics in 1.0. | M |
-| FR-UI-02 | Real-time updates. The MVP polls the REST API. Server-Sent Events come in 1.0. | M (polling), 1.0 (SSE) |
+| FR-UI-02 | Real-time updates through Server-Sent Events. | M |
 | FR-UI-03 | Profile editor: form and YAML with validation. | M (form), 1.0 (YAML) |
 | FR-UI-04 | Dark and light themes. English and Russian languages. | M |
 | FR-API-01 | Public REST API with an OpenAPI specification that the CP generates from code. API tokens with limited permissions. The API can do all operations that the UI can do. | M |
@@ -256,7 +256,7 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 |---|---|
 | NFR-SEC-01 | mTLS (TLS 1.3, rustls) between the agent and the CP. HTTPS for the UI and the API. |
 | NFR-SEC-02 | The threat model is in the repository. The maintainers review it before each release. |
-| NFR-SEC-03 | On a host without the local trust mode, a compromised CP cannot execute an arbitrary command. It can send only typed steps. On a host with the trust mode on, the CP can run any command with the rights of the agent service (ADR-0037, ADR-0040). A pinned-hash mode for scripts is planned after the MVP (issue #136). |
+| NFR-SEC-03 | On a host without the local trust mode, a compromised CP cannot execute an arbitrary command. It can send only typed steps. A restore below a root that covers system or user files, for example `/` or `/home`, can still lead to code execution (T2, ADR-0035). On a host with the trust mode on, the CP can run any command with the rights of the agent service (ADR-0037, ADR-0040). A pinned-hash mode for scripts is planned after the MVP (issue #136). |
 | NFR-SEC-04 | A compromised CP database without the KEK does not disclose secrets. Job signing protects against a network attacker, a replayed or altered job, and a CP without the key. It does not protect against an attacker who can write to the database or who holds the KEK (T3). |
 | NFR-SEC-05 | The agent does not write secrets to logs, files or process arguments. The agent masks secrets in restic and script logs. |
 | NFR-SEC-06 | Releases are signed (cosign or minisign, Authenticode for Windows, notarization for macOS). Builds are reproducible. Each release has an SBOM. |

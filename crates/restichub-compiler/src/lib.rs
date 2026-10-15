@@ -26,7 +26,7 @@ pub use compile::{Plan, PlannedStep, compile};
 pub use error::{CompileError, CronError, FieldPath, validate_cron};
 pub use job::ValidatedJob;
 pub use option::ResticOption;
-pub use preview::{PreviewError, PreviewStep, preview};
+pub use preview::{PreviewError, PreviewStep, masked_command, preview};
 pub use profile::{
     BackupOptions, CheckOptions, GroupBy, HookPhase, JobLimits, Profile, ProfilePaths, Retention,
     SnapshotFilter,

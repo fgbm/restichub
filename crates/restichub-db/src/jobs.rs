@@ -45,6 +45,8 @@ macro_rules! job_columns {
             $p,
             "result_message, ",
             $p,
+            "result_params, ",
+            $p,
             "location_fingerprint, ",
             $p,
             "expires_at, ",
@@ -102,6 +104,8 @@ pub struct Job {
     pub result_code: Option<JobResultCode>,
     /// A machine-readable error code from the agent. Never a secret and never prose (NFR-DOC-04).
     pub result_message: Option<String>,
+    /// The typed values behind `result_message`. Never a secret.
+    pub result_params: Option<serde_json::Value>,
     /// A hash of the repository location at create time. The control plane applies the
     /// `initialized` flag only while it still matches.
     pub location_fingerprint: Option<String>,
@@ -161,6 +165,7 @@ pub struct JobOutcome {
     pub result_code: JobResultCode,
     /// A machine-readable error code from the agent. Never a secret.
     pub result_message: Option<String>,
+    pub result_params: Option<serde_json::Value>,
 }
 
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewJob) -> Result<JobId, DbError> {
@@ -335,7 +340,7 @@ pub async fn finish(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE jobs SET status = $2, result_code = $3, result_message = $4, finished_at = $5, \
-                updated_at = now() \
+                result_params = $6, updated_at = now() \
          WHERE id = $1 AND status NOT IN ('succeeded', 'failed', 'expired', 'dead_letter')",
     )
     .bind(id)
@@ -343,6 +348,7 @@ pub async fn finish(
     .bind(outcome.result_code.as_str())
     .bind(outcome.result_message.as_deref())
     .bind(now)
+    .bind(outcome.result_params.as_ref())
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -496,6 +502,7 @@ pub(crate) struct JobRow {
     status: JobStatus,
     result_code: Option<JobResultCode>,
     result_message: Option<String>,
+    result_params: Option<serde_json::Value>,
     location_fingerprint: Option<String>,
     expires_at: Option<OffsetDateTime>,
     sent_at: Option<OffsetDateTime>,
@@ -529,6 +536,7 @@ impl From<JobRow> for Job {
             status: row.status,
             result_code: row.result_code,
             result_message: row.result_message,
+            result_params: row.result_params,
             location_fingerprint: row.location_fingerprint,
             expires_at: row.expires_at,
             sent_at: row.sent_at,

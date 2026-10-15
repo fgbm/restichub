@@ -19,6 +19,7 @@ Set the variables in the environment of the control plane process. For the Docke
 | `RESTICHUB_TENANCY_MODE` | `single` | `single` or `multi`. |
 | `RESTICHUB_TENANCY_DEFAULT_TENANT` | `default` | The name of the organization that the single mode uses. |
 | `RESTICHUB_LOG_RETENTION_DAYS` | `30` | The number of days that the control plane keeps the text of job logs. The smallest value is 1. The largest value is 36500. See [Jobs](/restichub/concepts/jobs/#log-retention). |
+| `RESTICHUB_AUDIT_REFUSAL_LIMIT` | `10` | The number of audit records each minute that the refused messages of one agent can write for one reason. The control plane counts the other refusals and writes one summary record when the minute ends or the connection closes. The smallest value is 1. |
 
 ## Control plane: database and secrets
 
@@ -31,7 +32,7 @@ Set the variables in the environment of the control plane process. For the Docke
 | `RESTICHUB_DATABASE_MIGRATION_PASSWORD` | none | The password of the owner login. |
 | `RESTICHUB_DATABASE_MIGRATION_PASSWORD_FILE` | none | The path of a file that holds that password. |
 | `RESTICHUB_KEK` | none | The key encryption key. It opens the repository passwords and the installation CA. Not recommended: `docker inspect` and the process environment show the value. Use `RESTICHUB_KEK_FILE`. |
-| `RESTICHUB_KEK_FILE` | none | The path of a file that holds the key encryption key. The reference stack mounts a Docker secret there. The file mode must be `0400` or `0600`. Set `RESTICHUB_KEK` or `RESTICHUB_KEK_FILE`, not both. |
+| `RESTICHUB_KEK_FILE` | none | The path of a file that holds the key encryption key. The reference stack mounts a Docker secret there. The file must have no group or other bits, for example `0400` or `0600`. Set `RESTICHUB_KEK` or `RESTICHUB_KEK_FILE`, not both. |
 
 ## Control plane: sign-in
 

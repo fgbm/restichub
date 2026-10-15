@@ -24,7 +24,7 @@ The signature covers the serialized bytes of the job. The agent verifies the byt
 
 ## Amendment, 2026-10-15
 
-The implementation differs from the text above in two points. The decision is not rewritten.
+The implementation differs from the text above in three points. The decision is not rewritten. A later ADR records the change.
 
 - The CP signs a job at dispatch from the state of the database.
 - The signing key is not in a file. It is in the database, wrapped by the KEK (ADR-0026).

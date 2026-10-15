@@ -79,6 +79,9 @@ pub trait ServiceManager {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostService;
 
+#[cfg(not(any(target_os = "linux", windows)))]
+const UNSUPPORTED_SERVICE: &str = "this operating system has no service support; run the agent in the foreground with: restichub-agent run";
+
 impl ServiceManager for HostService {
     fn install_and_start(&self, restic: &Path) -> Result<()> {
         #[cfg(target_os = "linux")]
@@ -92,7 +95,7 @@ impl ServiceManager for HostService {
         #[cfg(not(any(target_os = "linux", windows)))]
         {
             let _ = restic;
-            anyhow::bail!("the service install is a 1.0 feature on this operating system")
+            anyhow::bail!("{UNSUPPORTED_SERVICE}")
         }
     }
 
@@ -170,7 +173,7 @@ pub fn uninstall() -> Result<()> {
     }
     #[cfg(not(any(target_os = "linux", windows)))]
     {
-        anyhow::bail!("the service install is a 1.0 feature on this operating system")
+        anyhow::bail!("{UNSUPPORTED_SERVICE}")
     }
 }
 

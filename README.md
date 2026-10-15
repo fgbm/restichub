@@ -20,7 +20,7 @@ ResticHub is a central control plane for [restic](https://restic.net) backups on
 | Control plane | Rust, PostgreSQL |
 | Agent | Rust, Windows service, systemd, launchd |
 | Agent protocol | gRPC with mTLS, Protocol Buffers |
-| Public API | REST, OpenAPI |
+| Public API | REST, OpenAPI, Server-Sent Events |
 | Web UI | Svelte 5 |
 | Documentation | Starlight |
 

@@ -34,19 +34,26 @@ repo_root="$(cd "$here/../.." && pwd)"
 
 echo "== copy the deployment files to $host:$dir =="
 ssh "$host" "install -d -m 0700 -o root -g root '$dir'"
-scp -q "$here/compose.yaml" "$here/Caddyfile" "$here/bootstrap.sh" "$host:$dir/"
+scp -q "$here/Caddyfile" "$here/bootstrap.sh" "$host:$dir/"
 scp -q "$repo_root/crates/restichub-db/sql/bootstrap-roles.sql" "$host:$dir/bootstrap-roles.sql"
-ssh "$host" "chmod 0700 '$dir/bootstrap.sh' && chmod 0644 '$dir/compose.yaml' '$dir/Caddyfile' '$dir/bootstrap-roles.sql'"
+ssh "$host" "chmod 0700 '$dir/bootstrap.sh' && chmod 0644 '$dir/Caddyfile' '$dir/bootstrap-roles.sql'"
 
 echo "== create the environment file if it is missing =="
 ssh "$host" "cd '$dir' && { [ -e .env ] || ./bootstrap.sh .env '$domain' '$acme_email'; }"
 
 # The stack reads the key encryption key from a Docker secret file. A server that was set up with
-# the key in `.env` must move it first. See deploy/stage/README.md.
-if ! ssh "$host" "[ -e '$dir/secrets/restichub_kek' ]"; then
-	echo "$dir/secrets/restichub_kek is missing; move the key out of .env first (deploy/stage/README.md)" >&2
+# the key in the environment file must move it first. See deploy/stage/README.md. The new
+# `compose.yaml` goes to the server only after this check, so a refusal leaves the old stack as it
+# is. The file must hold one key of 32 bytes in standard base64: 44 characters, no quotes.
+if ! ssh "$host" "sh -s '$dir/secrets/restichub_kek'" <<'REMOTE'; then
+[ -s "$1" ] && tr -d '\n' <"$1" | grep -Eq '^[A-Za-z0-9+/]{43}=$'
+REMOTE
+	echo "$dir/secrets/restichub_kek is missing or does not hold a base64 key of 32 bytes; see deploy/stage/README.md" >&2
 	exit 1
 fi
+
+scp -q "$here/compose.yaml" "$host:$dir/"
+ssh "$host" "chmod 0644 '$dir/compose.yaml'"
 
 # The alert settings go to the environment file on the server when the local environment sets
 # them. The values travel on standard input, so no password shows in a process list. Compose reads

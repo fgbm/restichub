@@ -956,6 +956,7 @@ async fn run_stream(
             }
         }
     }
+    crate::refusal_audit::flush_summaries(&state, identity.tenant, agent).await;
     // The removal drops the last outbound sender, so the response stream ends (FR-ID-04).
     state.agent_registry().remove(agent, generation);
 }

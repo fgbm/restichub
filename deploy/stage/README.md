@@ -87,11 +87,25 @@ A server that `bootstrap.sh` set up before the secret file existed keeps the key
    chown 10001:10001 secrets/restichub_kek
    ```
 
-3. Run `deploy.sh` from the workstation. The new `compose.yaml` mounts the file and sets `RESTICHUB_KEK_FILE`.
-4. After the control plane is healthy, remove the line `RESTICHUB_KEK=` from the environment file.
-5. Check that the container has no key in its environment: `docker inspect <cp container> | grep -c RESTICHUB_KEK=` prints `0`.
+3. Check the file. The command prints `32`. If it prints another number, the file holds an empty value or a value with quotes. Fix the file before the next step:
+
+   ```sh
+   base64 -d secrets/restichub_kek | wc -c
+   ```
+
+4. Run `deploy.sh` from the workstation. The script checks the file again and refuses a file that is empty or is not a base64 key of 32 bytes. Only then does it copy the new `compose.yaml`, which mounts the file and sets `RESTICHUB_KEK_FILE`.
+5. After the control plane is healthy, remove the line `RESTICHUB_KEK=` from the environment file.
+6. Check that the container has no key in its environment: `docker inspect <cp container> | grep -c RESTICHUB_KEK=` prints `0`.
 
 The key stays the same, so the stored secrets stay readable.
+
+### Roll back
+
+Do the rollback in this order:
+
+1. If you did step 5, put the line `RESTICHUB_KEK=<value>` back in the environment file. Take the value from `secrets/restichub_kek`.
+2. Deploy the previous commit with `deploy.sh`. Its `compose.yaml` reads the key from the environment file.
+3. Keep `secrets/restichub_kek`. The key must not change, or the stored secrets become unreadable.
 
 ## The image tag
 

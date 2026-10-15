@@ -139,6 +139,7 @@ mod tests {
             status,
             result_code: None,
             result_message: None,
+            result_params: None,
             location_fingerprint: None,
             expires_at: None,
             sent_at: None,

@@ -67,8 +67,8 @@ impl<'a> TenantTx<'a> {
     ///
     /// A caller that runs several independent units of work in one transaction uses a savepoint, so
     /// a failure of one unit does not roll back the whole transaction. The name is formatted into the
-    /// statement, because `SAVEPOINT` takes no bind parameter. The `'static` bound keeps user input
-    /// out: only a constant can be the name.
+    /// statement, because `SAVEPOINT` takes no bind parameter. The `'static` bound makes a runtime
+    /// string unlikely. Callers pass a literal.
     pub async fn savepoint(&mut self, name: &'static str) -> Result<(), DbError> {
         sqlx::query(sqlx::AssertSqlSafe(format!("SAVEPOINT {name}")))
             .execute(&mut *self.tx)

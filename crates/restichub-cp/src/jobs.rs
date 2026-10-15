@@ -57,8 +57,10 @@ use uuid::Uuid;
 use crate::context::{Operation, RequestContext};
 use crate::delivery::{DeliveryError, SecretReader};
 use crate::error::{ApiError, map_write_error};
+use crate::job_result_params::IncompatibleParams;
 use crate::json::ApiJson;
 use crate::queue::retry;
+use crate::refusal_audit::{self, MessageRefusal};
 use crate::repositories::stored_location;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -109,6 +111,9 @@ pub struct JobView {
     /// A machine-readable error code from the agent. The user interface translates it (NFR-DOC-04).
     /// It never holds a secret.
     pub result_message: Option<String>,
+    /// The typed values behind `result_message`: the user interface builds its text from them.
+    /// Null when the message needs none.
+    pub result_params: Option<IncompatibleParams>,
     /// In RFC 3339.
     pub created_at: String,
     /// In RFC 3339.
@@ -154,6 +159,10 @@ impl From<&Job> for JobView {
             status: job.status,
             result_code: job.result_code,
             result_message: job.result_message.clone(),
+            result_params: job
+                .result_params
+                .as_ref()
+                .and_then(IncompatibleParams::from_value),
             created_at: format_time(job.created_at),
             updated_at: format_time(job.updated_at),
             finished_at: job.finished_at.map(format_time),
@@ -396,13 +405,33 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
     };
     let job = match job_repo::get_for_update(&mut tx, job_id).await {
         Ok(Some(job)) => job,
-        Ok(None) => return,
+        Ok(None) => {
+            audit_foreign_job(
+                state,
+                tx,
+                agent,
+                job_id,
+                "job_ack",
+                MessageRefusal::UnknownJob,
+            )
+            .await;
+            return;
+        }
         Err(error) => {
             tracing::warn!(job = %job_id, %error, "the acknowledgement could not read the job");
             return;
         }
     };
     if job.agent_id != agent {
+        audit_foreign_job(
+            state,
+            tx,
+            agent,
+            job_id,
+            "job_ack",
+            MessageRefusal::ForeignJob,
+        )
+        .await;
         return;
     }
     if job.status == JobStatus::Sent
@@ -434,9 +463,9 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
 /// Records a `JobRejected` from the stream: the job fails with the typed reason (FR-PR-03).
 ///
 /// A rejection frees the repository, so the control plane can start the next job. A rejection that
-/// names no job only leaves a log line. The identity
-/// comes from the certificate, never from the message (FR-PR-08), so a rejection for another agent
-/// or tenant changes no row.
+/// names no job of the agent only leaves an audit record (AC-PR-01). The identity comes from the
+/// certificate, never from the message (FR-PR-08), so a rejection for another agent or tenant
+/// changes no row.
 pub async fn handle_job_rejected(
     state: &AppState,
     tenant: TenantId,
@@ -451,6 +480,7 @@ pub async fn handle_job_rejected(
             reason = reject_reason_code(rejected.reason),
             "the agent rejected a job that it could not identify"
         );
+        audit_rejection(state, tenant, agent, reject_reason_code(rejected.reason)).await;
         return;
     };
     let now = state.auth().clock.now();
@@ -460,13 +490,32 @@ pub async fn handle_job_rejected(
     };
     let job = match job_repo::get_for_update(&mut tx, job_id).await {
         Ok(Some(job)) => job,
-        Ok(None) => return,
+        Ok(None) => {
+            let reason = reject_reason_code(rejected.reason);
+            let audited =
+                refusal_audit::rejection_of_unknown_job(state, &mut tx, agent, job_id, reason)
+                    .await;
+            commit_audit(tx, audited, agent, "the rejection of an unknown job").await;
+            return;
+        }
         Err(error) => {
             tracing::warn!(job = %job_id, %error, "the rejection could not read the job");
             return;
         }
     };
-    if job.agent_id != agent || job.status.is_terminal() {
+    if job.agent_id != agent {
+        audit_foreign_job(
+            state,
+            tx,
+            agent,
+            job_id,
+            "job_rejected",
+            MessageRefusal::ForeignJob,
+        )
+        .await;
+        return;
+    }
+    if job.status.is_terminal() {
         return;
     }
     // A busy agent only defers the job: it stays `sent` and the control plane delivers it again
@@ -488,9 +537,15 @@ pub async fn handle_job_rejected(
         status: JobStatus::Failed,
         result_code: JobResultCode::Failed,
         result_message: Some(reason.to_owned()),
+        result_params: None,
     };
     if let Err(error) = job_repo::finish(&mut tx, job_id, &outcome, now).await {
         tracing::warn!(job = %job_id, %error, "the rejection could not update the job");
+        return;
+    }
+    if let Err(error) = refusal_audit::rejection(state, &mut tx, agent, Some(job_id), reason).await
+    {
+        tracing::warn!(job = %job_id, %error, "the rejection could not be audited");
         return;
     }
     if let Err(error) = tx.commit().await {
@@ -498,6 +553,45 @@ pub async fn handle_job_rejected(
         return;
     }
     state.wake_dispatcher();
+}
+
+/// Audits and commits the message of an agent for a job that the agent does not own (AC-PR-05).
+async fn audit_foreign_job(
+    state: &AppState,
+    mut tx: restichub_db::TenantTx<'_>,
+    agent: AgentId,
+    job: JobId,
+    kind: &str,
+    refusal: MessageRefusal,
+) {
+    let audited = refusal_audit::refused_message(state, &mut tx, agent, job, kind, refusal).await;
+    commit_audit(tx, audited, agent, "a foreign message").await;
+}
+
+/// Audits a rejection that names no job of the agent (AC-PR-01).
+async fn audit_rejection(state: &AppState, tenant: TenantId, agent: AgentId, reason: &'static str) {
+    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+        tracing::warn!(%agent, "the rejection audit could not open a transaction");
+        return;
+    };
+    let audited = refusal_audit::rejection(state, &mut tx, agent, None, reason).await;
+    commit_audit(tx, audited, agent, "the rejection").await;
+}
+
+async fn commit_audit(
+    tx: restichub_db::TenantTx<'_>,
+    audited: Result<(), restichub_db::DbError>,
+    agent: AgentId,
+    what: &str,
+) {
+    match audited {
+        Ok(()) => {
+            if let Err(error) = tx.commit().await {
+                tracing::warn!(%agent, %error, "the audit of {what} could not commit");
+            }
+        }
+        Err(error) => tracing::warn!(%agent, %error, "{what} could not be audited"),
+    }
 }
 
 /// The stable code of a `RejectReason`. The user interface translates it (NFR-DOC-04).
@@ -593,13 +687,23 @@ pub async fn handle_job_result(
             return;
         }
     };
-    if job.agent_id != agent || job.status.is_terminal() {
+    // `handle_job_result_data` runs first for the same message and has audited the refusal.
+    if job.agent_id != agent {
+        return;
+    }
+    if job.status.is_terminal() {
         return;
     }
     let Some(outcome) = outcome_of(result) else {
         tracing::warn!(job = %job_id, "the job result holds an unknown outcome");
         return;
     };
+    // The row lock above waits for a progress write in flight. Deleting here, in the same
+    // transaction as the status change, leaves no progress on a job that is not running.
+    if let Err(error) = restichub_db::job_steps::delete_progress(&mut tx, job_id).await {
+        tracing::warn!(job = %job_id, %error, "the job result could not remove the progress");
+        return;
+    }
     // Restic exit code 11 is a held lock, not a failure: the job returns to the queue as a new job
     // or, after the last retry, to the dead-letter status (FR-SC-05). The agent reports the lock on
     // the step, and the job result of a stopped job has the status `failed`, so the step result
@@ -625,6 +729,7 @@ pub async fn handle_job_result(
             status: JobStatus::Failed,
             result_code: JobResultCode::Cancelled,
             result_message: None,
+            result_params: None,
         }
     } else {
         outcome
@@ -638,6 +743,7 @@ pub async fn handle_job_result(
                     status: JobStatus::Failed,
                     result_code: JobResultCode::AccessError,
                     result_message: Some(ACCESS_ERROR_CODE.to_owned()),
+                    result_params: None,
                 },
                 Ok(_) => outcome,
                 Err(error) => {
@@ -655,6 +761,7 @@ pub async fn handle_job_result(
             status: JobStatus::Succeeded,
             result_code: JobResultCode::SucceededWithWarnings,
             result_message: Some(FORGET_SELECTED_NOTHING.to_owned()),
+            result_params: None,
         }
     } else {
         outcome
@@ -942,6 +1049,7 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         | JobResultCode::ConfigError
         | JobResultCode::NotInitialized
         | JobResultCode::AccessError
+        | JobResultCode::Incompatible
         | JobResultCode::Cancelled => JobStatus::Failed,
     };
     // The typed code says all: the agent repeats it as the error code of the job.
@@ -964,6 +1072,7 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         status,
         result_code,
         result_message,
+        result_params: None,
     })
 }
 

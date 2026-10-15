@@ -9,13 +9,17 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use restichub_db::JobId;
+use restichub_db::{AgentId, JobId};
+
+/// The slot of a job belongs to the agent that owns it, so another agent cannot touch it.
+pub type ProgressKey = (AgentId, JobId);
 
 pub const INTERVAL: Duration = Duration::from_secs(1);
 
 /// The throttle forgets expired jobs when it holds more than this many.
 const PRUNE_AT: usize = 256;
-/// A hard cap: a job above it is not throttled, so the memory stays bounded.
+/// A hard cap: a job above it is not throttled, so the memory stays bounded. Only a job that the
+/// agent owns gets a slot.
 const MAX_JOBS: usize = 10_000;
 
 #[derive(Debug)]
@@ -38,7 +42,7 @@ pub enum Admit<T> {
 
 #[derive(Debug)]
 pub struct ProgressThrottle<T> {
-    slots: Mutex<HashMap<JobId, Slot<T>>>,
+    slots: Mutex<HashMap<ProgressKey, Slot<T>>>,
 }
 
 impl<T> Default for ProgressThrottle<T> {
@@ -50,12 +54,12 @@ impl<T> Default for ProgressThrottle<T> {
 }
 
 impl<T> ProgressThrottle<T> {
-    pub fn admit(&self, job: JobId, message: T, now: Instant) -> Admit<T> {
+    pub fn admit(&self, key: ProgressKey, message: T, now: Instant) -> Admit<T> {
         let mut slots = lock(&self.slots);
         if slots.len() >= PRUNE_AT {
             slots.retain(|_, slot| slot.flush_scheduled || now < slot.window_end);
         }
-        match slots.get_mut(&job) {
+        match slots.get_mut(&key) {
             Some(slot) if now < slot.window_end => {
                 slot.pending = Some(message);
                 if slot.flush_scheduled {
@@ -70,26 +74,37 @@ impl<T> ProgressThrottle<T> {
                 slot.pending = None;
                 Admit::WriteNow(message)
             }
-            None => {
-                if slots.len() < MAX_JOBS {
-                    slots.insert(
-                        job,
-                        Slot {
-                            window_end: now + INTERVAL,
-                            pending: None,
-                            flush_scheduled: false,
-                        },
-                    );
-                }
-                Admit::WriteNow(message)
-            }
+            None => Admit::WriteNow(message),
         }
     }
 
-    /// The latest held message, and the start of the next window. `None` when nothing waits.
-    pub fn take_pending(&self, job: JobId, now: Instant) -> Option<T> {
+    /// Opens the window of a job after a write that the database accepted. A message for a job that
+    /// the agent does not own never reaches this call.
+    pub fn wrote(&self, key: ProgressKey, now: Instant) {
         let mut slots = lock(&self.slots);
-        let slot = slots.get_mut(&job)?;
+        if let Some(slot) = slots.get_mut(&key) {
+            slot.window_end = now + INTERVAL;
+        } else if slots.len() < MAX_JOBS {
+            slots.insert(
+                key,
+                Slot {
+                    window_end: now + INTERVAL,
+                    pending: None,
+                    flush_scheduled: false,
+                },
+            );
+        }
+    }
+
+    /// Drops the slot and the held message of a job that has ended.
+    pub fn forget(&self, key: ProgressKey) {
+        lock(&self.slots).remove(&key);
+    }
+
+    /// The latest held message, and the start of the next window. `None` when nothing waits.
+    pub fn take_pending(&self, key: ProgressKey, now: Instant) -> Option<T> {
+        let mut slots = lock(&self.slots);
+        let slot = slots.get_mut(&key)?;
         slot.flush_scheduled = false;
         let message = slot.pending.take()?;
         slot.window_end = now + INTERVAL;
@@ -108,22 +123,28 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 mod tests {
     use super::*;
 
-    fn job() -> JobId {
-        JobId::new()
+    fn key() -> ProgressKey {
+        (AgentId::new(), JobId::new())
+    }
+
+    /// The caller opens the window after a write, as `handle_progress` does.
+    fn written(throttle: &ProgressThrottle<i32>, key: ProgressKey, now: Instant) {
+        assert_eq!(throttle.admit(key, 1, now), Admit::WriteNow(1));
+        throttle.wrote(key, now);
     }
 
     #[test]
     fn fr_ag_08_the_first_progress_is_written_at_once() {
         let throttle = ProgressThrottle::default();
-        assert_eq!(throttle.admit(job(), 1, Instant::now()), Admit::WriteNow(1));
+        assert_eq!(throttle.admit(key(), 1, Instant::now()), Admit::WriteNow(1));
     }
 
     #[test]
     fn fr_ag_08_progress_inside_one_second_keeps_only_the_latest() {
         let throttle = ProgressThrottle::default();
-        let id = job();
+        let id = key();
         let start = Instant::now();
-        assert_eq!(throttle.admit(id, 1, start), Admit::WriteNow(1));
+        written(&throttle, id, start);
         let second = start + Duration::from_millis(100);
         assert_eq!(
             throttle.admit(id, 2, second),
@@ -141,9 +162,9 @@ mod tests {
     #[test]
     fn fr_ag_08_progress_after_the_window_is_written_at_once() {
         let throttle = ProgressThrottle::default();
-        let id = job();
+        let id = key();
         let start = Instant::now();
-        assert_eq!(throttle.admit(id, 1, start), Admit::WriteNow(1));
+        written(&throttle, id, start);
         assert_eq!(
             throttle.admit(id, 2, start + INTERVAL + Duration::from_millis(1)),
             Admit::WriteNow(2)
@@ -153,9 +174,9 @@ mod tests {
     #[test]
     fn fr_ag_08_a_flush_opens_a_new_window() {
         let throttle = ProgressThrottle::default();
-        let id = job();
+        let id = key();
         let start = Instant::now();
-        throttle.admit(id, 1, start);
+        written(&throttle, id, start);
         throttle.admit(id, 2, start + Duration::from_millis(10));
         let flush = start + INTERVAL;
         assert_eq!(throttle.take_pending(id, flush), Some(2));
@@ -169,7 +190,50 @@ mod tests {
     fn fr_ag_08_jobs_do_not_share_a_window() {
         let throttle = ProgressThrottle::default();
         let now = Instant::now();
-        assert_eq!(throttle.admit(job(), 1, now), Admit::WriteNow(1));
-        assert_eq!(throttle.admit(job(), 1, now), Admit::WriteNow(1));
+        written(&throttle, key(), now);
+        assert_eq!(throttle.admit(key(), 1, now), Admit::WriteNow(1));
+    }
+
+    #[test]
+    fn fr_ag_08_agents_do_not_share_the_slot_of_a_job() {
+        let throttle = ProgressThrottle::default();
+        let owner = key();
+        let other = (AgentId::new(), owner.1);
+        let now = Instant::now();
+        written(&throttle, owner, now);
+        assert_eq!(throttle.admit(owner, 2, now), Admit::FlushAfter(INTERVAL));
+        assert_eq!(throttle.admit(other, 9, now), Admit::WriteNow(9));
+        assert_eq!(throttle.take_pending(owner, now + INTERVAL), Some(2));
+    }
+
+    #[test]
+    fn fr_ag_08_a_message_makes_no_slot_before_a_write() {
+        let throttle = ProgressThrottle::default();
+        let now = Instant::now();
+        for _ in 0..(MAX_JOBS + 1) {
+            assert!(matches!(throttle.admit(key(), 1, now), Admit::WriteNow(1)));
+        }
+        assert!(lock(&throttle.slots).is_empty());
+    }
+
+    #[test]
+    fn fr_ag_08_the_slots_stay_bounded() {
+        let throttle: ProgressThrottle<i32> = ProgressThrottle::default();
+        let now = Instant::now();
+        for _ in 0..(MAX_JOBS + 10) {
+            throttle.wrote(key(), now);
+        }
+        assert_eq!(lock(&throttle.slots).len(), MAX_JOBS);
+    }
+
+    #[test]
+    fn fr_ag_08_forget_drops_the_held_message() {
+        let throttle = ProgressThrottle::default();
+        let id = key();
+        let now = Instant::now();
+        written(&throttle, id, now);
+        throttle.admit(id, 2, now);
+        throttle.forget(id);
+        assert_eq!(throttle.take_pending(id, now + INTERVAL), None);
     }
 }

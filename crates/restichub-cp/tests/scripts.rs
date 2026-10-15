@@ -17,6 +17,7 @@ use queue_support::{Env, eventually, test_queue};
 
 const CANARY: &str = "CANARY-script-secret-90b2";
 const BODY_CANARY: &str = "CANARY-script-body-text";
+const ENV_CANARY: &str = "CANARY-script-env-value";
 
 fn bash() -> Vec<ScriptInterpreter> {
     vec![ScriptInterpreter::Bash, ScriptInterpreter::Sh]
@@ -384,13 +385,14 @@ async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile_and_a_viewer_re
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
+    let inline = json!([{"name": "PGPASSWORD", "kind": "string", "value": ENV_CANARY}]);
     let (status, created) = env
         .call(
             &env.admin,
             "POST",
             "/api/v1/profiles",
             Some(body(
-                json!([script("dump", "before", json!([]))]),
+                json!([script("dump", "before", inline.clone())]),
                 "with-script",
             )),
         )
@@ -412,15 +414,23 @@ async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile_and_a_viewer_re
             !as_viewer.to_string().contains(BODY_CANARY),
             "a Viewer reads a script body: {as_viewer}"
         );
+        assert!(
+            !as_viewer.to_string().contains(ENV_CANARY),
+            "a Viewer reads a script variable: {as_viewer}"
+        );
         assert!(as_viewer.to_string().contains("dump"), "{as_viewer}");
         let (_, as_operator) = env.call(&env.operator, "GET", &uri, None).await;
         assert!(
             as_operator.to_string().contains(BODY_CANARY),
             "{as_operator}"
         );
+        assert!(
+            as_operator.to_string().contains(ENV_CANARY),
+            "{as_operator}"
+        );
     }
     // An Operator can change another setting while the scripts stay as they are.
-    let unchanged = body(json!([script("dump", "before", json!([]))]), "with-script");
+    let unchanged = body(json!([script("dump", "before", inline)]), "with-script");
     let (status, saved) = env
         .call(
             &env.operator,

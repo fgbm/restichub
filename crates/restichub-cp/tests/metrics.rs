@@ -204,6 +204,40 @@ async fn scrape(env: &Env, token: Option<&str>) -> (StatusCode, Option<String>, 
     )
 }
 
+/// Pipes the exposition through the real `promtool check metrics` when the CI job provides it.
+fn check_with_promtool(text: &str) {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let Some(promtool) = std::env::var_os("RESTICHUB_TEST_PROMTOOL") else {
+        assert!(
+            std::env::var_os("RESTICHUB_REQUIRE_PROMTOOL").is_none(),
+            "RESTICHUB_REQUIRE_PROMTOOL is set but RESTICHUB_TEST_PROMTOOL is not"
+        );
+        return;
+    };
+    let mut child = Command::new(promtool)
+        .args(["check", "metrics"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("cannot start promtool");
+    child
+        .stdin
+        .take()
+        .expect("the stdin")
+        .write_all(text.as_bytes())
+        .expect("cannot write to promtool");
+    let output = child.wait_with_output().expect("promtool must finish");
+    assert!(
+        output.status.success(),
+        "promtool rejected the exposition: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn labelled<'a>(exposition: &'a Exposition, name: &'a str) -> impl Iterator<Item = &'a Sample> {
     exposition
         .samples
@@ -249,6 +283,7 @@ async fn ac_mn_03_the_metrics_endpoint_passes_a_strict_format_check() {
         content_type.as_deref(),
         Some("text/plain; version=0.0.4; charset=utf-8")
     );
+    check_with_promtool(&text);
     let exposition = parse(&text);
     for family in [
         "restichub_last_success_timestamp_seconds",

@@ -24,7 +24,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::scripts::ScriptDef;
+use crate::scripts::{EnvKind, ScriptDef};
 use crate::validation::{self, Reason};
 
 /// Limit in characters of a profile name. The derived value stays within the column.
@@ -346,10 +346,16 @@ pub struct ProfileView {
 }
 
 impl ProfileView {
-    /// Empties the script bodies for a reader who may not read scripts (FR-HK-12).
+    /// A string value may hold a credential that was typed into the script, so it goes with the body
+    /// (FR-HK-12).
     pub fn hide_script_bodies(&mut self) {
         for script in &mut self.scripts {
             script.body.clear();
+            for variable in &mut script.env {
+                if variable.kind == EnvKind::String {
+                    variable.value.clear();
+                }
+            }
         }
     }
 }

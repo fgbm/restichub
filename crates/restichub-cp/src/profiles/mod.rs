@@ -76,7 +76,7 @@ pub struct ProfileListQuery {
     security(("cookie" = []), ("bearer" = [])),
     params(ProfileListQuery),
     responses(
-        (status = 200, description = "The profiles of the tenant.", body = ProfileListResponse),
+        (status = 200, description = "The profiles of the tenant. For a Viewer, each script has an empty body and empty values of string variables.", body = ProfileListResponse),
         (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
     )
@@ -146,7 +146,7 @@ pub async fn job_limit_defaults(
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the profile.")),
     responses(
-        (status = 200, description = "The profile.", body = ProfileView),
+        (status = 200, description = "The profile. For a Viewer, each script has an empty body and empty values of string variables.", body = ProfileView),
         crate::error::ProtectedResponses,
         (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
     )
@@ -388,7 +388,7 @@ pub async fn preview_profile(
     let compiler_profile = compiler_profile_from_row(&profile)?;
     let plan = compile(&compiler_profile, &target).map_err(compile_error_to_api)?;
     let access = repository_access(&repository);
-    let steps = preview(&plan, &access).map_err(preview_error_to_api)?;
+    let steps = preview(&plan, &access, target.os).map_err(preview_error_to_api)?;
 
     Ok(Json(PreviewResponse {
         profile_id: profile_id.to_string(),
