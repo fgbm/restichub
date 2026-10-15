@@ -208,7 +208,9 @@ fn spawn_shutdown(shutdown: Option<Receiver<()>>, stop: watch::Sender<bool>) -> 
         }
     };
     std::thread::spawn(move || {
-        let _ = receiver.recv();
+        if receiver.recv().is_ok() {
+            tracing::info!("the agent stops: a stop signal arrived");
+        }
         let _ = stop.send(true);
     });
     Ok(())
