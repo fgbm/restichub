@@ -19,7 +19,7 @@ pub const SERVICE_NAME: &str = "restichub-agent";
 /// The Win32 error `ERROR_SERVICE_DOES_NOT_EXIST`, which means the service is not installed.
 const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
 
-/// How long a restart waits for the service to stop. A running job gets its stop grace first.
+/// A running job gets its stop grace first, so this bound is generous.
 const STOP_WAIT: Duration = Duration::from_secs(120);
 
 define_windows_service!(ffi_service_main, service_main);

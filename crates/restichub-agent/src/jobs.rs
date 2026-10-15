@@ -89,8 +89,8 @@ enum Dispatch {
 pub struct Jobs {
     program: PathBuf,
     expected_sha256: String,
-    /// Where the protected record lives. A job reads the hash from it at every spawn, so a
-    /// `restic update` takes effect without a restart (FR-AG-11, threat T20).
+    /// A job reads the hash from the protected file at every spawn, so a `restic update` takes
+    /// effect without a restart (FR-AG-11, threat T20).
     record: Option<Arc<Layout>>,
     cache: PathBuf,
     journal: Arc<Mutex<FileJournal>>,
@@ -151,7 +151,6 @@ impl Jobs {
         self
     }
 
-    /// The SHA-256 that the next spawn must match.
     pub(crate) fn expected_sha256(&self) -> Result<String> {
         match &self.record {
             Some(layout) => Ok(layout.read_record()?.sha256),

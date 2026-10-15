@@ -72,7 +72,7 @@ pub fn check_supported(version: &str) -> Result<()> {
     Ok(())
 }
 
-/// Tells whether `candidate` is an older release than `installed`.
+/// True when `candidate` precedes `installed` in release order.
 ///
 /// # Errors
 ///
@@ -251,7 +251,7 @@ fn github_recent(response: &Response) -> Result<Vec<String>> {
             Some((version, parsed))
         })
         .collect();
-    versions.sort_by(|a, b| b.1.cmp(&a.1));
+    versions.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     Ok(versions
         .into_iter()
         .map(|(version, _)| version)
@@ -352,7 +352,7 @@ impl Supply {
         }
     }
 
-    /// The version that the project marks as the latest release.
+    /// Asks the release source which release the project marks newest.
     ///
     /// # Errors
     ///

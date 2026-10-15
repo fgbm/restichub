@@ -75,7 +75,6 @@ pub struct ResticFileOptions {
     pub sums_signature: Option<PathBuf>,
 }
 
-/// The options of `restic update` (ADR-0038).
 #[derive(Debug, Default, Clone)]
 pub struct UpdateOptions {
     pub restic: ResticFileOptions,

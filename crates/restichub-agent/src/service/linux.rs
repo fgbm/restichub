@@ -127,7 +127,7 @@ fn refuse_rejected_roots(config: &Path) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error when `systemctl` fails.
+/// Returns an error when `systemctl` cannot restart the unit.
 pub fn restart_if_installed() -> Result<bool> {
     if !unit_path().exists() {
         return Ok(false);
