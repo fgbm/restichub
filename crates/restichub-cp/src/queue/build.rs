@@ -8,7 +8,7 @@
 //! repository only (AC-PR-03). [`crate::delivery::SecretReader`] writes the `secret_delivered` audit record in the
 //! transaction of the caller (AC-RP-03); the dispatcher commits before it sends.
 
-use restichub_compiler::{CompileError, JobLimits, ValidatedJob, compile};
+use restichub_compiler::{JobLimits, ValidatedJob, compile};
 use restichub_db::jobs::Job;
 use restichub_db::{
     AgentStatus, JobKind, JobResultCode, RepositoryId, SecretId, TenantTx, agents as agents_repo,
@@ -21,6 +21,7 @@ use restichub_proto::agent::v1::{
 use time::OffsetDateTime;
 
 use crate::delivery::DeliveryError;
+use crate::job_result_params::IncompatibleParams;
 use crate::jobs::{delivered_secrets, repository_access, timestamp};
 use crate::profiles::{compiler_profile_from_row, target_facts};
 use crate::server::AppState;
@@ -105,9 +106,8 @@ impl Refusal {
 pub enum BuildError {
     /// The job can never be sent as it is, so it fails with the typed reason.
     Refused(Refusal),
-    /// An option needs a newer restic than the agent has (AC-AG-09). The text names the option and
-    /// the needed version.
-    Incompatible(String),
+    /// An option needs a newer restic than the agent has (AC-AG-09).
+    Incompatible(IncompatibleParams),
     /// A database or a key error. The job stays queued and the next pass tries again.
     Transient(String),
 }
@@ -122,28 +122,6 @@ impl From<restichub_db::DbError> for BuildError {
 pub struct Built {
     pub job: ValidatedJob,
     pub secrets: Vec<SecretId>,
-}
-
-/// The result message of a job that the restic of the agent cannot run.
-pub(super) fn incompatible_message(error: &CompileError) -> Option<String> {
-    match error {
-        CompileError::IncompatibleOption {
-            option,
-            required,
-            installed,
-            ..
-        } => Some(format!(
-            "incompatible: {} needs restic {required}, the agent has {installed}",
-            option.flag()
-        )),
-        CompileError::UnsupportedRestic {
-            installed,
-            required,
-        } => Some(format!(
-            "incompatible: restic {required} is the minimum, the agent has {installed}"
-        )),
-        _ => None,
-    }
 }
 
 /// Recompiles the plan profile for the agent and assembles the job with the secrets of its own
@@ -400,8 +378,8 @@ async fn plan_steps(
     })?;
     let compiled = compile(&compiler_profile, &target).map_err(|error| {
         tracing::warn!(job = %job.id, cause = ?error, "the stored profile does not compile");
-        if let Some(message) = incompatible_message(&error) {
-            BuildError::Incompatible(message)
+        if let Some(params) = IncompatibleParams::of(&error) {
+            BuildError::Incompatible(params)
         } else if error.is_script() {
             BuildError::Refused(Refusal::ServerScriptsDisabled)
         } else {
@@ -459,32 +437,6 @@ mod tests {
                 ..
             }))
         ));
-    }
-
-    #[test]
-    fn ac_ag_09_the_message_of_an_incompatible_option_names_the_option_and_the_version() {
-        use restichub_compiler::{FieldPath, ResticOption, ResticVersion};
-
-        let error = CompileError::IncompatibleOption {
-            field: FieldPath::new("--ownership-by-name"),
-            option: ResticOption::RestoreOwnershipByName,
-            required: ResticVersion {
-                major: 0,
-                minor: 19,
-                patch: 0,
-            },
-            installed: ResticVersion::MIN_SUPPORTED,
-        };
-        assert_eq!(
-            incompatible_message(&error).as_deref(),
-            Some("incompatible: --ownership-by-name needs restic 0.19.0, the agent has 0.18.1")
-        );
-        assert_eq!(
-            incompatible_message(&CompileError::NoPaths {
-                os: restichub_compiler::OperatingSystem::Linux
-            }),
-            None
-        );
     }
 
     #[test]

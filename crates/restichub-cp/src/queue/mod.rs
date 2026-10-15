@@ -39,6 +39,7 @@ use zeroize::Zeroizing;
 use crate::agent_stream::JobSend;
 use crate::clock::Clock;
 use crate::delivery::{self, DeliveryError};
+use crate::job_result_params::{INCOMPATIBLE_CODE, IncompatibleParams};
 use crate::server::AppState;
 use build::BuildError;
 use select::Limits;
@@ -219,17 +220,16 @@ async fn dispatch_tenant(
                 tracing::warn!(job = %job.id, reason = code, "the queue fails a job");
                 fail(&mut tx, &job, code, result_code, now).await?;
             }
-            Prepared::Incompatible(message) => {
+            Prepared::Incompatible(params) => {
                 tx.rollback_to_savepoint(SAVEPOINT).await?;
-                tracing::warn!(job = %job.id, reason = %message, "the queue fails an incompatible job");
-                fail(
-                    &mut tx,
-                    &job,
-                    &message,
-                    restichub_db::JobResultCode::Incompatible,
-                    now,
-                )
-                .await?;
+                tracing::warn!(job = %job.id, ?params, "the queue fails an incompatible job");
+                let outcome = JobOutcome {
+                    status: JobStatus::Failed,
+                    result_code: restichub_db::JobResultCode::Incompatible,
+                    result_message: Some(INCOMPATIBLE_CODE.to_owned()),
+                    result_params: Some(params.to_value()),
+                };
+                job_repo::finish(&mut tx, job.id, &outcome, now).await?;
             }
             Prepared::Skip => {
                 tx.rollback_to_savepoint(SAVEPOINT).await?;
@@ -249,9 +249,8 @@ async fn dispatch_tenant(
 enum Prepared {
     Send(SignedJob, Vec<restichub_proto::AgentCapability>),
     Fail(&'static str, restichub_db::JobResultCode),
-    /// An option of the profile needs a newer restic than the agent reports (AC-AG-09). The text
-    /// names the option and the needed version.
-    Incompatible(String),
+    /// An option of the profile needs a newer restic than the agent reports (AC-AG-09).
+    Incompatible(IncompatibleParams),
     /// A database or a key error. The job stays as it is and the next pass tries again.
     Skip,
 }
@@ -269,7 +268,7 @@ async fn first_send(
         Err(BuildError::Refused(refusal)) => {
             return Ok(Prepared::Fail(refusal.code(), refusal.result_code()));
         }
-        Err(BuildError::Incompatible(message)) => return Ok(Prepared::Incompatible(message)),
+        Err(BuildError::Incompatible(params)) => return Ok(Prepared::Incompatible(params)),
         Err(BuildError::Transient(cause)) => {
             tracing::warn!(job = %job.id, %cause, "the queue could not build a job");
             return Ok(Prepared::Skip);
@@ -486,6 +485,7 @@ async fn fail(
         status: JobStatus::Failed,
         result_code,
         result_message: Some(message.to_owned()),
+        result_params: None,
     };
     job_repo::finish(tx, job.id, &outcome, now).await?;
     Ok(())

@@ -57,6 +57,7 @@ use uuid::Uuid;
 use crate::context::{Operation, RequestContext};
 use crate::delivery::{DeliveryError, SecretReader};
 use crate::error::{ApiError, map_write_error};
+use crate::job_result_params::IncompatibleParams;
 use crate::json::ApiJson;
 use crate::queue::retry;
 use crate::refusal_audit::{self, MessageRefusal};
@@ -110,6 +111,9 @@ pub struct JobView {
     /// A machine-readable error code from the agent. The user interface translates it (NFR-DOC-04).
     /// It never holds a secret.
     pub result_message: Option<String>,
+    /// The typed values behind `result_message`: the user interface builds its text from them.
+    /// Null when the message needs none.
+    pub result_params: Option<IncompatibleParams>,
     /// In RFC 3339.
     pub created_at: String,
     /// In RFC 3339.
@@ -155,6 +159,10 @@ impl From<&Job> for JobView {
             status: job.status,
             result_code: job.result_code,
             result_message: job.result_message.clone(),
+            result_params: job
+                .result_params
+                .as_ref()
+                .and_then(IncompatibleParams::from_value),
             created_at: format_time(job.created_at),
             updated_at: format_time(job.updated_at),
             finished_at: job.finished_at.map(format_time),
@@ -529,6 +537,7 @@ pub async fn handle_job_rejected(
         status: JobStatus::Failed,
         result_code: JobResultCode::Failed,
         result_message: Some(reason.to_owned()),
+        result_params: None,
     };
     if let Err(error) = job_repo::finish(&mut tx, job_id, &outcome, now).await {
         tracing::warn!(job = %job_id, %error, "the rejection could not update the job");
@@ -714,6 +723,7 @@ pub async fn handle_job_result(
             status: JobStatus::Failed,
             result_code: JobResultCode::Cancelled,
             result_message: None,
+            result_params: None,
         }
     } else {
         outcome
@@ -727,6 +737,7 @@ pub async fn handle_job_result(
                     status: JobStatus::Failed,
                     result_code: JobResultCode::AccessError,
                     result_message: Some(ACCESS_ERROR_CODE.to_owned()),
+                    result_params: None,
                 },
                 Ok(_) => outcome,
                 Err(error) => {
@@ -744,6 +755,7 @@ pub async fn handle_job_result(
             status: JobStatus::Succeeded,
             result_code: JobResultCode::SucceededWithWarnings,
             result_message: Some(FORGET_SELECTED_NOTHING.to_owned()),
+            result_params: None,
         }
     } else {
         outcome
@@ -1054,6 +1066,7 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         status,
         result_code,
         result_message,
+        result_params: None,
     })
 }
 

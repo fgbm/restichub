@@ -2211,6 +2211,14 @@ export interface components {
          * @enum {string}
          */
         HookPhase: "before" | "after" | "on_success" | "on_error" | "finally";
+        IncompatibleParams: {
+            /** @description The restic version of the agent, such as `0.18.1`. */
+            installed_version: string;
+            /** @description The restic option that needs a newer version. Null when the whole restic version is too old. */
+            option?: string | null;
+            /** @description The version that the option needs, such as `0.19.0`. */
+            required_version: string;
+        };
         /** @description The mode and the setup state of the installation. */
         InstanceResponse: {
             /** @description True while the installation has no administrator. */
@@ -2344,6 +2352,9 @@ export interface components {
              *     It never holds a secret.
              */
             result_message?: string | null;
+            /** @description The typed values behind `result_message`: the user interface builds its text from them.
+             *     Null when the message needs none. */
+            result_params?: components["schemas"]["IncompatibleParams"] | null;
             /** @description In RFC 3339. The earliest time at which the queue sends the job. */
             run_at: string;
             /** @description In RFC 3339. Null until the agent starts the job. */

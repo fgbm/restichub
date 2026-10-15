@@ -302,9 +302,14 @@ async fn ac_ag_09_an_agent_with_an_older_restic_gets_no_job_and_the_status_is_in
     let body = env.job(job).await;
     assert_eq!(body["status"], "failed");
     assert_eq!(body["result_code"], "incompatible");
+    assert_eq!(body["result_message"], "incompatible");
     assert_eq!(
-        body["result_message"],
-        "incompatible: restic 0.18.1 is the minimum, the agent has 0.1.0"
+        body["result_params"],
+        json!({
+            "option": null,
+            "required_version": "0.18.1",
+            "installed_version": "0.1.0",
+        })
     );
     assert!(agent.try_job(Duration::from_millis(300)).await.is_none());
     assert_eq!(
@@ -312,5 +317,35 @@ async fn ac_ag_09_an_agent_with_an_older_restic_gets_no_job_and_the_status_is_in
         0,
         "a refused job reads no secret"
     );
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_profile_that_no_longer_compiles_fails_the_job_with_a_typed_reason() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("compile-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(repository, json!({})).await;
+    let plan = env.create_plan(profile, agent.id).await;
+    let job = env.run_plan(plan).await;
+
+    // The profile loses its paths after the job was queued.
+    let mut tx = env.scoped().await;
+    sqlx::query("UPDATE profiles SET paths_all = '{}' WHERE id = $1")
+        .bind(profile)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot update the profile");
+    tx.commit().await.expect("cannot commit the update");
+    env.pass().await;
+
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["result_code"], "config_error");
+    assert_eq!(body["result_message"], "compile_failed");
+    assert!(agent.try_job(Duration::from_millis(300)).await.is_none());
     env.db.cleanup().await;
 }

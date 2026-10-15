@@ -19,7 +19,8 @@
 		StatusTone,
 		TableColumn
 	} from '#lib/components/ui/index.ts';
-	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
+	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { jobReason } from '#lib/job-reason.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatDuration, formatLocalTime } from '#lib/format.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -127,10 +128,7 @@
 
 	function reasonOf(job: Job): string | null {
 		if (isCancelled(job)) return null;
-		const code =
-			job.result_message ?? (job.result_code === 'repository_locked' ? job.result_code : null);
-		if (!code) return null;
-		return tOr(`jobs.reason.${code}`, code);
+		return jobReason(job);
 	}
 
 	function durationOf(job: Job): string {

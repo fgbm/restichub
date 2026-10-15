@@ -729,6 +729,9 @@ export const en = {
 	'jobs.errorCode.job_invalid': 'the job is not valid',
 	'jobs.errorCode.unsupported_kind': 'unsupported job kind',
 	'jobs.errorCode.incompatible': 'the agent restic does not support an option',
+	'jobs.reason.incompatible': 'The restic of the agent does not support this job. Update restic on the host.',
+	'jobs.reason.incompatibleOption': 'The option {option} needs restic {required}. The agent has restic {installed}.',
+	'jobs.reason.incompatibleVersion': 'The agent has restic {installed}. ResticHub needs restic {required} or later.',
 	'jobs.reason.interrupted': 'Interrupted: the agent restarted while scripts ran',
 	'jobs.reason.timed_out': 'The job ran longer than its maximum duration.',
 	'jobs.reason.stalled':

@@ -29,6 +29,7 @@ pub mod instance;
 pub mod job_api;
 pub mod job_data;
 pub mod job_detail;
+pub mod job_result_params;
 pub mod job_signing;
 pub mod jobs;
 pub mod json;
