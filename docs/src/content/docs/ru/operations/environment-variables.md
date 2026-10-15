@@ -121,4 +121,4 @@ description: Все переменные RESTICHUB_, которые читают
 
 ## Переменные сборки и тестов
 
-`RESTICHUB_BUILD_VERSION` задаёт ревизию в версии сборки. Её устанавливает CI при сборке выпуска. Переменные `RESTICHUB_TEST_DATABASE_URL`, `RESTICHUB_TEST_RESTIC`, `RESTICHUB_TEST_DETACHED` и `RESTICHUB_REQUIRE_RESTIC` нужны для тестов проекта. Не задавайте их в рабочей установке.
+`RESTICHUB_BUILD_VERSION` задаёт ревизию в версии сборки. `RESTICHUB_RELEASE_VERSION` задаёт версию выпуска с суффиксом предварительной версии, например `0.1.0-rc.2`. Сборка сообщает `<версия>+<ревизия>`. CI устанавливает обе переменные при сборке выпуска. Переменные `RESTICHUB_TEST_DATABASE_URL`, `RESTICHUB_TEST_RESTIC`, `RESTICHUB_TEST_DETACHED` и `RESTICHUB_REQUIRE_RESTIC` нужны для тестов проекта. Не задавайте их в рабочей установке.

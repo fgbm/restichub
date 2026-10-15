@@ -121,4 +121,4 @@ The agent also honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. See [Register
 
 ## Build and test variables
 
-`RESTICHUB_BUILD_VERSION` sets the revision in the version of a build. The CI sets it when it builds a release. The variables `RESTICHUB_TEST_DATABASE_URL`, `RESTICHUB_TEST_RESTIC`, `RESTICHUB_TEST_DETACHED` and `RESTICHUB_REQUIRE_RESTIC` are for the tests of the project. Do not set them in an installation.
+`RESTICHUB_BUILD_VERSION` sets the revision in the version of a build. `RESTICHUB_RELEASE_VERSION` sets the version of a release, with its pre-release suffix, for example `0.1.0-rc.2`. The build reports `<version>+<revision>`. The CI sets both when it builds a release. The variables `RESTICHUB_TEST_DATABASE_URL`, `RESTICHUB_TEST_RESTIC`, `RESTICHUB_TEST_DETACHED` and `RESTICHUB_REQUIRE_RESTIC` are for the tests of the project. Do not set them in an installation.
