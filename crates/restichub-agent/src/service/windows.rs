@@ -63,8 +63,15 @@ fn run_service() -> Result<()> {
     ))?;
     let result = crate::commands::run(&crate::paths::config_dir(), Some(receiver));
     // A failing run leaves a non-zero service exit code, so the SCM and an operator see it.
-    let exit_code = match result {
+    let exit_code = match &result {
         Ok(()) => ServiceExitCode::NO_ERROR,
+        Err(error)
+            if error
+                .downcast_ref::<crate::commands::NoIdentity>()
+                .is_some() =>
+        {
+            ServiceExitCode::ServiceSpecific(u32::from(crate::commands::EXIT_NO_IDENTITY))
+        }
         Err(_) => ServiceExitCode::Win32(1),
     };
     status_handle.set_service_status(status(
@@ -164,14 +171,64 @@ pub fn install(restic: &Path) -> Result<()> {
         ]),
     })?;
     service.set_failure_actions_on_non_crash_failures(true)?;
-    if service.query_status()?.current_state != ServiceState::Running {
-        // A start failure is reported, not hidden behind a success message.
-        service
-            .start(&[] as &[&OsStr])
-            .context("cannot start the service")?;
-    }
-    println!("the service {SERVICE_NAME} is installed and started");
+    // A running service restarts, so that it uses the new executable path.
+    stop_and_wait(&service)?;
+    // A start failure is reported, not hidden behind a success message.
+    service
+        .start(&[] as &[&OsStr])
+        .context("cannot start the service")?;
     Ok(())
+}
+
+/// Stops the service when it runs and waits until it is stopped.
+fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
+    if service.query_status()?.current_state == ServiceState::Stopped {
+        return Ok(());
+    }
+    service.stop().context("cannot stop the service")?;
+    let deadline = std::time::Instant::now() + STOP_WAIT;
+    while service.query_status()?.current_state != ServiceState::Stopped {
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "the service {SERVICE_NAME} did not stop in time; start it by hand after it stops"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Ok(())
+}
+
+/// Asks the service control manager for the state of the service.
+///
+/// # Errors
+///
+/// Returns an error when the manager cannot be opened or queried.
+pub fn state() -> Result<super::ServiceState> {
+    use super::{ServiceState as Reported, StartType};
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .context("cannot open the service manager")?;
+    let access = ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG;
+    let service = match manager.open_service(SERVICE_NAME, access) {
+        Ok(service) => service,
+        Err(windows_service::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
+        {
+            return Ok(Reported::NOT_INSTALLED);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let running = service.query_status()?.current_state == ServiceState::Running;
+    let start_type = match service.query_config()?.start_type {
+        ServiceStartType::AutoStart => StartType::Automatic,
+        ServiceStartType::OnDemand => StartType::Manual,
+        ServiceStartType::Disabled => StartType::Disabled,
+        _ => StartType::Unknown,
+    };
+    Ok(Reported {
+        installed: true,
+        running,
+        start_type,
+    })
 }
 
 /// Stops the Windows service, waits for it and starts it again, when it is installed.
@@ -192,18 +249,7 @@ pub fn restart_if_installed() -> Result<bool> {
         }
         Err(error) => return Err(error.into()),
     };
-    if service.query_status()?.current_state != ServiceState::Stopped {
-        service.stop().context("cannot stop the service")?;
-        let deadline = std::time::Instant::now() + STOP_WAIT;
-        while service.query_status()?.current_state != ServiceState::Stopped {
-            if std::time::Instant::now() >= deadline {
-                anyhow::bail!(
-                    "the service {SERVICE_NAME} did not stop in time; start it by hand after it stops"
-                );
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        }
-    }
+    stop_and_wait(&service)?;
     service
         .start(&[] as &[&OsStr])
         .context("cannot start the service")?;

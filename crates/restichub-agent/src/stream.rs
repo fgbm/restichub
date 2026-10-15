@@ -236,6 +236,7 @@ pub async fn run(
         }
         let active = rotated.as_ref().unwrap_or(identity);
         warn_when_expired(active, options.timeouts.now);
+        let cp_url = active.cp_url.as_str();
         let (refused, healthy) = match connect_once(
             active,
             dir,
@@ -252,13 +253,29 @@ pub async fn run(
                     agent_id = %identity.agent_id,
                     "the control plane refused the agent identity; check that the agent is enrolled and not revoked"
                 );
+                crate::connection::record_failure(
+                    dir,
+                    cp_url,
+                    "the control plane refused the agent identity; check that the agent is enrolled and not revoked",
+                );
                 (true, false)
             }
             // The stream already logged the reason (FR-PR-09).
-            Ok(Disconnect::Incompatible) => (true, false),
-            Ok(Disconnect::Closed { healthy }) => (false, healthy),
+            Ok(Disconnect::Incompatible) => {
+                crate::connection::record_failure(
+                    dir,
+                    cp_url,
+                    "the control plane refused the protocol version of the agent; update the agent or the control plane",
+                );
+                (true, false)
+            }
+            Ok(Disconnect::Closed { healthy }) => {
+                crate::connection::record_closed(dir, cp_url);
+                (false, healthy)
+            }
             Err(error) => {
                 tracing::warn!(agent_id = %identity.agent_id, %error, "the agent stream stopped");
+                crate::connection::record_failure(dir, cp_url, &format!("{error:#}"));
                 (false, false)
             }
         };
@@ -354,6 +371,7 @@ pub async fn connect_once(
         Err(status) if refused(status.code()) => return Ok(Disconnect::Refused),
         Err(status) => return Err(anyhow::anyhow!("the stream did not open: {status}")),
     };
+    crate::connection::record_connected(dir, &identity.cp_url);
     let mut inbound = response.into_inner();
     send_hello(&tx, restic_version, jobs.restore_roots()).await?;
     // The results go through this stream now, and a result that a dropped stream lost reaches the

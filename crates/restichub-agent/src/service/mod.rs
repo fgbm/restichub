@@ -1,6 +1,8 @@
 //! The operating system service of the agent (FR-AG-01, FR-IN-08).
 
-use anyhow::Result;
+use std::path::Path;
+
+use anyhow::{Context as _, Result};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -12,28 +14,109 @@ mod location;
 #[cfg(windows)]
 pub use windows::run_as_service;
 
-/// Writes and enables the operating system service (FR-IN-08).
+/// The start type of the installed service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartType {
+    Automatic,
+    Manual,
+    Disabled,
+    Unknown,
+}
+
+impl std::fmt::Display for StartType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Automatic => "automatic",
+            Self::Manual => "manual",
+            Self::Disabled => "disabled",
+            Self::Unknown => "unknown",
+        })
+    }
+}
+
+/// What the operating system says about the agent service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServiceState {
+    pub installed: bool,
+    pub running: bool,
+    pub start_type: StartType,
+}
+
+impl ServiceState {
+    /// The state of a host without the service.
+    pub const NOT_INSTALLED: Self = Self {
+        installed: false,
+        running: false,
+        start_type: StartType::Unknown,
+    };
+}
+
+/// The operating system service manager (systemd or the Windows service control manager).
+///
+/// A test replaces it, so the setup logic runs without a real manager (FR-IN-08).
+pub trait ServiceManager {
+    /// Writes or updates the service for the running executable, enables it and (re)starts it.
+    /// A second call updates the executable path and restarts the service.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the service cannot be written, enabled or started.
+    fn install_and_start(&self, restic: &Path) -> Result<()>;
+
+    /// Reads the state of the service.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the manager cannot be asked.
+    fn state(&self) -> Result<ServiceState>;
+}
+
+/// The service manager of this host.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HostService;
+
+impl ServiceManager for HostService {
+    fn install_and_start(&self, restic: &Path) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            linux::install(restic)
+        }
+        #[cfg(windows)]
+        {
+            windows::install(restic)
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        {
+            let _ = restic;
+            anyhow::bail!("the service install is a 1.0 feature on this operating system")
+        }
+    }
+
+    fn state(&self) -> Result<ServiceState> {
+        #[cfg(target_os = "linux")]
+        {
+            linux::state()
+        }
+        #[cfg(windows)]
+        {
+            windows::state()
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        {
+            Ok(ServiceState::NOT_INSTALLED)
+        }
+    }
+}
+
+/// Refuses an agent or restic location that another account can change (T20, FR-IN-08).
 ///
 /// # Errors
 ///
-/// Returns an error when the service cannot be written or enabled, when restic cannot be installed,
-/// or when the operating system is not supported in the MVP.
-pub fn install(restic: &crate::cli::ResticFileOptions) -> Result<()> {
-    crate::preflight::ensure_elevated()?;
-    crate::preflight::prepare_directories(&crate::paths::config_dir(), &crate::paths::cache_dir())?;
-    let restic = crate::commands::ensure_restic(restic)?;
-    #[cfg(target_os = "linux")]
-    {
-        linux::install(restic.path())
-    }
-    #[cfg(windows)]
-    {
-        windows::install(restic.path())
-    }
-    #[cfg(not(any(target_os = "linux", windows)))]
-    {
-        anyhow::bail!("the service install is a 1.0 feature on this operating system")
-    }
+/// Returns an error when the executable, restic or a parent directory is writable by another
+/// account.
+pub fn check_install_location(restic: &Path) -> Result<()> {
+    let exe = std::env::current_exe().context("cannot find the agent executable")?;
+    location::check(&exe, restic)
 }
 
 /// Stops and removes the operating system service (FR-IN-08).
