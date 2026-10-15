@@ -21,6 +21,8 @@ COPY crates ./crates
 COPY proto ./proto
 # The Rust build embeds `ui/build` at compile time.
 COPY --from=ui /src/ui/build ./ui/build
+# CI passes the short revision; the control plane reports it as the build part of its version.
+ARG RESTICHUB_BUILD_VERSION
 RUN cargo build --release --locked -p restichub-cp
 
 # Stage 3: the runtime image.
