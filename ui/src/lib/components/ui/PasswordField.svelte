@@ -11,6 +11,7 @@
 		error,
 		id,
 		required = false,
+		class: className,
 		...rest
 	}: {
 		value?: string;
@@ -36,7 +37,7 @@
 			id={inputId}
 			type={visible ? 'text' : 'password'}
 			bind:value
-			class="rh-input"
+			class={['rh-input', className]}
 			aria-invalid={error ? 'true' : undefined}
 			aria-describedby={describedBy}
 			{required}

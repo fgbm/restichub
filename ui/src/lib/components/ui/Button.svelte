@@ -17,6 +17,7 @@
 		type = 'button',
 		onclick,
 		children,
+		class: className,
 		...rest
 	}: {
 		variant?: Variant;
@@ -36,7 +37,7 @@
 
 <button
 	{type}
-	class="btn btn--{variant} btn--{size}"
+	class={['btn', `btn--${variant}`, `btn--${size}`, className]}
 	class:btn--icon={iconOnly}
 	class:btn--full={full}
 	disabled={disabled || loading}

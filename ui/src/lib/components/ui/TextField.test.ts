@@ -19,4 +19,9 @@ describe('TextField', () => {
 		expect(input).toHaveAttribute('aria-invalid', 'true');
 		expect(input).toHaveAccessibleDescription('Required');
 	});
+
+	it('keeps the base class next to a class of the caller', () => {
+		render(TextField, { props: { label: 'Name', class: 'extra' } });
+		expect(screen.getByLabelText('Name')).toHaveClass('rh-input', 'extra');
+	});
 });

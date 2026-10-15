@@ -269,7 +269,26 @@ export class MockScripts {
 					purpose: 'hook_secret',
 					created_at: now(),
 					updated_at: now(),
-					created_by: 'u_01'
+					created_by: 'u_01',
+					used_by: [{ kind: 'profile', id: 'p_3', name: 'db-nightly' }]
+				},
+				{
+					id: 's_repo',
+					name: 'primary-s3.password',
+					purpose: 'repository_password',
+					created_at: now(),
+					updated_at: now(),
+					created_by: 'u_01',
+					used_by: [{ kind: 'repository', id: 'r_1', name: 'primary-s3' }]
+				},
+				{
+					id: 's_spare',
+					name: 'spare.token',
+					purpose: 'hook_secret',
+					created_at: now(),
+					updated_at: now(),
+					created_by: 'u_01',
+					used_by: []
 				}
 			];
 			this.templates = [
@@ -309,10 +328,36 @@ export class MockScripts {
 			purpose: request.purpose,
 			created_at: now(),
 			updated_at: now(),
-			created_by: 'u_01'
+			created_by: 'u_01',
+			used_by: []
 		};
 		this.secrets = [...this.secrets, secret];
 		return secret;
+	}
+
+	replaceSecretValue(id: string): void {
+		const secret = this.secrets.find((item) => item.id === id);
+		if (!secret) throw problem('not_found', 'id', 'unknown');
+		this.secrets = this.secrets.map((item) =>
+			item.id === id ? { ...item, updated_at: now() } : item
+		);
+	}
+
+	deleteSecret(id: string): void {
+		const secret = this.secrets.find((item) => item.id === id);
+		if (!secret) throw problem('not_found', 'id', 'unknown');
+		if (secret.used_by.length > 0) {
+			throw Object.assign(new Error('conflict'), {
+				problem: {
+					type: 'about:blank',
+					title: 'Conflict',
+					status: 409,
+					code: 'conflict',
+					request_id: ''
+				}
+			});
+		}
+		this.secrets = this.secrets.filter((item) => item.id !== id);
 	}
 
 	listScriptTemplates(): ScriptTemplate[] {

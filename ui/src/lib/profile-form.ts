@@ -133,9 +133,6 @@ function joinLines(values: string[] | undefined): string {
 	return (values ?? []).join('\n');
 }
 
-// App execution aliases in this folder are reparse points that restic rejects as "irregular".
-export const WINDOWS_APPS_EXCLUDE = 'C:\\Users\\*\\AppData\\Local\\Microsoft\\WindowsApps';
-
 export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): ProfileDraft {
 	return {
 		name: '',
@@ -144,7 +141,7 @@ export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): Prof
 		pathsWindows: '',
 		pathsLinux: '',
 		pathsMacos: '',
-		excludes: WINDOWS_APPS_EXCLUDE,
+		excludes: '',
 		excludeFiles: '',
 		tags: [],
 		vss: false,
@@ -165,7 +162,7 @@ export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): Prof
 		stallMinutes: defaults ? String(defaults.stall_timeout_minutes) : '',
 		maxDurationHours: defaults ? minutesToHours(defaults.max_duration_minutes) : '',
 		enabled: {
-			excludes: true,
+			excludes: false,
 			tags: false,
 			options: false,
 			retention: true,

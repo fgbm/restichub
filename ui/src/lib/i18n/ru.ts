@@ -302,6 +302,55 @@ export const ru: Record<MessageKey, string> = {
 	'tokens.valueNote':
 		'Значение токена показывается один раз. Отзовите токен, чтобы остановить внешние инструменты, которые его используют.',
 
+	'nav.secrets': 'Секреты',
+	'secrets.title': 'Секреты',
+	'secrets.description': 'Сохранённые значения для репозиториев, скриптов и каналов уведомлений.',
+	'secrets.note':
+		'После сохранения ResticHub больше не показывает значение. Чтобы изменить его, замените значение. Сервер управления шифрует каждое значение.',
+	'secrets.create': 'Добавить секрет',
+	'secrets.createTitle': 'Добавить секрет',
+	'secrets.created': 'Секрет добавлен.',
+	'secrets.name': 'Название',
+	'secrets.namePlaceholder': 'db.password',
+	'secrets.nameHint': 'Допустимы a–z, 0–9, точка, подчёркивание и дефис. До 64 символов.',
+	'secrets.purpose': 'Назначение',
+	'secrets.value': 'Значение',
+	'secrets.valueHint':
+		'ResticHub больше никогда не покажет это значение. Его можно только заменить.',
+	'secrets.usedBy': 'Где используется',
+	'secrets.unused': 'Не используется',
+	'secrets.replacedAt': 'Значение заменено',
+	'secrets.searchPlaceholder': 'Поиск секретов',
+	'secrets.manage': 'Управление секретами',
+	'secrets.purpose.repository_password': 'Пароль репозитория',
+	'secrets.purpose.s3_access_key': 'Ключ доступа S3',
+	'secrets.purpose.s3_secret_key': 'Секретный ключ S3',
+	'secrets.purpose.rest_server_password': 'Пароль REST-сервера',
+	'secrets.purpose.hook_secret': 'Секрет скрипта',
+	'secrets.purpose.webhook_secret': 'Ключ подписи канала',
+	'secrets.purpose.webhook_url': 'Адрес канала',
+	'secrets.usage.repository': 'Репозиторий',
+	'secrets.usage.profile': 'Профиль',
+	'secrets.usage.channel': 'Канал',
+	'secrets.usage.jobTemplate': 'Шаблон задания',
+	'secrets.replace': 'Заменить значение',
+	'secrets.replaceTitle': 'Заменить значение секрета',
+	'secrets.replaceHidden': 'Старое значение остаётся скрытым',
+	'secrets.replaceHiddenText':
+		'Замена записывает новое значение. ResticHub не показывает старое значение.',
+	'secrets.replaceDependents':
+		'Все задания, которые используют этот секрет, получат новое значение при следующей доставке на агент. Выполняющееся задание сохраняет старое значение.',
+	'secrets.newValue': 'Новое значение',
+	'secrets.replaced': 'Значение заменено.',
+	'secrets.delete': 'Удалить',
+	'secrets.deleteTitle': 'Удалить секрет?',
+	'secrets.deleteBody': 'ResticHub навсегда удалит секрет {name}. Отменить это нельзя.',
+	'secrets.deleteInUseTitle': 'Секрет используется',
+	'secrets.deleteInUseBody':
+		'Нельзя удалить {name}, пока его используют эти объекты. Сначала уберите секрет из них.',
+	'secrets.deleteRefused': 'Секрет используется объектом, поэтому ResticHub не может его удалить.',
+	'secrets.deleted': 'Секрет удалён.',
+
 	// Hosts
 	'hosts.title': 'Хосты',
 	'hosts.description': 'Все компьютеры организации с агентом ResticHub.',
@@ -1452,8 +1501,6 @@ export const ru: Record<MessageKey, string> = {
 	'pe.excludes.lead':
 		'Что пропустить. Шаблоны вида <code>*.tmp</code> или пути. По одной записи в строке.',
 	'pe.excludes.filesHelp': 'Путь к файлу со списком шаблонов на хосте.',
-	'pe.excludes.windowsHint':
-		'Новый профиль пропускает папку WindowsApps на хостах Windows. В ней лежат псевдонимы запуска приложений, и restic падает на них с ошибкой.',
 	'pe.tags.lead': 'Метки снимков этого профиля. По ним снимки ищут и отбирают правила хранения.',
 	'pe.tags.help': 'Через запятую, пробел или Enter. Каждый тег станет чипом.',
 	'pe.tags.placeholder': 'Добавьте тег и нажмите Enter',

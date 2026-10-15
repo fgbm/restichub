@@ -28,7 +28,8 @@ const SECRET: Secret = {
 	name: 'db.password',
 	purpose: 'hook_secret',
 	created_at: '2026-01-01T00:00:00Z',
-	updated_at: '2026-01-01T00:00:00Z'
+	updated_at: '2026-01-01T00:00:00Z',
+	used_by: []
 };
 
 function agent(overrides: Partial<Agent> = {}): Agent {
