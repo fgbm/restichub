@@ -1377,6 +1377,11 @@ export interface components {
             revoked_at?: string | null;
             revoked_by_user_id?: string | null;
             status: components["schemas"]["AgentStatus"];
+            /**
+             * @description In RFC 3339. Null unless a connection presented the certificate that the last rotation
+             *     replaced. It can mean a copy of the old key (T17).
+             */
+            superseded_certificate_used_at?: string | null;
             version_status: components["schemas"]["AgentVersionStatus"];
         };
         /**
@@ -1483,6 +1488,7 @@ export interface components {
          * @example agent_enroll
          * @example agent_revoke
          * @example agent_certificate_rotate
+         * @example agent_superseded_certificate_used
          * @example agent_update
          * @example remote_install
          * @example tenant_create
@@ -1666,6 +1672,13 @@ export interface components {
             /** Format: int64 */
             packs_checked: number;
             repair_suggested: boolean;
+        };
+        CompromiseRequest: {
+            /**
+             * @description The identifier of the current job signing key, as the caller read it. A different current
+             *     key gives HTTP 409, so a repeated call does not retire the key set that the first call made.
+             */
+            expected_current_key_id: string;
         };
         CompromiseResponse: {
             /** @description The identifiers of the keys that the action retired for a compromise. */
@@ -5196,7 +5209,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompromiseRequest"];
+            };
+        };
         responses: {
             /** @description The key set is rotated. */
             200: {
@@ -5218,6 +5235,15 @@ export interface operations {
             };
             /** @description The role is not sufficient. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The current key is not the expected one. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

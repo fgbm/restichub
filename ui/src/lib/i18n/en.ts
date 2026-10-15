@@ -322,6 +322,7 @@ export const en = {
 	'hosts.certExpired': 'Expired {time}',
 	'hosts.certRotated': 'Renewed {time}',
 	'hosts.certNotRotated': 'Not renewed yet',
+	'hosts.certSuperseded': 'Old certificate used',
 	'hosts.versionUpdate': 'Update available',
 	'hosts.versionUnsupported': 'Unsupported version',
 	'hosts.versionTitle': 'Protocol {protocol} · control plane {version}',

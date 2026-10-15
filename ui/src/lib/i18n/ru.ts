@@ -328,6 +328,7 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.certExpired': 'Истёк {time}',
 	'hosts.certRotated': 'Обновлён {time}',
 	'hosts.certNotRotated': 'Ещё не обновлялся',
+	'hosts.certSuperseded': 'Использован старый сертификат',
 	'hosts.versionUpdate': 'Доступно обновление',
 	'hosts.versionUnsupported': 'Версия не поддерживается',
 	'hosts.versionTitle': 'Протокол {protocol} · сервер управления {version}',

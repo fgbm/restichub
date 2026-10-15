@@ -84,6 +84,7 @@ function agent(overrides: Record<string, unknown> = {}) {
 		certificate_serial: '0f01',
 		certificate_expires_at: FUTURE,
 		last_certificate_rotation_at: null,
+		superseded_certificate_used_at: null,
 		protocol_version: '1.1',
 		control_plane_version: '0.4.2',
 		version_status: 'current',
@@ -206,6 +207,34 @@ describe('the Hosts screen', () => {
 			'title',
 			'Protocol 0.9 · control plane 0.4.2'
 		);
+	});
+
+	it('hides the update badge of a revoked host (FR-PR-09)', async () => {
+		mocks.listAgents.mockResolvedValue([
+			agent({ id: 'a_01', hostname: 'host-live', version_status: 'update_available' }),
+			agent({
+				id: 'a_02',
+				hostname: 'host-gone',
+				version_status: 'update_available',
+				status: 'revoked',
+				revoked_at: PAST
+			})
+		]);
+		render(Hosts);
+
+		await screen.findByText('host-gone');
+		expect(screen.getAllByText('Update available')).toHaveLength(1);
+	});
+
+	it('warns about a host that presented a replaced certificate (T17)', async () => {
+		mocks.listAgents.mockResolvedValue([
+			agent({ id: 'a_01', hostname: 'host-clean' }),
+			agent({ id: 'a_02', hostname: 'host-clone', superseded_certificate_used_at: PAST })
+		]);
+		render(Hosts);
+
+		await screen.findByText('host-clone');
+		expect(screen.getAllByText('Old certificate used')).toHaveLength(1);
 	});
 
 	it('shows the certificate expiry, the last rotation and warns before the expiry (FR-ID-03)', async () => {

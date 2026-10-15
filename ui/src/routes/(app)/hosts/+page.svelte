@@ -311,7 +311,7 @@
 				version: agent.control_plane_version
 			})}>{agent.agent_version}</span
 		>
-		{#if agent.version_status === 'update_available'}
+		{#if agent.version_status === 'update_available' && agent.status !== 'revoked'}
 			<Badge tone="warning">{t('hosts.versionUpdate')}</Badge>
 		{:else if agent.version_status === 'unsupported'}
 			<Badge tone="danger">{t('hosts.versionUnsupported')}</Badge>
@@ -339,6 +339,13 @@
 				{t('hosts.certNotRotated')}
 			{/if}
 		</span>
+		{#if agent.superseded_certificate_used_at}
+			<Badge tone="danger">
+				<span title={formatTime(agent.superseded_certificate_used_at)}
+					>{t('hosts.certSuperseded')}</span
+				>
+			</Badge>
+		{/if}
 	</span>
 {/snippet}
 

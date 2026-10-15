@@ -199,6 +199,7 @@ function makeAgents(): Agent[] {
 			options.rotatedMinutesAgo === undefined || options.rotatedMinutesAgo === null
 				? null
 				: iso(options.rotatedMinutesAgo),
+		superseded_certificate_used_at: null,
 		certificate_serial: '0f' + id.padStart(14, '0'),
 		protocol_version: options.protocol ?? '1.1',
 		control_plane_version: '0.4.2',
