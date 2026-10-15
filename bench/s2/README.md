@@ -72,9 +72,22 @@ The script restarts the control plane container, counts the agents that hold a s
 | `WARMUP_SECONDS` | 300 | Seconds of the load that the report skips |
 | `CP_CPUS` | 2 | CPU share for the percentage (matches `cpus` in `compose.yaml`) |
 | `CPU_LIMIT_PCT`, `RAM_LIMIT_MB`, `DELAY_LIMIT_SECONDS` | 70, 3072, 3 | Targets |
-| `CP_MODE` | `compose` | `native` runs a local `restichub-cp` binary (`CP_BIN`) for a smoke run on a developer machine |
+| `CP_MODE` | `compose` | `native` runs a local `restichub-cp` binary (`CP_BIN`) for a smoke run on a developer machine. `remote` uses a compose stack on another host over SSH (see "Remote control plane") |
+| `CP_SSH`, `CP_REMOTE_DIR`, `CP_IMAGE` | none, `/opt/restichub-s2`, none | Remote mode: the SSH target, the directory of the stack on it, and the image of the control plane (use a digest) |
+| `CP_WEB_URL`, `CP_AGENT_URL` | `http://127.0.0.1:8080`, `https://localhost:8443` | Where the script and the emulator reach the web port and the agent port |
 
 The native mode needs a PostgreSQL administrator (`psql`, or the container name in `PG_CONTAINER`). Its figures do not count for AC-NFR-01: the process is not limited to 2 vCPU.
+
+## Remote control plane
+
+Use this mode when the control plane runs on a separate virtual machine, as the reference bench S2 requires. The emulator and the script run on another host.
+
+1. Install Docker Engine with the Compose plugin on the virtual machine. Copy `bench/s2` and `crates/restichub-db/sql` to `$CP_REMOTE_DIR` on it, with the same relative layout.
+2. Use the firewall of the virtual machine to let only the emulator host reach the agent port 8443. Docker bypasses `ufw`, so put the rule in the `DOCKER-USER` chain.
+3. Open an SSH tunnel from the emulator host to the web port: `ssh -N -L 8080:127.0.0.1:8080 <host>`.
+4. Set `CP_MODE=remote`, `CP_SSH=<user>@<host>`, `CP_IMAGE=<image>@sha256:<digest>` and `CP_AGENT_URL=https://<host>:8443`, then run `./s2.sh run`. The address in `CP_AGENT_URL` goes into the certificate of the agent listener.
+
+The collector reads the CPU and RAM of the container with `docker stats` over SSH.
 
 ## Files in the output directory
 
