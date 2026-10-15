@@ -321,6 +321,27 @@ pub async fn active_job_ids_for_agent(
     Ok(rows.into_iter().map(|(id,)| JobId::from_uuid(id)).collect())
 }
 
+/// The sent and running jobs of an agent, and the jobs that a revoke failed since `since`. The
+/// instance that holds the stream of a revoked agent still sends them a cancellation.
+pub async fn cancellable_job_ids_for_agent(
+    tx: &mut TenantTx<'_>,
+    agent: AgentId,
+    since: OffsetDateTime,
+) -> Result<Vec<JobId>, DbError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM jobs WHERE agent_id = $1 \
+           AND (status IN ('sent', 'running') \
+                OR (result_message = 'agent_revoked' AND finished_at >= $2)) \
+         ORDER BY id",
+    )
+    .bind(agent)
+    .bind(since)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(|(id,)| JobId::from_uuid(id)).collect())
+}
+
 /// Flags a sent or running job for cancel. The dispatcher never sends a flagged job.
 pub async fn request_cancel(tx: &mut TenantTx<'_>, id: JobId) -> Result<bool, DbError> {
     let result = sqlx::query(
