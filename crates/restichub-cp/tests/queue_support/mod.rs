@@ -234,6 +234,11 @@ impl Env {
             .expect("the dispatcher pass");
     }
 
+    /// The user who created the enrollment tokens of the environment.
+    pub fn creator_id(&self) -> restichub_db::UserId {
+        self.creator
+    }
+
     /// Spends a one-time enrollment token over HTTPS and returns the issued identity.
     pub async fn enroll_agent(&self, hostname: &str) -> EnrolledIdentity {
         let (token, _) = seed_enrollment_token_value(
@@ -244,6 +249,15 @@ impl Env {
             time::OffsetDateTime::now_utc() + time::Duration::hours(1),
         )
         .await;
+        self.enroll_with_token_named(&token, hostname).await
+    }
+
+    /// Spends the given token over HTTPS.
+    pub async fn enroll_with_token(&self, token: &str) -> EnrolledIdentity {
+        self.enroll_with_token_named(token, "token-host").await
+    }
+
+    async fn enroll_with_token_named(&self, token: &str, hostname: &str) -> EnrolledIdentity {
         let tls = EnrollTls {
             ca_der: self.listener.root_der.clone(),
             server_name: "localhost".to_owned(),
@@ -255,7 +269,7 @@ impl Env {
             agent_version: "0.1.0".to_owned(),
             restic_version: "0.19.0".to_owned(),
         };
-        enroll_tls(&self.listener.https_url(), &token, &facts, &tls)
+        enroll_tls(&self.listener.https_url(), token, &facts, &tls)
             .await
             .expect("the agent must enroll over HTTPS")
     }
@@ -936,12 +950,21 @@ impl Env {
         hostname: &str,
         executor: Arc<dyn restichub_emulator::executor::Executor>,
     ) -> Emulator {
+        let identity = self.enroll_agent(hostname).await;
+        self.start_emulator_for(identity, executor).await
+    }
+
+    /// Runs the emulator with an identity that the test enrolled before.
+    pub async fn start_emulator_for(
+        &self,
+        identity: EnrolledIdentity,
+        executor: Arc<dyn restichub_emulator::executor::Executor>,
+    ) -> Emulator {
         use base64::Engine as _;
         use restichub_emulator::agent::{AgentConfig, AgentLoad, Backoff, run_agent};
         use restichub_emulator::identity::AgentIdentity;
         use restichub_emulator::metrics::Metrics;
 
-        let identity = self.enroll_agent(hostname).await;
         let mut ring = KeyRing::new();
         for key in &identity.signing_keys {
             let bytes = base64::engine::general_purpose::STANDARD
