@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::enums::AgentStatus;
+use crate::enums::{AgentStatus, HookAllowListState, ServerScriptsState};
 use crate::ids::{AgentId, UserId};
 use crate::tx::TenantTx;
 
@@ -33,6 +33,16 @@ pub struct Agent {
     pub capabilities: Vec<String>,
     /// The directories where the agent restores files, from its last `AgentHello` (FR-RS-03).
     pub restore_roots: Vec<String>,
+    /// The hooks from the last `AgentHello`: a JSON object that maps a hook identifier to its
+    /// schema (FR-HK-04). It holds no path.
+    pub hooks: serde_json::Value,
+    /// Whether the agent trusted its allow-list file at its last connection (AC-HK-01).
+    pub hook_allow_list: HookAllowListState,
+    /// Whether the host trusts scripts from the control plane, from the last `AgentHello`
+    /// (FR-HK-08).
+    pub server_scripts: ServerScriptsState,
+    /// The interpreters the agent found, as wire names such as `bash` (FR-HK-08).
+    pub script_interpreters: Vec<String>,
     pub certificate_serial: Vec<u8>,
     pub certificate_expires_at: OffsetDateTime,
     pub status: AgentStatus,
@@ -65,6 +75,11 @@ pub struct HelloFacts<'a> {
     pub restic_version: &'a str,
     pub protocol_version_major: u32,
     pub protocol_version_minor: u32,
+    /// A JSON object that maps a hook identifier to its schema (FR-HK-04).
+    pub hooks: &'a serde_json::Value,
+    pub hook_allow_list: HookAllowListState,
+    pub server_scripts: ServerScriptsState,
+    pub script_interpreters: &'a [String],
 }
 
 /// The keyset cursor of the agent list. It orders by `(created_at, id)`.
@@ -391,12 +406,16 @@ pub async fn set_hello_facts(
         "UPDATE agents SET capabilities = $2, restore_roots = $3, \
                 agent_version = COALESCE(NULLIF($4, ''), agent_version), \
                 restic_version = COALESCE(NULLIF($5, ''), restic_version), \
-                protocol_version_major = $6, protocol_version_minor = $7 \
+                protocol_version_major = $6, protocol_version_minor = $7, \
+                hooks = $8, hook_allow_list = $9, server_scripts = $10, \
+                script_interpreters = $11 \
          WHERE id = $1 AND (capabilities <> $2 OR restore_roots <> $3 \
                 OR agent_version <> COALESCE(NULLIF($4, ''), agent_version) \
                 OR restic_version <> COALESCE(NULLIF($5, ''), restic_version) \
                 OR protocol_version_major IS DISTINCT FROM $6 \
-                OR protocol_version_minor IS DISTINCT FROM $7)",
+                OR protocol_version_minor IS DISTINCT FROM $7 \
+                OR hooks <> $8 OR hook_allow_list <> $9 OR server_scripts <> $10 \
+                OR script_interpreters <> $11)",
     )
     .bind(id)
     .bind(facts.capabilities)
@@ -405,6 +424,10 @@ pub async fn set_hello_facts(
     .bind(facts.restic_version)
     .bind(i32::try_from(facts.protocol_version_major).unwrap_or(i32::MAX))
     .bind(i32::try_from(facts.protocol_version_minor).unwrap_or(i32::MAX))
+    .bind(facts.hooks)
+    .bind(facts.hook_allow_list.as_str())
+    .bind(facts.server_scripts.as_str())
+    .bind(facts.script_interpreters)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -450,7 +473,8 @@ pub async fn revoke(
 }
 
 const COLUMNS: &str = "id, hostname, os, arch, agent_version, restic_version, labels, \
-    capabilities, restore_roots, certificate_serial, certificate_expires_at, status, \
+    capabilities, restore_roots, hooks, hook_allow_list, server_scripts, script_interpreters, \
+    certificate_serial, certificate_expires_at, status, \
     last_seen_at, created_at, revoked_at, revoked_by_user_id, pending_certificate_serial, \
     pending_certificate_expires_at, last_certificate_rotation_at, last_rotation_request_at, \
     previous_certificate_serial, superseded_certificate_used_at, protocol_version_major, \
@@ -467,6 +491,10 @@ struct AgentRow {
     labels: Vec<String>,
     capabilities: Vec<String>,
     restore_roots: Vec<String>,
+    hooks: serde_json::Value,
+    hook_allow_list: String,
+    server_scripts: String,
+    script_interpreters: Vec<String>,
     certificate_serial: Vec<u8>,
     certificate_expires_at: OffsetDateTime,
     status: AgentStatus,
@@ -496,6 +524,12 @@ impl From<AgentRow> for Agent {
             labels: row.labels,
             capabilities: row.capabilities,
             restore_roots: row.restore_roots,
+            hooks: row.hooks,
+            hook_allow_list: HookAllowListState::parse(&row.hook_allow_list)
+                .unwrap_or(HookAllowListState::Unknown),
+            server_scripts: ServerScriptsState::parse(&row.server_scripts)
+                .unwrap_or(ServerScriptsState::Unknown),
+            script_interpreters: row.script_interpreters,
             certificate_serial: row.certificate_serial,
             certificate_expires_at: row.certificate_expires_at,
             status: row.status,

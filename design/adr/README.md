@@ -9,7 +9,7 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | accepted |
 | [0002](0002-control-plane-owns-scheduling.md) | The control plane owns all scheduling | accepted |
 | [0003](0003-direct-repository-access.md) | Direct repository access with secrets for one job | accepted |
-| [0004](0004-hook-allow-list.md) | Hooks only from an agent-side allow-list | accepted |
+| [0004](0004-hook-allow-list.md) | Hooks only from an agent-side allow-list | partly superseded by ADR-0037 (server scripts on trusted hosts) |
 | [0005](0005-signed-jobs.md) | Signed jobs with a dedicated signing key | partly superseded by ADR-0020 (replay protection) |
 | [0006](0006-multi-tenancy.md) | Multi-tenancy from the first migration | accepted |
 | [0007](0007-modular-monolith.md) | Modular monolith: one control plane binary and PostgreSQL | accepted |
@@ -42,4 +42,5 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0034](0034-repository-maintenance-schedule.md) | Repository maintenance schedule and retention isolation | accepted |
 | [0035](0035-restore-and-snapshot-browsing.md) | Restore and snapshot browsing | accepted |
 | [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted |
+| [0037](0037-server-scripts-on-trusted-hosts.md) | Server scripts on trusted hosts | accepted |
 | [0038](0038-agent-downloads-restic.md) | The agent downloads restic | accepted |

@@ -50,6 +50,7 @@ pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileE
     }
     validate_platform(profile, target)?;
     validate_hooks(profile, target)?;
+    validate_scripts(profile, target)?;
 
     let steps = build_steps(profile, target)?;
     check_contract(profile, &steps)?;
@@ -171,32 +172,72 @@ fn option_name(option: ResticOption) -> &'static str {
 
 fn validate_hooks(profile: &Profile, target: &TargetFacts) -> Result<(), CompileError> {
     for (index, hook) in profile.hooks.iter().enumerate() {
-        let hook_field = FieldPath::new(format!("hooks[{index}].hook_id"));
-        let Some(allowed) = target.allow_list.get(&hook.hook_id) else {
-            return Err(CompileError::UnknownHook {
-                field: hook_field,
-                hook_id: hook.hook_id.clone(),
-            });
-        };
-
-        let mut seen = HashSet::new();
-        for (parameter, value) in hook.parameters.iter().enumerate() {
-            let name_field = FieldPath::new(format!("hooks[{index}].parameters[{parameter}].name"));
-            if !allowed.parameters.contains_key(&value.name) {
-                return Err(CompileError::UnknownHookParameter {
-                    field: name_field,
-                    name: value.name.clone(),
-                });
-            }
-            if !seen.insert(value.name.as_str()) {
-                return Err(CompileError::DuplicateHookParameter {
-                    field: name_field,
-                    name: value.name.clone(),
-                });
-            }
-        }
+        check_hook(index, hook, target)?;
     }
     Ok(())
+}
+
+fn validate_scripts(profile: &Profile, target: &TargetFacts) -> Result<(), CompileError> {
+    for (index, script) in profile.scripts.iter().enumerate() {
+        crate::script::check_script(index, script, target)?;
+    }
+    Ok(())
+}
+
+/// Checks one hook of a profile against the allow-list that the target agent reported: the
+/// identifier, the phase, the parameter names and every value (FR-HK-03, FR-HK-04, AC-HK-05).
+///
+/// `index` is the position of the hook in the profile and names the field of an error.
+///
+/// # Errors
+///
+/// Returns the [`CompileError`] for the first rule that the hook breaks.
+pub fn check_hook(
+    index: usize,
+    hook: &crate::profile::HookRef,
+    target: &TargetFacts,
+) -> Result<(), CompileError> {
+    let hook_field = FieldPath::new(format!("hooks[{index}].hook_id"));
+    let Some(allowed) = target.allow_list.get(&hook.hook_id) else {
+        return Err(CompileError::UnknownHook {
+            field: hook_field,
+            hook_id: hook.hook_id.clone(),
+        });
+    };
+    if !allowed.allows(hook.phase) {
+        return Err(CompileError::HookPhaseNotAllowed {
+            field: FieldPath::new(format!("hooks[{index}].phase")),
+            hook_id: hook.hook_id.clone(),
+        });
+    }
+
+    let mut seen = HashSet::new();
+    for (parameter, value) in hook.parameters.iter().enumerate() {
+        let name_field = FieldPath::new(format!("hooks[{index}].parameters[{parameter}].name"));
+        if !allowed.parameters.contains_key(&value.name) {
+            return Err(CompileError::UnknownHookParameter {
+                field: name_field,
+                name: value.name.clone(),
+            });
+        }
+        if !seen.insert(value.name.as_str()) {
+            return Err(CompileError::DuplicateHookParameter {
+                field: name_field,
+                name: value.name.clone(),
+            });
+        }
+    }
+    if let Some((name, _)) = allowed
+        .parameters
+        .iter()
+        .find(|(name, spec)| spec.required && !seen.contains(name.as_str()))
+    {
+        return Err(CompileError::MissingHookParameter {
+            field: FieldPath::new(format!("hooks[{index}].parameters")),
+            name: name.clone(),
+        });
+    }
+    hook_step(index, hook, target).map(|_| ())
 }
 
 fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedStep>, CompileError> {
@@ -210,19 +251,30 @@ fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedSte
             });
         }
     }
+    push_scripts(&mut steps, profile, HookPhase::Before);
 
     steps.push(PlannedStep {
         step: backup_step(profile, target)?,
         maintenance: false,
     });
 
-    for (index, hook) in profile.hooks.iter().enumerate() {
-        if hook.phase != HookPhase::Before {
-            steps.push(PlannedStep {
-                step: hook_step(index, hook, target)?,
-                maintenance: false,
-            });
+    // The agent derives the order from the phase, not from the position (FR-HK-05). The listed
+    // order is the order of a run, so the preview reads like the job.
+    for phase in [
+        HookPhase::After,
+        HookPhase::OnSuccess,
+        HookPhase::OnError,
+        HookPhase::Finally,
+    ] {
+        for (index, hook) in profile.hooks.iter().enumerate() {
+            if hook.phase == phase {
+                steps.push(PlannedStep {
+                    step: hook_step(index, hook, target)?,
+                    maintenance: false,
+                });
+            }
         }
+        push_scripts(&mut steps, profile, phase);
     }
 
     if let Some(retention) = &profile.retention {
@@ -244,6 +296,18 @@ fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedSte
     }
 
     Ok(steps)
+}
+
+/// Adds the scripts of one phase, in the order of the profile (FR-HK-09).
+fn push_scripts(steps: &mut Vec<PlannedStep>, profile: &Profile, phase: HookPhase) {
+    for (index, script) in profile.scripts.iter().enumerate() {
+        if script.phase == phase {
+            steps.push(PlannedStep {
+                step: crate::script::script_step(index, script),
+                maintenance: false,
+            });
+        }
+    }
 }
 
 fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileError> {
@@ -414,12 +478,28 @@ fn hook_step(
     hook: &crate::profile::HookRef,
     target: &TargetFacts,
 ) -> Result<Step, CompileError> {
+    let allowed = target.allow_list.get(&hook.hook_id);
     let mut parameters = Vec::new();
     for (parameter, value) in hook.parameters.iter().enumerate() {
         let field = format!("hooks[{index}].parameters[{parameter}].value");
+        let invalid = || CompileError::InvalidHookParameter {
+            field: FieldPath::new(&field),
+            name: value.name.clone(),
+        };
+        let spec = allowed
+            .and_then(|allowed| allowed.parameters.get(&value.name))
+            .ok_or_else(invalid)?;
+        // A secret reference is an identifier, not a text with template variables.
+        let text = if spec.secret() {
+            value.value.clone()
+        } else {
+            expand_field(&value.value, target, &field)?
+        };
+        let typed = spec.parse_text(&text).map_err(|_| invalid())?;
         parameters.push(ProtoHookParameter {
             name: value.name.clone(),
-            value: expand_field(&value.value, target, &field)?,
+            typed: Some(typed.to_proto()),
+            ..ProtoHookParameter::default()
         });
     }
 

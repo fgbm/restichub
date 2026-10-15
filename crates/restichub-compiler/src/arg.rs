@@ -240,7 +240,7 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
                 args.push(attached("--mode", value));
             }
         }
-        step::Kind::Hook(_) => return Err(ArgError::NotRestic),
+        step::Kind::Hook(_) | step::Kind::Script(_) => return Err(ArgError::NotRestic),
     }
 
     Ok(CommandLine {
@@ -304,7 +304,7 @@ fn repository_id(kind: &step::Kind) -> Option<&str> {
         step::Kind::Forget(forget) => Some(&forget.repository_id),
         step::Kind::Prune(prune) => Some(&prune.repository_id),
         step::Kind::Stats(stats) => Some(&stats.repository_id),
-        step::Kind::Hook(_) => None,
+        step::Kind::Hook(_) | step::Kind::Script(_) => None,
     }
 }
 

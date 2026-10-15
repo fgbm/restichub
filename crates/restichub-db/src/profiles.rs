@@ -44,6 +44,8 @@ pub struct Profile {
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub hooks: Value,
+    /// Definitions as a JSON array (FR-HK-09).
+    pub scripts: Value,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub created_by: Option<UserId>,
@@ -99,6 +101,7 @@ pub struct NewProfile<'a> {
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub hooks: Value,
+    pub scripts: Value,
     /// Absent for an API token actor.
     pub created_by: Option<UserId>,
 }
@@ -123,6 +126,7 @@ pub struct ProfileUpdate<'a> {
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub hooks: Value,
+    pub scripts: Value,
 }
 
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<ProfileId, DbError> {
@@ -130,9 +134,10 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
         "INSERT INTO profiles \
          (id, tenant_id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
           excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-          limit_upload_kib, limit_download_kib, retention, check_options, hooks, created_by) \
+          limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, \
+          created_by) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, \
-                 $18, $19, $20)",
+                 $18, $19, $20, $21)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -153,6 +158,7 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
     .bind(&new.retention)
     .bind(&new.check_options)
     .bind(&new.hooks)
+    .bind(&new.scripts)
     .bind(new.created_by)
     .execute(tx.as_conn())
     .await
@@ -170,7 +176,7 @@ pub async fn list_for_repository(
     let rows = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, retention, check_options, hooks, created_at, \
+                limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE repository_id = $1 ORDER BY created_at, id",
     )
@@ -191,7 +197,7 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePa
     let rows = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, retention, check_options, hooks, created_at, \
+                limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles \
          WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
@@ -215,7 +221,7 @@ pub async fn get(tx: &mut TenantTx<'_>, id: ProfileId) -> Result<Option<Profile>
     let row = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, retention, check_options, hooks, created_at, \
+                limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE id = $1",
     )
@@ -237,7 +243,7 @@ pub async fn get_for_update(
     let row = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, retention, check_options, hooks, created_at, \
+                limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE id = $1 FOR UPDATE",
     )
@@ -259,7 +265,7 @@ pub async fn update(
                 paths_linux = $6, paths_macos = $7, excludes = $8, exclude_files = $9, tags = $10, \
                 use_fs_snapshot = $11, one_file_system = $12, exclude_caches = $13, \
                 limit_upload_kib = $14, limit_download_kib = $15, retention = $16, \
-                check_options = $17, hooks = $18, updated_at = now() \
+                check_options = $17, hooks = $18, scripts = $19, updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
@@ -280,6 +286,7 @@ pub async fn update(
     .bind(&patch.retention)
     .bind(&patch.check_options)
     .bind(&patch.hooks)
+    .bind(&patch.scripts)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -332,6 +339,7 @@ struct ProfileRow {
     retention: Option<Value>,
     check_options: Option<Value>,
     hooks: Value,
+    scripts: Value,
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
     created_by: Option<Uuid>,
@@ -358,6 +366,7 @@ impl From<ProfileRow> for Profile {
             retention: row.retention,
             check_options: row.check_options,
             hooks: row.hooks,
+            scripts: row.scripts,
             created_at: row.created_at,
             updated_at: row.updated_at,
             created_by: row.created_by.map(UserId::from_uuid),

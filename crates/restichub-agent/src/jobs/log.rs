@@ -25,6 +25,7 @@ pub(super) struct JobLog {
     job_id: String,
     used: usize,
     truncated: bool,
+    search_path_noted: bool,
     pending: Vec<LogChunk>,
     pending_bytes: usize,
     tail: VecDeque<LogChunk>,
@@ -38,11 +39,21 @@ impl JobLog {
             job_id: job_id.to_owned(),
             used: 0,
             truncated: false,
+            search_path_noted: false,
             pending: Vec::new(),
             pending_bytes: 0,
             tail: VecDeque::new(),
             tail_bytes: 0,
             sequence: [0; STREAMS],
+        }
+    }
+
+    /// Adds the line about the dropped search path entries to the first step that has one. Later
+    /// steps of the job add nothing, because the entries are the same.
+    pub(super) fn note_search_path(&mut self, step_id: &str, line: &str) {
+        if !self.search_path_noted {
+            self.search_path_noted = true;
+            self.push(step_id, LogStream::Agent, line);
         }
     }
 

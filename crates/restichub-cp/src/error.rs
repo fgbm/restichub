@@ -89,6 +89,8 @@ pub struct ApiError {
     title: &'static str,
     field: Option<String>,
     reason: Option<Reason>,
+    /// The agent and the hook that a refused profile names (AC-HK-05).
+    hook_target: Option<Box<HookTarget>>,
     /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
     retry_after: Option<u64>,
     /// The internal detail. The response body never holds it; the mapper logs it with the request
@@ -104,6 +106,7 @@ impl ApiError {
             title,
             field: None,
             reason: None,
+            hook_target: None,
             retry_after: None,
             cause: None,
         }
@@ -182,6 +185,14 @@ impl ApiError {
     pub fn invalid_field(field: impl Into<String>, reason: Reason) -> Self {
         let mut error = Self::invalid_argument(field);
         error.reason = Some(reason);
+        error
+    }
+
+    /// Creates a `400 invalid_argument` error for a hook field of a profile. The body names the
+    /// agent that does not report the hook or the schema, and the hook (AC-HK-05).
+    pub fn invalid_hook(field: impl Into<String>, reason: Reason, target: HookTarget) -> Self {
+        let mut error = Self::invalid_field(field, reason);
+        error.hook_target = Some(Box::new(target));
         error
     }
 
@@ -421,6 +432,15 @@ impl IntoResponse for ApiError {
             request_id: String::new(),
             field: self.field,
             reason: self.reason.map(|reason| reason.as_str().to_owned()),
+            agent_id: self
+                .hook_target
+                .as_ref()
+                .and_then(|target| target.agent_id.clone()),
+            agent_name: self
+                .hook_target
+                .as_ref()
+                .and_then(|target| target.agent_name.clone()),
+            hook_id: self.hook_target.map(|target| target.hook_id),
         };
         let mut response = (
             self.status,
@@ -455,6 +475,25 @@ pub struct ProblemBody {
     /// In snake_case; only `invalid_argument` sets it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The agent that does not report the hook or the schema. Only a refused hook of a profile
+    /// sets it (AC-HK-05).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    /// The hook that the agent does not report. Only a refused hook of a profile sets it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_id: Option<String>,
+}
+
+/// The agent and the hook of a refused profile (AC-HK-05). The values are stored identifiers and
+/// host names, never request text.
+#[derive(Debug, Clone)]
+pub struct HookTarget {
+    /// Absent when no agent of the tenant reports the hook.
+    pub agent_id: Option<String>,
+    pub agent_name: Option<String>,
+    pub hook_id: String,
 }
 
 /// The shared responses of a protected route: 401 and 403 with the problem body.

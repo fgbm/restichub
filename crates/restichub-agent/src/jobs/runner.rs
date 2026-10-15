@@ -6,7 +6,7 @@
 //! the step runs. A cancel or a timeout stops the step in two stages: the graceful signal, then the
 //! forced kill of the process tree after the grace period.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -25,26 +25,26 @@ use crate::output::{Accepted, Collector, Line, OutputKind, Pipe, spawn_reader};
 use crate::scrub::Scrubber;
 
 /// How often the agent checks the restic child for its exit.
-const POLL_INTERVAL: Duration = Duration::from_millis(25);
+pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// The shortest time between two progress messages of a step (FR-AG-08).
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(2);
 
 /// The longest time that log lines wait before the agent sends them.
-const LOG_INTERVAL: Duration = Duration::from_secs(1);
+pub(super) const LOG_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The log size that the agent sends at once, whatever the interval.
-const LOG_FLUSH_BYTES: usize = 16 * 1024;
+pub(super) const LOG_FLUSH_BYTES: usize = 16 * 1024;
 
 /// How long the agent waits for the rest of the output after restic exited.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+pub(super) const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long a log or progress message may wait for room in the stream buffer, so a slow control
 /// plane never blocks a cancel.
 const SEND_WAIT: Duration = Duration::from_millis(250);
 
 /// The lines that the agent takes before it looks at the child again.
-const LINES_PER_TURN: usize = 256;
+pub(super) const LINES_PER_TURN: usize = 256;
 
 /// Why a step is not a success. The stable code reaches the control plane (NFR-DOC-04).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,7 +103,7 @@ pub(super) struct StepOutcome {
 }
 
 impl StepOutcome {
-    fn new(status: StepStatus, exit_code: i32) -> Self {
+    pub(super) fn new(status: StepStatus, exit_code: i32) -> Self {
         Self {
             status,
             exit_code,
@@ -121,14 +121,14 @@ impl StepOutcome {
         Self::new(StepStatus::Skipped, -1)
     }
 
-    fn cancelled(possible_stale_lock: bool) -> Self {
+    pub(super) fn cancelled(possible_stale_lock: bool) -> Self {
         Self {
             possible_stale_lock,
             ..Self::new(StepStatus::Cancelled, -1)
         }
     }
 
-    fn timed_out(possible_stale_lock: bool) -> Self {
+    pub(super) fn timed_out(possible_stale_lock: bool) -> Self {
         Self {
             possible_stale_lock,
             error: Some(StepError::TimedOut),
@@ -136,7 +136,7 @@ impl StepOutcome {
         }
     }
 
-    fn not_started() -> Self {
+    pub(super) fn not_started() -> Self {
         Self {
             error: Some(StepError::NotStarted),
             ..Self::new(StepStatus::Failed, -1)
@@ -151,24 +151,33 @@ impl StepOutcome {
 /// The handle that stops the restic child of a running job (FR-AG-10).
 #[derive(Clone)]
 pub(super) struct CancelHandle {
-    child: Arc<Mutex<Option<JobChild>>>,
-    cancelled: Arc<AtomicBool>,
+    pub(super) child: Arc<Mutex<Option<JobChild>>>,
+    cancels: Arc<AtomicU32>,
 }
 
 impl CancelHandle {
     pub(super) fn new() -> Self {
         Self {
             child: Arc::new(Mutex::new(None)),
-            cancelled: Arc::new(AtomicBool::new(false)),
+            cancels: Arc::new(AtomicU32::new(0)),
         }
     }
 
     pub(super) fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
+        let _ = self
+            .cancels
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                Some(count.saturating_add(1))
+            });
     }
 
     pub(super) fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.cancel_count() > 0
+    }
+
+    /// How many cancels arrived. A cleanup step reads it to see a cancel that came while it runs.
+    pub(super) fn cancel_count(&self) -> u32 {
+        self.cancels.load(Ordering::SeqCst)
     }
 }
 
@@ -458,7 +467,7 @@ impl Jobs {
 }
 
 /// Sends the graceful stop signal to the child of a step (FR-AG-10).
-fn interrupt(child: &Mutex<Option<JobChild>>) {
+pub(super) fn interrupt(child: &Mutex<Option<JobChild>>) {
     if let Some(child) = lock(child).as_ref()
         && let Err(error) = child.interrupt()
     {
@@ -467,7 +476,7 @@ fn interrupt(child: &Mutex<Option<JobChild>>) {
 }
 
 /// Kills the whole process tree of the child of a step (FR-AG-10).
-fn kill_tree(child: &Mutex<Option<JobChild>>) {
+pub(super) fn kill_tree(child: &Mutex<Option<JobChild>>) {
     if let Some(child) = lock(child).as_mut()
         && let Err(error) = child.kill_tree()
     {

@@ -6,6 +6,7 @@
  */
 import { filterSnapshots, inRange, listDirectory, makeSnapshots } from './mock-restore';
 import { MockAlerts } from './mock-alerts';
+import { MockScripts } from './mock-scripts';
 import type {
 	Agent,
 	AlertListResponse,
@@ -24,7 +25,10 @@ import type {
 	CreateChannelRequest,
 	Dashboard,
 	CreateEnrollmentTokenRequest,
+	CreateJobTemplateRequest,
 	CreatePlatformUserRequest,
+	CreateScriptTemplateRequest,
+	CreateSecretRequest,
 	CreatePlanRequest,
 	CreateProfileRequest,
 	CreateRepositoryRequest,
@@ -42,6 +46,7 @@ import type {
 	JobQuery,
 	JobKind,
 	JobStatus,
+	JobTemplate,
 	LsQueryRequest,
 	LsView,
 	Maintenance,
@@ -60,6 +65,9 @@ import type {
 	ResetPasswordRequest,
 	RestoreRequest,
 	SchedulePreviewResponse,
+	ScriptDef,
+	ScriptTemplate,
+	Secret,
 	SetRoleRequest,
 	SetupRequest,
 	SetupStatus,
@@ -72,6 +80,8 @@ import type {
 	UpdateAccountRequest,
 	UpdateAlertRulesRequest,
 	UpdateChannelRequest,
+	UpdateJobTemplateRequest,
+	UpdateScriptTemplateRequest,
 	UpdatePlanRequest,
 	UpdateMaintenanceRequest,
 	UpdateProfileRequest,
@@ -81,7 +91,7 @@ import type {
 } from './types';
 
 import { nextRunsFromCron } from '#lib/schedule.ts';
-import { detailOf, logPageOf } from './mock-jobs';
+import { detailOf, logPageOf, SCRIPTED_PLAN } from './mock-jobs';
 
 const REDACTED = '<redacted>';
 
@@ -145,6 +155,16 @@ const SAMPLE_REPOSITORIES_KEY = 'restichub.mock.repositories';
 // The mock starts without a plan. A review capture or an e2e test sets this storage key to see a
 // filled list.
 const SAMPLE_PLANS_KEY = 'restichub.mock.plans';
+
+// A review capture or an e2e test sets this storage key, besides the profile and the plan keys, to
+// see a profile with scripts, its plan and a finished job with a log for each step (FR-HK-11).
+const SAMPLE_SCRIPTS_KEY = 'restichub.mock.scripts';
+
+function scriptsSample(): boolean {
+	return (
+		typeof localStorage !== 'undefined' && localStorage.getItem(SAMPLE_SCRIPTS_KEY) === 'sample'
+	);
+}
 // A review capture or an e2e test sets this storage key to drive the mock as a Platform Admin
 // without a membership. The sign-in then survives a full page load, so a direct visit to an
 // address keeps the session, the way a session cookie does.
@@ -204,7 +224,18 @@ function makeAgents(): Agent[] {
 		protocol_version: options.protocol ?? '1.1',
 		control_plane_version: '0.4.2',
 		version_status: options.versionStatus ?? 'current',
-		revoked_at: options.status === 'revoked' ? iso(60) : null
+		revoked_at: options.status === 'revoked' ? iso(60) : null,
+		hook_allow_list: 'absent',
+		hooks: [],
+		// A Linux host that turned the trust mode on lists its interpreters (FR-HK-08).
+		server_scripts:
+			os === 'linux' && (options.status ?? 'active') === 'active' && id !== '4'
+				? 'enabled'
+				: 'disabled',
+		script_interpreters:
+			os === 'linux' && (options.status ?? 'active') === 'active' && id !== '4'
+				? ['bash', 'sh']
+				: []
 	});
 	return [
 		agent('1', 'win-fs01', 'windows', 'amd64', '0.4.2', 14, {
@@ -312,6 +343,7 @@ function makeProfiles(): Profile[] {
 				limit_download_kib: 0
 			},
 			hooks: [],
+			scripts: [],
 			retention,
 			check: { read_data_subset: '10%' },
 			created_at: iso(60 * 24 * 10),
@@ -334,11 +366,99 @@ function makeProfiles(): Profile[] {
 				limit_download_kib: 0
 			},
 			hooks: [],
+			scripts: [],
 			retention: null,
 			check: null,
 			created_at: iso(60 * 24 * 5),
 			updated_at: iso(60 * 24),
 			created_by: 'u_01'
+		},
+		{
+			id: 'p_3',
+			name: 'db-nightly',
+			repository_id: 'r_1',
+			paths: { all: ['/var/backups/postgres'], windows: [], linux: ['/etc'], macos: [] },
+			excludes: [],
+			exclude_files: [],
+			tags: ['database'],
+			options: {
+				use_fs_snapshot: false,
+				one_file_system: true,
+				exclude_caches: false,
+				limit_upload_kib: 0,
+				limit_download_kib: 0
+			},
+			hooks: [],
+			scripts: sampleScripts(),
+			retention: null,
+			check: null,
+			created_at: iso(60 * 24 * 3),
+			updated_at: iso(60 * 6),
+			created_by: 'u_01'
+		}
+	].filter((item) => item.id !== 'p_3' || scriptsSample());
+}
+
+/// The sample scripts of the profile `db-nightly`: a check and a dump before the backup, and a
+/// cleanup after it (FR-HK-09).
+function sampleScripts(): ScriptDef[] {
+	const tail = (
+		name: string,
+		phase: ScriptDef['phase'],
+		body: string,
+		policy: ScriptDef['failure_policy']
+	) =>
+		({
+			name,
+			interpreter: 'bash',
+			phase,
+			body,
+			timeout_seconds: 600,
+			failure_policy: policy,
+			env: []
+		}) satisfies ScriptDef;
+	return [
+		{
+			...tail(
+				'Check free disk space',
+				'before',
+				'set -euo pipefail\nfree_kb=$(df --output=avail -k "$CHECK_PATH" | tail -n 1 | tr -d \' \')\necho "free: $((free_kb / 1024 / 1024)) GB, needed: $MIN_FREE_GB GB"\n[ "$free_kb" -ge $((MIN_FREE_GB * 1024 * 1024)) ]\n',
+				'abort_backup'
+			),
+			env: [
+				{ name: 'CHECK_PATH', kind: 'string', value: '/var/backups' },
+				{ name: 'MIN_FREE_GB', kind: 'string', value: '10' }
+			],
+			template_id: 'builtin:disk-space-check-bash'
+		},
+		{
+			...tail(
+				'Dump the PostgreSQL database',
+				'before',
+				'set -euo pipefail\nmkdir -p "$DUMP_DIR"\ntarget="$DUMP_DIR/$PGDATABASE.dump"\npg_dump --format=custom --file="$target" "$PGDATABASE"\necho "dump written: $target"\n',
+				'abort_backup'
+			),
+			env: [
+				{ name: 'PGHOST', kind: 'string', value: 'localhost' },
+				{ name: 'PGUSER', kind: 'string', value: 'postgres' },
+				{ name: 'PGPASSWORD', kind: 'secret_ref', value: 's_db' },
+				{ name: 'PGDATABASE', kind: 'string', value: 'app' },
+				{ name: 'DUMP_DIR', kind: 'string', value: '/var/backups/postgres' }
+			],
+			template_id: 'builtin:postgres-dump-bash'
+		},
+		{
+			...tail(
+				'Remove the old dumps',
+				'finally',
+				'set -euo pipefail\nfind "$DUMP_DIR" -name "*.dump" -mtime +"$KEEP_DAYS" -print -delete\n',
+				'continue'
+			),
+			env: [
+				{ name: 'DUMP_DIR', kind: 'string', value: '/var/backups/postgres' },
+				{ name: 'KEEP_DAYS', kind: 'string', value: '7' }
+			],
+			template_id: 'st_1'
 		}
 	];
 }
@@ -349,7 +469,7 @@ function makePlans(): Plan[] {
 	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_PLANS_KEY) !== 'sample') {
 		return [];
 	}
-	return [
+	const plans: Plan[] = [
 		{
 			id: 'pl_1',
 			name: 'nightly-web',
@@ -368,8 +488,28 @@ function makePlans(): Plan[] {
 			last_fire_time: iso(60 * 24),
 			created_at: iso(60 * 24 * 9),
 			updated_at: iso(60 * 24)
+		},
+		{
+			id: SCRIPTED_PLAN,
+			name: 'nightly-db',
+			profile_id: 'p_3',
+			profile_name: 'db-nightly',
+			repository_id: 'r_1',
+			agent_id: '2',
+			agent_hostname: 'srv-db-01',
+			cron: '30 1 * * *',
+			time_zone: 'Europe/Berlin',
+			missed_run_policy: 'latest_only',
+			enabled: true,
+			rpo_seconds: null,
+			effective_rpo_seconds: 26 * 3600,
+			next_run_at: nextFireTime('30 1 * * *', 'Europe/Berlin'),
+			last_fire_time: iso(60 * 6),
+			created_at: iso(60 * 24 * 3),
+			updated_at: iso(60 * 6)
 		}
 	];
+	return plans.filter((item) => item.id !== SCRIPTED_PLAN || scriptsSample());
 }
 
 /// Sample jobs of the sample plan, one for each lifecycle state that the Jobs screen shows
@@ -412,7 +552,13 @@ function makeJobs(): MockJob[] {
 		repositoryId: 'r_1',
 		initializes: false
 	});
+	const scripted = job('j_s7', 'succeeded', 'succeeded', null, 60 * 5 + 6, 60 * 5 + 5, 60 * 5);
+	scripted.job.plan_id = SCRIPTED_PLAN;
+	scripted.job.plan_name = 'nightly-db';
+	scripted.job.agent_id = '2';
+	scripted.job.agent_hostname = 'srv-db-01';
 	return [
+		...(scriptsSample() ? [scripted] : []),
 		job('j_s1', 'running', null, null, 12, 11, null),
 		job('j_s2', 'queued', null, null, 3, null, null),
 		job('j_s3', 'succeeded', 'succeeded', null, 60 * 24 + 40, 60 * 24 + 38, 60 * 24 + 20),
@@ -686,6 +832,7 @@ export class MockApiService {
 	private profiles: Profile[] = makeProfiles();
 	private plans: Plan[] = makePlans();
 	private alertMock = new MockAlerts();
+	private scriptMock = new MockScripts();
 	private audit: AuditRecord[] = makeAudit();
 	private memberships: TenantAccess[] = makeMemberships();
 	private currentTenant = 't_01';
@@ -1390,6 +1537,7 @@ export class MockApiService {
 				limit_download_kib: 0
 			},
 			hooks: request.hooks ?? [],
+			scripts: request.scripts ?? [],
 			retention: request.retention ?? null,
 			check: request.check ?? null,
 			created_at: now,
@@ -1413,6 +1561,7 @@ export class MockApiService {
 			tags: request.tags ?? [],
 			options: request.options ?? current.options,
 			hooks: request.hooks ?? [],
+			scripts: request.scripts ?? [],
 			retention: request.retention ?? null,
 			check: request.check ?? null,
 			updated_at: new Date().toISOString()
@@ -1466,6 +1615,62 @@ export class MockApiService {
 		return this.alertMock.testChannel(id);
 	}
 
+	/// A plan for a host without the trust mode is refused with the typed reason (FR-HK-10).
+	private checkScripts(profile: Profile, agent: Agent): void {
+		const index = profile.scripts.findIndex(
+			(script) =>
+				agent.server_scripts !== 'enabled' ||
+				!agent.script_interpreters.includes(script.interpreter)
+		);
+		if (index >= 0) {
+			const reason = agent.server_scripts !== 'enabled' ? 'server_scripts_disabled' : 'unavailable';
+			throw problemError('invalid_argument', `scripts[${index}]`, reason);
+		}
+	}
+
+	async listSecrets(): Promise<Secret[]> {
+		return this.scriptMock.listSecrets();
+	}
+
+	async createSecret(request: CreateSecretRequest): Promise<Secret> {
+		return this.scriptMock.createSecret(request);
+	}
+
+	async listScriptTemplates(): Promise<ScriptTemplate[]> {
+		return this.scriptMock.listScriptTemplates();
+	}
+
+	async createScriptTemplate(request: CreateScriptTemplateRequest): Promise<ScriptTemplate> {
+		return this.scriptMock.createScriptTemplate(request);
+	}
+
+	async updateScriptTemplate(
+		id: string,
+		request: UpdateScriptTemplateRequest
+	): Promise<ScriptTemplate> {
+		return this.scriptMock.updateScriptTemplate(id, request);
+	}
+
+	async deleteScriptTemplate(id: string): Promise<void> {
+		this.scriptMock.deleteScriptTemplate(id);
+	}
+
+	async listJobTemplates(): Promise<JobTemplate[]> {
+		return this.scriptMock.listJobTemplates();
+	}
+
+	async createJobTemplate(request: CreateJobTemplateRequest): Promise<JobTemplate> {
+		return this.scriptMock.createJobTemplate(request);
+	}
+
+	async updateJobTemplate(id: string, request: UpdateJobTemplateRequest): Promise<JobTemplate> {
+		return this.scriptMock.updateJobTemplate(id, request);
+	}
+
+	async deleteJobTemplate(id: string): Promise<void> {
+		this.scriptMock.deleteJobTemplate(id);
+	}
+
 	async listPlans(): Promise<Plan[]> {
 		return [...this.plans];
 	}
@@ -1477,6 +1682,7 @@ export class MockApiService {
 		if (!agent || agent.status !== 'active') {
 			throw problemError('invalid_argument', 'agent_id', 'unknown');
 		}
+		this.checkScripts(profile, agent);
 		const now = new Date().toISOString();
 		const plan: Plan = {
 			id: `pl_${this.plans.length + 1}`,
@@ -1510,6 +1716,7 @@ export class MockApiService {
 		if (!agent || agent.status !== 'active') {
 			throw problemError('invalid_argument', 'agent_id', 'unknown');
 		}
+		this.checkScripts(profile, agent);
 		const enabled = request.enabled ?? true;
 		const updated: Plan = {
 			...current,

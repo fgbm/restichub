@@ -38,6 +38,9 @@ pub enum SecretPurpose {
     WebhookSecret,
     /// The path and the query of a webhook URL, which often hold a token (ADR-0036).
     WebhookUrl,
+    /// A value that a profile hands to a hook through its environment (FR-HK-03, ADR-0017). No
+    /// other purpose can reach a hook.
+    HookSecret,
 }
 
 impl SecretPurpose {
@@ -49,6 +52,7 @@ impl SecretPurpose {
             Self::RestServerPassword => "rest_server_password",
             Self::WebhookSecret => "webhook_secret",
             Self::WebhookUrl => "webhook_url",
+            Self::HookSecret => "hook_secret",
         }
     }
 
@@ -68,6 +72,7 @@ impl SecretPurpose {
             "rest_server_password" => Self::RestServerPassword,
             "webhook_secret" => Self::WebhookSecret,
             "webhook_url" => Self::WebhookUrl,
+            "hook_secret" => Self::HookSecret,
             _ => return None,
         };
         Some(purpose)
@@ -211,6 +216,7 @@ mod tests {
             SecretPurpose::RestServerPassword,
             SecretPurpose::WebhookSecret,
             SecretPurpose::WebhookUrl,
+            SecretPurpose::HookSecret,
         ] {
             assert_eq!(SecretPurpose::parse(purpose.as_str()), Some(purpose));
         }

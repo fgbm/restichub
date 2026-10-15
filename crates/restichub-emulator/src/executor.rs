@@ -210,7 +210,7 @@ pub fn restic_arguments(step: &Step) -> Option<Vec<String>> {
             arguments.push("stats".to_owned());
             arguments.push("--json".to_owned());
         }
-        step::Kind::Hook(_) => return None,
+        step::Kind::Hook(_) | step::Kind::Script(_) => return None,
     }
     Some(arguments)
 }

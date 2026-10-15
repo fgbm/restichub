@@ -288,6 +288,30 @@ pub async fn register_async(
     Ok(())
 }
 
+/// Turns the local trust mode for server scripts on or off (FR-HK-08, ADR-0037).
+///
+/// # Errors
+///
+/// Returns an error when the setting file cannot be written or the host would not trust it, for
+/// example when the command does not run as root or Administrator.
+pub fn trust_server_scripts(enable: bool) -> Result<()> {
+    let dir = crate::paths::config_dir();
+    crate::scripts::set_mode(&dir, enable)?;
+    let file = crate::scripts::mode_file_for(&dir);
+    if enable {
+        println!(
+            "Server scripts are enabled on this host ({}). The control plane can now run code here as the agent account.",
+            file.display()
+        );
+    } else {
+        println!(
+            "Server scripts are disabled on this host ({}).",
+            file.display()
+        );
+    }
+    Ok(())
+}
+
 fn check_register_input(options: &RegisterOptions, dir: &Path) -> Result<()> {
     if options.url.is_none() {
         bail!("--url is required for register");

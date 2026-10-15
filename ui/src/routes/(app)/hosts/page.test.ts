@@ -93,6 +93,10 @@ function agent(overrides: Record<string, unknown> = {}) {
 		created_at: PAST,
 		revoked_at: null,
 		revoked_by_user_id: null,
+		hook_allow_list: 'absent',
+		hooks: [],
+		server_scripts: 'disabled',
+		script_interpreters: [],
 		...overrides
 	};
 }
@@ -179,6 +183,40 @@ describe('the Hosts screen', () => {
 		await user.click(within(dialog).getByRole('button', { name: 'Rename' }));
 
 		await waitFor(() => expect(mocks.renameAgent).toHaveBeenCalledWith('a_01', 'new-name'));
+	});
+
+	it('shows the trust mode of each host and the command that turns it on (FR-HK-08)', async () => {
+		const user = userEvent.setup();
+		mocks.listAgents.mockResolvedValue([
+			agent({ id: 'a_01', hostname: 'win-fs01', os: 'windows' }),
+			agent({
+				id: 'a_02',
+				hostname: 'srv-db-01',
+				os: 'linux',
+				server_scripts: 'enabled',
+				script_interpreters: ['bash', 'sh']
+			})
+		]);
+		render(Hosts);
+
+		await screen.findByText('win-fs01');
+		expect(screen.getByText('Enabled')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Server scripts: win-fs01' }));
+		let dialog = await screen.findByRole('dialog');
+		expect(
+			within(dialog).getByDisplayValue('restichub-agent.exe trust-server-scripts --enable')
+		).toBeInTheDocument();
+		await user.keyboard('{Escape}');
+		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+		await user.click(screen.getByRole('button', { name: 'Server scripts: srv-db-01' }));
+		dialog = await screen.findByRole('dialog', { name: 'Server scripts' });
+		expect(within(dialog).getByText('bash, sh')).toBeInTheDocument();
+		expect(
+			within(dialog).getByText(
+				'The control plane then runs code on this host with the rights of the agent.'
+			)
+		).toBeInTheDocument();
 	});
 
 	it('marks an agent that needs an update and an agent with an unsupported version (FR-PR-09)', async () => {

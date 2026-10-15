@@ -184,13 +184,27 @@ pub async fn read(
     after_seq: i64,
     limit: i64,
 ) -> Result<Vec<LogLine>, DbError> {
+    read_step(tx, job, None, after_seq, limit).await
+}
+
+/// Reads the lines of one step of a job after a line number, oldest first. `None` reads every
+/// line of the job (FR-HK-11).
+pub async fn read_step(
+    tx: &mut TenantTx<'_>,
+    job: JobId,
+    step_id: Option<&str>,
+    after_seq: i64,
+    limit: i64,
+) -> Result<Vec<LogLine>, DbError> {
     sqlx::query_as::<_, LogLine>(
         "SELECT seq, step_id, stream, level, ts, text FROM job_logs \
-         WHERE job_id = $1 AND seq > $2 ORDER BY seq LIMIT $3",
+         WHERE job_id = $1 AND seq > $2 AND ($4::text IS NULL OR step_id = $4) \
+         ORDER BY seq LIMIT $3",
     )
     .bind(job)
     .bind(after_seq)
     .bind(limit.clamp(1, MAX_READ_LIMIT))
+    .bind(step_id)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)
