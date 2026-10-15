@@ -583,3 +583,149 @@ async fn ac_hk_08_a_powershell_script_runs_a_system_program_by_name() {
                 Set-Content -Path (Join-Path $env:MARKS 'path') -Value $env:PATH\r\n";
     run_whoami_script("script-ps-path", ScriptInterpreter::Powershell, body).await;
 }
+
+/// AC-HK-06: a failed backup runs `after`, `on_error` and `finally`, and skips `on_success`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_hk_06_a_failed_backup_runs_the_error_scripts() {
+    let host = Host::new("script-backup-fails");
+    host.enable();
+    host.fx.restic_code("backup", 1);
+    let job = host.job(
+        "job-backup",
+        vec![
+            backup_step("repo-1", &["/srv"]),
+            simple(
+                "script-0",
+                HookPhase::After,
+                &mark_body(&host, "after"),
+                vec![],
+            ),
+            simple(
+                "script-1",
+                HookPhase::OnSuccess,
+                &mark_body(&host, "success"),
+                vec![],
+            ),
+            simple(
+                "script-2",
+                HookPhase::OnError,
+                &mark_body(&host, "error"),
+                vec![],
+            ),
+            simple(
+                "script-3",
+                HookPhase::Finally,
+                &mark_body(&host, "finally"),
+                vec![],
+            ),
+        ],
+    );
+    let collected = run(&host.jobs(), &job).await;
+    assert_eq!(status_of(&collected, "backup"), StepStatus::Failed);
+    assert_eq!(status_of(&collected, "script-0"), StepStatus::Success);
+    assert_eq!(status_of(&collected, "script-1"), StepStatus::Skipped);
+    assert_eq!(status_of(&collected, "script-2"), StepStatus::Success);
+    assert_eq!(status_of(&collected, "script-3"), StepStatus::Success);
+    assert_eq!(host.mark("order"), "after\nerror\nfinally\n");
+    let result = collected.result();
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("step_failed")
+    );
+}
+
+/// FR-HK-05: a failed `on_success` script fails the job, and `finally` still runs.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_hk_05_a_failed_success_script_fails_the_job_and_finally_runs() {
+    let host = Host::new("script-success-fails");
+    host.enable();
+    let job = host.job(
+        "job-late",
+        vec![
+            backup_step("repo-1", &["/srv"]),
+            simple("script-0", HookPhase::OnSuccess, "exit 2\n", vec![]),
+            simple(
+                "script-1",
+                HookPhase::Finally,
+                &mark_body(&host, "finally"),
+                vec![],
+            ),
+        ],
+    );
+    let collected = run(&host.jobs(), &job).await;
+    assert_eq!(status_of(&collected, "backup"), StepStatus::Success);
+    assert_eq!(status_of(&collected, "script-0"), StepStatus::Failed);
+    assert_eq!(status_of(&collected, "script-1"), StepStatus::Success);
+    assert_eq!(host.mark("order"), "finally\n");
+    let result = collected.result();
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("hook_failed")
+    );
+}
+
+/// FR-HK-05: a failed cleanup script does not stop the next one of its phase.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_hk_05_a_failed_cleanup_script_does_not_stop_the_next_one() {
+    let host = Host::new("script-cleanup");
+    host.enable();
+    let job = host.job(
+        "job-cleanup",
+        vec![
+            backup_step("repo-1", &["/srv"]),
+            simple("script-0", HookPhase::Finally, "exit 1\n", vec![]),
+            simple(
+                "script-1",
+                HookPhase::Finally,
+                &mark_body(&host, "second"),
+                vec![],
+            ),
+        ],
+    );
+    let collected = run(&host.jobs(), &job).await;
+    assert_eq!(status_of(&collected, "script-0"), StepStatus::Failed);
+    assert_eq!(status_of(&collected, "script-1"), StepStatus::Success);
+    assert_eq!(host.mark("order"), "second\n");
+}
+
+/// AC-HK-02 (method A): 100 jobs of different types do not change the trust mode file.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_hk_02_a_hundred_jobs_leave_the_trust_mode_file_unchanged() {
+    let host = Host::new("script-checksum");
+    host.enable();
+    let before = sha256_hex(&host.setting());
+    let jobs = host.jobs();
+    for index in 0..100 {
+        let steps = match index % 4 {
+            0 => vec![backup_step("repo-1", &["/srv"])],
+            1 => vec![check_step("repo-1")],
+            2 => vec![
+                simple(
+                    "script-0",
+                    HookPhase::Before,
+                    &mark_body(&host, "before"),
+                    vec![],
+                ),
+                simple("script-1", HookPhase::Finally, "exit 1\n", vec![]),
+            ],
+            _ => vec![
+                simple("script-0", HookPhase::Before, "exit 3\n", vec![]),
+                backup_step("repo-1", &["/srv"]),
+                simple(
+                    "script-1",
+                    HookPhase::OnError,
+                    &mark_body(&host, "error"),
+                    vec![],
+                ),
+            ],
+        };
+        run(&jobs, &host.job(&format!("job-{index}"), steps)).await;
+    }
+    assert_eq!(sha256_hex(&host.setting()), before);
+}
