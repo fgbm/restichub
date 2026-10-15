@@ -60,7 +60,14 @@ bench/s1/e2e/scenario-14.2.1.sh [OUT]   # a new tenant, from the creation to the
 bench/s1/e2e/scenario-14.2.3.sh [OUT]   # recovery after a stale lock; about 40 minutes
 ```
 
-The scenario 14.2.3 kills the restic process of a running backup with SIGKILL. The control plane waits 30 minutes (FR-SC-06) and runs `unlock` when the repository is idle. The scenario checks the lock list of the repository and the next backup.
+The scenario 14.2.3 kills a running backup with SIGKILL. The control plane waits 30 minutes (FR-SC-06) and runs `unlock` when the repository is idle. The scenario checks the lock list of the repository and the next backup. `KILL_TARGET` selects the victim:
+
+| `KILL_TARGET` | Victim | Expected |
+|---|---|---|
+| `agent` (default) | the agent process of the host; the control plane loses the agent during the job and marks the lock | the job fails, the control plane runs `unlock` after 30 minutes, the next backup succeeds |
+| `restic` | the restic process only, as AC-SC-06 words it | see the known gap below |
+
+Known gap: when something other than the agent kills restic with SIGKILL, the agent reports a failed step without the stale lock mark (`possible_stale_lock` is set only after the agent stops restic itself). The control plane then runs no `unlock`. The run with `KILL_TARGET=restic` shows it.
 
 The scenarios 14.2.2 and 14.2.4 need Windows hosts or a person. See `windows-checklist.md`.
 

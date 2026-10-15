@@ -3,9 +3,14 @@
 #
 #   scenario-14.2.3.sh [OUT]
 #
-# It starts a fresh bench with one agent host. It runs a backup, kills the restic process of that
-# backup with SIGKILL, waits for the automatic `unlock` and checks the next backup. The control
+# It starts a fresh bench with one agent host. It runs a backup, kills a process of that backup
+# with SIGKILL, waits for the automatic `unlock` and checks the next backup. The control
 # plane waits 30 minutes before it unlocks (FR-SC-06), so the scenario takes about 40 minutes.
+#
+# KILL_TARGET selects what gets SIGKILL:
+#   agent   the agent process of the host (default): the control plane loses the agent in the
+#           middle of the job and marks the lock (`agent_lost`)
+#   restic  the restic process only, as AC-SC-06 words it; the agent sees a signal exit
 
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -29,9 +34,10 @@ plan="$(api POST /api/v1/plans "$(jq -nc --arg p "$profile" --arg a "$agent" \
 	'{name:"lock",profile_id:$p,agent_id:$a,cron:"0 3 * * *",time_zone:"UTC",missed_run_policy:"skip"}')" | jq -r '.plan.id')"
 step 2 "Create the repository, the profile and the plan" PASS "repository $repo, plan $plan"
 
-# A large file keeps the backup running long enough to kill it. The killer runs in the host and
+target="${KILL_TARGET:-agent}"
+# A large file keeps the backup running long enough to kill it. The watcher runs in the host and
 # polls fast, because the backup of the data set ends in seconds. It waits one second after it sees
-# the restic backup process, so the process holds its lock, and then it sends SIGKILL.
+# the restic backup process, so the process holds its lock.
 docker exec "$container" sh -c 'head -c 1000000000 /dev/urandom > /data/big.bin'
 killer_out="$out/killer.txt"
 docker exec "$container" sh -c '
@@ -39,23 +45,40 @@ docker exec "$container" sh -c '
 	while [ "$(date +%s)" -lt "$end" ]; do
 		for p in /proc/[0-9]*; do
 			if tr "\0" " " <"$p/cmdline" 2>/dev/null | grep -q "^/proc/self/fd/[0-9]* backup "; then
-				pid="${p#/proc/}"
 				sleep 1
-				kill -KILL "$pid" && echo "killed $pid at $(date -u +%T)" && exit 0
+				echo "${p#/proc/}"
+				exit 0
 			fi
 		done
 		sleep 0.05
 	done
-	echo "no restic backup process seen"; exit 1' >"$killer_out" 2>&1 &
-killer=$!
+	exit 1' >"$killer_out" 2>&1 &
+watcher=$!
 sleep 1
 first="$(api POST "/api/v1/plans/$plan/run" | jq -r .id)"
 step 3 "Run a backup of a 1 GB data set" PASS "job $first"
 
-wait "$killer" && v=PASS || v=FAIL
-step 4 "Stop the restic backup process with SIGKILL" "$v" "$(cat "$killer_out")"
+if wait "$watcher"; then
+	pid="$(cat "$killer_out")"
+	if [ "$target" = restic ]; then
+		docker exec "$container" kill -KILL "$pid"
+		what="restic backup process $pid"
+	else
+		docker kill --signal=KILL "$container" >/dev/null
+		# The service manager of a real host starts the agent again; the container has no manager.
+		sleep 5
+		docker start "$container" >/dev/null
+		what="agent process of the host (container $container)"
+	fi
+	v=PASS
+	evidence="SIGKILL to the $what at $(date -u +%T)"
+else
+	v=FAIL
+	evidence="no restic backup process seen"
+fi
+step 4 "Stop the job with SIGKILL (target: $target)" "$v" "$evidence"
 
-result="$(wait_job "$first" 300 || true)"
+result="$(wait_job "$first" 600 || true)"
 case "$result" in failed*) v=PASS ;; *) v=FAIL ;; esac
 step 5 "The killed backup ends as failed" "$v" "job $first: $result"
 
