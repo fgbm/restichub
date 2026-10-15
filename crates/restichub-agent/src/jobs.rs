@@ -937,7 +937,7 @@ impl Jobs {
         progress.hook_failure = hook_failure;
 
         self.send_log(&mut log).await;
-        self.log_spool.finish(&job_id);
+        self.close_log(&mut log).await;
         let outcome = job_outcome(&progress);
         let status = stopped_status.unwrap_or(match outcome {
             JobStatus::SucceededWithWarnings => StepStatus::Warning,

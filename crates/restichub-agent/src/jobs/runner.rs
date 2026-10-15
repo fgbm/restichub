@@ -526,7 +526,11 @@ impl Jobs {
     /// chunk that fits is preceded by one marker line with the count (FR-LG-07).
     fn spool_chunk(&self, log: &mut JobLog, chunk: LogChunk) {
         let lost = log.lost_lines();
-        if let Some(marker) = log.take_loss_marker(&chunk.step_id)
+        if lost > 0 && !self.log_spool.fits_with_marker(&chunk) {
+            log.note_lost(crate::log_spool::line_count(&chunk));
+            return;
+        }
+        if let Some(marker) = log.take_loss_marker()
             && !self.keep_in_spool(log.job_id(), &marker)
         {
             log.note_lost(lost);
@@ -534,6 +538,20 @@ impl Jobs {
         if !self.keep_in_spool(log.job_id(), &chunk) {
             log.note_lost(crate::log_spool::line_count(&chunk));
         }
+    }
+
+    /// Ends the log of a job: reports the lines that the spool still owes and tells the spool that
+    /// nothing follows (FR-LG-07).
+    pub(super) async fn close_log(&self, log: &mut JobLog) {
+        if self.log_acks.load(Ordering::SeqCst)
+            && let Some(marker) = log.take_loss_marker()
+        {
+            if let Err(error) = self.log_spool.append_marker(log.job_id(), &marker) {
+                tracing::warn!(%error, "cannot write the log spool");
+            }
+            self.flush_log(&log.job_id().to_owned(), true).await;
+        }
+        self.log_spool.finish(log.job_id());
     }
 
     fn keep_in_spool(&self, job_id: &str, chunk: &LogChunk) -> bool {

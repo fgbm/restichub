@@ -32,6 +32,9 @@ pub const MAX_BYTES_VARIABLE: &str = "RESTICHUB_LOG_SPOOL_MAX_BYTES";
 
 const FILE_EXTENSION: &str = "spool";
 
+/// Bytes that a loss marker record takes at most.
+const MARKER_RESERVE: u64 = 160;
+
 /// Bytes of the length prefix of one record.
 const PREFIX: u64 = 4;
 
@@ -193,12 +196,26 @@ impl LogSpool {
     ///
     /// Returns an error when the file cannot be written; the chunk is then not in the spool.
     pub fn append(&self, job_id: &str, chunk: &LogChunk) -> Result<Stored> {
+        self.append_within(job_id, chunk, false)
+    }
+
+    /// Like [`Self::append`], and ignores the cap. Only the loss marker uses it: one short line
+    /// per job, so the log never ends without the report of what it lost (FR-LG-07).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file cannot be written.
+    pub fn append_marker(&self, job_id: &str, chunk: &LogChunk) -> Result<Stored> {
+        self.append_within(job_id, chunk, true)
+    }
+
+    fn append_within(&self, job_id: &str, chunk: &LogChunk, force: bool) -> Result<Stored> {
         let Some(name) = file_name(job_id) else {
             return Ok(Stored::Full);
         };
         let size = record_size(chunk);
         let mut state = self.lock();
-        if state.total + size > self.max_bytes {
+        if !force && state.total + size > self.max_bytes {
             return Ok(Stored::Full);
         }
         let path = self.dir.join(name);
@@ -220,6 +237,12 @@ impl LogSpool {
         job.live_bytes += size;
         state.total += size;
         Ok(Stored::Kept)
+    }
+
+    /// True when the cap leaves room for `chunk` and for a loss marker before it.
+    #[must_use]
+    pub fn fits_with_marker(&self, chunk: &LogChunk) -> bool {
+        self.lock().total + record_size(chunk) + MARKER_RESERVE <= self.max_bytes
     }
 
     /// The chunks that the current connection did not get yet. They count as sent from now on.
