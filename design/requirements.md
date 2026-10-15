@@ -209,6 +209,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-LG-02 | The connection to the log storage and the retention rules are separate settings. Retention is by age, by size or both, and can be different for each tenant. Retention works the same way for all backends. | M |
 | FR-LG-03 | Job metadata (status, summary, duration) is always in the database. Only log text goes to the external storage. | M |
 | FR-LG-04 | If S3 is not available, the CP writes logs to the database, sends an alert and does not fail the job. After a backend change, the CP can still read the old logs. | 1.0 |
+| FR-LG-07 | The agent keeps each log chunk of a job on disk until the CP acknowledges it. After a reconnect or a restart, the agent sends every chunk that is not acknowledged, in order. The CP stores each chunk once. If the spool is full, the agent sends one marker line with the number of lost lines. | M |
 
 ### 3.11. Tenants
 

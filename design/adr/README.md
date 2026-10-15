@@ -46,3 +46,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0038](0038-agent-downloads-restic.md) | The agent downloads restic | accepted |
 | [0039](0039-stall-watchdog-instead-of-job-time-limit.md) | A stall watchdog instead of a fixed job time limit | accepted |
 | [0041](0041-re-registration-and-duplicate-detection.md) | Re-registration that keeps the agent ID, and duplicate detection | accepted |
+| [0042](0042-agent-log-spool-and-acknowledgements.md) | The agent log spool and the log acknowledgements | accepted |
