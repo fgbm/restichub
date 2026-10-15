@@ -14,7 +14,7 @@ restichub-agent register --url https://<control-plane> --token <token>
 ```
 
 - `--url` is the control plane URL. The scheme must be `https`.
-- `--token` is the one-time enrollment token. The documented default is this flag.
+- `--token` is the one-time enrollment token. This is the usual way to pass the token.
 - `--token-file PATH` reads the token from a file. A script uses this option.
 - `--token-stdin` reads the token from the standard input.
 - `--ca-file PATH` verifies the control plane with the CA in the file. Without this option the agent uses the system root certificates.
