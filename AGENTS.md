@@ -17,7 +17,7 @@ Read this file before you change the repository.
 - Each test that covers an acceptance criterion refers to its ID, for example `ac_ag_05_exit_code_mapping`.
 - Never put a long-lived secret in logs, process arguments or files on the agent. A one-time enrollment token is the only exception: the `register` command takes it on the command line (ADR-0032).
 - The agent has no scheduling logic (ADR-0002). Do not add timers that start jobs on the agent.
-- A script from the CP runs only on a host with the local trust mode, which is off by default (ADR-0037). Do not add another step type that runs an arbitrary command. The allow-list hooks of ADR-0004 are removed (ADR-0039).
+- A script from the CP runs only on a host with the local trust mode, which is off by default (ADR-0037). Do not add another step type that runs an arbitrary command. The allow-list hooks of ADR-0004 are removed (ADR-0040).
 - Steps are typed messages. Do not add free-form argument maps to the protocol (FR-PR-01).
 - Each database table has `tenant_id` (ADR-0006).
 

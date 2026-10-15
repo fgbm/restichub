@@ -18,7 +18,7 @@ Each requirement has an ID. Acceptance criteria refer to these IDs. See [accepta
 | D2 | Agents access repositories directly. The control plane sends secrets for the duration of one job. The agent does not store them in any form. | An agent that has a password during a job can delete the repository. ResticHub accepts this risk, documents it and decreases it with storage-side controls (NFR-SEC-08). | [0003](adr/0003-direct-repository-access.md) |
 | D3 | High availability is not in the MVP. | The MVP is one control plane instance and PostgreSQL. The design must not block high availability later. | [0018](adr/0018-high-availability-deferred.md) |
 | D4 | ResticHub replaces other file-level backup tools. | Windows and VSS are primary use cases. Application consistency comes from scripts on trusted hosts. Native database steps are out of scope (see section 5). | [0016](adr/0016-native-database-steps-deferred.md) |
-| D5 | A script from the control plane runs only on a host with the local trust mode. | The control plane cannot change the trust mode. It is local configuration that the agent keeps on purpose. | [0037](adr/0037-server-scripts-on-trusted-hosts.md), [0039](adr/0039-remove-allow-list-hooks.md) |
+| D5 | A script from the control plane runs only on a host with the local trust mode. | The control plane cannot change the trust mode. It is local configuration that the agent keeps on purpose. | [0037](adr/0037-server-scripts-on-trusted-hosts.md), [0040](adr/0040-remove-allow-list-hooks.md) |
 | D6 | Multi-tenancy is mandatory from the first release. | Each object belongs to a tenant. The database schema and the protocol contain the tenant from the first migration. | [0006](adr/0006-multi-tenancy.md) |
 | D7 | One certificate authority and one job signing key serve all tenants. | The agent certificate contains the tenant ID. | [0006](adr/0006-multi-tenancy.md) |
 | D8 | If a scheduled time falls in a DST gap, the job runs once, immediately after the clock change. | Scheduler behavior is deterministic and documented. | [0010](adr/0010-queue-and-scheduler-on-postgresql.md) |
@@ -121,7 +121,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 |---|---|---|
 | FR-HK-01 | The trust mode setting is a file on the agent. Only root or Administrators can write it. The CP, self-update and jobs cannot change it. | M |
 | FR-HK-05 | Script phases: `before`, `after`, `on_success`, `on_error`, `finally`. | M |
-| FR-HK-02 to FR-HK-04, FR-HK-06, FR-HK-07 | Removed by [ADR-0039](adr/0039-remove-allow-list-hooks.md). The allow-list hooks no longer exist. | - |
+| FR-HK-02 to FR-HK-04, FR-HK-06, FR-HK-07 | Removed by [ADR-0040](adr/0040-remove-allow-list-hooks.md). The allow-list hooks no longer exist. | - |
 | FR-HK-08 | The local trust mode `server_scripts` is off by default. A host administrator turns it on and off with an elevated agent command. The setting file follows the ownership rule of FR-HK-01. The agent reports the mode and its interpreters to the CP. | M |
 | FR-HK-09 | A typed script step has an interpreter, a name, a phase, an order and a timeout. It also has a body of 64 KiB at most, a failure policy and typed environment parameters. A parameter value is a plain string or a secret reference. The agent gives the values to the script as environment variables only. The job signature covers the body. | M |
 | FR-HK-10 | The CP and the agent refuse a script step for a host without the trust mode. The job has a typed reason. | M |

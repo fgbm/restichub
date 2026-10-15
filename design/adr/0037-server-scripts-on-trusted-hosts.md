@@ -4,7 +4,7 @@
 - Date: 2026-10-15
 - Requirements: FR-HK-01 to FR-HK-12, NFR-SEC-03
 - Supersedes: [ADR-0004](0004-hook-allow-list.md) for hosts with the local trust mode
-- Amended by: [ADR-0039](0039-remove-allow-list-hooks.md), which removes decision 6
+- Amended by: [ADR-0040](0040-remove-allow-list-hooks.md), which removes decision 6
 
 ## Context
 
@@ -19,7 +19,7 @@ A script that comes from the control plane (CP) is code that runs as SYSTEM or r
 3. A job can contain a typed `ScriptStep`: interpreter (`powershell`, `cmd`, `bash`, `sh`), script body (64 KiB at most), name, phase, order, timeout, failure policy (`abort_backup` or `continue`), and environment parameters. A value is a plain string or a reference to a secret that the CP resolves at send time ([ADR-0017](0017-secret-encryption.md)). The agent gives the values to the script only as environment variables.
 4. The job signature covers the script body ([ADR-0005](0005-signed-jobs.md)). The agent writes the body to a new protected file in its cache directory. It starts the interpreter with fixed safe flags. The script gets the environment of the service, without the restic variables. Its search path holds only the directories that the host account controls, and the step log names each directory that the agent dropped. On Windows, `TEMP` and `TMP` point to the directory of the script. It bounds and scrubs the output. It kills the process tree on timeout or cancel, and deletes the file.
 5. The CP refuses a job with a script for an agent without the mode, with a typed reason. The agent refuses it too (`JobRejected`). A job that the agent already finished returns its stored result, also after the host turned the mode off. A job with a script that a restart interrupted does not run again: the agent answers with a final result, `interrupted`.
-6. Removed by ADR-0039. The allow-list hooks no longer exist.
+6. Removed by ADR-0040. The allow-list hooks no longer exist.
 7. Each script is its own job step with a status, a start time, a duration, an exit code and its own log. The CP stores the step index with each log line.
 8. Only an Admin can edit scripts and script templates. An Operator can run the jobs. Each change of a script or of a template writes an audit record with the SHA-256 hash of the content. Each run writes the hash in the job record.
 9. The CP ships a set of read-only built-in script templates. A tenant has its own script templates and job templates.

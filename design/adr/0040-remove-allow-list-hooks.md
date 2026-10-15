@@ -1,4 +1,4 @@
-# ADR-0039: Remove the allow-list hooks
+# ADR-0040: Remove the allow-list hooks
 
 - Status: accepted
 - Date: 2026-10-16
