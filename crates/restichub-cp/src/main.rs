@@ -290,8 +290,12 @@ async fn compromise_signing_key(cli: Cli) -> anyhow::Result<()> {
         restichub_db::audit::AuditAction::SigningKeyCompromise,
         "signing_key",
     );
+    let current = signing
+        .current_key_id(&database)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the installation has no current job signing key"))?;
     let retired = signing
-        .mark_compromised(&database, time::OffsetDateTime::now_utc(), &event)
+        .mark_compromised(&database, time::OffsetDateTime::now_utc(), &current, &event)
         .await
         .context("cannot rotate the job signing key set")?;
     for id in retired {

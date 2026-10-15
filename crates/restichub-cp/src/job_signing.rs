@@ -77,6 +77,8 @@ pub enum JobSigningError {
     Missing,
     #[error("every stored job signing key is retired; the installation has no active key set")]
     AllRetired,
+    #[error("the current job signing key is not the one that the caller expected")]
+    StaleCurrentKey,
     #[error("a job signing key is still in its rotation overlap; the next rotation must wait")]
     RotationPending,
     #[error("the installation holds no active {role:?} job signing key")]
@@ -415,6 +417,22 @@ impl JobSigningService {
         Ok(self.current_set(db).await?.enrollment_keys())
     }
 
+    /// The identifiers of the keys that are retired, for a compromise or a rotation. A stored
+    /// signed job with such a signer is signed again before it goes out (ADR-0030).
+    pub async fn retired_key_ids(
+        &self,
+        db: &Database,
+    ) -> Result<std::collections::HashSet<String>, JobSigningError> {
+        let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
+        let rows = signing::list(&mut tx).await?;
+        tx.commit().await?;
+        Ok(rows
+            .iter()
+            .filter(|row| row.retired_at.is_some())
+            .map(|row| row.id.to_string())
+            .collect())
+    }
+
     /// The identifier of the current signing key, or `None` when the set is absent.
     ///
     /// The agent stream accepts a `KeyUpdateAck` only for this identifier.
@@ -529,19 +547,27 @@ impl JobSigningService {
     /// offline during the compromise enrolls again. The operation and its audit record commit in
     /// one transaction under the rotation lock. Returns the identifiers of the retired keys.
     ///
+    /// The caller names the key that it believes is current. When another compromise or a
+    /// rotation changed it, the call stops, so two calls retire at most one key set.
+    ///
     /// # Errors
     ///
-    /// Returns an error when the key set is damaged or the registry is not reachable.
+    /// Returns [`JobSigningError::StaleCurrentKey`] when the current key is another one, and an
+    /// error when the key set is damaged or the registry is not reachable.
     pub async fn mark_compromised(
         &self,
         db: &Database,
         now: OffsetDateTime,
+        expected_current_key_id: &str,
         audit_template: &AuditEvent,
     ) -> Result<Vec<Uuid>, JobSigningError> {
         let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
         tx.lock(SIGNING_KEY_LOCK).await?;
         let rows = signing::list(&mut tx).await?;
         let current = active_row(&rows, SigningKeyRole::Current)?.id;
+        if current.to_string() != expected_current_key_id {
+            return Err(JobSigningError::StaleCurrentKey);
+        }
         let next_row = active_row(&rows, SigningKeyRole::Next)?;
         let next = next_row.id;
         let material = self.unwrap_row(next_row)?;

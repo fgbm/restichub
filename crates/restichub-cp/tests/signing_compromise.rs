@@ -136,7 +136,12 @@ async fn adr_0030_a_compromise_rotates_and_retires_the_key_with_the_reason() {
     assert_eq!(verify_job(&forged_by_holder, &ring, &expected()), Ok(job()));
 
     let retired = service
-        .mark_compromised(db.database(), OffsetDateTime::now_utc(), &event())
+        .mark_compromised(
+            db.database(),
+            OffsetDateTime::now_utc(),
+            &compromised,
+            &event(),
+        )
         .await
         .expect("the compromise must succeed");
     assert_eq!(retired, vec![compromised.parse::<Uuid>().expect("an id")]);
@@ -202,9 +207,16 @@ async fn adr_0030_the_compromise_endpoint_needs_the_platform_admin() {
     let env = Env::start(db, test_queue()).await;
     let uri = "/api/v1/platform/signing-keys/compromise";
 
+    let signing = env.state.job_signing().expect("the signing service");
+    let current = signing
+        .current_key_id(env.db.database())
+        .await
+        .expect("a current key");
+    let body = serde_json::json!({ "expected_current_key_id": current });
+
     let (status, _, _) = common::send(
         &env.app,
-        common::bearer_request("POST", uri, &env.admin, None),
+        common::bearer_request("POST", uri, &env.admin, Some(body.clone())),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -217,10 +229,25 @@ async fn adr_0030_the_compromise_endpoint_needs_the_platform_admin() {
         "platform_admin",
     )
     .await;
-    let (status, _, body) =
-        common::send(&env.app, common::request("POST", uri, Some(&cookie), None)).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["retired_key_ids"].as_array().map(Vec::len), Some(1));
+    let (status, _, body_out) = common::send(
+        &env.app,
+        common::request("POST", uri, Some(&cookie), Some(body.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body_out}");
+    assert_eq!(
+        body_out["retired_key_ids"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(audit_count(&env.db, "signing_key_compromise").await, 1);
+
+    // The same call again names a key that is no longer current: it retires nothing.
+    let (status, _, body_out) = common::send(
+        &env.app,
+        common::request("POST", uri, Some(&cookie), Some(body)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body_out}");
     assert_eq!(audit_count(&env.db, "signing_key_compromise").await, 1);
     env.db.cleanup().await;
 }
@@ -251,7 +278,12 @@ async fn adr_0030_a_compromise_on_one_instance_reaches_the_agents_of_another() {
         .state
         .job_signing()
         .expect("the signing service")
-        .mark_compromised(env.db.database(), OffsetDateTime::now_utc(), &event())
+        .mark_compromised(
+            env.db.database(),
+            OffsetDateTime::now_utc(),
+            &compromised,
+            &event(),
+        )
         .await
         .expect("the compromise must succeed");
     assert_eq!(retired.len(), 1);

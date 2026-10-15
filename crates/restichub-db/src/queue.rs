@@ -227,6 +227,29 @@ pub async fn mark_redelivered(
     Ok(result.rows_affected() == 1)
 }
 
+/// Replaces the stored signed bytes of a `sent` job, for a job that the control plane signs again
+/// with the current key. The secret delivery records stay as they were. `false` when the job is
+/// not sent.
+pub async fn replace_signed_job(
+    tx: &mut TenantTx<'_>,
+    id: JobId,
+    signed: &StoredSignedJob,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET signed_job = $2, signed_job_nonce = $3, signed_job_key_version = $4, \
+                updated_at = now() \
+         WHERE id = $1 AND status = 'sent'",
+    )
+    .bind(id)
+    .bind(&signed.ciphertext)
+    .bind(&signed.nonce)
+    .bind(signed.key_version)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
 /// The ciphertext of a `sent` row, or `None` when the row holds none.
 pub async fn signed_job(
     tx: &mut TenantTx<'_>,

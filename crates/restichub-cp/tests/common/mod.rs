@@ -198,6 +198,10 @@ pub fn write_body(
         ("PATCH", "/api/v1/notification-channels/{id}") => Some(json!({"enabled": true})),
         ("PUT", "/api/v1/alert-rules") => Some(json!({"items": []})),
         ("PUT", _) => Some(json!({"value": "matrix-value"})),
+        // A key that is never current: the matrix checks the right and compromises nothing.
+        ("POST", "/api/v1/platform/signing-keys/compromise") => Some(json!({
+            "expected_current_key_id": "00000000-0000-0000-0000-000000000000",
+        })),
         ("POST", "/api/v1/platform/tenants") => Some(json!({
             "name": format!("matrix-{index}"),
         })),
