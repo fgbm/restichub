@@ -98,6 +98,7 @@ async fn run(job: &Job, repository: &Path, name: &str) -> (JobResult, Duration) 
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel::<AgentMessage>(256);
     jobs.attach(&tx);
+    jobs.greeted(false);
     let started = Instant::now();
     jobs.handle(
         sign_job(job, KEY_ID, &signing_key()),

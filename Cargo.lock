@@ -2056,6 +2056,7 @@ dependencies = [
  "prost",
  "prost-types",
  "rcgen",
+ "restichub-agent",
  "restichub-canary-scan",
  "restichub-common",
  "restichub-compiler",
@@ -2072,12 +2073,10 @@ dependencies = [
  "sha1",
  "sha2 0.11.0",
  "sqlx",
- "thiserror",
  "time",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
- "toml",
  "tonic",
  "tower",
  "tracing",
@@ -2106,7 +2105,6 @@ name = "restichub-compiler"
 version = "0.1.0"
 dependencies = [
  "proptest",
- "regex",
  "restichub-proto",
  "serde",
  "thiserror",

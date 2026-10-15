@@ -121,25 +121,79 @@ async fn enroll_with(
     });
     let body = serde_json::to_vec(&body).context("cannot serialize the request")?;
 
-    let (host, port, https) = split_origin(base_url)?;
-    let response = match (https, tls) {
-        (true, Some(tls)) => post_tls(&host, port, ENROLL_PATH, &body, tls).await?,
-        (true, None) => bail!("an https base URL needs the TLS trust material"),
-        (false, _) => post(&host, port, ENROLL_PATH, &body).await?,
-    };
+    let response = post_json(base_url, ENROLL_PATH, &body, None, tls).await?;
     parse_response(&response, key.serialize_pem())
 }
 
+/// Creates an enrollment token through the public API with an API token and returns its value
+/// (FR-ID-01). The API listener may be plain HTTP or HTTPS with the installation root CA.
+///
+/// # Errors
+///
+/// Returns an error when the request fails, the control plane refuses it, or the response holds no
+/// token.
+pub async fn create_enrollment_token(
+    api_url: &str,
+    api_token: &str,
+    ttl_seconds: i64,
+    tls: Option<&EnrollTls>,
+) -> anyhow::Result<String> {
+    let body = serde_json::to_vec(&json!({ "ttl_seconds": ttl_seconds }))
+        .context("cannot serialize the request")?;
+    let response = post_json(
+        api_url,
+        "/api/v1/enrollment-tokens",
+        &body,
+        Some(api_token),
+        tls,
+    )
+    .await?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&response).context("the response is not JSON")?;
+    value
+        .get("token")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .context("the response holds no `token`")
+}
+
+async fn post_json(
+    base_url: &str,
+    path: &str,
+    body: &[u8],
+    bearer: Option<&str>,
+    tls: Option<&EnrollTls>,
+) -> anyhow::Result<Vec<u8>> {
+    let (host, port, https) = split_origin(base_url)?;
+    match (https, tls) {
+        (true, Some(tls)) => post_tls(&host, port, path, body, bearer, tls).await,
+        (true, None) => bail!("an https base URL needs the TLS trust material"),
+        (false, _) => post(&host, port, path, body, bearer).await,
+    }
+}
+
+fn request_head(host: &str, path: &str, length: usize, bearer: Option<&str>) -> String {
+    let authorization = bearer
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\n{authorization}Content-Type: application/json\r\n\
+         Content-Length: {length}\r\nConnection: close\r\n\r\n"
+    )
+}
+
 /// Sends one HTTP/1.1 `POST` and returns the response body on HTTP 201.
-async fn post(host: &str, port: u16, path: &str, body: &[u8]) -> anyhow::Result<Vec<u8>> {
+async fn post(
+    host: &str,
+    port: u16,
+    path: &str,
+    body: &[u8],
+    bearer: Option<&str>,
+) -> anyhow::Result<Vec<u8>> {
     let mut stream = TcpStream::connect((host, port))
         .await
         .with_context(|| format!("cannot connect to {host}:{port}"))?;
-    let head = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
+    let head = request_head(host, path, body.len(), bearer);
     stream
         .write_all(head.as_bytes())
         .await
@@ -163,6 +217,7 @@ async fn post_tls(
     port: u16,
     path: &str,
     body: &[u8],
+    bearer: Option<&str>,
     tls: &EnrollTls,
 ) -> anyhow::Result<Vec<u8>> {
     let mut roots = RootCertStore::empty();
@@ -183,11 +238,7 @@ async fn post_tls(
         .connect(server_name, stream)
         .await
         .context("the TLS handshake failed")?;
-    let head = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
+    let head = request_head(host, path, body.len(), bearer);
     stream
         .write_all(head.as_bytes())
         .await

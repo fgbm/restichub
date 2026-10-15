@@ -30,4 +30,13 @@ describe('Button', () => {
 		expect(button).toBeDisabled();
 		expect(button).toHaveAttribute('aria-busy', 'true');
 	});
+
+	it('keeps the base classes next to a class of the caller', () => {
+		render(Button, { props: { class: 'extra', children: label('Save') } });
+		expect(screen.getByRole('button', { name: 'Save' })).toHaveClass(
+			'btn',
+			'btn--secondary',
+			'extra'
+		);
+	});
 });

@@ -29,9 +29,9 @@ use anyhow::{Context, Result, bail};
 use hyper::Uri;
 use restichub_proto::agent::v1::{
     AgentHello, AgentMessage, CertificateInstalled, CertificateRejectReason,
-    CertificateSigningRequest, ControlMessage, HookAllowListState, HookMetadata, KeyUpdateAck,
-    Ping, Pong, ScriptInterpreter, ServerScriptsState, SigningKeyUpdate, VersionRejectReason,
-    agent_message, agent_service_client::AgentServiceClient, control_message,
+    CertificateSigningRequest, ControlMessage, KeyUpdateAck, Ping, Pong, ScriptInterpreter,
+    ServerScriptsState, SigningKeyUpdate, VersionRejectReason, agent_message,
+    agent_service_client::AgentServiceClient, control_message,
 };
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, watch};
@@ -403,7 +403,6 @@ pub async fn connect_once(
         restic_version,
         jobs.restore_roots(),
         jobs.held_job_ids(),
-        jobs.hook_report().await,
         jobs.script_report().await,
     )
     .await?;
@@ -633,7 +632,14 @@ async fn handle_control(
             // Only the greeting proves that the control plane accepts the protocol version, so
             // `register` does not report a connection before it (FR-IN-07).
             crate::connection::record_connected(dir, &identity.cp_url);
+            // A control plane that lists the capability acknowledges log chunks, so the agent
+            // keeps the log in its spool until the acknowledgement (FR-LG-07). The drain task
+            // sends it, so this loop never waits for the log.
+            jobs.greeted(
+                restichub_proto::AgentCapability::LogAckV1.is_listed(&hello.accepted_capabilities),
+            );
         }
+        Some(control_message::Payload::LogAck(ack)) => jobs.log_ack(&ack),
         Some(control_message::Payload::VersionRejected(rejected)) => {
             let reason = VersionRejectReason::try_from(rejected.reason).unwrap_or_default();
             tracing::error!(
@@ -843,7 +849,6 @@ async fn send_hello(
     restic_version: &str,
     restore_roots: Vec<String>,
     held_job_ids: Vec<String>,
-    (hook_allow_list_state, hooks): (HookAllowListState, Vec<HookMetadata>),
     (server_scripts_state, script_interpreters): (ServerScriptsState, Vec<ScriptInterpreter>),
 ) -> Result<()> {
     let hello = AgentMessage {
@@ -860,8 +865,6 @@ async fn send_hello(
                 .collect(),
             restore_roots,
             held_job_ids,
-            hooks,
-            hook_allow_list_state: hook_allow_list_state as i32,
             server_scripts_state: server_scripts_state as i32,
             script_interpreters: script_interpreters
                 .into_iter()
@@ -883,7 +886,7 @@ mod tests {
         send_hello,
     };
     use crate::rotation::rotation_due;
-    use restichub_proto::agent::v1::{HookAllowListState, Ping, ServerScriptsState, agent_message};
+    use restichub_proto::agent::v1::{Ping, ServerScriptsState, agent_message};
     use std::time::Duration;
     use time::OffsetDateTime;
 
@@ -977,7 +980,6 @@ mod tests {
             "0.19.0",
             vec!["/var/lib/restichub-restore".to_owned()],
             Vec::new(),
-            (HookAllowListState::Absent, Vec::new()),
             (ServerScriptsState::Disabled, Vec::new()),
         )
         .await
@@ -997,7 +999,6 @@ mod tests {
             "0.19.0",
             vec!["/srv/restore".to_owned()],
             Vec::new(),
-            (HookAllowListState::Absent, Vec::new()),
             (ServerScriptsState::Disabled, Vec::new()),
         )
         .await

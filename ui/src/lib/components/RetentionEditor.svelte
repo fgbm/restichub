@@ -89,7 +89,6 @@
 					id={`profile-${rule.key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`}
 					type="number"
 					min="0"
-					class="num"
 					aria-label={t(titleOf(rule.unit))}
 					bind:value={draft[rule.key]}
 				/>
@@ -114,7 +113,6 @@
 			<TextField
 				id="profile-keep-within"
 				mono
-				class="num num--wide"
 				placeholder="30d"
 				aria-label={t('pe.rule.within.title')}
 				error={preview.withinInvalid
@@ -122,7 +120,7 @@
 					: fieldError(problem, 'retention.keep_within')}
 				bind:value={draft.keepWithin}
 			/>
-			<span class="muted">y m d h</span>
+			<span class="muted rule__hint">{t('pe.rule.within.hint')}</span>
 		</div>
 		<p class="rule__text"><RichText text={t('pe.rule.within.text')} /></p>
 		<div class="rule__count">
@@ -297,7 +295,7 @@
 
 	.rule {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr) 14rem;
 		gap: var(--rh-space-1) var(--rh-space-4);
 		padding: var(--rh-space-3) var(--rh-space-4);
 		border-bottom: var(--rh-border-width) solid var(--rh-color-border-muted);
@@ -333,20 +331,20 @@
 	}
 
 	.rule__input {
-		display: flex;
+		display: grid;
 		grid-column: 2;
 		grid-row: 1;
+		grid-template-columns: 6rem minmax(0, 1fr);
 		align-items: center;
-		justify-content: flex-end;
-		gap: var(--rh-space-2);
+		gap: var(--rh-space-1) var(--rh-space-2);
 	}
 
-	.rule__input :global(.num) {
-		width: 72px;
+	.rule__input :global(.rh-input) {
+		width: 100%;
 	}
 
-	.rule__input :global(.num--wide) {
-		width: 110px;
+	.rule__hint {
+		grid-column: 1 / -1;
 	}
 
 	.rule__text {
@@ -360,11 +358,6 @@
 		grid-column: 2;
 		grid-row: 2;
 		font-size: var(--rh-font-size-sm);
-		text-align: right;
-	}
-
-	.rule--wide .rule__count {
-		text-align: left;
 	}
 
 	.checks {

@@ -56,12 +56,13 @@ pub enum Reason {
     Unsupported,
     /// The installed restic version lacks the option (AC-AG-09).
     Incompatible,
-    /// Not available yet (FR-HK-04).
+    /// Not available on the host (FR-HK-10).
     Unavailable,
     /// A confirmation value does not match the object (FR-SC-06).
     Mismatch,
     /// The host did not turn on the trust mode for server scripts (FR-HK-10).
     ServerScriptsDisabled,
+    Removed,
 }
 
 impl Reason {
@@ -84,6 +85,7 @@ impl Reason {
             Self::Unavailable => "unavailable",
             Self::Mismatch => "mismatch",
             Self::ServerScriptsDisabled => "server_scripts_disabled",
+            Self::Removed => "removed",
         }
     }
 }

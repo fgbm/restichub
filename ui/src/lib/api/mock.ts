@@ -244,8 +244,6 @@ function makeAgents(): Agent[] {
 		control_plane_version: '0.4.2',
 		version_status: options.versionStatus ?? 'current',
 		revoked_at: options.status === 'revoked' ? iso(60) : null,
-		hook_allow_list: 'absent',
-		hooks: [],
 		// A Linux host that turned the trust mode on lists its interpreters (FR-HK-08).
 		server_scripts:
 			os === 'linux' && (options.status ?? 'active') === 'active' && id !== '4'
@@ -373,7 +371,6 @@ function makeProfiles(): Profile[] {
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 2880
 			},
-			hooks: [],
 			scripts: [],
 			retention,
 			check: { read_data_subset: '10%' },
@@ -398,7 +395,6 @@ function makeProfiles(): Profile[] {
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 2880
 			},
-			hooks: [],
 			scripts: [],
 			retention: null,
 			check: null,
@@ -421,7 +417,6 @@ function makeProfiles(): Profile[] {
 				limit_upload_kib: 0,
 				limit_download_kib: 0
 			},
-			hooks: [],
 			scripts: sampleScripts(),
 			retention: null,
 			check: null,
@@ -596,6 +591,7 @@ function makeJobs(): MockJob[] {
 		job('j_s2', 'queued', null, null, 3, null, null),
 		job('j_s3', 'succeeded', 'succeeded', null, 60 * 24 + 40, 60 * 24 + 38, 60 * 24 + 20),
 		job('j_s6', 'succeeded', 'succeeded_with_warnings', null, 60 * 30, 60 * 30 - 2, 60 * 30 - 20),
+		job('j_s8', 'failed', 'failed', 'interrupted', 60 * 8 + 5, 60 * 8 + 4, 60 * 8),
 		job('j_s4', 'failed', 'config_error', 'compile_failed', 60 * 48 + 5, null, 60 * 48 + 5),
 		job(
 			'j_s5',
@@ -1628,7 +1624,6 @@ export class MockApiService {
 				stall_timeout_minutes: 60,
 				max_duration_minutes: 2880
 			},
-			hooks: request.hooks ?? [],
 			scripts: request.scripts ?? [],
 			retention: request.retention ?? null,
 			check: request.check ?? null,
@@ -1661,7 +1656,6 @@ export class MockApiService {
 							request.options.max_duration_minutes ?? current.options?.max_duration_minutes
 					}
 				: current.options,
-			hooks: request.hooks ?? [],
 			scripts: request.scripts ?? [],
 			retention: request.retention ?? null,
 			check: request.check ?? null,
@@ -1735,6 +1729,14 @@ export class MockApiService {
 
 	async createSecret(request: CreateSecretRequest): Promise<Secret> {
 		return this.scriptMock.createSecret(request);
+	}
+
+	async replaceSecretValue(id: string): Promise<void> {
+		this.scriptMock.replaceSecretValue(id);
+	}
+
+	async deleteSecret(id: string): Promise<void> {
+		this.scriptMock.deleteSecret(id);
 	}
 
 	async listScriptTemplates(): Promise<ScriptTemplate[]> {

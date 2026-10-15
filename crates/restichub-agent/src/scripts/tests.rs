@@ -10,7 +10,7 @@ use restichub_proto::agent::v1::{
 
 use super::setting::set_mode_at;
 use super::{ScriptMode, ScriptRefusal, ScriptStore};
-use crate::hooks::Trust;
+use crate::trust::Trust;
 
 const CANARY: &str = "CANARY-secret-7f3a";
 
@@ -251,7 +251,7 @@ fn enabled_store(dir: &std::path::Path) -> ScriptStore {
 }
 
 #[test]
-fn ac_hk_01_a_search_path_directory_that_others_can_write_is_not_in_the_script_environment() {
+fn ac_hk_08_a_search_path_directory_that_others_can_write_is_not_in_the_script_environment() {
     let dir = TempDir::new();
     let good = private_dir(dir.path(), "good", 0o755);
     let bad = private_dir(dir.path(), "bad", 0o777);
@@ -270,7 +270,7 @@ fn ac_hk_01_a_search_path_directory_that_others_can_write_is_not_in_the_script_e
 }
 
 #[test]
-fn ac_hk_01_a_relative_or_missing_search_path_entry_is_dropped() {
+fn ac_hk_08_a_relative_or_missing_search_path_entry_is_dropped() {
     let dir = TempDir::new();
     let good = private_dir(dir.path(), "good", 0o755);
     let missing = dir.path().join("missing");
@@ -291,7 +291,7 @@ fn ac_hk_01_a_relative_or_missing_search_path_entry_is_dropped() {
 }
 
 #[test]
-fn ac_hk_01_a_search_path_of_trusted_directories_drops_nothing() {
+fn ac_hk_08_a_search_path_of_trusted_directories_drops_nothing() {
     let dir = TempDir::new();
     let first = private_dir(dir.path(), "first", 0o755);
     let second = private_dir(dir.path(), "second", 0o750);
@@ -311,4 +311,15 @@ fn ac_hk_09_a_crash_leaves_no_script_directory_after_the_next_start() {
     store.clean_leftovers();
     assert!(!dir.path().join("scripts").exists());
     store.clean_leftovers();
+}
+
+#[test]
+fn adr_0040_an_old_allow_list_file_is_reported_by_path_only() {
+    let dir = TempDir::new();
+    let config = dir.path().join("restichub-agent");
+    assert_eq!(super::removed_allow_list_file(&config), None);
+
+    let file = dir.path().join("restichub-agent-hooks.toml");
+    std::fs::write(&file, "secret = \"x\"").expect("cannot write the file");
+    assert_eq!(super::removed_allow_list_file(&config), Some(file));
 }

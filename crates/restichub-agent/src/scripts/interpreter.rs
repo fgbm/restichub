@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use restichub_proto::agent::v1::ScriptInterpreter;
 
-use crate::hooks::{Trust, trust};
+use crate::trust::{self, Trust};
 
 /// The interpreters that exist on this host and that the agent trusts.
 pub(super) fn available(trust: Trust) -> Vec<ScriptInterpreter> {

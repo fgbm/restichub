@@ -6,6 +6,7 @@
 
 use std::collections::VecDeque;
 
+use restichub_proto::MAX_LOG_CHUNK_BYTES;
 use restichub_proto::agent::v1::{LogChunk, LogStream};
 
 /// Bytes of log that one job sends. After that the log ends with a marker (FR-AG-08).
@@ -31,6 +32,9 @@ pub(super) struct JobLog {
     tail: VecDeque<LogChunk>,
     tail_bytes: usize,
     sequence: [u64; STREAMS],
+    /// Lines that the full spool refused since the last marker.
+    lost_lines: u64,
+    last_step: String,
 }
 
 impl JobLog {
@@ -45,7 +49,49 @@ impl JobLog {
             tail: VecDeque::new(),
             tail_bytes: 0,
             sequence: [0; STREAMS],
+            lost_lines: 0,
+            last_step: String::new(),
         }
+    }
+
+    pub(super) fn job_id(&self) -> &str {
+        &self.job_id
+    }
+
+    /// Lines refused by the spool that no marker reports yet.
+    pub(super) fn lost_lines(&self) -> u64 {
+        self.lost_lines
+    }
+
+    /// Counts lines that the spool could not keep (FR-LG-07).
+    pub(super) fn note_lost(&mut self, lines: u64) {
+        self.lost_lines += lines;
+    }
+
+    /// The marker chunk for the lines lost so far, or `None` when nothing was lost. The marker
+    /// takes the place of the gap, so the log never has a silent hole (FR-LG-07).
+    pub(super) fn take_loss_marker(&mut self) -> Option<LogChunk> {
+        if self.lost_lines == 0 {
+            return None;
+        }
+        let lines = std::mem::take(&mut self.lost_lines);
+        let text = if lines == 1 {
+            "1 log line was dropped because the agent log spool was full or not writable\n"
+                .to_owned()
+        } else {
+            format!(
+                "{lines} log lines were dropped because the agent log spool was full or not writable\n"
+            )
+        };
+        let slot = &mut self.sequence[LogStream::Agent as usize % STREAMS];
+        *slot += 1;
+        Some(LogChunk {
+            job_id: self.job_id.clone(),
+            step_id: self.last_step.clone(),
+            stream: LogStream::Agent as i32,
+            sequence: *slot,
+            data: text.into_bytes(),
+        })
     }
 
     /// Adds the line about the dropped search path entries to the first step that has one. Later
@@ -73,7 +119,26 @@ impl JobLog {
         self.append(step_id, stream, &format!("{line}\n"));
     }
 
+    /// Splits a text above the chunk bound of the control plane, so no chunk is refused for its
+    /// size (FR-LG-07). The cut never falls inside a character.
     fn append(&mut self, step_id: &str, stream: LogStream, text: &str) {
+        let mut rest = text;
+        while rest.len() > MAX_LOG_CHUNK_BYTES {
+            let mut cut = MAX_LOG_CHUNK_BYTES;
+            while !rest.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            let (head, tail) = rest.split_at(cut);
+            self.append_piece(step_id, stream, head);
+            rest = tail;
+        }
+        self.append_piece(step_id, stream, rest);
+    }
+
+    fn append_piece(&mut self, step_id: &str, stream: LogStream, text: &str) {
+        if self.last_step != step_id {
+            step_id.clone_into(&mut self.last_step);
+        }
         self.pending_bytes += text.len();
         if let Some(last) = self.pending.last_mut()
             && last.step_id == step_id
@@ -125,7 +190,7 @@ mod tests {
 
     use restichub_proto::agent::v1::LogStream;
 
-    use super::{JobLog, LOG_LIMIT, TAIL_LIMIT};
+    use super::{JobLog, LOG_LIMIT, MAX_LOG_CHUNK_BYTES, TAIL_LIMIT};
 
     #[test]
     fn fr_ag_08_lines_of_one_stream_share_a_chunk() {
@@ -163,6 +228,43 @@ mod tests {
         // After the marker the log drops every line.
         log.push("step-2", LogStream::Stdout, "late");
         assert!(log.take_pending().is_empty());
+    }
+
+    #[test]
+    fn fr_lg_07_the_marker_counts_the_lost_lines_once() {
+        let mut log = JobLog::new("job-1");
+        assert!(log.take_loss_marker().is_none());
+        log.note_lost(3);
+        log.note_lost(2);
+        let marker = log.take_loss_marker().expect("a marker");
+        assert_eq!(
+            String::from_utf8_lossy(&marker.data),
+            "5 log lines were dropped because the agent log spool was full or not writable\n"
+        );
+        assert_eq!(marker.stream, LogStream::Agent as i32);
+        assert!(log.take_loss_marker().is_none());
+        log.note_lost(1);
+        let single = log.take_loss_marker().expect("a marker");
+        assert_eq!(single.sequence, 2);
+        assert!(String::from_utf8_lossy(&single.data).starts_with("1 log line was dropped"));
+    }
+
+    #[test]
+    fn fr_lg_07_a_long_line_splits_into_chunks_within_the_bound() {
+        let mut log = JobLog::new("job-1");
+        let line = "é".repeat(MAX_LOG_CHUNK_BYTES);
+        log.push("step-1", LogStream::Stderr, &line);
+        let chunks = log.take_pending();
+        assert!(chunks.len() >= 2);
+        assert!(
+            chunks
+                .iter()
+                .all(|chunk| chunk.data.len() <= MAX_LOG_CHUNK_BYTES)
+        );
+        let joined: Vec<u8> = chunks.iter().flat_map(|chunk| chunk.data.clone()).collect();
+        assert_eq!(joined, format!("{line}\n").into_bytes());
+        let sequences: Vec<u64> = chunks.iter().map(|chunk| chunk.sequence).collect();
+        assert_eq!(sequences, (1..=chunks.len() as u64).collect::<Vec<_>>());
     }
 
     #[test]

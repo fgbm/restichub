@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type {
@@ -74,7 +75,7 @@
 			value: (row) => (row.enabled ? t('common.enabled') : t('common.disabled')),
 			render: stateCell
 		},
-		{ key: 'created_at', header: t('common.createdAt'), render: createdCell }
+		{ key: 'created_at', header: t('common.createdAt'), nowrap: true, render: createdCell }
 	]);
 
 	function targetOf(channel: NotificationChannel): string {
@@ -318,6 +319,15 @@
 				/>
 			{/snippet}
 		</Table>
+
+		<a
+			class="manage-secrets"
+			href={resolve('/(app)/settings/access/secrets')}
+			target="_blank"
+			rel="noopener"
+		>
+			{t('secrets.manage')}
+		</a>
 	{/if}
 </SettingsLayout>
 
@@ -414,6 +424,11 @@
 </Dialog>
 
 <style>
+	.manage-secrets {
+		align-self: flex-start;
+		font-size: var(--rh-font-size-sm);
+	}
+
 	.channel__name {
 		font-weight: var(--rh-font-weight-semibold);
 	}

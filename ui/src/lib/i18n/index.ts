@@ -11,5 +11,6 @@ export {
 	tChannelError,
 	tErrorCode,
 	tErrorReason,
+	tOr,
 	type Locale
 } from './i18n.svelte';

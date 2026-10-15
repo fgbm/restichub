@@ -286,6 +286,7 @@ async fn first_send(
         key_version: sealed.key_version,
         nonce: sealed.nonce,
         ciphertext: sealed.ciphertext,
+        signer_key_id: Some(signed.signer_key_id.clone()),
         secrets: built.secrets,
     };
     let timeout = Some(i32::try_from(built.job.job().timeout_seconds).unwrap_or(i32::MAX))
@@ -438,6 +439,7 @@ async fn resign_if_retired(
         key_version: sealed.key_version,
         nonce: sealed.nonce,
         ciphertext: sealed.ciphertext,
+        signer_key_id: Some(fresh.signer_key_id.clone()),
         secrets: stored.secrets.clone(),
     };
     queue_repo::replace_signed_job(tx, job.id, &replacement).await?;

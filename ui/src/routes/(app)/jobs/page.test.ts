@@ -153,8 +153,62 @@ describe('the Jobs screen', () => {
 
 		const table = within(await screen.findByRole('table'));
 		expect(await table.findByText('Succeeded with warnings')).toBeInTheDocument();
-		expect(screen.getByText('The repository is locked by another process.')).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				'Another process locks the repository. Wait for it to end and run the job again.'
+			)
+		).toBeInTheDocument();
 		expect(screen.getByText('Forget selected no snapshots')).toBeInTheDocument();
+	});
+
+	it('keeps the status, the start time and the duration on one line', async () => {
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
+		render(Jobs);
+
+		const table = await screen.findByRole('table');
+		for (const name of ['Status', 'Started', 'Duration']) {
+			const header = within(table).getByRole('columnheader', { name: new RegExp(name) });
+			expect(header).toHaveClass('table__cell--nowrap');
+		}
+	});
+
+	it('translates the interrupted result of a job', async () => {
+		mocks.listJobs.mockResolvedValue({
+			items: [
+				job({
+					id: 'j_6',
+					status: 'failed',
+					result_code: 'failed',
+					result_message: 'interrupted',
+					finished_at: '2026-10-14T10:03:00Z'
+				})
+			],
+			next_cursor: null
+		});
+		render(Jobs);
+
+		expect(
+			await screen.findByText('Interrupted: the agent restarted while scripts ran')
+		).toBeInTheDocument();
+		expect(screen.queryByText('interrupted')).not.toBeInTheDocument();
+	});
+
+	it('shows the raw code of a result that has no translation', async () => {
+		mocks.listJobs.mockResolvedValue({
+			items: [
+				job({
+					id: 'j_7',
+					status: 'failed',
+					result_code: 'failed',
+					result_message: 'brand_new_code',
+					finished_at: '2026-10-14T10:03:00Z'
+				})
+			],
+			next_cursor: null
+		});
+		render(Jobs);
+
+		expect(await screen.findByText('brand_new_code')).toBeInTheDocument();
 	});
 
 	it('shows the empty state when no job exists', async () => {

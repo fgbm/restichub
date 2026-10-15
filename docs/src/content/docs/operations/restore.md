@@ -20,7 +20,7 @@ The data of a restore goes from the repository to the target agent. It does not 
 1. Open **Restore**.
 2. Select a repository. The screen shows the newest stored list and its age.
 3. Enter a host, a tag or a path. Enter a date range if you need one.
-4. Click **Refresh**. An agent runs `restic snapshots` with the filters, and the list updates.
+4. Click **Find snapshots**. An agent runs `restic snapshots` with the filters, and the list updates.
 
 The control plane applies the date range to the list. restic applies the host, the tag and the path. The list agrees with `restic snapshots --json` for the same filters. When a repository holds more snapshots than a result can carry, the screen shows a warning and keeps the newest snapshots.
 
@@ -35,22 +35,22 @@ One person can send 60 list and page requests in one minute. Each control plane 
 ## Restore files
 
 1. Select the files and directories that you need in the tree. If you select nothing, the restore uses the whole snapshot.
-2. Click **Restore**.
-3. Select the target agent. The default is the maintenance agent of the repository.
+2. Click **Restore…**.
+3. Select the target host ("Target host"). The default is the maintenance agent of the repository.
 4. Check the target path. The screen suggests a new folder in the first restore root of the agent, for example `/var/lib/restichub-restore/a1b2c3d4`. The path must be absolute and must lie inside a restore root.
 5. Select what to do with a file that exists in the target.
-6. Click **Restore**. The screen opens the job.
+6. Click **Start restore**. The screen opens the job.
 
 The job detail shows the progress while the restore runs. After it ends, the detail shows how many files and bytes the agent restored and how many it skipped.
 
 | Option | Meaning |
 |---|---|
-| Overwrite: `always` | Replace each file that exists. |
-| Overwrite: `if-changed` | Replace a file whose content differs. |
-| Overwrite: `if-newer` | Replace a file that is older than the copy in the snapshot. |
-| Overwrite: `never` | Keep each file that exists. |
-| Dry run | Check the restore. The agent writes no file and changes no file. |
-| Verify | After the restore, the agent reads the restored files again and compares them with the snapshot. You cannot use it with a dry run, because a dry run writes no file. |
+| "Existing files": "Replace every file" (`always`) | Replace each file that exists. |
+| "Existing files": "Replace a file that differs" (`if-changed`) | Replace a file whose content differs. |
+| "Existing files": "Replace a file that is older than the snapshot" (`if-newer`) | Replace a file that is older than the copy in the snapshot. |
+| "Existing files": "Keep every existing file" (`never`) | Keep each file that exists. |
+| "Dry run" | Check the restore. The agent writes no file and changes no file. |
+| "Verify after the restore" | After the restore, the agent reads the restored files again and compares them with the snapshot. You cannot use it with a dry run, because a dry run writes no file. |
 
 restic does not accept an include list and an exclude list in one restore. The screen restores the files that you select, and the API refuses a request that has both lists.
 
@@ -73,7 +73,7 @@ A root must be writable only by root or Administrators. The root and each existi
 
 A root of `/` allows a restore to any other directory, for example `/srv/data`. A file of the agent, a parent of one and a path inside one stay refused. The target `/` is not possible, because it holds the files of the agent. Set the root `/` only when you want this. The screen shows a warning for a system path such as `/etc`.
 
-The agent always refuses a target that is, holds or lies inside its own files. These are the configuration directory, the cache directory, the directory of the agent and restic binaries, and the allow-list. It follows symbolic links first. A root of `/` does not change this rule.
+The agent always refuses a target that is, holds or lies inside its own files. These are the configuration directory, the cache directory, and the directory of the agent and restic binaries. It follows symbolic links first. A root of `/` does not change this rule.
 
 ## API
 

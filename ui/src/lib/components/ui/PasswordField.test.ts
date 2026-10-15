@@ -17,4 +17,9 @@ describe('PasswordField', () => {
 		await user.click(screen.getByRole('button', { name: 'Hide' }));
 		expect(input).toHaveAttribute('type', 'password');
 	});
+
+	it('keeps the base class next to a class of the caller', () => {
+		render(PasswordField, { props: { label: 'Password', class: 'extra' } });
+		expect(screen.getByLabelText('Password')).toHaveClass('rh-input', 'extra');
+	});
 });

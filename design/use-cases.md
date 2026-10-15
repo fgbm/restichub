@@ -244,13 +244,13 @@ The sign-in screen asks for the username and the password only. The account is i
   2. Stop the agent service.
   3. Replace the `restichub-agent` file and the `restic` file with the files from the new package.
   4. Start the agent service. Do not run `register` again.
-- **Expected result:** the agent connects with its old identity. The "Hosts" screen shows the same host with the status "Active" and the new value in "Agent version". The host keeps its agent ID, its certificate and its allow-list file. The next job of the host runs with the new files.
+- **Expected result:** the agent connects with its old identity. The "Hosts" screen shows the same host with the status "Active" and the new value in "Agent version". The host keeps its agent ID, its certificate and its trust mode file. The next job of the host runs with the new files.
 - **Alternative flows:**
   - A `restic` file that does not match the pinned hash stops the agent at start. The host stays offline and the service log gives the cause.
   - A job that the agent already ran does not run again after the start. The agent journal holds the job.
 - **Requirements:** FR-IN-07, FR-IN-08, FR-HK-01.
 - **Acceptance criteria:** AC-IN-01, AC-HK-02.
-- **Note:** the update is a manual step in the MVP. The automatic self-update (FR-AG-13) is planned for 1.0. No criterion covers the in-place update of the package as a whole. The listed criteria cover the package content and the allow-list checksum.
+- **Note:** the update is a manual step in the MVP. The automatic self-update (FR-AG-13) is planned for 1.0. No criterion covers the in-place update of the package as a whole. The listed criteria cover the package content and the checksum of the trust mode file.
 - **Status:** Ready on the stage.
 
 ## 9. Repository and secret configuration
@@ -319,7 +319,7 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Main flow:**
   1. Open the "Profiles" screen and click "Add profile".
   2. Select the repository. Enter the paths for each operating system, the excludes, the tags and the backup options.
-  3. Set the retention and the hooks when they are needed.
+  3. Set the retention and the scripts when they are needed.
   4. Click "Preview", select a host and read the steps.
   5. Click "Save".
 - **Expected result:** the preview shows the steps and the equivalent restic command line for the host. The secrets are masked. The profile appears in the list with the status "Ready". The audit log holds `profile_create`.
@@ -466,22 +466,22 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Note:** the issue #73 (maintenance agent assignment and barriers) delivers the rule that only the maintenance agent runs these steps.
 - **Status:** Blocked by #73.
 
-## 15. Hooks from the allow-list
+## 15. Scripts on a trusted host
 
-### UC-HK-01: Run a hook from the allow-list
+### UC-HK-01: Run a script before and after a backup
 
-- **Actor:** the host administrator enables the hook. An Admin or an Operator uses it in a profile.
-- **Preconditions:** an enrolled host has the allow-list file.
+- **Actor:** the host administrator turns on the trust mode. An Admin writes the script in a profile.
+- **Preconditions:** an enrolled host reports the capability `scripts-v1`.
 - **Main flow:**
-  1. On the host, add a hook to the allow-list file. Only root or Administrators write this file.
-  2. In the profile, select the hook and enter its parameters.
+  1. On the host, run `restichub-agent trust-server-scripts --enable` as root or Administrator.
+  2. In the profile, add a script. Select the interpreter, the phase and the timeout. Enter the body and the parameters.
   3. Save the profile and run the plan.
-- **Expected result:** the agent validates the parameters against the schema and starts the hook without a shell. The hook runs in its phase: `before`, `after`, `on_success`, `on_error` or `finally`.
+- **Expected result:** the job detail lists the script and the backup in order. The script runs in its phase: `before`, `after`, `on_success`, `on_error` or `finally`. Each step has its own log.
 - **Alternative flows:**
-  - An unknown hook ID is refused.
-  - A `before` hook that fails stops the backup. The `on_error` and `finally` hooks run.
-- **Requirements:** FR-HK-01, FR-HK-03, FR-HK-05.
-- **Acceptance criteria:** AC-HK-01, AC-HK-03, AC-HK-06.
+  - A host without the trust mode refuses the job with a typed reason.
+  - A `before` script with the policy `abort_backup` that fails stops the backup. The `on_error` and `finally` scripts run.
+- **Requirements:** FR-HK-01, FR-HK-05, FR-HK-08, FR-HK-09, FR-HK-10.
+- **Acceptance criteria:** AC-HK-02, AC-HK-07, AC-HK-13.
 - **Status:** Blocked by #3.
 
 ## 16. Audit review
@@ -627,7 +627,7 @@ The sign-in screen asks for the username and the password only. The account is i
 | UC-JOB-03 | FR-MN-01, FR-MN-02 | AC-MN-04, AC-UI-02 | Blocked by #9 |
 | UC-RS-01 | FR-RS-01, FR-RS-03, FR-RS-04 | AC-RS-01, AC-RS-03, AC-RS-04 | Blocked by #8 |
 | UC-MNT-01 | FR-RP-08, FR-SC-04, FR-SC-06 | AC-RP-04, AC-SC-03, AC-SC-06 | Blocked by #73 |
-| UC-HK-01 | FR-HK-01, FR-HK-03, FR-HK-05 | AC-HK-01, AC-HK-03, AC-HK-06 | Blocked by #3 |
+| UC-HK-01 | FR-HK-01, FR-HK-05, FR-HK-08, FR-HK-09, FR-HK-10 | AC-HK-02, AC-HK-07, AC-HK-13 | Blocked by #3 |
 | UC-AUD-01 | FR-AU-01 | AC-AU-01 | Ready on the stage |
 | UC-AUD-02 | FR-AU-01, FR-TN-02 | AC-AU-01 | Ready on the stage |
 | UC-TOK-01 | FR-API-01, FR-TN-05 | AC-TN-04 | Ready on the stage |

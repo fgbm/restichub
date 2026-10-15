@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
 		ApiProblem,
@@ -832,6 +833,14 @@
 				required
 			/>
 		{/if}
+		<a
+			class="manage-secrets"
+			href={resolve('/(app)/settings/access/secrets')}
+			target="_blank"
+			rel="noopener"
+		>
+			{t('secrets.manage')}
+		</a>
 		{#if kind === 's3'}
 			<PasswordField
 				id="repo-s3-access-key"
@@ -1064,6 +1073,11 @@
 </Dialog>
 
 <style>
+	.manage-secrets {
+		align-self: flex-start;
+		font-size: var(--rh-font-size-sm);
+	}
+
 	.repo {
 		display: flex;
 		flex-direction: column;

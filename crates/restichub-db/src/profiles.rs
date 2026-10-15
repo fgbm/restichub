@@ -1,10 +1,10 @@
-//! The profile rows of a tenant (FR-PF-01, FR-PF-03, FR-HK-02, ADR-0006).
+//! The profile rows of a tenant (FR-PF-01, FR-PF-03, ADR-0006).
 //!
-//! One row holds the repository, the paths, the excludes, the tags, the options, the hooks, the
+//! One row holds the repository, the paths, the excludes, the tags, the options, the
 //! retention and the check options. The row never holds a secret value: the repository password and
 //! the backend credentials live in the encrypted `secrets` table (ADR-0017).
 //!
-//! The list settings use text arrays. The retention, the check options and the hooks use a jsonb
+//! The list settings use text arrays. The retention, the check options and the scripts use a jsonb
 //! document. The control plane validates the document with the compiler before it writes the row
 //! (FR-PF-05); this module stores it as an opaque [`serde_json::Value`].
 //!
@@ -47,7 +47,6 @@ pub struct Profile {
     pub max_duration_minutes: i32,
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
-    pub hooks: Value,
     /// Definitions as a JSON array (FR-HK-09).
     pub scripts: Value,
     pub created_at: OffsetDateTime,
@@ -106,7 +105,6 @@ pub struct NewProfile<'a> {
     pub max_duration_minutes: i32,
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
-    pub hooks: Value,
     pub scripts: Value,
     /// Absent for an API token actor.
     pub created_by: Option<UserId>,
@@ -134,7 +132,6 @@ pub struct ProfileUpdate<'a> {
     pub max_duration_minutes: Option<i32>,
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
-    pub hooks: Value,
     pub scripts: Value,
 }
 
@@ -143,10 +140,10 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
         "INSERT INTO profiles \
          (id, tenant_id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
           excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-          limit_upload_kib, limit_download_kib, retention, check_options, hooks, scripts, \
+          limit_upload_kib, limit_download_kib, retention, check_options, scripts, \
           created_by, stall_timeout_minutes, max_duration_minutes) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, \
-                 $18, $19, $20, $21, $22, $23)",
+                 $18, $19, $20, $21, $22)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -166,7 +163,6 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
     .bind(new.limit_download_kib)
     .bind(&new.retention)
     .bind(&new.check_options)
-    .bind(&new.hooks)
     .bind(&new.scripts)
     .bind(new.created_by)
     .bind(new.stall_timeout_minutes)
@@ -188,7 +184,7 @@ pub async fn list_for_repository(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, hooks, scripts, created_at, \
+                max_duration_minutes, retention, check_options, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE repository_id = $1 ORDER BY created_at, id",
     )
@@ -210,7 +206,7 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePa
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, hooks, scripts, created_at, \
+                max_duration_minutes, retention, check_options, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles \
          WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
@@ -235,7 +231,7 @@ pub async fn get(tx: &mut TenantTx<'_>, id: ProfileId) -> Result<Option<Profile>
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, hooks, scripts, created_at, \
+                max_duration_minutes, retention, check_options, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE id = $1",
     )
@@ -258,7 +254,7 @@ pub async fn get_for_update(
         "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, hooks, scripts, created_at, \
+                max_duration_minutes, retention, check_options, scripts, created_at, \
                 updated_at, created_by \
          FROM profiles WHERE id = $1 FOR UPDATE",
     )
@@ -280,9 +276,9 @@ pub async fn update(
                 paths_linux = $6, paths_macos = $7, excludes = $8, exclude_files = $9, tags = $10, \
                 use_fs_snapshot = $11, one_file_system = $12, exclude_caches = $13, \
                 limit_upload_kib = $14, limit_download_kib = $15, retention = $16, \
-                check_options = $17, hooks = $18, scripts = $19, \
-                stall_timeout_minutes = COALESCE($20, stall_timeout_minutes), \
-                max_duration_minutes = COALESCE($21, max_duration_minutes), updated_at = now() \
+                check_options = $17, scripts = $18, \
+                stall_timeout_minutes = COALESCE($19, stall_timeout_minutes), \
+                max_duration_minutes = COALESCE($20, max_duration_minutes), updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
@@ -302,7 +298,6 @@ pub async fn update(
     .bind(patch.limit_download_kib)
     .bind(&patch.retention)
     .bind(&patch.check_options)
-    .bind(&patch.hooks)
     .bind(&patch.scripts)
     .bind(patch.stall_timeout_minutes)
     .bind(patch.max_duration_minutes)
@@ -359,7 +354,6 @@ struct ProfileRow {
     max_duration_minutes: i32,
     retention: Option<Value>,
     check_options: Option<Value>,
-    hooks: Value,
     scripts: Value,
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
@@ -388,7 +382,6 @@ impl From<ProfileRow> for Profile {
             max_duration_minutes: row.max_duration_minutes,
             retention: row.retention,
             check_options: row.check_options,
-            hooks: row.hooks,
             scripts: row.scripts,
             created_at: row.created_at,
             updated_at: row.updated_at,

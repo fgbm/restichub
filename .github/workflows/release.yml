@@ -1,0 +1,552 @@
+name: Release
+
+# Build, sign and draft a release for a `v*` tag (AC-NFR-03).
+#
+# Every artifact and every image gets a keyless cosign signature from the GitHub OIDC
+# identity of this workflow, and an SBOM. The release stays a draft: the operator
+# publishes it after a manual check. The image gets only its version tag here. The
+# `latest` tag moves in `promote-latest.yml` after the operator publishes the release.
+# A `workflow_dispatch` run builds and checks everything but signs and publishes nothing.
+#
+# The workflow signs only a tag on a commit of `main` whose CI run succeeded. It uses no
+# cache: a cache that another job saved must not reach a signed build. It installs the
+# signing and SBOM tools at a fixed version with a fixed checksum.
+#
+# SBOM tools: `cargo-cyclonedx` for the agent packages, because it reads the exact
+# dependency graph of the crate from `Cargo.lock` and a scan of a stripped binary
+# cannot. `syft` for the images, because it reads the installed packages of the
+# image layers, which Cargo metadata does not cover. Both write CycloneDX JSON.
+#
+# Reproducible builds (NFR-SEC-06): the Linux agent packages are byte-identical for one
+# commit (`agent-packages.yml` checks it). The SBOM files hold their generation time, and
+# the Windows package and the images are not checked.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-cp
+  CARGO_CYCLONEDX_VERSION: 0.5.9
+  COSIGN_URL: https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64
+  COSIGN_SHA256: c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+  SYFT_URL: https://github.com/anchore/syft/releases/download/v1.54.0/syft_1.54.0_linux_amd64.tar.gz
+  SYFT_SHA256: 54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860
+
+jobs:
+  gates:
+    name: Dependency gates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: npm audit
+        run: |
+          for dir in ui docs; do
+            ( cd "$dir" && npm ci --ignore-scripts && npm audit --audit-level=high )
+          done
+
+  version:
+    name: Resolve the version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      revision: ${{ steps.v.outputs.revision }}
+      epoch: ${{ steps.v.outputs.epoch }}
+    steps:
+      # The full history lets the job test that the commit is on `main`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: v
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          crate="$(awk -F'"' '/^name = "restichub-agent"$/{getline; print $2; exit}' Cargo.lock)"
+          if [ "$REF_TYPE" = tag ]; then
+            semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$'
+            [[ "$REF_NAME" =~ $semver ]] || { echo "::error::the tag is not a strict semantic version"; exit 1; }
+            version="${REF_NAME#v}"
+            # The tag is the crate version, optionally with a pre-release suffix.
+            case "$version" in
+              "$crate"|"$crate"-*) ;;
+              *) echo "::error::the tag does not match the crate version $crate"; exit 1 ;;
+            esac
+
+            git rev-parse --verify --quiet origin/main >/dev/null ||
+              { echo "::error::origin/main is missing"; exit 1; }
+            git merge-base --is-ancestor "$SHA" origin/main ||
+              { echo "::error::the tagged commit is not on main"; exit 1; }
+            # The tag can arrive while the CI run of the commit is still queued or running.
+            deadline=$((SECONDS + 3600))
+            while :; do
+              # shellcheck disable=SC2016
+              ci="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&per_page=50" \
+                --jq '(.workflow_runs | sort_by(.created_at) | last) as $r | if $r == null then "none" else "\($r.status)/\($r.conclusion)" end')"
+              case "$ci" in
+                completed/success) break ;;
+                completed/*) echo "::error::the CI run of the tagged commit is $ci, not completed/success"; exit 1 ;;
+              esac
+              [ "$SECONDS" -lt "$deadline" ] ||
+                { echo "::error::the CI run of the tagged commit is still $ci after 60 minutes"; exit 1; }
+              echo "The CI run of the tagged commit is $ci. Waiting."
+              sleep 30
+            done
+          else
+            version="$crate-dev"
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "revision=$(git rev-parse --short=7 "$SHA")"
+            echo "epoch=$(git log -1 --format=%ct "$SHA")"
+          } >> "$GITHUB_OUTPUT"
+
+  agent:
+    name: Agent (${{ matrix.os }}-${{ matrix.arch }})
+    needs: [gates, version]
+    runs-on: ${{ matrix.runner }}
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.version.outputs.epoch }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            binary: restichub-agent
+            rustflags: ''
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            binary: restichub-agent
+            rustflags: ''
+          - os: windows
+            arch: amd64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            binary: restichub-agent.exe
+            # The agent must start on a host without the Visual C++ Redistributable.
+            rustflags: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          target: ${{ matrix.target }}
+          cache: false
+      - name: Install musl tools
+        if: matrix.os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      # Installed before the package is built: no code of its dependencies runs between the
+      # build of the package and its upload.
+      - name: Install cargo-cyclonedx
+        shell: bash
+        run: cargo install cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION" --locked --root "$RUNNER_TEMP/tools"
+      - name: Build the agent
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EXTRA_RUSTFLAGS: ${{ matrix.rustflags }}
+          REVISION: ${{ needs.version.outputs.revision }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The remapped prefixes keep the build directory and the home directory out of the binary.
+          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}=/build/src --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/build/cargo --remap-path-prefix=${RUSTUP_HOME:-$HOME/.rustup}=/build/rustup $EXTRA_RUSTFLAGS"
+          # A musl build links statically, so the binary runs on any Linux distribution.
+          RESTICHUB_BUILD_VERSION="$REVISION" RESTICHUB_RELEASE_VERSION="$RELEASE_VERSION" \
+            cargo build --release --locked -p restichub-agent --target "$TARGET"
+      - name: Check the binary
+        if: matrix.os == 'linux'
+        run: |
+          out="$(file "target/${{ matrix.target }}/release/restichub-agent")"
+          echo "$out"
+          echo "$out" | grep -Eq 'statically linked|static-pie linked' || { echo "::error::the Linux agent is not static"; exit 1; }
+      - name: Assemble the package
+        shell: bash
+        env:
+          OS: ${{ matrix.os }}
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ needs.version.outputs.version }}
+          BIN: target/${{ matrix.target }}/release/${{ matrix.binary }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/out"
+          archive="$(packaging/assemble-agent-package.sh "$BIN" "$OS" "$ARCH" "$VERSION" "$RUNNER_TEMP/out")"
+          echo "archive=$archive" >> "$GITHUB_ENV"
+          echo "name=$(basename "$archive" | sed -e 's/\.tar\.gz$//' -e 's/\.zip$//')" >> "$GITHUB_ENV"
+      # AC-IN-01: the package holds the agent, the licenses and the hashes, and no restic.
+      - name: Verify the package (AC-IN-01)
+        shell: bash
+        run: packaging/verify-agent-package.sh --package "$archive"
+      - name: Write the SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATH="$RUNNER_TEMP/tools/bin:$PATH" cargo cyclonedx --manifest-path crates/restichub-agent/Cargo.toml \
+            --format json --spec-version 1.5 --target "${{ matrix.target }}" \
+            --override-filename sbom
+          mv crates/restichub-agent/sbom.json "$RUNNER_TEMP/out/$name.cdx.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-agent-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: error
+
+  inspect:
+    name: Inspect the Windows agent
+    needs: agent
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-agent-windows-amd64
+          path: ${{ runner.temp }}/windows
+      - name: The agent imports no C or C++ runtime DLL
+        env:
+          WINDOWS: ${{ runner.temp }}/windows
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/exe"
+          python3 -I -c 'import glob, sys, zipfile; zipfile.ZipFile(glob.glob(sys.argv[1] + "/*.zip")[0]).extract("restichub-agent.exe", sys.argv[2])' "$WINDOWS" "$RUNNER_TEMP/exe"
+          packaging/check-windows-imports.sh "$RUNNER_TEMP/exe/restichub-agent.exe"
+
+  # A run without a tag builds the image and pushes nothing. It has no package permission.
+  image:
+    name: Image check (${{ matrix.platform }})
+    needs: [gates, version]
+    if: github.event_name != 'push'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push=false
+          build-args: |
+            RESTICHUB_BUILD_VERSION=${{ needs.version.outputs.revision }}
+            RESTICHUB_RELEASE_VERSION=${{ needs.version.outputs.version }}
+          provenance: false
+          sbom: false
+
+  image-push:
+    name: Image (${{ matrix.platform }})
+    needs: [gates, version]
+    if: github.event_name == 'push'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Each platform builds on a native runner and pushes by digest. The `manifest` job
+      # joins the digests into one tag. The build creates no attestation here: the
+      # `manifest` job signs and attests the digests.
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.title=ResticHub control plane
+            org.opencontainers.image.description=The ResticHub control plane.
+            org.opencontainers.image.licenses=Apache-2.0
+          build-args: |
+            RESTICHUB_BUILD_VERSION=${{ needs.version.outputs.revision }}
+            RESTICHUB_RELEASE_VERSION=${{ needs.version.outputs.version }}
+          provenance: false
+          sbom: false
+      - name: Save the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          echo "$DIGEST" > "$RUNNER_TEMP/digests/${PLATFORM//\//-}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+
+  manifest:
+    name: Image manifest, signature and SBOM
+    needs: [version, image-push]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.index.outputs.digest }}
+      ref: ${{ steps.index.outputs.ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cosign and syft
+        run: |
+          packaging/install-tool.sh "$COSIGN_URL" "$COSIGN_SHA256" cosign binary
+          packaging/install-tool.sh "$SYFT_URL" "$SYFT_SHA256" syft archive
+      - id: index
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          repo="${REGISTRY}/${IMAGE_NAME}"
+          refs=()
+          for f in "$RUNNER_TEMP"/digests/*; do refs+=("$repo@$(cat "$f")"); done
+          # Only the version tag. The `latest` tag moves after the operator publishes the release.
+          docker buildx imagetools create -t "$repo:$VERSION" "${refs[@]}"
+          digest="$(docker buildx imagetools inspect "$repo:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "ref=$repo@$digest" >> "$GITHUB_OUTPUT"
+
+          mkdir -p "$RUNNER_TEMP/image-out"
+          # Sign the index and each platform image by digest. A tag can move, a digest cannot.
+          for ref in "$repo@$digest" "${refs[@]}"; do
+            cosign sign --yes "$ref"
+          done
+          # One SBOM per platform image, attested to its digest and kept as a release file.
+          for f in "$RUNNER_TEMP"/digests/*; do
+            platform="$(basename "$f")"
+            ref="$repo@$(cat "$f")"
+            sbom="$RUNNER_TEMP/image-out/restichub-cp-${VERSION}-${platform}.cdx.json"
+            syft "$ref" -o "cyclonedx-json@1.5=$sbom"
+            cosign attest --yes --type cyclonedx --predicate "$sbom" "$ref"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-image
+          path: ${{ runner.temp }}/image-out/*
+          if-no-files-found: error
+
+  # The only job with `id-token: write`. It runs no command from a documentation page.
+  sign:
+    name: Sign the artifacts
+    needs: [version, agent, inspect, manifest]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The exact names of the artifacts: another artifact cannot replace a file.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-agent-linux-amd64
+          path: ${{ runner.temp }}/assets
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-agent-linux-arm64
+          path: ${{ runner.temp }}/assets
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-agent-windows-amd64
+          path: ${{ runner.temp }}/assets
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image
+          path: ${{ runner.temp }}/assets
+      - name: Install cosign
+        run: packaging/install-tool.sh "$COSIGN_URL" "$COSIGN_SHA256" cosign binary
+      - name: Check the file set
+        env:
+          ASSETS: ${{ runner.temp }}/assets
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          {
+            for platform in linux-amd64 linux-arm64 windows-amd64; do
+              echo "restichub-agent-${VERSION}-${platform}.cdx.json"
+            done
+            echo "restichub-agent-${VERSION}-linux-amd64.tar.gz"
+            echo "restichub-agent-${VERSION}-linux-arm64.tar.gz"
+            echo "restichub-agent-${VERSION}-windows-amd64.zip"
+            echo "restichub-cp-${VERSION}-linux-amd64.cdx.json"
+            echo "restichub-cp-${VERSION}-linux-arm64.cdx.json"
+          } | sort > "$RUNNER_TEMP/expected.txt"
+          ( cd "$ASSETS" && find . -mindepth 1 -printf '%P\n' | sort ) > "$RUNNER_TEMP/found.txt"
+          cat "$RUNNER_TEMP/found.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/found.txt" ||
+            { echo "::error::the release files differ from the expected list"; exit 1; }
+          if find "$ASSETS" -mindepth 1 ! -type f | grep -q .; then
+            echo "::error::the release holds a directory or a link"; exit 1
+          fi
+      - name: Hash and sign
+        env:
+          ASSETS: ${{ runner.temp }}/assets
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          cd "$ASSETS"
+          # SHA256SUMS lists every file, including the SBOMs. It is signed too.
+          sha256sum -- * > SHA256SUMS
+          for f in *; do
+            case "$f" in *.sigstore.json) continue ;; esac
+            cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
+          done
+          ls -l
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-files
+          path: ${{ runner.temp }}/assets/*
+          if-no-files-found: error
+
+  # The commands of the verification guide run against the files and the image that this
+  # workflow just built, so the guide cannot drift from the release (AC-NFR-03). The
+  # commands come from a documentation page, so this job has read permissions only and no
+  # registry login. What it writes is never released: the `draft` job takes the files of
+  # the `sign` job.
+  verify:
+    name: Verify with the commands of the guide
+    needs: [version, sign]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-files
+          path: ${{ runner.temp }}/assets
+      - name: Install cosign
+        run: packaging/install-tool.sh "$COSIGN_URL" "$COSIGN_SHA256" cosign binary
+      - name: Run the commands of the guide
+        env:
+          ASSETS: ${{ runner.temp }}/assets
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for page in docs/src/content/docs/operations/verify-a-release.md docs/src/content/docs/ru/operations/verify-a-release.md; do
+            packaging/run-doc-verify.sh "$page" "$VERSION" "$ASSETS"
+          done
+
+  draft:
+    name: Draft the release
+    needs: [version, manifest, sign, verify]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-files
+          path: ${{ runner.temp }}/assets
+      - name: Write the release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          IMAGE_REF: ${{ needs.manifest.outputs.ref }}
+        run: |
+          set -euo pipefail
+          # The values passed the checks of the earlier jobs: a strict version and a digest reference.
+          awk '{
+            gsub(/@VERSION@/, ENVIRON["VERSION"]); gsub(/@TAG@/, ENVIRON["TAG"])
+            gsub(/@REPO@/, ENVIRON["REPO"]); gsub(/@IMAGE@/, ENVIRON["IMAGE_REF"])
+            print
+          }' .github/release-notes.md.tmpl > "$RUNNER_TEMP/notes.md"
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+          ASSETS: ${{ runner.temp }}/assets
+        run: |
+          set -euo pipefail
+          flags=(--draft --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag)
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" "${flags[@]}" "$ASSETS"/*

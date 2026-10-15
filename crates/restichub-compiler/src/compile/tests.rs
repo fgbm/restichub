@@ -7,13 +7,11 @@ use time::{Date, Month, OffsetDateTime};
 use super::{Plan, compile};
 use crate::arg;
 use crate::error::CompileError;
-use crate::hook::{AllowListedHook, HookParameterSpec, ParameterKind};
 use crate::job::ValidatedJob;
 use crate::option::ResticOption;
 use crate::preview::preview;
 use crate::profile::{
-    BackupOptions, CheckOptions, HookParameter, HookPhase, HookRef, Profile, ProfilePaths,
-    Retention, SnapshotFilter,
+    BackupOptions, CheckOptions, HookPhase, Profile, ProfilePaths, Retention, SnapshotFilter,
 };
 use crate::target::{Architecture, OperatingSystem, ResticVersion, TargetFacts};
 
@@ -29,74 +27,6 @@ fn date(year: i32, month: u8, day: u8) -> OffsetDateTime {
     }
 }
 
-fn allow_list() -> BTreeMap<String, AllowListedHook> {
-    let mut allow_list = BTreeMap::new();
-    allow_list.insert(
-        "pg_dump".to_owned(),
-        AllowListedHook {
-            parameters: BTreeMap::from([(
-                "database".to_owned(),
-                HookParameterSpec {
-                    kind: ParameterKind::String {
-                        max_length: 64,
-                        pattern: None,
-                    },
-                    required: false,
-                },
-            )]),
-            phases: Vec::new(),
-        },
-    );
-    allow_list.insert(
-        "dump_secret".to_owned(),
-        AllowListedHook {
-            parameters: BTreeMap::from([(
-                "password".to_owned(),
-                HookParameterSpec {
-                    kind: ParameterKind::SecretRef,
-                    required: false,
-                },
-            )]),
-            phases: Vec::new(),
-        },
-    );
-    allow_list.insert(
-        "strict".to_owned(),
-        AllowListedHook {
-            parameters: BTreeMap::from([
-                (
-                    "mode".to_owned(),
-                    HookParameterSpec {
-                        kind: ParameterKind::Enum {
-                            values: vec!["full".to_owned(), "fast".to_owned()],
-                        },
-                        required: true,
-                    },
-                ),
-                (
-                    "jobs".to_owned(),
-                    HookParameterSpec {
-                        kind: ParameterKind::Integer {
-                            minimum: Some(1),
-                            maximum: Some(8),
-                        },
-                        required: false,
-                    },
-                ),
-                (
-                    "verbose".to_owned(),
-                    HookParameterSpec {
-                        kind: ParameterKind::Boolean,
-                        required: false,
-                    },
-                ),
-            ]),
-            phases: vec![HookPhase::Before, HookPhase::Finally],
-        },
-    );
-    allow_list
-}
-
 fn target() -> TargetFacts {
     let mut labels = BTreeMap::new();
     labels.insert("env".to_owned(), "prod".to_owned());
@@ -109,7 +39,6 @@ fn target() -> TargetFacts {
         labels,
         restic_version: ResticVersion::MIN_SUPPORTED,
         now: date(2026, 10, 13),
-        allow_list: allow_list(),
         server_scripts: crate::script::ServerScripts::default(),
     }
 }
@@ -178,20 +107,6 @@ fn backup_paths(plan: &Plan) -> Vec<String> {
     panic!("no backup step");
 }
 
-fn hook(hook_id: &str, phase: HookPhase, parameters: &[(&str, &str)]) -> HookRef {
-    HookRef {
-        hook_id: hook_id.to_owned(),
-        phase,
-        parameters: parameters
-            .iter()
-            .map(|(name, value)| HookParameter {
-                name: (*name).to_owned(),
-                value: (*value).to_owned(),
-            })
-            .collect(),
-    }
-}
-
 #[test]
 fn backup_step_is_built_with_retry_lock() {
     let plan = plan(&profile(), &target());
@@ -219,7 +134,7 @@ fn retention_and_check_add_maintenance_steps() {
     assert_eq!(plan.steps.len(), 4);
     for planned in &plan.steps {
         match &planned.step.kind {
-            Some(step::Kind::Backup(_)) | Some(step::Kind::Hook(_)) => {
+            Some(step::Kind::Backup(_)) => {
                 assert!(!planned.maintenance);
             }
             Some(step::Kind::Forget(_))
@@ -256,7 +171,7 @@ fn fr_rp_08_the_forget_carries_the_profile_tag_and_the_filter_tags_as_one_and_li
     assert_eq!(filter.all_tags, [PROFILE_TAG, "daily"]);
     assert!(filter.tags.is_empty());
 
-    let preview = preview(&plan, &repository(), &allow_list()).expect("the preview");
+    let preview = preview(&plan, &repository()).expect("the preview");
     let forget = preview
         .iter()
         .find(|step| matches!(step.step.kind, Some(step::Kind::Forget(_))))
@@ -341,19 +256,6 @@ fn fr_rp_08_the_backup_carries_the_profile_tag() {
 }
 
 #[test]
-fn before_hook_runs_before_the_backup() {
-    let mut profile = profile();
-    profile.hooks = vec![hook("pg_dump", HookPhase::Before, &[("database", "app")])];
-    let plan = plan(&profile, &target());
-    assert_eq!(plan.steps.len(), 2);
-    assert!(matches!(plan.steps[0].step.kind, Some(step::Kind::Hook(_))));
-    assert!(matches!(
-        plan.steps[1].step.kind,
-        Some(step::Kind::Backup(_))
-    ));
-}
-
-#[test]
 fn ac_pf_02_vss_on_linux_agent_is_rejected() {
     let mut profile = profile();
     profile.options = BackupOptions {
@@ -391,137 +293,6 @@ fn ac_ag_12_the_plan_carries_the_job_limits() {
         max_duration_seconds: 86_400,
     };
     assert_eq!(plan(&profile, &target()).limits, profile.limits);
-}
-
-#[test]
-fn ac_pf_02_missing_hook_is_rejected() {
-    let mut profile = profile();
-    profile.hooks = vec![hook("missing", HookPhase::Before, &[])];
-    let error = error(&profile, &target());
-    assert!(matches!(
-        error,
-        CompileError::UnknownHook { hook_id, .. } if hook_id == "missing"
-    ));
-}
-
-#[test]
-fn fr_hk_03_typed_hook_parameters_reach_the_step() {
-    use restichub_proto::agent::v1::hook_parameter::Typed;
-    let mut profile = profile();
-    profile.hooks = vec![hook(
-        "strict",
-        HookPhase::Before,
-        &[("mode", "full"), ("jobs", "4"), ("verbose", "true")],
-    )];
-    let plan = plan(&profile, &target());
-    let Some(step::Kind::Hook(step)) = &plan.steps[0].step.kind else {
-        panic!("the first step is not a hook");
-    };
-    let typed: Vec<_> = step.parameters.iter().map(|p| p.typed.clone()).collect();
-    assert_eq!(
-        typed,
-        vec![
-            Some(Typed::StringValue("full".to_owned())),
-            Some(Typed::IntegerValue(4)),
-            Some(Typed::BooleanValue(true)),
-        ]
-    );
-}
-
-#[test]
-fn fr_hk_03_a_value_outside_the_schema_is_rejected() {
-    for (name, value) in [
-        ("mode", "slow"),
-        ("jobs", "9"),
-        ("jobs", "4; id"),
-        ("verbose", "1"),
-    ] {
-        let mut profile = profile();
-        let mut parameters = vec![("mode", "full")];
-        parameters.retain(|(known, _)| *known != name);
-        parameters.push((name, value));
-        profile.hooks = vec![hook("strict", HookPhase::Before, &parameters)];
-        assert!(
-            matches!(
-                compile(&profile, &target()),
-                Err(CompileError::InvalidHookParameter { name: ref bad, .. }) if bad == name
-            ),
-            "{name}={value}"
-        );
-    }
-}
-
-#[test]
-fn fr_hk_02_a_required_parameter_must_be_set() {
-    let mut profile = profile();
-    profile.hooks = vec![hook("strict", HookPhase::Before, &[])];
-    assert!(matches!(
-        compile(&profile, &target()),
-        Err(CompileError::MissingHookParameter { name, .. }) if name == "mode"
-    ));
-}
-
-#[test]
-fn fr_hk_05_a_hook_runs_only_in_its_phases() {
-    let mut profile = profile();
-    profile.hooks = vec![hook("strict", HookPhase::OnError, &[("mode", "full")])];
-    assert!(matches!(
-        compile(&profile, &target()),
-        Err(CompileError::HookPhaseNotAllowed { hook_id, .. }) if hook_id == "strict"
-    ));
-}
-
-#[test]
-fn fr_hk_05_the_hooks_follow_the_phase_order() {
-    let mut profile = profile();
-    profile.hooks = vec![
-        hook("pg_dump", HookPhase::Finally, &[]),
-        hook("pg_dump", HookPhase::OnError, &[]),
-        hook("pg_dump", HookPhase::After, &[]),
-        hook("pg_dump", HookPhase::Before, &[]),
-        hook("pg_dump", HookPhase::OnSuccess, &[]),
-    ];
-    let plan = plan(&profile, &target());
-    let order: Vec<String> = plan
-        .steps
-        .iter()
-        .map(|planned| match &planned.step.kind {
-            Some(step::Kind::Hook(hook)) => format!("hook-{}", hook.phase),
-            Some(step::Kind::Backup(_)) => "backup".to_owned(),
-            _ => "other".to_owned(),
-        })
-        .collect();
-    // before=1, after=2, on_success=3, on_error=4, finally=5 in the protocol.
-    assert_eq!(
-        order,
-        ["hook-1", "backup", "hook-2", "hook-3", "hook-4", "hook-5"]
-    );
-}
-
-#[test]
-fn ac_pf_02_unknown_hook_parameter_is_rejected() {
-    let mut profile = profile();
-    profile.hooks = vec![hook("pg_dump", HookPhase::Before, &[("other", "app")])];
-    let error = error(&profile, &target());
-    assert!(matches!(
-        error,
-        CompileError::UnknownHookParameter { name, .. } if name == "other"
-    ));
-}
-
-#[test]
-fn duplicate_hook_parameter_is_rejected() {
-    let mut profile = profile();
-    profile.hooks = vec![hook(
-        "pg_dump",
-        HookPhase::Before,
-        &[("database", "app"), ("database", "other")],
-    )];
-    let error = error(&profile, &target());
-    assert!(matches!(
-        error,
-        CompileError::DuplicateHookParameter { name, .. } if name == "database"
-    ));
 }
 
 #[test]
@@ -697,7 +468,7 @@ fn empty_paths_are_rejected() {
 #[test]
 fn ac_pf_01_preview_masks_secrets() {
     let plan = plan(&profile(), &target());
-    let previews = match preview(&plan, &repository(), &allow_list()) {
+    let previews = match preview(&plan, &repository()) {
         Ok(value) => value,
         Err(error) => panic!("{error:?}"),
     };
@@ -710,35 +481,6 @@ fn ac_pf_01_preview_masks_secrets() {
             .iter()
             .any(|(name, value)| name == "RESTIC_PASSWORD" && value == "***")
     );
-}
-
-#[test]
-fn ac_pf_01_preview_masks_secret_hook_parameter() {
-    let mut profile = profile();
-    profile.hooks = vec![hook(
-        "dump_secret",
-        HookPhase::Before,
-        &[("password", "s3cr3t")],
-    )];
-    let plan = plan(&profile, &target());
-    let previews = match preview(&plan, &repository(), &allow_list()) {
-        Ok(value) => value,
-        Err(error) => panic!("{error:?}"),
-    };
-    assert!(previews[0].command.contains("password=***"));
-    assert!(!previews[0].command.contains("s3cr3t"));
-}
-
-#[test]
-fn ac_pf_01_preview_quotes_hook_parameter_value() {
-    let mut profile = profile();
-    profile.hooks = vec![hook("pg_dump", HookPhase::Before, &[("database", "my db")])];
-    let plan = plan(&profile, &target());
-    let previews = match preview(&plan, &repository(), &allow_list()) {
-        Ok(value) => value,
-        Err(error) => panic!("{error:?}"),
-    };
-    assert!(previews[0].command.contains("database='my db'"));
 }
 
 fn attack() -> impl Strategy<Value = String> {
@@ -761,7 +503,6 @@ proptest! {
     #[test]
     fn injection_values_never_become_options(
         values in prop::collection::vec(attack(), 0..6),
-        hook_values in prop::collection::vec(attack(), 0..3),
     ) {
         let profile = Profile {
             repository_id: "repo-1".to_owned(),
@@ -785,17 +526,6 @@ proptest! {
             check: Some(CheckOptions {
                 read_data_subset: "10%".to_owned(),
             }),
-            hooks: vec![HookRef {
-                hook_id: "pg_dump".to_owned(),
-                phase: HookPhase::Before,
-                parameters: hook_values
-                    .iter()
-                    .map(|value| HookParameter {
-                        name: "database".to_owned(),
-                        value: value.clone(),
-                    })
-                    .collect(),
-            }],
             ..Profile::default()
         };
 
@@ -941,7 +671,7 @@ fn ac_pf_01_the_preview_of_a_script_shows_no_body_and_no_value() {
     }];
     profile.scripts = vec![dump];
     let plan = plan(&profile, &trusting_target());
-    let lines = preview(&plan, &repository(), &BTreeMap::new()).expect("preview");
+    let lines = preview(&plan, &repository()).expect("preview");
     let line = &lines[0].command;
     assert!(line.contains("script=dump"));
     assert!(line.contains("PGPASSWORD"));

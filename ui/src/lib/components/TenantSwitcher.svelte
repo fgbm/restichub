@@ -194,7 +194,7 @@
 		class="switcher__button"
 		aria-haspopup="menu"
 		aria-expanded={open}
-		aria-label={t('topbar.switchTenant')}
+		aria-label={`${platformMode ? t('nav.platformMode') : (session?.tenant?.name ?? t('topbar.noTenant'))}, ${t('topbar.switchTenant')}`}
 		onclick={toggle}
 		onkeydown={onKeydown}
 	>

@@ -17,7 +17,7 @@
 	} from '#lib/components/ui/index.ts';
 	import type { MenuItem, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { draftOf, scriptOf } from '#lib/scripts.ts';
+	import { draftOf, scriptOf, templateDescription, templateName } from '#lib/scripts.ts';
 	import type { ScriptDraft } from '#lib/scripts.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -44,7 +44,12 @@
 	let deleting = $state(false);
 
 	const columns = $derived<TableColumn<JobTemplate>[]>([
-		{ key: 'name', header: t('jobTemplates.name'), value: (row) => row.name, render: nameCell },
+		{
+			key: 'name',
+			header: t('jobTemplates.name'),
+			value: (row) => templateName(row, 'job'),
+			render: nameCell
+		},
 		{
 			key: 'scripts',
 			header: t('jobTemplates.scripts'),
@@ -103,8 +108,8 @@
 	}
 
 	function fill(template: JobTemplate): void {
-		name = template.name;
-		description = template.description;
+		name = templateName(template, 'job');
+		description = templateDescription(template, 'job');
 		scripts = template.scripts.map((script) => draftOf(script));
 	}
 
@@ -128,7 +133,7 @@
 		viewing = false;
 		resetForm();
 		fill(template);
-		name = t('scriptTemplates.copyName', { name: template.name });
+		name = t('scriptTemplates.copyName', { name: templateName(template, 'job') });
 		formOpen = true;
 	}
 
@@ -207,8 +212,8 @@
 
 {#snippet nameCell(template: JobTemplate)}
 	<span class="template">
-		<span class="template__name">{template.name}</span>
-		<span class="template__meta">{template.description}</span>
+		<span class="template__name">{templateName(template, 'job')}</span>
+		<span class="template__meta">{templateDescription(template, 'job')}</span>
 	</span>
 {/snippet}
 
@@ -255,7 +260,7 @@
 				<DropdownMenu
 					icon="more"
 					align="end"
-					label={t('scriptTemplates.moreActions', { name: template.name })}
+					label={t('scriptTemplates.moreActions', { name: templateName(template, 'job') })}
 					items={actionsFor(template)}
 				/>
 			{/snippet}
@@ -324,7 +329,9 @@
 <ConfirmDialog
 	bind:open={deleteOpen}
 	title={t('jobTemplates.deleteTitle')}
-	message={t('jobTemplates.deleteBody', { name: deleteTarget?.name ?? '' })}
+	message={t('jobTemplates.deleteBody', {
+		name: deleteTarget ? templateName(deleteTarget, 'job') : ''
+	})}
 	confirmLabel={t('scriptTemplates.delete')}
 	tone="danger"
 	loading={deleting}

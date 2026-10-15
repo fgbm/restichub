@@ -317,7 +317,7 @@ pub fn validate_script(mut script: ScriptDef, prefix: &str) -> Result<ScriptDef,
         return Err(ApiError::invalid_field(at("env"), Reason::TooLong));
     }
     let mut names = BTreeSet::new();
-    for (index, variable) in script.env.iter().enumerate() {
+    for (index, variable) in script.env.iter_mut().enumerate() {
         let field = format!("{prefix}.env[{index}]");
         if !is_script_env_name(&variable.name) {
             return Err(ApiError::invalid_field(
@@ -344,12 +344,16 @@ pub fn validate_script(mut script: ScriptDef, prefix: &str) -> Result<ScriptDef,
                     Reason::InvalidCharacter,
                 ));
             }
-            EnvKind::SecretRef if uuid::Uuid::parse_str(&variable.value).is_err() => {
-                return Err(ApiError::invalid_field(
-                    format!("{field}.value"),
-                    Reason::InvalidFormat,
-                ));
-            }
+            // The usage search of a secret compares the canonical text (FR-RP-05).
+            EnvKind::SecretRef => match uuid::Uuid::parse_str(&variable.value) {
+                Ok(id) => variable.value = id.to_string(),
+                Err(_) => {
+                    return Err(ApiError::invalid_field(
+                        format!("{field}.value"),
+                        Reason::InvalidFormat,
+                    ));
+                }
+            },
             _ => {}
         }
     }

@@ -49,7 +49,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
 | AC-AG-01 | FR-AG-01 | Install the agent on each operating system of S1. **Expected:** the service runs. It starts automatically after a reboot. After the process stops unexpectedly, the service starts again in 30 s or less. | A |
-| AC-AG-02 | FR-AG-02, FR-AG-03 | The agent is connected to the CP and gets no jobs for 24 h. **Expected:** no restic process and no hook starts. The agent opens outbound connections only to the CP. | A |
+| AC-AG-02 | FR-AG-02, FR-AG-03 | The agent is connected to the CP and gets no jobs for 24 h. **Expected:** no restic process and no script starts. The agent opens outbound connections only to the CP. | A |
 | AC-AG-03 | FR-AG-03, FR-AG-04 | The agent completes 10 jobs on 3 repositories. **Expected:** a search for the canary in the agent directory, temporary directories, logs, Windows registry, journald and Windows Event Log finds 0 matches. The agent files agree with the list in FR-AG-04. | S |
 | AC-AG-04 | FR-AG-06 | During a backup, read the process list: `/proc/*/cmdline` on Linux, `Win32_Process.CommandLine` on Windows. **Expected:** no process argument contains the canary. | S |
 | AC-AG-05 | FR-AG-09 | Fake restic exits with codes 0, 1, 3, 10, 11, 12, 130 and 99. **Expected:** statuses `success`, `failed`, `warning`, `config_error`, `retry`, `config_error`, `cancelled`, `failed`. | A |
@@ -91,23 +91,18 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-PR-08 | FR-PR-10 | Put `--password-command=cmd /c calc`, `-x` and a line break into each string field of each step type. **Expected:** validation rejects the value, or the argument builder puts it after `--` or in attached form. restic never receives the value as an option. | S |
 | AC-PR-09 | FR-PR-11 | Send a key update signed by a revoked key, a key update that changes an existing `key_id` and a replayed old key update. **Expected:** the agent rejects all three. The key ring does not change. | S |
 
-## 5. Hooks
+## 5. Scripts
 
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
-| AC-HK-01 | FR-HK-01 | Users other than root or Administrators can write the allow-list file. **Expected:** the agent starts no hook and reports a configuration error to the CP. | A |
-| AC-HK-02 | FR-HK-01 | Do a self-update and 100 jobs of different types. **Expected:** the checksum of the allow-list does not change. | A |
-| AC-HK-03 | FR-HK-03 | A job refers to an unknown hook ID. **Expected:** the agent rejects the job. | A |
-| AC-HK-04 | FR-HK-02, FR-HK-03 | A hook parameter does not agree with the schema. **Expected:** the agent rejects it. The strings `; rm -rf /`, `& del C:\*`, `$(id)` and `` `id` `` go to the hook as one literal argument or the schema rejects them. No side effect occurs. | S |
-| AC-HK-05 | FR-HK-04 | A profile refers to a hook that one target agent does not have. **Expected:** the UI does not save the profile. The error shows the agent and the hook. | A |
+| AC-HK-02 | FR-HK-01 | Do a self-update and 100 jobs of different types. **Expected:** the checksum of the trust mode file does not change. | A |
 | AC-HK-07 | FR-HK-08, FR-HK-10 | The trust mode is off and a job has a script step. **Expected:** the CP refuses the job with a typed reason. A job that reaches the agent anyway gets `JobRejected`. No script runs. | A |
 | AC-HK-08 | FR-HK-08 | Another user can write the trust file. **Expected:** the agent reports the mode as off and runs no script. | A |
 | AC-HK-09 | FR-HK-09 | A script has a secret parameter with a canary value. **Expected:** the script reads the canary from its environment. The canary is not in the arguments, the logs, the journal or a file after the run. The file with the body does not exist after the run. | S |
 | AC-HK-10 | FR-HK-09 | A script runs longer than its timeout, or the user cancels the job. **Expected:** the agent stops the script and its child processes. | A |
-| AC-HK-11 | FR-HK-11 | A job has scripts, hooks and a backup. **Expected:** the planned steps list all of them in order before they run. Each step has its own log. The API returns the lines of one step. | A |
+| AC-HK-11 | FR-HK-11 | A job has scripts and a backup. **Expected:** the planned steps list all of them in order before they run. Each step has its own log. The API returns the lines of one step. | A |
 | AC-HK-12 | FR-HK-12 | An Operator edits a script or a template. **Expected:** the CP refuses it. An Admin edit writes an audit record with the hash of the script. A template of another organization returns 404. | A |
 | AC-HK-13 | FR-HK-05, FR-HK-09 | A `before` script with the policy `abort_backup` fails. **Expected:** the backup does not run. `on_error` and `finally` scripts run. With the policy `continue`, the backup runs. | A |
-| AC-HK-06 | FR-HK-05 | The `before` hook fails. **Expected:** the backup does not run. `on_error` and `finally` run. `on_success` does not run. On success the sequence is `before`, backup, `after`, `on_success`, `finally`. | A |
 
 ## 6. Repositories and secrets
 
@@ -123,7 +118,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
 | AC-PF-01 | FR-PF-04 | Open the profile preview. **Expected:** the steps and the command line agree with the command that the agent ran (compare with the job log). Secrets are masked. | A |
-| AC-PF-02 | FR-PF-05 | Save a profile with one error. Do this test for each error: incorrect cron, missing hook, VSS for a Linux agent, option not available in the installed restic. **Expected:** the UI does not save the profile. The error points to the field. | A |
+| AC-PF-02 | FR-PF-05 | Save a profile with one error. Test each error: incorrect cron, a script without the trust mode, VSS for a Linux agent, option not available in the installed restic. **Expected:** the UI does not save the profile. The error points to the field. | A |
 | AC-PF-03 | FR-PF-03 | A profile uses `{{hostname}}`, `{{os}}`, `{{agent.label.env}}` and the date on 3 agents. **Expected:** each agent gets its own values. | A |
 | AC-PF-04 | FR-PF-02 (1.0) | A chain of `extends` with three levels. **Expected:** the result agrees with the documented merge rules (table-driven test). The CP rejects the cycle A→B→A and shows the chain. | A |
 | AC-PF-05 | FR-PF-06 (1.0) | Change a profile and roll it back. **Expected:** the diff shows the change. The rollback restores the revision. Each job refers to the revision that the compiler used. | A |
@@ -170,6 +165,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-LG-02 | FR-LG-01, FR-LG-02 (1.0) | Change the backend to `s3`. **Expected:** new logs go to S3 with the keys `<tenant>/<job>/<step>`. The UI shows old logs from the database and new logs from S3. Retention in S3 works independently. | A |
 | AC-LG-03 | FR-LG-04 (1.0) | MinIO is not available for 30 minutes. **Expected:** jobs do not fail. The logs go to the database. An alert occurs. | A |
 | AC-LG-04 | NFR-SEC-05 | After the full end-to-end suite, search for the canary in all logs of all backends. **Expected:** 0 matches. | S |
+| AC-LG-05 | FR-LG-07, FR-PR-07 | The stream drops in the middle of a backup that writes a long log. The agent restarts once, and the control plane acknowledges only a part of the log. The spool of the agent is full for a short time. **Expected:** after the reconnect, the CP has every line once and in order. The acknowledged data leaves the disk of the agent. A full spool leaves one marker line with the number of lost lines. A stalled CP does not delay a cancel. | A |
 
 ## 11. Tenants
 
