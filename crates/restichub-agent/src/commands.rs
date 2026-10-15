@@ -7,29 +7,98 @@ use std::sync::mpsc::Receiver;
 use anyhow::{Context, Result, bail};
 use time::OffsetDateTime;
 
-use crate::cli::RegisterOptions;
+use crate::cli::{RegisterOptions, ResticFileOptions};
 use crate::enroll::{Client, Facts};
 use crate::identity::{StoredIdentity, StoredSigningKeys, generate_key_and_csr};
 use crate::restic::{Restic, ResticBinary};
+use crate::restic_install::Installer;
+use crate::restic_release::Supply;
+use crate::restic_store::Layout;
 
 /// Enrolls this host on a private runtime (FR-IN-07).
 ///
+/// The restic download runs after the preflight and before the enrollment request, so a host
+/// without restic and without network fails before the token is spent (ADR-0038, FR-IN-07).
+///
 /// # Errors
 ///
-/// Returns an error when the runtime cannot start, or from [`register_async`].
+/// Returns an error when the runtime cannot start, or from [`provision_and_register`].
 pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     crate::preflight::ensure_elevated()?;
-    let restic = ResticBinary::locate()?;
+    let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("cannot start the runtime")?;
-    runtime.block_on(register_async(
-        options,
-        dir,
-        &crate::paths::cache_dir(),
-        &restic,
-    ))
+    runtime.block_on(async {
+        let supply = crate::restic_install::supply(&options.restic)?;
+        provision_and_register(
+            options,
+            dir,
+            &crate::paths::cache_dir(),
+            &installer,
+            &supply,
+        )
+        .await
+    })
+}
+
+/// Checks the input, installs restic when it is absent and enrolls this host (FR-IN-07, ADR-0038).
+///
+/// # Errors
+///
+/// Returns an error from the checks, from the restic install, or from [`register_async`].
+pub async fn provision_and_register(
+    options: &RegisterOptions,
+    dir: &Path,
+    cache: &Path,
+    installer: &Installer<'_>,
+    supply: &Supply,
+) -> Result<()> {
+    check_register_input(options, dir)?;
+    crate::preflight::prepare_directories(dir, cache)?;
+    installer.ensure(supply).await?;
+    let restic = ResticBinary::installed(&installer.layout)?;
+    register_async(options, dir, cache, &restic).await
+}
+
+/// Installs restic when it is absent and returns it (ADR-0038).
+///
+/// # Errors
+///
+/// Returns an error when the runtime cannot start or the install fails.
+pub fn ensure_restic(options: &ResticFileOptions) -> Result<ResticBinary> {
+    let installer = Installer::host()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("cannot start the runtime")?;
+    runtime.block_on(async {
+        let supply = crate::restic_install::supply(options)?;
+        installer.ensure(&supply).await
+    })?;
+    ResticBinary::installed(&installer.layout)
+}
+
+/// Downloads the latest restic and replaces the installed one (ADR-0038).
+///
+/// # Errors
+///
+/// Returns an error when the process is not elevated or the update fails. The old binary stays.
+pub fn restic_update(options: &ResticFileOptions) -> Result<()> {
+    crate::preflight::ensure_elevated()?;
+    crate::paths::ensure_config_dir(&crate::paths::config_dir())?;
+    let installer = Installer::host()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("cannot start the runtime")?;
+    runtime.block_on(async {
+        let supply = crate::restic_install::supply(options)?;
+        installer.update(&supply).await
+    })?;
+    println!("restart the agent service so that it uses the new restic");
+    Ok(())
 }
 
 /// Enrolls this host and writes the identity into `dir` (FR-IN-07).
@@ -41,24 +110,16 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error when the identity already exists without `--force`, when a directory is not
-/// ready, when restic is not the pinned binary, or when the control plane refuses the enrollment.
+/// ready, when restic is not the recorded binary, or when the control plane refuses the enrollment.
 pub async fn register_async(
     options: &RegisterOptions,
     dir: &Path,
     cache: &Path,
     restic: &dyn Restic,
 ) -> Result<()> {
-    let url = options
-        .url
-        .clone()
-        .context("--url is required for register")?;
+    check_register_input(options, dir)?;
+    let url = options.url.clone().unwrap_or_default();
     let token = resolve_token(options)?;
-    if StoredIdentity::exists(dir) && !options.force {
-        bail!(
-            "an agent identity already exists in {}; pass --force to register again",
-            dir.display()
-        );
-    }
     crate::preflight::prepare_directories(dir, cache)?;
 
     let facts = Facts {
@@ -93,6 +154,20 @@ pub async fn register_async(
     print_identity(&identity)
 }
 
+fn check_register_input(options: &RegisterOptions, dir: &Path) -> Result<()> {
+    if options.url.is_none() {
+        bail!("--url is required for register");
+    }
+    check_token_sources(options)?;
+    if StoredIdentity::exists(dir) && !options.force {
+        bail!(
+            "an agent identity already exists in {}; pass --force to register again",
+            dir.display()
+        );
+    }
+    Ok(())
+}
+
 /// Prints the identity facts without secrets (FR-AG-04).
 ///
 /// # Errors
@@ -110,7 +185,7 @@ pub fn status(dir: &Path) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error when the identity is absent, restic is not the pinned binary, or the runtime
+/// Returns an error when the identity is absent, restic is not the recorded binary, or the runtime
 /// cannot start.
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let identity = StoredIdentity::load(dir)
@@ -119,14 +194,15 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let mut keys = crate::keys::KeyState::load(&identity, dir)?;
     let cache = crate::paths::cache_dir();
     crate::preflight::prepare_cache(&cache)?;
-    let restic = ResticBinary::locate()?;
+    // The service never downloads restic; an absent or changed binary stops the start (ADR-0038).
+    let restic = ResticBinary::installed(&Layout::host())?;
     restic.verify()?;
     let restic_version = restic.version().unwrap_or_default();
     // The job journal lives in the configuration directory; the runner uses the verified restic
-    // binary (ADR-0020, ADR-0031).
+    // binary (ADR-0020, ADR-0038).
     let jobs = crate::jobs::Jobs::open(
         restic.path().to_path_buf(),
-        crate::restic::EXPECTED_SHA256.to_owned(),
+        restic.expected_sha256().to_owned(),
         cache,
         dir,
     )?;
@@ -167,15 +243,19 @@ fn restic_version(restic: &dyn Restic) -> Result<String> {
     restic.version()
 }
 
-fn resolve_token(options: &RegisterOptions) -> Result<String> {
+fn check_token_sources(options: &RegisterOptions) -> Result<()> {
     let sources = usize::from(options.token.is_some())
         + usize::from(options.token_file.is_some())
         + usize::from(options.token_stdin);
     match sources {
         0 => bail!("give the token with --token, --token-file or --token-stdin"),
-        1 => {}
+        1 => Ok(()),
         _ => bail!("give exactly one of --token, --token-file or --token-stdin"),
     }
+}
+
+fn resolve_token(options: &RegisterOptions) -> Result<String> {
+    check_token_sources(options)?;
     let raw = if let Some(token) = &options.token {
         token.clone()
     } else if let Some(path) = &options.token_file {

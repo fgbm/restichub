@@ -84,16 +84,17 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -
 /// # Errors
 ///
 /// Returns an error when the unit cannot be written or `systemctl` fails.
-pub fn install() -> Result<()> {
+pub fn install(restic: &Path) -> Result<()> {
     let exe = std::env::current_exe().context("cannot find the agent executable")?;
     // A binary that another account can replace defeats the service hardening (T20).
-    super::location::check(&exe)?;
+    super::location::check(&exe, restic)?;
     let config = crate::paths::config_dir();
     // A path in `ReadWritePaths` must exist, or systemd refuses to start the unit. The default root
     // is created here with the access of root only; an extra root is the choice of the operator.
     crate::restore_roots::ensure_default_root()?;
     refuse_rejected_roots(&config)?;
-    let access = crate::restore_roots::RestoreAccess::for_host(&config, Path::new(CACHE_DIR), &exe);
+    let access =
+        crate::restore_roots::RestoreAccess::for_host(&config, Path::new(CACHE_DIR), restic);
     for root in access.roots() {
         if !root.is_dir() {
             bail!(

@@ -1,15 +1,12 @@
-//! The bundled restic binary and its embedded SHA-256 (ADR-0031, FR-AG-11).
+//! The installed restic binary and the SHA-256 that the agent recorded for it (ADR-0038, FR-AG-11).
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
-/// The SHA-256 of the bundled restic binary, embedded at build time (ADR-0031).
-///
-/// The packaging CI sets `RESTICHUB_RESTIC_SHA256` after it verifies the restic release against the
-/// signed `SHA256SUMS`. An empty value is a development build without a pinned binary.
-pub const EXPECTED_SHA256: &str = env!("RESTICHUB_RESTIC_SHA256");
+use crate::restic_release::hex;
+use crate::restic_store::Layout;
 
 #[cfg(windows)]
 pub const RESTIC_FILE_NAME: &str = "restic.exe";
@@ -37,39 +34,58 @@ pub trait Restic {
     fn version(&self) -> Result<String>;
 }
 
-/// The bundled restic that sits next to the agent executable (ADR-0031).
+/// The restic that the agent downloaded, with the hash from its protected record (ADR-0038).
 #[derive(Debug, Clone)]
 pub struct ResticBinary {
     path: PathBuf,
+    expected_sha256: String,
 }
 
 impl ResticBinary {
-    /// Resolves the restic binary next to the running agent executable (ADR-0031).
+    #[must_use]
+    pub fn new(path: PathBuf, expected_sha256: String) -> Self {
+        Self {
+            path,
+            expected_sha256,
+        }
+    }
+
+    /// Takes the hash from the protected record and the path from the protected directory (ADR-0038).
     ///
-    /// The path never comes from the control plane or from a configuration file (ADR-0031).
+    /// Neither comes from the control plane or from a user file (FR-AG-11).
     ///
     /// # Errors
     ///
-    /// Returns an error when the path of the running executable is not readable.
-    pub fn locate() -> Result<Self> {
-        let exe = std::env::current_exe().context("cannot find the agent executable")?;
-        let dir = exe
-            .parent()
-            .context("the agent executable has no directory")?;
-        Ok(Self {
-            path: dir.join(RESTIC_FILE_NAME),
-        })
+    /// Returns an error when the record is absent or damaged, when it names an unsupported
+    /// version, or when the binary is missing.
+    pub fn installed(layout: &Layout) -> Result<Self> {
+        let record = layout.read_record()?;
+        crate::restic_release::check_supported(&record.version)
+            .context("the recorded restic version is not supported")?;
+        let path = layout.binary_path();
+        if !path.is_file() {
+            bail!(
+                "the restic binary {} is missing; run `restichub-agent restic update`",
+                path.display()
+            );
+        }
+        Ok(Self::new(path, record.sha256))
     }
 
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    #[must_use]
+    pub fn expected_sha256(&self) -> &str {
+        &self.expected_sha256
+    }
 }
 
 impl Restic for ResticBinary {
     fn verify(&self) -> Result<()> {
-        verify_hash(&self.path, EXPECTED_SHA256)
+        verify_hash(&self.path, &self.expected_sha256)
     }
 
     fn version(&self) -> Result<String> {
@@ -85,15 +101,12 @@ impl Restic for ResticBinary {
 
 /// Checks the SHA-256 of the file at `path` against `expected_hex` (AC-AG-11).
 ///
-/// An empty `expected_hex` is a development build. Without the `dev-unpinned-restic` feature the
-/// agent refuses the binary, so a release never runs an unverified restic.
-///
 /// # Errors
 ///
 /// Returns an error when the binary is missing or its hash differs from `expected_hex`.
 pub fn verify_hash(path: &Path, expected_hex: &str) -> Result<()> {
     let bytes = std::fs::read(path)
-        .with_context(|| format!("cannot read the bundled restic at {}", path.display()))?;
+        .with_context(|| format!("cannot read the restic binary at {}", path.display()))?;
     verify_digest(&Sha256::digest(&bytes), expected_hex)
 }
 
@@ -104,38 +117,19 @@ pub fn verify_hash(path: &Path, expected_hex: &str) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error when the digest differs from `expected_hex`, or when the build holds no pinned
-/// hash and the `dev-unpinned-restic` feature is absent.
+/// Returns an error when the digest differs from `expected_hex`.
 pub fn verify_digest(actual: &[u8], expected_hex: &str) -> Result<()> {
     let actual = hex(actual);
-    if expected_hex.is_empty() {
-        if cfg!(feature = "dev-unpinned-restic") {
-            tracing::warn!("the restic hash is not pinned in this build");
-            return Ok(());
-        }
-        bail!(
-            "the restic binary is not verified: this build holds no pinned SHA-256; install a released agent package"
-        );
-    }
     if !actual.eq_ignore_ascii_case(expected_hex) {
         bail!(
-            "the restic binary does not match the pinned SHA-256: expected {expected_hex}, got {actual}"
+            "the restic binary does not match the recorded SHA-256: expected {expected_hex}, got {actual}"
         );
     }
     Ok(())
 }
 
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    let mut text = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(text, "{byte:02x}");
-    }
-    text
-}
-
 /// Parses the version token of the first line, for example `0.19.1` in `restic 0.19.1 compiled ...`.
-fn parse_version(text: &str) -> Result<String> {
+pub(crate) fn parse_version(text: &str) -> Result<String> {
     let line = text.lines().next().unwrap_or_default();
     let token = line
         .split_whitespace()
@@ -175,7 +169,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("does not match the pinned SHA-256")
+                .contains("does not match the recorded SHA-256")
         );
         let _ = std::fs::remove_file(&path);
     }
@@ -184,18 +178,7 @@ mod tests {
     fn ac_ag_11_refuses_a_missing_binary() {
         let path = std::env::temp_dir().join("restichub-agent-restic-missing-does-not-exist");
         let error = verify_hash(&path, &"0".repeat(64)).expect_err("a missing binary must fail");
-        assert!(error.to_string().contains("cannot read the bundled restic"));
-    }
-
-    #[test]
-    fn ac_ag_11_refuses_an_unpinned_build_without_the_feature() {
-        // A release build holds no pinned hash and must refuse the binary.
-        if cfg!(feature = "dev-unpinned-restic") {
-            return;
-        }
-        let path = temp_file("unpinned", b"restic bytes");
-        assert!(verify_hash(&path, "").is_err());
-        let _ = std::fs::remove_file(&path);
+        assert!(error.to_string().contains("cannot read the restic binary"));
     }
 
     #[test]

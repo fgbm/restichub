@@ -97,10 +97,10 @@ fn status(
 ///
 /// Returns an error when the service cannot be created, updated or started, usually without
 /// administrator rights.
-pub fn install() -> Result<()> {
+pub fn install(restic: &Path) -> Result<()> {
     let exe = std::env::current_exe().context("cannot find the agent executable")?;
     // A binary that another account can replace defeats the service hardening (T20).
-    super::location::check(&exe)?;
+    super::location::check(&exe, restic)?;
     // The default restore root gets the access of SYSTEM and Administrators only (FR-RS-03).
     crate::restore_roots::ensure_default_root()?;
     if let Some((root, reason)) = crate::restore_roots::rejected_roots(&crate::paths::config_dir())

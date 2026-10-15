@@ -297,7 +297,7 @@ fn roots_from_file(path: &Path) -> Result<RootCertStore> {
     Ok(roots)
 }
 
-fn system_roots() -> Result<RootCertStore> {
+pub(crate) fn system_roots() -> Result<RootCertStore> {
     let result = rustls_native_certs::load_native_certs();
     let mut roots = RootCertStore::empty();
     for cert in result.certs {
@@ -333,7 +333,7 @@ impl Origin {
     }
 }
 
-fn split_authority(authority: &str) -> Result<(String, u16)> {
+pub(crate) fn split_authority(authority: &str) -> Result<(String, u16)> {
     if let Some(rest) = authority.strip_prefix('[') {
         let (host, after) = rest
             .split_once(']')

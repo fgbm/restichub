@@ -38,6 +38,22 @@ pub fn cache_dir() -> PathBuf {
     }
 }
 
+/// The directory of the downloaded restic binary (ADR-0038).
+///
+/// Linux uses `/var/lib/restichub-agent/bin`. Windows uses the `bin` subdirectory of the
+/// configuration directory, which `create_protected_tree` already restricts.
+#[must_use]
+pub fn restic_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        config_dir().join("bin")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/var/lib/restichub-agent/bin")
+    }
+}
+
 /// The `ResticHub` directory under `%ProgramData%`. The agent owns it and every level below it; the
 /// levels above it belong to Windows and stay as they are.
 #[cfg(windows)]

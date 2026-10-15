@@ -247,7 +247,7 @@ impl StepOutput {
 }
 
 impl Jobs {
-    /// Runs one step with the bundled restic and stops it in two stages (FR-AG-05, FR-AG-06,
+    /// Runs one step with the installed restic and stops it in two stages (FR-AG-05, FR-AG-06,
     /// FR-AG-09, FR-AG-10).
     ///
     /// `limit` is the timeout of the step, or `None` for no timeout.
