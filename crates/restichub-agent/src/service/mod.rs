@@ -14,7 +14,6 @@ mod location;
 #[cfg(windows)]
 pub use windows::run_as_service;
 
-/// The start type of the installed service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartType {
     Automatic,
@@ -43,7 +42,6 @@ pub struct ServiceState {
 }
 
 impl ServiceState {
-    /// The state of a host without the service.
     pub const NOT_INSTALLED: Self = Self {
         installed: false,
         running: false,
@@ -63,7 +61,7 @@ pub trait ServiceManager {
     /// Returns an error when the service cannot be written, enabled or started.
     fn install_and_start(&self, restic: &Path) -> Result<()>;
 
-    /// Reads the state of the service.
+    /// Reports installed, running and start type; a missing service is not an error.
     ///
     /// # Errors
     ///
@@ -71,7 +69,6 @@ pub trait ServiceManager {
     fn state(&self) -> Result<ServiceState>;
 }
 
-/// The service manager of this host.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostService;
 

@@ -13,7 +13,6 @@ use time::OffsetDateTime;
 
 pub const STATUS_FILE: &str = "status.json";
 
-/// The longest error text that the file keeps.
 const MAX_ERROR_CHARS: usize = 500;
 
 /// What the service last knew about its connection to the control plane.
@@ -55,14 +54,12 @@ impl ConnectionStatus {
         crate::paths::replace_file(&dir.join(STATUS_FILE), &json)
     }
 
-    /// The time of the last open stream.
     #[must_use]
     pub fn connected_time(&self) -> Option<OffsetDateTime> {
         self.connected_at
             .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
     }
 
-    /// The time of the last error.
     #[must_use]
     pub fn error_time(&self) -> Option<OffsetDateTime> {
         self.last_error_at
@@ -80,7 +77,7 @@ pub fn record_connected(dir: &Path, cp_url: &str) {
     });
 }
 
-/// Records that the stream is closed without an error.
+/// Clears the connected flag when the stream ends cleanly; the last error stays.
 pub fn record_closed(dir: &Path, cp_url: &str) {
     update(dir, cp_url, |status| status.connected = false);
 }
@@ -110,7 +107,7 @@ fn update(dir: &Path, cp_url: &str, change: impl FnOnce(&mut ConnectionStatus)) 
     }
 }
 
-/// How a wait for the connection ended.
+/// The outcome of the wait; a timeout carries the last status the service wrote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Wait {
     Connected(ConnectionStatus),

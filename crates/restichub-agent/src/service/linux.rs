@@ -115,11 +115,11 @@ pub fn install(restic: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Asks systemd for the state of the unit.
+/// Reads `systemctl` output; a missing unit is a state, not an error.
 ///
 /// # Errors
 ///
-/// Returns an error when `systemctl` cannot run.
+/// Returns an error when the `systemctl` program does not start, for example when it is not installed.
 pub fn state() -> Result<super::ServiceState> {
     use super::{ServiceState, StartType};
     if !unit_path().exists() {

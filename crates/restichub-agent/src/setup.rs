@@ -210,7 +210,6 @@ pub fn collect_status(
     }
 }
 
-/// The text of `status`.
 #[must_use]
 pub fn render_status(report: &StatusReport) -> String {
     let mut lines = Vec::new();
