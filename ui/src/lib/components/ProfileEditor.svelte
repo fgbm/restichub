@@ -72,7 +72,9 @@
 	let warnings = $state<ProfileWarning[]>([]);
 	let os = $state('linux');
 	let copied = $state(false);
-	let open = $state<Record<string, boolean>>({ basics: true, paths: true });
+	let open = $state<Record<string, boolean>>(
+		Object.fromEntries(SECTIONS.map((key) => [key, key === 'basics' || key === 'paths']))
+	);
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	// Code that runs on a host needs the Admin role (ADR-0037).
