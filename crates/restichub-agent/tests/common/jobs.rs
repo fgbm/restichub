@@ -204,12 +204,29 @@ pub async fn create_local_repository(
     path: &Path,
     password: &str,
 ) -> String {
-    let body = json!({
+    let backend = json!({"kind": "local", "path": path.to_string_lossy()});
+    create_repository(app, cookie, agent, backend, password, json!({})).await
+}
+
+/// Creates a repository of any backend with the maintenance agent and returns its identifier.
+/// `credentials` holds the extra write-only fields, for example the S3 keys.
+pub async fn create_repository(
+    app: &axum::Router,
+    cookie: &str,
+    agent: Uuid,
+    backend: Value,
+    password: &str,
+    credentials: Value,
+) -> String {
+    let mut body = json!({
         "name": format!("repo-{}", Uuid::now_v7()),
-        "backend": {"kind": "local", "path": path.to_string_lossy()},
+        "backend": backend,
         "password": password,
         "maintenance_agent_id": agent.to_string(),
     });
+    if let (Some(body), Some(extra)) = (body.as_object_mut(), credentials.as_object()) {
+        body.extend(extra.clone());
+    }
     let (status, _, repository) = super::send(
         app,
         super::request("POST", "/api/v1/repositories", Some(cookie), Some(body)),

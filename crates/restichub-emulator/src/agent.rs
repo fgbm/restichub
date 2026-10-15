@@ -99,6 +99,10 @@ pub struct AgentLoad {
     pub capabilities: Option<Vec<String>>,
     /// The certificate rotation of the agent (FR-ID-03).
     pub renewal: crate::renewal::Renewal,
+    /// Keeps the running jobs across a reconnect, lists them in `AgentHello.held_job_ids` and
+    /// sends the stored results again, as the real agent does (ADR-0039). Off: a closed stream
+    /// cancels the running jobs.
+    pub survive_reconnect: bool,
 }
 
 impl AgentLoad {
@@ -116,6 +120,7 @@ impl AgentLoad {
             restore_roots: Vec::new(),
             capabilities: None,
             renewal: crate::renewal::Renewal::default(),
+            survive_reconnect: false,
         }
     }
 }
@@ -188,7 +193,41 @@ struct Session {
     ring: Arc<Mutex<KeyRing>>,
     journal: Arc<Mutex<InMemoryJournal>>,
     jobs: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    results: Arc<Mutex<HashMap<String, JobResult>>>,
     config: Arc<AgentConfig>,
+}
+
+/// State of one agent that outlives a connection while `survive_reconnect` is on.
+struct Carry {
+    jobs: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    results: Arc<Mutex<HashMap<String, JobResult>>>,
+    out_tx: mpsc::Sender<AgentMessage>,
+    out_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<AgentMessage>>>,
+}
+
+impl Carry {
+    fn new() -> Self {
+        let (out_tx, out_rx) = mpsc::channel(OUT_CHANNEL);
+        Self {
+            jobs: Arc::default(),
+            results: Arc::default(),
+            out_tx,
+            out_rx: Arc::new(tokio::sync::Mutex::new(out_rx)),
+        }
+    }
+}
+
+/// Moves the messages of the running jobs to the stream of the current connection.
+async fn forward(
+    out_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<AgentMessage>>>,
+    tx: mpsc::Sender<AgentMessage>,
+) {
+    let mut out_rx = out_rx.lock().await;
+    while let Some(message) = out_rx.recv().await {
+        if tx.send(message).await.is_err() {
+            break;
+        }
+    }
 }
 
 /// Keeps one emulated agent connected until `shutdown` is set. The stream
@@ -198,13 +237,14 @@ pub async fn run_agent(config: Arc<AgentConfig>, mut shutdown: watch::Receiver<b
     // The journal drops the entries that passed their expiry (ADR-0020). The
     // task starts no job.
     let purge = tokio::spawn(purge_journal(Arc::clone(&journal), shutdown.clone()));
+    let carry = Carry::new();
     let mut attempt = 0u32;
     let mut connected = false;
     while !*shutdown.borrow() {
         if connected {
             config.load.metrics.inc_reconnect();
         }
-        match connect_once(&config, &journal, &mut shutdown).await {
+        match connect_once(&config, &journal, &carry, &mut shutdown).await {
             Ok(()) => {
                 attempt = 0;
                 connected = true;
@@ -248,6 +288,7 @@ async fn purge_journal(journal: Arc<Mutex<InMemoryJournal>>, mut shutdown: watch
 async fn connect_once(
     config: &Arc<AgentConfig>,
     journal: &Arc<Mutex<InMemoryJournal>>,
+    carry: &Carry,
     shutdown: &mut watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     let identity = config.load.renewal.identity(&config.identity);
@@ -266,16 +307,42 @@ async fn connect_once(
     let response = client.connect(ReceiverStream::new(rx)).await?;
     let mut inbound = response.into_inner();
 
-    send_hello(&tx, &config.load).await?;
+    let survive = config.load.survive_reconnect;
+    let held: Vec<String> = if survive {
+        let mut held: Vec<String> = crate::lock(&carry.jobs).keys().cloned().collect();
+        held.extend(crate::lock(&carry.results).keys().cloned());
+        held
+    } else {
+        Vec::new()
+    };
+    send_hello(&tx, &config.load, held).await?;
+    let forwarder = if survive {
+        let stored: Vec<JobResult> = crate::lock(&carry.results).values().cloned().collect();
+        for result in stored {
+            tx.send(job_result_message(result)).await?;
+        }
+        Some(tokio::spawn(forward(Arc::clone(&carry.out_rx), tx.clone())))
+    } else {
+        None
+    };
 
     let metrics = Arc::clone(&config.load.metrics);
     metrics.record_connect(started.elapsed().as_micros() as u64);
 
     let session = Session {
-        tx: tx.clone(),
+        tx: if survive {
+            carry.out_tx.clone()
+        } else {
+            tx.clone()
+        },
         ring: Arc::new(Mutex::new(config.key_ring.clone())),
         journal: Arc::clone(journal),
-        jobs: Arc::new(Mutex::new(HashMap::new())),
+        jobs: if survive {
+            Arc::clone(&carry.jobs)
+        } else {
+            Arc::new(Mutex::new(HashMap::new()))
+        },
+        results: Arc::clone(&carry.results),
         config: Arc::clone(config),
     };
 
@@ -367,7 +434,11 @@ async fn connect_once(
         }
     }
 
-    cancel_running(&session);
+    if let Some(forwarder) = forwarder {
+        forwarder.abort();
+    } else {
+        cancel_running(&session);
+    }
     metrics.stream_closed();
     Ok(())
 }
@@ -390,7 +461,11 @@ async fn storm_drop(config: &AgentConfig) {
     config.load.storm_dropped.store(true, Ordering::Relaxed);
 }
 
-async fn send_hello(tx: &mpsc::Sender<AgentMessage>, load: &AgentLoad) -> anyhow::Result<()> {
+async fn send_hello(
+    tx: &mpsc::Sender<AgentMessage>,
+    load: &AgentLoad,
+    held_job_ids: Vec<String>,
+) -> anyhow::Result<()> {
     let capabilities = load.capabilities.clone().unwrap_or_else(|| {
         restichub_proto::AgentCapability::ALL
             .iter()
@@ -412,6 +487,7 @@ async fn send_hello(tx: &mpsc::Sender<AgentMessage>, load: &AgentLoad) -> anyhow
             supported_step_types: supported_step_types(),
             capabilities,
             restore_roots: load.restore_roots.clone(),
+            held_job_ids,
             ..AgentHello::default()
         })),
     };
@@ -683,6 +759,7 @@ async fn run_job(
         log_tail: Vec::new(),
     };
     crate::lock(&session.journal).record_completed(&job_id, result.clone());
+    crate::lock(&session.results).insert(job_id.clone(), result.clone());
     let _ = session.tx.send(job_result_message(result)).await;
     session
         .config
