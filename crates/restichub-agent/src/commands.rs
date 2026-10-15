@@ -241,6 +241,7 @@ pub async fn register_async(
 
     let (generated, csr_der) = generate_key_and_csr()?;
     let client = Client::new(options.ca_file.as_deref())?;
+    crate::preflight::check_clock(OffsetDateTime::now_utc(), client.server_time(&url).await)?;
     let enrolled = client.enroll(&url, &token, &facts, &csr_der).await?;
     // The response is checked before any file is written (ADR-0026, FR-AG-04).
     crate::verify::check_enrollment(&generated.public_key, &enrolled, OffsetDateTime::now_utc())?;

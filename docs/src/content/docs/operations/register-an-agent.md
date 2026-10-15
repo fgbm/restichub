@@ -27,6 +27,19 @@ The command installs restic when the host has none (ADR-0038). This step runs af
 
 The token is single use. The control plane consumes the token at the first successful registration. A used token, an expired token and a revoked token give a clear error.
 
+## The host clock
+
+The host clock must be within 5 minutes of the control plane clock. The control plane issues a certificate that starts 5 minutes before the issue time. The agent accepts a certificate that starts up to 5 minutes after the host time. A larger difference makes the certificate unusable.
+
+Before it sends the token, the agent reads the time from the answer of the control plane. If the difference is more than 5 minutes, the agent stops and shows the local time, the control plane time and the difference. The token stays unused. The agent also shows which certificate is not valid when the check of the issued certificate fails.
+
+The stream to the control plane uses the verification of the TLS library, which has no tolerance. Keep the host clock correct for the whole life of the agent.
+
+To check and fix the clock:
+
+- Windows: run `w32tm /query /status` in an elevated PowerShell, then `w32tm /resync`. Or open Settings, Time & language, Date & time, and select "Sync now". Set the time zone too.
+- Linux: run `timedatectl status` and look for `System clock synchronized: yes`. Run `timedatectl set-ntp true` to enable the time sync. With chrony, run `chronyc makestep`.
+
 ## The stored identity
 
 The command writes the identity into the protected configuration directory:
