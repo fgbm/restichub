@@ -40,3 +40,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0032](0032-manual-agent-registration-and-service-install.md) | Manual agent registration and service install | accepted |
 | [0033](0033-enrollment-transport-and-agent-trust-bootstrap.md) | Enrollment transport and agent trust bootstrap | accepted |
 | [0034](0034-repository-maintenance-schedule.md) | Repository maintenance schedule and retention isolation | accepted |
+| [0035](0035-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted |
