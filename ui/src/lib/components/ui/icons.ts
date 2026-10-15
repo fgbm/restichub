@@ -296,6 +296,11 @@ export const icons = {
 		['rect', { x: '14', y: '3', width: '5', height: '18', rx: '1' }],
 		['rect', { x: '5', y: '3', width: '5', height: '18', rx: '1' }]
 	],
+	'loader-circle': [['path', { d: 'M21 12a9 9 0 1 1-6.219-8.56' }]],
+	'circle-slash': [
+		['circle', { cx: '12', cy: '12', r: '10' }],
+		['line', { x1: '9', x2: '15', y1: '15', y2: '9' }]
+	],
 	cloud: [['path', { d: 'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z' }]],
 	activity: [
 		[

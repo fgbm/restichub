@@ -121,7 +121,8 @@ describe('the job state', () => {
 		expect(markerOf('retry')).toBe('warning');
 		expect(markerOf('config_error')).toBe('failed');
 		expect(markerOf('success')).toBe('success');
-		expect(markerOf('skipped')).toBe('idle');
+		expect(markerOf('skipped')).toBe('skipped');
+		expect(markerOf('cancelled')).toBe('skipped');
 	});
 });
 

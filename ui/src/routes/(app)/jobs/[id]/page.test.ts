@@ -370,6 +370,51 @@ describe('the job detail screen', () => {
 		await waitFor(() => expect(mocks.cancelJob).toHaveBeenCalledWith('j_1'));
 	});
 
+	it('draws one icon per step state with no frame around it', async () => {
+		const step = (id: string, status: string) => ({
+			...job().steps[0],
+			step_id: id,
+			status,
+			output: null
+		});
+		mocks.getJob.mockResolvedValue(
+			job({
+				status: 'running',
+				result_code: null,
+				finished_at: null,
+				planned_steps: ['a', 'b', 'c', 'd', 'e', 'f'],
+				planned: ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({
+					step_id: id,
+					kind: 'backup',
+					name: id,
+					phase: null
+				})),
+				steps: [
+					step('a', 'success'),
+					step('b', 'warning'),
+					step('c', 'failed'),
+					step('d', 'skipped')
+				],
+				summary: null,
+				progress: null
+			})
+		);
+		const { container } = render(JobDetailPage);
+		await waitFor(() => expect(container.querySelectorAll('.timeline__marker')).toHaveLength(6));
+
+		const icons = [...container.querySelectorAll('.timeline__marker svg')].map((svg) =>
+			svg.getAttribute('data-icon')
+		);
+		expect(icons).toEqual([
+			'check-circle',
+			'alert',
+			'x-circle',
+			'circle-slash',
+			'loader-circle',
+			'clock'
+		]);
+	});
+
 	it('fr_mn_02_shows_the_header_line_and_all_steps_of_a_running_job', async () => {
 		mocks.getJob.mockResolvedValue(
 			job({
