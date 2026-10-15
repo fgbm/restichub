@@ -7,7 +7,7 @@ use std::sync::mpsc::Receiver;
 use anyhow::{Context, Result, bail};
 use time::OffsetDateTime;
 
-use crate::cli::{RegisterOptions, ResticFileOptions};
+use crate::cli::{RegisterOptions, ResticFileOptions, UpdateOptions};
 use crate::enroll::{Client, Facts};
 use crate::identity::{StoredIdentity, StoredSigningKeys, generate_key_and_csr};
 use crate::restic::{Restic, ResticBinary};
@@ -82,10 +82,12 @@ pub fn ensure_restic(options: &ResticFileOptions) -> Result<ResticBinary> {
 
 /// Downloads the latest restic and replaces the installed one (ADR-0038).
 ///
+/// The installed service restarts afterwards, unless the options say otherwise.
+///
 /// # Errors
 ///
 /// Returns an error when the process is not elevated or the update fails. The old binary stays.
-pub fn restic_update(options: &ResticFileOptions) -> Result<()> {
+pub fn restic_update(options: &UpdateOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     crate::paths::ensure_config_dir(&crate::paths::config_dir())?;
     let installer = Installer::host()?;
@@ -94,10 +96,16 @@ pub fn restic_update(options: &ResticFileOptions) -> Result<()> {
         .build()
         .context("cannot start the runtime")?;
     runtime.block_on(async {
-        let supply = crate::restic_install::supply(options)?;
-        installer.update(&supply).await
+        let supply = crate::restic_install::supply(&options.restic)?;
+        installer
+            .update_with(&supply, options.allow_downgrade)
+            .await
     })?;
-    println!("restart the agent service so that it uses the new restic");
+    if options.no_restart {
+        println!("restart the agent service so that it uses the new restic");
+    } else if !crate::service::restart_if_installed()? {
+        println!("no agent service is installed; nothing to restart");
+    }
     Ok(())
 }
 

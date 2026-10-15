@@ -10,7 +10,9 @@ use anyhow::{Context, Result, bail};
 use crate::cli::ResticFileOptions;
 use crate::http_get::HttpsClient;
 use crate::openpgp::PublicKey;
-use crate::restic_release::{Platform, Source, Supply, release_key, verify_release};
+use crate::restic_release::{
+    Platform, ReleaseFiles, Source, Supply, is_older, release_key, verify_release,
+};
 use crate::restic_store::{Layout, Record, probe_version};
 
 /// Everything the install needs, so a test can replace the key, the platform and the probe.
@@ -55,16 +57,36 @@ impl Installer<'_> {
         self.update(supply).await
     }
 
-    /// Fetches a release, verifies it and swaps it in (FR-AG-11).
+    /// Fetches the latest release, verifies it and swaps it in (FR-AG-11).
+    ///
+    /// A downgrade is refused. See [`Installer::update_with`].
     ///
     /// # Errors
     ///
     /// Returns an error when the download or a verification step fails. The old binary stays in
     /// place then.
     pub async fn update(&self, supply: &Supply) -> Result<Record> {
-        let files = supply.fetch(self.platform).await?;
-        let release = verify_release(&files, self.platform, &self.key)?;
-        let record = self.layout.install(&release, self.probe)?;
+        self.update_with(supply, false).await
+    }
+
+    /// Fetches a release, verifies it and swaps it in (FR-AG-11, NFR-CMP-03).
+    ///
+    /// When the download supply cannot give the latest release, because the checks refuse it or
+    /// GitHub does not answer, the update takes the newest supported release of the release list,
+    /// and then the release that the build pins. An older release than the installed one needs
+    /// `allow_downgrade`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no release passes the download and the checks, or when the release is
+    /// a downgrade that is not allowed. The old binary stays in place then.
+    pub async fn update_with(&self, supply: &Supply, allow_downgrade: bool) -> Result<Record> {
+        let record = if matches!(supply, Supply::Files { .. }) {
+            let files = supply.fetch(self.platform).await?;
+            self.install_files(&files, allow_downgrade)?
+        } else {
+            self.update_from_download(supply, allow_downgrade).await?
+        };
         println!(
             "restic {} is installed at {}",
             record.version,
@@ -72,7 +94,113 @@ impl Installer<'_> {
         );
         Ok(record)
     }
+
+    async fn update_from_download(&self, supply: &Supply, allow_downgrade: bool) -> Result<Record> {
+        let mut failures: Vec<String> = Vec::new();
+        let mut tried: Vec<String> = Vec::new();
+        match supply.latest_version().await {
+            Ok(version) => {
+                if let Some(record) = self
+                    .try_version(supply, &version, allow_downgrade, &mut failures)
+                    .await?
+                {
+                    return Ok(record);
+                }
+                tried.push(version);
+            }
+            Err(error) => failures.push(format!("the latest release: {error:#}")),
+        }
+        match supply.recent_versions().await {
+            Ok(versions) => {
+                for version in versions {
+                    if tried.contains(&version) {
+                        continue;
+                    }
+                    if let Some(record) = self
+                        .try_version(supply, &version, allow_downgrade, &mut failures)
+                        .await?
+                    {
+                        return Ok(record);
+                    }
+                    tried.push(version);
+                }
+            }
+            Err(error) => failures.push(format!("the release list: {error:#}")),
+        }
+        if let Some(pinned) = supply
+            .pinned_version()
+            .filter(|v| !tried.contains(&(*v).to_owned()))
+            && let Some(record) = self
+                .try_version(supply, pinned, allow_downgrade, &mut failures)
+                .await?
+        {
+            return Ok(record);
+        }
+        bail!(
+            "no restic release could be installed:\n  {}\nTo install from files, give --restic-archive, --restic-sums and --restic-sums-sig",
+            failures.join("\n  ")
+        )
+    }
+
+    /// Returns `None` after it noted the failure of this version, so the caller tries the next.
+    async fn try_version(
+        &self,
+        supply: &Supply,
+        version: &str,
+        allow_downgrade: bool,
+        failures: &mut Vec<String>,
+    ) -> Result<Option<Record>> {
+        let attempt = async {
+            let files = supply.fetch_version(self.platform, version).await?;
+            self.install_files(&files, allow_downgrade)
+        }
+        .await;
+        match attempt {
+            Ok(record) => Ok(Some(record)),
+            Err(error) if error.downcast_ref::<DowngradeRefused>().is_some() => Err(error),
+            Err(error) => {
+                let detail = format!("{error:#}");
+                tracing::warn!(version, %detail, "this restic release is not installed");
+                failures.push(format!("restic {version}: {detail}"));
+                Ok(None)
+            }
+        }
+    }
+
+    fn install_files(&self, files: &ReleaseFiles, allow_downgrade: bool) -> Result<Record> {
+        let release = verify_release(files, self.platform, &self.key)?;
+        if !allow_downgrade
+            && let Ok(installed) = self.layout.read_record()
+            && is_older(&release.version, &installed.version)?
+        {
+            return Err(DowngradeRefused {
+                candidate: release.version,
+                installed: installed.version,
+            }
+            .into());
+        }
+        self.layout.install(&release, self.probe)
+    }
 }
+
+/// The release is older than the installed one, and the operator did not allow that.
+#[derive(Debug)]
+struct DowngradeRefused {
+    candidate: String,
+    installed: String,
+}
+
+impl std::fmt::Display for DowngradeRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "restic {} is older than the installed {}; give --allow-downgrade to install it",
+            self.candidate, self.installed
+        )
+    }
+}
+
+impl std::error::Error for DowngradeRefused {}
 
 /// Picks the supply from the options: the offline files, or the GitHub download.
 ///

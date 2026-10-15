@@ -225,7 +225,9 @@ fn hashed_subpackets(mut area: &[u8]) -> Result<Subpackets> {
             }
             SUBPACKET_ISSUER_KEY_ID => {}
             other if critical => {
-                bail!("the signature has a critical subpacket of type {other}, which is not supported")
+                bail!(
+                    "the signature has a critical subpacket of type {other}, which is not supported"
+                )
             }
             _ => {}
         }

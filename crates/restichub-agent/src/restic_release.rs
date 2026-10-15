@@ -24,8 +24,16 @@ const MAX_SIGNATURE_BYTES: usize = 64 * 1024;
 const MAX_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_BINARY_BYTES: u64 = 256 * 1024 * 1024;
 
+/// How many of the newest supported releases the fallback tries.
+const MAX_FALLBACKS: usize = 3;
+
 const GITHUB_API_LATEST: &str = "https://api.github.com/repos/restic/restic/releases/latest";
+// One bounded page: the newest ten releases are enough to find a supported one.
+const GITHUB_API_LIST: &str = "https://api.github.com/repos/restic/restic/releases?per_page=10";
 const GITHUB_DOWNLOAD_BASE: &str = "https://github.com/restic/restic/releases/download";
+
+/// The release that the build pins in `packaging/restic.env` (ADR-0011, ADR-0038).
+const PINNED_ENV: &str = include_str!("../../../packaging/restic.env");
 
 /// The signing key of the restic releases (ADR-0031, ADR-0038).
 const RELEASE_KEY: &str = include_str!("../../../packaging/restic-release-key.asc");
@@ -62,6 +70,22 @@ pub fn check_supported(version: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Tells whether `candidate` is an older release than `installed`.
+///
+/// # Errors
+///
+/// Returns an error when either text is not a plain version.
+pub fn is_older(candidate: &str, installed: &str) -> Result<bool> {
+    Ok(parse_version(candidate)? < parse_version(installed)?)
+}
+
+fn pinned_version() -> &'static str {
+    PINNED_ENV
+        .lines()
+        .find_map(|line| line.strip_prefix("RESTIC_VERSION="))
+        .map_or("", str::trim)
 }
 
 fn parse_version(version: &str) -> Result<[u64; 3]> {
@@ -149,7 +173,11 @@ pub enum Source {
     /// The release assets of the restic project on GitHub.
     GitHub {
         api_latest: String,
+        /// One page of the newest releases, for the fallback.
+        api_list: String,
         download_base: String,
+        /// The last resort when the API gives no usable release.
+        pinned: String,
     },
 }
 
@@ -158,13 +186,27 @@ impl Source {
     pub fn github() -> Self {
         Self::GitHub {
             api_latest: GITHUB_API_LATEST.to_owned(),
+            api_list: GITHUB_API_LIST.to_owned(),
             download_base: GITHUB_DOWNLOAD_BASE.to_owned(),
+            pinned: pinned_version().to_owned(),
         }
     }
 
     fn asset_url(&self, version: &str, file: &str) -> String {
         match self {
             Self::GitHub { download_base, .. } => format!("{download_base}/v{version}/{file}"),
+        }
+    }
+
+    async fn recent_versions(&self, client: &HttpsClient) -> Result<Vec<String>> {
+        match self {
+            Self::GitHub { api_list, .. } => {
+                let response = client
+                    .get(api_list, "application/vnd.github+json", MAX_API_BYTES)
+                    .await
+                    .context("cannot ask GitHub for the list of restic releases")?;
+                github_recent(&response)
+            }
         }
     }
 
@@ -179,6 +221,42 @@ impl Source {
             }
         }
     }
+}
+
+/// The newest supported releases of one API page, newest first.
+fn github_recent(response: &Response) -> Result<Vec<String>> {
+    #[derive(Deserialize)]
+    struct Release {
+        tag_name: String,
+        #[serde(default)]
+        draft: bool,
+        #[serde(default)]
+        prerelease: bool,
+    }
+    if response.status != 200 {
+        bail!(
+            "GitHub answered the release list query with HTTP {}",
+            response.status
+        );
+    }
+    let releases: Vec<Release> = serde_json::from_slice(&response.body)
+        .context("the GitHub release list is not valid JSON")?;
+    let mut versions: Vec<(String, [u64; 3])> = releases
+        .into_iter()
+        .filter(|release| !release.draft && !release.prerelease)
+        .filter_map(|release| {
+            let version = release.tag_name.trim_start_matches('v').to_owned();
+            let parsed = parse_version(&version).ok()?;
+            check_supported(&version).ok()?;
+            Some((version, parsed))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(versions
+        .into_iter()
+        .map(|(version, _)| version)
+        .take(MAX_FALLBACKS)
+        .collect())
 }
 
 fn github_latest(response: &Response) -> Result<String> {
@@ -245,27 +323,9 @@ impl Supply {
     /// Returns an error when a file cannot be read or downloaded.
     pub async fn fetch(&self, platform: Platform) -> Result<ReleaseFiles> {
         match self {
-            Self::Download { source, client } => {
-                let version = source.latest_version(client).await?;
-                let archive_name = platform.archive_name(&version);
-                let archive =
-                    download(client, source, &version, &archive_name, MAX_ARCHIVE_BYTES).await?;
-                let sums = download(client, source, &version, "SHA256SUMS", MAX_SUMS_BYTES).await?;
-                let signature = download(
-                    client,
-                    source,
-                    &version,
-                    "SHA256SUMS.asc",
-                    MAX_SIGNATURE_BYTES,
-                )
-                .await?;
-                Ok(ReleaseFiles {
-                    archive_name,
-                    archive,
-                    sums,
-                    sums_signature: String::from_utf8(signature)
-                        .context("SHA256SUMS.asc is not text")?,
-                })
+            Self::Download { .. } => {
+                let version = self.latest_version().await?;
+                self.fetch_version(platform, &version).await
             }
             Self::Files {
                 archive,
@@ -290,6 +350,72 @@ impl Supply {
                 })
             }
         }
+    }
+
+    /// The version that the project marks as the latest release.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for offline files, or when the query fails.
+    pub async fn latest_version(&self) -> Result<String> {
+        match self {
+            Self::Download { source, client } => source.latest_version(client).await,
+            Self::Files { .. } => bail!("offline files name no latest release"),
+        }
+    }
+
+    /// The newest supported releases of one bounded API page, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for offline files, or when the query fails.
+    pub async fn recent_versions(&self) -> Result<Vec<String>> {
+        match self {
+            Self::Download { source, client } => source.recent_versions(client).await,
+            Self::Files { .. } => bail!("offline files name no releases"),
+        }
+    }
+
+    /// The release that the build pins, which needs no API query.
+    #[must_use]
+    pub fn pinned_version(&self) -> Option<&str> {
+        match self {
+            Self::Download {
+                source: Source::GitHub { pinned, .. },
+                ..
+            } => Some(pinned.as_str()),
+            Self::Files { .. } => None,
+        }
+    }
+
+    /// Downloads the three files of one release. A version that the agent does not support is
+    /// refused before the download (NFR-CMP-03).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for offline files, for an unsupported version, or when a download fails.
+    pub async fn fetch_version(&self, platform: Platform, version: &str) -> Result<ReleaseFiles> {
+        let Self::Download { source, client } = self else {
+            bail!("offline files hold one release only");
+        };
+        check_supported(version)?;
+        let archive_name = platform.archive_name(version);
+        let archive = download(client, source, version, &archive_name, MAX_ARCHIVE_BYTES).await?;
+        let sums = download(client, source, version, "SHA256SUMS", MAX_SUMS_BYTES).await?;
+        let signature = download(
+            client,
+            source,
+            version,
+            "SHA256SUMS.asc",
+            MAX_SIGNATURE_BYTES,
+        )
+        .await?;
+        Ok(ReleaseFiles {
+            archive_name,
+            archive,
+            sums,
+            sums_signature: String::from_utf8(signature).context("SHA256SUMS.asc is not text")?,
+        })
     }
 }
 
@@ -456,6 +582,47 @@ mod tests {
         assert!(check_supported("0.19").is_err());
         assert!(check_supported("0.19.1-beta").is_err());
         assert!(check_supported("0.19.1.2").is_err());
+    }
+
+    #[test]
+    fn nfr_cmp_03_the_pinned_release_is_supported() {
+        check_supported(pinned_version()).expect("the pinned release");
+    }
+
+    #[test]
+    fn nfr_cmp_03_the_fallback_list_keeps_the_newest_supported_releases() {
+        let body = br#"[
+            {"tag_name":"v1.0.0"},
+            {"tag_name":"v0.20.0-rc1","prerelease":true},
+            {"tag_name":"v0.19.1"},
+            {"tag_name":"v0.18.1"},
+            {"tag_name":"v0.19.2","draft":true},
+            {"tag_name":"v0.17.0"},
+            {"tag_name":"nightly"},
+            {"tag_name":"v0.19.0"},
+            {"tag_name":"v0.18.9"}
+        ]"#;
+        let response = Response {
+            status: 200,
+            headers: hyper::HeaderMap::new(),
+            body: body.to_vec(),
+        };
+        assert_eq!(
+            github_recent(&response).expect("list"),
+            ["0.19.1", "0.19.0", "0.18.9"]
+        );
+        let failed = Response {
+            status: 403,
+            ..response
+        };
+        assert!(github_recent(&failed).is_err());
+    }
+
+    #[test]
+    fn nfr_cmp_03_a_downgrade_is_detected() {
+        assert!(is_older("0.18.1", "0.19.1").expect("compare"));
+        assert!(!is_older("0.19.1", "0.19.1").expect("compare"));
+        assert!(!is_older("0.19.10", "0.19.9").expect("compare"));
     }
 
     #[test]

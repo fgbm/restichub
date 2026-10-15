@@ -858,7 +858,9 @@ mod tests {
             }
         };
         let probe = |_: &Path| Ok("0.19.1".to_owned());
-        let first = layout.install(&release(b""), &probe).expect("first install");
+        let first = layout
+            .install(&release(b""), &probe)
+            .expect("first install");
         let jobs = crate::jobs::Jobs::open(
             layout.binary_path(),
             first.sha256.clone(),

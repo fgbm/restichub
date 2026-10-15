@@ -19,6 +19,9 @@ pub const SERVICE_NAME: &str = "restichub-agent";
 /// The Win32 error `ERROR_SERVICE_DOES_NOT_EXIST`, which means the service is not installed.
 const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
 
+/// How long a restart waits for the service to stop. A running job gets its stop grace first.
+const STOP_WAIT: Duration = Duration::from_secs(120);
+
 define_windows_service!(ffi_service_main, service_main);
 
 /// Runs the agent under the service control manager when the SCM started this process (FR-AG-01).
@@ -169,6 +172,43 @@ pub fn install(restic: &Path) -> Result<()> {
     }
     println!("the service {SERVICE_NAME} is installed and started");
     Ok(())
+}
+
+/// Stops the Windows service, waits for it and starts it again, when it is installed.
+///
+/// # Errors
+///
+/// Returns an error when the service exists and cannot be stopped or started.
+pub fn restart_if_installed() -> Result<bool> {
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .context("cannot open the service manager; run as an administrator")?;
+    let access = ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::START;
+    let service = match manager.open_service(SERVICE_NAME, access) {
+        Ok(service) => service,
+        Err(windows_service::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
+        {
+            return Ok(false);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if service.query_status()?.current_state != ServiceState::Stopped {
+        service.stop().context("cannot stop the service")?;
+        let deadline = std::time::Instant::now() + STOP_WAIT;
+        while service.query_status()?.current_state != ServiceState::Stopped {
+            if std::time::Instant::now() >= deadline {
+                anyhow::bail!(
+                    "the service {SERVICE_NAME} did not stop in time; start it by hand after it stops"
+                );
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+    service
+        .start(&[] as &[&OsStr])
+        .context("cannot start the service")?;
+    println!("the service {SERVICE_NAME} is restarted");
+    Ok(true)
 }
 
 /// Stops and removes the Windows service (FR-IN-08).

@@ -123,6 +123,20 @@ fn refuse_rejected_roots(config: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Restarts the unit when it is installed.
+///
+/// # Errors
+///
+/// Returns an error when `systemctl` fails.
+pub fn restart_if_installed() -> Result<bool> {
+    if !unit_path().exists() {
+        return Ok(false);
+    }
+    systemctl(&["restart", SERVICE_NAME])?;
+    println!("the service {SERVICE_NAME} is restarted");
+    Ok(true)
+}
+
 /// Stops and removes the systemd unit (FR-IN-08).
 ///
 /// # Errors

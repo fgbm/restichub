@@ -56,3 +56,24 @@ pub fn uninstall() -> Result<()> {
         anyhow::bail!("the service install is a 1.0 feature on this operating system")
     }
 }
+
+/// Restarts the installed service so that it runs with the new restic, and tells whether a
+/// service was installed (ADR-0038).
+///
+/// # Errors
+///
+/// Returns an error when the service exists and cannot be restarted.
+pub fn restart_if_installed() -> Result<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::restart_if_installed()
+    }
+    #[cfg(windows)]
+    {
+        windows::restart_if_installed()
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        Ok(false)
+    }
+}

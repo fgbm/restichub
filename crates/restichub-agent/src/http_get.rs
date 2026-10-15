@@ -156,9 +156,8 @@ impl Proxy {
 
 /// Splits `host`, `host:port`, `[v6]` and `[v6]:port`. The default port is 80.
 fn proxy_host_port(host_port: &str) -> Result<(String, u16)> {
-    let parse_port = |port: &str| -> Result<u16> {
-        port.parse().context("the proxy port is not a number")
-    };
+    let parse_port =
+        |port: &str| -> Result<u16> { port.parse().context("the proxy port is not a number") };
     if let Some(rest) = host_port.strip_prefix('[') {
         let (host, tail) = rest
             .split_once(']')
@@ -437,8 +436,8 @@ mod tests {
 
     #[test]
     fn a_proxy_user_info_is_percent_decoded() {
-        let proxy = Proxy::parse("http://us%40er:p%3Aw%25@proxy.example:3128", Vec::new())
-            .expect("proxy");
+        let proxy =
+            Proxy::parse("http://us%40er:p%3Aw%25@proxy.example:3128", Vec::new()).expect("proxy");
         let expected = format!("Basic {}", STANDARD.encode("us@er:p:w%"));
         assert_eq!(proxy.authorization.as_deref(), Some(expected.as_str()));
         assert!(Proxy::parse("http://u:%zz@proxy.example", Vec::new()).is_err());

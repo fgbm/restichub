@@ -7,8 +7,9 @@ use restichub_agent::commands::provision_and_register;
 use restichub_agent::http_get::HttpsClient;
 use restichub_agent::openpgp::PublicKey;
 use restichub_agent::restic_install::Installer;
-use restichub_agent::restic_release::{Platform, Source, Supply};
+use restichub_agent::restic_release::{Platform, Source, Supply, VerifiedRelease, hex};
 use restichub_agent::restic_store::Layout;
+use sha2::{Digest as _, Sha256};
 
 use crate::server::{Reply, TestServer};
 
@@ -59,7 +60,9 @@ fn supply(server: &TestServer) -> Supply {
     Supply::Download {
         source: Source::GitHub {
             api_latest: server.url("/api/latest"),
+            api_list: server.url("/api/list"),
             download_base: server.url("/dl"),
+            pinned: "0.19.1".to_owned(),
         },
         client: HttpsClient::new(server.roots.clone(), None),
     }
@@ -124,6 +127,101 @@ async fn fr_ag_11_a_github_rate_limit_stops_the_download() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The files of the signed 0.19.1 release, plus the API answers that the test gives.
+fn fallback_routes(
+    latest: &'static str,
+    list: &'static str,
+) -> impl Fn(&str) -> Reply + Send + Sync + 'static {
+    let release = release_routes(data("SHA256SUMS.asc"));
+    move |path| match path {
+        "/api/latest" if latest.is_empty() => Reply::status(500),
+        "/api/latest" => Reply::ok(latest),
+        "/api/list" if list.is_empty() => Reply::status(500),
+        "/api/list" => Reply::ok(list),
+        other => release(other),
+    }
+}
+
+#[tokio::test]
+async fn nfr_cmp_03_a_refused_latest_release_falls_back_to_the_newest_supported_one() {
+    let dir = base("fallback-list");
+    let server = TestServer::start(fallback_routes(
+        r#"{"tag_name":"v1.0.0"}"#,
+        r#"[{"tag_name":"v1.0.0"},{"tag_name":"v0.19.1"},{"tag_name":"v0.18.1"}]"#,
+    ))
+    .await;
+    let installer = installer(&dir);
+    let record = installer.update(&supply(&server)).await.expect("fallback");
+    assert_eq!(record.version, "0.19.1");
+    assert!(
+        server.paths().iter().all(|path| !path.contains("v1.0.0")),
+        "the refused release is never downloaded: {:?}",
+        server.paths()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn nfr_cmp_03_the_pinned_release_is_the_last_resort() {
+    let dir = base("fallback-pinned");
+    let server = TestServer::start(fallback_routes("", "")).await;
+    let installer = installer(&dir);
+    let record = installer.update(&supply(&server)).await.expect("pinned");
+    assert_eq!(record.version, "0.19.1");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn nfr_cmp_03_a_failure_of_every_release_names_the_offline_options() {
+    let dir = base("fallback-none");
+    let server = TestServer::start(|_| Reply::status(404)).await;
+    let installer = installer(&dir);
+    let error = installer
+        .update(&supply(&server))
+        .await
+        .expect_err("nothing installs");
+    let text = format!("{error:#}");
+    assert!(
+        text.contains("--restic-archive")
+            && text.contains("--restic-sums ")
+            && text.contains("--restic-sums-sig"),
+        "{text}"
+    );
+    assert!(!installer.layout.has_record());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn nfr_cmp_03_a_downgrade_needs_the_explicit_flag() {
+    let dir = base("downgrade");
+    let server = TestServer::start(release_routes(data("SHA256SUMS.asc"))).await;
+    let installer = installer(&dir);
+    let newer = VerifiedRelease {
+        version: "0.20.0".to_owned(),
+        binary: b"newer".to_vec(),
+        sha256: hex(&Sha256::digest(b"newer")),
+    };
+    installer
+        .layout
+        .install(&newer, &|_| Ok("0.20.0".to_owned()))
+        .expect("installed");
+    let error = installer
+        .update(&supply(&server))
+        .await
+        .expect_err("a downgrade");
+    assert!(error.to_string().contains("--allow-downgrade"), "{error:#}");
+    assert_eq!(
+        installer.layout.read_record().expect("record").version,
+        "0.20.0"
+    );
+    let record = installer
+        .update_with(&supply(&server), true)
+        .await
+        .expect("allowed");
+    assert_eq!(record.version, "0.19.1");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A host without restic and without network fails before the enrollment request (FR-IN-07,
 /// ADR-0038).
 #[tokio::test]
@@ -134,7 +232,9 @@ async fn fr_in_07_register_without_restic_and_network_fails_before_the_enrollmen
     let unreachable = Supply::Download {
         source: Source::GitHub {
             api_latest: "https://localhost:9/api/latest".to_owned(),
+            api_list: "https://localhost:9/api/list".to_owned(),
             download_base: "https://localhost:9/dl".to_owned(),
+            pinned: "0.19.1".to_owned(),
         },
         client: HttpsClient::new(rustls::RootCertStore::empty(), None),
     };

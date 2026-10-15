@@ -19,7 +19,8 @@ const RECORD_FILE: &str = "restic.json";
 
 // Windows refuses to replace an executable that a process runs.
 #[cfg(windows)]
-const REPLACE_HINT: &str = "; stop the restichub-agent service, run the update again and start the service";
+const REPLACE_HINT: &str =
+    "; stop the restichub-agent service, run the update again and start the service";
 
 #[cfg(not(windows))]
 const REPLACE_HINT: &str = "";
@@ -191,10 +192,8 @@ impl Layout {
         }
         if let Err(error) = std::fs::rename(staging, &binary) {
             let _ = std::fs::remove_file(staging);
-            return Err(anyhow::Error::new(error).context(format!(
-                "cannot replace {}{REPLACE_HINT}",
-                binary.display()
-            )));
+            return Err(anyhow::Error::new(error)
+                .context(format!("cannot replace {}{REPLACE_HINT}", binary.display())));
         }
         let text = serde_json::to_vec_pretty(record).context("cannot write the record")?;
         let recorded = crate::paths::replace_file(&self.record_path(), &text)
@@ -435,8 +434,8 @@ mod tests {
         std::fs::write(&script, "#!/bin/sh\nexec sleep 30\n").expect("script");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).expect("mode");
         let started = Instant::now();
-        let error = probe_version_within(&script, Duration::from_millis(300))
-            .expect_err("a hung binary");
+        let error =
+            probe_version_within(&script, Duration::from_millis(300)).expect_err("a hung binary");
         assert!(error.to_string().contains("did not answer"), "{error:#}");
         assert!(started.elapsed() < Duration::from_secs(10));
         let _ = std::fs::remove_dir_all(&dir);

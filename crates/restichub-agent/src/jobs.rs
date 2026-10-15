@@ -48,8 +48,8 @@ use restichub_proto::signing::{
 use tokio::sync::mpsc;
 
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
-use crate::restore_roots::RestoreAccess;
 use crate::restic_store::Layout;
+use crate::restore_roots::RestoreAccess;
 
 mod log;
 mod runner;
