@@ -217,3 +217,82 @@ async fn ac_id_03_an_emulated_agent_rotates_its_certificate_over_the_stream() {
     emulator.stop().await;
     env.db.cleanup().await;
 }
+
+/// Compromises the current job signing key, naming the key that the caller sees.
+async fn compromise(env: &Env) {
+    use restichub_db::audit::{AuditAction, AuditEvent};
+
+    let signing = env.state.job_signing().expect("the signing service");
+    let current = signing
+        .current_key_id(env.db.database())
+        .await
+        .expect("a current key");
+    let template = AuditEvent::new(AuditAction::SigningKeyCompromise, "signing_key");
+    signing
+        .mark_compromised(
+            env.db.database(),
+            time::OffsetDateTime::now_utc(),
+            &current,
+            &template,
+        )
+        .await
+        .expect("the compromise must succeed");
+}
+
+/// ADR-0030, AC-PR-09: an agent that was offline during one compromise holds the next key from its
+/// enrollment. It follows the key chain after it reconnects and accepts a job that the new current
+/// key signs. The agent needs no new enrollment.
+#[tokio::test(flavor = "multi_thread")]
+async fn adr_0030_an_agent_one_rotation_behind_follows_the_chain_after_a_compromise() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    // The agent enrolls, then stays offline while the key is compromised.
+    let identity = env.enroll_agent("e2e-offline-compromise").await;
+    let agent = rotation_support::agent_of(&identity);
+    compromise(&env).await;
+
+    let emulator = env.start_emulator_for(identity, Arc::new(Quick)).await;
+    let repository = env.create_repository(agent, "pw").await;
+    let profile = env.create_profile(repository, json!({})).await;
+    let plan = env.create_plan(profile, agent).await;
+    let job = env.run_plan(plan).await;
+    eventually(|| async {
+        env.pass().await;
+        env.job_status(job).await == "succeeded"
+    })
+    .await;
+    emulator.stop().await;
+    env.db.cleanup().await;
+}
+
+/// ADR-0030: an agent two compromises behind cannot verify the chain. The control plane never
+/// sends a compromised key, so the agent cannot verify the update, the job never runs and the
+/// operator registers the host again.
+#[tokio::test(flavor = "multi_thread")]
+async fn adr_0030_an_agent_two_rotations_behind_does_not_run_the_job() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let identity = env.enroll_agent("e2e-offline-twice").await;
+    let agent = rotation_support::agent_of(&identity);
+    compromise(&env).await;
+    compromise(&env).await;
+
+    let emulator = env.start_emulator_for(identity, Arc::new(Quick)).await;
+    let repository = env.create_repository(agent, "pw").await;
+    let profile = env.create_profile(repository, json!({})).await;
+    let plan = env.create_plan(profile, agent).await;
+    let job = env.run_plan(plan).await;
+    env.pass().await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    env.pass().await;
+    assert!(
+        matches!(env.job_status(job).await.as_str(), "sent" | "failed"),
+        "the agent must not run the job"
+    );
+    emulator.stop().await;
+    env.db.cleanup().await;
+}
