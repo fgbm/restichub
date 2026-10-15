@@ -48,7 +48,6 @@ pub struct Agent {
     /// The time of the last rotation request, answered or refused. The control plane refuses the
     /// next request until the cooldown has passed (FR-ID-03).
     pub last_rotation_request_at: Option<OffsetDateTime>,
-    /// The serial that the last rotation replaced.
     pub previous_certificate_serial: Option<Vec<u8>>,
     /// The last time a connection presented [`Self::previous_certificate_serial`] (T17).
     pub superseded_certificate_used_at: Option<OffsetDateTime>,

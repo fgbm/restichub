@@ -244,7 +244,6 @@ async fn fr_id_03_a_new_certificate_starts_five_minutes_before_the_issue_time() 
         .await
         .expect("the rotation must be signed");
     // The test CA starts a moment before the test, so the start is bound by the CA here.
-    // A certificate holds whole seconds.
     let issued = due.replace_nanosecond(0).expect("whole seconds");
     assert!(
         next.not_before < issued,
