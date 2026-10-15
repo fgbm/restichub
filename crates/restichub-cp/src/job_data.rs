@@ -118,28 +118,33 @@ pub async fn handle_step_result(
     finish(tx, outcome, job_id, "step result").await;
 }
 
-/// Records one log chunk.
+/// Records one log chunk. True when the log holds the chunk afterwards, so the agent may drop its
+/// copy (FR-LG-07).
 pub async fn handle_log_chunk(
     state: &AppState,
     tenant: TenantId,
     agent: AgentId,
     chunk: &LogChunk,
-) {
+) -> bool {
     let Some(job_id) = parse_job_id_value(&chunk.job_id) else {
-        return;
+        return false;
     };
     let Some(new_chunk) = chunk_of(chunk) else {
-        return;
+        return false;
     };
     if !job_is_owned(state, tenant, agent, job_id).await {
-        return;
+        return false;
     }
     let store = DatabaseLogStore::new(state.db().clone());
-    if let Err(error) = store
+    match store
         .append(tenant, job_id, &new_chunk, state.auth().clock.now())
         .await
     {
-        tracing::warn!(job = %job_id, %error, "the log chunk could not be stored");
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(job = %job_id, %error, "the log chunk could not be stored");
+            false
+        }
     }
 }
 

@@ -27,8 +27,9 @@ use restichub_db::queue as queue_repo;
 use restichub_db::{AgentId, AgentStatus, Database, JobId, TenantId};
 use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{
-    AgentMessage, CancelJob, CertificateRejectReason, CertificateRejected, ControlMessage, Ping,
-    ServerHello, SigningKeyUpdate, VersionRejectReason, VersionRejected, agent_message,
+    AgentMessage, CancelJob, CertificateRejectReason, CertificateRejected, ControlMessage, LogAck,
+    LogChunk, LogStreamAck, Ping, ServerHello, SigningKeyUpdate, VersionRejectReason,
+    VersionRejected, agent_message,
     agent_service_server::{AgentService, AgentServiceServer},
     control_message,
 };
@@ -722,7 +723,7 @@ impl AgentService for AgentStreamService {
             payload: Some(control_message::Payload::ServerHello(ServerHello {
                 protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
                 protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
-                accepted_capabilities: Vec::new(),
+                accepted_capabilities: vec![AgentCapability::LogAckV1.as_str().to_owned()],
                 control_plane_version: crate::agent_version::CONTROL_PLANE_VERSION.to_owned(),
             })),
         };
@@ -888,6 +889,7 @@ async fn run_stream(
     last_seen.tick().await;
     let mut last_activity = tokio::time::Instant::now();
     let mut last_request: Option<tokio::time::Instant> = None;
+    let mut log_acks = LogAcks::new(capabilities.contains(&AgentCapability::LogAckV1));
     let mut active = false;
 
     loop {
@@ -896,8 +898,16 @@ async fn run_stream(
                 Ok(Some(message)) => {
                     last_activity = tokio::time::Instant::now();
                     active = true;
-                    handle_message(&state, &mut identity, generation, &tx, &mut last_request, message)
-                        .await;
+                    handle_message(
+                        &state,
+                        &mut identity,
+                        generation,
+                        &tx,
+                        &mut last_request,
+                        &mut log_acks,
+                        message,
+                    )
+                    .await;
                 }
                 Ok(None) | Err(_) => break,
             },
@@ -984,6 +994,53 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
     let _ = state.agent_registry().send_to_agent(agent, message);
 }
 
+/// The acknowledgements of log chunks on one connection (FR-LG-07).
+///
+/// An acknowledgement covers every chunk of the stream up to its sequence, because the agent sends
+/// the chunks in order. A chunk that fails to store therefore stops the acknowledgements of its job
+/// on this connection; the agent sends the chunks again on the next one.
+struct LogAcks {
+    enabled: bool,
+    failed: HashSet<String>,
+}
+
+impl LogAcks {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            failed: HashSet::new(),
+        }
+    }
+
+    fn after_store(&mut self, tx: &mpsc::Sender<ControlMessage>, chunk: &LogChunk, stored: bool) {
+        if !self.enabled {
+            return;
+        }
+        if !stored {
+            if self.failed.len() < MAX_FAILED_LOG_JOBS {
+                self.failed.insert(chunk.job_id.clone());
+            }
+            return;
+        }
+        if self.failed.contains(&chunk.job_id) {
+            return;
+        }
+        // A full buffer drops the acknowledgement. The agent sends the chunk again later.
+        let _ = tx.try_send(ControlMessage {
+            payload: Some(control_message::Payload::LogAck(LogAck {
+                job_id: chunk.job_id.clone(),
+                streams: vec![LogStreamAck {
+                    stream: chunk.stream,
+                    sequence: chunk.sequence,
+                }],
+            })),
+        });
+    }
+}
+
+/// The most jobs with a failed log write that one connection remembers.
+const MAX_FAILED_LOG_JOBS: usize = 1024;
+
 /// Handles one inbound message (FR-PR-08, ADR-0026).
 ///
 /// The identity comes from the certificate, never from the message. An acknowledgement is accepted
@@ -995,6 +1052,7 @@ async fn handle_message(
     generation: u64,
     tx: &mpsc::Sender<ControlMessage>,
     last_request: &mut Option<tokio::time::Instant>,
+    log_acks: &mut LogAcks,
     message: AgentMessage,
 ) {
     match message.payload {
@@ -1107,7 +1165,10 @@ async fn handle_message(
                 .await;
         }
         Some(agent_message::Payload::LogChunk(chunk)) => {
-            crate::job_data::handle_log_chunk(state, identity.tenant, identity.agent, &chunk).await;
+            let stored =
+                crate::job_data::handle_log_chunk(state, identity.tenant, identity.agent, &chunk)
+                    .await;
+            log_acks.after_store(tx, &chunk, stored);
         }
         None => {}
     }

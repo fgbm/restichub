@@ -13,16 +13,16 @@ use std::time::Duration;
 use restichub_compiler::ValidatedJob;
 use restichub_compiler::arg::build_command;
 use restichub_proto::agent::v1::{
-    AgentMessage, ErrorDetail, LogChunk, LogStream, ProcessPriority, Step, StepProgress, StepStatus,
-    agent_message, step, step_result,
+    AgentMessage, ErrorDetail, LogChunk, LogStream, ProcessPriority, Step, StepProgress,
+    StepStatus, agent_message, step, step_result,
 };
 use tokio::sync::mpsc;
 
 use super::log::JobLog;
-use crate::log_spool::Stored;
 use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
 use crate::exec::JobChild;
+use crate::log_spool::Stored;
 use crate::output::{Accepted, Collector, Line, OutputKind, Pipe, spawn_reader};
 use crate::scrub::Scrubber;
 

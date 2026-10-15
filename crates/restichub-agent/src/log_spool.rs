@@ -202,14 +202,17 @@ impl LogSpool {
             return Ok(Stored::Full);
         }
         let path = self.dir.join(name);
-        let job = state.jobs.entry(job_id.to_owned()).or_insert_with(|| JobSpool {
-            path,
-            chunks: Vec::new(),
-            file_bytes: 0,
-            live_bytes: 0,
-            sent: 0,
-            finished: false,
-        });
+        let job = state
+            .jobs
+            .entry(job_id.to_owned())
+            .or_insert_with(|| JobSpool {
+                path,
+                chunks: Vec::new(),
+                file_bytes: 0,
+                live_bytes: 0,
+                sent: 0,
+                finished: false,
+            });
         job.finished = false;
         write_record(job, chunk)?;
         job.chunks.push(chunk.clone());
@@ -477,7 +480,10 @@ mod tests {
         assert!(smaller < full, "{smaller} < {full}");
         spool.finish("job-1");
         spool.acknowledge(&ack(4));
-        assert!(!path.exists(), "the file of a fully acknowledged job is removed");
+        assert!(
+            !path.exists(),
+            "the file of a fully acknowledged job is removed"
+        );
         assert_eq!(spool.total_bytes(), 0);
         let _ = std::fs::remove_dir_all(dir);
     }

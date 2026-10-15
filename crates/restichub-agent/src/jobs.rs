@@ -44,8 +44,9 @@ use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{
-    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, LogAck, RejectReason, ScriptInterpreter,
-    ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message, step, step_result,
+    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, LogAck, RejectReason,
+    ScriptInterpreter, ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message,
+    step, step_result,
 };
 use restichub_proto::signing::{
     Admission, Expected, JobJournal as _, JournalState, KeyRing, Rejection, admit, verify_job,
@@ -639,7 +640,10 @@ impl Jobs {
     async fn send_live(&self, message: AgentMessage, wait: Duration) -> bool {
         let tx = lock(&self.connection).clone();
         match tx {
-            Some(tx) => matches!(tokio::time::timeout(wait, tx.send(message)).await, Ok(Ok(()))),
+            Some(tx) => matches!(
+                tokio::time::timeout(wait, tx.send(message)).await,
+                Ok(Ok(()))
+            ),
             None => false,
         }
     }
