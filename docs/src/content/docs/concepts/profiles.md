@@ -7,19 +7,23 @@ A profile is the definition of a backup: what to copy, what to skip, how to run 
 
 ## Editor sections
 
-The profile editor is one page. Each section shows its state (on, off or needs attention) and a short summary. The side panel shows a live summary and the restic commands that the profile produces.
+The profile editor is one page. Select "Add profile" on the "Profiles" screen, or "Edit" in the menu of a profile. Each section shows its state ("On", "Off" or "Needs attention") and a short summary. You can switch a section on or off, and you can use "Expand all" and "Collapse all". The side panel shows "The result": a live summary and the restic commands that the profile produces for a host. Unsaved changes show the note "The changes are not saved.". When the profile has plans, the editor tells how many plans use it. The new settings apply to their next run.
 
 | Section | What you set |
 |---|---|
-| Basics | The name of the profile and its repository. The name is how you find the profile in the list and in plans. |
-| What to copy | One path in each line. The paths for all systems apply on every host. The other paths apply only on their own system (Windows, Linux or macOS). |
-| Exclusions | Patterns such as `*.tmp`, or paths. One entry in each line. You can also give the path of a file on the host that holds a list of patterns. |
-| Backup options | Snapshot tags. VSS (Windows only), which passes `--use-fs-snapshot`. Stay on one file system (`--one-file-system`). Skip the cache directories that hold a `CACHEDIR.TAG` file (`--exclude-caches`). Limit the upload and download speed in KiB/s (`--limit-upload`, `--limit-download`). |
-| Repository check | A check after the backup. Without a read share, the check reads the repository structure only. This is fast. A share such as `5%` or `1/10` reads that part of the data. A larger share takes more time and traffic. |
+| Main | The name of the profile and its repository. The name is how you find the profile in the list and in plans. |
+| What to back up | One path in each line. The paths for "All systems" apply on every host. The other paths apply only on their own system (Windows, Linux or macOS). |
+| Exclusions | Patterns such as `*.tmp`, or paths. One entry in each line. You can also give the path of a file on the host that holds a list of patterns ("Exclude files"). |
+| Tags | The tags of the snapshots of this profile. The retention rules and the searches use them. Type a tag and press Enter, or separate tags with a comma or a space. Each tag becomes a chip. Select the cross on a chip to remove the tag. |
+| Backup options | VSS (Windows only), which passes `--use-fs-snapshot`. "Stay on one file system" (`--one-file-system`). "Exclude cache directories" that hold a `CACHEDIR.TAG` file (`--exclude-caches`). "Upload limit (KiB/s)" and "Download limit (KiB/s)" (`--limit-upload`, `--limit-download`). |
+| Retention | The rules that decide which snapshots stay. See the section below. |
+| Repository check | A check after the backup. Without a "Read-data subset", the check reads the repository structure only. This is fast. A share such as `5%` or `1/10` reads that part of the data. A larger share takes more time and traffic. |
 | Scripts on the host | Scripts before and after the backup. See [Server scripts](/restichub/operations/scripts/). |
-| Execution limits | The stall limit and the maximum duration of a job. See the section below. |
+| Run limits | The stall limit and the maximum duration of a job. See the section below. |
 
-The retention rules are part of the profile. Only the [maintenance host](/restichub/concepts/repositories/) of the repository runs the `forget` and `prune` steps.
+A profile has no hooks. Use [server scripts](/restichub/operations/scripts/) to run a command on the host before or after a backup.
+
+Only the [maintenance host](/restichub/concepts/repositories/) of the repository runs the `forget` and `prune` steps.
 
 ## Retention rules
 
@@ -42,7 +46,7 @@ The hourly, daily, weekly, monthly and yearly rules count only the intervals tha
 
 The rules apply to each group of snapshots separately. Then the copies of different hosts or paths do not push each other out. Without a choice, the group is the host and the paths. A filter can limit the rules to some hosts, tags or paths. Snapshots outside the filter stay.
 
-The editor shows a sample of 60 daily snapshots and which of them the current rules keep.
+The editor shows a sample of 60 daily snapshots. The last three days hold two snapshots a day. The sample shows which snapshots the current rules keep. The legend marks a snapshot that stays because of a tag as "stays because of a tag".
 
 ### Presets
 
@@ -56,11 +60,11 @@ A new profile starts with the Standard preset. You can pick another preset or ch
 
 ## Job limits
 
-The limits protect against jobs that hang or run too long. The stall limit always applies. You can turn off the maximum duration with 0. An empty field uses the default.
+The section "Run limits" protects against jobs that hang or run too long. The stall limit always applies. An empty field leaves the value to the server: a new profile gets the default, and a profile that you edit keeps its stored value.
 
-| Limit | Default | Environment variable for the whole stack |
-|---|---|---|
-| No progress | 60 minutes (from 5 to 10080) | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` |
-| Maximum duration | 48 hours (from 0 to 43200, where 0 turns the limit off) | `RESTICHUB_JOB_MAX_DURATION_SECS` |
+| Field | Unit | Default | Allowed values | Variable for the whole installation |
+|---|---|---|---|---|
+| "Stop after no progress (minutes)" | Minutes | 60 minutes | 5 to 10080 | [`RESTICHUB_JOB_STALL_TIMEOUT_SECS`](/restichub/operations/environment-variables/) |
+| "Maximum duration (hours)" | Hours | 48 hours | 0 to 720. 0 means no limit. | [`RESTICHUB_JOB_MAX_DURATION_SECS`](/restichub/operations/environment-variables/) |
 
-If the agent reports no progress for longer than the first limit, the control plane stops the job as stalled. A job that runs longer than the second limit stops even when it makes progress. The environment variable sets the default. A value in the profile overrides it. The [Jobs](/restichub/concepts/jobs/#time-limits) page describes how the agent measures progress.
+If restic makes no progress for longer than the first limit, the agent stops the step and the job fails as stalled. A `check` or `prune` step waits for at least 6 hours, even when the profile sets a shorter limit. A job that runs longer than the second limit stops even when it makes progress. The variable sets the default of a new profile. A value in the profile overrides it. The [Jobs](/restichub/concepts/jobs/#time-limits) page describes how the agent measures progress. The job detail shows the limits of each job.

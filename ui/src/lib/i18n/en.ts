@@ -1519,6 +1519,7 @@ export const en = {
 	'pe.rule.within.title': 'All snapshots in a period',
 	'pe.rule.within.text':
 		'Keep all snapshots that are not older than this period than the newest snapshot. The count starts at the newest snapshot, not at today. For example <code>30d</code> is 30 days and <code>1y2m</code> is a year and two months.',
+	'pe.rule.within.hint': 'For example: 30d, 1y2m',
 	'pe.rule.within.invalid': 'The period is not valid. For example: 30d, 6m, 1y2m7d3h.',
 	'pe.rule.tags.title': 'Tags that are never deleted',
 	'pe.rule.tags.text':
@@ -1612,7 +1613,55 @@ export const en = {
 	'pe.sum.maxDefault': 'at most {count} (default)',
 	'pe.sum.maxNone': 'no limit',
 	'pe.sum.maxServer': 'longest time: server default',
-	'pe.sum.stallServer': 'no progress: server default'
+	'pe.sum.stallServer': 'no progress: server default',
+	// Built-in script and job templates, keyed by slug
+	'builtin.script.postgres-dump-bash.name': 'PostgreSQL dump with pg_dump (Linux)',
+	'builtin.script.postgres-dump-bash.description':
+		'Writes a custom-format dump of one database before the backup. Needs pg_dump on the host.',
+	'builtin.script.postgres-dump-powershell.name': 'PostgreSQL dump with pg_dump (Windows)',
+	'builtin.script.postgres-dump-powershell.description':
+		'Writes a custom-format dump of one database before the backup. Needs pg_dump.exe in the PATH of the agent.',
+	'builtin.script.mysql-dump-bash.name': 'MySQL dump with mysqldump (Linux)',
+	'builtin.script.mysql-dump-bash.description':
+		'Writes a consistent dump of one InnoDB database before the backup. Needs mysqldump on the host.',
+	'builtin.script.mssql-backup-powershell.name': 'MSSQL backup with sqlcmd (Windows)',
+	'builtin.script.mssql-backup-powershell.description':
+		'Runs BACKUP DATABASE to a .bak file before the file backup. Needs sqlcmd.exe in the PATH of the agent.',
+	'builtin.script.windows-vss-note-powershell.name': 'Windows VSS note (Windows)',
+	'builtin.script.windows-vss-note-powershell.description':
+		'Lists the VSS writers before the backup. The snapshot itself comes from the profile option for a file system snapshot.',
+	'builtin.script.service-stop-bash.name': 'Stop a service (Linux)',
+	'builtin.script.service-stop-bash.description':
+		'Stops a systemd service before the backup. Pair it with the start template in the finally phase.',
+	'builtin.script.service-start-bash.name': 'Start a service (Linux)',
+	'builtin.script.service-start-bash.description':
+		'Starts a systemd service. Use it in the finally phase, so the service starts again when the backup fails.',
+	'builtin.script.service-stop-powershell.name': 'Stop a service (Windows)',
+	'builtin.script.service-stop-powershell.description':
+		'Stops a Windows service before the backup. Pair it with the start template in the finally phase.',
+	'builtin.script.service-start-powershell.name': 'Start a service (Windows)',
+	'builtin.script.service-start-powershell.description':
+		'Starts a Windows service. Use it in the finally phase, so the service starts again when the backup fails.',
+	'builtin.script.disk-space-check-bash.name': 'Free disk space check (Linux)',
+	'builtin.script.disk-space-check-bash.description':
+		'Fails when the path has less free space than the limit.',
+	'builtin.script.disk-space-check-powershell.name': 'Free disk space check (Windows)',
+	'builtin.script.disk-space-check-powershell.description':
+		'Fails when the drive of the path has less free space than the limit.',
+	'builtin.script.run-command-bash.name': 'Run a command (Linux)',
+	'builtin.script.run-command-bash.description':
+		'Runs one command line with bash. Use a dedicated template for anything that needs quoting.',
+	'builtin.script.run-command-powershell.name': 'Run a command (Windows)',
+	'builtin.script.run-command-powershell.description': 'Runs one command line with PowerShell.',
+	'builtin.job.postgres-linux.name': 'PostgreSQL server (Linux)',
+	'builtin.job.postgres-linux.description':
+		'Checks the free space, dumps one database before the backup and removes nothing after it.',
+	'builtin.job.mssql-windows.name': 'Microsoft SQL Server (Windows)',
+	'builtin.job.mssql-windows.description':
+		'Lists the VSS writers and backs up one database to a .bak file before the file backup.',
+	'builtin.job.stop-start-service-linux.name': 'Application with a service (Linux)',
+	'builtin.job.stop-start-service-linux.description':
+		'Stops a service before the backup and starts it again in the finally phase.'
 } as const;
 
 export type MessageKey = keyof typeof en;
