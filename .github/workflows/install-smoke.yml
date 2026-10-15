@@ -218,7 +218,8 @@ jobs:
           Move-Item $restic (Join-Path $dir 'bin\restic.exe')
           Start-Service restichub-agent
           # The service reports Running before its start code runs.
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $restic); $i++) { Start-Sleep -Seconds 1 }
+          $bin = Join-Path $dir 'bin'
+          for ($i = 0; $i -lt 60 -and -not ((Test-Path $restic) -and -not (Test-Path $bin)); $i++) { Start-Sleep -Seconds 1 }
           if (-not (Test-Path $restic)) {
             Get-Service restichub-agent | Format-List Status
             & (Join-Path $dir 'restichub-agent.exe') status
