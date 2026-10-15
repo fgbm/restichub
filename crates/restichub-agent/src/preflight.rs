@@ -7,7 +7,10 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
 
+use time::OffsetDateTime;
+
 use crate::paths;
+use crate::verify::{CLOCK_HINT, CLOCK_TOLERANCE};
 
 const PROBE_FILE: &str = ".probe";
 
@@ -83,6 +86,29 @@ fn probe(dir: &Path) -> Result<()> {
     std::fs::remove_file(&file).with_context(|| format!("cannot remove {}", file.display()))
 }
 
+/// Refuses a host clock that is far from the control plane clock (FR-IN-07, FR-AG-04).
+///
+/// The issued certificate starts a few minutes before the control plane time. A host that is
+/// behind by more than the tolerance would refuse it after the token is spent, so the check runs
+/// before the enrollment. An absent control plane time passes.
+///
+/// # Errors
+///
+/// Returns an error with both times and the offset when they differ by more than the tolerance.
+pub fn check_clock(local: OffsetDateTime, server: Option<OffsetDateTime>) -> Result<()> {
+    let Some(server) = server else {
+        return Ok(());
+    };
+    let offset = local - server;
+    if offset.abs() > CLOCK_TOLERANCE {
+        bail!(
+            "the host clock is off by {} s: the local time is {local} and the control plane time is {server}; the token is not used; {CLOCK_HINT}",
+            offset.whole_seconds()
+        );
+    }
+    Ok(())
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -121,5 +147,34 @@ mod tests {
             .expect_err("a cache below a file must fail");
         assert!(error.to_string().contains("cache directory"), "{error}");
         let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn ac_in_02_a_clock_within_the_tolerance_passes() {
+        let server = OffsetDateTime::now_utc();
+        check_clock(server - time::Duration::minutes(4), Some(server)).expect("4 minutes behind");
+        check_clock(server + time::Duration::minutes(4), Some(server)).expect("4 minutes ahead");
+        check_clock(server, None).expect("no control plane time");
+    }
+
+    #[test]
+    fn ac_in_02_a_clock_beyond_the_tolerance_is_refused_with_both_times() {
+        let server = OffsetDateTime::now_utc();
+        let local = server - time::Duration::minutes(20);
+        let error = check_clock(local, Some(server))
+            .expect_err("a clock 20 minutes behind must fail")
+            .to_string();
+        assert!(error.contains("-1200 s"), "{error}");
+        assert!(error.contains(&local.to_string()), "{error}");
+        assert!(error.contains(&server.to_string()), "{error}");
+        assert!(error.contains("w32tm /resync"), "{error}");
+        assert!(error.contains("timedatectl"), "{error}");
     }
 }
