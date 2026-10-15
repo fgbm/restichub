@@ -156,3 +156,72 @@ async fn fr_hk_08_disabling_the_mode_in_a_before_script_stops_the_next_script() 
     assert_eq!(host.mark("order"), "");
     assert!(host.fx.restic_runs().is_empty());
 }
+
+/// AC-HK-10: a cancel that arrives while a `finally` script hangs stops it, and a second cancel
+/// kills the tree at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_hk_10_a_cancel_stops_a_hanging_finally_script() {
+    let host = Host::new("script-finally-cancel");
+    host.enable();
+    let started = host.marks().join("started");
+    let body = format!("touch '{}'\nsleep 300\n", started.display());
+    let job = host.job(
+        "job-finally-cancel",
+        vec![
+            backup_step("repo-1", &["/srv"]),
+            simple("script-0", HookPhase::Finally, &body, vec![]),
+        ],
+    );
+    let jobs = host
+        .jobs()
+        .with_stop_grace(std::time::Duration::from_secs(120));
+    let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+    jobs.attach(&tx);
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    for _ in 0..200 {
+        if started.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(started.exists());
+    let begin = std::time::Instant::now();
+    jobs.cancel("job-finally-cancel");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    jobs.cancel("job-finally-cancel");
+    let collected = collect(&mut rx).await;
+    assert!(begin.elapsed() < std::time::Duration::from_secs(20));
+    assert_eq!(status_of(&collected, "script-0"), StepStatus::Cancelled);
+    assert!(host.leftovers().is_empty());
+}
+
+/// FR-HK-05: a cleanup script runs past the job deadline only for the grace time.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_hk_05_a_hanging_finally_script_ends_with_the_deadline_and_the_grace() {
+    let host = Host::new("script-finally-deadline");
+    host.enable();
+    let mut job = host.job(
+        "job-finally-deadline",
+        vec![
+            backup_step("repo-1", &["/srv"]),
+            simple("script-0", HookPhase::Finally, "sleep 300\n", vec![]),
+        ],
+    );
+    job.timeout_seconds = 1;
+    let jobs = host
+        .jobs()
+        .with_cleanup_grace(std::time::Duration::from_secs(1));
+    let begin = std::time::Instant::now();
+    let collected = run(&jobs, &job).await;
+    assert!(begin.elapsed() < std::time::Duration::from_secs(25));
+    assert_eq!(status_of(&collected, "script-0"), StepStatus::Failed);
+    assert_eq!(
+        collected
+            .step("script-0")
+            .error
+            .as_ref()
+            .map(|error| error.code.as_str()),
+        Some("step_timeout")
+    );
+    assert!(host.leftovers().is_empty());
+}

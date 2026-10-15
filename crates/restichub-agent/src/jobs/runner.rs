@@ -6,7 +6,7 @@
 //! the step runs. A cancel or a timeout stops the step in two stages: the graceful signal, then the
 //! forced kill of the process tree after the grace period.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -152,23 +152,32 @@ impl StepOutcome {
 #[derive(Clone)]
 pub(super) struct CancelHandle {
     pub(super) child: Arc<Mutex<Option<JobChild>>>,
-    cancelled: Arc<AtomicBool>,
+    cancels: Arc<AtomicU32>,
 }
 
 impl CancelHandle {
     pub(super) fn new() -> Self {
         Self {
             child: Arc::new(Mutex::new(None)),
-            cancelled: Arc::new(AtomicBool::new(false)),
+            cancels: Arc::new(AtomicU32::new(0)),
         }
     }
 
     pub(super) fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
+        let _ = self
+            .cancels
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                Some(count.saturating_add(1))
+            });
     }
 
     pub(super) fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.cancel_count() > 0
+    }
+
+    /// How many cancels arrived. A cleanup step reads it to see a cancel that came while it runs.
+    pub(super) fn cancel_count(&self) -> u32 {
+        self.cancels.load(Ordering::SeqCst)
     }
 }
 

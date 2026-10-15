@@ -70,6 +70,10 @@ use runner::{CancelHandle, StepError, StepOutcome};
 /// (FR-AG-10, AC-AG-06).
 pub const STOP_GRACE: Duration = Duration::from_secs(30);
 
+/// How long past the job deadline the cleanup hooks (`after`, `on_*` and `finally`) may run
+/// (FR-HK-05).
+pub const CLEANUP_GRACE: Duration = Duration::from_secs(10 * 60);
+
 /// The timeout of a step that gives none and whose job gives none either (FR-AG-05).
 const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
@@ -119,6 +123,8 @@ pub struct Jobs {
     resent: Arc<Mutex<HashSet<String>>>,
     /// The grace period between the graceful stop and the forced kill (FR-AG-10).
     stop_grace: Duration,
+    /// How long past the job deadline the cleanup hooks may run (FR-HK-05).
+    cleanup_grace: Duration,
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
@@ -157,6 +163,7 @@ impl Jobs {
             written: Arc::new(Mutex::new(0)),
             resent: Arc::new(Mutex::new(HashSet::new())),
             stop_grace: STOP_GRACE,
+            cleanup_grace: CLEANUP_GRACE,
             restore: Arc::new(restore),
             hooks: Arc::new(HookStore::for_config_dir(dir)),
             scripts: Arc::new(scripts),
@@ -232,6 +239,13 @@ impl Jobs {
     #[must_use]
     pub fn with_stop_grace(mut self, grace: Duration) -> Self {
         self.stop_grace = grace;
+        self
+    }
+
+    /// Sets how long past the job deadline the cleanup hooks may run (FR-HK-05).
+    #[must_use]
+    pub fn with_cleanup_grace(mut self, grace: Duration) -> Self {
+        self.cleanup_grace = grace;
         self
     }
 
@@ -583,6 +597,7 @@ impl Jobs {
                     stop_on_failure: true,
                     honor_cancel: true,
                     honor_deadline: true,
+                    deadline_grace: None,
                 },
                 &cancel,
                 deadline,
@@ -753,6 +768,7 @@ impl Jobs {
             stop_on_failure: false,
             honor_cancel: true,
             honor_deadline: false,
+            deadline_grace: Some(self.cleanup_grace),
         };
         let main_ok = before_ok
             && progress.stopped_code.is_none()
@@ -803,6 +819,7 @@ impl Jobs {
                 sink!(),
             )
             .await;
+        progress.cancelled |= report.cancelled;
         progress.warned |= report.warned;
         hook_failure = hook_failure.or(report.failure);
         progress.hook_failure = hook_failure;

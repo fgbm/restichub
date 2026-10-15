@@ -94,8 +94,10 @@ pub(super) struct PhaseMode {
     pub(super) stop_on_failure: bool,
     /// Stop a running hook when the job is cancelled.
     pub(super) honor_cancel: bool,
-    /// Do not start a hook after the deadline of the job. A cleanup hook runs anyway.
+    /// Do not start a hook after the deadline of the job.
     pub(super) honor_deadline: bool,
+    /// A cleanup hook runs after the deadline too, but only this long past it.
+    pub(super) deadline_grace: Option<Duration>,
 }
 
 /// What a phase did.
@@ -351,6 +353,9 @@ impl Jobs {
                 return StepOutcome::not_started();
             }
             limit = limit.min(remaining);
+        } else if let (Some(grace), Some(deadline)) = (mode.deadline_grace, deadline) {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            limit = limit.min(remaining.saturating_add(grace));
         }
         let scrubber = Scrubber::for_secrets(&invocation.secrets);
         let mut child = match crate::exec::spawn_job_hook(&invocation, &self.cache) {
@@ -389,6 +394,8 @@ impl Jobs {
         let mut hard_killed = false;
         let mut timed_out = false;
         let mut cancelled = false;
+        let cancels_at_start = cancel.cancel_count();
+        let mut cancels_at_stop = cancels_at_start;
         let code = loop {
             let reaped = {
                 let mut slot = lock(&cancel.child);
@@ -412,9 +419,17 @@ impl Jobs {
             if let Some(code) = reaped {
                 break code;
             }
+            // A cleanup step that ignores an earlier cancel still stops for one that arrives while
+            // it runs.
+            let cancel_seen = if mode.honor_cancel {
+                cancel.is_cancelled()
+            } else {
+                cancel.cancel_count() > cancels_at_start
+            };
             if stopped_at.is_none() {
-                if mode.honor_cancel && cancel.is_cancelled() {
+                if cancel_seen {
                     cancelled = true;
+                    cancels_at_stop = cancel.cancel_count();
                     interrupt(&cancel.child);
                     stopped_at = Some(tokio::time::Instant::now());
                 } else if started.elapsed() >= limit {
@@ -423,7 +438,8 @@ impl Jobs {
                     stopped_at = Some(tokio::time::Instant::now());
                 }
             } else if !hard_killed
-                && stopped_at.is_some_and(|since| since.elapsed() >= self.stop_grace)
+                && (stopped_at.is_some_and(|since| since.elapsed() >= self.stop_grace)
+                    || cancel.cancel_count() > cancels_at_stop)
             {
                 kill_tree(&cancel.child);
                 hard_killed = true;
