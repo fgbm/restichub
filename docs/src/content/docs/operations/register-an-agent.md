@@ -20,6 +20,8 @@ restichub-agent register --url https://<control-plane> --token <token>
 - `--ca-file PATH` verifies the control plane with the CA in the file. Without this option the agent uses the system root certificates.
 - `--force` replaces an existing identity. Use it to register the host again.
 
+Run the command as `root` on Linux, or in an elevated PowerShell on Windows ("Run as administrator"). The agent checks the rights, creates its directories and proves that it can write there before it contacts the control plane. A failed check does not use the token.
+
 The token is single use. The control plane consumes the token at the first successful registration. A used token, an expired token and a revoked token give a clear error.
 
 ## The stored identity
