@@ -41,6 +41,13 @@ ssh "$host" "chmod 0700 '$dir/bootstrap.sh' && chmod 0644 '$dir/compose.yaml' '$
 echo "== create the environment file if it is missing =="
 ssh "$host" "cd '$dir' && { [ -e .env ] || ./bootstrap.sh .env '$domain' '$acme_email'; }"
 
+# The stack reads the key encryption key from a Docker secret file. A server that was set up with
+# the key in `.env` must move it first. See deploy/stage/README.md.
+if ! ssh "$host" "[ -e '$dir/secrets/restichub_kek' ]"; then
+	echo "$dir/secrets/restichub_kek is missing; move the key out of .env first (deploy/stage/README.md)" >&2
+	exit 1
+fi
+
 # The alert settings go to the environment file on the server when the local environment sets
 # them. The values travel on standard input, so no password shows in a process list. Compose reads
 # a single-quoted value as it is, so `$` and `#` in a password stay as typed. Compose has no

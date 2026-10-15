@@ -30,8 +30,8 @@ Set the variables in the environment of the control plane process. For the Docke
 | `RESTICHUB_DATABASE_MIGRATION_URL` | none | The PostgreSQL URL of the owner login. Without it the control plane runs no migration. |
 | `RESTICHUB_DATABASE_MIGRATION_PASSWORD` | none | The password of the owner login. |
 | `RESTICHUB_DATABASE_MIGRATION_PASSWORD_FILE` | none | The path of a file that holds that password. |
-| `RESTICHUB_KEK` | none | The key encryption key. It opens the repository passwords and the installation CA. |
-| `RESTICHUB_KEK_FILE` | none | The path of a file that holds the key encryption key. Set `RESTICHUB_KEK` or `RESTICHUB_KEK_FILE`, not both. |
+| `RESTICHUB_KEK` | none | The key encryption key. It opens the repository passwords and the installation CA. Not recommended: `docker inspect` and the process environment show the value. Use `RESTICHUB_KEK_FILE`. |
+| `RESTICHUB_KEK_FILE` | none | The path of a file that holds the key encryption key. The reference stack mounts a Docker secret there. The file mode must be `0400` or `0600`. Set `RESTICHUB_KEK` or `RESTICHUB_KEK_FILE`, not both. |
 
 ## Control plane: sign-in
 

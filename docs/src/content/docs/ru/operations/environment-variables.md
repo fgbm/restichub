@@ -30,8 +30,8 @@ description: Все переменные RESTICHUB_, которые читают
 | `RESTICHUB_DATABASE_MIGRATION_URL` | нет | URL PostgreSQL для учётной записи владельца. Без него сервер управления не применяет миграции. |
 | `RESTICHUB_DATABASE_MIGRATION_PASSWORD` | нет | Пароль учётной записи владельца. |
 | `RESTICHUB_DATABASE_MIGRATION_PASSWORD_FILE` | нет | Путь к файлу с этим паролем. |
-| `RESTICHUB_KEK` | нет | Ключ шифрования ключей (KEK). Он открывает пароли репозиториев и удостоверяющий центр установки. |
-| `RESTICHUB_KEK_FILE` | нет | Путь к файлу с KEK. Задайте `RESTICHUB_KEK` или `RESTICHUB_KEK_FILE`, но не обе переменные. |
+| `RESTICHUB_KEK` | нет | Ключ шифрования ключей (KEK). Он открывает пароли репозиториев и удостоверяющий центр установки. Не рекомендуется: `docker inspect` и окружение процесса показывают значение. Используйте `RESTICHUB_KEK_FILE`. |
+| `RESTICHUB_KEK_FILE` | нет | Путь к файлу с KEK. Эталонный набор подключает туда секрет Docker. Права на файл — `0400` или `0600`. Задайте `RESTICHUB_KEK` или `RESTICHUB_KEK_FILE`, но не обе переменные. |
 
 ## Сервер управления: вход
 

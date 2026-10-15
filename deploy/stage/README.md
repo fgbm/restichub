@@ -70,7 +70,28 @@ The host is the SSH alias of the staging server. The deploy script fails if the 
 
 ## The environment file
 
-`bootstrap.sh` writes `.env` with random secrets and the mode `600`. The file holds the PostgreSQL passwords and the key encryption key. The deploy script never copies the file from the workstation. To make a new file, remove the old one and run `bootstrap.sh` again. A new key encryption key makes the stored secrets unreadable.
+`bootstrap.sh` writes `.env` with random secrets and the mode `600`. The file holds the PostgreSQL passwords. The script writes the key encryption key to `secrets/restichub_kek` with the mode `400` and the owner uid 10001. Docker mounts the file as a secret, and the control plane reads it through `RESTICHUB_KEK_FILE`. The deploy script never copies the file from the workstation. To make a new file, remove the old one and run `bootstrap.sh` again. A new key encryption key makes the stored secrets unreadable.
+
+## Move the key encryption key out of the environment file
+
+A server that `bootstrap.sh` set up before the secret file existed keeps the key in the environment file. Move it before the next `deploy.sh` run. The deploy script stops if the file `secrets/restichub_kek` is missing.
+
+1. Log in to the server as root and go to `/opt/restichub`.
+2. Create the key file from the value in the environment file:
+
+   ```sh
+   umask 077
+   mkdir -p secrets && chmod 700 secrets
+   grep '^RESTICHUB_KEK=' ./.env | cut -d= -f2- > secrets/restichub_kek
+   chmod 400 secrets/restichub_kek
+   chown 10001:10001 secrets/restichub_kek
+   ```
+
+3. Run `deploy.sh` from the workstation. The new `compose.yaml` mounts the file and sets `RESTICHUB_KEK_FILE`.
+4. After the control plane is healthy, remove the line `RESTICHUB_KEK=` from the environment file.
+5. Check that the container has no key in its environment: `docker inspect <cp container> | grep -c RESTICHUB_KEK=` prints `0`.
+
+The key stays the same, so the stored secrets stay readable.
 
 ## The image tag
 
