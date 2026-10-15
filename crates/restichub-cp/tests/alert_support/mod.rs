@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use base64::Engine as _;
 use restichub_cp::alerts::sender::Sender;
 use restichub_cp::alerts::settings::{AlertsSettings, SmtpSecurity, SmtpSettings, WebhookSettings};
-use restichub_cp::alerts::transport::{ResolveFuture, Resolver, tls_config_with_roots};
+use restichub_cp::alerts::transport::{BoxIo, ResolveFuture, Resolver, tls_config_with_roots};
 use restichub_db::test_util::TestDatabase;
 use restichub_db::{AgentId, JobId, PlanId, RepositoryId, TenantId};
 use time::OffsetDateTime;
@@ -51,46 +51,66 @@ impl Mail {
     }
 }
 
+/// What the SMTP sink offers: TLS from the first byte, `STARTTLS`, and `AUTH PLAIN`.
+#[derive(Clone, Default)]
+pub struct SmtpOptions {
+    pub implicit_tls: Option<Arc<ServerConfig>>,
+    pub starttls: Option<Arc<ServerConfig>>,
+    pub offer_auth: bool,
+}
+
 pub struct SmtpSink {
     pub port: u16,
     pub mails: Arc<Mutex<Vec<Mail>>>,
+    /// The decoded `AUTH PLAIN` payloads that the sink saw.
+    pub credentials: Arc<Mutex<Vec<String>>>,
 }
 
 impl SmtpSink {
     pub async fn start() -> Self {
-        Self::start_with(None).await
+        Self::start_with(SmtpOptions::default()).await
     }
 
     /// Accepts TLS from the first byte with the given server configuration.
     pub async fn start_tls(config: Arc<ServerConfig>) -> Self {
-        Self::start_with(Some(config)).await
+        Self::start_with(SmtpOptions {
+            implicit_tls: Some(config),
+            ..SmtpOptions::default()
+        })
+        .await
     }
 
-    async fn start_with(tls: Option<Arc<ServerConfig>>) -> Self {
+    pub async fn start_with(options: SmtpOptions) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let port = listener.local_addr().expect("address").port();
         let mails = Arc::new(Mutex::new(Vec::new()));
-        let store = mails.clone();
+        let credentials = Arc::new(Mutex::new(Vec::new()));
+        let (store, creds) = (mails.clone(), credentials.clone());
         tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
-                let store = store.clone();
-                let tls = tls.clone();
+                let (store, creds, options) = (store.clone(), creds.clone(), options.clone());
                 tokio::spawn(async move {
-                    match tls {
+                    let stream: BoxIo = match &options.implicit_tls {
                         Some(config) => {
-                            if let Ok(stream) = TlsAcceptor::from(config).accept(stream).await {
-                                serve_smtp(stream, store).await;
+                            match TlsAcceptor::from(config.clone()).accept(stream).await {
+                                Ok(stream) => Box::new(stream),
+                                Err(_) => return,
                             }
                         }
-                        None => serve_smtp(stream, store).await,
-                    }
+                        None => Box::new(stream),
+                    };
+                    serve_smtp(stream, store, creds, options).await;
                 });
             }
         });
-        Self { port, mails }
+        Self {
+            port,
+            mails,
+            credentials,
+        }
     }
 
     pub fn received(&self) -> Vec<Mail> {
@@ -98,11 +118,15 @@ impl SmtpSink {
     }
 }
 
-async fn serve_smtp<S>(stream: S, store: Arc<Mutex<Vec<Mail>>>)
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-{
+async fn serve_smtp(
+    stream: BoxIo,
+    store: Arc<Mutex<Vec<Mail>>>,
+    credentials: Arc<Mutex<Vec<String>>>,
+    options: SmtpOptions,
+) {
     let mut reader = BufReader::new(stream);
+    // Before the upgrade a server that offers `STARTTLS` offers no `AUTH`.
+    let mut secure = options.starttls.is_none();
     if reader
         .get_mut()
         .write_all(b"220 sink ready\r\n")
@@ -118,14 +142,52 @@ where
             return;
         }
         let upper = line.to_ascii_uppercase();
-        let reply: &[u8] = if upper.starts_with("EHLO") {
-            b"250-sink\r\n250 8BITMIME\r\n"
+        let reply: Vec<u8> = if upper.starts_with("EHLO") {
+            let mut caps = String::from("250-sink\r\n");
+            if !secure {
+                caps.push_str("250-STARTTLS\r\n");
+            } else if options.offer_auth {
+                caps.push_str("250-AUTH PLAIN\r\n");
+            }
+            caps.push_str("250 8BITMIME\r\n");
+            caps.into_bytes()
+        } else if upper.starts_with("STARTTLS") {
+            let Some(config) = &options.starttls else {
+                return;
+            };
+            if reader
+                .get_mut()
+                .write_all(b"220 go ahead\r\n")
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let inner = reader.into_inner();
+            match TlsAcceptor::from(config.clone()).accept(inner).await {
+                Ok(upgraded) => {
+                    reader = BufReader::new(Box::new(upgraded));
+                    secure = true;
+                    continue;
+                }
+                Err(_) => return,
+            }
+        } else if upper.starts_with("AUTH PLAIN") {
+            let token = line["AUTH PLAIN".len()..].trim();
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(token)
+                .unwrap_or_default();
+            credentials
+                .lock()
+                .expect("lock")
+                .push(String::from_utf8_lossy(&decoded).replace('\0', "|"));
+            b"235 welcome\r\n".to_vec()
         } else if upper.starts_with("MAIL FROM:") {
             from = between_angles(&line);
-            b"250 ok\r\n"
+            b"250 ok\r\n".to_vec()
         } else if upper.starts_with("RCPT TO:") {
             to.push(between_angles(&line));
-            b"250 ok\r\n"
+            b"250 ok\r\n".to_vec()
         } else if upper.starts_with("DATA") {
             if reader.get_mut().write_all(b"354 go\r\n").await.is_err() {
                 return;
@@ -146,14 +208,14 @@ where
                 to: std::mem::take(&mut to),
                 data,
             });
-            b"250 queued\r\n"
+            b"250 queued\r\n".to_vec()
         } else if upper.starts_with("QUIT") {
             let _ = reader.get_mut().write_all(b"221 bye\r\n").await;
             return;
         } else {
-            b"500 what\r\n"
+            b"500 what\r\n".to_vec()
         };
-        if reader.get_mut().write_all(reply).await.is_err() {
+        if reader.get_mut().write_all(&reply).await.is_err() {
             return;
         }
     }

@@ -242,3 +242,127 @@ fn webhook_settings(
         allow_networks,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use restichub_secrets::EnvReader;
+
+    use super::*;
+
+    struct MapEnv(HashMap<String, String>);
+
+    impl EnvReader for MapEnv {
+        fn get(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
+    }
+
+    fn env(pairs: &[(&str, &str)]) -> MapEnv {
+        MapEnv(
+            pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        )
+    }
+
+    fn load(pairs: &[(&str, &str)]) -> Result<AlertsSettings, ConfigError> {
+        AlertsSettings::load(&env(pairs), None, None, None)
+    }
+
+    /// AC-MN-05: the allow-list and the scheme rule come from the environment.
+    #[test]
+    fn ac_mn_05_webhook_policy_from_the_environment() {
+        let settings = load(&[
+            ("RESTICHUB_WEBHOOK_ALLOW_NETWORKS", "10.0.0.0/8, fd00::/8"),
+            ("RESTICHUB_WEBHOOK_ALLOW_HTTP", "true"),
+        ])
+        .expect("the settings load");
+        assert!(settings.webhook.allow_http);
+        assert_eq!(settings.webhook.allow_networks.len(), 2);
+        assert!(matches!(
+            load(&[("RESTICHUB_WEBHOOK_ALLOW_NETWORKS", "10.0.0.0")]),
+            Err(ConfigError::Invalid {
+                name: "webhook.allow_networks",
+                ..
+            })
+        ));
+        let defaults = load(&[]).expect("the defaults load");
+        assert!(!defaults.webhook.allow_http && defaults.webhook.allow_networks.is_empty());
+    }
+
+    #[test]
+    fn the_public_origin_holds_no_path_or_user() {
+        let ok = load(&[("RESTICHUB_PUBLIC_ORIGIN", "https://backup.example.com/")]).expect("ok");
+        assert_eq!(
+            ok.public_origin.as_deref(),
+            Some("https://backup.example.com")
+        );
+        for bad in [
+            "https://user@backup.example.com",
+            "https://backup.example.com/app",
+            "https://backup.example.com?x=1",
+            "ftp://backup.example.com",
+            "backup.example.com",
+        ] {
+            assert!(
+                load(&[("RESTICHUB_PUBLIC_ORIGIN", bad)]).is_err(),
+                "{bad} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn the_smtp_server_needs_a_host_and_a_sender() {
+        assert!(load(&[]).expect("none").smtp.is_none());
+        let settings = load(&[
+            ("RESTICHUB_SMTP_HOST", "smtp.example.com"),
+            ("RESTICHUB_SMTP_FROM", "restichub@example.com"),
+        ])
+        .expect("loads");
+        let smtp = settings.smtp.expect("smtp");
+        assert_eq!((smtp.port, smtp.security), (587, SmtpSecurity::StartTls));
+        assert!(smtp.password.is_none());
+        assert!(matches!(
+            load(&[("RESTICHUB_SMTP_HOST", "smtp.example.com")]),
+            Err(ConfigError::Invalid {
+                name: "smtp.from",
+                ..
+            })
+        ));
+        let tls = load(&[
+            ("RESTICHUB_SMTP_HOST", "smtp.example.com"),
+            ("RESTICHUB_SMTP_FROM", "restichub@example.com"),
+            ("RESTICHUB_SMTP_SECURITY", "tls"),
+        ])
+        .expect("tls");
+        assert_eq!(tls.smtp.expect("smtp").port, 465);
+    }
+
+    /// AC-MN-08: the password comes from the environment or a file, needs a user, and stays out
+    /// of the `Debug` text.
+    #[test]
+    fn ac_mn_08_smtp_password_stays_hidden() {
+        let settings = load(&[
+            ("RESTICHUB_SMTP_HOST", "smtp.example.com"),
+            ("RESTICHUB_SMTP_FROM", "restichub@example.com"),
+            ("RESTICHUB_SMTP_USERNAME", "restichub"),
+            ("RESTICHUB_SMTP_PASSWORD", "hunter2-canary"),
+        ])
+        .expect("loads");
+        assert!(!format!("{settings:?}").contains("hunter2-canary"));
+        assert!(matches!(
+            load(&[
+                ("RESTICHUB_SMTP_HOST", "smtp.example.com"),
+                ("RESTICHUB_SMTP_FROM", "restichub@example.com"),
+                ("RESTICHUB_SMTP_PASSWORD", "x"),
+            ]),
+            Err(ConfigError::Invalid {
+                name: "smtp.username",
+                ..
+            })
+        ));
+    }
+}

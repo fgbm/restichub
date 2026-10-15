@@ -724,3 +724,58 @@ async fn ac_tn_01_channels_and_alerts_are_tenant_scoped() {
     let (status, _, _) = send(&app, request("GET", &uri, Some(&admin_a), None)).await;
     assert_eq!(status, StatusCode::OK, "the owner still reads the channel");
 }
+
+/// AC-MN-08: with `STARTTLS` the control plane signs in with `AUTH PLAIN` after the upgrade. With
+/// no TLS it sends no credentials.
+#[tokio::test]
+async fn ac_mn_08_smtp_credentials_travel_over_tls_only() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "ac-mn-08-smtp").await;
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let (server, client) = tls_pair("127.0.0.1");
+    let sink = SmtpSink::start_with(alert_support::SmtpOptions {
+        starttls: Some(server),
+        offer_auth: true,
+        ..alert_support::SmtpOptions::default()
+    })
+    .await;
+    let mut settings = local_settings(Some(sink.port), SmtpSecurity::StartTls);
+    if let Some(smtp) = settings.smtp.as_mut() {
+        smtp.username = Some("restichub".to_owned());
+        smtp.password = Some(restichub_secrets::SecretString::new("smtp-pw".to_owned()));
+    }
+    let sender = Sender::new(Arc::new(settings))
+        .expect("sender")
+        .with_tls(client);
+    let app = app_with(&db, sender);
+    let (_, created) = create_channel(
+        &app,
+        &cookie,
+        json!({"name": "mail", "kind": "email", "recipients": ["ops@example.com"]}),
+    )
+    .await;
+    let id = created["channel"]["id"].as_str().expect("id");
+    let result = test_send(&app, &cookie, id).await;
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(
+        sink.credentials.lock().expect("lock").clone(),
+        vec!["|restichub|smtp-pw"]
+    );
+    assert_eq!(sink.received().len(), 1);
+
+    // No credential reaches a server without TLS.
+    let plain = SmtpSink::start().await;
+    let mut settings = local_settings(Some(plain.port), SmtpSecurity::None);
+    if let Some(smtp) = settings.smtp.as_mut() {
+        smtp.username = Some("restichub".to_owned());
+        smtp.password = Some(restichub_secrets::SecretString::new("smtp-pw".to_owned()));
+    }
+    let app = app_with(&db, Sender::new(Arc::new(settings)).expect("sender"));
+    let result = test_send(&app, &cookie, id).await;
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["error"], "smtp_unsupported_auth_without_tls");
+    assert!(plain.credentials.lock().expect("lock").is_empty());
+    assert!(plain.received().is_empty());
+}

@@ -38,6 +38,7 @@ pub enum StatusFilter {
 #[serde(deny_unknown_fields)]
 pub struct AlertListQuery {
     /// `open` (default), `resolved` or `all`.
+    #[param(inline)]
     pub status: Option<StatusFilter>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,

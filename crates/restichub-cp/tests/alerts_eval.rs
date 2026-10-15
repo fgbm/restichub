@@ -275,6 +275,26 @@ async fn ac_mn_01_rpo_violation_alerts_and_recovers() {
     .await;
     assert_eq!(status, StatusCode::OK, "{open}");
     assert_eq!(open["items"][0]["status"], "resolved");
+
+    // Each send is audited with no address and no secret.
+    let (status, _, audit) = send(
+        &fx.app,
+        request("GET", "/api/v1/audit?limit=200", Some(&fx.cookie), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    let sent: Vec<&Value> = audit["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter(|record| record["action"] == "alert_sent")
+        .collect();
+    assert_eq!(sent.len(), 4, "two events on two channels");
+    for record in sent {
+        let text = record.to_string();
+        assert!(!text.contains("ops@example.com") && !text.contains(&fx.signing_secret));
+    }
+    assert!(!audit.to_string().contains(&fx.signing_secret));
 }
 
 /// AC-MN-01: an RPO that a plan sets itself replaces the default.
