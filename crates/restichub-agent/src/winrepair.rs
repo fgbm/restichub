@@ -90,14 +90,15 @@ impl Kind {
 /// entries of the agent in them (FR-AG-04).
 ///
 /// A level of another owner, a reparse point and a level above `root` are left to the normal
-/// check, which refuses them. `log` gets each change and each warning.
+/// check, which refuses them. `log` gets each change and each warning. Returns the identity
+/// entries that another account could change before the repair.
 pub(crate) fn repair_agent_tree(
     config: &Path,
     root: &Path,
     log: &mut dyn FnMut(Action),
-) -> Result<()> {
+) -> Result<Vec<PathBuf>> {
     if !config.starts_with(root) {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let mut levels: Vec<&Path> = config
         .ancestors()
@@ -108,17 +109,19 @@ pub(crate) fn repair_agent_tree(
         config,
         log,
         exposure_told: false,
+        changeable: Vec::new(),
     };
     for level in levels {
         repair.level(level)?;
     }
-    Ok(())
+    Ok(repair.changeable)
 }
 
 struct Repair<'a> {
     config: &'a Path,
     log: &'a mut dyn FnMut(Action),
     exposure_told: bool,
+    changeable: Vec<PathBuf>,
 }
 
 impl Repair<'_> {
@@ -144,13 +147,14 @@ impl Repair<'_> {
             Exposure::Clean => false,
         };
         if open {
+            let changeable = is_config && entry.exposure(Rights::Change)? == Exposure::ForeignGrant;
             // The DACL comes before the listing, so no entry can appear after the check.
             entry
                 .protect()
                 .with_context(|| format!("cannot protect {}", level.display()))?;
             (self.log)(Action::Protected(level.to_path_buf()));
             if is_config {
-                self.identity_exposed(level);
+                self.identity_exposed(level, changeable);
             }
         }
         drop(entry);
@@ -262,12 +266,14 @@ impl Repair<'_> {
         };
         check_entry(&entry, path, kind)?;
         if entry.exposure(kind.rights())? == Exposure::ForeignGrant {
+            let changeable =
+                kind == Kind::Identity && entry.exposure(Rights::Change)? == Exposure::ForeignGrant;
             entry
                 .protect()
                 .with_context(|| format!("cannot protect {}", path.display()))?;
             (self.log)(Action::Protected(path.to_path_buf()));
             if kind == Kind::Identity {
-                self.identity_exposed(path);
+                self.identity_exposed(path, changeable);
             }
         }
         if !entry.is_dir() {
@@ -285,7 +291,10 @@ impl Repair<'_> {
         Ok(())
     }
 
-    fn identity_exposed(&mut self, path: &Path) {
+    fn identity_exposed(&mut self, path: &Path, changeable: bool) {
+        if changeable {
+            self.changeable.push(path.to_path_buf());
+        }
         if !self.exposure_told {
             self.exposure_told = true;
             (self.log)(Action::IdentityExposed(path.to_path_buf()));
@@ -439,7 +448,7 @@ mod tests {
         (base, root, config)
     }
 
-    fn repair(config: &Path, root: &Path) -> (Result<()>, Vec<Action>) {
+    fn repair(config: &Path, root: &Path) -> (Result<Vec<PathBuf>>, Vec<Action>) {
         let mut actions = Vec::new();
         let result = repair_agent_tree(config, root, &mut |action| actions.push(action));
         (result, actions)
@@ -545,7 +554,8 @@ mod tests {
         grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
         grant(&key, "(R,W)").expect("cannot add the entry");
         let (result, actions) = repair(&config, &root);
-        result.expect("the repair must succeed");
+        let changeable = result.expect("the repair must succeed");
+        assert_eq!(changeable, vec![config.clone(), key.clone()]);
         check_admin_only(&config).expect("the directory must be protected");
         assert!(!is_open(&key), "the key must be protected");
         assert_eq!(
@@ -571,12 +581,44 @@ mod tests {
         create_protected_file(&key, b"key").expect("cannot write");
         grant(&key, "(R)").expect("cannot add the entry");
         let (result, actions) = repair(&config, &root);
-        result.expect("the repair must succeed");
+        let changeable = result.expect("the repair must succeed");
+        assert!(changeable.is_empty(), "a read keeps the identity in use");
         assert!(!is_open(&key), "the read must be gone");
         assert_eq!(
             actions,
             vec![Action::Protected(key.clone()), Action::IdentityExposed(key),]
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_ca_chain_that_users_could_change_is_reported_and_a_new_registration_replaces_it()
+    {
+        let (base, root, config) = tree("repair-ca-chain");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        let chain = config.join(crate::identity::CA_CHAIN_FILE);
+        grant(&chain, "(R,W)").expect("cannot add the entry");
+
+        let (result, actions) = repair(&config, &root);
+        let changeable = result.expect("the repair must succeed");
+        assert_eq!(changeable, vec![chain.clone()]);
+        assert!(!is_open(&chain), "the chain must be protected");
+        assert_eq!(
+            actions,
+            vec![
+                Action::Protected(chain.clone()),
+                Action::IdentityExposed(chain)
+            ]
+        );
+
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("register --force must replace the identity");
+        let (result, actions) = repair(&config, &root);
+        assert!(result.expect("the repair must succeed").is_empty());
+        assert!(actions.is_empty(), "{actions:?}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

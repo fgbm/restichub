@@ -251,9 +251,26 @@ pub fn install_service(options: &ResticFileOptions) -> Result<()> {
 /// The identity load finishes a staged rotation, so the tree check and the repair run before it, as
 /// in `register`: another account may have planted the staged files (T20).
 fn prepare_install(dir: &Path, cache: &Path) -> Result<()> {
-    crate::preflight::prepare_directories(dir, cache)?;
+    let changeable = crate::preflight::prepare_directories(dir, cache)?;
+    refuse_changeable_identity(&changeable)?;
     crate::setup::require_identity(dir)?;
     Ok(())
+}
+
+/// Another account that could write the identity could have replaced the CA chain, the signing
+/// keys or the endpoint, so the repaired access does not make the identity trusted again (T20).
+fn refuse_changeable_identity(changeable: &[PathBuf]) -> Result<()> {
+    if changeable.is_empty() {
+        return Ok(());
+    }
+    let files = changeable
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "the identity of this host could be changed by another account ({files}), so the agent does not use it and the service is not installed; the access control is repaired; register the host again: create a token with \"Re-register\" on the host page and run `restichub-agent register --force --url <URL> --token <TOKEN>`"
+    )
 }
 
 /// Installs restic when it is absent and returns it (ADR-0038).
@@ -981,6 +998,23 @@ mod tests {
         );
         assert!(dir.join("agent-key.pem.next").exists());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_install_service_refuses_an_identity_that_another_account_could_change() {
+        refuse_changeable_identity(&[]).expect("an untouched identity is used");
+        let chain = PathBuf::from("Agent").join(crate::identity::CA_CHAIN_FILE);
+        let error = format!(
+            "{:#}",
+            refuse_changeable_identity(std::slice::from_ref(&chain))
+                .expect_err("a changeable identity must be refused")
+        );
+        assert!(error.contains(&chain.display().to_string()), "{error}");
+        assert!(error.contains("the service is not installed"), "{error}");
+        assert!(
+            error.contains("register --force --url <URL> --token <TOKEN>"),
+            "{error}"
+        );
     }
 
     #[test]
