@@ -1,4 +1,5 @@
-//! The agent-side repository jobs against the real restic and real network backends (AC-RP-01).
+//! The agent-side repository jobs against the real restic and real network backends (AC-RP-01,
+//! AC-AG-10).
 //!
 //! The CI job `backends` starts a MinIO service container and a rest-server 0.14 and sets the
 //! variables below. Without the variables the tests skip, unless `RESTICHUB_REQUIRE_BACKENDS` asks
@@ -15,6 +16,10 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
+use restichub_proto::agent::v1::{
+    BackupStep, JobStatus, RepositoryAccess, RestCredentials,
+    repository_access::BackendCredentials, step, step_result::Output,
+};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -150,6 +155,116 @@ async fn exercise(name: &str, backend: Backend) {
     let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
     let _ = std::fs::remove_dir_all(&dir);
     fixture.db.cleanup().await;
+}
+
+/// Writes `len` bytes that zstd cannot compress, so the packed size equals the source size.
+fn write_random_file(path: &std::path::Path, len: usize) {
+    let mut state = u64::from(std::process::id()) ^ 0x9e37_79b9_7f4a_7c15;
+    let mut data = Vec::with_capacity(len);
+    while data.len() < len {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        data.extend_from_slice(&(z ^ (z >> 31)).to_le_bytes());
+    }
+    data.truncate(len);
+    std::fs::write(path, data).expect("cannot write the random file");
+}
+
+/// AC-AG-10: a backup step with an upload limit makes the real restic keep the average upload
+/// rate to a rest-server at the limit. The test scales 10 MB/s down to 1 MiB/s to stay short.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_10_the_real_restic_keeps_the_upload_limit() {
+    const LIMIT_KIB: u64 = 1024;
+    const DATA_BYTES: usize = 20 * 1024 * 1024;
+    let Some(restic) = common::real_restic_or_skip() else {
+        return;
+    };
+    let Some(endpoint) = variable("RESTICHUB_TEST_REST_ENDPOINT") else {
+        skip_or_fail("rest-server");
+        return;
+    };
+    let agent_dir = common::temp_config_dir("upload-rate-agent");
+    let data = common::temp_config_dir("upload-rate-data");
+    for dir in [&agent_dir, &data] {
+        std::fs::create_dir_all(dir).expect("cannot create the directory");
+    }
+    write_random_file(&data.join("random.bin"), DATA_BYTES);
+    let data_path = data.to_string_lossy().into_owned();
+
+    let jobs = common::real_jobs(&agent_dir, &restic);
+    let access = RepositoryAccess {
+        repository_id: "repo-1".to_owned(),
+        location: format!(
+            "rest:{}/ci-{}",
+            endpoint.trim_end_matches('/'),
+            Uuid::now_v7()
+        ),
+        password: format!("CANARY-{}", Uuid::now_v7()),
+        backend_credentials: Some(BackendCredentials::Rest(RestCredentials::default())),
+    };
+    // Init runs in its own job, so its uploads are outside the measured backup.
+    let result = common::run(
+        &jobs,
+        &common::job(
+            "job-init",
+            vec![access.clone()],
+            vec![common::test_access("repo-1"), common::init("repo-1")],
+        ),
+    )
+    .await;
+    assert_eq!(
+        result.result().outcome,
+        JobStatus::Succeeded as i32,
+        "{}",
+        result.log_text()
+    );
+
+    let backup = common::make_step(
+        "backup",
+        step::Kind::Backup(BackupStep {
+            limit_upload_kib: LIMIT_KIB,
+            ..common::backup("repo-1", &[&data_path])
+        }),
+    );
+    let result = common::run(
+        &jobs,
+        &common::job("job-backup", vec![access], vec![backup]),
+    )
+    .await;
+    assert_eq!(
+        result.result().outcome,
+        JobStatus::Succeeded as i32,
+        "{}",
+        result.log_text()
+    );
+    let Some(Output::BackupSummary(summary)) = result.step("backup").output.clone() else {
+        panic!("the backup must give a typed summary");
+    };
+    // The packed bytes over the restic backup duration: restic counts both, so the rate does not
+    // depend on the agent or on the load of the CI runner around the restic process.
+    #[allow(clippy::cast_precision_loss)]
+    let rate = summary.data_added_packed as f64 / summary.total_duration_seconds;
+    #[allow(clippy::cast_precision_loss)]
+    let limit = (LIMIT_KIB * 1024) as f64;
+    println!(
+        "AC-AG-10: {} bytes in {:.2} s, {:.0} B/s, {:.3} of the limit",
+        summary.data_added_packed,
+        summary.total_duration_seconds,
+        rate,
+        rate / limit
+    );
+    assert!(
+        summary.data_added_packed >= DATA_BYTES as u64,
+        "{summary:?}"
+    );
+    assert!(rate <= 1.1 * limit, "{rate} B/s is above the limit");
+    // Without the limit the local rest-server takes this data in about one second.
+    assert!(rate >= 0.5 * limit, "{rate} B/s is far below the limit");
+
+    let _ = std::fs::remove_dir_all(&agent_dir);
+    let _ = std::fs::remove_dir_all(&data);
 }
 
 /// AC-RP-01: the real restic initializes and tests a repository in S3 (MinIO), and a wrong
