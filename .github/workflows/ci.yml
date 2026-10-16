@@ -173,6 +173,8 @@ jobs:
       # The action reads rust-toolchain.toml.
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       # The database tests skip here because RESTICHUB_TEST_DATABASE_URL is not set.
+      - name: Build the tests
+        run: cargo test --workspace --no-run
       - name: Test
         run: cargo test --workspace
 
@@ -228,10 +230,11 @@ jobs:
       - name: Test
         run: cargo nextest run --workspace --profile ci
       # The openssl chain check prints its result line; --nocapture puts the line in this log.
+      # The filter keeps the workspace feature set, so the step reuses the build of the first step.
       - name: Show the openssl chain check
         run: >-
-          cargo test -p restichub-cp --test pki_certs --
-          --nocapture openssl_verifies_the_issued_chain
+          cargo nextest run --workspace --profile ci --no-capture
+          -E 'binary(pki_certs) & test(openssl_verifies_the_issued_chain)'
 
   # The heavy jobs run on a push to main and on a pull request with the label `ci-heavy`.
   # The real restic works against an S3 server and a rest-server (AC-RP-01). MinIO no longer
