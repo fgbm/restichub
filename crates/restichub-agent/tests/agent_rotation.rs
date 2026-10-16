@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use restichub_agent::cli::RegisterOptions;
 use restichub_agent::commands;
-use restichub_agent::identity::StoredIdentity;
+use restichub_agent::identity::{IdentityReplaced, StoredIdentity};
 use restichub_agent::keys::KeyState;
 use restichub_agent::restic::Restic;
 use restichub_agent::stream::{self, Backoff, StreamOptions, Timeouts};
@@ -67,24 +67,16 @@ async fn wait_for_new_certificate(dir: &Path, old: &[u8], wait: Duration) -> Sto
     }
 }
 
-/// AC-ID-03: the agent rotates at two thirds of the lifetime, stores the new key and certificate,
-/// rotates again for the new certificate, and its stream stays open. After the rotations the
-/// control plane accepts the new certificate and no longer the first one.
-#[tokio::test(flavor = "multi_thread")]
-async fn ac_id_03_the_agent_rotates_twice_over_its_open_stream() {
-    let Some(fixture) =
-        common::stream_fixture_with_lifetime("agent-rotation", Some(LIFETIME)).await
-    else {
-        return;
-    };
-    let dir = common::temp_config_dir("agent-rotation");
-    let identity = Arc::new(register(&fixture, &dir).await);
-    let first_expiry = identity.certificate_expiry().expect("an expiry");
-    let (first_not_before, _) = identity.certificate_validity().expect("a validity");
-    let first_key = identity.key_pem.clone();
-
-    let dir_task = dir.clone();
-    let identity_task = Arc::clone(&identity);
+/// Runs the connect loop of the agent until the returned sender stops it.
+fn spawn_agent(
+    identity: &Arc<StoredIdentity>,
+    dir: &Path,
+) -> (
+    tokio::task::JoinHandle<anyhow::Result<()>>,
+    watch::Sender<bool>,
+) {
+    let dir_task = dir.to_path_buf();
+    let identity_task = Arc::clone(identity);
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let task = tokio::spawn(async move {
         let mut keys = KeyState::load(&identity_task, &dir_task).expect("the key state");
@@ -112,6 +104,26 @@ async fn ac_id_03_the_agent_rotates_twice_over_its_open_stream() {
         )
         .await
     });
+    (task, stop_tx)
+}
+
+/// AC-ID-03: the agent rotates at two thirds of the lifetime, stores the new key and certificate,
+/// rotates again for the new certificate, and its stream stays open. After the rotations the
+/// control plane accepts the new certificate and no longer the first one.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_id_03_the_agent_rotates_twice_over_its_open_stream() {
+    let Some(fixture) =
+        common::stream_fixture_with_lifetime("agent-rotation", Some(LIFETIME)).await
+    else {
+        return;
+    };
+    let dir = common::temp_config_dir("agent-rotation");
+    let identity = Arc::new(register(&fixture, &dir).await);
+    let first_expiry = identity.certificate_expiry().expect("an expiry");
+    let (first_not_before, _) = identity.certificate_validity().expect("a validity");
+    let first_key = identity.key_pem.clone();
+
+    let (task, stop_tx) = spawn_agent(&identity, &dir);
 
     let started = tokio::time::Instant::now();
     let second =
@@ -155,6 +167,51 @@ async fn ac_id_03_the_agent_rotates_twice_over_its_open_stream() {
         .expect("the agent must stop")
         .expect("the agent must not panic");
     assert!(result.is_ok(), "the loop must stop without an error");
+    let _ = std::fs::remove_dir_all(&dir);
+    fixture.db.cleanup().await;
+}
+
+/// FR-ID-03: `register --force --no-service` stored another agent while the service ran. The
+/// rotation that the old agent asks for ends the loop with an error, so the service manager starts
+/// the agent again with the new identity.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_id_03_a_registration_of_another_agent_stops_the_running_agent() {
+    let Some(fixture) =
+        common::stream_fixture_with_lifetime("agent-rotation-other", Some(LIFETIME)).await
+    else {
+        return;
+    };
+    let dir = common::temp_config_dir("agent-rotation-other");
+    let identity = Arc::new(register(&fixture, &dir).await);
+    let (task, _stop_tx) = spawn_agent(&identity, &dir);
+    // The save swaps the directory, so it waits until the agent opened its state.
+    let status = dir.join(restichub_agent::connection::STATUS_FILE);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !status.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the agent must start"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let mut other = StoredIdentity::load(&dir).expect("the identity must load");
+    other.agent_id = "0192f1e0-0000-7000-8000-00000000beef".to_owned();
+    other.save(&dir).expect("the other identity must save");
+
+    let result = tokio::time::timeout(Duration::from_secs(20), task)
+        .await
+        .expect("the agent must stop at its rotation")
+        .expect("the agent must not panic");
+    let error = result.expect_err("the loop must end with an error");
+    assert_eq!(
+        error.downcast_ref::<IdentityReplaced>(),
+        Some(&IdentityReplaced::Agent),
+        "{error:#}"
+    );
+    let stored = StoredIdentity::load(&dir).expect("the identity must load");
+    assert_eq!(stored.agent_id, other.agent_id);
+    assert_eq!(stored.certificate_der, other.certificate_der);
     let _ = std::fs::remove_dir_all(&dir);
     fixture.db.cleanup().await;
 }

@@ -33,6 +33,7 @@ pub(crate) enum Action {
     IdentityExposed(PathBuf),
     RemovedIdentity(PathBuf),
     RemovedTemporary(PathBuf),
+    RemovedLock(PathBuf),
 }
 
 impl std::fmt::Display for Action {
@@ -73,6 +74,11 @@ impl std::fmt::Display for Action {
                 "removed {}: another account could change it; it is a leftover of an interrupted write, and the agent does not read it",
                 path.display()
             ),
+            Self::RemovedLock(path) => write!(
+                f,
+                "removed {}: another account could change it or hold it; the agent creates the identity lock again",
+                path.display()
+            ),
         }
     }
 }
@@ -87,6 +93,8 @@ enum Kind {
     Staged,
     /// A temporary file of an identity write. The identity load never reads it.
     Temporary,
+    /// The identity lock. Another account that created it could hold its lock for good.
+    Lock,
     TrustMode,
     RestoreRoots,
     Identity,
@@ -214,6 +222,15 @@ impl Repair<'_> {
                 Some(Kind::Staged) => self.remove_leftover(path, open, Action::RemovedStaged)?,
                 Some(Kind::Temporary) => {
                     self.remove_leftover(path, open, Action::RemovedTemporary)?;
+                }
+                Some(Kind::Lock) => {
+                    self.remove_leftover(path, open, Action::RemovedLock)
+                        .with_context(|| {
+                            format!(
+                                "another process may keep {} open; an administrator stops that process or restarts the computer, then runs the command again",
+                                path.display()
+                            )
+                        })?;
                 }
                 Some(setting @ (Kind::TrustMode | Kind::RestoreRoots)) => {
                     self.distrust_setting(path, *setting)?;
@@ -413,6 +430,7 @@ fn root_entries(config: &Path, root: &Path) -> Vec<(String, Kind)> {
         }
     };
     add(config, Kind::Config, false);
+    add(&crate::identity::lock_file(config), Kind::Lock, false);
     add(
         &crate::identity::sibling(config, ".staging"),
         Kind::Identity,
@@ -911,6 +929,60 @@ mod tests {
         result.expect("the repair must succeed");
         assert!(!is_open(&file), "the explicit entry must be gone");
         assert_eq!(actions, vec![Action::Protected(file)]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_an_open_top_level_with_the_held_identity_lock_is_repaired() {
+        let (base, root, config) = tree("repair-lock");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        let lock = crate::identity::lock_file(&config);
+        assert_eq!(lock, root.join("Agent.lock"));
+        grant(&lock, "(R,W)").expect("cannot add the entry");
+        grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let held = std::fs::File::open(&lock).expect("cannot open the lock");
+        held.lock().expect("cannot take the lock");
+
+        let (result, actions) = repair(&config, &root);
+        assert!(result.expect("the repair must succeed").is_empty());
+        check_admin_only(&root).expect("the top level must be protected");
+        assert!(
+            actions.contains(&Action::RemovedLock(lock.clone())),
+            "{actions:?}"
+        );
+        crate::identity::StoredIdentity::load(&config)
+            .expect("the identity loads while the old lock stays held");
+        drop(held);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_an_identity_lock_that_another_process_keeps_open_is_named() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let (base, root, config) = tree("repair-lock-open");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        let lock = crate::identity::lock_file(&config);
+        grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
+        // FILE_SHARE_READ | FILE_SHARE_WRITE, without FILE_SHARE_DELETE.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(&lock)
+            .expect("cannot open the lock");
+
+        let (result, _) = repair(&config, &root);
+        let error = format!(
+            "{:#}",
+            result.expect_err("a lock that cannot be removed must stop the repair")
+        );
+        assert!(error.contains("Agent.lock"), "{error}");
+        assert!(error.contains("restarts the computer"), "{error}");
+        drop(held);
         let _ = std::fs::remove_dir_all(&base);
     }
 

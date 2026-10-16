@@ -1,6 +1,7 @@
 //! The stored agent identity and the key pair (ADR-0026, FR-AG-04).
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
@@ -19,6 +20,9 @@ pub const SIGNING_KEYS_FILE: &str = "signing-keys.json";
 pub(crate) const STAGED_SUFFIX: &str = ".next";
 /// The staged marker. Its presence says that the staged key, certificate and chain are complete.
 pub(crate) const ROTATION_MARKER: &str = "rotation.next";
+/// A rotation holds the lock for milliseconds. A holder past this time is not the agent, and a
+/// hang would keep the service from starting.
+const LOCK_WAIT: Duration = Duration::from_secs(60);
 
 /// The public job signing key set that the identity keeps (ADR-0026).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +69,12 @@ impl StoredIdentity {
         let staging = sibling(dir, ".staging");
         let _ = std::fs::remove_dir_all(&staging);
         paths::ensure_config_dir(&staging)?;
+        // The first registration has no directory to lock yet.
+        let _lock = if lock_path(dir).parent().is_some_and(Path::is_dir) {
+            Some(lock(dir)?)
+        } else {
+            None
+        };
         if let Err(error) = self.stage(&staging) {
             let _ = std::fs::remove_dir_all(&staging);
             return Err(error);
@@ -105,6 +115,7 @@ impl StoredIdentity {
     ///
     /// Returns an error when a file is missing or malformed.
     pub fn load(dir: &Path) -> Result<Self> {
+        let _lock = lock(dir)?;
         let dir = recover(dir);
         finish_rotation(&dir)?;
         let metadata: Metadata =
@@ -138,14 +149,33 @@ impl StoredIdentity {
     /// the marker keeps the old identity. A crash after it is finished by the next [`Self::load`],
     /// so the key and the certificate never stay apart.
     ///
+    /// `agent_id` and `replaced_der` name the identity that the rotation started from.
+    ///
     /// # Errors
     ///
-    /// Returns an error when a staged file cannot be written or moved.
-    pub fn install_rotation(dir: &Path, rotated: &Rotated) -> Result<()> {
+    /// Returns [`IdentityReplaced`] when the directory holds another identity now, and an error
+    /// when a staged file cannot be written or moved.
+    pub fn install_rotation(
+        dir: &Path,
+        agent_id: &str,
+        replaced_der: &[u8],
+        rotated: &Rotated,
+    ) -> Result<()> {
+        let _lock = lock(dir)?;
         let dir = recover(dir);
         // An interrupted earlier rotation with a complete staged set finishes first. Dropping the
         // set after some files moved would leave a new key with an old certificate.
         finish_rotation(&dir)?;
+        // A register that saved while the request was open put a new identity here. The rotated
+        // certificate belongs to the old one and would break the new identity.
+        let metadata: Metadata =
+            serde_json::from_slice(&read(dir.join(METADATA_FILE))?).context("bad identity.json")?;
+        if metadata.agent_id != agent_id {
+            return Err(IdentityReplaced::Agent.into());
+        }
+        if first_block(&read(dir.join(CERT_FILE))?)? != replaced_der {
+            return Err(IdentityReplaced::Certificate.into());
+        }
         discard_staged(&dir);
         paths::create_protected_file(&staged(&dir, KEY_FILE), rotated.key_pem.as_bytes())?;
         paths::create_protected_file(
@@ -166,7 +196,7 @@ impl StoredIdentity {
     /// Reports whether the directory holds a stored identity.
     #[must_use]
     pub fn exists(dir: &Path) -> bool {
-        recover(dir).join(METADATA_FILE).exists()
+        current(dir).join(METADATA_FILE).exists()
     }
 
     /// The time from which and until which the stored leaf certificate is valid (FR-AG-04).
@@ -206,6 +236,30 @@ pub struct Rotated {
     pub ca_chain_der: Vec<Vec<u8>>,
 }
 
+/// The stored identity is no longer the one that a rotation started from (FR-ID-03).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityReplaced {
+    /// A registration stored a new certificate of the same agent.
+    Certificate,
+    /// A registration stored the identity of another agent.
+    Agent,
+}
+
+impl std::fmt::Display for IdentityReplaced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Certificate => {
+                "a registration stored a new certificate after the rotation started"
+            }
+            Self::Agent => {
+                "a registration stored another agent identity after the rotation started"
+            }
+        })
+    }
+}
+
+impl std::error::Error for IdentityReplaced {}
+
 fn staged(dir: &Path, name: &str) -> std::path::PathBuf {
     dir.join(format!("{name}{STAGED_SUFFIX}"))
 }
@@ -236,6 +290,121 @@ fn finish_rotation(dir: &Path) -> Result<()> {
     }
     std::fs::remove_file(&marker).context("cannot remove the rotation marker")?;
     paths::sync_dir(dir)
+}
+
+/// Takes the exclusive lock of the identity files; dropping the file releases it (FR-ID-03).
+///
+/// A load finishes or drops a staged rotation. Without the lock, a second process such as `status`
+/// that loads while the service stages a rotation deletes the staged key, and the service then
+/// installs the new certificate next to the old key. The lock also keeps a reader from seeing the
+/// key of one rotation with the certificate of the next, and a save from swapping the directory
+/// under a rotation.
+fn lock(dir: &Path) -> Result<std::fs::File> {
+    lock_within(dir, LOCK_WAIT)
+}
+
+/// Windows cannot rename a directory that holds an open file, so the lock file is next to `dir`.
+/// The Linux service may write only inside `dir` (`ProtectSystem=strict`), so the lock file is
+/// inside it, and a waiter checks that a swap did not replace it.
+pub(crate) fn lock_file(dir: &Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        sibling(dir, ".lock")
+    }
+    #[cfg(not(windows))]
+    {
+        dir.join("identity.lock")
+    }
+}
+
+fn lock_within(dir: &Path, wait: Duration) -> Result<std::fs::File> {
+    let deadline = Instant::now() + wait;
+    loop {
+        let path = lock_path(dir);
+        match open_lock_file(&path) {
+            Ok(file) => match file.try_lock() {
+                Ok(()) if still_at(&file, &path) => return Ok(file),
+                Ok(()) | Err(std::fs::TryLockError::WouldBlock) => {}
+                Err(std::fs::TryLockError::Error(error)) => {
+                    return Err(error).with_context(|| format!("cannot lock {}", path.display()));
+                }
+            },
+            // A save renamed the directory between `lock_path` and the open.
+            Err(error) if is_not_found(&error) && swap_in_progress(dir) => {}
+            Err(error) => return Err(error),
+        }
+        if Instant::now() >= deadline {
+            // TimedOut is not a damaged identity, so the service restarts instead of exiting 78.
+            return Err(std::io::Error::from(std::io::ErrorKind::TimedOut)).with_context(|| {
+                format!(
+                    "another process holds the lock {} for more than {wait:?}; stop that process and run the command again",
+                    path.display()
+                )
+            });
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn is_not_found(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn swap_in_progress(dir: &Path) -> bool {
+    dir.exists() || sibling(dir, ".old").exists()
+}
+
+#[cfg(windows)]
+fn lock_path(dir: &Path) -> std::path::PathBuf {
+    lock_file(dir)
+}
+
+/// Between the two renames of a save, and after a crash there, the lock file is in the backup.
+#[cfg(not(windows))]
+fn lock_path(dir: &Path) -> std::path::PathBuf {
+    let backup = sibling(dir, ".old");
+    if !dir.exists() && backup.exists() {
+        lock_file(&backup)
+    } else {
+        lock_file(dir)
+    }
+}
+
+#[cfg(windows)]
+fn open_lock_file(path: &Path) -> Result<std::fs::File> {
+    crate::winsec::open_or_create_protected(path)
+}
+
+#[cfg(not(windows))]
+fn open_lock_file(path: &Path) -> Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+        .with_context(|| format!("cannot open {}", path.display()))
+}
+
+#[cfg(windows)]
+fn still_at(_file: &std::fs::File, _path: &Path) -> bool {
+    true
+}
+
+/// A save that swapped the directory while this process waited leaves it with the lock of the old
+/// directory.
+#[cfg(not(windows))]
+fn still_at(file: &std::fs::File, path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    match (file.metadata(), std::fs::metadata(path)) {
+        (Ok(held), Ok(current)) => held.dev() == current.dev() && held.ino() == current.ino(),
+        _ => false,
+    }
 }
 
 /// An ECDSA P-256 key pair and its raw public key (ADR-0026).
@@ -278,7 +447,8 @@ pub(crate) fn sibling(dir: &Path, suffix: &str) -> std::path::PathBuf {
 /// The directory that holds the identity, with the backup of an interrupted swap (FR-AG-04).
 ///
 /// A swap that a crash interrupted leaves the old identity in the backup and no identity in the
-/// main directory. The function moves the backup back, so the agent keeps its identity.
+/// main directory. The function moves the backup back, so the agent keeps its identity. The caller
+/// holds the lock: a save that is between its two renames looks the same.
 pub(crate) fn recover(dir: &Path) -> std::path::PathBuf {
     if dir.join(METADATA_FILE).exists() {
         return dir.to_path_buf();
@@ -289,6 +459,18 @@ pub(crate) fn recover(dir: &Path) -> std::path::PathBuf {
             return dir.to_path_buf();
         }
         return backup;
+    }
+    dir.to_path_buf()
+}
+
+/// The directory that holds the identity, without the move of [`recover`], for a reader that does
+/// not take the lock (FR-AG-04).
+pub(crate) fn current(dir: &Path) -> std::path::PathBuf {
+    if !dir.join(METADATA_FILE).exists() {
+        let backup = sibling(dir, ".old");
+        if backup.join(METADATA_FILE).exists() {
+            return backup;
+        }
     }
     dir.to_path_buf()
 }
@@ -380,7 +562,7 @@ pub(crate) mod tests {
             "restichub-agent-identity-{name}-{}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
         dir
     }
 
@@ -395,6 +577,11 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&base);
         crate::paths::create_protected_dir(&base).expect("cannot create the protected base");
         base.join("agent")
+    }
+
+    fn remove(dir: &Path) {
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_file(lock_file(dir));
     }
 
     #[test]
@@ -412,7 +599,7 @@ pub(crate) mod tests {
         assert_eq!(loaded.certificate_der, identity.certificate_der);
         assert_eq!(loaded.ca_chain_der, identity.ca_chain_der);
         assert_eq!(loaded.signing_keys, identity.signing_keys);
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
     }
 
     #[test]
@@ -429,7 +616,7 @@ pub(crate) mod tests {
         sample().save(&dir).expect("cannot save the identity");
         assert!(dir.join("restic.json").is_file());
         assert!(StoredIdentity::exists(&dir));
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
     }
 
     #[test]
@@ -441,7 +628,7 @@ pub(crate) mod tests {
         sample().save(&dir).expect("cannot save the identity");
         assert!(!dir.join("signing-key-updates.json").exists());
         assert!(!dir.join("status.json").exists());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
     }
 
     #[test]
@@ -456,7 +643,7 @@ pub(crate) mod tests {
         assert!(dir.exists());
         assert!(!sibling(&dir, ".staging").exists());
         assert!(!sibling(&dir, ".old").exists());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
     }
 
     #[test]
@@ -472,7 +659,7 @@ pub(crate) mod tests {
         assert!(new.save(&dir).is_err());
         let loaded = StoredIdentity::load(&dir).expect("the old identity must survive");
         assert_eq!(loaded.agent_id, old.agent_id);
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
         let _ = std::fs::remove_file(&staging);
     }
 
@@ -488,7 +675,12 @@ pub(crate) mod tests {
         let loaded = StoredIdentity::load(&dir).expect("the backup must recover");
         assert_eq!(loaded.agent_id, identity.agent_id);
         assert!(dir.exists());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
+    }
+
+    fn install_from_sample(dir: &Path, rotated: &Rotated) -> Result<()> {
+        let sample = sample();
+        StoredIdentity::install_rotation(dir, &sample.agent_id, &sample.certificate_der, rotated)
     }
 
     fn rotated() -> Rotated {
@@ -504,7 +696,7 @@ pub(crate) mod tests {
         let dir = temp_dir("rotation");
         sample().save(&dir).expect("the save must succeed");
         std::fs::write(dir.join("journal.db"), b"state").expect("cannot write other state");
-        StoredIdentity::install_rotation(&dir, &rotated()).expect("the rotation must install");
+        install_from_sample(&dir, &rotated()).expect("the rotation must install");
         let loaded = StoredIdentity::load(&dir).expect("the identity must load");
         assert_eq!(loaded.certificate_der, vec![9, 9, 9]);
         assert!(loaded.key_pem.contains("NEW"));
@@ -517,7 +709,7 @@ pub(crate) mod tests {
         );
         assert!(!dir.join(ROTATION_MARKER).exists());
         assert!(!staged(&dir, KEY_FILE).exists());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
     }
 
     #[test]
@@ -548,7 +740,7 @@ pub(crate) mod tests {
         assert_eq!(loaded.certificate_der, vec![9, 9, 9]);
         assert!(loaded.key_pem.contains("NEW"));
         assert!(!dir.join(ROTATION_MARKER).exists());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
     }
 
     #[test]
@@ -560,7 +752,50 @@ pub(crate) mod tests {
         assert_eq!(loaded.certificate_der, sample().certificate_der);
         assert!(loaded.key_pem.contains("MIIB"));
         assert!(!staged(&dir, KEY_FILE).exists());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
+    }
+
+    #[test]
+    fn fr_id_03_a_rotation_of_a_replaced_identity_is_refused_and_keeps_the_new_one() {
+        let dir = temp_dir("rotation-replaced");
+        sample().save(&dir).expect("the save must succeed");
+        // The rotation started from the sample identity; a register then stored another one.
+        let mut new = sample();
+        new.key_pem = "new registration key".to_owned();
+        new.certificate_der = vec![7, 7, 7];
+        new.save(&dir).expect("the second save must succeed");
+
+        let error =
+            install_from_sample(&dir, &rotated()).expect_err("the rotation must be refused");
+        assert_eq!(
+            error.downcast_ref::<IdentityReplaced>(),
+            Some(&IdentityReplaced::Certificate),
+            "{error:#}"
+        );
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.key_pem, new.key_pem);
+        assert_eq!(loaded.certificate_der, new.certificate_der);
+        assert_eq!(loaded.ca_chain_der, new.ca_chain_der);
+        for name in [KEY_FILE, CERT_FILE, CA_CHAIN_FILE] {
+            assert!(!staged(&dir, name).exists(), "{name} is staged");
+        }
+        assert!(!dir.join(ROTATION_MARKER).exists());
+
+        let mut other = sample();
+        other.agent_id = "other-agent".to_owned();
+        other.save(&dir).expect("the third save must succeed");
+        let error =
+            install_from_sample(&dir, &rotated()).expect_err("the rotation must be refused");
+        assert_eq!(
+            error.downcast_ref::<IdentityReplaced>(),
+            Some(&IdentityReplaced::Agent),
+            "{error:#}"
+        );
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.agent_id, "other-agent");
+        assert_eq!(loaded.key_pem, sample().key_pem);
+        assert_eq!(loaded.certificate_der, sample().certificate_der);
+        remove(&dir);
     }
 
     #[test]
@@ -593,7 +828,7 @@ pub(crate) mod tests {
             certificate_der: vec![9],
             ca_chain_der: vec![vec![8]],
         };
-        StoredIdentity::install_rotation(&dir, &next).expect("the rotation must install");
+        install_from_sample(&dir, &next).expect("the rotation must install");
 
         let key = std::fs::read_to_string(dir.join(KEY_FILE)).expect("the key");
         let cert = std::fs::read_to_string(dir.join(CERT_FILE)).expect("the certificate");
@@ -601,7 +836,283 @@ pub(crate) mod tests {
         assert_eq!(cert, pem::encode("CERTIFICATE", &next.certificate_der));
         assert!(!dir.join(ROTATION_MARKER).exists());
         assert!(!staged(&dir, CERT_FILE).exists());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove(&dir);
+    }
+
+    /// Another process loads while the rotation has staged only the new key. Without the lock
+    /// the load drops the staged key, and the rotation installs the new certificate with the old
+    /// key.
+    #[test]
+    fn fr_id_03_a_load_waits_for_a_rotation_that_stages_its_files() {
+        let dir = temp_dir("rotation-lock");
+        sample().save(&dir).expect("the save must succeed");
+        let next = rotated();
+        let held = lock(&dir).expect("the rotation takes the lock");
+        paths::create_protected_file(&staged(&dir, KEY_FILE), next.key_pem.as_bytes())
+            .expect("stage the key");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader_dir = dir.clone();
+        let reader = std::thread::spawn(move || {
+            let _ = tx.send(StoredIdentity::load(&reader_dir));
+        });
+        assert!(
+            matches!(
+                rx.recv_timeout(std::time::Duration::from_millis(500)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ),
+            "the load must wait for the rotation"
+        );
+        assert!(staged(&dir, KEY_FILE).exists());
+
+        paths::create_protected_file(
+            &staged(&dir, CERT_FILE),
+            pem::encode("CERTIFICATE", &next.certificate_der).as_bytes(),
+        )
+        .expect("stage the certificate");
+        let chain: String = next
+            .ca_chain_der
+            .iter()
+            .map(|der| pem::encode("CERTIFICATE", der))
+            .collect();
+        paths::create_protected_file(&staged(&dir, CA_CHAIN_FILE), chain.as_bytes())
+            .expect("stage the chain");
+        paths::create_protected_file(&dir.join(ROTATION_MARKER), b"1").expect("the marker");
+        finish_rotation(&dir).expect("the rotation must finish");
+        drop(held);
+
+        let loaded = rx
+            .recv()
+            .expect("the reader must answer")
+            .expect("the identity must load");
+        reader.join().expect("the reader must not panic");
+        assert_eq!(loaded.key_pem, next.key_pem);
+        assert_eq!(loaded.certificate_der, next.certificate_der);
+        let stored = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(stored.key_pem, next.key_pem);
+        assert_eq!(stored.certificate_der, next.certificate_der);
+        remove(&dir);
+    }
+
+    fn assert_waits<T>(rx: &std::sync::mpsc::Receiver<T>, what: &str) {
+        assert!(
+            matches!(
+                rx.recv_timeout(Duration::from_millis(500)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ),
+            "{what} must wait for the lock"
+        );
+    }
+
+    #[test]
+    fn fr_id_03_a_rotation_install_waits_for_the_lock() {
+        let dir = temp_dir("rotation-install-lock");
+        sample().save(&dir).expect("the save must succeed");
+        let held = lock(&dir).expect("cannot take the lock");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let rotation_dir = dir.clone();
+        let rotation = std::thread::spawn(move || {
+            let _ = tx.send(install_from_sample(&rotation_dir, &rotated()));
+        });
+        assert_waits(&rx, "the rotation");
+        for name in [KEY_FILE, CERT_FILE, CA_CHAIN_FILE] {
+            assert!(
+                !staged(&dir, name).exists(),
+                "{name} is staged under the lock"
+            );
+        }
+        assert!(!dir.join(ROTATION_MARKER).exists());
+        drop(held);
+
+        rx.recv()
+            .expect("the rotation must answer")
+            .expect("the rotation must install");
+        rotation.join().expect("the rotation must not panic");
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.certificate_der, rotated().certificate_der);
+        assert_eq!(loaded.key_pem, rotated().key_pem);
+        remove(&dir);
+    }
+
+    #[test]
+    fn fr_ag_04_a_save_waits_for_a_rotation_in_progress() {
+        let dir = temp_dir("save-lock");
+        sample().save(&dir).expect("the save must succeed");
+        let held = lock(&dir).expect("the rotation takes the lock");
+        paths::create_protected_file(&staged(&dir, KEY_FILE), b"rotated key")
+            .expect("stage the key");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let save_dir = dir.clone();
+        let save = std::thread::spawn(move || {
+            let mut new = sample();
+            new.agent_id = "new-agent".to_owned();
+            let _ = tx.send(new.save(&save_dir));
+        });
+        assert_waits(&rx, "the save");
+        let metadata: Metadata =
+            serde_json::from_slice(&std::fs::read(dir.join(METADATA_FILE)).expect("read"))
+                .expect("the metadata");
+        assert_eq!(metadata.agent_id, sample().agent_id);
+        assert!(staged(&dir, KEY_FILE).exists(), "the directory is swapped");
+        drop(held);
+
+        rx.recv()
+            .expect("the save must answer")
+            .expect("the save must succeed");
+        save.join().expect("the save must not panic");
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.agent_id, "new-agent");
+        assert_eq!(loaded.key_pem, sample().key_pem);
+        remove(&dir);
+    }
+
+    #[test]
+    fn fr_id_03_a_lock_that_another_process_keeps_fails_and_names_the_file() {
+        let dir = temp_dir("lock-timeout");
+        sample().save(&dir).expect("the save must succeed");
+        let held = lock(&dir).expect("cannot take the lock");
+        let error =
+            lock_within(&dir, Duration::from_millis(200)).expect_err("a held lock must time out");
+        let text = format!("{error:#}");
+        assert!(
+            text.contains(&lock_file(&dir).display().to_string()),
+            "{text}"
+        );
+        assert!(
+            error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::TimedOut),
+            "{text}"
+        );
+        drop(held);
+        remove(&dir);
+    }
+
+    #[test]
+    fn fr_ag_04_a_save_after_an_interrupted_swap_waits_for_the_lock() {
+        let dir = temp_dir("save-backup-lock");
+        sample().save(&dir).expect("the save must succeed");
+        let backup = sibling(&dir, ".old");
+        std::fs::rename(&dir, &backup).expect("cannot move the identity to the backup");
+        let held = lock(&dir).expect("cannot take the lock");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let save_dir = dir.clone();
+        let save = std::thread::spawn(move || {
+            let mut new = sample();
+            new.agent_id = "new-agent".to_owned();
+            let _ = tx.send(new.save(&save_dir));
+        });
+        assert_waits(&rx, "the save");
+        assert!(!dir.exists(), "the save must not swap under the lock");
+        assert!(backup.join(METADATA_FILE).exists());
+        drop(held);
+
+        rx.recv()
+            .expect("the save must answer")
+            .expect("the save must succeed");
+        save.join().expect("the save must not panic");
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.agent_id, "new-agent");
+        remove(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_id_03_a_lock_taken_during_repeated_saves_never_finds_the_directory_missing() {
+        let dir = temp_dir("lock-during-saves");
+        sample().save(&dir).expect("the save must succeed");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let saver_dir = dir.clone();
+        let saver_stop = std::sync::Arc::clone(&stop);
+        let saver = std::thread::spawn(move || {
+            while !saver_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                sample().save(&saver_dir).expect("the save must succeed");
+            }
+        });
+        for _ in 0..200 {
+            lock_within(&dir, Duration::from_secs(10)).expect("the lock must be taken");
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        saver.join().expect("the saver must not panic");
+        remove(&dir);
+    }
+
+    /// The holder keeps swapping in a new directory with a held lock, so the waiter never holds
+    /// a lock that is still in place.
+    #[cfg(unix)]
+    #[test]
+    fn fr_id_03_a_waiter_that_keeps_losing_the_swapped_lock_stops_at_its_deadline() {
+        let dir = temp_dir("lock-chase");
+        sample().save(&dir).expect("the save must succeed");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let swapper_dir = dir.clone();
+        let swapper_stop = std::sync::Arc::clone(&stop);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let swapper = std::thread::spawn(move || {
+            let old = sibling(&swapper_dir, ".swapped");
+            let mut held = lock(&swapper_dir).expect("cannot take the lock");
+            let _ = ready_tx.send(());
+            while !swapper_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = std::fs::remove_dir_all(&old);
+                std::fs::rename(&swapper_dir, &old).expect("cannot move the directory");
+                paths::ensure_config_dir(&swapper_dir).expect("cannot create the directory");
+                held = lock(&swapper_dir).expect("cannot take the new lock");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            drop(held);
+            let _ = std::fs::remove_dir_all(&old);
+        });
+        ready_rx.recv().expect("the swapper must start");
+
+        let started = Instant::now();
+        let error = lock_within(&dir, Duration::from_millis(300))
+            .expect_err("a lock that keeps moving must time out");
+        let elapsed = started.elapsed();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        swapper.join().expect("the swapper must not panic");
+        assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+        assert!(
+            error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::TimedOut),
+            "{error:#}"
+        );
+        remove(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_id_03_a_waiter_takes_the_lock_of_the_directory_that_a_save_swapped_in() {
+        let dir = temp_dir("lock-swap");
+        sample().save(&dir).expect("the save must succeed");
+        let held = lock(&dir).expect("cannot take the lock");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiter_dir = dir.clone();
+        let waiter = std::thread::spawn(move || {
+            let _ = tx.send(lock(&waiter_dir).map(drop));
+        });
+        assert_waits(&rx, "the waiter");
+        let old = sibling(&dir, ".swapped");
+        let _ = std::fs::remove_dir_all(&old);
+        std::fs::rename(&dir, &old).expect("cannot move the directory");
+        paths::ensure_config_dir(&dir).expect("cannot create the new directory");
+        let new = lock(&dir).expect("the new directory has a lock of its own");
+        drop(held);
+        assert_waits(&rx, "a waiter on the old lock file");
+        drop(new);
+
+        rx.recv()
+            .expect("the waiter must answer")
+            .expect("the waiter must take the new lock");
+        waiter.join().expect("the waiter must not panic");
+        let _ = std::fs::remove_dir_all(&old);
+        remove(&dir);
     }
 
     #[test]
