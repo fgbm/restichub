@@ -10,11 +10,18 @@ on:
   pull_request:
     paths:
       - crates/restichub-agent/**
+      - crates/restichub-common/**
+      - crates/restichub-compiler/**
       - crates/restichub-cp/**
+      - crates/restichub-db/**
       - crates/restichub-proto/**
+      - crates/restichub-secrets/**
+      - Cargo.lock
+      - Cargo.toml
+      - rust-toolchain.toml
       - packaging/**
       - scripts/install-smoke.sh
-      - .github/workflows/install-smoke.yml
+      - .github/**
   workflow_dispatch:
 
 permissions:
