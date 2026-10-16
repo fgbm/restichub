@@ -631,11 +631,14 @@ mod tests {
 
     #[test]
     fn a_failed_access_control_change_reports_the_returned_code() {
-        let missing = temp("acl-missing").join("absent");
+        let base = temp("acl-missing");
+        std::fs::create_dir_all(&base).expect("cannot create the base");
+        let missing = base.join("absent");
         let error = apply_descriptor(&missing, DIR_SDDL).expect_err("a missing path must fail");
         let text = format!("{error:#}");
         // ERROR_FILE_NOT_FOUND, not the stale last error of the thread.
         assert!(text.contains("os error 2"), "{text}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
