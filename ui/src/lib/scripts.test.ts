@@ -190,4 +190,3 @@ describe('built-in template text', () => {
 		expect(draftFromTemplate(own).name).toBe('Own dump');
 	});
 });
-
