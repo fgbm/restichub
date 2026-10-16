@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use restichub_agent::cli::{self, Command};
-use restichub_agent::{commands, paths, service};
+use restichub_agent::{commands, logging, paths, service};
 
 fn main() -> ExitCode {
     match run() {
@@ -34,44 +34,36 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Register(options) => {
-            init_tracing();
+            logging::init_console();
             commands::register(&options, &paths::config_dir())
         }
         Command::Status => {
-            init_tracing();
+            logging::init_console();
             commands::status(&paths::config_dir())
         }
         Command::TrustServerScripts { enable, no_restart } => {
             commands::trust_server_scripts(enable, no_restart)
         }
         Command::Run => {
-            init_tracing();
+            // The service sets up its own log sinks; only a console run reaches the next line.
             #[cfg(windows)]
             if let Ok(()) = service::run_as_service() {
                 return Ok(());
             }
+            logging::init_console();
             commands::run(&paths::config_dir(), None)
         }
         Command::InstallService(options) => {
-            init_tracing();
+            logging::init_console();
             commands::install_service(&options)
         }
         Command::ResticUpdate(options) => {
-            init_tracing();
+            logging::init_console();
             commands::restic_update(&options)
         }
         Command::UninstallService => {
-            init_tracing();
+            logging::init_console();
             service::uninstall()
         }
     }
-}
-
-fn init_tracing() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .try_init();
 }
