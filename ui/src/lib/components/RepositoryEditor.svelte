@@ -1,0 +1,985 @@
+<script lang="ts">
+	import { onDestroy, onMount } from 'svelte';
+	import { beforeNavigate, goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import type {
+		ApiProblem,
+		BackendSettings,
+		CreateRepositoryRequest,
+		Job,
+		JobStatus,
+		Maintenance,
+		Repository,
+		RepositoryBackendKind,
+		UpdateRepositoryRequest
+	} from '#lib/api/index.ts';
+	import ProfileSection from './ProfileSection.svelte';
+	import {
+		Alert,
+		Button,
+		Icon,
+		PageHeader,
+		PasswordField,
+		Select,
+		Skeleton,
+		StatusPill,
+		TextField
+	} from './ui/index.ts';
+	import type { SelectOption, StatusTone } from './ui/index.ts';
+	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
+	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import type { MessageKey } from '#lib/i18n/index.ts';
+	import type { SummaryState } from '#lib/profile-form.ts';
+	import { browserTimeZone, timeZoneNames } from '#lib/schedule.ts';
+	import { setPageTitle } from '#lib/stores/page-title.svelte.ts';
+	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+
+	let { repositoryId = null }: { repositoryId?: string | null } = $props();
+
+	type SectionKey = 'basics' | 'location' | 'access' | 'retention' | 'check' | 'host';
+	const SECTIONS: SectionKey[] = ['basics', 'location', 'access', 'retention', 'check', 'host'];
+
+	const TIME_ZONES = timeZoneNames();
+	const TIME_ZONE_LIST_ID = 'maintenance-time-zones';
+	const PREVIEW_RUNS = 3;
+	// The defaults of the control plane for a new repository (FR-RP-08, ADR-0034).
+	const DEFAULT_RETENTION_CRON = '0 3 * * 0';
+	const DEFAULT_CHECK_CRON = '0 4 1 * *';
+	const RETENTION_PRESETS: { label: MessageKey; cron: string }[] = [
+		{ label: 'repositories.maintenance.preset.daily', cron: '0 3 * * *' },
+		{ label: 'repositories.maintenance.preset.weekly', cron: '0 3 * * 0' }
+	];
+	const CHECK_PRESETS: { label: MessageKey; cron: string }[] = [
+		{ label: 'repositories.maintenance.preset.weekly', cron: '0 4 * * 0' },
+		{ label: 'repositories.maintenance.preset.monthly', cron: '0 4 1 * *' }
+	];
+
+	let loading = $state(true);
+	let loadError = $state<string | null>(null);
+	let existing = $state<Repository | null>(null);
+	let agents = $state<{ id: string; hostname: string; status: string }[]>([]);
+	let saving = $state(false);
+	let saved = false;
+	let formError = $state<string | null>(null);
+	let formProblem = $state<ApiProblem | null>(null);
+	let baseline = $state('');
+	let open = $state<Record<string, boolean>>(
+		Object.fromEntries(SECTIONS.map((key) => [key, true]))
+	);
+
+	let name = $state('');
+	let kind = $state<RepositoryBackendKind>('s3');
+	let endpoint = $state('');
+	let bucket = $state('');
+	let prefix = $state('');
+	let region = $state('');
+	let path = $state('');
+	let password = $state('');
+	let s3AccessKey = $state('');
+	let s3SecretKey = $state('');
+	let restPassword = $state('');
+	let maintenanceAgentId = $state('');
+
+	let maintenance = $state<Maintenance | null>(null);
+	let retentionCron = $state(DEFAULT_RETENTION_CRON);
+	let retentionEnabled = $state(true);
+	let checkCron = $state(DEFAULT_CHECK_CRON);
+	let checkEnabled = $state(true);
+	let maintenanceTimeZone = $state(browserTimeZone());
+	let retentionRuns = $state<string[] | null>(null);
+	let checkRuns = $state<string[] | null>(null);
+
+	const canWrite = $derived(getSession()?.role === 'admin');
+	// The location of an initialized repository cannot change in this version.
+	const locationLocked = $derived(existing?.initialized === true);
+	const showSchedules = $derived(!existing || maintenance !== null);
+	const allOpen = $derived(SECTIONS.every((key) => open[key]));
+
+	const kindOptions = $derived<SelectOption[]>([
+		{ value: 's3', label: t('repositories.backendKind.s3') },
+		{ value: 'rest', label: t('repositories.backendKind.rest') },
+		{ value: 'local', label: t('repositories.backendKind.local') }
+	]);
+
+	const agentOptions = $derived<SelectOption[]>([
+		{ value: '', label: t('repositories.maintenanceHostNone') },
+		...agents
+			.filter((agent) => agent.status === 'active')
+			.map((agent) => ({ value: agent.id, label: agent.hostname }))
+	]);
+
+	const stateKey = $derived(
+		JSON.stringify([
+			name,
+			kind,
+			endpoint,
+			bucket,
+			prefix,
+			region,
+			path,
+			password,
+			s3AccessKey,
+			s3SecretKey,
+			restPassword,
+			maintenanceAgentId,
+			retentionCron,
+			retentionEnabled,
+			checkCron,
+			checkEnabled,
+			maintenanceTimeZone
+		])
+	);
+	const dirty = $derived(!loading && stateKey !== baseline);
+
+	const hostName = $derived(
+		agents.find((agent) => agent.id === maintenanceAgentId)?.hostname ?? ''
+	);
+
+	function address(): string {
+		switch (kind) {
+			case 's3':
+				return bucket ? `s3://${bucket}/${prefix}`.replace(/\/$/, '') : '';
+			case 'rest':
+				return endpoint ? `rest:${endpoint}` : '';
+			case 'local':
+				return path;
+		}
+	}
+
+	function accessSummary(): { text: string; state: SummaryState } {
+		if (existing) {
+			const entered = Boolean(s3AccessKey || s3SecretKey || restPassword);
+			return {
+				text: t(entered ? 'rp.summary.accessReplace' : 'rp.summary.accessKeep'),
+				state: 'on'
+			};
+		}
+		const complete = Boolean(password) && (kind !== 's3' || Boolean(s3AccessKey && s3SecretKey));
+		return {
+			text: t(complete ? 'rp.summary.accessReady' : 'rp.summary.accessMissing'),
+			state: complete ? 'on' : 'warn'
+		};
+	}
+
+	function scheduleSummary(cron: string, enabled: boolean): { text: string; state: SummaryState } {
+		return enabled
+			? { text: `${cron} · ${maintenanceTimeZone}`, state: 'on' }
+			: { text: t('rp.summary.off'), state: 'off' };
+	}
+
+	const summaries = $derived<Record<SectionKey, { text: string; state: SummaryState }>>({
+		basics: name ? { text: name, state: 'on' } : { text: t('rp.summary.noName'), state: 'warn' },
+		location: address()
+			? {
+					text: `${t(`repositories.backendKind.${kind}` as MessageKey)} · ${address()}`,
+					state: 'on'
+				}
+			: { text: t('rp.summary.noLocation'), state: 'warn' },
+		access: accessSummary(),
+		retention: scheduleSummary(retentionCron, retentionEnabled),
+		check: scheduleSummary(checkCron, checkEnabled),
+		host: hostName
+			? { text: hostName, state: 'on' }
+			: { text: t('repositories.maintenanceHostNone'), state: 'warn' }
+	});
+
+	const titles: Record<SectionKey, MessageKey> = {
+		basics: 'rp.section.basics',
+		location: 'rp.section.location',
+		access: 'rp.section.access',
+		retention: 'repositories.maintenance.title',
+		check: 'repositories.maintenance.check',
+		host: 'repositories.maintenanceHost'
+	};
+
+	const jobStatusLabels: Record<JobStatus, MessageKey> = {
+		queued: 'repositories.job.queued',
+		sent: 'repositories.job.sent',
+		running: 'repositories.job.running',
+		succeeded: 'repositories.job.succeeded',
+		failed: 'repositories.job.failed',
+		expired: 'repositories.job.expired',
+		dead_letter: 'repositories.job.failed'
+	};
+
+	function messageOf(problem: unknown): string {
+		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		return t('table.error');
+	}
+
+	function lastTone(entry: Job): StatusTone {
+		if (entry.status === 'succeeded') {
+			return entry.result_code === 'succeeded_with_warnings' ? 'warning' : 'success';
+		}
+		if (entry.status === 'failed' || entry.status === 'expired' || entry.status === 'dead_letter') {
+			return 'failed';
+		}
+		if (entry.status === 'running') return 'running';
+		return 'queued';
+	}
+
+	function utcTitle(value: string): string {
+		const utc = `${formatTimeInZone(value, 'UTC')} UTC`;
+		return maintenanceTimeZone === 'UTC'
+			? utc
+			: `${utc} · ${formatTimeInZone(value, maintenanceTimeZone)} ${maintenanceTimeZone}`;
+	}
+
+	async function load(): Promise<void> {
+		try {
+			const [repositoryList, agentList] = await Promise.all([
+				service.listRepositories(),
+				service.listAgents()
+			]);
+			agents = agentList;
+			if (repositoryId) {
+				const found = repositoryList.find((item) => item.id === repositoryId);
+				if (!found) {
+					loadError = t('rp.notFound');
+					return;
+				}
+				existing = found;
+				name = found.name;
+				kind = found.backend.kind;
+				if (found.backend.kind === 's3') {
+					endpoint = found.backend.endpoint;
+					bucket = found.backend.bucket;
+					prefix = found.backend.prefix ?? '';
+					region = found.backend.region ?? '';
+				} else if (found.backend.kind === 'rest') {
+					endpoint = found.backend.endpoint;
+				} else {
+					path = found.backend.path;
+				}
+				maintenanceAgentId = found.maintenance_agent_id ?? '';
+				await loadMaintenance(found);
+			}
+			setPageTitle(repositoryId ? name : t('rp.newTitle'));
+			baseline = stateKey;
+		} catch (problem) {
+			loadError = messageOf(problem);
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function loadMaintenance(repository: Repository): Promise<void> {
+		try {
+			const loaded = await service.getMaintenance(repository.id);
+			maintenance = loaded;
+			retentionCron = loaded.retention.cron;
+			retentionEnabled = loaded.retention.enabled;
+			checkCron = loaded.check.cron;
+			checkEnabled = loaded.check.enabled;
+			maintenanceTimeZone = loaded.retention.time_zone;
+		} catch (problem) {
+			formError = messageOf(problem);
+		}
+	}
+
+	onMount(load);
+	onDestroy(() => setPageTitle(null));
+
+	beforeNavigate(({ cancel }) => {
+		if (dirty && !saved && !window.confirm(t('rp.unsaved'))) cancel();
+	});
+
+	// The page previews the next fire times of each schedule from the form, so the user sees them
+	// before the save (FR-SC-01). The list follows the edit of the cron or the time zone.
+	$effect(() => {
+		if (loading) return;
+		const zone = maintenanceTimeZone;
+		const retention = retentionCron;
+		const check = checkCron;
+		const handle = setTimeout(() => {
+			void loadRuns(retention, zone).then((runs) => (retentionRuns = runs));
+			void loadRuns(check, zone).then((runs) => (checkRuns = runs));
+		}, 200);
+		return () => clearTimeout(handle);
+	});
+
+	async function loadRuns(cron: string, zone: string): Promise<string[] | null> {
+		if (!cron.trim() || !zone.trim()) return null;
+		try {
+			const response = await service.previewSchedule({
+				cron,
+				time_zone: zone,
+				count: PREVIEW_RUNS
+			});
+			return response.runs;
+		} catch {
+			return null;
+		}
+	}
+
+	// A section that holds a server error opens, so the message is not hidden.
+	$effect(() => {
+		const field = formProblem?.field ?? '';
+		const target: [string, SectionKey][] = [
+			['name', 'basics'],
+			['backend', 'location'],
+			['password', 'access'],
+			['s3_', 'access'],
+			['rest_password', 'access'],
+			['time_zone', 'retention'],
+			['retention', 'retention'],
+			['check', 'check'],
+			['maintenance_agent_id', 'host']
+		];
+		const hit = target.find(([prefix]) => field.startsWith(prefix));
+		if (hit) open[hit[1]] = true;
+	});
+
+	function setAll(value: boolean): void {
+		for (const key of SECTIONS) open[key] = value;
+	}
+
+	function backendRequest(): BackendSettings {
+		switch (kind) {
+			case 's3':
+				return {
+					kind: 's3',
+					endpoint,
+					bucket,
+					prefix: prefix || undefined,
+					region: region || undefined
+				};
+			case 'rest':
+				return { kind: 'rest', endpoint };
+			case 'local':
+				return { kind: 'local', path };
+		}
+	}
+
+	async function save(): Promise<void> {
+		saving = true;
+		formError = null;
+		formProblem = null;
+		try {
+			if (existing) {
+				const request: UpdateRepositoryRequest = {
+					name,
+					backend: backendRequest(),
+					maintenance_agent_id: maintenanceAgentId
+				};
+				if (kind === 's3') {
+					if (s3AccessKey) request.s3_access_key = s3AccessKey;
+					if (s3SecretKey) request.s3_secret_key = s3SecretKey;
+				}
+				if (kind === 'rest' && restPassword) request.rest_password = restPassword;
+				await service.updateRepository(existing.id, request);
+				if (maintenance) {
+					await service.updateMaintenance(existing.id, {
+						time_zone: maintenanceTimeZone,
+						retention: { cron: retentionCron, enabled: retentionEnabled },
+						check: { cron: checkCron, enabled: checkEnabled }
+					});
+				}
+				pushToast('success', t('repositories.updated'));
+			} else {
+				const request: CreateRepositoryRequest = {
+					name,
+					backend: backendRequest(),
+					password,
+					maintenance_agent_id: maintenanceAgentId || undefined
+				};
+				if (kind === 's3') {
+					request.s3_access_key = s3AccessKey;
+					request.s3_secret_key = s3SecretKey;
+				}
+				if (kind === 'rest' && restPassword) request.rest_password = restPassword;
+				const created = await service.createRepository(request);
+				pushToast('success', t('repositories.created'));
+				try {
+					await service.updateMaintenance(created.id, {
+						time_zone: maintenanceTimeZone,
+						retention: { cron: retentionCron, enabled: retentionEnabled },
+						check: { cron: checkCron, enabled: checkEnabled }
+					});
+				} catch (problem) {
+					pushToast('danger', messageOf(problem));
+				}
+			}
+			saved = true;
+			await goto(resolve('/(app)/repositories'));
+		} catch (problem) {
+			formProblem = problem instanceof ApiError ? problem.problem : null;
+			formError = formProblem ? null : messageOf(problem);
+		} finally {
+			saving = false;
+		}
+	}
+</script>
+
+{#snippet runsList(runs: string[] | null)}
+	{#if runs && runs.length > 0}
+		<ul class="runs">
+			{#each runs as run (run)}
+				<li title={utcTitle(run)}>{formatLocalTime(run)}</li>
+			{/each}
+		</ul>
+	{:else}
+		<p class="muted">{t('repositories.maintenance.nextRunsEmpty')}</p>
+	{/if}
+{/snippet}
+
+{#snippet lastRun(job: Job | null | undefined)}
+	{#if job}
+		<span class="last">
+			<StatusPill tone={lastTone(job)}>{t(jobStatusLabels[job.status])}</StatusPill>
+			<span class="muted" title={utcTitle(job.finished_at ?? job.created_at)}>
+				{formatLocalTime(job.finished_at ?? job.created_at)}
+			</span>
+		</span>
+	{:else}
+		<span class="muted">{t('repositories.maintenance.lastNone')}</span>
+	{/if}
+{/snippet}
+
+<svelte:head>
+	<title>{(repositoryId ? name : '') || t('rp.newTitle')} · {t('app.name')}</title>
+</svelte:head>
+
+<a class="back" href={resolve('/(app)/repositories')}>
+	<Icon name="arrow-left" size="xs" />
+	{t('rp.backToList')}
+</a>
+<PageHeader
+	title={repositoryId ? t('rp.editTitle') : t('rp.newTitle')}
+	description={t(repositoryId ? 'repositories.editDescription' : 'repositories.addDescription')}
+>
+	<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
+	<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
+</PageHeader>
+
+{#if loading}
+	<Skeleton />
+{:else if loadError}
+	<Alert tone="danger" title={loadError} />
+	<p><a href={resolve('/(app)/repositories')}>{t('rp.backToList')}</a></p>
+{:else}
+	{#if formError}
+		<Alert tone="danger" title={formError} />
+	{/if}
+	<form
+		class="layout"
+		onsubmit={(event) => {
+			event.preventDefault();
+			void save();
+		}}
+	>
+		<div class="main">
+			<ProfileSection
+				id="basics"
+				title={t(titles.basics)}
+				summary={summaries.basics.text}
+				state={summaries.basics.state}
+				required
+				bind:open={open.basics}
+			>
+				<TextField
+					id="repo-name"
+					label={t('repositories.repository')}
+					error={fieldError(formProblem, 'name')}
+					bind:value={name}
+					required
+				/>
+			</ProfileSection>
+
+			<ProfileSection
+				id="location"
+				title={t(titles.location)}
+				summary={summaries.location.text}
+				state={summaries.location.state}
+				required
+				bind:open={open.location}
+			>
+				{#if locationLocked}
+					<Alert tone="attention" icon="lock" title={t('repositories.locationLocked')} />
+				{/if}
+				<Select
+					id="repo-kind"
+					label={t('repositories.backendKind')}
+					options={kindOptions}
+					error={fieldError(formProblem, 'backend')}
+					bind:value={kind}
+					disabled={!!existing}
+				/>
+				{#if kind === 's3'}
+					<div class="grid2">
+						<TextField
+							id="repo-endpoint"
+							label={t('repositories.endpoint')}
+							placeholder={t('repositories.endpointPlaceholder')}
+							error={fieldError(formProblem, 'backend.endpoint')}
+							bind:value={endpoint}
+							disabled={locationLocked}
+							required
+						/>
+						<TextField
+							id="repo-bucket"
+							label={t('repositories.bucket')}
+							placeholder={t('repositories.bucketPlaceholder')}
+							error={fieldError(formProblem, 'backend.bucket')}
+							bind:value={bucket}
+							disabled={locationLocked}
+							required
+						/>
+						<TextField
+							id="repo-prefix"
+							label={t('repositories.prefix')}
+							placeholder={t('repositories.prefixPlaceholder')}
+							error={fieldError(formProblem, 'backend.prefix')}
+							bind:value={prefix}
+							disabled={locationLocked}
+						/>
+						<TextField
+							id="repo-region"
+							label={t('repositories.region')}
+							placeholder={t('repositories.regionPlaceholder')}
+							error={fieldError(formProblem, 'backend.region')}
+							bind:value={region}
+							disabled={locationLocked}
+						/>
+					</div>
+				{:else if kind === 'rest'}
+					<TextField
+						id="repo-endpoint"
+						label={t('repositories.endpoint')}
+						placeholder={t('repositories.endpointPlaceholder')}
+						error={fieldError(formProblem, 'backend.endpoint')}
+						bind:value={endpoint}
+						disabled={locationLocked}
+						required
+					/>
+				{:else}
+					<TextField
+						id="repo-path"
+						label={t('repositories.path')}
+						placeholder={t('repositories.pathPlaceholder')}
+						error={fieldError(formProblem, 'backend.path')}
+						bind:value={path}
+						disabled={locationLocked}
+						required
+					/>
+				{/if}
+			</ProfileSection>
+
+			<ProfileSection
+				id="access"
+				title={t(titles.access)}
+				summary={summaries.access.text}
+				state={summaries.access.state}
+				required
+				bind:open={open.access}
+			>
+				{#if existing}
+					<Alert tone="info" icon="lock" title={t('repositories.password')}>
+						{t('repositories.passwordLocked')}
+					</Alert>
+				{:else}
+					<PasswordField
+						id="repo-password"
+						label={t('repositories.password')}
+						help={t('repositories.passwordHint')}
+						error={fieldError(formProblem, 'password')}
+						autocomplete="new-password"
+						bind:value={password}
+						required
+					/>
+				{/if}
+				{#if kind === 's3'}
+					<div class="grid2">
+						<PasswordField
+							id="repo-s3-access-key"
+							label={t('repositories.s3AccessKey')}
+							help={t('repositories.secretHint')}
+							error={fieldError(formProblem, 's3_access_key')}
+							autocomplete="new-password"
+							bind:value={s3AccessKey}
+							required={!existing}
+						/>
+						<PasswordField
+							id="repo-s3-secret-key"
+							label={t('repositories.s3SecretKey')}
+							help={t('repositories.secretHint')}
+							error={fieldError(formProblem, 's3_secret_key')}
+							autocomplete="new-password"
+							bind:value={s3SecretKey}
+							required={!existing}
+						/>
+					</div>
+				{:else if kind === 'rest'}
+					<PasswordField
+						id="repo-rest-password"
+						label={t('repositories.restPassword')}
+						help={t('repositories.restPasswordHint')}
+						error={fieldError(formProblem, 'rest_password')}
+						autocomplete="new-password"
+						bind:value={restPassword}
+					/>
+				{/if}
+				<a
+					class="manage-secrets"
+					href={resolve('/(app)/settings/access/secrets')}
+					target="_blank"
+					rel="noopener"
+				>
+					{t('secrets.manage')}
+				</a>
+			</ProfileSection>
+
+			{#if showSchedules}
+				<ProfileSection
+					id="retention"
+					title={t(titles.retention)}
+					summary={summaries.retention.text}
+					state={summaries.retention.state}
+					switchable
+					bind:enabled={retentionEnabled}
+					bind:open={open.retention}
+				>
+					<p class="lead">{t('repositories.maintenance.description')}</p>
+					<TextField
+						id="maintenance-time-zone"
+						label={t('repositories.maintenance.timeZone')}
+						help={t('repositories.maintenance.timeZoneHint')}
+						error={fieldError(formProblem, 'time_zone')}
+						list={TIME_ZONE_LIST_ID}
+						bind:value={maintenanceTimeZone}
+						required
+					/>
+					<datalist id={TIME_ZONE_LIST_ID}>
+						{#each TIME_ZONES as zone (zone)}
+							<option value={zone}></option>
+						{/each}
+					</datalist>
+					<p class="lead">{t('repositories.maintenance.retentionHint')}</p>
+					<TextField
+						id="maintenance-retention-cron"
+						mono
+						label={t('repositories.maintenance.cron')}
+						help={t('repositories.maintenance.cronHint')}
+						error={fieldError(formProblem, 'retention.cron')}
+						bind:value={retentionCron}
+						required
+					/>
+					<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
+						{#each RETENTION_PRESETS as preset (preset.cron)}
+							<Button type="button" size="sm" onclick={() => (retentionCron = preset.cron)}>
+								{t(preset.label)}
+							</Button>
+						{/each}
+					</div>
+					<div class="runs-block">
+						<span class="muted">{t('repositories.maintenance.nextRuns')}</span>
+						{@render runsList(retentionEnabled ? retentionRuns : null)}
+					</div>
+					{#if maintenance}
+						<div class="runs-block">
+							<span class="muted">{t('repositories.maintenance.last')}</span>
+							{@render lastRun(maintenance.last_retention)}
+						</div>
+					{/if}
+				</ProfileSection>
+
+				<ProfileSection
+					id="check"
+					title={t(titles.check)}
+					summary={summaries.check.text}
+					state={summaries.check.state}
+					switchable
+					bind:enabled={checkEnabled}
+					bind:open={open.check}
+				>
+					<p class="lead">{t('repositories.maintenance.checkHint')}</p>
+					<TextField
+						id="maintenance-check-cron"
+						mono
+						label={t('repositories.maintenance.cron')}
+						help={t('repositories.maintenance.cronHint')}
+						error={fieldError(formProblem, 'check.cron')}
+						bind:value={checkCron}
+						required
+					/>
+					<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
+						{#each CHECK_PRESETS as preset (preset.cron)}
+							<Button type="button" size="sm" onclick={() => (checkCron = preset.cron)}>
+								{t(preset.label)}
+							</Button>
+						{/each}
+					</div>
+					<p class="muted">{t('rp.check.zone', { zone: maintenanceTimeZone })}</p>
+					<div class="runs-block">
+						<span class="muted">{t('repositories.maintenance.nextRuns')}</span>
+						{@render runsList(checkEnabled ? checkRuns : null)}
+					</div>
+					{#if maintenance}
+						<div class="runs-block">
+							<span class="muted">{t('repositories.maintenance.last')}</span>
+							{@render lastRun(maintenance.last_check)}
+						</div>
+					{/if}
+				</ProfileSection>
+			{/if}
+
+			<ProfileSection
+				id="host"
+				title={t(titles.host)}
+				summary={summaries.host.text}
+				state={summaries.host.state}
+				bind:open={open.host}
+			>
+				<Select
+					id="repo-agent"
+					label={t('repositories.maintenanceHost')}
+					help={t('repositories.maintenanceHostHint')}
+					options={agentOptions}
+					error={fieldError(formProblem, 'maintenance_agent_id')}
+					bind:value={maintenanceAgentId}
+				/>
+				{#if showSchedules && !maintenanceAgentId}
+					<Alert tone="attention" icon="alert" title={t('repositories.maintenance.noHostTitle')}>
+						{t('repositories.maintenance.noHostBody')}
+					</Alert>
+				{/if}
+			</ProfileSection>
+		</div>
+
+		<aside class="side">
+			<div class="box">
+				<div class="box__head">
+					<span>{t('rp.side.result')}</span>
+				</div>
+				<ul class="result">
+					{#each SECTIONS as key (key)}
+						{#if showSchedules || (key !== 'retention' && key !== 'check')}
+							<li>
+								<span class="dot dot--{summaries[key].state}" data-state={summaries[key].state}
+								></span>
+								<div>
+									<b>{t(titles[key])}</b>
+									<span class="result__text">{summaries[key].text}</span>
+								</div>
+							</li>
+						{/if}
+					{/each}
+				</ul>
+			</div>
+		</aside>
+
+		<div class="savebar">
+			<span class="muted savebar__text">
+				{#if !canWrite}
+					{t('rp.save.readonly')}
+				{:else if dirty}
+					{t('rp.save.dirty')}
+				{/if}
+			</span>
+			<Button onclick={() => goto(resolve('/(app)/repositories'))}>{t('common.cancel')}</Button>
+			{#if canWrite}
+				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
+			{/if}
+		</div>
+	</form>
+{/if}
+
+<style>
+	.back {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--rh-space-1);
+		margin-bottom: var(--rh-space-3);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+		text-decoration: none;
+	}
+
+	.back:hover {
+		color: var(--rh-color-link);
+	}
+
+	.layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 340px;
+		grid-template-areas:
+			'main side'
+			'bar bar';
+		gap: var(--rh-space-4);
+		align-items: start;
+	}
+
+	.main {
+		display: flex;
+		grid-area: main;
+		flex-direction: column;
+		gap: var(--rh-space-3);
+		min-width: 0;
+	}
+
+	.side {
+		position: sticky;
+		top: calc(var(--rh-layout-topbar-height) + var(--rh-space-4));
+		display: flex;
+		grid-area: side;
+		flex-direction: column;
+		gap: var(--rh-space-3);
+		max-height: calc(100vh - var(--rh-layout-topbar-height) - 120px);
+		overflow-y: auto;
+	}
+
+	.box {
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-lg);
+		background-color: var(--rh-color-surface);
+	}
+
+	.box__head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--rh-space-2);
+		padding: var(--rh-space-2) var(--rh-space-3);
+		border-bottom: var(--rh-border-width) solid var(--rh-color-border-muted);
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.result {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-2);
+		margin: 0;
+		padding: var(--rh-space-3);
+		list-style: none;
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.result li {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--rh-space-2);
+	}
+
+	.result li .dot {
+		margin-top: 6px;
+	}
+
+	.result__text {
+		display: block;
+		color: var(--rh-color-text-muted);
+		overflow-wrap: anywhere;
+	}
+
+	.dot {
+		flex: none;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background-color: var(--rh-color-border-strong);
+	}
+
+	.dot--on {
+		background-color: var(--rh-color-success);
+	}
+
+	.dot--warn {
+		background-color: var(--rh-color-warning);
+	}
+
+	.muted {
+		margin: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.lead {
+		margin: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.grid2 {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: var(--rh-space-3);
+	}
+
+	.manage-secrets {
+		align-self: flex-start;
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.presets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--rh-space-2);
+	}
+
+	.runs-block {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-1);
+	}
+
+	.runs {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.runs li {
+		width: fit-content;
+		cursor: help;
+	}
+
+	.last {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.savebar {
+		position: sticky;
+		bottom: 0;
+		z-index: var(--rh-z-sticky);
+		display: flex;
+		grid-area: bar;
+		align-items: center;
+		gap: var(--rh-space-3);
+		padding: var(--rh-space-3) var(--rh-space-4);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-lg);
+		background-color: var(--rh-color-surface);
+	}
+
+	.savebar__text {
+		flex: 1;
+	}
+
+	@media (max-width: 1000px) {
+		.layout {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-areas:
+				'main'
+				'side'
+				'bar';
+		}
+
+		.side {
+			position: static;
+			max-height: none;
+		}
+	}
+
+	@media (max-width: 720px) {
+		.grid2 {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>
