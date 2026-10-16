@@ -289,3 +289,59 @@ async fn db_the_lower_case_unique_indexes_hold() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn ac_tn_01_the_host_count_function_answers_only_the_platform_scope() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
+    for (tenant, number, status) in [
+        (tenant_a, 1_u8, "active"),
+        (tenant_a, 2, "active"),
+        (tenant_a, 3, "revoked"),
+        (tenant_b, 4, "active"),
+    ] {
+        let mut tx = db.database().begin_tenant(tenant).await?;
+        sqlx::query(
+            "INSERT INTO agents \
+             (id, tenant_id, hostname, os, arch, agent_version, certificate_serial, \
+              certificate_expires_at, status, revoked_at) \
+             VALUES ($1, $2, $3, 'linux', 'amd64', '0.1.0', $4, now() + interval '30 days', \
+                     $5, CASE WHEN $5 = 'revoked' THEN now() END)",
+        )
+        .bind(crate::AgentId::new())
+        .bind(tenant)
+        .bind(format!("host-{number}"))
+        .bind(vec![0xa0, number])
+        .bind(status)
+        .execute(tx.as_conn())
+        .await?;
+        tx.commit().await?;
+    }
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let rows: Vec<(Uuid, i64)> =
+        sqlx::query_as("SELECT tenant_id, agent_count FROM tenant_agent_counts()")
+            .fetch_all(tx.as_conn())
+            .await?;
+    drop(tx);
+    assert!(
+        rows.is_empty(),
+        "a tenant transaction must get no count row"
+    );
+
+    // The platform scope counts each tenant; a revoked host does not count.
+    let mut tx = db.database().begin_platform().await?;
+    let mut rows: Vec<(Uuid, i64)> =
+        sqlx::query_as("SELECT tenant_id, agent_count FROM tenant_agent_counts()")
+            .fetch_all(tx.as_conn())
+            .await?;
+    drop(tx);
+    rows.sort();
+    let mut expected = vec![(tenant_a.as_uuid(), 2), (tenant_b.as_uuid(), 1)];
+    expected.sort();
+    assert_eq!(rows, expected);
+    db.cleanup().await;
+    Ok(())
+}

@@ -255,11 +255,19 @@ export const ru: Record<MessageKey, string> = {
 		'Учётная запись принадлежит другим организациям. Пароль может сбросить пользователь или администратор платформы.',
 	'users.sharedNote':
 		'Учётная запись в нескольких организациях — общая. Её пароль сбрасывает только сам пользователь или администратор платформы.',
-	'users.roles': 'Роли',
 	'users.roles.admin':
 		'Все операции организации, включая пользователей, отзыв агентов и установку.',
 	'users.roles.operator': 'Профили, планы, ручной запуск, отмена и восстановление.',
 	'users.roles.viewer': 'Только чтение, включая журнал аудита организации.',
+	'users.account': 'Учётная запись',
+	'users.access': 'Доступ',
+	'users.lastSignIn': 'Последний вход',
+	'users.emailUnverified': 'не подтверждена',
+	'users.selfHint': 'Это ваша учётная запись',
+	'users.platformManagedHint': 'Учётной записью управляет администратор платформы',
+	'users.disableTitle': 'Отключить пользователя?',
+	'users.disableBody':
+		'{name} не сможет работать в организации {org}. Роль сохранится; пользователя можно включить снова.',
 
 	// Platform users (installation-wide accounts)
 	'platformUsers.title': 'Пользователи',
@@ -279,7 +287,6 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.role': 'Роль',
 	'platformUsers.created': 'Учётная запись создана.',
 	'platformUsers.changeRole': 'Изменить роль',
-	'platformUsers.removeMembership': 'Убрать',
 	'platformUsers.removed': 'Членство убрано.',
 	'platformUsers.roleChanged': 'Роль изменена.',
 	'platformUsers.added': 'Членство добавлено.',
@@ -295,6 +302,23 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.revokeAdmin': 'Забрать право администратора платформы',
 	'platformUsers.rightGranted': 'Право администратора платформы выдано.',
 	'platformUsers.rightRemoved': 'Право администратора платформы забрано.',
+	'platformUsers.disableBody':
+		'{name} не сможет войти ни в одну организацию. Членство и роли сохранятся; пользователя можно включить снова.',
+	'platformUsers.lastAdminHint': 'Это последний администратор платформы',
+	'platformUsers.roleIn': 'Роль в организации {name}',
+	'platformUsers.removeFrom': 'Убрать из организации {name}',
+	'platformUsers.removeSelfHint': 'Нельзя убрать своё членство',
+	'platformUsers.removeTitle': 'Убрать из организации?',
+	'platformUsers.removeBody':
+		'{name} потеряет доступ к организации {org}. Учётная запись останется; членство можно добавить снова.',
+	'platformUsers.removeConfirm': 'Убрать',
+	'platformUsers.revokeTitle': 'Забрать право администратора платформы?',
+	'platformUsers.revokeBody':
+		'{name} больше не сможет управлять организациями и пользователями установки. Членство в организациях не изменится.',
+	'platformUsers.revokeConfirm': 'Забрать право',
+	'platformUsers.noMemberships': 'Пользователь не состоит ни в одной организации.',
+	'platformUsers.noMembershipsAdminHint':
+		'Право администратора платформы не даёт доступа к данным организаций. Добавьте организацию, чтобы работать в ней.',
 
 	// API tokens
 	'tokens.title': 'Токены API',
@@ -2093,7 +2117,6 @@ export const ru: Record<MessageKey, string> = {
 	'tenants.userCount.few': 'пользователей: {n}',
 	'tenants.userCount.many': 'пользователей: {n}',
 	'tenants.userCount.other': 'пользователей: {n}',
-	'platformUsers.manage': 'Изменить членство',
 	'platformUsers.facet.organization': 'Организация',
 	'platformUsers.meta.membership': '{name} — {role}',
 	'platformUsers.meta.platformAdmin': 'администратор платформы',
@@ -2175,5 +2198,28 @@ export const ru: Record<MessageKey, string> = {
 	'jobTemplates.secrets': 'Секретов',
 	'jobTemplates.backupStep': 'Резервная копия',
 	'templates.summary': 'Сводка',
-	'jobTemplates.scriptCount': 'Скриптов'
+	'jobTemplates.scriptCount': 'Скриптов',
+	'hosts.status.oldCertificate': 'Использован старый сертификат',
+	'repositories.status.checkFailed': 'Проверка не пройдена',
+	'repositories.meta.checked': 'проверен {time}',
+	'repositories.meta.notChecked': 'не проверялся',
+	'repositories.snapshotCount.one': '{n} снимок',
+	'repositories.snapshotCount.few': '{n} снимка',
+	'repositories.snapshotCount.many': '{n} снимков',
+	'repositories.snapshotCount.other': '{n} снимка',
+	'repositories.sort.lastCheck': 'Последняя проверка',
+	'plans.tab.attention': 'Требуют внимания',
+	'plans.sort.lastSuccess': 'Последняя копия',
+	'jobs.tab.warnings': 'С предупреждениями',
+	'jobs.sort.duration': 'Длительность',
+	'jobs.sort.finished': 'Завершение',
+	'jobs.searchByName': 'Поиск по плану, хосту, репозиторию',
+	'channels.meta.delivered': 'доставлено {time}',
+	'channels.meta.deliveryFailed': 'доставка не удалась {time}',
+	'users.meta.signedIn': 'вход {time}',
+	'tenants.hostCount.one': 'хостов: {n}',
+	'tenants.hostCount.few': 'хостов: {n}',
+	'tenants.hostCount.many': 'хостов: {n}',
+	'tenants.hostCount.other': 'хостов: {n}',
+	'audit.searchByName': 'Поиск по имени объекта или действующего лица, коду действия'
 };

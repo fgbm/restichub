@@ -20,7 +20,10 @@ export interface TabItem {
 
 export interface MenuItem {
 	label: string;
-	/** Tooltip of the icon button in a row with one or two actions, instead of the label. */
+	/**
+	 * Tooltip of the icon button in a row with one or two actions, instead of the label. A disabled
+	 * menu item shows it below the label.
+	 */
 	hint?: string;
 	icon?: IconName;
 	/** A menu item without an action is a heading, not a command. */
@@ -109,6 +112,8 @@ export interface FilterTab {
 	value: string;
 	label: string;
 	count?: number;
+	/** The server counted only up to its limit: the tab shows the count with a "+". */
+	capped?: boolean;
 	/** The count is red when it is more than zero, for the failure tab only. */
 	danger?: boolean;
 }

@@ -399,6 +399,7 @@ mod tests {
             status: TenantStatus::Active,
             created_at: OffsetDateTime::now_utc(),
             user_count: 1,
+            agent_count: 0,
             admin_state: restichub_db::AdminState::Present,
         };
         let decoded = decode_cursor(&encode_cursor(&tenant));

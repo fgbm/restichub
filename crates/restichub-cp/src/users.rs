@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext, allowed_role, ensure_target_not_above_actor};
 use crate::error::ApiError;
+use crate::jobs::format_time;
 use crate::json::ApiJson;
 use crate::password;
 use crate::server::AppState;
@@ -76,12 +77,25 @@ pub async fn list_users(
     context: RequestContext,
 ) -> Result<Json<UserListResponse>, ApiError> {
     context.authorize(Operation::UsersRead)?;
-    let members = context
-        .tenant_tx(&state, async |tx| Ok(users::list_members(tx).await?))
+    let (members, sign_ins) = context
+        .tenant_tx(&state, async |tx| {
+            let members = users::list_members(tx).await?;
+            let ids: Vec<UserId> = members.iter().map(|member| member.id).collect();
+            Ok((members, users::last_sign_ins(tx, &ids).await?))
+        })
         .await?;
-    Ok(Json(UserListResponse {
-        items: members.iter().map(UserView::from_member).collect(),
-    }))
+    let items = members
+        .iter()
+        .map(|member| {
+            let mut view = UserView::from_member(member);
+            view.last_sign_in_at = sign_ins
+                .iter()
+                .find(|(id, _)| *id == member.id)
+                .map(|(_, time)| format_time(*time));
+            view
+        })
+        .collect();
+    Ok(Json(UserListResponse { items }))
 }
 
 #[utoipa::path(
@@ -179,13 +193,18 @@ pub async fn get_user(
 ) -> Result<Json<UserView>, ApiError> {
     context.authorize(Operation::UsersRead)?;
     let user_id = parse_uuid(&id)?;
-    let member = context
-        .tenant_tx(&state, async |tx| Ok(users::get_member(tx, user_id).await?))
+    let (member, sign_ins) = context
+        .tenant_tx(&state, async |tx| {
+            let member = users::get_member(tx, user_id).await?;
+            Ok((member, users::last_sign_ins(tx, &[user_id]).await?))
+        })
         .await?;
-    match member {
-        Some(member) => Ok(Json(UserView::from_member(&member))),
-        None => Err(ApiError::not_found()),
-    }
+    let Some(member) = member else {
+        return Err(ApiError::not_found());
+    };
+    let mut view = UserView::from_member(&member);
+    view.last_sign_in_at = sign_ins.first().map(|(_, time)| format_time(*time));
+    Ok(Json(view))
 }
 
 /// Changes a member of the tenant.
@@ -358,7 +377,8 @@ pub async fn delete_user(
 
 /// Resets the password of a member (Admin action).
 ///
-/// A tenant Admin cannot reset the password of a shared account (HTTP 403 `shared_account`).
+/// A tenant Admin cannot reset the password of a shared account (HTTP 403 `shared_account`) or of
+/// its own account (HTTP 403).
 #[utoipa::path(
     post,
     path = "/api/v1/users/{id}/password",
@@ -369,7 +389,7 @@ pub async fn delete_user(
         (status = 204, description = "The password is changed."),
         (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
-        (status = 403, description = "The account is shared.", body = crate::error::ProblemBody),
+        (status = 403, description = "The account is shared or is the account of the caller.", body = crate::error::ProblemBody),
         (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody),
         (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
     )
@@ -382,6 +402,10 @@ pub async fn reset_password(
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::UsersWrite)?;
     let user_id = parse_uuid(&id)?;
+    // A reset of the own account skips the current password check of the self change.
+    if context.actor == Actor::User(user_id) {
+        return Err(ApiError::forbidden());
+    }
     validation::validate_password("new_password", &body.new_password)?;
 
     let member = context

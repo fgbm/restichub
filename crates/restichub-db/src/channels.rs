@@ -48,12 +48,24 @@ pub struct Channel {
     pub url_secret_id: Option<SecretId>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    /// The end of the last delivery attempt of an alert. A test send leaves no row.
+    pub last_delivery_at: Option<OffsetDateTime>,
+    pub last_delivery_ok: Option<bool>,
 }
 
+// `alert_deliveries_channel_attempt_idx` (0050) serves both subqueries.
 macro_rules! columns {
     () => {
         "id, name, kind, enabled, recipients, url_origin, secret_id, url_secret_id, \
-                       created_at, updated_at"
+         created_at, updated_at, \
+         (SELECT d.attempted_at FROM alert_deliveries d \
+          WHERE d.tenant_id = notification_channels.tenant_id \
+            AND d.channel_id = notification_channels.id AND d.attempted_at IS NOT NULL \
+          ORDER BY d.attempted_at DESC, d.id DESC LIMIT 1) AS last_delivery_at, \
+         (SELECT d.status = 'sent' FROM alert_deliveries d \
+          WHERE d.tenant_id = notification_channels.tenant_id \
+            AND d.channel_id = notification_channels.id AND d.attempted_at IS NOT NULL \
+          ORDER BY d.attempted_at DESC, d.id DESC LIMIT 1) AS last_delivery_ok"
     };
 }
 

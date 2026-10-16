@@ -48,7 +48,8 @@ function session(id: string, name: string, platformAdmin = false) {
 			display_name: 'Alice',
 			disabled: false,
 			role: 'admin' as const,
-			shared: false
+			shared: false,
+			platform_admin: platformAdmin
 		},
 		tenant: { id, name },
 		role: 'admin' as const,

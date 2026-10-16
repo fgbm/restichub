@@ -9,6 +9,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use utoipa::ToSchema;
 
+use restichub_db::job_search::CappedCount;
+
 use crate::error::ApiError;
 use crate::validation::Reason;
 
@@ -83,6 +85,24 @@ pub struct FacetValue {
 impl From<(String, i64)> for FacetValue {
     fn from((value, count): (String, i64)) -> Self {
         Self { value, count }
+    }
+}
+
+/// The number of rows of a state tab under the other filters of the list.
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+pub struct TabCount {
+    /// At most 10000.
+    pub count: i64,
+    /// More rows match than `count` shows.
+    pub capped: bool,
+}
+
+impl From<CappedCount> for TabCount {
+    fn from(value: CappedCount) -> Self {
+        Self {
+            count: value.count,
+            capped: value.capped,
+        }
     }
 }
 

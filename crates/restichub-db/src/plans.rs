@@ -21,6 +21,25 @@ pub const DEFAULT_PAGE_LIMIT: i64 = 50;
 
 pub const MAX_PAGE_LIMIT: i64 = 200;
 
+// `jobs_plan_last_success_idx` (0039) serves the lateral read of the last success.
+macro_rules! plan_select {
+    () => {
+        "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
+                p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
+                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
+                a.hostname AS agent_hostname, a.status AS agent_status, p.rpo_seconds, \
+                s.finished_at AS last_success_at \
+         FROM plans p \
+         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
+         JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
+         LEFT JOIN LATERAL ( \
+             SELECT j.finished_at FROM jobs j \
+             WHERE j.tenant_id = p.tenant_id AND j.plan_id = p.id AND j.kind = 'backup' \
+               AND j.status = 'succeeded' AND j.finished_at IS NOT NULL \
+             ORDER BY j.finished_at DESC LIMIT 1) s ON true"
+    };
+}
+
 /// A schedule that binds a profile to one agent, with a cron expression and a time zone
 /// (FR-SC-01, ADR-0010).
 ///
@@ -44,10 +63,13 @@ pub struct Plan {
     pub profile_name: String,
     /// The host name of the bound agent (display only).
     pub agent_hostname: String,
+    pub agent_status: AgentStatus,
     /// The repository of the bound profile (display only).
     pub repository_id: RepositoryId,
     /// The recovery point objective in seconds. `None` means the default of the schedule (ADR-0036).
     pub rpo_seconds: Option<i32>,
+    /// The finish time of the latest succeeded backup job of the plan.
+    pub last_success_at: Option<OffsetDateTime>,
 }
 
 /// The keyset cursor of the plan list. It orders by `(created_at, id)`.
@@ -157,18 +179,12 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &PlanPage) -> Result<PlanPageResu
         Some(cursor) => (Some(cursor.created_at), Some(cursor.id.as_uuid())),
         None => (None, None),
     };
-    let rows = sqlx::query_as::<_, PlanRow>(
-        "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
-                p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
-                a.hostname AS agent_hostname, p.rpo_seconds \
-         FROM plans p \
-         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
-         JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
-         WHERE ($1::timestamptz IS NULL OR (p.created_at, p.id) < ($1::timestamptz, $2::uuid)) \
+    let rows = sqlx::query_as::<_, PlanRow>(concat!(
+        plan_select!(),
+        " WHERE ($1::timestamptz IS NULL OR (p.created_at, p.id) < ($1::timestamptz, $2::uuid)) \
          ORDER BY p.created_at DESC, p.id DESC \
          LIMIT $3",
-    )
+    ))
     .bind(cursor_time)
     .bind(cursor_id)
     .bind(limit + 1)
@@ -183,20 +199,11 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &PlanPage) -> Result<PlanPageResu
 
 /// Reads one plan of the tenant of the transaction. A plan of another tenant is absent.
 pub async fn get(tx: &mut TenantTx<'_>, id: PlanId) -> Result<Option<Plan>, DbError> {
-    let row = sqlx::query_as::<_, PlanRow>(
-        "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
-                p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
-                a.hostname AS agent_hostname, p.rpo_seconds \
-         FROM plans p \
-         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
-         JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
-         WHERE p.id = $1",
-    )
-    .bind(id)
-    .fetch_optional(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
+    let row = sqlx::query_as::<_, PlanRow>(concat!(plan_select!(), " WHERE p.id = $1",))
+        .bind(id)
+        .fetch_optional(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
     Ok(row.map(Plan::from))
 }
 
@@ -225,17 +232,11 @@ pub async fn list_by_profile(
     tx: &mut TenantTx<'_>,
     profile_id: ProfileId,
 ) -> Result<Vec<Plan>, DbError> {
-    let rows = sqlx::query_as::<_, PlanRow>(
-        "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
-                p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
-                a.hostname AS agent_hostname, p.rpo_seconds \
-         FROM plans p \
-         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
-         JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
-         WHERE p.profile_id = $1 \
+    let rows = sqlx::query_as::<_, PlanRow>(concat!(
+        plan_select!(),
+        " WHERE p.profile_id = $1 \
          ORDER BY p.created_at, p.id",
-    )
+    ))
     .bind(profile_id)
     .fetch_all(tx.as_conn())
     .await
@@ -248,20 +249,12 @@ pub async fn list_by_profile(
 /// An update or a delete uses this function, so a concurrent change cannot remove the row between
 /// the read and the write.
 pub async fn get_for_update(tx: &mut TenantTx<'_>, id: PlanId) -> Result<Option<Plan>, DbError> {
-    let row = sqlx::query_as::<_, PlanRow>(
-        "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
-                p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
-                a.hostname AS agent_hostname, p.rpo_seconds \
-         FROM plans p \
-         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
-         JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
-         WHERE p.id = $1 FOR UPDATE OF p",
-    )
-    .bind(id)
-    .fetch_optional(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
+    let row =
+        sqlx::query_as::<_, PlanRow>(concat!(plan_select!(), " WHERE p.id = $1 FOR UPDATE OF p",))
+            .bind(id)
+            .fetch_optional(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
     Ok(row.map(Plan::from))
 }
 
@@ -400,7 +393,9 @@ struct PlanRow {
     profile_name: String,
     repository_id: RepositoryId,
     agent_hostname: String,
+    agent_status: AgentStatus,
     rpo_seconds: Option<i32>,
+    last_success_at: Option<OffsetDateTime>,
 }
 
 impl From<PlanRow> for Plan {
@@ -421,8 +416,10 @@ impl From<PlanRow> for Plan {
             created_by: row.created_by,
             profile_name: row.profile_name,
             agent_hostname: row.agent_hostname,
+            agent_status: row.agent_status,
             repository_id: row.repository_id,
             rpo_seconds: row.rpo_seconds,
+            last_success_at: row.last_success_at,
         }
     }
 }

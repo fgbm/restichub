@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
 const route = vi.hoisted(() => ({ url: new URL('http://localhost/settings/access/users') }));
 
 vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/paths', () => ({
+	resolve: (path: string, params?: Record<string, string>) =>
+		(params ? path.replace('[id]', params.id) : path).replace('/(app)', '')
+}));
 vi.mock('$app/navigation', () => ({
 	goto: (address: string) => {
 		route.url = new URL(address, 'http://localhost');
@@ -43,7 +47,9 @@ const users = [
 		display_name: 'Anna Petrova',
 		role: 'admin',
 		disabled: false,
-		shared: false
+		shared: false,
+		platform_admin: false,
+		last_sign_in_at: new Date(Date.now() - 2 * 3_600_000).toISOString()
 	},
 	{
 		id: 'u_02',
@@ -51,7 +57,8 @@ const users = [
 		display_name: 'Duty shift',
 		role: 'operator',
 		disabled: false,
-		shared: true
+		shared: true,
+		platform_admin: false
 	},
 	{
 		id: 'u_03',
@@ -59,7 +66,17 @@ const users = [
 		display_name: 'Olga Kotova',
 		role: 'viewer',
 		disabled: true,
-		shared: false
+		shared: false,
+		platform_admin: false
+	},
+	{
+		id: 'u_04',
+		username: 'root',
+		display_name: 'Root',
+		role: 'viewer',
+		disabled: false,
+		shared: false,
+		platform_admin: true
 	}
 ];
 
@@ -71,10 +88,17 @@ beforeEach(() => {
 });
 
 describe('Users screen', () => {
+	it('fr_ui_01 shows the last sign-in of a user that has one', async () => {
+		render(Users);
+		await screen.findByText('Anna Petrova');
+		expect(screen.getByText('signed in 2 h ago')).toBeInTheDocument();
+		expect(screen.getAllByText(/^signed in/)).toHaveLength(1);
+	});
+
 	it('shows the active users with the login, the role and a shared account', async () => {
 		render(Users);
 		await screen.findByText('Anna Petrova');
-		expect(screen.getByRole('button', { name: 'Active 2' })).toHaveAttribute(
+		expect(screen.getByRole('button', { name: 'Active 3' })).toHaveAttribute(
 			'aria-pressed',
 			'true'
 		);
@@ -83,6 +107,13 @@ describe('Users screen', () => {
 		expect(screen.getByText('apetrova')).toBeInTheDocument();
 		expect(screen.getByText('shared account')).toBeInTheDocument();
 		expect(document.querySelector('.status')).toBeNull();
+	});
+
+	it('links each user to its page and has no roles panel', async () => {
+		render(Users);
+		const link = await screen.findByRole('link', { name: 'Duty shift' });
+		expect(link).toHaveAttribute('href', '/settings/access/users/u_02');
+		expect(screen.queryByRole('heading', { name: 'Roles' })).toBeNull();
 	});
 
 	it('changes the role of a user in a small dialog', async () => {
@@ -95,5 +126,26 @@ describe('Users screen', () => {
 		await user.selectOptions(within(dialog).getByLabelText('Role'), 'viewer');
 		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(mocks.updateUser).toHaveBeenCalledWith('u_02', { role: 'viewer' }));
+	});
+
+	it('asks before it disables a user', async () => {
+		const user = userEvent.setup();
+		render(Users);
+		await screen.findByText('Duty shift');
+		await user.click(screen.getByRole('button', { name: 'More actions for Duty shift' }));
+		await user.click(await screen.findByText('Disable user'));
+		const dialog = await screen.findByRole('dialog', { name: 'Disable the user?' });
+		expect(mocks.updateUser).not.toHaveBeenCalled();
+		await user.click(within(dialog).getByRole('button', { name: 'Disable user' }));
+		await waitFor(() => expect(mocks.updateUser).toHaveBeenCalledWith('u_02', { disabled: true }));
+	});
+
+	it('disables the actions on an account with the Platform Admin right', async () => {
+		const user = userEvent.setup();
+		render(Users);
+		await screen.findByText('Root');
+		await user.click(screen.getByRole('button', { name: 'More actions for Root' }));
+		const item = (await screen.findByText('Change role')).closest('[data-disabled]');
+		expect(item).toHaveTextContent('A Platform Admin manages this account');
 	});
 });

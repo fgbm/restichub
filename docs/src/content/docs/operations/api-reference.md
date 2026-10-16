@@ -63,6 +63,29 @@ curl -s -b cookies.txt -X POST https://<control-plane>/api/v1/plans/<plan-id>/ru
 
 A request must not hold a cookie and a bearer token together. That request gives HTTP 400.
 
+## Users
+
+A Platform Admin reads and changes every account of the installation through the platform routes. A tenant scope gets HTTP 403 on these routes.
+
+| Route | Function |
+|---|---|
+| `GET /api/v1/platform/users` | Lists every account with its memberships. |
+| `GET /api/v1/platform/users/{id}` | Reads one account with its memberships and the field `platform_admin_count`, the number of the active Platform Admins. An unknown account gives HTTP 404 `not_found`. |
+| `POST /api/v1/platform/users/{id}/password` | Sets a new password from the field `new_password` (12 characters or more) and ends every session of the account. |
+| `PATCH /api/v1/platform/users/{id}` | Disables or enables the account, sets the email, grants or removes the Platform Admin right. |
+
+The password reset refuses the own account with HTTP 403 `forbidden`. To change your own password, send `POST /api/v1/auth/password` with the current password. The platform audit and the audit of each organization of the account record the reset without the password. In an organization, `POST /api/v1/users/{id}/password` also refuses the own account with HTTP 403 `forbidden`.
+
+```sh
+curl -s -X POST https://<control-plane>/api/v1/platform/users/<user-id>/password \
+  -b cookies.txt \
+  -H "X-ResticHub-CSRF: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"new_password": "<new-password>"}'
+```
+
+In an organization, `GET /api/v1/users` and `GET /api/v1/users/{id}` return the field `platform_admin`. When it is `true`, the organization scope cannot change the account: a change gives HTTP 403 `forbidden`.
+
 ## Errors
 
 An error response uses the media type of RFC 9457. The body holds these fields:
@@ -80,6 +103,10 @@ An error response uses the media type of RFC 9457. The body holds these fields:
 A list route returns `items` and `next_cursor`. To read the next page, send the value of `next_cursor` as the parameter `cursor`. The parameter `limit` sets the page size.
 
 The lists of hosts, jobs, alerts and audit records also read a numbered page. Send the parameter `offset` with the number of records to skip. The answer then has `total`, the number of records that agree with the filters. The control plane counts at most 10000 records. If more records agree, `total_capped` is `true`. An `offset` above 10000 gives HTTP 400 `invalid_argument` with the field `offset` and the reason `out_of_range`. Do not send `cursor` and `offset` together.
+
+The alert list also gives `counts`: the number of records of each state tab with the other filters. The job list gives `counts` when the request has `counts=true`, because each tab is a separate count. Each tab has `count` (at most 10000) and `capped`. The lists of hosts, jobs, alerts and audit records find text with the parameter `q`, at most 200 characters. The characters `%`, `_` and `\` match themselves. In the audit list, `q` finds a part of the action code, of the object name or of the actor name.
+
+An audit record gives `object_name` and `actor_name`: the current names of the object and of the actor. The value is null when the object is removed or has no name. In the platform list, the value is null also for an object inside an organization.
 
 ```sh
 curl -s "https://<control-plane>/api/v1/plans?limit=50" \
@@ -116,5 +143,6 @@ A reverse proxy must not buffer the stream. The response sets `X-Accel-Buffering
 
 ## Related pages
 
+- [Users](/restichub/operations/users/)
 - [Prometheus metrics](/restichub/operations/metrics/)
 - [Environment variables](/restichub/operations/environment-variables/)

@@ -106,6 +106,33 @@ pub async fn list_all(tx: &mut PlatformTx<'_>) -> Result<Vec<PlatformMembership>
         .collect())
 }
 
+/// Lists the memberships of one account (Platform Admin only).
+pub async fn list_for_account(
+    tx: &mut PlatformTx<'_>,
+    user_id: UserId,
+) -> Result<Vec<PlatformMembership>, DbError> {
+    let rows = sqlx::query_as::<_, (Uuid, String, Role, bool)>(
+        "SELECT tenant_id, tenant_name, role, disabled FROM auth_platform_memberships() \
+         WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(tenant_id, tenant_name, role, disabled)| PlatformMembership {
+                user_id,
+                tenant_id: TenantId::from_uuid(tenant_id),
+                tenant_name,
+                role,
+                disabled,
+            },
+        )
+        .collect())
+}
+
 /// Changes the role of a membership (Platform Admin only).
 ///
 /// The database function requires the platform scope, refuses the platform tenant and takes the

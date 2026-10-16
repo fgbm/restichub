@@ -232,6 +232,9 @@ pub fn write_body(
             Some(json!({"role": "viewer"}))
         }
         ("PATCH", "/api/v1/platform/users/{id}") => Some(json!({"disabled": true})),
+        ("POST", "/api/v1/platform/users/{id}/password") => {
+            Some(json!({"new_password": "a long enough password"}))
+        }
         ("POST", "/api/v1/auth/password") => Some(json!({
             "current_password": "wrong",
             "new_password": "a long enough password",
@@ -1140,6 +1143,22 @@ pub fn retry_after(response: &axum::response::Response) -> Option<String> {
 
 pub async fn test_db() -> Option<TestDatabase> {
     test_database().await
+}
+
+/// Runs one statement on a row of the tenant through the owner connection. `$1` is `id`.
+pub async fn exec(db: &TestDatabase, tenant: TenantId, sql: &str, id: uuid::Uuid) {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query(sqlx::AssertSqlSafe(sql.to_owned()))
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot run the statement");
+    tx.commit().await.expect("cannot commit the statement");
 }
 
 /// Builds an instant of the tests without the `time` macros feature.

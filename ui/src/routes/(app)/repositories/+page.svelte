@@ -31,6 +31,7 @@
 		StatusTone
 	} from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { ago, plural } from '#lib/list-format.ts';
 	import { iconOf, pillOf, repositoryState } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
@@ -181,7 +182,10 @@
 
 	const sort = $derived({
 		default: 'name',
-		options: [{ value: 'name', label: t('repositories.sort.name') }]
+		options: [
+			{ value: 'name', label: t('repositories.sort.name') },
+			{ value: 'check', label: t('repositories.sort.lastCheck') }
+		]
 	});
 
 	const shown = $derived.by(() => {
@@ -190,7 +194,10 @@
 				filters.value.state !== 'attention' || repositoryState(repository).tone !== 'normal'
 		);
 		const factor = filters.value.order === 'desc' ? -1 : 1;
-		return [...list].sort((a, b) => factor * a.name.localeCompare(b.name));
+		// A repository that was never checked is the oldest.
+		const key = (repository: Repository) =>
+			filters.value.sort === 'check' ? (repository.last_check?.finished_at ?? '') : repository.name;
+		return [...list].sort((a, b) => factor * key(a).localeCompare(key(b)));
 	});
 
 	const filtered = $derived(
@@ -208,9 +215,17 @@
 		return [
 			t(backendLabels[repository.backend.kind]),
 			{ text: backendAddress(repository), mono: true },
+			repository.last_check
+				? {
+						text: t('repositories.meta.checked', { time: ago(repository.last_check.finished_at) }),
+						time: repository.last_check.finished_at
+					}
+				: t('repositories.meta.notChecked'),
 			repository.maintenance_agent_id
 				? t('repositories.meta.maintenance', { name: maintenanceName(repository) })
-				: t('repositories.meta.noMaintenance')
+				: t('repositories.meta.noMaintenance'),
+			repository.snapshot_count != null &&
+				plural('repositories.snapshotCount', repository.snapshot_count)
 		];
 	}
 

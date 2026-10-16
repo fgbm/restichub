@@ -61,6 +61,7 @@ import type {
 	Plan,
 	PlanResponse,
 	PlatformUser,
+	PlatformUserRecord,
 	PlatformUserListResponse,
 	PreviewRequest,
 	PreviewResponse,
@@ -118,6 +119,7 @@ export interface ApiService {
 	instance(): Promise<Instance>;
 
 	listUsers(): Promise<User[]>;
+	getUser(id: string): Promise<User>;
 	createUser(request: CreateUserRequest): Promise<User>;
 	updateUser(id: string, patch: UpdateUserRequest): Promise<User>;
 	deleteUser(id: string): Promise<void>;
@@ -232,8 +234,11 @@ export interface ApiService {
 
 	/** Every account of the installation with its memberships (ADR-0028). */
 	listPlatformUsers(): Promise<PlatformUser[]>;
+	getPlatformUser(id: string): Promise<PlatformUserRecord>;
 	createPlatformUser(request: CreatePlatformUserRequest): Promise<PlatformUser>;
 	updatePlatformUser(id: string, patch: UpdateAccountRequest): Promise<void>;
+	/** Sets a new password and ends every session of the account (ADR-0029). */
+	resetPlatformUserPassword(id: string, request: ResetPasswordRequest): Promise<void>;
 	addPlatformMembership(id: string, request: MembershipInput): Promise<void>;
 	setPlatformMembershipRole(id: string, tenantId: string, request: SetRoleRequest): Promise<void>;
 	removePlatformMembership(id: string, tenantId: string): Promise<void>;
@@ -308,6 +313,7 @@ const httpService: ApiService = {
 
 	listUsers: () =>
 		api.get<UserListResponse>(endpoints.users.list).then((response) => response.items),
+	getUser: (id) => api.get<User>(endpoints.users.byId(id)),
 	createUser: (request) => api.post<User>(endpoints.users.create, request),
 	updateUser: (id, patch) => api.patch<User>(endpoints.users.byId(id), patch),
 	deleteUser: (id) => api.delete<void>(endpoints.users.byId(id)),
@@ -372,7 +378,7 @@ const httpService: ApiService = {
 		}),
 	listJobs: (query) =>
 		api.get<JobListResponse>(endpoints.jobs.list, {
-			query: (query ?? {}) as Record<string, string | number | undefined>
+			query: (query ?? {}) as Record<string, string | number | boolean | undefined>
 		}),
 	cancelJob: (id) => api.post<Job>(endpoints.jobs.cancel(id)),
 
@@ -426,8 +432,11 @@ const httpService: ApiService = {
 
 	listPlatformUsers: () =>
 		api.get<PlatformUserListResponse>(endpoints.platform.users).then((response) => response.items),
+	getPlatformUser: (id) => api.get<PlatformUserRecord>(endpoints.platform.userById(id)),
 	createPlatformUser: (request) => api.post<PlatformUser>(endpoints.platform.createUser, request),
 	updatePlatformUser: (id, patch) => api.patch<void>(endpoints.platform.userById(id), patch),
+	resetPlatformUserPassword: (id, request) =>
+		api.post<void>(endpoints.platform.userPassword(id), request),
 	addPlatformMembership: (id, request) =>
 		api.post<void>(endpoints.platform.userMemberships(id), request),
 	setPlatformMembershipRole: (id, tenantId, request) =>

@@ -634,7 +634,7 @@ fn map_account_unique(error: DbError) -> ApiError {
     }
 }
 
-fn parse_uuid(value: &str) -> Result<UserId, ApiError> {
+pub(crate) fn parse_uuid(value: &str) -> Result<UserId, ApiError> {
     Uuid::parse_str(value)
         .map(UserId::from_uuid)
         .map_err(|error| {

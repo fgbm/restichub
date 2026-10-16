@@ -69,6 +69,9 @@ function repository(overrides: Record<string, unknown> = {}) {
 		created_at: '2026-10-01T00:00:00Z',
 		updated_at: '2026-10-01T00:00:00Z',
 		created_by: 'u_01',
+		lock_state: 'free',
+		last_check: null,
+		snapshot_count: null,
 		...overrides
 	};
 }
@@ -87,6 +90,44 @@ describe('the Repositories screen maintenance', () => {
 
 		await screen.findByText('repo-a');
 		expect(screen.getByText('no maintenance host')).toBeInTheDocument();
+	});
+
+	it('fr_ui_01 shows the last check, the snapshot count and the state of the repository', async () => {
+		const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+		mocks.listRepositories.mockResolvedValue([
+			repository({
+				last_check: { finished_at: daysAgo(2), result: 'passed' },
+				snapshot_count: 146
+			}),
+			repository({
+				id: 'r_2',
+				name: 'repo-b',
+				lock_state: 'stale',
+				last_check: { finished_at: daysAgo(6), result: 'passed' }
+			}),
+			repository({
+				id: 'r_3',
+				name: 'repo-c',
+				lock_state: 'stale',
+				last_check: { finished_at: daysAgo(1), result: 'failed' }
+			})
+		]);
+		render(Repositories);
+
+		await screen.findByText('repo-a');
+		expect(screen.getByText('checked 2 d ago')).toBeInTheDocument();
+		expect(screen.getByText('146 snapshots')).toBeInTheDocument();
+		expect(screen.getByText('Stale lock', { selector: '.status' })).toHaveClass('status--warning');
+		// A failed check outranks the stale lock of the same repository.
+		expect(screen.getByText('Check failed', { selector: '.status' })).toHaveClass('status--failed');
+		expect(screen.getByRole('button', { name: 'Need attention 2' })).toBeInTheDocument();
+	});
+
+	it('fr_ui_01 says that a repository was never checked', async () => {
+		render(Repositories);
+		await screen.findByText('repo-a');
+		expect(screen.getByText('not checked')).toBeInTheDocument();
+		expect(screen.queryByText(/snapshots?$/)).not.toBeInTheDocument();
 	});
 
 	it('fr_rp_08 opens the repository page from the row and has no Edit action', async () => {
