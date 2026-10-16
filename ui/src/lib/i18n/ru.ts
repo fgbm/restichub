@@ -2031,5 +2031,13 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.facet.os': 'ОС',
 	'hosts.facet.label': 'Метка',
 	'hosts.facet.agent': 'Версия агента',
-	'alerts.facet.kind': 'Вид'
+	'alerts.facet.kind': 'Вид',
+	'channels.tab.all': 'Все',
+	'channels.tab.disabled': 'Отключены',
+	'channels.sort.name': 'Имя',
+	'channels.enable': 'Включить',
+	'channels.disable': 'Отключить',
+	'channels.enabledToast': 'Канал включён.',
+	'channels.disabledToast': 'Канал отключён.',
+	'list.changed': 'изменён {time}'
 };

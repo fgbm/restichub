@@ -190,14 +190,18 @@ describe('the channel settings', () => {
 		);
 	});
 
-	it('deletes a channel after the confirmation', async () => {
+	it('deletes a channel from its form after the confirmation', async () => {
 		const user = userEvent.setup();
 		mocks.listChannels.mockResolvedValueOnce(list([channel()])).mockResolvedValueOnce(list([]));
 		mocks.deleteChannel.mockResolvedValue(undefined);
 		render(Channels);
 		await screen.findByText('ops-mail');
 
-		await user.click(screen.getByRole('button', { name: 'Delete channel' }));
+		// The item keeps two actions: send a test and turn the channel on or off.
+		expect(screen.queryByRole('button', { name: 'Delete channel' })).toBeNull();
+		await user.click(screen.getByRole('button', { name: 'ops-mail' }));
+		const form = await screen.findByRole('dialog', { name: 'Edit the channel' });
+		await user.click(within(form).getByRole('button', { name: 'Delete channel' }));
 		const dialog = await screen.findByRole('dialog', { name: 'Delete the channel?' });
 		await user.click(within(dialog).getByRole('button', { name: 'Delete channel' }));
 

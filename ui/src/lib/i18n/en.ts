@@ -2020,7 +2020,15 @@ export const en = {
 	'hosts.facet.os': 'OS',
 	'hosts.facet.label': 'Label',
 	'hosts.facet.agent': 'Agent version',
-	'alerts.facet.kind': 'Kind'
+	'alerts.facet.kind': 'Kind',
+	'channels.tab.all': 'All',
+	'channels.tab.disabled': 'Disabled',
+	'channels.sort.name': 'Name',
+	'channels.enable': 'Enable',
+	'channels.disable': 'Disable',
+	'channels.enabledToast': 'The channel is enabled.',
+	'channels.disabledToast': 'The channel is disabled.',
+	'list.changed': 'changed {time}'
 } as const;
 
 export type MessageKey = keyof typeof en;
