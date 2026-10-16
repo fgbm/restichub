@@ -174,6 +174,7 @@ The agent installs itself, so you do not copy files by hand. The command copies 
 | Restic | `/opt/restichub-agent/bin/restic` | `%ProgramFiles%\ResticHub\Agent\restic.exe` |
 | Identity, status file, restic record, cache, journal | `/etc/restichub-agent`, `/var/lib/restichub-agent`, `/var/cache/restichub-agent` | `%ProgramData%\ResticHub\Agent` |
 | Default restore root | `/var/lib/restichub-restore` | `%ProgramData%\ResticHub-Restore` |
+| Service log | journald | `%ProgramData%\ResticHub\Agent\logs` and the Application event log |
 
 An older install kept restic in `/var/lib/restichub-agent/bin`. An older Windows install kept it in `%ProgramFiles%\ResticHub\Agent\bin` or in `%ProgramData%\ResticHub\Agent\bin`. `register` and `install-service` stop a running service, move restic into the program directory and point the service at the new path. They remove the old copies and the empty `bin` directory. The agent checks the moved file against the hash in the record. The identity stays, so the host does not register again. A Windows service moves restic by itself when it starts with the new agent. It keeps working without a new `register`. To migrate an old install, unpack the new agent package and run `restichub-agent install-service` as `root` or Administrator.
 
@@ -202,6 +203,33 @@ The command stops at an item that it cannot repair. Such an item has another own
 
 On Linux the command needs no repair: it sets the mode of `/etc/restichub-agent` itself, and an old install leaves no directory that the command refuses.
 
+### Agent logs
+
+A command that you start in a console, for example `register` or `status`, writes its log to the standard error.
+
+On Linux the service writes its log to journald. Read it with `journalctl -u restichub-agent`.
+
+On Windows the service writes its log to two locations:
+
+- The directory `%ProgramData%\ResticHub\Agent\logs` holds the full log. Only SYSTEM and Administrators can read it. The files have the names `agent-000001.log`, `agent-000002.log` and so on. The file with the highest number is the current file. When the current file is 10 MB, the service starts the next file. The service keeps 5 files and deletes the oldest file.
+- The Application event log holds each warning and each error, with the source `ResticHub Agent`. The service control manager writes the start and the stop of the service to the System log.
+
+To read the events, open Event Viewer, go to "Windows Logs" > "Application" and click "Filter Current Log". Select the event source `ResticHub Agent`. In PowerShell, use this command:
+
+```powershell
+Get-WinEvent -ProviderName 'ResticHub Agent' -MaxEvents 50 | Format-List TimeCreated, LevelDisplayName, Message
+```
+
+To read the last lines of the full log, use an elevated PowerShell:
+
+```powershell
+Get-ChildItem "$env:ProgramData\ResticHub\Agent\logs\agent-*.log" | Sort-Object Name | Select-Object -Last 1 | Get-Content -Tail 100
+```
+
+`install-service` registers the event source, and `uninstall-service` removes it. The events and the log files stay after `uninstall-service`. If the service cannot write a log file or an event, it writes one warning and then writes these lines to the standard error. A log failure does not stop a job.
+
+The log holds no repository password and no other secret.
+
 ### Troubleshooting
 
 The exit code is 0 on success and 1 on an error. The exit code is 78 when the service starts without a usable identity. The systemd unit does not restart the service after the code 78, because a restart cannot create an identity.
@@ -216,7 +244,7 @@ The exit code is 0 on success and 1 on an error. The exit code is 78 when the se
 | The error says that restic cannot be downloaded | The host cannot reach GitHub. | Use a proxy or the offline files (see "The restic binary"). The token stays unused. |
 | The control plane refuses the token | The token is used, expired or cancelled. | Create a new token with "Add host". |
 | `register first: restichub-agent register ...` | `install-service` found no valid identity. | Run `register` with a new token. |
-| `service: installed, not running` | The service stopped at the start. | On Linux read `journalctl -u restichub-agent`. On Windows read the Application log. Fix the cause and run `install-service`. |
+| `service: installed, not running` | The service stopped at the start. | On Linux read `journalctl -u restichub-agent`. On Windows read the events of the source `ResticHub Agent` in the Application log and the files in `%ProgramData%\ResticHub\Agent\logs` (see "Agent logs"). Fix the cause and run `install-service`. |
 | `connection: not connected ... after the wait` | The agent cannot reach the control plane. | Check the clock of the host, the firewall to port 8443 and the URL. Run `status` to read the last error. |
 | `cannot load the agent identity in ...; register the agent again with a new enrollment token` | The identity directory is damaged or empty. The service exits with code 78 and does not restart. | Create a token with "Re-register" and run `register --force` with it. |
 | The host stays in "Waiting for connection" | The service does not run, or it cannot reach the control plane. | Run `restichub-agent status` and read "last error". Check the service, the clock and the firewall. |

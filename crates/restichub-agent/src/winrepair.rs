@@ -476,6 +476,7 @@ fn config_entries() -> Vec<(String, Kind)> {
     }
     names.push((crate::identity::ROTATION_MARKER.to_owned(), Kind::Staged));
     names.push((crate::log_spool::SPOOL_DIR.to_owned(), Kind::Agent));
+    names.push((crate::logging::LOGS_DIR.to_owned(), Kind::Agent));
     names.push((crate::preflight::PROBE_FILE.to_owned(), Kind::Agent));
     // Windows keeps the cache and, in older builds, restic below the configuration directory.
     names.extend(
@@ -910,6 +911,23 @@ mod tests {
         result.expect("the repair must succeed");
         assert!(!is_open(&file), "the explicit entry must be gone");
         assert_eq!(actions, vec![Action::Protected(file)]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_the_service_log_is_a_known_entry_and_its_files_are_protected() {
+        let (base, root, config) = tree("repair-logs");
+        let logs = config.join(crate::logging::LOGS_DIR);
+        create_protected_tree(&logs, &root).expect("cannot create the logs directory");
+        let file = logs.join("agent-000001.log");
+        create_protected_file(&file, b"line\n").expect("cannot write");
+        grant(&file, "(R,W)").expect("cannot add the entry");
+        grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let (result, actions) = repair_with(&config, &root, UntrustedIdentity::Remove);
+        result.expect("the repair must succeed");
+        check_admin_only(&config).expect("the directory must be protected");
+        assert!(!is_open(&file), "the entry on the log file must be gone");
+        assert!(actions.contains(&Action::Protected(file)), "{actions:?}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -36,6 +36,7 @@ pub fn run_as_service() -> windows_service::Result<()> {
 }
 
 fn service_main(_arguments: Vec<OsString>) {
+    crate::logging::init_service();
     if let Err(error) = run_service() {
         tracing::error!(%error, "the service stopped with an error");
     }
@@ -175,6 +176,7 @@ pub fn install(restic: &Path) -> Result<()> {
         ]),
     })?;
     service.set_failure_actions_on_non_crash_failures(true)?;
+    crate::logging::register_event_source()?;
     // A running service restarts, so that it uses the new executable path.
     stop_and_wait(&service)?;
     // A start failure is reported, not hidden behind a success message.
@@ -291,7 +293,7 @@ pub fn uninstall() -> Result<()> {
             if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
         {
             println!("the service {SERVICE_NAME} is not installed");
-            return Ok(());
+            return crate::logging::remove_event_source();
         }
         Err(error) => return Err(error.into()),
     };
@@ -299,6 +301,7 @@ pub fn uninstall() -> Result<()> {
     if service.query_status()?.current_state != ServiceState::Stopped {
         let _ = service.stop();
     }
+    crate::logging::remove_event_source()?;
     println!("the service {SERVICE_NAME} is removed");
     Ok(())
 }
