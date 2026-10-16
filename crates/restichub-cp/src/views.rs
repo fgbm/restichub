@@ -154,6 +154,16 @@ impl PlatformUserView {
     }
 }
 
+/// One installation account for its record page.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlatformUserRecordView {
+    #[serde(flatten)]
+    pub account: PlatformUserView,
+    /// The number of the active accounts with the Platform Admin right in the installation. The
+    /// last one cannot lose the right or be disabled (HTTP 409).
+    pub platform_admin_count: i64,
+}
+
 fn format_time(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }

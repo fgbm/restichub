@@ -19,7 +19,7 @@ The "…" menu of the list has "Change role", "Reset password" and "Disable user
 
 Some actions are not available:
 
-- An Admin cannot change its own role and cannot disable itself.
+- An Admin cannot change its own role, cannot disable itself and cannot reset its own password.
 - An Admin cannot reset the password of a shared account. A shared account has a membership in another organization. The user or a Platform Admin resets that password.
 - An Admin cannot change an account with the Platform Admin right. Only a Platform Admin manages it.
 
@@ -49,7 +49,11 @@ The Platform Admin right gives no access to the data of an organization. To work
 3. Enter a new password with 12 characters or more.
 4. Select "Reset password".
 
-The old password stops, and every session of the account ends. The audit log records the reset without the password.
+The old password stops, and every session of the account ends. The platform audit and the audit of each organization of the account record the reset without the password.
+
+The reset does not revoke the API tokens that the account created. To stop all access of the account, revoke these tokens separately.
+
+A Platform Admin can reset the password of another Platform Admin.
 
 A Platform Admin cannot reset its own password on this page. To change your own password, send `POST /api/v1/auth/password` with the current password.
 

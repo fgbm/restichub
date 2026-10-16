@@ -1,8 +1,9 @@
 -- The password reset of an account by the Platform Admin (ADR-0025, ADR-0029).
 --
 -- `auth_admin_set_password` needs a membership in the current tenant, so the platform scope cannot
--- use it for an account of any organization. This function needs the platform tenant or the
--- platform scope and no membership. The caller ends the sessions of the account in the same
+-- use it for an account of any organization. This function needs the platform scope and no
+-- membership. A tenant transaction of the platform tenant is refused too: a session without an
+-- organization runs in it (ADR-0029). The caller ends the sessions of the account in the same
 -- transaction. The status is `ok`, `not_found` or `forbidden`.
 
 GRANT CREATE ON SCHEMA public TO restichub_auth;
@@ -13,12 +14,8 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
-DECLARE
-    current_tenant uuid := NULLIF(current_setting('restichub.tenant_id', true), '')::uuid;
 BEGIN
-    IF current_tenant IS DISTINCT FROM '00000000-0000-7000-8000-000000000000'::uuid
-       AND current_setting('restichub.scope', true) IS DISTINCT FROM 'platform'
-    THEN
+    IF current_setting('restichub.scope', true) IS DISTINCT FROM 'platform' THEN
         RETURN 'forbidden';
     END IF;
     PERFORM 1 FROM public.users WHERE id = account_id FOR UPDATE;

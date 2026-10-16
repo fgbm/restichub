@@ -175,7 +175,7 @@
 	}
 
 	function rowActions(user: User): RowAction[] {
-		const resetLock = orgResetLock(user);
+		const resetLock = orgResetLock(user, selfId);
 		const changeLock = orgChangeLock(user, selfId);
 		return [
 			{

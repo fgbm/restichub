@@ -54,6 +54,7 @@ function account(overrides: Record<string, unknown> = {}) {
 			{ tenant_id: 't_01', tenant_name: 'acme', role: 'operator', disabled: false },
 			{ tenant_id: 't_03', tenant_name: 'initech', role: 'viewer', disabled: false }
 		],
+		platform_admin_count: 2,
 		...overrides
 	};
 }
@@ -76,7 +77,6 @@ beforeEach(() => {
 		tenant('t_03', 'initech', 'suspended'),
 		tenant('t_04', 'umbrella')
 	]);
-	mocks.listPlatformUsers.mockResolvedValue([self, account()]);
 	mocks.setPlatformMembershipRole.mockResolvedValue(undefined);
 	mocks.addPlatformMembership.mockResolvedValue(undefined);
 	mocks.removePlatformMembership.mockResolvedValue(undefined);
@@ -211,6 +211,20 @@ describe('Platform user page', () => {
 		);
 		expect(revoke).toHaveTextContent('This is your account');
 		expect(screen.getByText('Disable user').closest('[data-disabled]')).not.toBeNull();
+	});
+
+	it('locks the right of the last Platform Admin from the count of the record', async () => {
+		const user = userEvent.setup();
+		mocks.getPlatformUser.mockResolvedValue(
+			account({ platform_admin: true, platform_admin_count: 1 })
+		);
+		render(PlatformUserPage, { userId: 'u_02' });
+		await user.click(await screen.findByRole('button', { name: 'More actions for Ivan Egorkin' }));
+		const revoke = (await screen.findByText('Remove the Platform Admin right')).closest(
+			'[data-disabled]'
+		);
+		expect(revoke).toHaveTextContent('This is the last Platform Admin');
+		expect(mocks.listPlatformUsers).not.toHaveBeenCalled();
 	});
 
 	it('explains the empty memberships of a Platform Admin', async () => {

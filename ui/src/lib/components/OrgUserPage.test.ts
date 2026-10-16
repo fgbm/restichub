@@ -130,10 +130,12 @@ describe('Organization user page', () => {
 		expect(item).toHaveTextContent('A Platform Admin manages this account');
 	});
 
-	it('disables the own role and the own disable switch', async () => {
+	it('disables the own role, the own disable switch and the own reset', async () => {
 		mocks.getUser.mockResolvedValue(member({ id: 'u_01', role: 'admin' }));
 		render(OrgUserPage, { userId: 'u_01' });
 		expect(await screen.findByLabelText('Role')).toBeDisabled();
-		expect(screen.getByRole('button', { name: 'Reset password' })).toBeEnabled();
+		const reset = screen.getByRole('button', { name: 'Reset password' });
+		expect(reset).toBeDisabled();
+		expect(reset).toHaveAttribute('title', 'This is your account');
 	});
 });

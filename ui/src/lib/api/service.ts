@@ -61,6 +61,7 @@ import type {
 	Plan,
 	PlanResponse,
 	PlatformUser,
+	PlatformUserRecord,
 	PlatformUserListResponse,
 	PreviewRequest,
 	PreviewResponse,
@@ -233,7 +234,7 @@ export interface ApiService {
 
 	/** Every account of the installation with its memberships (ADR-0028). */
 	listPlatformUsers(): Promise<PlatformUser[]>;
-	getPlatformUser(id: string): Promise<PlatformUser>;
+	getPlatformUser(id: string): Promise<PlatformUserRecord>;
 	createPlatformUser(request: CreatePlatformUserRequest): Promise<PlatformUser>;
 	updatePlatformUser(id: string, patch: UpdateAccountRequest): Promise<void>;
 	/** Sets a new password and ends every session of the account (ADR-0029). */
@@ -431,7 +432,7 @@ const httpService: ApiService = {
 
 	listPlatformUsers: () =>
 		api.get<PlatformUserListResponse>(endpoints.platform.users).then((response) => response.items),
-	getPlatformUser: (id) => api.get<PlatformUser>(endpoints.platform.userById(id)),
+	getPlatformUser: (id) => api.get<PlatformUserRecord>(endpoints.platform.userById(id)),
 	createPlatformUser: (request) => api.post<PlatformUser>(endpoints.platform.createUser, request),
 	updatePlatformUser: (id, patch) => api.patch<void>(endpoints.platform.userById(id), patch),
 	resetPlatformUserPassword: (id, request) =>

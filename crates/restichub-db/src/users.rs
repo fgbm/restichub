@@ -192,9 +192,9 @@ pub async fn admin_set_password(
 }
 
 /// The password write of the Platform Admin for any account (migration 0051). It needs the platform
-/// tenant or the platform scope and no membership.
+/// scope and no membership.
 pub async fn platform_set_password(
-    tx: &mut TenantTx<'_>,
+    tx: &mut PlatformTx<'_>,
     id: UserId,
     password_hash: &str,
 ) -> Result<WriteStatus, DbError> {
@@ -378,6 +378,43 @@ pub async fn list_platform_accounts(
             },
         )
         .collect())
+}
+
+/// `None` when no account has the id.
+pub async fn platform_account(
+    tx: &mut PlatformTx<'_>,
+    id: UserId,
+) -> Result<Option<PlatformAccount>, DbError> {
+    let row = sqlx::query_as::<_, (String, String, Option<String>, bool, bool, bool)>(
+        "SELECT username, display_name, email, email_verified, disabled, platform_admin \
+         FROM auth_platform_accounts() WHERE user_id = $1",
+    )
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(
+        |(username, display_name, email, email_verified, disabled, platform_admin)| {
+            PlatformAccount {
+                id,
+                username,
+                display_name,
+                email,
+                email_verified,
+                disabled,
+                platform_admin,
+            }
+        },
+    ))
+}
+
+/// Counts the active installation administrators in a platform transaction (ADR-0029).
+pub async fn platform_admin_count_platform(tx: &mut PlatformTx<'_>) -> Result<i64, DbError> {
+    let (count,): (i64,) = sqlx::query_as("SELECT auth_platform_admin_count()")
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(count)
 }
 
 /// Creates an installation account (Platform Admin only).

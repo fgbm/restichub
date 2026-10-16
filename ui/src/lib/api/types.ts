@@ -406,6 +406,8 @@ export type AdminState = components['schemas']['AdminState'];
 /** An installation account with its memberships (ADR-0028). */
 export type PlatformUser = components['schemas']['PlatformUserView'];
 
+export type PlatformUserRecord = components['schemas']['PlatformUserRecordView'];
+
 export type PlatformMembership = components['schemas']['PlatformMembershipView'];
 
 export type PlatformUserListResponse = components['schemas']['PlatformUserListResponse'];

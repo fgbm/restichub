@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { PlatformMembership, PlatformUser, Role, Tenant } from '#lib/api/index.ts';
+	import type { PlatformMembership, PlatformUserRecord, Role, Tenant } from '#lib/api/index.ts';
 	import PlatformUserDialogs from './PlatformUserDialogs.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import {
@@ -19,7 +19,7 @@
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
-	import { activePlatformAdmins, platformChangeLock, platformResetLock } from '#lib/user-locks.ts';
+	import { platformChangeLock, platformResetLock } from '#lib/user-locks.ts';
 	import { userState } from '#lib/vocabulary.ts';
 
 	let { userId }: { userId: string } = $props();
@@ -28,9 +28,8 @@
 	const ASSIGNABLE: Role[] = ['admin', 'operator', 'viewer'];
 	const ROLE_RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2, platform_admin: 3 };
 
-	let user = $state<PlatformUser | null>(null);
+	let user = $state<PlatformUserRecord | null>(null);
 	let tenants = $state<Tenant[]>([]);
-	let activeAdmins = $state(0);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 
@@ -70,15 +69,12 @@
 
 	async function load(): Promise<void> {
 		try {
-			// The list gives the number of the active Platform Admins for the last-admin guard.
-			const [account, tenantList, accounts] = await Promise.all([
+			const [account, tenantList] = await Promise.all([
 				service.getPlatformUser(userId),
-				service.listTenants(),
-				service.listPlatformUsers()
+				service.listTenants()
 			]);
 			user = account;
 			tenants = tenantList;
-			activeAdmins = activePlatformAdmins(accounts);
 			roleDrafts = Object.fromEntries(
 				account.memberships.map((member) => [member.tenant_id, member.role])
 			);
@@ -93,7 +89,9 @@
 	onMount(load);
 
 	const resetLock = $derived(user ? platformResetLock(user, selfId) : null);
-	const changeLock = $derived(user ? platformChangeLock(user, selfId, activeAdmins) : null);
+	const changeLock = $derived(
+		user ? platformChangeLock(user, selfId, user.platform_admin_count) : null
+	);
 
 	const menuItems = $derived.by<MenuItem[]>(() => {
 		const account = user;
@@ -165,7 +163,8 @@
 		];
 	}
 
-	/** The own role may only rise: a lower role in the current organization would outlive the session. */
+	// The own role may only rise, as on the organization screens. The server allows a lower role;
+	// the owner chose not to offer it here.
 	function roleOptionsOf(member: PlatformMembership): SelectOption[] {
 		if (!self) return roleOptions;
 		return roleOptions.filter(

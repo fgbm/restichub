@@ -950,7 +950,9 @@ export interface paths {
         /**
          * Resets the password of an account and ends every session of it (Platform Admin only).
          * @description The caller's own account is refused with HTTP 403: the caller changes its own password with the
-         *     current password. A shared account is no obstacle in the platform scope (ADR-0025).
+         *     current password. A shared account and another Platform Admin are no obstacle in the platform
+         *     scope (ADR-0025, ADR-0029). The reset is recorded in the platform audit and in the audit of each
+         *     organization of the account.
          */
         post: operations["reset_password"];
         delete?: never;
@@ -1436,7 +1438,8 @@ export interface paths {
         put?: never;
         /**
          * Resets the password of a member (Admin action).
-         * @description A tenant Admin cannot reset the password of a shared account (HTTP 403 `shared_account`).
+         * @description A tenant Admin cannot reset the password of a shared account (HTTP 403 `shared_account`) or of
+         *     its own account (HTTP 403).
          */
         post: operations["reset_password"];
         delete?: never;
@@ -2771,6 +2774,15 @@ export interface components {
         };
         PlatformUserListResponse: {
             items: components["schemas"]["PlatformUserView"][];
+        };
+        /** @description One installation account for its record page. */
+        PlatformUserRecordView: components["schemas"]["PlatformUserView"] & {
+            /**
+             * Format: int64
+             * @description The number of the active accounts with the Platform Admin right in the installation. The
+             *     last one cannot lose the right or be disabled (HTTP 409).
+             */
+            platform_admin_count: number;
         };
         /** @description An installation account with its memberships (ADR-0028). */
         PlatformUserView: {
@@ -6849,7 +6861,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlatformUserView"];
+                    "application/json": components["schemas"]["PlatformUserRecordView"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9566,7 +9578,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The account is shared. */
+            /** @description The account is shared or is the account of the caller. */
             403: {
                 headers: {
                     [name: string]: unknown;

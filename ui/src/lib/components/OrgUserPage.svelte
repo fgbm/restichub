@@ -66,7 +66,7 @@
 
 	onMount(load);
 
-	const resetLock = $derived(user ? orgResetLock(user) : null);
+	const resetLock = $derived(user ? orgResetLock(user, selfId) : null);
 	const changeLock = $derived(user ? orgChangeLock(user, selfId) : null);
 
 	const menuItems = $derived.by<MenuItem[]>(() => {

@@ -5,7 +5,6 @@
 import type { PlatformUser, User } from '#lib/api/index.ts';
 import { t } from '#lib/i18n/index.ts';
 
-/** The active accounts with the Platform Admin right. */
 export function activePlatformAdmins(accounts: PlatformUser[]): number {
 	return accounts.filter((account) => account.platform_admin && !account.disabled).length;
 }
@@ -33,7 +32,9 @@ function managedLock(user: User): string | null {
 	return user.platform_admin ? t('users.platformManagedHint') : null;
 }
 
-export function orgResetLock(user: User): string | null {
+/** An Admin changes its own password with the current password only. */
+export function orgResetLock(user: User, selfId: string | null): string | null {
+	if (user.id === selfId) return t('users.selfHint');
 	return managedLock(user) ?? (user.shared ? t('users.sharedResetHint') : null);
 }
 

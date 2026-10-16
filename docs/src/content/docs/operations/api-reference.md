@@ -70,11 +70,11 @@ A Platform Admin reads and changes every account of the installation through the
 | Route | Function |
 |---|---|
 | `GET /api/v1/platform/users` | Lists every account with its memberships. |
-| `GET /api/v1/platform/users/{id}` | Reads one account with its memberships. An unknown account gives HTTP 404 `not_found`. |
+| `GET /api/v1/platform/users/{id}` | Reads one account with its memberships and the field `platform_admin_count`, the number of the active Platform Admins. An unknown account gives HTTP 404 `not_found`. |
 | `POST /api/v1/platform/users/{id}/password` | Sets a new password from the field `new_password` (12 characters or more) and ends every session of the account. |
 | `PATCH /api/v1/platform/users/{id}` | Disables or enables the account, sets the email, grants or removes the Platform Admin right. |
 
-The password reset refuses the own account with HTTP 403 `forbidden`. To change your own password, send `POST /api/v1/auth/password` with the current password. The audit log of the platform records the reset without the password.
+The password reset refuses the own account with HTTP 403 `forbidden`. To change your own password, send `POST /api/v1/auth/password` with the current password. The platform audit and the audit of each organization of the account record the reset without the password. In an organization, `POST /api/v1/users/{id}/password` also refuses the own account with HTTP 403 `forbidden`.
 
 ```sh
 curl -s -X POST https://<control-plane>/api/v1/platform/users/<user-id>/password \

@@ -358,7 +358,8 @@ pub async fn delete_user(
 
 /// Resets the password of a member (Admin action).
 ///
-/// A tenant Admin cannot reset the password of a shared account (HTTP 403 `shared_account`).
+/// A tenant Admin cannot reset the password of a shared account (HTTP 403 `shared_account`) or of
+/// its own account (HTTP 403).
 #[utoipa::path(
     post,
     path = "/api/v1/users/{id}/password",
@@ -369,7 +370,7 @@ pub async fn delete_user(
         (status = 204, description = "The password is changed."),
         (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
-        (status = 403, description = "The account is shared.", body = crate::error::ProblemBody),
+        (status = 403, description = "The account is shared or is the account of the caller.", body = crate::error::ProblemBody),
         (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody),
         (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
     )
@@ -382,6 +383,10 @@ pub async fn reset_password(
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::UsersWrite)?;
     let user_id = parse_uuid(&id)?;
+    // A reset of the own account skips the current password check of the self change.
+    if context.actor == Actor::User(user_id) {
+        return Err(ApiError::forbidden());
+    }
     validation::validate_password("new_password", &body.new_password)?;
 
     let member = context

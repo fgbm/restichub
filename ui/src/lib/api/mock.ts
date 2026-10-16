@@ -64,6 +64,7 @@ import type {
 	Plan,
 	PlanResponse,
 	PlatformUser,
+	PlatformUserRecord,
 	PreviewResponse,
 	PreviewScheduleRequest,
 	Profile,
@@ -2089,10 +2090,16 @@ export class MockApiService {
 		return [...this.platformUsers];
 	}
 
-	async getPlatformUser(id: string): Promise<PlatformUser> {
+	async getPlatformUser(id: string): Promise<PlatformUserRecord> {
 		const user = this.platformUsers.find((item) => item.id === id);
 		if (!user) throw new ApiError({ status: 404, code: 'not_found', title: 'Not Found' });
-		return { ...user, memberships: user.memberships.map((member) => ({ ...member })) };
+		return {
+			...user,
+			memberships: user.memberships.map((member) => ({ ...member })),
+			platform_admin_count: this.platformUsers.filter(
+				(item) => item.platform_admin && !item.disabled
+			).length
+		};
 	}
 
 	async resetPlatformUserPassword(id: string, _request: ResetPasswordRequest): Promise<void> {
