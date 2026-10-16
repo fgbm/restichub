@@ -1953,5 +1953,12 @@ export const ru: Record<MessageKey, string> = {
 	'secrets.used': 'Используется',
 	'tenants.status.active': 'Активна',
 	'tenants.status.suspended': 'Приостановлена',
-	'tenants.status.noAdmin': 'Нет администратора'
+	'tenants.status.noAdmin': 'Нет администратора',
+	'time.months': 'янв,фев,мар,апр,мая,июн,июл,авг,сен,окт,ноя,дек',
+	'time.dayMonth': '{day} {month}',
+	'time.dayMonthYear': '{day} {month} {year}',
+	'list.scripts.one': '{n} скрипт',
+	'list.scripts.few': '{n} скрипта',
+	'list.scripts.many': '{n} скриптов',
+	'list.scripts.other': '{n} скрипта'
 };

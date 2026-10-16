@@ -21,6 +21,7 @@
 		EmptyState,
 		JsonDiff,
 		KeyValue,
+		ListView,
 		PageHeader,
 		Pagination,
 		Panel,
@@ -38,7 +39,15 @@
 		Toast,
 		Tooltip
 	} from '#lib/components/ui/index.ts';
-	import type { IconName, MenuItem, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		IconName,
+		ListMeta,
+		MenuItem,
+		StatusTone,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { iconOf, jobState, pillOf } from '#lib/vocabulary.ts';
+	import type { Job } from '#lib/api/index.ts';
 
 	let confirmOpen = $state(false);
 	let destructiveOpen = $state(false);
@@ -111,6 +120,52 @@
 			status: 'Offline',
 			tone: 'failed',
 			lastBackup: '2 days ago'
+		}
+	];
+
+	interface Run {
+		id: string;
+		name: string;
+		job: Pick<Job, 'status' | 'result_code'>;
+		meta: ListMeta[];
+		duration: string;
+		day: string;
+	}
+
+	let listFilters = $state<Record<string, string>>({});
+
+	const runs: Run[] = [
+		{
+			id: 'r1',
+			name: 'srv-db-01-postgres',
+			job: { status: 'running' },
+			meta: ['srv-db-01', 'today 09:40', 'Backup', 'test-s3-yandex'],
+			duration: '3 min 05 s',
+			day: 'Today, 16 October'
+		},
+		{
+			id: 'r2',
+			name: 'user-profiles',
+			job: { status: 'failed' },
+			meta: ['BUH-PC07', 'today 02:00', 'Backup', 'test-s3-yandex'],
+			duration: '12 s',
+			day: 'Today, 16 October'
+		},
+		{
+			id: 'r3',
+			name: 'user-profiles',
+			job: { status: 'succeeded', result_code: 'succeeded_with_warnings' },
+			meta: ['MINDCORE', 'today 02:00', 'Backup', 'test-s3-yandex'],
+			duration: '4 min 12 s',
+			day: 'Today, 16 October'
+		},
+		{
+			id: 'r4',
+			name: '1c-base-daily',
+			job: { status: 'succeeded' },
+			meta: ['srv-1c-01', 'yesterday 01:00', 'Backup', 'test-s3-yandex', 'manual'],
+			duration: '18 min 40 s',
+			day: 'Yesterday, 15 October'
 		}
 	];
 
@@ -347,6 +402,70 @@
 		<div class="spaced">
 			<Pagination bind:page pageCount={7} summary="Showing 1 to 20 of 128" />
 		</div>
+	</section>
+
+	<section>
+		<h2>ListView</h2>
+		<ListView
+			label="Jobs"
+			items={runs}
+			itemKey={(run) => run.id}
+			icon={(run) => iconOf(jobState(run.job))}
+			pill={(run) => pillOf(jobState(run.job))}
+			title={(run) => run.name}
+			href={() => '#'}
+			meta={(run) => run.meta}
+			aside={(run) => run.duration}
+			groupBy={(run) => run.day}
+			actions={(run) =>
+				run.job.status === 'running'
+					? [
+							{
+								id: 'cancel',
+								label: 'Cancel',
+								icon: 'circle-stop',
+								danger: true,
+								onSelect: () => {}
+							}
+						]
+					: []}
+		>
+			{#snippet toolbar()}
+				<FilterBar
+					label="Job filters"
+					value={listFilters}
+					search={{ key: 'q', label: 'Search', placeholder: 'Search by plan, host, repository' }}
+					states={{
+						default: 'all',
+						options: [
+							{ value: 'all', label: 'All', count: 124 },
+							{ value: 'running', label: 'Running', count: 2 },
+							{ value: 'failed', label: 'Failed', count: 3, danger: true },
+							{ value: 'succeeded', label: 'Succeeded', count: 118 }
+						]
+					}}
+					facets={[
+						{
+							key: 'host',
+							label: 'Host',
+							options: [
+								{ value: 'srv-db-01', count: 2 },
+								{ value: 'MINDCORE', count: 1 }
+							]
+						}
+					]}
+					period
+					sort={{
+						default: 'started',
+						options: [
+							{ value: 'started', label: 'Started', order: 'desc' },
+							{ value: 'duration', label: 'Duration', order: 'desc' }
+						]
+					}}
+					onchange={(patch) => (listFilters = { ...listFilters, ...patch })}
+				/>
+			{/snippet}
+		</ListView>
 	</section>
 
 	<section>

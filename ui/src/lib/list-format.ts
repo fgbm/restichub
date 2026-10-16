@@ -51,16 +51,11 @@ function hoursMinutes(date: Date): string {
 	}).format(date);
 }
 
-// The short month of Russian ends with a dot ("окт."); the list format has none.
+// A three-letter month without a dot, as in "14 Oct" and "3 сен".
 function dayMonth(date: Date, withYear: boolean): string {
-	return new Intl.DateTimeFormat(getLocale(), {
-		day: 'numeric',
-		month: 'short',
-		...(withYear ? { year: 'numeric' } : {})
-	})
-		.format(date)
-		.replace(/\.(?=\s|,|$)/g, '')
-		.replace(/\s?г$/, '');
+	const month = t('time.months').split(',')[date.getMonth()];
+	const params = { day: date.getDate(), month, year: date.getFullYear() };
+	return withYear ? t('time.dayMonthYear', params) : t('time.dayMonth', params);
 }
 
 /** The day and the hours of a run: "today 02:00", "yesterday 23:30", "14 Oct 02:00", "14 Oct 2025". */
@@ -84,7 +79,8 @@ export function changedAt(value: string, now = Date.now()): string {
 /** A validity end: the date, or the distance when less than 30 days remain. */
 export function expiry(value: string, now = Date.now()): { text: string; soon: boolean } {
 	const left = secondsBetween(value, now);
-	if (left < 30 * DAY) return { text: t('time.expiresIn', { time: inFuture(value, now) }), soon: true };
+	if (left < 30 * DAY)
+		return { text: t('time.expiresIn', { time: inFuture(value, now) }), soon: true };
 	return {
 		text: t('time.validUntil', { date: new Date(value).toLocaleDateString(getLocale()) }),
 		soon: false
@@ -175,7 +171,11 @@ export function size(bytes: number): string {
 }
 
 /** A count with the plural form of the locale; `key` has the `one`, `few`, `many` and `other` forms. */
-export function plural(key: string, count: number, params: Record<string, string | number> = {}): string {
+export function plural(
+	key: string,
+	count: number,
+	params: Record<string, string | number> = {}
+): string {
 	const form = new Intl.PluralRules(getLocale()).select(count);
 	return t(`${key}.${form}` as MessageKey, {
 		n: new Intl.NumberFormat(getLocale()).format(count),

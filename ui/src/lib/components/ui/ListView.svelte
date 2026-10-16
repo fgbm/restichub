@@ -117,9 +117,7 @@
 	const pageCount = $derived(Math.max(1, Math.ceil(totalItems / pageSize)));
 	const currentPage = $derived(Math.min(Math.max(page, 1), pageCount));
 	const shown = $derived(
-		server || !paginated
-			? items
-			: items.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+		server || !paginated ? items : items.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 	);
 
 	interface Row {
@@ -137,6 +135,8 @@
 			return { key: itemKey(item), item, group: heading };
 		});
 	});
+
+	const SEPARATOR = ' · ';
 
 	const PILL_TONES: Record<ListTone, StatusTone> = {
 		danger: 'failed',
@@ -257,8 +257,10 @@
 										onclick={() => onOpen?.(item)}>{name}</button
 									>
 								{:else}
-									<span class="item__title item__title--text" class:item__title--mono={titleMono} title={name}
-										>{name}</span
+									<span
+										class="item__title item__title--text"
+										class:item__title--mono={titleMono}
+										title={name}>{name}</span
 									>
 								{/if}
 								{#if state}
@@ -271,7 +273,8 @@
 								<span class="item__meta">
 									{#each fields as field, index (index)}
 										<span class="item__field" class:item__field--extra={index >= 2}>
-											{#if index > 0}<span class="item__sep" aria-hidden="true"> · </span>{/if}
+											{#if index > 0}<span class="item__sep" aria-hidden="true">{SEPARATOR}</span
+												>{/if}
 											{#if field.time}
 												<time datetime={field.time} title={field.title ?? fullTime(field.time)}
 													>{field.text}</time
@@ -283,7 +286,9 @@
 									{/each}
 									{#if number}
 										<span class="item__field item__field--aside">
-											{#if fields.length > 0}<span class="item__sep" aria-hidden="true"> · </span>{/if}
+											{#if fields.length > 0}<span class="item__sep" aria-hidden="true"
+													>{SEPARATOR}</span
+												>{/if}
 											<span class="item__number">{number}</span>
 										</span>
 									{/if}

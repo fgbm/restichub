@@ -91,7 +91,8 @@ export function hasWarnings(job: Pick<Job, 'status' | 'result_code'>): boolean {
 }
 
 export function jobState(job: Pick<Job, 'status' | 'result_code'>): EntityState {
-	if (isCancelled(job)) return state('cancelled', 'jobs.status.cancelled', 'neutral', 'circle-slash');
+	if (isCancelled(job))
+		return state('cancelled', 'jobs.status.cancelled', 'neutral', 'circle-slash');
 	if (hasWarnings(job)) {
 		return {
 			...state('warnings', 'jobs.status.succeeded_with_warnings', 'warning', 'check-circle'),
@@ -120,7 +121,8 @@ const CERTIFICATE_WARNING_MS = 3 * DAY_MS;
 
 /** One pill by priority; the other facts are on the host page. */
 export function hostState(agent: Agent, now = Date.now()): EntityState {
-	if (agent.status === 'revoked') return state('revoked', 'hosts.status.revoked', 'neutral', 'monitor-x');
+	if (agent.status === 'revoked')
+		return state('revoked', 'hosts.status.revoked', 'neutral', 'monitor-x');
 	if (!agent.first_connected_at) {
 		return state('waiting', 'hosts.status.waiting', 'neutral', 'hourglass');
 	}
@@ -176,7 +178,12 @@ export function alertPill(alert: Pick<Alert, 'kind' | 'status'>): ListPill | nul
 
 export function channelState(channel: Pick<NotificationChannel, 'enabled' | 'kind'>): EntityState {
 	if (!channel.enabled) return state('disabled', 'channels.disabled', 'neutral', 'bell-off');
-	return state('enabled', 'channels.enabled', 'normal', channel.kind === 'email' ? 'mail' : 'webhook');
+	return state(
+		'enabled',
+		'channels.enabled',
+		'normal',
+		channel.kind === 'email' ? 'mail' : 'webhook'
+	);
 }
 
 export function userState(user: Pick<User | PlatformUser, 'disabled'>): EntityState {
@@ -194,7 +201,8 @@ export function apiTokenState(
 	if (token.expires_at) {
 		const left = new Date(token.expires_at).getTime() - now;
 		if (left <= 0) return state('expired', 'apiTokens.status.expired', 'neutral', 'key');
-		if (left < TOKEN_WARNING_MS) return state('expiring', 'apiTokens.status.expiring', 'warning', 'key');
+		if (left < TOKEN_WARNING_MS)
+			return state('expiring', 'apiTokens.status.expiring', 'warning', 'key');
 	}
 	return state('active', 'apiTokens.status.active', 'normal', 'key');
 }

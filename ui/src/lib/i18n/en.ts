@@ -1943,7 +1943,14 @@ export const en = {
 	'secrets.used': 'Used',
 	'tenants.status.active': 'Active',
 	'tenants.status.suspended': 'Suspended',
-	'tenants.status.noAdmin': 'No administrator'
+	'tenants.status.noAdmin': 'No administrator',
+	'time.months': 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec',
+	'time.dayMonth': '{month} {day}',
+	'time.dayMonthYear': '{month} {day}, {year}',
+	'list.scripts.one': '{n} script',
+	'list.scripts.few': '{n} scripts',
+	'list.scripts.many': '{n} scripts',
+	'list.scripts.other': '{n} scripts'
 } as const;
 
 export type MessageKey = keyof typeof en;
