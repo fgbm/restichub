@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 	hostRows: vi.fn(),
 	getAgent: vi.fn(),
 	listEnrollmentTokens: vi.fn(),
+	getEnrollmentToken: vi.fn(),
 	createEnrollmentToken: vi.fn(),
 	revokeEnrollmentToken: vi.fn(),
 	renameAgent: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			getAgent: mocks.getAgent,
 			listEnrollmentTokens: mocks.listEnrollmentTokens,
+			getEnrollmentToken: mocks.getEnrollmentToken,
 			createEnrollmentToken: mocks.createEnrollmentToken,
 			revokeEnrollmentToken: mocks.revokeEnrollmentToken,
 			renameAgent: mocks.renameAgent,
@@ -537,7 +539,10 @@ describe('the Hosts screen', () => {
 			mocks.listEnrollmentTokens
 				.mockResolvedValueOnce([])
 				.mockResolvedValueOnce([token()])
-				.mockResolvedValue([token({ used_at: PAST, used_by_agent_id: 'a_07' })]);
+				.mockResolvedValue([]);
+			mocks.getEnrollmentToken.mockResolvedValue(
+				token({ used_at: PAST, used_by_agent_id: 'a_07' })
+			);
 			mocks.hostRows
 				.mockResolvedValueOnce([])
 				.mockResolvedValueOnce([])
@@ -553,6 +558,8 @@ describe('the Hosts screen', () => {
 			await within(dialog).findByText('Host registered: brand-new');
 			expect(within(dialog).getByRole('heading', { name: 'Host registered' })).toBeInTheDocument();
 			expect(within(dialog).queryByText('Copy the enrollment token')).not.toBeInTheDocument();
+			expect(mocks.getEnrollmentToken).toHaveBeenCalledTimes(1);
+			expect(mocks.getEnrollmentToken).toHaveBeenCalledWith('e_1');
 		} finally {
 			vi.useRealTimers();
 		}
@@ -606,6 +613,11 @@ describe('the Hosts screen', () => {
 			await waitFor(() =>
 				expect(screen.queryByText('Pending registrations')).not.toBeInTheDocument()
 			);
+			expect(mocks.listEnrollmentTokens).toHaveBeenCalledTimes(2);
+			for (const call of mocks.listEnrollmentTokens.mock.calls) {
+				expect(call).toEqual([{ pending: true }]);
+			}
+			expect(mocks.getEnrollmentToken).not.toHaveBeenCalled();
 		});
 	});
 });

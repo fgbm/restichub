@@ -111,6 +111,11 @@ export type ReplaceAgentResponse = components['schemas']['ReplaceAgentResponse']
 
 export type EnrollmentToken = components['schemas']['EnrollmentTokenView'];
 
+export interface EnrollmentTokenQuery {
+	/** Only the tokens that can still enroll a host. */
+	pending?: boolean;
+}
+
 /** The value appears one time only. */
 export type EnrollmentTokenCreated = components['schemas']['CreateEnrollmentTokenResponse'];
 

@@ -91,11 +91,14 @@
 		);
 	}
 
+	// The token of the open dialog after it left the pending list.
+	let createdUse = $state<EnrollmentToken | null>(null);
+
 	// The dialog shows the host when the agent used the token that the dialog created.
 	const registeredHost = $derived.by(() => {
-		if (!createdToken) return null;
-		const used = enrollmentTokens.find((token) => token.id === createdToken?.id);
-		if (!used?.used_at || !used.used_by_agent_id) return null;
+		const used = createdUse;
+		if (!createdToken || used?.id !== createdToken.id) return null;
+		if (!used.used_at || !used.used_by_agent_id) return null;
 		const hostname = hostNames[used.used_by_agent_id];
 		return hostname ? { hostname } : null;
 	});
@@ -405,7 +408,20 @@
 	}
 
 	function tokenHosts(): (string | null | undefined)[] {
-		return enrollmentTokens.flatMap((token) => [token.used_by_agent_id, token.replaces_agent_id]);
+		return [
+			createdUse?.used_by_agent_id,
+			...enrollmentTokens.map((token) => token.replaces_agent_id)
+		];
+	}
+
+	// The used and revoked tokens grow without bound, so the poll reads only the pending ones. The
+	// token of the open dialog is read by itself once, when it leaves that list.
+	async function readTokens(): Promise<void> {
+		enrollmentTokens = await service.listEnrollmentTokens({ pending: true });
+		const id = createdToken?.id;
+		if (!id || createdUse?.id === id || enrollmentTokens.some((token) => token.id === id)) return;
+		const token = await service.getEnrollmentToken(id);
+		if (createdToken?.id === id) createdUse = token;
 	}
 
 	async function load(): Promise<void> {
@@ -413,7 +429,7 @@
 		error = null;
 		const page = loadPage(true);
 		try {
-			enrollmentTokens = await service.listEnrollmentTokens();
+			await readTokens();
 		} catch (problem) {
 			error = messageOf(problem);
 		}
@@ -429,7 +445,7 @@
 	async function refresh(): Promise<void> {
 		const page = loadPage();
 		try {
-			enrollmentTokens = await service.listEnrollmentTokens();
+			await readTokens();
 		} catch {
 			// The next tick tries again; the visible list stays.
 		}

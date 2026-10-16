@@ -41,6 +41,7 @@ import type {
 	EnrollmentToken,
 	ReplaceAgentResponse,
 	EnrollmentTokenCreated,
+	EnrollmentTokenQuery,
 	Instance,
 	Job,
 	JobActionRequest,
@@ -1169,8 +1170,18 @@ export class MockApiService {
 		return { plans_moved: 0, repositories_moved: 0, queued_jobs_moved: 0 };
 	}
 
-	async listEnrollmentTokens(): Promise<EnrollmentToken[]> {
-		return [...this.enrollmentTokens];
+	async listEnrollmentTokens(query: EnrollmentTokenQuery = {}): Promise<EnrollmentToken[]> {
+		if (!query.pending) return [...this.enrollmentTokens];
+		const now = Date.now();
+		return this.enrollmentTokens.filter(
+			(token) => !token.used_at && !token.revoked_at && new Date(token.expires_at).getTime() > now
+		);
+	}
+
+	async getEnrollmentToken(id: string): Promise<EnrollmentToken> {
+		const token = this.enrollmentTokens.find((item) => item.id === id);
+		if (!token) throw new Error('not found');
+		return { ...token };
 	}
 
 	async createEnrollmentToken(
