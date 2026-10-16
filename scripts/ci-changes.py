@@ -2,7 +2,8 @@
 """Classify the files that a pull request changes, so CI runs only the jobs that can fail.
 
 Usage: ci-changes.py [--all] [--base REF]
-Prints one `name=true|false` line for each job group, ready for $GITHUB_OUTPUT.
+Prints one `name=true|false` line for each job group, ready for $GITHUB_OUTPUT, and an
+`agent-packages` line with the `-p` arguments that select the agent crates for the Windows job.
 --all marks every group true (a push to main, a tag, a manual run). Without --all, the script
 diffs REF..HEAD. A change to the CI itself or to the dependency lock marks every group true.
 
@@ -82,7 +83,12 @@ def classify(files, agent):
     }
 
 
+def package_args(agent):
+    return " ".join(f"-p {name}" for name in sorted(agent))
+
+
 def main(argv):
+    agent = agent_crates()
     if "--all" in argv:
         result = {group: True for group in GROUPS}
     else:
@@ -90,10 +96,11 @@ def main(argv):
         files = subprocess.check_output(
             ["git", "diff", "--name-only", base, "HEAD"], text=True
         ).splitlines()
-        result = classify(files, agent_crates())
+        result = classify(files, agent)
         print(f"changed files: {len(files)}", file=sys.stderr)
     for group in GROUPS:
         print(f"{group}={'true' if result[group] else 'false'}")
+    print(f"agent-packages={package_args(agent)}")
 
 
 if __name__ == "__main__":
