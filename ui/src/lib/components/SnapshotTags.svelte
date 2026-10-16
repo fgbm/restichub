@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Badge } from '#lib/components/ui/index.ts';
-	import { t } from '#lib/i18n/index.ts';
-	import { profileOfTag } from '#lib/restore.ts';
+	import { tagLabel } from '#lib/snapshot-filter.ts';
 
 	let {
 		tags,
@@ -11,17 +10,11 @@
 		/** The names of the profiles by identifier, for the automatic profile tags. */
 		profiles?: ReadonlyMap<string, string>;
 	} = $props();
-
-	function label(tag: string): string {
-		const profile = profileOfTag(tag);
-		if (!profile) return tag;
-		return t('restore.profileTag', { name: profiles.get(profile) ?? profile.slice(0, 8) });
-	}
 </script>
 
 <span class="tags">
 	{#each tags as tag (tag)}
-		<span class="tags__chip" title={tag}><Badge>{label(tag)}</Badge></span>
+		<span class="tags__chip" title={tag}><Badge>{tagLabel(tag, profiles)}</Badge></span>
 	{/each}
 </span>
 

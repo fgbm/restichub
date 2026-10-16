@@ -147,9 +147,17 @@ describe('restore page helpers (FR-RS-01, FR-RS-02)', () => {
 	});
 
 	it('fr_rs_01_keeps_the_filters_in_the_query_string', () => {
-		const filters = { ...EMPTY_FILTERS, host: 'nas', tag: 'daily', from: '2026-10-01' };
+		const filters = {
+			...EMPTY_FILTERS,
+			host: 'nas',
+			tag: 'daily',
+			from: '2026-10-01',
+			period: 'custom'
+		};
 		const query = filtersToQuery(filters, { repository: 'r_1' });
-		expect(query.toString()).toBe('host=nas&tag=daily&from=2026-10-01&repository=r_1');
+		expect(query.toString()).toBe(
+			'host=nas&tag=daily&from=2026-10-01&period=custom&repository=r_1'
+		);
 		expect(filtersFromQuery(query)).toEqual(filters);
 		expect(filtersToQuery(EMPTY_FILTERS).toString()).toBe('');
 	});

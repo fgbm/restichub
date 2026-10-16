@@ -76,61 +76,95 @@ beforeEach(() => {
 });
 
 describe('Restore page', () => {
-	it('fr_rs_01_lists_the_stored_snapshots_and_runs_a_new_request_with_the_filters', async () => {
+	it('fr_rs_01_lists_the_stored_snapshots_and_filters_them_on_the_page_without_a_new_job', async () => {
 		const user = userEvent.setup();
+		mocks.getSnapshots.mockResolvedValue(
+			listing('done', [
+				{ ...snapshot('a1b2c3d4', 'nas-backup'), paths: ['/srv', '/etc'] },
+				{ ...snapshot('b2c3d4e5', 'ws-anna'), paths: ['C:\\Users\\Anna'] }
+			])
+		);
 		render(Restore);
 		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
 		expect(screen.getByRole('link', { name: 'Open snapshot b2c3d4e5' })).toBeVisible();
 
-		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('b2c3d4e5', 'ws-anna')]));
-		await user.type(screen.getByLabelText('Snapshot host'), 'ws-anna');
-		await user.type(screen.getByLabelText('Tag'), 'daily');
-		await user.click(screen.getByRole('button', { name: 'Find snapshots' }));
-		await waitFor(() =>
-			expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', {
-				hosts: ['ws-anna'],
-				tags: ['daily'],
-				paths: []
-			})
-		);
+		await user.type(screen.getByRole('searchbox', { name: 'Search by path' }), 'c:\\users');
 		await waitFor(() =>
 			expect(screen.queryByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeNull()
 		);
+		expect(screen.getByRole('link', { name: 'Open snapshot b2c3d4e5' })).toBeVisible();
+		expect(mocks.startSnapshots).not.toHaveBeenCalled();
 		// The address keeps the filters, so the back link of the snapshot page restores them.
 		await waitFor(() =>
-			expect(mocks.goto).toHaveBeenCalledWith(
-				'/(app)/restore?host=ws-anna&tag=daily&repository=r_1',
-				{ replaceState: true }
-			)
+			expect(mocks.goto).toHaveBeenCalledWith('/(app)/restore?path=c%3A%5Cusers&repository=r_1', {
+				replace: true,
+				reset: false
+			})
 		);
+	});
+
+	it('fr_rs_01_a_host_chosen_in_the_popover_shows_as_a_chip_and_narrows_the_list', async () => {
+		const user = userEvent.setup();
+		render(Restore);
+		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		await user.click(screen.getByRole('button', { name: 'Host' }));
+		await user.click(await screen.findByLabelText('ws-anna'));
+		expect(screen.getByText('Host: ws-anna')).toBeVisible();
+		await waitFor(() =>
+			expect(screen.queryByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeNull()
+		);
+		await user.click(screen.getByRole('button', { name: 'Remove the filter Host: ws-anna' }));
+		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
+	});
+
+	it('fr_rs_01_a_filter_that_matches_nothing_offers_a_reset', async () => {
+		const user = userEvent.setup();
+		route.url = new URL('http://localhost/restore?repository=r_1&host=nobody');
+		render(Restore);
+		expect(await screen.findByText('No snapshot matches these filters.')).toBeVisible();
+		await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
+	});
+
+	it('fr_rs_01_a_repository_without_snapshots_shows_its_own_empty_state', async () => {
+		mocks.getSnapshots.mockResolvedValue(listing('done'));
+		render(Restore);
+		expect(await screen.findByText('This repository holds no snapshots')).toBeVisible();
+	});
+
+	it('fr_rs_01_the_refresh_button_runs_a_list_job_without_filters', async () => {
+		const user = userEvent.setup();
+		render(Restore);
+		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('c3d4e5f6', 'nas-backup')]));
+		await user.click(screen.getByRole('button', { name: 'Refresh the list from the repository' }));
+		await waitFor(() =>
+			expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', { hosts: [], tags: [], paths: [] })
+		);
+		expect(await screen.findByRole('link', { name: 'Open snapshot c3d4e5f6' })).toBeVisible();
 	});
 
 	it('fr_rs_01_a_snapshot_links_to_its_own_page_with_the_filters', async () => {
 		route.url = new URL('http://localhost/restore?repository=r_1&tag=daily');
-		mocks.getSnapshots.mockResolvedValue({
-			...listing('done', [snapshot('a1b2c3d4', 'nas-backup')]),
-			tags: ['daily']
-		});
 		render(Restore);
 		const link = await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
 		expect(link).toHaveAttribute(
 			'href',
 			`/(app)/restore/r_1/${'a1b2c3d4'.padEnd(64, '0')}?tag=daily`
 		);
-		// The stored list already holds the tag filter, so no new request starts.
+		// The page filters the whole stored list itself, so no new request starts.
 		expect(mocks.startSnapshots).not.toHaveBeenCalled();
 	});
 
-	it('fr_rs_01_a_filter_in_the_address_that_the_stored_list_lacks_starts_a_request', async () => {
-		route.url = new URL('http://localhost/restore?repository=r_1&host=ws-anna');
+	it('fr_rs_01_a_stored_list_made_with_filters_starts_a_whole_request', async () => {
+		mocks.getSnapshots.mockResolvedValue({
+			...listing('done', [snapshot('b2c3d4e5', 'ws-anna')]),
+			hosts: ['ws-anna']
+		});
 		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('b2c3d4e5', 'ws-anna')]));
 		render(Restore);
 		await waitFor(() =>
-			expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', {
-				hosts: ['ws-anna'],
-				tags: [],
-				paths: []
-			})
+			expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', { hosts: [], tags: [], paths: [] })
 		);
 	});
 
@@ -143,22 +177,6 @@ describe('Restore page', () => {
 		);
 		expect(screen.getByRole('link', { name: 'Open snapshot a1b2c3d4' })).not.toHaveAttribute(
 			'aria-current'
-		);
-	});
-
-	it('fr_rs_01_reset_clears_every_filter_and_searches_again', async () => {
-		const user = userEvent.setup();
-		route.url = new URL('http://localhost/restore?repository=r_1&tag=daily&from=2026-10-01');
-		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('a1b2c3d4', 'nas-backup')]));
-		render(Restore);
-		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
-		expect(screen.getByLabelText('Tag')).toHaveValue('daily');
-		mocks.startSnapshots.mockClear();
-		await user.click(screen.getByRole('button', { name: 'Reset filters' }));
-		expect(screen.getByLabelText('Tag')).toHaveValue('');
-		expect(screen.getByLabelText('From')).toHaveValue('');
-		await waitFor(() =>
-			expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', { hosts: [], tags: [], paths: [] })
 		);
 	});
 
