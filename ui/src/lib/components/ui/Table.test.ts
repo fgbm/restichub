@@ -86,4 +86,17 @@ describe('Table', () => {
 		});
 		expect(container.querySelector('.table-wrap')).toHaveClass('table-wrap--flush');
 	});
+
+	it('marks a column that hides on a narrow screen', () => {
+		render(Table, {
+			props: {
+				columns: [{ key: 'name', header: 'Name', hideNarrow: true }],
+				rows,
+				rowKey: (row: Row) => row.id
+			}
+		});
+		expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveClass(
+			'table__cell--narrow-hidden'
+		);
+	});
 });

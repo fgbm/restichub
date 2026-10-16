@@ -91,6 +91,13 @@
 		if (page.route.id === '/(app)/jobs/[id]' && page.params.id) {
 			return [{ label: t(item.labelKey), href: item.href }, { label: page.params.id }];
 		}
+		// The host page shows the host name after the list.
+		if (page.route.id === '/(app)/hosts/[id]') {
+			const title = getPageTitle();
+			return title
+				? [{ label: t(item.labelKey), href: item.href }, { label: title }]
+				: [{ label: t(item.labelKey) }];
+		}
 		// The profile editor shows the profile name, or "New profile", after the list.
 		if (page.route.id === '/(app)/profiles/[id]' || page.route.id === '/(app)/profiles/new') {
 			const title = page.route.id === '/(app)/profiles/new' ? t('pe.newTitle') : getPageTitle();

@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
 
 const session = vi.hoisted(() => ({ role: 'operator' as string }));
 
+const route = vi.hoisted(() => ({ url: new URL('http://localhost/jobs') }));
+
+vi.mock('$app/state', () => ({ page: route }));
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
 		user: {
@@ -72,6 +75,7 @@ function job(overrides: Record<string, unknown> = {}) {
 
 describe('the Jobs screen', () => {
 	beforeEach(() => {
+		route.url = new URL('http://localhost/jobs');
 		vi.clearAllMocks();
 		session.role = 'operator';
 		mocks.listJobs.mockResolvedValue({ items: [], next_cursor: null });
@@ -86,6 +90,18 @@ describe('the Jobs screen', () => {
 		expect(within(screen.getByRole('table')).getByText('Running')).toBeInTheDocument();
 		expect(screen.getByText('win-fs01')).toBeInTheDocument();
 		expect(screen.getByText('primary-s3')).toBeInTheDocument();
+	});
+
+	it('reads only the jobs of the host that the link names', async () => {
+		route.url = new URL('http://localhost/jobs?agent_id=a_01');
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
+		render(Jobs);
+
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'a_01' }))
+		);
+		expect(await screen.findByText('Host: win-fs01')).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'Show all jobs' })).toBeInTheDocument();
 	});
 
 	it('shows a dash for an empty start and duration and keeps the filter in the toolbar', async () => {

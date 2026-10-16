@@ -1022,6 +1022,12 @@ export class MockApiService {
 		return [...this.agents];
 	}
 
+	async getAgent(id: string): Promise<Agent> {
+		const agent = this.agents.find((item) => item.id === id);
+		if (!agent) throw new Error('not found');
+		return { ...agent };
+	}
+
 	async renameAgent(id: string, hostname: string): Promise<Agent> {
 		const agent = this.agents.find((item) => item.id === id);
 		if (!agent) throw new Error('not found');

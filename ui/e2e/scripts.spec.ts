@@ -122,18 +122,16 @@ test('the script templates screen opens a built-in template read-only and copies
 	await expect(page.getByText('The template is deleted.')).toBeVisible();
 });
 
-test('the hosts screen shows the trust mode and the command', async ({ page }) => {
+test('the host page shows the trust mode and the command', async ({ page }) => {
 	await openSample(page, 'Hosts');
-	await page.getByRole('button', { name: 'Server scripts: win-fs01', exact: true }).click();
-	const dialog = page.getByRole('dialog', { name: 'Server scripts' });
-	await expect(dialog.locator('input[readonly]')).toHaveValue(
+	await page.getByRole('link', { name: 'Server scripts: win-fs01', exact: true }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'win-fs01' })).toBeVisible();
+	await expect(page.locator('#scripts input[readonly]')).toHaveValue(
 		'restichub-agent.exe trust-server-scripts --enable'
 	);
-	await page.keyboard.press('Escape');
-	await page.getByRole('button', { name: 'Server scripts: srv-db-01' }).click();
-	await expect(
-		page.getByRole('dialog', { name: 'Server scripts' }).getByText('bash, sh')
-	).toBeVisible();
+	await page.getByRole('link', { name: 'Back to the hosts' }).click();
+	await page.getByRole('link', { name: 'Server scripts: srv-db-01' }).click();
+	await expect(page.locator('#scripts').getByText('bash, sh')).toBeVisible();
 });
 
 test('a finished job lists each script as a step with its own log', async ({ page }) => {

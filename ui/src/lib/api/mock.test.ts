@@ -41,4 +41,13 @@ describe('the mock agents', () => {
 		const listed = (await api.listAgents()).find((agent) => agent.id === first.id);
 		expect(listed?.hostname).toBe('win-fs01-renamed');
 	});
+
+	it('reads one agent by its identifier', async () => {
+		localStorage.setItem('restichub.mock.agents', 'sample');
+		const api = new MockApiService();
+		const [first] = await api.listAgents();
+
+		expect((await api.getAgent(first.id)).hostname).toBe(first.hostname);
+		await expect(api.getAgent('missing')).rejects.toThrow('not found');
+	});
 });

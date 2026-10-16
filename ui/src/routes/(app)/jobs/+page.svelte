@@ -2,10 +2,12 @@
 	import { onMount } from 'svelte';
 	import { coalesce } from '#lib/events.ts';
 	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
+	import { page as route } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Job, JobStatus } from '#lib/api/index.ts';
 	import {
+		Badge,
 		Button,
 		ConfirmDialog,
 		DropdownMenu,
@@ -45,6 +47,8 @@
 	let loadingMore = $state(false);
 	let error = $state<string | null>(null);
 	let statusFilter = $state('');
+	// The host page links here with the host to show (`?agent_id=`).
+	const agentFilter = $derived(route.url.searchParams.get('agent_id') ?? undefined);
 
 	let cancelTarget = $state<Job | null>(null);
 	let cancelOpen = $state(false);
@@ -89,7 +93,9 @@
 		}
 	]);
 
-	const empty = $derived(!loading && !error && jobs.length === 0 && statusFilter === '');
+	const empty = $derived(
+		!loading && !error && jobs.length === 0 && statusFilter === '' && !agentFilter
+	);
 
 	// A cancelled job ends as `failed` with the result `cancelled`; the screen shows it apart.
 	function isCancelled(job: Job): boolean {
@@ -171,7 +177,8 @@
 		try {
 			const page = await service.listJobs({
 				limit: PAGE_SIZE,
-				status: statusFilter ? (statusFilter as JobStatus) : undefined
+				status: statusFilter ? (statusFilter as JobStatus) : undefined,
+				agent_id: agentFilter
 			});
 			jobs = page.items;
 			nextCursor = page.next_cursor ?? null;
@@ -189,6 +196,7 @@
 			const page = await service.listJobs({
 				limit: PAGE_SIZE,
 				status: statusFilter ? (statusFilter as JobStatus) : undefined,
+				agent_id: agentFilter,
 				cursor: nextCursor
 			});
 			jobs = [...jobs, ...page.items];
@@ -201,7 +209,17 @@
 		}
 	}
 
-	onMount(() => void load());
+	let loadedFilter: string | undefined;
+	onMount(() => {
+		loadedFilter = agentFilter;
+		void load();
+	});
+
+	$effect(() => {
+		if (agentFilter === loadedFilter) return;
+		loadedFilter = agentFilter;
+		void load();
+	});
 
 	// A page that the user extended with "load more" keeps its rows until the next full load.
 	let extended = false;
@@ -294,6 +312,15 @@
 	<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
 </PageHeader>
 
+{#if agentFilter}
+	<p class="agent-filter">
+		<Badge tone="info">
+			{t('jobs.filterHost', { name: jobs[0]?.agent_hostname ?? agentFilter })}
+		</Badge>
+		<a href={resolve('/(app)/jobs')}>{t('jobs.filterHostClear')}</a>
+	</p>
+{/if}
+
 {#if empty}
 	<EmptyState
 		icon="job"
@@ -352,6 +379,15 @@
 />
 
 <style>
+	.agent-filter {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--rh-space-3);
+		margin: 0 0 var(--rh-space-3);
+		font-size: var(--rh-font-size-sm);
+	}
+
 	.job {
 		display: flex;
 		flex-direction: column;

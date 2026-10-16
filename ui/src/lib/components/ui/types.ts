@@ -41,6 +41,8 @@ export interface TableColumn<T> {
 	sortable?: boolean;
 	/** Keep the cell on one line, for a date, a relative time or a status. */
 	nowrap?: boolean;
+	/** Hide the column on a narrow screen, so the row actions stay in view. */
+	hideNarrow?: boolean;
 	/** Align the cell text. Default: `left`. */
 	align?: 'left' | 'right' | 'center';
 	/** Value used for sorting and filtering. Default: `String(row[key])`. */
