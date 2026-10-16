@@ -131,6 +131,7 @@ export interface ApiService {
 
 	/** The enrolled agents of the tenant (ADR-0026). */
 	listAgents(): Promise<Agent[]>;
+	getAgent(id: string): Promise<Agent>;
 	renameAgent(id: string, hostname: string): Promise<Agent>;
 	revokeAgent(id: string): Promise<void>;
 	/** A token bound to the host: the enrollment keeps the identifier and the plans (FR-ID-01). */
@@ -284,6 +285,7 @@ const httpService: ApiService = {
 
 	listAgents: () =>
 		api.get<AgentListResponse>(endpoints.agents.list).then((response) => response.items),
+	getAgent: (id) => api.get<Agent>(endpoints.agents.byId(id)),
 	renameAgent: (id, hostname) =>
 		api.patch<Agent>(endpoints.agents.byId(id), { hostname } satisfies RenameAgentRequest),
 	revokeAgent: (id) => api.post<void>(endpoints.agents.revoke(id)),

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
+	import HostActions from '#lib/components/HostActions.svelte';
 	import { eventReader } from '#lib/events.ts';
 	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
@@ -29,13 +31,10 @@
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
-	import { enableCommand } from '#lib/scripts.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
-	// The host name the control plane accepts (validate_display_name).
-	const HOSTNAME_MAX_LENGTH = 128;
-
+	let actions: HostActions;
 	let agents = $state<Agent[]>([]);
 	let enrollmentTokens = $state<EnrollmentToken[]>([]);
 	let loading = $state(true);
@@ -52,27 +51,6 @@
 	let cancelOpen = $state(false);
 	let cancelling = $state(false);
 
-	let renameTarget = $state<Agent | null>(null);
-	let renameOpen = $state(false);
-	let renaming = $state(false);
-	let renameName = $state('');
-	let renameError = $state<string | null>(null);
-	let renameProblem = $state<ApiProblem | null>(null);
-
-	let revokeTarget = $state<Agent | null>(null);
-	let revokeOpen = $state(false);
-	let revoking = $state(false);
-
-	let reregisterTarget = $state<Agent | null>(null);
-	let reregisterOpen = $state(false);
-	let reregistering = $state(false);
-	let reregisterToken = $state<EnrollmentTokenCreated | null>(null);
-	let reregisterTokenOpen = $state(false);
-
-	let replaceTarget = $state<Agent | null>(null);
-	let replaceOpen = $state(false);
-	let replacing = $state(false);
-
 	const canWrite = $derived(getSession()?.role === 'admin');
 	// The registration command carries this installation URL (ADR-0032).
 	let origin = $state('');
@@ -81,9 +59,6 @@
 	});
 	const installCommand = $derived(
 		t('hosts.installPlaceholder', { url: origin, token: createdToken?.token ?? '<token>' })
-	);
-	const reregisterCommand = $derived(
-		t('hosts.reregisterCommand', { url: origin, token: reregisterToken?.token ?? '<token>' })
 	);
 
 	// The dialog shows the host when the agent used the token that the dialog created.
@@ -107,14 +82,6 @@
 		)
 	);
 
-	const renameLength = $derived(Array.from(renameName.trim()).length);
-	const renameValid = $derived(renameLength >= 1 && renameLength <= HOSTNAME_MAX_LENGTH);
-	const renameFieldError = $derived(
-		renameLength > HOSTNAME_MAX_LENGTH
-			? t('hosts.renameTooLong')
-			: fieldError(renameProblem, 'hostname')
-	);
-
 	const columns = $derived<TableColumn<Agent>[]>([
 		{
 			key: 'hostname',
@@ -130,18 +97,21 @@
 		},
 		{
 			key: 'server_scripts',
+			hideNarrow: true,
 			header: t('hosts.serverScripts'),
 			value: (row) => scriptsLabel(row),
 			render: scriptsCell
 		},
 		{
 			key: 'agent_version',
+			hideNarrow: true,
 			header: t('hosts.agent'),
 			value: (row) => row.agent_version,
 			render: versionCell
 		},
 		{
 			key: 'last_seen_at',
+			hideNarrow: true,
 			nowrap: true,
 			header: t('hosts.lastSeen'),
 			value: (row) => row.last_seen_at ?? '',
@@ -149,23 +119,26 @@
 		},
 		{
 			key: 'certificate_expires_at',
+			hideNarrow: true,
 			header: t('hosts.certificate'),
 			value: (row) => row.certificate_expires_at,
 			render: certificateCell
 		},
-		{ key: 'created_at', header: t('hosts.created'), nowrap: true, render: createdCell }
+		{
+			key: 'created_at',
+			header: t('hosts.created'),
+			nowrap: true,
+			hideNarrow: true,
+			render: createdCell
+		}
 	]);
 
-	let scriptsTarget = $state<Agent | null>(null);
-	let scriptsOpen = $state(false);
+	function scriptsHref(agent: Agent): string {
+		return `${resolve('/(app)/hosts/[id]', { id: agent.id })}#scripts`;
+	}
 
 	function scriptsLabel(agent: Agent): string {
 		return t(`hosts.serverScripts.${agent.server_scripts}` as MessageKey);
-	}
-
-	function openScripts(agent: Agent): void {
-		scriptsTarget = agent;
-		scriptsOpen = true;
 	}
 
 	// An agent rotates at two thirds of the lifetime, so a certificate that is close to its end
@@ -322,97 +295,6 @@
 			cancelling = false;
 		}
 	}
-
-	function openReregister(agent: Agent): void {
-		reregisterTarget = agent;
-		reregisterOpen = true;
-	}
-
-	async function confirmReregister(): Promise<void> {
-		if (!reregisterTarget) return;
-		reregistering = true;
-		try {
-			reregisterToken = await service.reenrollAgent(reregisterTarget.id);
-			reregisterOpen = false;
-			reregisterTokenOpen = true;
-			await load();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			reregistering = false;
-		}
-	}
-
-	$effect(() => {
-		if (!reregisterTokenOpen) reregisterToken = null;
-	});
-
-	function openReplace(agent: Agent): void {
-		replaceTarget = agent;
-		replaceOpen = true;
-	}
-
-	async function confirmReplace(): Promise<void> {
-		const old = replaceTarget?.possible_duplicate_of;
-		if (!replaceTarget || !old) return;
-		replacing = true;
-		try {
-			const moved = await service.replaceAgent(replaceTarget.id, old.id);
-			pushToast('success', t('hosts.replaced', { plans: moved.plans_moved }));
-			replaceOpen = false;
-			replaceTarget = null;
-			await load();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			replacing = false;
-		}
-	}
-
-	function openRename(agent: Agent): void {
-		renameTarget = agent;
-		renameName = agent.hostname;
-		renameError = null;
-		renameProblem = null;
-		renameOpen = true;
-	}
-
-	async function renameHost(): Promise<void> {
-		if (!renameTarget || !renameValid) return;
-		renaming = true;
-		renameError = null;
-		renameProblem = null;
-		try {
-			await service.renameAgent(renameTarget.id, renameName.trim());
-			pushToast('success', t('hosts.renamed'));
-			renameOpen = false;
-			await load();
-		} catch (problem) {
-			renameProblem = problem instanceof ApiError ? problem.problem : null;
-			renameError =
-				renameLength > HOSTNAME_MAX_LENGTH || fieldError(renameProblem, 'hostname')
-					? null
-					: messageOf(problem);
-		} finally {
-			renaming = false;
-		}
-	}
-
-	async function confirmRevoke(): Promise<void> {
-		if (!revokeTarget) return;
-		revoking = true;
-		try {
-			await service.revokeAgent(revokeTarget.id);
-			pushToast('success', t('hosts.revoked'));
-			revokeOpen = false;
-			revokeTarget = null;
-			await load();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			revoking = false;
-		}
-	}
 </script>
 
 {#snippet timeCell(value: string | null | undefined)}
@@ -433,7 +315,7 @@
 
 {#snippet hostCell(agent: Agent)}
 	<span class="host">
-		<span class="host__name">{agent.hostname}</span>
+		<a class="host__name" href={resolve('/(app)/hosts/[id]', { id: agent.id })}>{agent.hostname}</a>
 		<span class="host__meta">{agent.os} · {agent.arch}</span>
 	</span>
 {/snippet}
@@ -458,16 +340,17 @@
 {/snippet}
 
 {#snippet scriptsCell(agent: Agent)}
-	<button
-		type="button"
+	<!-- eslint-disable svelte/no-navigation-without-resolve -- resolved path with a query or a fragment -->
+	<a
 		class="host__scripts"
+		href={scriptsHref(agent)}
 		aria-label={`${t('hosts.serverScripts')}: ${agent.hostname}`}
-		onclick={() => openScripts(agent)}
 	>
 		<StatusPill tone={agent.server_scripts === 'enabled' ? 'info' : 'neutral'}>
 			{scriptsLabel(agent)}
 		</StatusPill>
-	</button>
+	</a>
+	<!-- eslint-enable svelte/no-navigation-without-resolve -->
 {/snippet}
 
 {#snippet versionCell(agent: Agent)}
@@ -604,19 +487,19 @@
 						{
 							label: t('hosts.rename'),
 							icon: 'tag',
-							onSelect: () => openRename(agent)
+							onSelect: () => actions.openRename(agent)
 						},
 						{
 							label: t('hosts.reregister'),
 							icon: 'key',
-							onSelect: () => openReregister(agent)
+							onSelect: () => actions.openReregister(agent)
 						},
 						...(agent.possible_duplicate_of?.is_older
 							? [
 									{
 										label: t('hosts.replaceOld'),
 										icon: 'host' as const,
-										onSelect: () => openReplace(agent)
+										onSelect: () => actions.openReplace(agent)
 									}
 								]
 							: []),
@@ -625,10 +508,7 @@
 							icon: 'octagon',
 							tone: 'danger',
 							separatorBefore: true,
-							onSelect: () => {
-								revokeTarget = agent;
-								revokeOpen = true;
-							}
+							onSelect: () => actions.openRevoke(agent)
 						}
 					]}
 				/>
@@ -684,84 +564,6 @@
 	{/snippet}
 </Dialog>
 
-<Dialog
-	bind:open={scriptsOpen}
-	size="md"
-	title={t('hosts.serverScripts')}
-	description={scriptsTarget ? scriptsTarget.hostname : undefined}
->
-	{#if scriptsTarget}
-		<dl class="scripts">
-			<dt>{t('hosts.serverScripts')}</dt>
-			<dd>{scriptsLabel(scriptsTarget)}</dd>
-			<dt>{t('hosts.serverScripts.interpreters')}</dt>
-			<dd>
-				{scriptsTarget.script_interpreters.length > 0
-					? scriptsTarget.script_interpreters.join(', ')
-					: t('common.none')}
-			</dd>
-		</dl>
-		{#if scriptsTarget.server_scripts === 'enabled'}
-			<Alert
-				variant="inline"
-				tone="attention"
-				icon="shield"
-				title={t('hosts.serverScripts.risk')}
-			/>
-		{:else}
-			<p class="scripts__hint">{t('hosts.serverScripts.enableHint')}</p>
-			<CopyField value={enableCommand(scriptsTarget.os)} />
-		{/if}
-	{/if}
-	{#snippet footer()}
-		<Button onclick={() => (scriptsOpen = false)}>{t('common.close')}</Button>
-	{/snippet}
-</Dialog>
-
-<ConfirmDialog
-	bind:open={reregisterOpen}
-	title={t('hosts.reregisterTitle')}
-	message={t('hosts.reregisterBody', { name: reregisterTarget?.hostname ?? '' })}
-	confirmLabel={t('hosts.reregisterCreate')}
-	cancelLabel={t('common.cancel')}
-	loading={reregistering}
-	onConfirm={confirmReregister}
-/>
-
-<Dialog bind:open={reregisterTokenOpen} size="lg" title={t('hosts.reregisterTokenTitle')}>
-	{#if reregisterToken}
-		<Alert tone="attention" icon="key" title={t('tokens.valueOnceBody')}>
-			{t('hosts.reregisterNote', { name: reregisterTarget?.hostname ?? '' })}
-		</Alert>
-		<CopyField value={reregisterToken.token} label={t('hosts.tokenValue')} secret />
-		<CopyField value={reregisterCommand} label={t('hosts.installCommand')} />
-	{/if}
-	{#snippet footer()}
-		<Button variant="primary" onclick={() => (reregisterTokenOpen = false)}>
-			{t('common.done')}
-		</Button>
-	{/snippet}
-</Dialog>
-
-<ConfirmDialog
-	bind:open={replaceOpen}
-	title={t('hosts.replaceTitle')}
-	message={t('hosts.replaceBody', {
-		old: replaceTarget?.possible_duplicate_of?.hostname ?? '',
-		oldSeen: replaceTarget?.possible_duplicate_of?.last_seen_at
-			? relativeTime(replaceTarget.possible_duplicate_of.last_seen_at)
-			: t('common.never'),
-		newSeen: replaceTarget?.last_seen_at
-			? relativeTime(replaceTarget.last_seen_at)
-			: t('common.never')
-	})}
-	confirmLabel={t('hosts.replace')}
-	cancelLabel={t('common.cancel')}
-	tone="danger"
-	loading={replacing}
-	onConfirm={confirmReplace}
-/>
-
 <ConfirmDialog
 	bind:open={cancelOpen}
 	title={t('hosts.pending.cancelTitle')}
@@ -773,66 +575,11 @@
 	onConfirm={confirmCancel}
 />
 
-<Dialog bind:open={renameOpen} size="sm" title={t('hosts.renameTitle')} onsubmit={renameHost}>
-	{#if renameError}
-		<Alert tone="danger" title={renameError} />
-	{/if}
-	<TextField
-		id="host-rename"
-		label={t('hosts.hostname')}
-		help={t('hosts.renameHint')}
-		error={renameFieldError}
-		bind:value={renameName}
-		maxlength={HOSTNAME_MAX_LENGTH}
-		required
-	/>
-	{#snippet footer()}
-		<Button onclick={() => (renameOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={renaming} disabled={!renameValid}>
-			{t('hosts.rename')}
-		</Button>
-	{/snippet}
-</Dialog>
-
-<Dialog bind:open={revokeOpen} size="sm" icon="octagon" title={t('hosts.revokeTitle')}>
-	<p>
-		{t('hosts.revokeBody', { name: revokeTarget?.hostname ?? '' })}
-	</p>
-	{#snippet footer()}
-		<Button onclick={() => (revokeOpen = false)}>{t('common.cancel')}</Button>
-		<Button variant="danger" loading={revoking} onclick={confirmRevoke}>
-			{t('hosts.revoke')}
-		</Button>
-	{/snippet}
-</Dialog>
+<HostActions bind:this={actions} onchanged={load} />
 
 <style>
 	.host__scripts {
-		padding: 0;
-		border: 0;
-		background: none;
-		cursor: pointer;
-	}
-
-	.scripts {
-		display: grid;
-		grid-template-columns: max-content 1fr;
-		gap: var(--rh-space-2) var(--rh-space-4);
-		margin: 0 0 var(--rh-space-3);
-	}
-
-	.scripts dt {
-		color: var(--rh-color-text-muted);
-	}
-
-	.scripts dd {
-		margin: 0;
-	}
-
-	.scripts__hint {
-		margin: 0 0 var(--rh-space-2);
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
+		text-decoration: none;
 	}
 
 	.status {
@@ -852,8 +599,15 @@
 	}
 
 	.host__name {
+		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
+		text-decoration: none;
 		white-space: nowrap;
+	}
+
+	.host__name:hover {
+		color: var(--rh-color-link);
+		text-decoration: underline;
 	}
 
 	.host__meta {

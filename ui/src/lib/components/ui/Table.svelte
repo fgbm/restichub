@@ -155,6 +155,7 @@
 							class:table__cell--right={column.align === 'right'}
 							class:table__cell--center={column.align === 'center'}
 							class:table__cell--nowrap={column.nowrap}
+							class:table__cell--narrow-hidden={column.hideNarrow}
 							aria-sort={column.sortable === false ? undefined : ariaSort(column)}
 						>
 							{#if column.sortable === false}
@@ -217,6 +218,7 @@
 									class:table__cell--center={column.align === 'center'}
 									class:table__cell--mono={column.mono}
 									class:table__cell--nowrap={column.nowrap}
+									class:table__cell--narrow-hidden={column.hideNarrow}
 								>
 									{#if column.render}
 										{@render column.render(row)}
@@ -447,6 +449,19 @@
 		width: 1%;
 		text-align: right;
 		white-space: nowrap;
+	}
+
+	@media (max-width: 720px) {
+		.table__cell--narrow-hidden {
+			display: none;
+		}
+
+		th.table__cell--actions,
+		td.table__cell--actions {
+			position: sticky;
+			right: 0;
+			background-color: var(--rh-color-surface);
+		}
 	}
 
 	.table__error {
