@@ -589,6 +589,12 @@
 		gap: var(--rh-space-1);
 	}
 
+	@media (max-width: 720px) {
+		.status :global(.status) {
+			white-space: normal;
+		}
+	}
+
 	.nowrap {
 		white-space: nowrap;
 	}

@@ -275,9 +275,6 @@
 	<p><a href={resolve('/(app)/hosts')}>{t('hp.back')}</a></p>
 {:else}
 	<PageHeader title={agent.hostname} description={t('hp.description')}>
-		{#if connection}
-			<StatusPill tone={connection.tone}>{connection.label}</StatusPill>
-		{/if}
 		{#if canWrite && active}
 			<Button size="sm" icon="tag" onclick={() => hostActions.openRename(agent!)}>
 				{t('hosts.rename')}
@@ -290,6 +287,11 @@
 			/>
 		{/if}
 	</PageHeader>
+	{#if connection}
+		<div class="state-row">
+			<StatusPill tone={connection.tone}>{connection.label}</StatusPill>
+		</div>
+	{/if}
 
 	{#if agent.status === 'revoked'}
 		<div class="banner">
@@ -637,11 +639,11 @@
 		color: var(--rh-color-link);
 	}
 
+	.state-row {
+		margin: calc(-1 * var(--rh-space-4)) 0 var(--rh-space-4);
+	}
+
 	.banner {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: var(--rh-space-2);
 		margin-bottom: var(--rh-space-4);
 	}
 
@@ -853,6 +855,18 @@
 	}
 
 	@media (max-width: 720px) {
+		.banner :global(.alert) {
+			flex-wrap: wrap;
+		}
+
+		.banner :global(.alert__body) {
+			flex-basis: calc(100% - 44px);
+		}
+
+		.banner :global(.alert__actions) {
+			margin-left: 36px;
+		}
+
 		.facts {
 			grid-template-columns: minmax(0, 1fr);
 			gap: 0;

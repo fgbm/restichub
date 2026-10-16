@@ -88,3 +88,54 @@ test('the hosts table fits 1440 px without a horizontal scroll (FR-ID-11)', asyn
 	expect(overflow).toBeLessThanOrEqual(0);
 	await expect(page.getByText('Duplicate').first()).toBeVisible();
 });
+
+test('a host page shows the host and its dangerous actions open small dialogs', async ({
+	page
+}) => {
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Hosts', exact: true })
+		.click();
+	await page.getByRole('link', { name: 'srv-db-01', exact: true }).click();
+
+	await expect(page.getByRole('heading', { level: 1, name: 'srv-db-01' })).toBeVisible();
+	await expect(page.locator('[data-section="restore"] input[readonly]')).toHaveValue(
+		'/var/lib/restichub-restore'
+	);
+	await expect(page.getByRole('link', { name: 'Restore to this host' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Revoke agent' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Revoke the host?' });
+	await expect(dialog).toBeVisible();
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await expect(dialog).toBeHidden();
+
+	await page.getByRole('button', { name: 'Rename' }).click();
+	const rename = page.getByRole('dialog', { name: 'Rename the host' });
+	await rename.locator('#host-rename').fill('srv-db-02');
+	await rename.getByRole('button', { name: 'Rename' }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'srv-db-02' })).toBeVisible();
+});
+
+test('the hosts list keeps the row menu inside a 390 px screen', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Hosts', exact: true })
+		.click();
+	await page.getByText('win-fs01', { exact: true }).waitFor();
+
+	const button = page.getByRole('button', { name: 'More actions for win-fs01', exact: true });
+	await expect(button).toBeVisible();
+	const box = await button.boundingBox();
+	expect(box).not.toBeNull();
+	expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
+	const overflow = await page
+		.locator('.table-scroll')
+		.evaluate((element) => element.scrollWidth - element.clientWidth);
+	expect(overflow).toBeLessThanOrEqual(0);
+});
