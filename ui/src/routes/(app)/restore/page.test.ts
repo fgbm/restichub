@@ -103,6 +103,37 @@ describe('Restore page', () => {
 		);
 	});
 
+	it('fr_rs_01_lists_the_newest_snapshot_first_with_the_count_next_to_the_title', async () => {
+		mocks.getSnapshots.mockResolvedValue(
+			listing('done', [
+				{ ...snapshot('a1b2c3d4', 'nas-backup'), time: '2026-10-12T08:00:00Z' },
+				{ ...snapshot('b2c3d4e5', 'ws-anna'), time: '2026-10-14T08:00:00Z' },
+				{ ...snapshot('c3d4e5f6', 'ws-anna'), time: '2026-10-13T08:00:00Z' }
+			])
+		);
+		const { container } = render(Restore);
+		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		const order = screen
+			.getAllByRole('link', { name: /^Open snapshot / })
+			.map((link) => link.textContent ?? '');
+		expect(order[0]).toContain('b2c3d4e5');
+		expect(order[1]).toContain('c3d4e5f6');
+		expect(order[2]).toContain('a1b2c3d4');
+		expect(container.querySelector('.page-header__count')).toHaveTextContent('3');
+		expect(screen.queryByRole('heading', { name: 'Snapshots' })).toBeNull();
+	});
+
+	it('fr_rs_01_the_facet_popover_explains_how_the_filters_combine', async () => {
+		const user = userEvent.setup();
+		render(Restore);
+		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		expect(screen.queryByText('Any chosen value matches. All filters must match.')).toBeNull();
+		await user.click(screen.getByRole('button', { name: 'Tag' }));
+		expect(
+			await screen.findByText('Any chosen value matches. All filters must match.')
+		).toBeInTheDocument();
+	});
+
 	it('fr_rs_01_a_host_chosen_in_the_popover_shows_as_a_chip_and_narrows_the_list', async () => {
 		const user = userEvent.setup();
 		render(Restore);

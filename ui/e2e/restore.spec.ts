@@ -30,10 +30,7 @@ test('the snapshot list takes filters and the tree loads a large directory by pa
 	await page.keyboard.press('Escape');
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(2);
 
-	await page
-		.getByRole('link', { name: /^Open snapshot / })
-		.first()
-		.click();
+	await page.getByRole('link', { name: 'Open snapshot a1b2d4e5' }).click();
 	const tree = page.getByRole('tree', { name: 'Files of the snapshot' });
 	await expect(tree.getByText('home', { exact: true })).toBeVisible();
 	await tree.getByRole('button', { name: 'Expand home' }).click();
@@ -53,10 +50,7 @@ test('the snapshot list takes filters and the tree loads a large directory by pa
 	// A directory with 2500 entries comes in pages of 1000.
 	await page.getByRole('button', { name: 'Reset', exact: true }).click();
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(8);
-	await page
-		.getByRole('link', { name: /^Open snapshot / })
-		.first()
-		.click();
+	await page.getByRole('link', { name: 'Open snapshot a1b2c3d4' }).click();
 	await tree.getByRole('button', { name: 'Expand srv' }).click();
 	await tree.getByRole('button', { name: 'Expand www' }).click();
 	await tree.getByRole('button', { name: 'Expand uploads' }).click();

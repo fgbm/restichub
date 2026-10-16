@@ -14,10 +14,12 @@ These components apply the rules of [design/style/ui-principles.md](../design/st
 | `description` | The text below the heading.                                                                                                                                                      |
 | `count`       | The counter next to the heading.                                                                                                                                                 |
 | `status`      | A snippet next to the heading, for example a `StatusPill`.                                                                                                                       |
-| `context`     | A snippet for the page context, for example the repository that a list belongs to.                                                                                               |
+| `context`     | A snippet for the page context, for example the repository that a list belongs to. Put a `<label>` without a colon before the control. The header makes the label muted.         |
 | `actions`     | A snippet with the primary actions of the page.                                                                                                                                  |
 | `loading`     | While it is `true`, the page shows a placeholder instead of the header and the body.                                                                                             |
 | `error`       | A load error. The page shows the error instead of the header and the body.                                                                                                       |
+
+The header puts the context and the actions at the right end of the title row, in this sequence. Below 720 px, they go below the description and the context uses the full width.
 
 The top bar (`AppShell`) shows the section levels from the navigation, then the levels of the page. Each level above the current page is a link. The section level links to the list with its last query string, so the list opens with the same filters and the same page. Do not add a back link to the page body. The lint rule `ui/no-back-link` reports a back link.
 
@@ -73,16 +75,17 @@ Do not put a link to another entity in a cell. Do not put a status text below a 
 
 `FilterBar` (`$lib/components/ui`) is the one compact filter bar above a table. Each change applies at once.
 
-| Property   | Function                                                                                                                               |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `label`    | The accessible name of the bar.                                                                                                        |
-| `value`    | The filter state (`FilterState`): one string for each query parameter. A facet with more than one value joins the values with a comma. |
-| `search`   | `{ key, label, placeholder?, mono?, id? }`: the search field.                                                                          |
-| `facets`   | `FilterFacet[]`: `{ key, label, options: { value, label?, count? }[], multiple? }`. A facet is a popover with the counts.              |
-| `period`   | Show the period facet with the presets and a custom range. It writes the `period`, `from` and `to` keys.                               |
-| `hint`     | A short help text behind an information icon.                                                                                          |
-| `onchange` | Receives a patch of the state.                                                                                                         |
-| `onreset`  | By default, the Reset button sets each key of the bar to an empty value.                                                               |
+| Property   | Function                                                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`    | The accessible name of the bar.                                                                                                                                                              |
+| `value`    | The filter state (`FilterState`): one string for each query parameter. A facet with more than one value joins the values with a comma.                                                       |
+| `search`   | `{ key, label, placeholder?, mono?, id? }`: the search field.                                                                                                                                |
+| `facets`   | `FilterFacet[]`: `{ key, label, options: { value, label?, count? }[], multiple?, hint? }`. A facet is a popover with the counts. The `hint` is a short muted line at the top of the popover. |
+| `period`   | Show the period facet with the presets and a custom range. It writes the `period`, `from` and `to` keys.                                                                                     |
+| `hint`     | A short help text behind an information icon.                                                                                                                                                |
+| `end`      | A snippet at the right end of the row, for example the age of the list and a refresh button.                                                                                                 |
+| `onchange` | Receives a patch of the state.                                                                                                                                                               |
+| `onreset`  | By default, the Reset button sets each key of the bar to an empty value.                                                                                                                     |
 
 The bar shows a chip with a × button for each applied filter and a Reset button when a filter applies. Put the page context, for example the repository, in the page header and not in the bar.
 
