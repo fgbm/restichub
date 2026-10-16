@@ -41,6 +41,7 @@ function tenant(overrides: Record<string, unknown> = {}) {
 		status: 'active',
 		admin_state: 'present',
 		user_count: 7,
+		agent_count: 24,
 		created_at: '2026-01-12T00:00:00Z',
 		...overrides
 	};
@@ -69,6 +70,7 @@ describe('Organizations screen', () => {
 		expect(screen.queryByText('northwind')).toBeNull();
 		expect(screen.getByText('No administrator', { selector: '.status' })).toBeInTheDocument();
 		expect(screen.getByText('7 users')).toBeInTheDocument();
+		expect(screen.getAllByText('24 hosts')).toHaveLength(2);
 	});
 
 	it('suspends an active organization from its item', async () => {

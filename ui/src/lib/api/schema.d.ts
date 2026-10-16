@@ -484,7 +484,7 @@ export interface paths {
         };
         /**
          * Lists the jobs of the tenant.
-         * @description The list is newest first by default. Filter by plan, repository, agent, kind, status and creation time; sort by a column; read the next page with the cursor or with an offset.
+         * @description The list is newest first by default. Filter by plan, repository, agent, kind, status, state tab, name search and creation time; sort by a column; read the next page with the cursor or with an offset. With `counts=true` the response counts the jobs of each state tab.
          */
         get: operations["list_jobs"];
         put?: never;
@@ -1584,12 +1584,18 @@ export interface components {
             superseded_certificate_used_at?: string | null;
             version_status: components["schemas"]["AgentVersionStatus"];
         };
+        AlertCounts: {
+            open: components["schemas"]["TabCount"];
+            resolved: components["schemas"]["TabCount"];
+        };
         /**
          * @description The kind of an alert. The string value of each variant is stored: do not change a string.
          * @enum {string}
          */
         AlertKind: "rpo_violated" | "job_failed" | "job_dead_letter" | "job_warnings" | "agent_offline" | "stale_lock";
         AlertListResponse: {
+            /** @description The alerts of each state tab under the kind and search filters. */
+            counts: components["schemas"]["AlertCounts"];
             items: components["schemas"]["AlertView"][];
             /** @description Null for a page read by `offset`. */
             next_cursor?: string | null;
@@ -1748,10 +1754,17 @@ export interface components {
         AuditItem: {
             action: components["schemas"]["AuditAction"];
             actor_id?: string | null;
+            /** @description The current name of a user, an API token or an agent actor, with the same rule. */
+            actor_name?: string | null;
             actor_type: string;
             diff?: Record<string, never> | null;
             id: string;
             object_id?: string | null;
+            /**
+             * @description What the object is called now. Null for a removed object, an object without a name and, in
+             *     the platform list, an object inside an organization.
+             */
+            object_name?: string | null;
             object_type: string;
             /** @description In RFC 3339. */
             occurred_at: string;
@@ -1891,6 +1904,10 @@ export interface components {
             enabled: boolean;
             id: string;
             kind: components["schemas"]["ChannelKind"];
+            /** @description The end of the last delivery attempt of an alert, in RFC 3339. A test send does not count. */
+            last_delivery_at?: string | null;
+            /** @description Null when no alert delivery was attempted. False also for an attempt that waits for a retry. */
+            last_delivery_ok?: boolean | null;
             name: string;
             /** @description The addresses of an email channel. Empty for a webhook. */
             recipients: string[];
@@ -1903,6 +1920,8 @@ export interface components {
             /** @description Portion to check, for example `10%` or `1/7`. */
             read_data_subset?: string;
         };
+        /** @enum {string} */
+        CheckResult: "passed" | "failed";
         /** @description What `restic check --json` reported. */
         CheckSummary: {
             /** Format: int64 */
@@ -2336,6 +2355,14 @@ export interface components {
             summary?: components["schemas"]["StepOutput"] | null;
             trigger: components["schemas"]["JobTrigger"];
         };
+        JobGroupCounts: {
+            /** @description Every job under the other filters, in each state. */
+            all: components["schemas"]["TabCount"];
+            failed: components["schemas"]["TabCount"];
+            running: components["schemas"]["TabCount"];
+            succeeded: components["schemas"]["TabCount"];
+            succeeded_with_warnings: components["schemas"]["TabCount"];
+        };
         /**
          * @description The kind of a job (FR-PR-02, the seed of the scheduler of epic #7).
          *
@@ -2352,6 +2379,7 @@ export interface components {
             stall_timeout_minutes: number;
         };
         JobListResponse: {
+            counts?: components["schemas"]["JobGroupCounts"] | null;
             items: components["schemas"]["JobView"][];
             /** @description Null when the list holds no later job, and for a numbered page or another order. */
             next_cursor?: string | null;
@@ -2444,6 +2472,11 @@ export interface components {
             status: components["schemas"]["JobStatus"];
             /** @description In RFC 3339. */
             updated_at: string;
+        };
+        LastCheckView: {
+            /** @description In RFC 3339. */
+            finished_at: string;
+            result: components["schemas"]["CheckResult"];
         };
         LimitsView: {
             /**
@@ -2659,6 +2692,8 @@ export interface components {
         PlanResponse: {
             plan: components["schemas"]["PlanView"];
         };
+        /** @enum {string} */
+        PlanRpoState: "ok" | "at_risk" | "violated" | "unknown";
         /** @description One plan with its display values (FR-SC-01). */
         PlanView: {
             agent_hostname: string;
@@ -2674,6 +2709,11 @@ export interface components {
             id: string;
             /** @description The last fire time that the scheduler processed, in RFC 3339. */
             last_fire_time?: string | null;
+            /**
+             * @description The finish time of the last succeeded backup, in RFC 3339. Null when the plan never
+             *     succeeded.
+             */
+            last_success_at?: string | null;
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
             name: string;
             /** @description In UTC, in RFC 3339. Null when the plan is disabled. */
@@ -2686,6 +2726,8 @@ export interface components {
              * @description The stored recovery point objective in seconds. Null means the default of the schedule.
              */
             rpo_seconds?: number | null;
+            /** @description The state of the dashboard (ADR-0036). `unknown` when the host of the plan is revoked. */
+            rpo_state: components["schemas"]["PlanRpoState"];
             time_zone: string;
             updated_at: string;
         };
@@ -2734,11 +2776,17 @@ export interface components {
         /**
          * @description A tenant in a platform administration response (FR-TN-02).
          *
-         *     The view holds the user count only. It never holds a user list or a secret of the tenant.
+         *     The view holds the user and host counts only. It never holds a user list or a secret of the
+         *     tenant.
          */
         PlatformTenantView: {
             /** @description Derived from the memberships: `none` when the tenant has no active Admin (ADR-0028). */
             admin_state: components["schemas"]["AdminState"];
+            /**
+             * Format: int64
+             * @description Revoked hosts do not count.
+             */
+            agent_count: number;
             /** @description In RFC 3339. */
             created_at: string;
             id: string;
@@ -2940,8 +2988,17 @@ export interface components {
             id: string;
             /** @description False until an agent runs the init step. The MVP control plane never sets it true. */
             initialized: boolean;
+            last_check?: components["schemas"]["LastCheckView"] | null;
+            /** @description Uses the same lock marks as the dashboard (FR-SC-06). */
+            lock_state: components["schemas"]["LockState"];
             maintenance_agent_id?: string | null;
             name: string;
+            /**
+             * Format: int64
+             * @description From the newest snapshot listing of the Restore screen, kept for 7 days. Null without a
+             *     listing or when the listing was cut.
+             */
+            snapshot_count?: number | null;
             /** @description In RFC 3339. */
             updated_at: string;
         };
@@ -3351,6 +3408,16 @@ export interface components {
         SwitchTenantRequest: {
             tenant_id: string;
         };
+        /** @description The number of rows of a state tab under the other filters of the list. */
+        TabCount: {
+            /** @description More rows match than `count` shows. */
+            capped: boolean;
+            /**
+             * Format: int64
+             * @description At most 10000.
+             */
+            count: number;
+        };
         /**
          * @description The tenancy mode of the installation (ADR-0024).
          *
@@ -3508,6 +3575,8 @@ export interface components {
             disabled: boolean;
             display_name: string;
             id: string;
+            /** @description The last sign-in into the tenant or switch to it, in RFC 3339. Set in the user list only. */
+            last_sign_in_at?: string | null;
             role: components["schemas"]["Role"];
             /** @description The account holds an active membership in another active tenant. */
             shared: boolean;
@@ -4250,6 +4319,11 @@ export interface operations {
                 object_id: string | null;
                 /** @description Used by the platform list. */
                 tenant_id: string | null;
+                /**
+                 * @description A part of the action code, the object name or the actor name, in any case; at most 200
+                 *     characters.
+                 */
+                q: string | null;
                 /** @description Not with `offset`. */
                 cursor: string | null;
                 /** @description Skipped records, in `0..=10000`. Not with `cursor`. */
@@ -5197,14 +5271,26 @@ export interface operations {
                 /** @description Comma-separated, for example `backup,check`. */
                 kind: string | null;
                 status: components["schemas"]["JobStatus"] | null;
+                /**
+                 * @description A state tab. `failed` leaves out the cancelled jobs; `succeeded` leaves out the jobs with
+                 *     warnings.
+                 */
+                group: ("running" | "failed" | "succeeded" | "succeeded_with_warnings") | null;
+                /** @description A part of the plan, host or repository name, in any case; at most 200 characters. */
+                q: string | null;
                 /** @description In RFC 3339: the first creation time that the list holds. */
                 from: string | null;
                 /** @description In RFC 3339: the last creation time that the list holds. Not before `from`. */
                 to: string | null;
-                /** @description Default: `created_at`. A cursor takes only the default order. */
-                sort: ("created_at" | "started_at" | "status" | "plan" | "host") | null;
+                /**
+                 * @description Default: `created_at`. A cursor takes only the default order. `duration` puts an unfinished
+                 *     job last.
+                 */
+                sort: ("created_at" | "started_at" | "finished_at" | "duration" | "status" | "plan" | "host") | null;
                 /** @description Default: `desc`. */
                 order: ("asc" | "desc") | null;
+                /** @description Adds the state tab totals to the response. */
+                counts: boolean | null;
             };
             cookie?: never;
         };
@@ -6258,6 +6344,11 @@ export interface operations {
                 object_id: string | null;
                 /** @description Used by the platform list. */
                 tenant_id: string | null;
+                /**
+                 * @description A part of the action code, the object name or the actor name, in any case; at most 200
+                 *     characters.
+                 */
+                q: string | null;
                 /** @description Not with `offset`. */
                 cursor: string | null;
                 /** @description Skipped records, in `0..=10000`. Not with `cursor`. */

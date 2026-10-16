@@ -145,7 +145,9 @@ function sampleChannels(): NotificationChannel[] {
 			recipients: ['ops@example.com', 'backup@example.com'],
 			url_origin: null,
 			created_at: iso(60 * 24 * 7),
-			updated_at: iso(60 * 24 * 7)
+			updated_at: iso(60 * 24 * 7),
+			last_delivery_at: iso(60 * 2),
+			last_delivery_ok: true
 		},
 		{
 			id: 'ch_2',
@@ -155,7 +157,9 @@ function sampleChannels(): NotificationChannel[] {
 			recipients: [],
 			url_origin: 'https://hooks.example.com',
 			created_at: iso(60 * 24 * 3),
-			updated_at: iso(60 * 24 * 2)
+			updated_at: iso(60 * 24 * 2),
+			last_delivery_at: iso(60 * 3),
+			last_delivery_ok: false
 		}
 	];
 }
@@ -189,8 +193,7 @@ export class MockAlerts {
 		const limit = query.limit ?? 50;
 		const kinds = (query.kind ?? '').split(',').filter(Boolean);
 		const search = (query.q ?? '').toLowerCase();
-		const matching = this.alerts
-			.filter((alert) => status === 'all' || alert.status === status)
+		const others = this.alerts
 			.filter((alert) => kinds.length === 0 || kinds.includes(alert.kind))
 			.filter(
 				(alert) =>
@@ -200,11 +203,22 @@ export class MockAlerts {
 					)
 			)
 			.sort((a, b) => b.opened_at.localeCompare(a.opened_at));
+		const matching = others.filter((alert) => status === 'all' || alert.status === status);
+		const count = (wanted: Alert['status']) => ({
+			count: others.filter((alert) => alert.status === wanted).length,
+			capped: false
+		});
 		const start = query.cursor ? Number(query.cursor) : (query.offset ?? 0);
 		const page = matching.slice(start, start + limit);
 		const next =
 			query.offset === undefined && start + limit < matching.length ? String(start + limit) : null;
-		return { items: page, next_cursor: next, total: matching.length, total_capped: false };
+		return {
+			items: page,
+			next_cursor: next,
+			total: matching.length,
+			total_capped: false,
+			counts: { open: count('open'), resolved: count('resolved') }
+		};
 	}
 
 	async listAlertRules(): Promise<AlertRule[]> {

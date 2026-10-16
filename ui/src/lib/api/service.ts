@@ -372,7 +372,7 @@ const httpService: ApiService = {
 		}),
 	listJobs: (query) =>
 		api.get<JobListResponse>(endpoints.jobs.list, {
-			query: (query ?? {}) as Record<string, string | number | undefined>
+			query: (query ?? {}) as Record<string, string | number | boolean | undefined>
 		}),
 	cancelJob: (id) => api.post<Job>(endpoints.jobs.cancel(id)),
 

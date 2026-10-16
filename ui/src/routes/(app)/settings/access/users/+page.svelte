@@ -27,6 +27,7 @@
 	} from '#lib/components/ui/index.ts';
 	import { iconOf, pillOf, userState } from '#lib/vocabulary.ts';
 	import { matchesSearch, splitList } from '#lib/filters.ts';
+	import { ago } from '#lib/list-format.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -158,7 +159,11 @@
 		return [
 			{ text: user.username, mono: true },
 			roleKeys[user.role],
-			user.shared ? t('users.meta.shared') : null
+			user.shared ? t('users.meta.shared') : null,
+			user.last_sign_in_at && {
+				text: t('users.meta.signedIn', { time: ago(user.last_sign_in_at) }),
+				time: user.last_sign_in_at
+			}
 		];
 	}
 

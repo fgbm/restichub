@@ -1,0 +1,77 @@
+-- The facts that the entity lists show in each item (FR-UI-01, ADR-0036).
+--
+-- `alert_deliveries.attempted_at` is the end of the last attempt of a delivery, sent or failed. The
+-- channel list shows the last attempt and its result.
+--
+-- `tenant_agent_counts()` gives the platform list of the organizations the number of the hosts
+-- that are not revoked. It follows the rules of migration 0013: the platform scope cannot read the
+-- `agents` table, so one narrow `SECURITY DEFINER` function returns the count only and no agent row.
+--
+-- The indexes serve one item fact each: the comment above each index names its query.
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'restichub_auth') THEN
+        RAISE EXCEPTION
+            'the role restichub_auth is missing; run crates/restichub-db/sql/bootstrap-roles.sql as a database administrator';
+    END IF;
+END
+$$;
+
+ALTER TABLE alert_deliveries ADD COLUMN attempted_at timestamptz;
+
+-- An earlier version kept no time of a failed attempt, so a delivery that was tried and not sent
+-- takes its creation time.
+UPDATE alert_deliveries SET attempted_at = COALESCE(sent_at, created_at)
+WHERE status <> 'pending' OR attempts > 0;
+
+-- The last attempt of each channel.
+CREATE INDEX alert_deliveries_channel_attempt_idx
+    ON alert_deliveries (tenant_id, channel_id, attempted_at DESC, id DESC)
+    WHERE attempted_at IS NOT NULL;
+
+-- The last check of each repository. A check is rare beside the backups of the same repository,
+-- so the list index of 0049 reads many rows before it finds one.
+CREATE INDEX jobs_repository_check_idx ON jobs (tenant_id, repository_id, finished_at DESC)
+    WHERE kind = 'check' AND status IN ('succeeded', 'failed', 'dead_letter');
+
+-- The job list sorted by the finish time or by the duration, newest or longest first, as the
+-- indexes of 0049 do for the other orders.
+CREATE INDEX jobs_list_finished_idx
+    ON jobs (tenant_id, finished_at DESC NULLS LAST, created_at DESC, id DESC)
+    WHERE kind NOT IN ('snapshots', 'ls');
+
+CREATE INDEX jobs_list_duration_idx
+    ON jobs (tenant_id, (finished_at - started_at) DESC NULLS LAST, created_at DESC, id DESC)
+    WHERE kind NOT IN ('snapshots', 'ls');
+
+-- The last sign-in of each member. The audit log of a tenant holds many more records of other
+-- actions, for example one for each delivered secret.
+CREATE INDEX audit_log_sign_in_idx ON audit_log (tenant_id, actor_id, occurred_at DESC)
+    WHERE action IN ('sign_in', 'session_switch');
+
+GRANT USAGE, CREATE ON SCHEMA public TO restichub_auth;
+-- The definer role reads only the columns of the count, not the certificate data of a host.
+GRANT SELECT (tenant_id, status) ON agents TO restichub_auth;
+
+CREATE FUNCTION tenant_agent_counts()
+RETURNS TABLE (tenant_id uuid, agent_count bigint)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+    SELECT agent.tenant_id, count(*)::bigint
+    FROM public.agents AS agent
+    WHERE current_setting('restichub.scope', true) IS NOT DISTINCT FROM 'platform'
+      AND agent.status <> 'revoked'
+    GROUP BY agent.tenant_id
+$$;
+
+ALTER FUNCTION tenant_agent_counts() OWNER TO restichub_auth;
+
+REVOKE ALL ON FUNCTION tenant_agent_counts() FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION tenant_agent_counts() TO restichub_app;
+
+-- The definer role creates no object after the migration (N5). It keeps USAGE.
+REVOKE CREATE ON SCHEMA public FROM restichub_auth;

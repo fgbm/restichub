@@ -81,6 +81,10 @@ A list route returns `items` and `next_cursor`. To read the next page, send the 
 
 The lists of hosts, jobs, alerts and audit records also read a numbered page. Send the parameter `offset` with the number of records to skip. The answer then has `total`, the number of records that agree with the filters. The control plane counts at most 10000 records. If more records agree, `total_capped` is `true`. An `offset` above 10000 gives HTTP 400 `invalid_argument` with the field `offset` and the reason `out_of_range`. Do not send `cursor` and `offset` together.
 
+The alert list also gives `counts`: the number of records of each state tab with the other filters. The job list gives `counts` when the request has `counts=true`, because each tab is a separate count. Each tab has `count` (at most 10000) and `capped`. The lists of hosts, jobs, alerts and audit records find text with the parameter `q`, at most 200 characters. The characters `%`, `_` and `\` match themselves. In the audit list, `q` finds a part of the action code, of the object name or of the actor name.
+
+An audit record gives `object_name` and `actor_name`: the current names of the object and of the actor. The value is null when the object is removed or has no name. In the platform list, the value is null also for an object inside an organization.
+
 ```sh
 curl -s "https://<control-plane>/api/v1/plans?limit=50" \
   -H "Authorization: Bearer rh_<token>"

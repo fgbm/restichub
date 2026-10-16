@@ -82,6 +82,19 @@ describe('the Alerts screen', () => {
 		);
 	});
 
+	it('fr_ui_01 shows the server counts of the open, the resolved and all alerts', async () => {
+		mocks.listAlerts.mockResolvedValue({
+			...list([alert()]),
+			counts: { open: { count: 3, capped: false }, resolved: { count: 41, capped: false } }
+		});
+		render(Alerts);
+
+		await screen.findByText('Job failed: nightly-web');
+		expect(screen.getByRole('button', { name: 'Open 3' })).toHaveAttribute('aria-pressed', 'true');
+		expect(screen.getByRole('button', { name: 'Resolved 41' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'All 44' })).toBeInTheDocument();
+	});
+
 	it('shows the empty state of the open list', async () => {
 		mocks.listAlerts.mockResolvedValue(list([]));
 		render(Alerts);

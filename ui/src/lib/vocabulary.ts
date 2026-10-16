@@ -125,6 +125,10 @@ const CERTIFICATE_WARNING_MS = 3 * DAY_MS;
 export function hostState(agent: Agent, now = Date.now()): EntityState {
 	if (agent.status === 'revoked')
 		return state('revoked', 'hosts.status.revoked', 'neutral', 'monitor-x');
+	// The old certificate of a replaced host still connected: a sign of a copied host.
+	if (agent.superseded_certificate_used_at) {
+		return state('oldCertificate', 'hosts.status.oldCertificate', 'danger', 'host');
+	}
 	if (!agent.first_connected_at) {
 		return state('waiting', 'hosts.status.waiting', 'neutral', 'hourglass');
 	}
@@ -143,26 +147,35 @@ export function hostState(agent: Agent, now = Date.now()): EntityState {
 	return state('online', 'hosts.status.online', 'normal', 'host');
 }
 
-export function planState(plan: Pick<Plan, 'enabled'>): EntityState {
+/** A disabled plan raises no alert, so its pill is "Disabled" whatever its recovery point. */
+export function planState(plan: { enabled: boolean; rpo_state?: Plan['rpo_state'] }): EntityState {
 	if (!plan.enabled) return state('disabled', 'plans.disabled', 'neutral', 'calendar-off');
+	if (plan.rpo_state === 'violated') {
+		return state('violated', 'plans.status.violated', 'danger', 'calendar-x');
+	}
+	if (plan.rpo_state === 'at_risk') {
+		return state('atRisk', 'plans.status.atRisk', 'warning', 'calendar-clock');
+	}
 	return state('ok', 'plans.ok', 'normal', 'calendar-check');
 }
 
 /** A plan with the recovery point state of the overview (`DashboardPlan`). */
 export function rpoPlanState(plan: { enabled: boolean; state: RpoState }): EntityState {
-	if (!plan.enabled) return planState(plan);
-	if (plan.state === 'violated') {
-		return state('violated', 'plans.status.violated', 'danger', 'calendar-x');
-	}
-	if (plan.state === 'at_risk') {
-		return state('atRisk', 'plans.status.atRisk', 'warning', 'calendar-clock');
-	}
-	return planState(plan);
+	return planState({ enabled: plan.enabled, rpo_state: plan.state });
 }
 
-export function repositoryState(repository: Pick<Repository, 'initialized'>): EntityState {
+export function repositoryState(
+	repository: Pick<Repository, 'initialized'> &
+		Partial<Pick<Repository, 'lock_state' | 'last_check'>>
+): EntityState {
 	if (!repository.initialized) {
 		return state('notInitialized', 'repositories.status.notInitialized', 'warning', 'repository');
+	}
+	if (repository.last_check?.result === 'failed') {
+		return state('checkFailed', 'repositories.status.checkFailed', 'danger', 'database-zap');
+	}
+	if (repository.lock_state === 'stale') {
+		return state('staleLock', 'lock.stale', 'warning', 'lock-keyhole');
 	}
 	return state('ready', 'repositories.status.ready', 'normal', 'repository');
 }

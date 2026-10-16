@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext, allowed_role, ensure_target_not_above_actor};
 use crate::error::ApiError;
+use crate::jobs::format_time;
 use crate::json::ApiJson;
 use crate::password;
 use crate::server::AppState;
@@ -76,12 +77,25 @@ pub async fn list_users(
     context: RequestContext,
 ) -> Result<Json<UserListResponse>, ApiError> {
     context.authorize(Operation::UsersRead)?;
-    let members = context
-        .tenant_tx(&state, async |tx| Ok(users::list_members(tx).await?))
+    let (members, sign_ins) = context
+        .tenant_tx(&state, async |tx| {
+            let members = users::list_members(tx).await?;
+            let ids: Vec<UserId> = members.iter().map(|member| member.id).collect();
+            Ok((members, users::last_sign_ins(tx, &ids).await?))
+        })
         .await?;
-    Ok(Json(UserListResponse {
-        items: members.iter().map(UserView::from_member).collect(),
-    }))
+    let items = members
+        .iter()
+        .map(|member| {
+            let mut view = UserView::from_member(member);
+            view.last_sign_in_at = sign_ins
+                .iter()
+                .find(|(id, _)| *id == member.id)
+                .map(|(_, time)| format_time(*time));
+            view
+        })
+        .collect();
+    Ok(Json(UserListResponse { items }))
 }
 
 #[utoipa::path(

@@ -2164,7 +2164,30 @@ export const en = {
 	'jobTemplates.secrets': 'Secrets',
 	'jobTemplates.backupStep': 'Backup',
 	'templates.summary': 'Summary',
-	'jobTemplates.scriptCount': 'Scripts'
+	'jobTemplates.scriptCount': 'Scripts',
+	'hosts.status.oldCertificate': 'Old certificate used',
+	'repositories.status.checkFailed': 'Check failed',
+	'repositories.meta.checked': 'checked {time}',
+	'repositories.meta.notChecked': 'not checked',
+	'repositories.snapshotCount.one': '{n} snapshot',
+	'repositories.snapshotCount.few': '{n} snapshots',
+	'repositories.snapshotCount.many': '{n} snapshots',
+	'repositories.snapshotCount.other': '{n} snapshots',
+	'repositories.sort.lastCheck': 'Last check',
+	'plans.tab.attention': 'Need attention',
+	'plans.sort.lastSuccess': 'Last backup',
+	'jobs.tab.warnings': 'With warnings',
+	'jobs.sort.duration': 'Duration',
+	'jobs.sort.finished': 'Finished',
+	'jobs.searchByName': 'Search by plan, host or repository',
+	'channels.meta.delivered': 'delivered {time}',
+	'channels.meta.deliveryFailed': 'delivery failed {time}',
+	'users.meta.signedIn': 'signed in {time}',
+	'tenants.hostCount.one': '{n} host',
+	'tenants.hostCount.few': '{n} hosts',
+	'tenants.hostCount.many': '{n} hosts',
+	'tenants.hostCount.other': '{n} hosts',
+	'audit.searchByName': 'Search by object or actor name, or action code'
 } as const;
 
 export type MessageKey = keyof typeof en;

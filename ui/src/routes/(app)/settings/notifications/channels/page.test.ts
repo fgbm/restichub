@@ -75,6 +75,28 @@ describe('the channel settings', () => {
 		expect(screen.getByText('ops@example.com')).toBeInTheDocument();
 	});
 
+	it('fr_ui_01 shows the result of the last delivery attempt', async () => {
+		const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+		mocks.listChannels.mockResolvedValue(
+			list([
+				channel({ last_delivery_at: hoursAgo(2), last_delivery_ok: true }),
+				channel({
+					id: 'ch_2',
+					name: 'ops-hook',
+					last_delivery_at: hoursAgo(3),
+					last_delivery_ok: false
+				}),
+				channel({ id: 'ch_3', name: 'quiet' })
+			])
+		);
+		render(Channels);
+
+		await screen.findByText('quiet');
+		expect(screen.getByText('delivered 2 h ago')).toBeInTheDocument();
+		expect(screen.getByText('delivery failed 3 h ago')).toBeInTheDocument();
+		expect(screen.getAllByText(/^deliver/)).toHaveLength(2);
+	});
+
 	it('warns when the installation has no SMTP server', async () => {
 		mocks.listChannels.mockResolvedValue(list([channel()], false));
 		render(Channels);

@@ -10,6 +10,7 @@ import {
 	jobState,
 	pillOf,
 	planState,
+	repositoryState,
 	tenantState
 } from './vocabulary';
 
@@ -83,12 +84,53 @@ describe('host states', () => {
 		expect(hostState(agent({ version_status: 'unsupported' }), now).key).toBe('outdated');
 		expect(pillOf(hostState(agent({}), now))).toBeNull();
 	});
+
+	it('fr_ui_01 shows the use of an old certificate in the danger tone above offline', () => {
+		const copied = agent({ online: false, superseded_certificate_used_at: '2026-10-16T08:00:00Z' });
+		expect(hostState(copied, now)).toMatchObject({ key: 'oldCertificate', tone: 'danger' });
+		expect(iconOf(hostState(copied, now)).tone).toBe('danger');
+		expect(pillOf(hostState(copied, now))?.label).toBe('Old certificate used');
+		expect(
+			hostState({ ...copied, status: 'revoked' }, now).key,
+			'a revoked host stays revoked'
+		).toBe('revoked');
+	});
 });
 
 describe('other entity states', () => {
 	it('puts Disabled of a plan in the neutral tone', () => {
 		expect(planState({ enabled: false })).toMatchObject({ tone: 'neutral', icon: 'calendar-off' });
 		expect(pillOf(planState({ enabled: true }))).toBeNull();
+	});
+
+	it('fr_ui_01 puts Disabled of a plan above its recovery point state', () => {
+		expect(planState({ enabled: true, rpo_state: 'violated' })).toMatchObject({
+			key: 'violated',
+			tone: 'danger',
+			icon: 'calendar-x'
+		});
+		expect(planState({ enabled: true, rpo_state: 'at_risk' })).toMatchObject({
+			key: 'atRisk',
+			tone: 'warning'
+		});
+		expect(planState({ enabled: false, rpo_state: 'violated' }).key).toBe('disabled');
+		expect(pillOf(planState({ enabled: true, rpo_state: 'unknown' }))).toBeNull();
+	});
+
+	it('fr_ui_01 ranks a repository: not initialized, then a failed check, then a stale lock', () => {
+		const failed = { finished_at: '2026-10-16T08:00:00Z', result: 'failed' } as const;
+		expect(
+			repositoryState({ initialized: false, lock_state: 'stale', last_check: failed }).key
+		).toBe('notInitialized');
+		expect(
+			repositoryState({ initialized: true, lock_state: 'stale', last_check: failed })
+		).toMatchObject({ key: 'checkFailed', tone: 'danger', icon: 'database-zap' });
+		expect(repositoryState({ initialized: true, lock_state: 'stale' })).toMatchObject({
+			key: 'staleLock',
+			tone: 'warning',
+			icon: 'lock-keyhole'
+		});
+		expect(pillOf(repositoryState({ initialized: true, lock_state: 'held' }))).toBeNull();
 	});
 
 	it('warns about an API token that expires within 14 days', () => {
