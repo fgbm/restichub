@@ -3,7 +3,17 @@ name: UI smoke
 on:
   push:
     branches: [main]
+  # Neither required check depends on this workflow, so a path filter is safe. A pull request that
+  # touches none of these paths cannot change the UI or the control plane.
   pull_request:
+    paths:
+      - ui/**
+      - crates/**
+      - Cargo.lock
+      - Cargo.toml
+      - rust-toolchain.toml
+      - scripts/ui-smoke.sh
+      - .github/**
 
 permissions:
   contents: read

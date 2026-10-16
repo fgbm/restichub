@@ -232,7 +232,9 @@ async fn setup_template(admin_pool: &PgPool, admin: &PgConnectOptions) -> Templa
     .expect("cannot create the role restichub_auth");
 
     let (name, owner_role) = template_names();
-    let owner_password = Uuid::now_v7().simple().to_string();
+    // The password is fixed for a template. Test processes that run side by side share the owner
+    // login, and a new random password in one process would lock the others out.
+    let owner_password = format!("{owner_role}-password");
     let role_exists = role_exists(admin_pool, &owner_role)
         .await
         .expect("cannot read pg_roles");
