@@ -5,7 +5,7 @@
  * The mock is loaded with a dynamic import, so a production build holds no mock
  * code: Vite replaces the flag with `false` and removes the import.
  */
-import { api } from './client';
+import { api, type QueryValue } from './client';
 import { endpoints } from './endpoints';
 import type {
 	Agent,
@@ -39,6 +39,7 @@ import type {
 	EnrollmentToken,
 	ReplaceAgentResponse,
 	EnrollmentTokenCreated,
+	EnrollmentTokenQuery,
 	Instance,
 	Job,
 	JobActionRequest,
@@ -139,7 +140,8 @@ export interface ApiService {
 	replaceAgent(id: string, oldAgentId: string): Promise<ReplaceAgentResponse>;
 
 	/** One-time enrollment tokens (FR-ID-01). */
-	listEnrollmentTokens(): Promise<EnrollmentToken[]>;
+	listEnrollmentTokens(query?: EnrollmentTokenQuery): Promise<EnrollmentToken[]>;
+	getEnrollmentToken(id: string): Promise<EnrollmentToken>;
 	createEnrollmentToken(request: CreateEnrollmentTokenRequest): Promise<EnrollmentTokenCreated>;
 	revokeEnrollmentToken(id: string): Promise<void>;
 
@@ -257,20 +259,34 @@ export interface ApiService {
 
 /** The largest page of a cursor list on the server. */
 const MAX_PAGE = 200;
+/** A client-paged list larger than this is a server fault, not data to hold in the tab. */
+const MAX_PAGES = 50;
 
 /**
  * Reads every page of a cursor list. The screens of these lists filter and page on the client, so
  * they need all rows, not the first page only (design/style/ui-principles.md, 2.14).
  */
-async function allPages<T>(path: string): Promise<T[]> {
+async function allPages<T>(path: string, filter: Record<string, QueryValue> = {}): Promise<T[]> {
 	const items: T[] = [];
+	const seen = new Set<string>();
 	let cursor: string | undefined;
+	let pages = 0;
 	do {
+		if (pages === MAX_PAGES) {
+			throw new Error(`${path} has more than ${MAX_PAGES} pages`);
+		}
 		const page = await api.get<{ items: T[]; next_cursor?: string | null }>(path, {
-			query: { limit: MAX_PAGE, cursor }
+			query: { ...filter, limit: MAX_PAGE, cursor }
 		});
+		pages += 1;
 		items.push(...page.items);
 		cursor = page.next_cursor ?? undefined;
+		if (cursor !== undefined) {
+			if (seen.has(cursor)) {
+				throw new Error(`${path} returned the cursor ${cursor} again`);
+			}
+			seen.add(cursor);
+		}
 	} while (cursor);
 	return items;
 }
@@ -315,7 +331,11 @@ const httpService: ApiService = {
 	replaceAgent: (id, oldAgentId) =>
 		api.post<ReplaceAgentResponse>(endpoints.agents.replace(id), { old_agent_id: oldAgentId }),
 
-	listEnrollmentTokens: () => allPages<EnrollmentToken>(endpoints.enrollmentTokens.list),
+	listEnrollmentTokens: (query = {}) =>
+		allPages<EnrollmentToken>(endpoints.enrollmentTokens.list, {
+			pending: query.pending ? 'true' : undefined
+		}),
+	getEnrollmentToken: (id) => api.get<EnrollmentToken>(endpoints.enrollmentTokens.byId(id)),
 	createEnrollmentToken: (request) =>
 		api.post<EnrollmentTokenCreated>(endpoints.enrollmentTokens.create, request),
 	revokeEnrollmentToken: (id) => api.delete<void>(endpoints.enrollmentTokens.byId(id)),
