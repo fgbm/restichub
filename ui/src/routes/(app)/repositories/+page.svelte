@@ -1,30 +1,24 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import { ApiError, service } from '#lib/api/index.ts';
 	import type {
-		ApiProblem,
-		BackendSettings,
-		CreateRepositoryRequest,
 		Job,
 		JobResultCode,
 		JobStatus,
-		Maintenance,
 		MaintenanceTask,
 		Repository,
-		RepositoryBackendKind,
-		UpdateRepositoryRequest
+		RepositoryBackendKind
 	} from '#lib/api/index.ts';
 	import {
 		Alert,
 		Button,
-		Checkbox,
 		ConfirmDialog,
 		Dialog,
 		DropdownMenu,
 		EmptyState,
 		PageHeader,
-		PasswordField,
 		Select,
 		StatusPill,
 		Table,
@@ -32,8 +26,6 @@
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
-	import { formatTimeInZoneWithLocal } from '#lib/format.ts';
-	import { browserTimeZone, timeZoneNames } from '#lib/schedule.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -41,49 +33,6 @@
 	let agents = $state<{ id: string; hostname: string; status: string }[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-
-	let formOpen = $state(false);
-	let editing = $state<Repository | null>(null);
-	let saving = $state(false);
-	let formError = $state<string | null>(null);
-	let formProblem = $state<ApiProblem | null>(null);
-
-	let name = $state('');
-	let kind = $state<RepositoryBackendKind>('s3');
-	let endpoint = $state('');
-	let bucket = $state('');
-	let prefix = $state('');
-	let region = $state('');
-	let path = $state('');
-	let password = $state('');
-	let s3AccessKey = $state('');
-	let s3SecretKey = $state('');
-	let restPassword = $state('');
-	let maintenanceAgentId = $state('');
-
-	// The maintenance schedules of the repository in the dialog (FR-RP-08).
-	const TIME_ZONES = timeZoneNames();
-	const TIME_ZONE_LIST_ID = 'maintenance-time-zones';
-	const PREVIEW_RUNS = 3;
-	// The defaults of the control plane for a new repository (FR-RP-08, ADR-0034).
-	const DEFAULT_RETENTION_CRON = '0 3 * * 0';
-	const DEFAULT_CHECK_CRON = '0 4 1 * *';
-	const RETENTION_PRESETS: { label: MessageKey; cron: string }[] = [
-		{ label: 'repositories.maintenance.preset.daily', cron: '0 3 * * *' },
-		{ label: 'repositories.maintenance.preset.weekly', cron: '0 3 * * 0' }
-	];
-	const CHECK_PRESETS: { label: MessageKey; cron: string }[] = [
-		{ label: 'repositories.maintenance.preset.weekly', cron: '0 4 * * 0' },
-		{ label: 'repositories.maintenance.preset.monthly', cron: '0 4 1 * *' }
-	];
-	let maintenance = $state<Maintenance | null>(null);
-	let retentionCron = $state('');
-	let retentionEnabled = $state(true);
-	let checkCron = $state('');
-	let checkEnabled = $state(true);
-	let maintenanceTimeZone = $state(browserTimeZone());
-	let retentionRuns = $state<string[] | null>(null);
-	let checkRuns = $state<string[] | null>(null);
 
 	let deleteTarget = $state<Repository | null>(null);
 	let deleteOpen = $state(false);
@@ -146,9 +95,6 @@
 			.map((agent) => ({ value: agent.id, label: agent.hostname }))
 	);
 
-	// The location of an initialized repository cannot change in this version (MEDIUM 4).
-	const locationLocked = $derived(editing?.initialized === true);
-
 	const canWrite = $derived(getSession()?.role === 'admin');
 	const canRun = $derived(getSession()?.role === 'admin' || getSession()?.role === 'operator');
 	const agentNames = $derived(new Map(agents.map((agent) => [agent.id, agent.hostname])));
@@ -158,19 +104,6 @@
 		rest: 'repositories.backendKind.rest',
 		local: 'repositories.backendKind.local'
 	};
-
-	const kindOptions = $derived<SelectOption[]>([
-		{ value: 's3', label: t('repositories.backendKind.s3') },
-		{ value: 'rest', label: t('repositories.backendKind.rest') },
-		{ value: 'local', label: t('repositories.backendKind.local') }
-	]);
-
-	const agentOptions = $derived<SelectOption[]>([
-		{ value: '', label: t('repositories.maintenanceHostNone') },
-		...agents
-			.filter((agent) => agent.status === 'active')
-			.map((agent) => ({ value: agent.id, label: agent.hostname }))
-	]);
 
 	const columns = $derived<TableColumn<Repository>[]>([
 		{
@@ -224,6 +157,14 @@
 		);
 	}
 
+	function openCreate(): void {
+		void goto(resolve('/(app)/repositories/new'));
+	}
+
+	function openEdit(repository: Repository): void {
+		void goto(resolve('/(app)/repositories/[id]', { id: repository.id }));
+	}
+
 	const empty = $derived(!loading && !error && repositories.length === 0);
 
 	function messageOf(problem: unknown): string {
@@ -249,183 +190,6 @@
 	}
 
 	onMount(load);
-
-	// A closed dialog drops the secret values, so they never stay in the component state.
-	$effect(() => {
-		if (!formOpen) resetForm();
-	});
-
-	// The dialog previews the next fire times of each schedule from the form, so the user sees them
-	// before the save (FR-SC-01). The list follows the edit of the cron or the time zone.
-	$effect(() => {
-		if (!formOpen) return;
-		const zone = maintenanceTimeZone;
-		const retention = retentionCron;
-		const check = checkCron;
-		const handle = setTimeout(() => {
-			void loadRuns(retention, zone).then((runs) => (retentionRuns = runs));
-			void loadRuns(check, zone).then((runs) => (checkRuns = runs));
-		}, 200);
-		return () => clearTimeout(handle);
-	});
-
-	async function loadRuns(cron: string, zone: string): Promise<string[] | null> {
-		if (!cron.trim() || !zone.trim()) return null;
-		try {
-			const response = await service.previewSchedule({
-				cron,
-				time_zone: zone,
-				count: PREVIEW_RUNS
-			});
-			return response.runs;
-		} catch {
-			return null;
-		}
-	}
-
-	async function loadMaintenance(repository: Repository): Promise<void> {
-		try {
-			const loaded = await service.getMaintenance(repository.id);
-			// The dialog may have closed or moved to another repository while the call ran.
-			if (editing?.id !== repository.id) return;
-			maintenance = loaded;
-			retentionCron = loaded.retention.cron;
-			retentionEnabled = loaded.retention.enabled;
-			checkCron = loaded.check.cron;
-			checkEnabled = loaded.check.enabled;
-			maintenanceTimeZone = loaded.retention.time_zone;
-		} catch (problem) {
-			formError = messageOf(problem);
-		}
-	}
-
-	function resetForm(): void {
-		maintenance = null;
-		retentionCron = DEFAULT_RETENTION_CRON;
-		retentionEnabled = true;
-		checkCron = DEFAULT_CHECK_CRON;
-		checkEnabled = true;
-		maintenanceTimeZone = browserTimeZone();
-		retentionRuns = null;
-		checkRuns = null;
-		name = '';
-		kind = 's3';
-		endpoint = '';
-		bucket = '';
-		prefix = '';
-		region = '';
-		path = '';
-		password = '';
-		s3AccessKey = '';
-		s3SecretKey = '';
-		restPassword = '';
-		maintenanceAgentId = '';
-		formError = null;
-		formProblem = null;
-	}
-
-	function openCreate(): void {
-		editing = null;
-		resetForm();
-		formOpen = true;
-	}
-
-	function openEdit(repository: Repository): void {
-		editing = repository;
-		resetForm();
-		name = repository.name;
-		kind = repository.backend.kind;
-		if (repository.backend.kind === 's3') {
-			endpoint = repository.backend.endpoint;
-			bucket = repository.backend.bucket;
-			prefix = repository.backend.prefix ?? '';
-			region = repository.backend.region ?? '';
-		} else if (repository.backend.kind === 'rest') {
-			endpoint = repository.backend.endpoint;
-		} else {
-			path = repository.backend.path;
-		}
-		maintenanceAgentId = repository.maintenance_agent_id ?? '';
-		formOpen = true;
-		void loadMaintenance(repository);
-	}
-
-	function backendRequest(): BackendSettings {
-		switch (kind) {
-			case 's3':
-				return {
-					kind: 's3',
-					endpoint,
-					bucket,
-					prefix: prefix || undefined,
-					region: region || undefined
-				};
-			case 'rest':
-				return { kind: 'rest', endpoint };
-			case 'local':
-				return { kind: 'local', path };
-		}
-	}
-
-	async function save(): Promise<void> {
-		saving = true;
-		formError = null;
-		formProblem = null;
-		try {
-			if (editing) {
-				const request: UpdateRepositoryRequest = {
-					name,
-					backend: backendRequest(),
-					maintenance_agent_id: maintenanceAgentId
-				};
-				if (kind === 's3') {
-					if (s3AccessKey) request.s3_access_key = s3AccessKey;
-					if (s3SecretKey) request.s3_secret_key = s3SecretKey;
-				}
-				if (kind === 'rest' && restPassword) request.rest_password = restPassword;
-				await service.updateRepository(editing.id, request);
-				if (maintenance) {
-					await service.updateMaintenance(editing.id, {
-						time_zone: maintenanceTimeZone,
-						retention: { cron: retentionCron, enabled: retentionEnabled },
-						check: { cron: checkCron, enabled: checkEnabled }
-					});
-				}
-				pushToast('success', t('repositories.updated'));
-			} else {
-				const request: CreateRepositoryRequest = {
-					name,
-					backend: backendRequest(),
-					password,
-					maintenance_agent_id: maintenanceAgentId || undefined
-				};
-				if (kind === 's3') {
-					request.s3_access_key = s3AccessKey;
-					request.s3_secret_key = s3SecretKey;
-				}
-				if (kind === 'rest' && restPassword) request.rest_password = restPassword;
-				const created = await service.createRepository(request);
-				pushToast('success', t('repositories.created'));
-				try {
-					await service.updateMaintenance(created.id, {
-						time_zone: maintenanceTimeZone,
-						retention: { cron: retentionCron, enabled: retentionEnabled },
-						check: { cron: checkCron, enabled: checkEnabled }
-					});
-				} catch (problem) {
-					pushToast('danger', messageOf(problem));
-				}
-			}
-			formOpen = false;
-			resetForm();
-			await load();
-		} catch (problem) {
-			formProblem = problem instanceof ApiError ? problem.problem : null;
-			formError = formProblem ? null : messageOf(problem);
-		} finally {
-			saving = false;
-		}
-	}
 
 	async function runTask(repository: Repository, task: MaintenanceTask): Promise<void> {
 		try {
@@ -552,17 +316,6 @@
 		jobOpen = false;
 	}
 
-	function lastTone(entry: Job): StatusTone {
-		if (entry.status === 'succeeded') {
-			return entry.result_code === 'succeeded_with_warnings' ? 'warning' : 'success';
-		}
-		if (entry.status === 'failed' || entry.status === 'expired' || entry.status === 'dead_letter') {
-			return 'failed';
-		}
-		if (entry.status === 'running') return 'running';
-		return 'queued';
-	}
-
 	function jobTone(): StatusTone {
 		if (!job) return 'neutral';
 		if (job.status === 'succeeded') {
@@ -577,7 +330,9 @@
 
 {#snippet nameCell(repository: Repository)}
 	<span class="repo">
-		<span class="repo__name">{repository.name}</span>
+		<a class="repo__name" href={resolve('/(app)/repositories/[id]', { id: repository.id })}>
+			{repository.name}
+		</a>
 		<span class="repo__meta">{backendAddress(repository)}</span>
 	</span>
 {/snippet}
@@ -591,31 +346,6 @@
 		<span>{maintenanceName(repository)}</span>
 	{:else}
 		<StatusPill tone="warning">{t('repositories.maintenanceMissing')}</StatusPill>
-	{/if}
-{/snippet}
-
-{#snippet lastRun(job: Job | null | undefined)}
-	{#if job}
-		<span class="last">
-			<StatusPill tone={lastTone(job)}>{t(jobStatusLabels[job.status])}</StatusPill>
-			<span class="last__time">
-				{formatTimeInZoneWithLocal(job.finished_at ?? job.created_at, maintenanceTimeZone)}
-			</span>
-		</span>
-	{:else}
-		<span class="last__time">{t('repositories.maintenance.lastNone')}</span>
-	{/if}
-{/snippet}
-
-{#snippet runsList(runs: string[] | null)}
-	{#if runs && runs.length > 0}
-		<ul class="runs">
-			{#each runs as run (run)}
-				<li>{formatTimeInZoneWithLocal(run, maintenanceTimeZone)}</li>
-			{/each}
-		</ul>
-	{:else}
-		<p class="hint">{t('repositories.maintenance.nextRunsEmpty')}</p>
 	{/if}
 {/snippet}
 
@@ -734,250 +464,6 @@
 </div>
 
 <Dialog
-	bind:open={formOpen}
-	size="lg"
-	title={editing ? t('repositories.editTitle') : t('repositories.addTitle')}
-	description={editing ? t('repositories.editDescription') : t('repositories.addDescription')}
-	onsubmit={save}
->
-	{#if formError}
-		<Alert tone="danger" title={formError} />
-	{/if}
-	{#if locationLocked}
-		<Alert tone="attention" icon="lock" title={t('repositories.locationLocked')} />
-	{/if}
-	<div class="form">
-		<TextField
-			id="repo-name"
-			label={t('repositories.repository')}
-			error={fieldError(formProblem, 'name')}
-			bind:value={name}
-			required
-		/>
-		<Select
-			id="repo-kind"
-			label={t('repositories.backendKind')}
-			options={kindOptions}
-			error={fieldError(formProblem, 'backend')}
-			bind:value={kind}
-			disabled={!!editing}
-		/>
-		{#if kind === 's3'}
-			<TextField
-				id="repo-endpoint"
-				label={t('repositories.endpoint')}
-				placeholder={t('repositories.endpointPlaceholder')}
-				error={fieldError(formProblem, 'backend.endpoint')}
-				bind:value={endpoint}
-				disabled={locationLocked}
-				required
-			/>
-			<TextField
-				id="repo-bucket"
-				label={t('repositories.bucket')}
-				placeholder={t('repositories.bucketPlaceholder')}
-				error={fieldError(formProblem, 'backend.bucket')}
-				bind:value={bucket}
-				disabled={locationLocked}
-				required
-			/>
-			<TextField
-				id="repo-prefix"
-				label={t('repositories.prefix')}
-				placeholder={t('repositories.prefixPlaceholder')}
-				error={fieldError(formProblem, 'backend.prefix')}
-				bind:value={prefix}
-				disabled={locationLocked}
-			/>
-			<TextField
-				id="repo-region"
-				label={t('repositories.region')}
-				placeholder={t('repositories.regionPlaceholder')}
-				error={fieldError(formProblem, 'backend.region')}
-				bind:value={region}
-				disabled={locationLocked}
-			/>
-		{:else if kind === 'rest'}
-			<TextField
-				id="repo-endpoint"
-				label={t('repositories.endpoint')}
-				placeholder={t('repositories.endpointPlaceholder')}
-				error={fieldError(formProblem, 'backend.endpoint')}
-				bind:value={endpoint}
-				disabled={locationLocked}
-				required
-			/>
-		{:else}
-			<TextField
-				id="repo-path"
-				label={t('repositories.path')}
-				placeholder={t('repositories.pathPlaceholder')}
-				error={fieldError(formProblem, 'backend.path')}
-				bind:value={path}
-				disabled={locationLocked}
-				required
-			/>
-		{/if}
-
-		{#if editing}
-			<Alert tone="info" icon="lock" title={t('repositories.password')}>
-				{t('repositories.passwordLocked')}
-			</Alert>
-		{:else}
-			<PasswordField
-				id="repo-password"
-				label={t('repositories.password')}
-				help={t('repositories.passwordHint')}
-				error={fieldError(formProblem, 'password')}
-				autocomplete="new-password"
-				bind:value={password}
-				required
-			/>
-		{/if}
-		<a
-			class="manage-secrets"
-			href={resolve('/(app)/settings/access/secrets')}
-			target="_blank"
-			rel="noopener"
-		>
-			{t('secrets.manage')}
-		</a>
-		{#if kind === 's3'}
-			<PasswordField
-				id="repo-s3-access-key"
-				label={t('repositories.s3AccessKey')}
-				help={t('repositories.secretHint')}
-				error={fieldError(formProblem, 's3_access_key')}
-				autocomplete="new-password"
-				bind:value={s3AccessKey}
-				required={!editing}
-			/>
-			<PasswordField
-				id="repo-s3-secret-key"
-				label={t('repositories.s3SecretKey')}
-				help={t('repositories.secretHint')}
-				error={fieldError(formProblem, 's3_secret_key')}
-				autocomplete="new-password"
-				bind:value={s3SecretKey}
-				required={!editing}
-			/>
-		{:else if kind === 'rest'}
-			<PasswordField
-				id="repo-rest-password"
-				label={t('repositories.restPassword')}
-				help={t('repositories.restPasswordHint')}
-				error={fieldError(formProblem, 'rest_password')}
-				autocomplete="new-password"
-				bind:value={restPassword}
-			/>
-		{/if}
-
-		<Select
-			id="repo-agent"
-			label={t('repositories.maintenanceHost')}
-			help={t('repositories.maintenanceHostHint')}
-			options={agentOptions}
-			error={fieldError(formProblem, 'maintenance_agent_id')}
-			bind:value={maintenanceAgentId}
-		/>
-
-		{#if !editing || maintenance}
-			<section class="section" aria-labelledby="maintenance-title">
-				<h3 class="section__title" id="maintenance-title">{t('repositories.maintenance.title')}</h3>
-				<p class="hint">{t('repositories.maintenance.description')}</p>
-				{#if !maintenanceAgentId}
-					<Alert tone="attention" icon="alert" title={t('repositories.maintenance.noHostTitle')}>
-						{t('repositories.maintenance.noHostBody')}
-					</Alert>
-				{/if}
-				<TextField
-					id="maintenance-time-zone"
-					label={t('repositories.maintenance.timeZone')}
-					help={t('repositories.maintenance.timeZoneHint')}
-					error={fieldError(formProblem, 'time_zone')}
-					list={TIME_ZONE_LIST_ID}
-					bind:value={maintenanceTimeZone}
-					required
-				/>
-				<datalist id={TIME_ZONE_LIST_ID}>
-					{#each TIME_ZONES as zone (zone)}
-						<option value={zone}></option>
-					{/each}
-				</datalist>
-
-				<div class="task">
-					<h4 class="task__title">{t('repositories.maintenance.retention')}</h4>
-					<p class="hint">{t('repositories.maintenance.retentionHint')}</p>
-					<TextField
-						id="maintenance-retention-cron"
-						label={t('repositories.maintenance.cron')}
-						help={t('repositories.maintenance.cronHint')}
-						error={fieldError(formProblem, 'retention.cron')}
-						bind:value={retentionCron}
-						required
-					/>
-					<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
-						{#each RETENTION_PRESETS as preset (preset.cron)}
-							<Button type="button" size="sm" onclick={() => (retentionCron = preset.cron)}>
-								{t(preset.label)}
-							</Button>
-						{/each}
-					</div>
-					<Checkbox label={t('repositories.maintenance.enabled')} bind:checked={retentionEnabled} />
-					<div class="task__runs">
-						<span class="task__label">{t('repositories.maintenance.nextRuns')}</span>
-						{@render runsList(retentionEnabled ? retentionRuns : null)}
-					</div>
-					{#if maintenance}
-						<div class="task__runs">
-							<span class="task__label">{t('repositories.maintenance.last')}</span>
-							{@render lastRun(maintenance.last_retention)}
-						</div>
-					{/if}
-				</div>
-
-				<div class="task">
-					<h4 class="task__title">{t('repositories.maintenance.check')}</h4>
-					<p class="hint">{t('repositories.maintenance.checkHint')}</p>
-					<TextField
-						id="maintenance-check-cron"
-						label={t('repositories.maintenance.cron')}
-						help={t('repositories.maintenance.cronHint')}
-						error={fieldError(formProblem, 'check.cron')}
-						bind:value={checkCron}
-						required
-					/>
-					<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
-						{#each CHECK_PRESETS as preset (preset.cron)}
-							<Button type="button" size="sm" onclick={() => (checkCron = preset.cron)}>
-								{t(preset.label)}
-							</Button>
-						{/each}
-					</div>
-					<Checkbox label={t('repositories.maintenance.enabled')} bind:checked={checkEnabled} />
-					<div class="task__runs">
-						<span class="task__label">{t('repositories.maintenance.nextRuns')}</span>
-						{@render runsList(checkEnabled ? checkRuns : null)}
-					</div>
-					{#if maintenance}
-						<div class="task__runs">
-							<span class="task__label">{t('repositories.maintenance.last')}</span>
-							{@render lastRun(maintenance.last_check)}
-						</div>
-					{/if}
-				</div>
-			</section>
-		{/if}
-	</div>
-	{#snippet footer()}
-		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={saving}>
-			{t('common.save')}
-		</Button>
-	{/snippet}
-</Dialog>
-
-<Dialog
 	bind:open={unlockOpen}
 	size="sm"
 	icon="octagon"
@@ -1074,19 +560,19 @@
 </Dialog>
 
 <style>
-	.manage-secrets {
-		align-self: flex-start;
-		font-size: var(--rh-font-size-sm);
-	}
-
 	.repo {
 		display: flex;
 		flex-direction: column;
 	}
 
 	.repo__name {
+		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
 		white-space: nowrap;
+	}
+
+	.repo__name:hover {
+		color: var(--rh-color-link);
 	}
 
 	.repo__meta {
@@ -1099,84 +585,8 @@
 		white-space: nowrap;
 	}
 
-	.form {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-4);
-	}
-
 	.note {
 		margin-top: var(--rh-space-4);
-	}
-
-	.section {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-3);
-	}
-
-	.section__title {
-		margin: 0;
-		padding-bottom: var(--rh-space-1);
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
-		font-size: var(--rh-font-size-sm);
-		font-weight: var(--rh-font-weight-semibold);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--rh-color-text-muted);
-	}
-
-	.task {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-2);
-		padding: var(--rh-space-3);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
-	}
-
-	.task__title {
-		margin: 0;
-		font-size: var(--rh-font-size-md);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.task__runs {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-1);
-	}
-
-	.task__label {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.presets {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--rh-space-2);
-	}
-
-	.runs {
-		margin: 0;
-		padding-left: var(--rh-space-4);
-	}
-
-	.hint {
-		margin: 0;
-		color: var(--rh-color-text-muted);
-	}
-
-	.last {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-	}
-
-	.last__time {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
 	}
 
 	.job {

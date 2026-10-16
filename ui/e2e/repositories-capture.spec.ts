@@ -14,6 +14,7 @@ type Labels = {
 	repositories: string;
 	addRepository: string;
 	save: string;
+	cancel: string;
 	edit: string;
 	initialize: string;
 	start: string;
@@ -27,6 +28,7 @@ const EN: Labels = {
 	repositories: 'Repositories',
 	addRepository: 'Add repository',
 	save: 'Save',
+	cancel: 'Cancel',
 	edit: 'Edit',
 	initialize: 'Initialize',
 	start: 'Start',
@@ -40,6 +42,7 @@ const RU: Labels = {
 	repositories: 'Репозитории',
 	addRepository: 'Добавить репозиторий',
 	save: 'Сохранить',
+	cancel: 'Отмена',
 	edit: 'Изменить',
 	initialize: 'Инициализировать',
 	start: 'Запустить',
@@ -65,7 +68,7 @@ async function addLocal(page: Page, labels: Labels, name: string, host: string |
 	await page.locator('#repo-path').fill(`/srv/backup/${name}`);
 	await page.locator('#repo-password').fill('repo-password');
 	if (host) await page.locator('#repo-agent').selectOption({ label: host });
-	await page.getByRole('dialog').getByRole('button', { name: labels.save }).click();
+	await page.locator('form button[type="submit"]').click();
 	await expect(page.getByText(name, { exact: true })).toBeVisible();
 }
 
@@ -86,14 +89,15 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 		.click();
 
 	await page.getByRole('button', { name: labels.addRepository, exact: true }).click();
-	await page.locator('#maintenance-title').waitFor();
 	await page.locator('.runs li').first().waitFor();
+	await page.waitForTimeout(150);
+	await shot(page, `new-repository${suffix}`);
 	await page
-		.locator('#maintenance-title')
+		.locator('[data-section="retention"]')
 		.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 	await page.waitForTimeout(150);
 	await shot(page, `new-repository-maintenance${suffix}`);
-	await page.keyboard.press('Escape');
+	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
 
 	await addLocal(page, labels, 'backups-prod', labels.hostName);
 	await addLocal(page, labels, 'scratch-local', null);
@@ -115,27 +119,25 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 
 	await page.getByRole('button', { name: labels.moreActions('backups-prod') }).click();
 	await page.getByRole('menuitem', { name: labels.edit }).click();
-	await page.locator('#maintenance-title').waitFor();
 	await page.locator('.runs li').first().waitFor();
 	await page
-		.locator('#maintenance-title')
+		.locator('[data-section="retention"]')
 		.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 	await page.waitForTimeout(150);
 	await shot(page, `repository-maintenance${suffix}`);
 	await page
-		.locator('.task')
-		.last()
+		.locator('[data-section="check"]')
 		.evaluate((element) => element.scrollIntoView({ block: 'end' }));
 	await page.waitForTimeout(150);
 	await shot(page, `repository-maintenance-check${suffix}`);
-	await page.keyboard.press('Escape');
+	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
 
 	await page.getByRole('button', { name: labels.moreActions('scratch-local') }).click();
 	await page.getByRole('menuitem', { name: labels.edit }).click();
-	await page.locator('#maintenance-title').waitFor();
+	await page.locator('#repo-agent').waitFor();
 	await page
-		.locator('#maintenance-title')
-		.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+		.locator('#repo-agent')
+		.evaluate((element) => element.scrollIntoView({ block: 'center' }));
 	await page.waitForTimeout(150);
 	await shot(page, `repository-maintenance-no-host${suffix}`);
 }

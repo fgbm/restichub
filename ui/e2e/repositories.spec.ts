@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// The Repositories screen lists the repositories of the organization and creates, edits and
-// deletes one in a centered dialog (FR-RP-01, FR-RP-05).
+// The Repositories screen lists the repositories of the organization. A repository is created and
+// edited on its own page and deleted in a dialog (FR-RP-01, FR-RP-05).
 async function signIn(page: Page): Promise<void> {
 	await page.goto('/sign-in');
 	await page.locator('#signin-username').fill('admin');
@@ -23,15 +23,15 @@ test('the repositories screen creates, edits and deletes a repository', async ({
 	await expect(page.getByText('No repositories yet')).toBeVisible();
 
 	await page.getByRole('button', { name: 'Add repository' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Add a repository' });
-	await expect(dialog).toBeVisible();
+	await expect(page).toHaveURL(/\/repositories\/new$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'New repository' })).toBeVisible();
 	await page.locator('#repo-name').fill('s3-prod');
 	await page.locator('#repo-endpoint').fill('https://s3.example.net');
 	await page.locator('#repo-bucket').fill('backups-prod');
 	await page.locator('#repo-password').fill('repo-password');
 	await page.locator('#repo-s3-access-key').fill('access-key');
 	await page.locator('#repo-s3-secret-key').fill('secret-key');
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
 
 	await expect(page.getByText('The repository is created.')).toBeVisible();
 	await expect(page.getByText('s3-prod')).toBeVisible();
@@ -41,13 +41,12 @@ test('the repositories screen creates, edits and deletes a repository', async ({
 	// Edit: the name changes and the secret fields stay empty.
 	await page.getByRole('button', { name: 'More actions for s3-prod' }).click();
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	const edit = page.getByRole('dialog', { name: 'Edit the repository' });
-	await expect(edit).toBeVisible();
+	await expect(page.getByRole('heading', { level: 1, name: 'Edit repository' })).toBeVisible();
 	// The password field is create-only: the password cannot be replaced until FR-RP-06.
 	await expect(page.locator('#repo-password')).toHaveCount(0);
-	await expect(edit.getByText('cannot be replaced')).toBeVisible();
+	await expect(page.getByText('cannot be replaced')).toBeVisible();
 	await page.locator('#repo-name').fill('s3-prod-renamed');
-	await edit.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('The repository is updated.')).toBeVisible();
 	await expect(page.getByText('s3-prod-renamed')).toBeVisible();
 
@@ -77,7 +76,7 @@ test('the repository init dialog picks a host and shows the job result', async (
 	await page.locator('#repo-s3-access-key').fill('access-key');
 	await page.locator('#repo-s3-secret-key').fill('secret-key');
 	await page.locator('#repo-agent').selectOption({ label: 'nas-backup' });
-	await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('Not initialized')).toBeVisible();
 
 	// Initialize: the dialog warns about the password copy and shows the job result (FR-RP-02).
@@ -106,13 +105,12 @@ test('the repository init dialog picks a host and shows the job result', async (
 // run-now action (FR-RP-08, FR-SC-09).
 async function addLocalRepository(page: Page, name: string, host: string | null): Promise<void> {
 	await page.getByRole('button', { name: 'Add repository' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Add a repository' });
 	await page.locator('#repo-name').fill(name);
 	await page.locator('#repo-kind').selectOption('local');
 	await page.locator('#repo-path').fill(`/srv/backup/${name}`);
 	await page.locator('#repo-password').fill('repo-password');
 	if (host) await page.locator('#repo-agent').selectOption({ label: host });
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText(name, { exact: true })).toBeVisible();
 }
 
@@ -130,10 +128,7 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 	await page.getByRole('button', { name: 'Add repository' }).click();
 	const zone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
 	await expect(page.locator('#maintenance-time-zone')).toHaveValue(zone);
-	await page
-		.getByRole('dialog', { name: 'Add a repository' })
-		.getByRole('button', { name: 'Cancel' })
-		.click();
+	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 
 	await addLocalRepository(page, 'repo-m', 'nas-backup');
 	await addLocalRepository(page, 'repo-nohost', null);
@@ -168,13 +163,12 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 	// Edit the schedules: a preset fills the cron, the preview lists the next runs.
 	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	const edit = page.getByRole('dialog', { name: 'Edit the repository' });
-	await expect(edit.getByRole('heading', { name: 'Maintenance' })).toBeVisible();
+	await expect(page.getByRole('heading', { level: 1, name: 'Edit repository' })).toBeVisible();
 	await expect(page.locator('#maintenance-retention-cron')).toHaveValue('0 3 * * 0');
-	await edit.getByRole('button', { name: 'Daily at 03:00' }).click();
+	await page.getByRole('button', { name: 'Daily at 03:00' }).click();
 	await expect(page.locator('#maintenance-retention-cron')).toHaveValue('0 3 * * *');
-	await expect(edit.locator('.runs li').first()).toBeVisible();
-	await edit.getByRole('button', { name: 'Save' }).click();
+	await expect(page.locator('.runs li').first()).toBeVisible();
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('The repository is updated.')).toBeVisible();
 
 	await page.getByRole('button', { name: 'More actions for repo-m' }).click();

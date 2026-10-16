@@ -63,8 +63,8 @@ async function createRepository(page: Page, labels: Labels): Promise<void> {
 	await page.locator('#repo-password').fill('repo-password');
 	await page.locator('#repo-s3-access-key').fill('access-key');
 	await page.locator('#repo-s3-secret-key').fill('secret-key');
-	await page.getByRole('dialog').locator('button[type="submit"]').click();
-	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await page.locator('form button[type="submit"]').click();
+	await expect(page.locator('#repo-name')).toHaveCount(0);
 }
 
 async function shot(page: Page, name: string, scheme: string): Promise<void> {
