@@ -2006,7 +2006,13 @@ export const en = {
 	'jobs.tab.succeeded': 'Succeeded',
 	'jobs.meta.attempt': 'attempt {n}',
 	'jobs.emptyAction': 'Add a plan',
-	'jobs.emptyRecent': 'No job ran in the last 7 days. Choose a longer period to see older jobs.'
+	'jobs.emptyRecent': 'No job ran in the last 7 days. Choose a longer period to see older jobs.',
+	'alerts.tab.open': 'Open',
+	'alerts.tab.resolved': 'Resolved',
+	'alerts.tab.all': 'All',
+	'alerts.title.item': '{kind}: {subject}',
+	'alerts.meta.opened': 'opened {time}',
+	'alerts.meta.lasted': 'lasted {time}'
 } as const;
 
 export type MessageKey = keyof typeof en;

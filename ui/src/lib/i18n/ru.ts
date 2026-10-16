@@ -1321,8 +1321,8 @@ export const ru: Record<MessageKey, string> = {
 	'alerts.openJob': 'Открыть задание',
 	'alerts.kind.rpo_violated': 'Копия просрочена',
 	'alerts.kind.job_failed': 'Задание не выполнено',
-	'alerts.kind.job_dead_letter': 'Задание сдалось',
-	'alerts.kind.job_warnings': 'Задание с предупреждениями',
+	'alerts.kind.job_dead_letter': 'Попытки исчерпаны',
+	'alerts.kind.job_warnings': 'Предупреждения в задании',
 	'alerts.kind.agent_offline': 'Хост не в сети',
 	'alerts.kind.stale_lock': 'Устаревшая блокировка',
 	'alerts.errorText': 'Текст ошибки',
@@ -2016,5 +2016,11 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.tab.succeeded': 'Успешно',
 	'jobs.meta.attempt': 'попытка {n}',
 	'jobs.emptyAction': 'Добавить план',
-	'jobs.emptyRecent': 'За последние 7 дней заданий не было. Выберите период длиннее, чтобы увидеть старые задания.'
+	'jobs.emptyRecent': 'За последние 7 дней заданий не было. Выберите период длиннее, чтобы увидеть старые задания.',
+	'alerts.tab.open': 'Открытые',
+	'alerts.tab.resolved': 'Закрытые',
+	'alerts.tab.all': 'Все',
+	'alerts.title.item': '{kind}: {subject}',
+	'alerts.meta.opened': 'открыто {time}',
+	'alerts.meta.lasted': 'длилось {time}'
 };

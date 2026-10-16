@@ -62,15 +62,16 @@ describe('the Alerts screen', () => {
 		mocks.listAlerts.mockResolvedValue(list([alert()]));
 		render(Alerts);
 
-		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('Job failed: nightly-web')).toBeInTheDocument());
 		expect(mocks.listAlerts).toHaveBeenCalledWith({ status: 'open', offset: 0, limit: 25 });
-		expect(screen.getByText('Job failed')).toBeInTheDocument();
-		expect(screen.getByText('The backup job failed (config_error).')).toBeInTheDocument();
+		// An open alert has no pill: its title names the problem.
+		expect(document.querySelector('.status')).toBeNull();
+		expect(document.querySelector('.item__lead')).toHaveClass('tone--danger');
 		// The error text is in the details, not in the list (design/style/ui-principles.md, 2.5).
 		expect(screen.queryByText('compile_failed')).not.toBeInTheDocument();
 		expect(screen.queryByRole('link', { name: /Open the job/ })).not.toBeInTheDocument();
 
-		await user.click(screen.getByRole('button', { name: 'nightly-web' }));
+		await user.click(screen.getByRole('button', { name: 'Job failed: nightly-web' }));
 		const panel = await screen.findByRole('dialog');
 		expect(within(panel).getByText('compile_failed')).toBeInTheDocument();
 		expect(within(panel).getByText('win-fs01')).toBeInTheDocument();
@@ -104,11 +105,9 @@ describe('the Alerts screen', () => {
 			])
 		);
 		render(Alerts);
-		await screen.findByText('nightly-web');
+		await screen.findByText('Job failed: nightly-web');
 
-		const bar = screen.getByRole('group', { name: 'Show alerts' });
-		await user.click(within(bar).getByRole('button', { name: /^State/ }));
-		await user.click((await screen.findByText('Resolved')).closest('button') as HTMLElement);
+		await user.click(screen.getByRole('button', { name: 'Resolved' }));
 
 		await waitFor(() =>
 			expect(mocks.listAlerts).toHaveBeenLastCalledWith({
@@ -117,8 +116,11 @@ describe('the Alerts screen', () => {
 				limit: 25
 			})
 		);
-		const row = (await screen.findByText('Backup overdue')).closest('tr') as HTMLElement;
-		expect(within(row).getByText('Resolved')).toBeInTheDocument();
+		const row = (await screen.findByText('Backup overdue: nightly-web')).closest(
+			'li'
+		) as HTMLElement;
+		expect(within(row).getByText('Resolved')).toHaveClass('status');
+		expect(within(row).getByText('lasted 1 h 00 min')).toBeInTheDocument();
 	});
 
 	it('reads another numbered page and filters the kind on the server', async () => {
@@ -132,7 +134,7 @@ describe('the Alerts screen', () => {
 			)
 		);
 		render(Alerts);
-		await screen.findByText('plan-0');
+		await screen.findByText('Job failed: plan-0');
 		expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
 		expect(screen.getByText('Showing 1 to 25 of 60')).toBeInTheDocument();
 
@@ -140,7 +142,7 @@ describe('the Alerts screen', () => {
 		await waitFor(() =>
 			expect(mocks.listAlerts).toHaveBeenLastCalledWith({ status: 'open', offset: 50, limit: 25 })
 		);
-		expect(await screen.findByText('plan-50')).toBeInTheDocument();
+		expect(await screen.findByText('Job failed: plan-50')).toBeInTheDocument();
 
 		const bar = screen.getByRole('group', { name: 'Show alerts' });
 		await user.click(within(bar).getByRole('button', { name: /^Alert/ }));
@@ -160,7 +162,7 @@ describe('the Alerts screen', () => {
 		route.url = new URL('http://localhost/alerts?status=open&kind=job_failed&size=50');
 		mocks.listAlerts.mockResolvedValue(list([alert()]));
 		render(Alerts);
-		await screen.findByText('nightly-web');
+		await screen.findByText('Job failed: nightly-web');
 		expect(mocks.listAlerts).toHaveBeenLastCalledWith({
 			status: 'open',
 			kind: 'job_failed',
@@ -170,7 +172,7 @@ describe('the Alerts screen', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Reset' }));
 		await waitFor(() =>
-			expect(mocks.listAlerts).toHaveBeenLastCalledWith({ status: 'all', offset: 0, limit: 50 })
+			expect(mocks.listAlerts).toHaveBeenLastCalledWith({ status: 'open', offset: 0, limit: 50 })
 		);
 		expect(route.url.searchParams.get('size')).toBe('50');
 		expect(route.url.searchParams.get('kind')).toBeNull();
@@ -190,7 +192,7 @@ describe('the Alerts screen', () => {
 			);
 		render(Alerts);
 
-		expect(await screen.findByText('plan-25')).toBeInTheDocument();
+		expect(await screen.findByText('Job failed: plan-25')).toBeInTheDocument();
 		expect(mocks.listAlerts.mock.calls.map(([query]) => query.offset)).toEqual([50, 25]);
 		expect(route.url.searchParams.get('page')).toBe('2');
 		expect(screen.getByText('Showing 26 to 40 of 40')).toBeInTheDocument();
