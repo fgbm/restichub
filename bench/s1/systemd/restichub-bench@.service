@@ -1,0 +1,21 @@
+# One timed run of bench S1 as a service. The instance name selects the environment file
+# /etc/restichub-bench/<instance>.env with PROFILE, OUT and the bench variables of the run.
+# The service resumes the run after a restart of the host (see "Run on its own host" in README.md).
+[Unit]
+Description=ResticHub bench S1 run %i
+After=docker.service network-online.target
+Requires=docker.service
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/restichub-bench/%i.env
+WorkingDirectory=/opt/restichub/bench/s1
+ExecStart=/opt/restichub/bench/s1/run.sh ${PROFILE} ${OUT}
+Restart=on-failure
+RestartSec=60
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
