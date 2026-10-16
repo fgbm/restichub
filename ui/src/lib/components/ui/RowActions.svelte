@@ -49,10 +49,22 @@
 		gap: 2px;
 	}
 
-	.row-actions--ghost :global(.btn) {
+	.row-actions--ghost :global(.btn),
+	.row-actions--ghost :global(.rh-menu__trigger--icon) {
 		width: 28px;
 		height: 28px;
 		color: var(--rh-color-text-muted);
+	}
+
+	.row-actions--ghost :global(.rh-menu__trigger--icon) {
+		border-color: transparent;
+		background-color: transparent;
+	}
+
+	.row-actions--ghost :global(.rh-menu__trigger--icon:hover),
+	.row-actions--ghost :global(.rh-menu__trigger--icon[data-state='open']) {
+		background-color: var(--rh-color-hover);
+		color: var(--rh-color-text);
 	}
 
 	.row-actions--ghost :global(.btn:hover:not(:disabled)) {

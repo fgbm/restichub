@@ -3,43 +3,23 @@
 	import { coalesce } from '#lib/events.ts';
 	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Job, JobKind, JobQuery, JobStatus } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
-	import {
-		Alert,
-		Button,
-		ConfirmDialog,
-		DataTable,
-		EmptyState,
-		FilterBar,
-		StatusPill
-	} from '#lib/components/ui/index.ts';
-	import type {
-		FilterFacet,
-		RowAction,
-		StatusTone,
-		TableColumn,
-		TableSort
-	} from '#lib/components/ui/index.ts';
+	import { Alert, Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
 	import { periodWindow } from '#lib/filters.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { formatCount, formatDuration } from '#lib/format.ts';
+	import { formatCount } from '#lib/format.ts';
+	import { isUnfinished, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
+	import { iconOf, isCancelled, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
-	const STATUSES: JobStatus[] = [
-		'queued',
-		'sent',
-		'running',
-		'succeeded',
-		'failed',
-		'expired',
-		'dead_letter'
-	];
 	// The kinds that a person starts or a plan runs; the browse jobs of Restore stay out.
 	const KINDS: JobKind[] = [
 		'backup',
@@ -78,18 +58,31 @@
 		'order'
 	] as const);
 	const SORT_KEYS: Record<string, NonNullable<JobQuery['sort']>> = {
-		status: 'status',
+		started: 'started_at',
 		plan: 'plan',
-		host: 'host',
-		started: 'started_at'
+		host: 'host'
 	};
+	const sort = $derived({
+		default: 'started',
+		options: [
+			{ value: 'started', label: t('jobs.sort.started'), order: 'desc' as const },
+			{ value: 'plan', label: t('jobs.sort.plan') },
+			{ value: 'host', label: t('jobs.sort.host') }
+		]
+	});
+	// The tabs are the status groups that the server filters.
+	const states = $derived({
+		key: 'status',
+		default: 'all',
+		options: [
+			{ value: 'all', label: t('jobs.tab.all') },
+			{ value: 'running', label: t('jobs.tab.running') },
+			{ value: 'failed', label: t('jobs.tab.failed') },
+			{ value: 'succeeded', label: t('jobs.tab.succeeded') }
+		]
+	});
 	const tablePage = $derived(pageNumber(filters.value.page));
 	const pageSize = $derived(pageSizeOf(filters.value.size));
-	const tableSort = $derived<TableSort | undefined>(
-		filters.value.sort
-			? { key: filters.value.sort, direction: filters.value.order === 'asc' ? 'asc' : 'desc' }
-			: undefined
-	);
 
 	let cancelTarget = $state<Job | null>(null);
 	let cancelOpen = $state(false);
@@ -110,8 +103,11 @@
 			status: value.status ? (value.status as JobStatus) : undefined,
 			from: iso(window.start),
 			to: iso(window.end),
-			sort: SORT_KEYS[value.sort],
-			order: value.sort ? (value.order === 'asc' ? 'asc' : 'desc') : undefined,
+			sort: SORT_KEYS[value.sort || 'started'],
+			order:
+				value.order === 'asc' || (value.sort && value.sort !== 'started' && !value.order)
+					? 'asc'
+					: 'desc',
 			offset: (tablePage - 1) * pageSize,
 			limit: pageSize
 		};
@@ -119,15 +115,14 @@
 
 	const facets = $derived<FilterFacet[]>([
 		{
-			key: 'status',
-			label: t('jobs.status'),
-			multiple: false,
-			options: STATUSES.map((value) => ({ value, label: t(`jobs.status.${value}` as MessageKey) }))
-		},
-		{
 			key: 'agent_id',
 			label: t('jobs.host'),
 			options: hosts.map((host) => ({ value: host.id, label: host.hostname }))
+		},
+		{
+			key: 'kind',
+			label: t('jobDetail.kind'),
+			options: KINDS.map((value) => ({ value, label: t(`jobs.kind.${value}` as MessageKey) }))
 		},
 		{
 			key: 'repository_id',
@@ -138,120 +133,38 @@
 			key: 'plan_id',
 			label: t('jobs.plan'),
 			options: plans.map((plan) => ({ value: plan.id, label: plan.name }))
-		},
-		{
-			key: 'kind',
-			label: t('jobDetail.kind'),
-			options: KINDS.map((value) => ({ value, label: t(`jobs.kind.${value}` as MessageKey) }))
 		}
 	]);
 
-	const columns = $derived<TableColumn<Job>[]>([
-		{
-			key: 'status',
-			header: t('jobs.status'),
-			nowrap: true,
-			value: statusLabel,
-			render: statusCell
-		},
-		{ key: 'plan', header: t('jobs.plan'), value: planLabel, truncate: 'sm', primary: true },
-		{
-			key: 'kind',
-			header: t('jobDetail.kind'),
-			nowrap: true,
-			sortable: false,
-			value: (row) => t(`jobs.kind.${row.kind}` as MessageKey)
-		},
-		{
-			key: 'host',
-			header: t('jobs.host'),
-			truncate: 'sm',
-			value: (row) => row.agent_hostname ?? t('common.none')
-		},
-		{
-			key: 'repository',
-			header: t('jobs.repository'),
-			truncate: 'sm',
-			sortable: false,
-			value: (row) => row.repository_name ?? ''
-		},
-		{
-			key: 'started',
-			header: t('jobs.started'),
-			date: 'absolute',
-			value: (row) => row.started_at ?? ''
-		},
-		{
-			key: 'duration',
-			nowrap: true,
-			sortable: false,
-			align: 'right',
-			header: t('jobs.duration'),
-			value: (row) => durationOf(row) || '—'
-		}
-	]);
-
-	const empty = $derived(
-		!loading && !error && total === 0 && !Object.values(filters.value).some(Boolean)
+	const FILTER_KEYS = [
+		'agent_id',
+		'repository_id',
+		'plan_id',
+		'kind',
+		'status',
+		'period',
+		'from',
+		'to'
+	] as const;
+	// The default period of 7 days is not a filter: an empty list then is an empty week.
+	const recent = $derived(filters.value.period === '7d');
+	const filtered = $derived(
+		FILTER_KEYS.some((key) =>
+			key === 'period' ? !recent && filters.value.period : filters.value[key]
+		)
 	);
 
-	// A cancelled job ends as `failed` with the result `cancelled`; the screen shows it apart.
-	function isCancelled(job: Job): boolean {
-		return job.status === 'failed' && job.result_code === 'cancelled';
-	}
-
-	function hasWarnings(job: Job): boolean {
-		return job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings';
-	}
-
-	function fullLabel(job: Job): string | undefined {
-		return hasWarnings(job) ? t('jobs.statusFull.succeeded_with_warnings') : undefined;
-	}
-
-	function statusLabel(job: Job): string {
-		if (hasWarnings(job)) return t('jobs.status.succeeded_with_warnings');
-		return t(`jobs.status.${isCancelled(job) ? 'cancelled' : job.status}` as MessageKey);
-	}
-
-	function toneOf(job: Job): StatusTone {
-		if (isCancelled(job)) return 'cancelled';
-		if (hasWarnings(job)) return 'warning';
-		switch (job.status) {
-			case 'queued':
-				return 'queued';
-			case 'sent':
-				return 'info';
-			case 'running':
-				return 'running';
-			case 'succeeded':
-				return 'success';
-			case 'expired':
-				return 'warning';
-			default:
-				return 'failed';
-		}
-	}
-
-	function planLabel(job: Job): string {
-		return job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey);
-	}
-
-	function durationOf(job: Job): string {
-		if (!job.started_at) return '';
-		return formatDuration(job.started_at, job.finished_at ?? new Date().toISOString());
-	}
-
-	function cancellable(job: Job): boolean {
-		return job.status === 'queued' || job.status === 'sent' || job.status === 'running';
+	function resetFilters(): void {
+		filters.update(Object.fromEntries(FILTER_KEYS.map((key) => [key, ''])));
 	}
 
 	function actionsFor(job: Job): RowAction[] {
-		if (!canWrite || !cancellable(job)) return [];
+		if (!canWrite || !isUnfinished(job)) return [];
 		return [
 			{
 				id: 'cancel',
 				label: t('jobs.cancel'),
-				icon: 'stop',
+				icon: 'circle-stop',
 				danger: true,
 				onSelect: () => {
 					cancelTarget = job;
@@ -306,6 +219,11 @@
 		if (hostList.status === 'fulfilled') hosts = hostList.value;
 		if (repositoryList.status === 'fulfilled') repositories = repositoryList.value;
 		if (planList.status === 'fulfilled') plans = planList.value;
+	}
+
+	// The list opens on the jobs of the last 7 days; "All time" in the period facet shows the rest.
+	if (!page.url.searchParams.has('period') && !filters.value.from && !filters.value.to) {
+		filters.update({ period: '7d', page: filters.value.page });
 	}
 
 	// The key is the filter state, not the query: a period preset gives a new time on each read.
@@ -363,10 +281,6 @@
 	}
 </script>
 
-{#snippet statusCell(job: Job)}
-	<StatusPill tone={toneOf(job)} title={fullLabel(job)}>{statusLabel(job)}</StatusPill>
-{/snippet}
-
 <Page
 	title={t('jobs.title')}
 	description={t('jobs.description')}
@@ -382,53 +296,55 @@
 		</div>
 	{/if}
 
-	{#if empty}
-		<EmptyState
-			icon="job"
-			title={t('jobs.emptyTitle')}
-			description={t('jobs.emptyDescription')}
-			bordered
-		/>
-	{:else}
-		<DataTable
-			{columns}
-			rows={jobs}
-			mode="server"
-			page={tablePage}
-			{pageSize}
-			pageSizes={PAGE_SIZES}
-			{total}
-			{totalCapped}
-			sort={tableSort}
-			onPageChange={(next) => filters.update({ page: String(next) })}
-			onPageSizeChange={(next) => filters.update({ size: String(next) })}
-			onSortChange={(next) => filters.update({ sort: next.key, order: next.direction })}
-			{loading}
-			{error}
-			rowKey={(job) => job.id}
-			rowHref={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
-			actions={actionsFor}
-			moreLabel={(job) => t('jobs.moreActions', { name: planLabel(job) })}
-			emptyTitle={t('filter.noMatches')}
-			emptyDescription={t('filter.noMatchesDescription')}
-		>
-			{#snippet toolbar()}
-				<FilterBar
-					label={t('jobs.filters')}
-					value={filters.value}
-					{facets}
-					period
-					onchange={filters.update}
-					onreset={filters.reset}
-				/>
-			{/snippet}
-		</DataTable>
-	{/if}
+	<ListView
+		label={t('jobs.title')}
+		items={jobs}
+		itemKey={(job) => job.id}
+		icon={(job) => iconOf(jobState(job))}
+		pill={(job) => pillOf(jobState(job))}
+		title={jobTitle}
+		href={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
+		meta={(job) => jobMeta(job)}
+		aside={jobDuration}
+		actions={actionsFor}
+		moreLabel={(job) => t('jobs.moreActions', { name: jobTitle(job) })}
+		mode="server"
+		page={tablePage}
+		{pageSize}
+		pageSizes={PAGE_SIZES}
+		{total}
+		{totalCapped}
+		onPageChange={(next) => filters.update({ page: String(next) })}
+		onPageSizeChange={(next) => filters.update({ size: String(next) })}
+		{loading}
+		{error}
+		{filtered}
+		onReset={resetFilters}
+		emptyIcon="job"
+		emptyTitle={t('jobs.emptyTitle')}
+		emptyDescription={t(recent ? 'jobs.emptyRecent' : 'jobs.emptyDescription')}
+	>
+		{#snippet emptyActions()}
+			<a class="empty-link" href={resolve('/(app)/plans/new')}>{t('jobs.emptyAction')}</a>
+		{/snippet}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('jobs.filters')}
+				value={filters.value}
+				{states}
+				{facets}
+				period
+				{sort}
+				onchange={filters.update}
+				onreset={resetFilters}
+			/>
+		{/snippet}
+	</ListView>
 
 	<ConfirmDialog
 		bind:open={cancelOpen}
 		title={t('jobs.cancelTitle')}
-		message={t('jobs.cancelBody', { name: cancelTarget ? planLabel(cancelTarget) : '' })}
+		message={t('jobs.cancelBody', { name: cancelTarget ? jobTitle(cancelTarget) : '' })}
 		confirmLabel={t('jobs.cancel')}
 		cancelLabel={t('jobs.cancelKeep')}
 		tone="danger"
@@ -438,6 +354,10 @@
 </Page>
 
 <style>
+	.empty-link {
+		color: var(--rh-color-link);
+	}
+
 	.capped {
 		margin-bottom: var(--rh-space-4);
 	}

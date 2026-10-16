@@ -163,11 +163,18 @@ describe('the Hosts screen', () => {
 			})
 		);
 		expect(screen.getByText('Showing 1 to 1 of 1')).toBeInTheDocument();
-		// The state facet counts the hosts on the server, also the hidden revoked ones.
-		await user.click(screen.getByRole('button', { name: /^Status/ }));
-		const revoked = (await screen.findByText('Revoked')).closest('li') as HTMLElement;
-		expect(revoked).toHaveTextContent('3');
-		await user.keyboard('{Escape}');
+		// The tabs count the hosts on the server, also the hidden revoked ones.
+		expect(screen.getByRole('button', { name: 'Active 3' })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		expect(screen.getByRole('button', { name: 'Offline 2' })).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Revoked 3' }));
+		await waitFor(() =>
+			expect(mocks.searchAgents).toHaveBeenLastCalledWith(
+				expect.objectContaining({ state: 'revoked' })
+			)
+		);
 	});
 
 	it('fr_ui_01 asks for the facets only when a filter changes, not for a new page', async () => {
@@ -268,8 +275,8 @@ describe('the Hosts screen', () => {
 		render(Hosts);
 
 		await waitFor(() => expect(screen.getByText('Pending registrations')).toBeInTheDocument());
-		expect(screen.getByText('ab12cd34')).toBeInTheDocument();
-		expect(screen.getByText('web')).toBeInTheDocument();
+		expect(screen.getByText('ab12cd34…')).toBeInTheDocument();
+		expect(screen.getByText('labels: web')).toBeInTheDocument();
 		expect(screen.queryByText('used0000')).not.toBeInTheDocument();
 		expect(screen.queryByText('revoke00')).not.toBeInTheDocument();
 		expect(screen.queryByText('expire00')).not.toBeInTheDocument();
@@ -297,7 +304,7 @@ describe('the Hosts screen', () => {
 		mocks.listEnrollmentTokens.mockResolvedValue([token()]);
 		render(Hosts);
 
-		await screen.findByText('ab12cd34');
+		await screen.findByText('ab12cd34…');
 		expect(screen.queryByRole('button', { name: 'Add host' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /^Cancel the token/ })).not.toBeInTheDocument();
 		expect(
@@ -334,27 +341,25 @@ describe('the Hosts screen', () => {
 		await waitFor(() => expect(mocks.renameAgent).toHaveBeenCalledWith('a_01', 'new-name'));
 	});
 
-	it('shows the trust mode of each host as plain text in the row (FR-HK-08)', async () => {
+	it('shows one link per host and the contact, the system and the agent in line 2', async () => {
 		mocks.hostRows.mockResolvedValue([
-			agent({ id: 'a_01', hostname: 'win-fs01', os: 'windows' }),
-			agent({
-				id: 'a_02',
-				hostname: 'srv-db-01',
-				os: 'linux',
-				server_scripts: 'enabled',
-				script_interpreters: ['bash', 'sh']
-			})
+			agent({ id: 'a_01', hostname: 'win-fs01', labels: ['office', '1c', 'prod'] }),
+			agent({ id: 'a_02', hostname: 'srv-db-01', os: 'linux' })
 		]);
 		render(Hosts);
 
 		await screen.findByText('win-fs01');
-		expect(screen.getByText('Enabled')).toBeInTheDocument();
-		expect(screen.getByText('Disabled')).toBeInTheDocument();
-		// The row holds one link: the host page (design/style/ui-principles.md, 2.4).
+		// The item holds one link: the host page (design/style/ui-principles.md, 2.3).
 		expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
 			expect.stringMatching(/\/hosts\/a_01$/),
 			expect.stringMatching(/\/hosts\/a_02$/)
 		]);
+		expect(screen.getAllByText(/^contact .* ago$/)).toHaveLength(2);
+		expect(screen.getByText('windows · amd64')).toBeInTheDocument();
+		expect(screen.getAllByText('agent 0.4.2')).toHaveLength(2);
+		expect(screen.getByText('office, 1c +1')).toBeInTheDocument();
+		// A host in the usual state has no pill.
+		expect(document.querySelector('.status')).toBeNull();
 	});
 
 	it('links the host name to the host page', async () => {
@@ -380,24 +385,9 @@ describe('the Hosts screen', () => {
 				agent_version: '0.1.0',
 				protocol_version: '0.9',
 				version_status: 'unsupported'
-			})
-		]);
-		render(Hosts);
-
-		await screen.findByText('host-refused');
-		expect(screen.getAllByText('Update available')).toHaveLength(1);
-		expect(screen.getAllByText('Unsupported version')).toHaveLength(1);
-		expect(screen.getByText('0.1.0')).toHaveAttribute(
-			'title',
-			'Protocol 0.9 · control plane 0.4.2'
-		);
-	});
-
-	it('hides the update badge of a revoked host (FR-PR-09)', async () => {
-		mocks.hostRows.mockResolvedValue([
-			agent({ id: 'a_01', hostname: 'host-live', version_status: 'update_available' }),
+			}),
 			agent({
-				id: 'a_02',
+				id: 'a_04',
 				hostname: 'host-gone',
 				version_status: 'update_available',
 				status: 'revoked',
@@ -406,37 +396,27 @@ describe('the Hosts screen', () => {
 		]);
 		render(Hosts);
 
-		await screen.findByText('host-gone');
-		expect(screen.getAllByText('Update available')).toHaveLength(1);
+		await screen.findByText('host-refused');
+		expect(screen.getAllByText('agent 0.3.0, 0.4.2 is available')).toHaveLength(1);
+		expect(screen.getByText('Agent too old', { selector: '.status' })).toBeInTheDocument();
+		expect(screen.getByText('Revoked', { selector: '.status' })).toBeInTheDocument();
 	});
 
-	it('warns about a host that presented a replaced certificate (T17)', async () => {
-		mocks.hostRows.mockResolvedValue([
-			agent({ id: 'a_01', hostname: 'host-clean' }),
-			agent({ id: 'a_02', hostname: 'host-clone', superseded_certificate_used_at: PAST })
-		]);
-		render(Hosts);
-
-		await screen.findByText('host-clone');
-		expect(screen.getAllByText('Old certificate used')).toHaveLength(1);
-	});
-
-	it('shows the certificate expiry, the last rotation and warns before the expiry (FR-ID-03)', async () => {
+	it('warns before the certificate expiry with one pill (FR-ID-03)', async () => {
 		const soon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
-		const rotated = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
 		mocks.hostRows.mockResolvedValue([
-			agent({ id: 'a_01', hostname: 'host-fresh', last_certificate_rotation_at: rotated }),
-			agent({ id: 'a_02', hostname: 'host-soon', certificate_expires_at: soon })
+			agent({ id: 'a_01', hostname: 'host-fresh' }),
+			agent({ id: 'a_02', hostname: 'host-soon', certificate_expires_at: soon }),
+			agent({ id: 'a_03', hostname: 'host-dead', certificate_expires_at: PAST })
 		]);
 		render(Hosts);
 
 		await screen.findByText('host-soon');
-		expect(screen.getAllByText(/^Expires /)).toHaveLength(2);
-		expect(screen.getAllByText('Not renewed yet')).toHaveLength(1);
-		expect(screen.getAllByText(/^Renewed /)).toHaveLength(1);
-		const [fresh, warn] = screen.getAllByText(/^Expires /);
-		expect(fresh.classList.contains('cert__expiry--warn')).toBe(false);
-		expect(warn.classList.contains('cert__expiry--warn')).toBe(true);
+		expect(
+			screen.getByText('Certificate expires soon', { selector: '.status' })
+		).toBeInTheDocument();
+		expect(screen.getByText('Certificate expired', { selector: '.status' })).toBeInTheDocument();
+		expect(document.querySelectorAll('.status')).toHaveLength(2);
 	});
 
 	it('shows a host that never connected as waiting (FR-ID-04)', async () => {
@@ -447,8 +427,8 @@ describe('the Hosts screen', () => {
 		render(Hosts);
 
 		await screen.findByText('host-new');
-		expect(screen.getAllByText('Waiting for connection')).toHaveLength(1);
-		expect(screen.getAllByText('Online')).toHaveLength(1);
+		expect(screen.getByText('Waiting for connection', { selector: '.status' })).toBeInTheDocument();
+		expect(screen.getByText(/^registered .* ago$/)).toBeInTheDocument();
 	});
 
 	it('offers the replacement only on the newer record (FR-ID-11, AC-ID-09)', async () => {
@@ -485,7 +465,8 @@ describe('the Hosts screen', () => {
 		render(Hosts);
 
 		await screen.findByText('new-host');
-		expect(screen.getAllByText('Duplicate')).toHaveLength(2);
+		// AC-ID-09: both records of a duplicate show the warning in the list.
+		expect(screen.getAllByText('Possible duplicate')).toHaveLength(2);
 		await user.click(screen.getByRole('button', { name: 'More actions for old-host' }));
 		await screen.findByText('Re-register');
 		expect(screen.queryByText('Replace the old record')).not.toBeInTheDocument();

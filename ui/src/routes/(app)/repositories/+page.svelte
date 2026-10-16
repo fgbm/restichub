@@ -16,22 +16,22 @@
 		Alert,
 		Button,
 		ConfirmDialog,
-		DataTable,
 		Dialog,
-		EmptyState,
 		FilterBar,
+		ListView,
 		Select,
 		StatusPill,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type {
 		FilterFacet,
+		ListMeta,
 		RowAction,
 		SelectOption,
-		StatusTone,
-		TableColumn
+		StatusTone
 	} from '#lib/components/ui/index.ts';
-	import { matchesSearch, splitList } from '#lib/filters.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { iconOf, pillOf, repositoryState } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -113,36 +113,6 @@
 		local: 'repositories.backendKind.local'
 	};
 
-	const columns = $derived<TableColumn<Repository>[]>([
-		{ key: 'name', header: t('repositories.repository'), truncate: 'sm' },
-		{
-			key: 'address',
-			header: t('rp.section.location'),
-			mono: true,
-			truncate: 'md',
-			hideNarrow: true,
-			value: backendAddress
-		},
-		{
-			key: 'backend',
-			header: t('repositories.backend'),
-			nowrap: true,
-			value: (row) => t(backendLabels[row.backend.kind])
-		},
-		{
-			key: 'maintenance_agent_id',
-			header: t('repositories.maintenanceHost'),
-			value: (row) => maintenanceName(row),
-			render: maintenanceCell
-		},
-		{
-			key: 'initialized',
-			header: t('repositories.status'),
-			value: (row) => statusLabel(row),
-			render: statusCell
-		}
-	]);
-
 	function backendAddress(repository: Repository): string {
 		const backend = repository.backend;
 		switch (backend.kind) {
@@ -160,19 +130,11 @@
 		return agentNames.get(repository.maintenance_agent_id) ?? repository.maintenance_agent_id;
 	}
 
-	function statusLabel(repository: Repository): string {
-		return t(
-			repository.initialized
-				? 'repositories.status.initialized'
-				: 'repositories.status.notInitialized'
-		);
-	}
-
 	function openCreate(): void {
 		void goto(resolve('/(app)/repositories/new'));
 	}
 
-	const filters = queryFilters(['q', 'backend', 'state'] as const);
+	const filters = queryFilters(['q', 'backend', 'maintenance', 'state', 'sort', 'order'] as const);
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -185,32 +147,72 @@
 			}))
 		},
 		{
-			key: 'state',
-			label: t('repositories.status'),
-			multiple: false,
-			options: (['initialized', 'not_initialized'] as const).map((value) => ({
-				value,
-				label: t(
-					value === 'initialized'
-						? 'repositories.status.initialized'
-						: 'repositories.status.notInitialized'
-				),
-				count: repositories.filter(
-					(repository) => repository.initialized === (value === 'initialized')
-				).length
-			}))
+			key: 'maintenance',
+			label: t('repositories.maintenanceHost'),
+			options: facetCounts(repositories, (repository) =>
+				repository.maintenance_agent_id ? [repository.maintenance_agent_id] : []
+			).map((option) => ({ ...option, label: agentNames.get(option.value) ?? option.value }))
 		}
 	]);
 
-	const shown = $derived(
+	const matching = $derived(
 		repositories.filter((repository) => {
-			const { q, backend, state } = filters.value;
+			const { q, backend, maintenance } = filters.value;
 			if (!matchesSearch(q, [repository.name, backendAddress(repository)])) return false;
 			if (backend && !splitList(backend).includes(repository.backend.kind)) return false;
-			if (state && repository.initialized !== (state === 'initialized')) return false;
+			if (maintenance && !splitList(maintenance).includes(repository.maintenance_agent_id ?? '')) {
+				return false;
+			}
 			return true;
 		})
 	);
+
+	const states = $derived({
+		default: 'all',
+		options: [
+			{ value: 'all', label: t('repositories.tab.all'), count: matching.length },
+			{
+				value: 'attention',
+				label: t('repositories.tab.attention'),
+				count: matching.filter((repository) => repositoryState(repository).tone !== 'normal').length
+			}
+		]
+	});
+
+	const sort = $derived({
+		default: 'name',
+		options: [{ value: 'name', label: t('repositories.sort.name') }]
+	});
+
+	const shown = $derived.by(() => {
+		const list = matching.filter(
+			(repository) =>
+				filters.value.state !== 'attention' || repositoryState(repository).tone !== 'normal'
+		);
+		const factor = filters.value.order === 'desc' ? -1 : 1;
+		return [...list].sort((a, b) => factor * a.name.localeCompare(b.name));
+	});
+
+	const filtered = $derived(
+		repositories.length > 0 &&
+			Boolean(
+				filters.value.q || filters.value.backend || filters.value.maintenance || filters.value.state
+			)
+	);
+
+	function resetFilters(): void {
+		filters.update({ q: '', backend: '', maintenance: '', state: '' });
+	}
+
+	function meta(repository: Repository): ListMeta[] {
+		return [
+			t(backendLabels[repository.backend.kind]),
+			{ text: backendAddress(repository), mono: true },
+			repository.maintenance_agent_id
+				? t('repositories.meta.maintenance', { name: maintenanceName(repository) })
+				: t('repositories.meta.noMaintenance')
+		];
+	}
 
 	function rowActions(repository: Repository): RowAction[] {
 		const maintained = canRun && Boolean(repository.maintenance_agent_id) && repository.initialized;
@@ -254,7 +256,7 @@
 			{
 				id: 'delete',
 				label: t('repositories.delete'),
-				icon: 'octagon',
+				icon: 'trash',
 				danger: true,
 				hidden: !canWrite,
 				onSelect: () => {
@@ -264,8 +266,6 @@
 			}
 		];
 	}
-
-	const empty = $derived(!loading && !error && repositories.length === 0);
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -428,20 +428,6 @@
 	}
 </script>
 
-{#snippet maintenanceCell(repository: Repository)}
-	{#if repository.maintenance_agent_id}
-		<span>{maintenanceName(repository)}</span>
-	{:else}
-		<StatusPill tone="warning">{t('repositories.maintenanceMissing')}</StatusPill>
-	{/if}
-{/snippet}
-
-{#snippet statusCell(repository: Repository)}
-	<StatusPill tone={repository.initialized ? 'success' : 'warning'}>
-		{statusLabel(repository)}
-	</StatusPill>
-{/snippet}
-
 <Page
 	title={t('repositories.title')}
 	description={t('repositories.description')}
@@ -453,46 +439,47 @@
 		{/if}
 	{/snippet}
 
-	{#if empty}
-		<EmptyState
-			icon="repository"
-			title={t('repositories.emptyTitle')}
-			description={t('repositories.emptyDescription')}
-			bordered
-		>
+	<ListView
+		label={t('repositories.title')}
+		items={shown}
+		itemKey={(repository) => repository.id}
+		icon={(repository) => iconOf(repositoryState(repository))}
+		pill={(repository) => pillOf(repositoryState(repository))}
+		title={(repository) => repository.name}
+		href={(repository) => resolve('/(app)/repositories/[id]', { id: repository.id })}
+		{meta}
+		actions={rowActions}
+		moreLabel={(repository) => t('repositories.moreActions', { name: repository.name })}
+		{loading}
+		{error}
+		{filtered}
+		onReset={resetFilters}
+		emptyIcon="repository"
+		emptyTitle={t('repositories.emptyTitle')}
+		emptyDescription={t('repositories.emptyDescription')}
+	>
+		{#snippet emptyActions()}
 			{#if canWrite}
 				<Button variant="primary" onclick={openCreate}>{t('repositories.addFirst')}</Button>
 			{/if}
-		</EmptyState>
-	{:else}
-		<DataTable
-			{columns}
-			rows={shown}
-			{loading}
-			{error}
-			rowKey={(repository) => repository.id}
-			rowHref={(repository) => resolve('/(app)/repositories/[id]', { id: repository.id })}
-			actions={rowActions}
-			moreLabel={(repository) => t('repositories.moreActions', { name: repository.name })}
-			emptyTitle={t('filter.noMatches')}
-			emptyDescription={t('filter.noMatchesDescription')}
-		>
-			{#snippet toolbar()}
-				<FilterBar
-					label={t('repositories.filters')}
-					value={filters.value}
-					search={{
-						key: 'q',
-						label: t('hosts.search'),
-						placeholder: t('repositories.searchPlaceholder')
-					}}
-					{facets}
-					onchange={filters.update}
-					onreset={filters.reset}
-				/>
-			{/snippet}
-		</DataTable>
-	{/if}
+		{/snippet}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('repositories.filters')}
+				value={filters.value}
+				search={{
+					key: 'q',
+					label: t('hosts.search'),
+					placeholder: t('repositories.searchPlaceholder')
+				}}
+				{states}
+				{facets}
+				{sort}
+				onchange={filters.update}
+				onreset={resetFilters}
+			/>
+		{/snippet}
+	</ListView>
 
 	<div class="note">
 		<Alert variant="inline" icon="lock" title={t('repositories.valueNote')} />

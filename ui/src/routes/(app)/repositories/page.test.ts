@@ -86,7 +86,7 @@ describe('the Repositories screen maintenance', () => {
 		render(Repositories);
 
 		await screen.findByText('repo-a');
-		expect(screen.getByText('No maintenance host')).toBeInTheDocument();
+		expect(screen.getByText('no maintenance host')).toBeInTheDocument();
 	});
 
 	it('fr_rp_08 opens the repository page from the row and has no Edit action', async () => {

@@ -10,6 +10,7 @@
 		JobLimitDefaults,
 		JobTemplate,
 		Plan,
+		PreviewResponse,
 		Profile,
 		ProfileWarning,
 		ScriptTemplate,
@@ -22,7 +23,17 @@
 	import ScriptsEditor from './ScriptsEditor.svelte';
 	import TagInput from './TagInput.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Alert, Button, Checkbox, Field, Icon, Select, TextField } from './ui/index.ts';
+	import {
+		Alert,
+		Badge,
+		Button,
+		Checkbox,
+		Field,
+		Icon,
+		Select,
+		SidePanel,
+		TextField
+	} from './ui/index.ts';
 	import type { KeyValueItem, SelectOption } from './ui/index.ts';
 	import { formatMinutes } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -41,7 +52,14 @@
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 
-	let { profileId = null }: { profileId?: string | null } = $props();
+	let {
+		profileId = null,
+		copyFrom = null
+	}: {
+		profileId?: string | null;
+		/** A new profile starts as a copy of this profile. */
+		copyFrom?: string | null;
+	} = $props();
 
 	const SECTIONS = SUMMARY_ORDER;
 
@@ -161,7 +179,13 @@
 				existing = found;
 				draft = draftFromProfile(found);
 			} else {
-				draft = emptyDraft(repositoryList[0]?.id ?? '', defaults);
+				const source = copyFrom ? profileList.find((item) => item.id === copyFrom) : undefined;
+				if (source) {
+					draft = draftFromProfile(source);
+					draft.name = t('profiles.copyName', { name: source.name });
+				} else {
+					draft = emptyDraft(repositoryList[0]?.id ?? '', defaults);
+				}
 			}
 			// The templates and the secrets serve the script editor only. A failure leaves the
 			// editor without choices and does not block the page.
@@ -255,6 +279,40 @@
 		SUMMARY_ORDER.map((key) => ({ key, label: t(titles[key]), value: summaries[key].text }))
 	);
 
+	// The preview of the server compiler for one host (FR-PF-04) needs a stored profile.
+	let previewOpen = $state(false);
+	let previewAgentId = $state('');
+	let previewLoading = $state(false);
+	let previewResult = $state<PreviewResponse | null>(null);
+	let previewProblem = $state<ApiProblem | null>(null);
+	const previewHosts = $derived<SelectOption[]>([
+		{ value: '', label: t('profiles.previewHost') },
+		...agents
+			.filter((agent) => agent.status === 'active')
+			.map((agent) => ({ value: agent.id, label: agent.hostname }))
+	]);
+
+	function openPreview(): void {
+		previewAgentId = '';
+		previewResult = null;
+		previewProblem = null;
+		previewOpen = true;
+	}
+
+	async function runPreview(): Promise<void> {
+		if (!existing || !previewAgentId) return;
+		previewLoading = true;
+		previewProblem = null;
+		previewResult = null;
+		try {
+			previewResult = await service.previewProfile(existing.id, previewAgentId);
+		} catch (problem) {
+			previewProblem = problemOf(problem);
+		} finally {
+			previewLoading = false;
+		}
+	}
+
 	async function copyCommands(): Promise<void> {
 		await navigator.clipboard?.writeText(steps.map((step) => step.command).join('\n\n'));
 		copied = true;
@@ -272,6 +330,9 @@
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
 		<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
+		{#if existing}
+			<Button size="sm" icon="eye" onclick={openPreview}>{t('profiles.preview')}</Button>
+		{/if}
 	{/snippet}
 	{#snippet banners()}
 		{#if formError}
@@ -633,6 +694,53 @@
 		</div>
 		<p class="muted"><RichText text={t('pe.limits.env')} /></p>
 	</ProfileSection>
+
+	<SidePanel
+		bind:open={previewOpen}
+		title={t('profiles.previewTitle')}
+		subtitle={t('profiles.previewDescription')}
+	>
+		<div class="preview">
+			<Select
+				id="preview-host"
+				label={t('profiles.previewHost')}
+				options={previewHosts}
+				bind:value={previewAgentId}
+				onchange={runPreview}
+			/>
+			{#if previewProblem}
+				<Alert tone="danger" title={tErrorCode(previewProblem.code) ?? previewProblem.title}>
+					{previewProblem.field}{previewProblem.reason ? `: ${previewProblem.reason}` : ''}
+				</Alert>
+			{/if}
+			{#if previewLoading}
+				<p class="preview__hint">{t('common.loading')}</p>
+			{:else if previewResult}
+				{#each previewResult.steps as step (step.kind + step.command)}
+					<div class="step">
+						<div class="step__head">
+							<span class="step__kind">{step.kind}</span>
+							{#if step.maintenance}
+								<Badge tone="info">{t('profiles.previewMaintenance')}</Badge>
+							{/if}
+						</div>
+						<div class="step__label">{t('profiles.previewCommand')}</div>
+						<pre class="step__command">{step.command}</pre>
+						{#if step.environment.length > 0}
+							<div class="step__label">{t('profiles.previewEnvironment')}</div>
+							<ul class="step__env">
+								{#each step.environment as entry (entry.name)}
+									<li><span class="step__env-name">{entry.name}</span> = {entry.value}</li>
+								{/each}
+							</ul>
+						{/if}
+					</div>
+				{/each}
+			{:else}
+				<p class="preview__hint">{t('profiles.previewEmpty')}</p>
+			{/if}
+		</div>
+	</SidePanel>
 </RecordPage>
 
 <style>
@@ -724,5 +832,62 @@
 		.grid3 {
 			grid-template-columns: minmax(0, 1fr);
 		}
+	}
+
+	.preview {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-4);
+	}
+
+	.preview__hint {
+		color: var(--rh-color-text-muted);
+	}
+
+	.step {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-2);
+		padding: var(--rh-space-3);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+	}
+
+	.step__head {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.step__kind {
+		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.step__label {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.step__command {
+		margin: 0;
+		padding: var(--rh-space-2);
+		overflow-x: auto;
+		border-radius: var(--rh-radius-sm);
+		background-color: var(--rh-color-surface-sunken, var(--rh-color-control-bg));
+		font-family: var(--rh-font-mono);
+		font-size: var(--rh-font-size-sm);
+		white-space: pre-wrap;
+		word-break: break-all;
+	}
+
+	.step__env {
+		margin: 0;
+		padding-left: var(--rh-space-4);
+		font-family: var(--rh-font-mono);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.step__env-name {
+		color: var(--rh-color-text-muted);
 	}
 </style>

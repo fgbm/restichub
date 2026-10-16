@@ -12,11 +12,13 @@
 		Badge,
 		Button,
 		CopyField,
-		DataTable,
 		DropdownMenu,
+		ListView,
 		StatusPill
 	} from './ui/index.ts';
-	import type { KeyValueItem, MenuItem, StatusTone, TableColumn } from './ui/index.ts';
+	import type { KeyValueItem, MenuItem, StatusTone } from './ui/index.ts';
+	import { jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
+	import { iconOf, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -156,42 +158,6 @@
 		return t(`hosts.serverScripts.${item.server_scripts}` as MessageKey);
 	}
 
-	function jobLabel(job: Job): string {
-		if (job.status === 'failed' && job.result_code === 'cancelled')
-			return t('jobs.status.cancelled');
-		if (job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings') {
-			return t('jobs.status.succeeded_with_warnings');
-		}
-		return t(`jobs.status.${job.status}` as MessageKey);
-	}
-
-	function jobFullLabel(job: Job): string | undefined {
-		return job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings'
-			? t('jobs.statusFull.succeeded_with_warnings')
-			: undefined;
-	}
-
-	function jobTone(job: Job): StatusTone {
-		if (job.status === 'failed' && job.result_code === 'cancelled') return 'cancelled';
-		if (job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings') {
-			return 'warning';
-		}
-		switch (job.status) {
-			case 'queued':
-				return 'queued';
-			case 'sent':
-				return 'info';
-			case 'running':
-				return 'running';
-			case 'succeeded':
-				return 'success';
-			case 'expired':
-				return 'warning';
-			default:
-				return 'failed';
-		}
-	}
-
 	const summaries = $derived.by<Record<SectionKey, { text: string; state: SummaryState }>>(() => {
 		const item = agent;
 		if (!item) {
@@ -234,25 +200,6 @@
 			danger: { text: t('hp.summary.danger'), state: 'off' }
 		};
 	});
-
-	const jobColumns = $derived<TableColumn<Job>[]>([
-		{
-			key: 'status',
-			header: t('jobs.status'),
-			sortable: false,
-			value: jobLabel,
-			render: jobStatusCell
-		},
-		{
-			key: 'plan',
-			header: t('jobs.plan'),
-			primary: true,
-			truncate: 'sm',
-			sortable: false,
-			value: (job) => job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey)
-		},
-		{ key: 'created_at', header: t('jobs.created'), date: 'relative', sortable: false }
-	]);
 
 	const stateItems = $derived.by<KeyValueItem[]>(() => {
 		const item = agent;
@@ -310,10 +257,6 @@
 	{:else}
 		{t('common.never')}
 	{/if}
-{/snippet}
-
-{#snippet jobStatusCell(job: Job)}
-	<StatusPill tone={jobTone(job)} title={jobFullLabel(job)}>{jobLabel(job)}</StatusPill>
 {/snippet}
 
 {#snippet connectionValue()}
@@ -546,12 +489,17 @@
 				{#if jobs.length === 0}
 					<p class="muted">{t('hp.jobs.none')}</p>
 				{:else}
-					<DataTable
-						columns={jobColumns}
-						rows={jobs}
-						rowKey={(job) => job.id}
-						rowHref={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
+					<ListView
 						paginated={false}
+						label={t('hp.jobs.recent')}
+						items={jobs}
+						itemKey={(job) => job.id}
+						icon={(job) => iconOf(jobState(job))}
+						pill={(job) => pillOf(jobState(job))}
+						title={jobTitle}
+						href={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
+						meta={(job) => jobMeta(job, { host: false })}
+						aside={jobDuration}
 					/>
 					<!-- eslint-disable svelte/no-navigation-without-resolve -- resolved path with a query -->
 					<a class="link" href={jobsHref}>

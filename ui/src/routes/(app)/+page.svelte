@@ -5,24 +5,32 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { AlertKind, Dashboard, LockState, RpoState } from '#lib/api/index.ts';
+	import type { Dashboard, JobResultCode } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
 		Card,
-		DataTable,
 		EmptyState,
 		Icon,
+		ListView,
 		Panel,
-		Skeleton,
-		StatusPill
+		Skeleton
 	} from '#lib/components/ui/index.ts';
-	import type { IconName, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
+	import type { IconName, ListMeta } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { alertCondition } from '#lib/alert-text.ts';
-	import { formatTime, relativeTime } from '#lib/format.ts';
+	import { ago, dayTime } from '#lib/list-format.ts';
+	import {
+		alertPill,
+		alertState,
+		iconOf,
+		jobState,
+		lockState,
+		overviewHostState,
+		pillOf,
+		rpoPlanState
+	} from '#lib/vocabulary.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
@@ -99,27 +107,6 @@
 			dashboard.repositories.length === 0
 	);
 
-	const RPO_TONES: Record<RpoState, StatusTone> = {
-		ok: 'success',
-		at_risk: 'warning',
-		violated: 'failed'
-	};
-
-	const LOCK_TONES: Record<LockState, StatusTone> = {
-		free: 'neutral',
-		held: 'warning',
-		stale: 'failed'
-	};
-
-	const ALERT_TONES: Record<AlertKind, StatusTone> = {
-		rpo_violated: 'failed',
-		job_failed: 'failed',
-		job_dead_letter: 'failed',
-		job_warnings: 'warning',
-		agent_offline: 'warning',
-		stale_lock: 'warning'
-	};
-
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
 		return t('table.error');
@@ -156,75 +143,60 @@
 		return () => clearInterval(timer);
 	});
 
-	function hours(seconds: number): string {
-		const minutes = Math.round(seconds / 60);
-		return minutes >= 120
-			? t('dashboard.hours', { n: Math.round(minutes / 60) })
-			: t('dashboard.minutes', { n: minutes });
-	}
-
 	type DashboardPlan = Dashboard['plans']['items'][number];
+	type DashboardAlert = Dashboard['alerts']['items'][number];
+	type DashboardHost = Dashboard['hosts']['items'][number];
+	type DashboardRepository = Dashboard['repositories'][number];
 	type FailedJob = Dashboard['failed_jobs'][number];
 
-	const planColumns = $derived<TableColumn<DashboardPlan>[]>([
-		{
-			key: 'name',
-			header: t('dashboard.plans.plan'),
-			sortable: false,
-			render: planCell
-		},
-		{
-			key: 'last_success_at',
-			header: t('dashboard.plans.lastSuccess'),
-			date: 'relative',
-			sortable: false,
-			value: (row) => row.last_success_at ?? '',
-			cell: () => t('dashboard.plans.noSuccess')
-		},
-		{
-			key: 'rpo_seconds',
-			header: t('dashboard.plans.rpo'),
-			nowrap: true,
-			sortable: false,
-			value: (row) => hours(row.rpo_seconds)
-		},
-		{ key: 'state', header: t('dashboard.plans.state'), sortable: false, render: rpoCell }
-	]);
+	function planMeta(plan: DashboardPlan): ListMeta[] {
+		return [
+			plan.agent_hostname,
+			plan.repository_name,
+			plan.last_success_at
+				? {
+						text: t('plans.meta.lastBackup', { time: ago(plan.last_success_at) }),
+						time: plan.last_success_at
+					}
+				: t('plans.meta.noBackup')
+		];
+	}
 
-	const jobColumns = $derived<TableColumn<FailedJob>[]>([
-		{ key: 'status', header: t('jobs.status'), sortable: false, render: failedCell },
-		{
-			key: 'name',
-			header: t('jobs.plan'),
-			primary: true,
-			sortable: false,
-			render: jobCell
-		},
-		{ key: 'finished_at', header: t('jobDetail.finishedAt'), date: 'relative', sortable: false }
-	]);
+	function alertMeta(alert: DashboardAlert): ListMeta[] {
+		return [
+			{ text: t('alerts.meta.opened', { time: ago(alert.opened_at) }), time: alert.opened_at },
+			alert.agent_hostname ?? null
+		];
+	}
+
+	function hostMeta(host: DashboardHost): ListMeta[] {
+		return [
+			host.last_seen_at
+				? {
+						text: t('hosts.meta.contact', { time: ago(host.last_seen_at) }),
+						time: host.last_seen_at
+					}
+				: t('hosts.meta.neverSeen')
+		];
+	}
+
+	function failedState(job: FailedJob) {
+		return jobState({ status: job.status, result_code: job.result_code as JobResultCode | null });
+	}
+
+	function jobMeta(job: FailedJob): ListMeta[] {
+		return [
+			job.agent_hostname,
+			{ text: dayTime(job.finished_at), time: job.finished_at },
+			job.plan_name ? t(`jobs.kind.${job.kind}` as MessageKey) : null,
+			job.repository_name ?? null
+		];
+	}
+
+	function repositoryHref(repository: DashboardRepository): string {
+		return resolve('/(app)/repositories/[id]', { id: repository.id });
+	}
 </script>
-
-{#snippet planCell(plan: DashboardPlan)}
-	<span class="cell__name">{plan.name}</span>
-	<span class="cell__meta">{plan.agent_hostname} · {plan.repository_name}</span>
-{/snippet}
-
-{#snippet rpoCell(plan: DashboardPlan)}
-	{#if plan.enabled}
-		<StatusPill tone={RPO_TONES[plan.state]}>{t(`rpo.${plan.state}` as MessageKey)}</StatusPill>
-	{:else}
-		<StatusPill tone="neutral">{t('dashboard.plans.paused')}</StatusPill>
-	{/if}
-{/snippet}
-
-{#snippet failedCell(job: FailedJob)}
-	<StatusPill tone="failed">{t(`jobs.status.${job.status}` as MessageKey)}</StatusPill>
-{/snippet}
-
-{#snippet jobCell(job: FailedJob)}
-	<span class="cell__name">{job.plan_name ?? job.repository_name ?? job.agent_hostname}</span>
-	<span class="cell__meta">{job.agent_hostname}</span>
-{/snippet}
 
 <Page title={t('overview.title')} description={t('overview.description')}>
 	{#snippet actions()}
@@ -334,14 +306,17 @@
 						{#if dashboard.plans.items.length === 0}
 							<p class="empty">{t('dashboard.plans.empty')}</p>
 						{:else}
-							<!-- A plan has no record page: the row opens the plan list with this plan. -->
-							<DataTable
-								columns={planColumns}
-								rows={dashboard.plans.items}
-								rowKey={(plan) => plan.id}
-								rowHref={(plan) => `${resolve('/(app)/plans')}?q=${encodeURIComponent(plan.name)}`}
-								paginated={false}
+							<ListView
 								flush
+								paginated={false}
+								label={t('dashboard.plans.title')}
+								items={dashboard.plans.items}
+								itemKey={(plan) => plan.id}
+								icon={(plan) => iconOf(rpoPlanState(plan))}
+								pill={(plan) => pillOf(rpoPlanState(plan))}
+								title={(plan) => plan.name}
+								href={(plan) => resolve('/(app)/plans/[id]', { id: plan.id })}
+								meta={planMeta}
 							/>
 						{/if}
 					</Panel>
@@ -353,28 +328,23 @@
 						{#if dashboard.alerts.items.length === 0}
 							<p class="empty">{t('dashboard.alerts.empty')}</p>
 						{:else}
-							<ul class="rows">
-								{#each dashboard.alerts.items as alert (alert.id)}
-									<li class="row">
-										<StatusPill tone={ALERT_TONES[alert.kind]}>
-											{t(`alerts.kind.${alert.kind}` as MessageKey)}
-										</StatusPill>
-										<div class="row__main">
-											<span class="cell__name">
-												{alert.plan_name ?? alert.repository_name ?? alert.agent_hostname}
-											</span>
-											<span class="cell__meta">{alertCondition(alert)}</span>
-										</div>
-										<time
-											class="cell__meta"
-											datetime={alert.opened_at}
-											title={formatTime(alert.opened_at)}
-										>
-											{relativeTime(alert.opened_at)}
-										</time>
-									</li>
-								{/each}
-							</ul>
+							<ListView
+								flush
+								paginated={false}
+								label={t('dashboard.alerts.title')}
+								items={dashboard.alerts.items}
+								itemKey={(alert) => alert.id}
+								icon={(alert) => iconOf(alertState(alert))}
+								pill={alertPill}
+								title={(alert) =>
+									t('alerts.title.item', {
+										kind: t(`alerts.kind.${alert.kind}` as MessageKey),
+										subject: alert.plan_name ?? alert.repository_name ?? alert.agent_hostname ?? ''
+									})}
+								href={(alert) =>
+									alert.job_id ? resolve('/(app)/jobs/[id]', { id: alert.job_id }) : undefined}
+								meta={alertMeta}
+							/>
 						{/if}
 					</Panel>
 				</div>
@@ -387,27 +357,18 @@
 						{#if dashboard.hosts.items.length === 0}
 							<p class="empty">{t('dashboard.hosts.empty')}</p>
 						{:else}
-							<ul class="rows">
-								{#each dashboard.hosts.items as host (host.id)}
-									<li class="row">
-										<StatusPill tone={host.waiting ? 'info' : host.online ? 'success' : 'neutral'}>
-											{host.waiting
-												? t('dashboard.hosts.waiting')
-												: host.online
-													? t('dashboard.hosts.online')
-													: t('dashboard.hosts.offline')}
-										</StatusPill>
-										<div class="row__main">
-											<span class="cell__name">{host.hostname}</span>
-											<span class="cell__meta">
-												{host.last_seen_at
-													? t('dashboard.hosts.seen', { time: relativeTime(host.last_seen_at) })
-													: t('dashboard.hosts.neverSeen')}
-											</span>
-										</div>
-									</li>
-								{/each}
-							</ul>
+							<ListView
+								flush
+								paginated={false}
+								label={t('dashboard.hosts.title')}
+								items={dashboard.hosts.items}
+								itemKey={(host) => host.id}
+								icon={(host) => iconOf(overviewHostState(host))}
+								pill={(host) => pillOf(overviewHostState(host))}
+								title={(host) => host.hostname}
+								href={(host) => resolve('/(app)/hosts/[id]', { id: host.id })}
+								meta={hostMeta}
+							/>
 						{/if}
 					</Panel>
 
@@ -418,18 +379,17 @@
 						{#if dashboard.repositories.length === 0}
 							<p class="empty">{t('dashboard.repositories.empty')}</p>
 						{:else}
-							<ul class="rows">
-								{#each dashboard.repositories as repository (repository.id)}
-									<li class="row">
-										<StatusPill tone={LOCK_TONES[repository.lock_state]}>
-											{t(`lock.${repository.lock_state}` as MessageKey)}
-										</StatusPill>
-										<div class="row__main">
-											<span class="cell__name">{repository.name}</span>
-										</div>
-									</li>
-								{/each}
-							</ul>
+							<ListView
+								flush
+								paginated={false}
+								label={t('dashboard.repositories.title')}
+								items={dashboard.repositories}
+								itemKey={(repository) => repository.id}
+								icon={(repository) => iconOf(lockState(repository.lock_state))}
+								pill={(repository) => pillOf(lockState(repository.lock_state))}
+								title={(repository) => repository.name}
+								href={repositoryHref}
+							/>
 						{/if}
 					</Panel>
 
@@ -440,13 +400,17 @@
 						{#if dashboard.failed_jobs.length === 0}
 							<p class="empty">{t('dashboard.failedJobs.empty')}</p>
 						{:else}
-							<DataTable
-								columns={jobColumns}
-								rows={dashboard.failed_jobs}
-								rowKey={(job) => job.id}
-								rowHref={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
-								paginated={false}
+							<ListView
 								flush
+								paginated={false}
+								label={t('dashboard.failedJobs.title')}
+								items={dashboard.failed_jobs}
+								itemKey={(job) => job.id}
+								icon={(job) => iconOf(failedState(job))}
+								pill={(job) => pillOf(failedState(job))}
+								title={(job) => job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey)}
+								href={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
+								meta={jobMeta}
 							/>
 						{/if}
 					</Panel>
@@ -636,46 +600,5 @@
 		padding: var(--rh-space-4);
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
-	}
-
-	.cell__name {
-		display: block;
-		color: var(--rh-color-text);
-		font-weight: var(--rh-font-weight-semibold);
-		text-decoration: none;
-	}
-
-	.row time {
-		flex: none;
-		white-space: nowrap;
-	}
-
-	.cell__meta {
-		display: block;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.rows {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.row {
-		display: flex;
-		align-items: flex-start;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
-	}
-
-	.row:first-child {
-		border-top: 0;
-	}
-
-	.row__main {
-		flex: 1 1 auto;
-		min-width: 0;
 	}
 </style>

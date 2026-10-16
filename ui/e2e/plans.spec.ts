@@ -44,14 +44,16 @@ test('the plans screen creates and deletes a plan', async ({ page }) => {
 	await expect(page.getByText('The plan is created.')).toBeVisible();
 	await expect(page.getByRole('heading', { level: 1, name: 'Plans' })).toBeVisible();
 	await expect(page.getByText('nightly-web')).toBeVisible();
-	// The schedule column shows the phrase and the cron expression.
-	await expect(page.getByText('Every day at 02:00')).toBeVisible();
+	// Line 2 shows the schedule as a phrase; the cron expression is in its tooltip.
+	await expect(page.getByText('every day at 02:00')).toHaveAttribute(
+		'title',
+		'0 2 * * * · Europe/Berlin'
+	);
 
-	// Delete the plan.
-	await page
-		.getByRole('row', { name: /nightly-web/ })
-		.getByRole('button', { name: 'Delete plan' })
-		.click();
+	// Delete the plan on its page: the item keeps two actions.
+	await page.getByRole('link', { name: 'nightly-web' }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'nightly-web' })).toBeVisible();
+	await page.getByRole('button', { name: 'Delete plan' }).click();
 	await page.getByRole('dialog').getByRole('button', { name: 'Delete plan', exact: true }).click();
 	await expect(page.getByText('The plan is deleted.')).toBeVisible();
 	await expect(page.getByText('No plans yet')).toBeVisible();

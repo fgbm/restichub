@@ -43,13 +43,11 @@ test('a created registration appears pending and a cancel removes it', async ({ 
 	await page.getByRole('button', { name: 'Done' }).click();
 
 	await expect(page.getByText('Pending registrations')).toBeVisible();
-	await expect(page.getByText('web')).toBeVisible();
+	const pending = page.getByRole('list', { name: 'Pending registrations' });
+	await expect(pending.getByText('labels: web')).toBeVisible();
 
 	// The closed add dialog stays mounted for a frame and shows a Cancel button too.
-	await page
-		.locator('.pending__row')
-		.getByRole('button', { name: /^Cancel the token/ })
-		.click();
+	await pending.getByRole('button', { name: /^Cancel the token/ }).click();
 	const dialog = page.getByRole('dialog', { name: 'Cancel the registration?' });
 	await dialog.getByRole('button', { name: 'Cancel' }).click();
 
@@ -75,7 +73,7 @@ test('an Admin renames a host', async ({ page }) => {
 	await expect(page.getByText('win-fs01-renamed', { exact: true })).toBeVisible();
 });
 
-test('the hosts table fits 1440 px without a horizontal scroll (FR-ID-11)', async ({ page }) => {
+test('the hosts list fits 1440 px without a horizontal scroll (FR-ID-11)', async ({ page }) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
 	await signIn(page);
@@ -85,11 +83,11 @@ test('the hosts table fits 1440 px without a horizontal scroll (FR-ID-11)', asyn
 		.click();
 	await page.getByText('win-fs01', { exact: true }).waitFor();
 
-	const overflow = await page
-		.locator('.table-scroll')
-		.evaluate((element) => element.scrollWidth - element.clientWidth);
+	const overflow = await page.evaluate(
+		() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+	);
 	expect(overflow).toBeLessThanOrEqual(0);
-	await expect(page.getByText('Duplicate').first()).toBeVisible();
+	await expect(page.getByText('Possible duplicate').first()).toBeVisible();
 });
 
 test('a host page shows the host and its dangerous actions open small dialogs', async ({
@@ -137,8 +135,12 @@ test('the hosts list keeps the row menu inside a 390 px screen', async ({ page }
 	const box = await button.boundingBox();
 	expect(box).not.toBeNull();
 	expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
-	const overflow = await page
-		.locator('.table-scroll')
-		.evaluate((element) => element.scrollWidth - element.clientWidth);
+	const overflow = await page.evaluate(
+		() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+	);
 	expect(overflow).toBeLessThanOrEqual(0);
+	// A narrow list keeps the first two fields of line 2.
+	const item = page.locator('li.item').filter({ hasText: 'win-fs01' }).first();
+	await expect(item.locator('.item__field--extra').first()).toBeHidden();
+	await expect(item.locator('.item__field').first()).toBeVisible();
 });

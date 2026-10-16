@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { chooseFacet } from './filters';
+import { chooseTab } from './filters';
 
 // The job detail screen shows the progress, the steps, the summary and the log of one job
 // (FR-MN-02, FR-LG-01).
@@ -28,9 +28,9 @@ async function openJobs(page: Page): Promise<void> {
 test('a finished job shows its summary, its steps and its log', async ({ page }) => {
 	await openJobs(page);
 	// The sample holds a succeeded job and a job with warnings; the first row of a status is enough.
-	await chooseFacet(page, 'Status', 'Succeeded');
+	await chooseTab(page, 'Succeeded');
 	await page
-		.getByRole('table')
+		.getByRole('list', { name: 'Jobs' })
 		.getByRole('link', { name: 'nightly-web', exact: true })
 		.first()
 		.click();
@@ -74,9 +74,9 @@ test('a finished job shows its summary, its steps and its log', async ({ page })
 
 test('a running job shows its progress and the log follows the new lines', async ({ page }) => {
 	await openJobs(page);
-	await chooseFacet(page, 'Status', 'Running');
+	await chooseTab(page, 'Running');
 	await page
-		.getByRole('table')
+		.getByRole('list', { name: 'Jobs' })
 		.getByRole('link', { name: 'nightly-web', exact: true })
 		.first()
 		.click();
@@ -121,9 +121,9 @@ test('a running job shows its progress and the log follows the new lines', async
 
 test('a running job shows its limit and no acceptance window', async ({ page }) => {
 	await openJobs(page);
-	await chooseFacet(page, 'Status', 'Running');
+	await chooseTab(page, 'Running');
 	await page
-		.getByRole('table')
+		.getByRole('list', { name: 'Jobs' })
 		.getByRole('link', { name: 'nightly-web', exact: true })
 		.first()
 		.click();

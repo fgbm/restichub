@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 	listRepositories: vi.fn(),
 	createPlan: vi.fn(),
 	updatePlan: vi.fn(),
+	deletePlan: vi.fn(),
 	previewSchedule: vi.fn(),
 	pushToast: vi.fn(),
 	goto: vi.fn()
@@ -48,6 +49,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listRepositories: mocks.listRepositories,
 			createPlan: mocks.createPlan,
 			updatePlan: mocks.updatePlan,
+			deletePlan: mocks.deletePlan,
 			previewSchedule: mocks.previewSchedule
 		}
 	};
@@ -161,6 +163,20 @@ describe('the plan page', () => {
 			})
 		);
 		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The plan is updated.');
+	});
+
+	it('deletes a stored plan after the confirmation and returns to the list', async () => {
+		const user = userEvent.setup();
+		mocks.deletePlan.mockResolvedValue(undefined);
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		await user.click(screen.getByRole('button', { name: 'Delete plan' }));
+		const dialog = await screen.findByRole('dialog');
+		await user.click(within(dialog).getByRole('button', { name: 'Delete plan' }));
+
+		await waitFor(() => expect(mocks.deletePlan).toHaveBeenCalledWith('pl_1'));
+		expect(mocks.goto).toHaveBeenCalledWith('/(app)/plans');
 	});
 
 	it('shows an error for a plan that does not exist', async () => {

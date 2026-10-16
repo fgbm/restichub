@@ -11,10 +11,12 @@ import type {
 	AlertKind,
 	ApiToken,
 	Job,
+	LockState,
 	NotificationChannel,
 	Plan,
 	PlatformUser,
 	Repository,
+	RpoState,
 	Secret,
 	Tenant,
 	User
@@ -146,6 +148,18 @@ export function planState(plan: Pick<Plan, 'enabled'>): EntityState {
 	return state('ok', 'plans.ok', 'normal', 'calendar-check');
 }
 
+/** A plan with the recovery point state of the overview (`DashboardPlan`). */
+export function rpoPlanState(plan: { enabled: boolean; state: RpoState }): EntityState {
+	if (!plan.enabled) return planState(plan);
+	if (plan.state === 'violated') {
+		return state('violated', 'plans.status.violated', 'danger', 'calendar-x');
+	}
+	if (plan.state === 'at_risk') {
+		return state('atRisk', 'plans.status.atRisk', 'warning', 'calendar-clock');
+	}
+	return planState(plan);
+}
+
 export function repositoryState(repository: Pick<Repository, 'initialized'>): EntityState {
 	if (!repository.initialized) {
 		return state('notInitialized', 'repositories.status.notInitialized', 'warning', 'repository');
@@ -174,6 +188,24 @@ export function alertState(alert: Pick<Alert, 'kind' | 'status'>): EntityState {
 /** An open alert has no pill: its title already names the problem. */
 export function alertPill(alert: Pick<Alert, 'kind' | 'status'>): ListPill | null {
 	return alert.status === 'resolved' ? pillOf(alertState(alert)) : null;
+}
+
+/** A busy lock during a job is usual; only a stale lock needs an action. */
+export function lockState(lock: LockState): EntityState {
+	if (lock === 'stale') return state('staleLock', 'lock.stale', 'warning', 'lock-keyhole');
+	return state(
+		lock,
+		lock === 'held' ? 'lock.held' : 'repositories.status.ready',
+		'normal',
+		'repository'
+	);
+}
+
+/** A host of the overview (`DashboardHost`). */
+export function overviewHostState(host: { online: boolean; waiting: boolean }): EntityState {
+	if (host.waiting) return state('waiting', 'hosts.status.waiting', 'neutral', 'hourglass');
+	if (!host.online) return state('offline', 'hosts.status.offline', 'warning', 'monitor-off');
+	return state('online', 'hosts.status.online', 'normal', 'host');
 }
 
 export function channelState(channel: Pick<NotificationChannel, 'enabled' | 'kind'>): EntityState {

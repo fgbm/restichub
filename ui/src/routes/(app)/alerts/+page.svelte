@@ -3,30 +3,25 @@
 	import { coalesce } from '#lib/events.ts';
 	import { onEvent } from '#lib/stores/events.svelte.ts';
 	import { resolve } from '$app/paths';
-	import { page as route } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Alert, AlertKind, AlertQuery } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert as Notice,
 		Button,
-		DataTable,
 		FilterBar,
 		KeyValue,
-		SidePanel,
-		StatusPill
+		ListView,
+		SidePanel
 	} from '#lib/components/ui/index.ts';
-	import type {
-		FilterFacet,
-		KeyValueItem,
-		StatusTone,
-		TableColumn
-	} from '#lib/components/ui/index.ts';
+	import type { FilterFacet, KeyValueItem, ListMeta } from '#lib/components/ui/index.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { alertCondition } from '#lib/alert-text.ts';
 	import { formatCount, formatTime } from '#lib/format.ts';
+	import { ago, elapsed, secondsSpan } from '#lib/list-format.ts';
+	import { alertPill, alertState, iconOf } from '#lib/vocabulary.ts';
 	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 
 	let alerts = $state<Alert[]>([]);
@@ -35,14 +30,22 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	// The list filters and pages on the server (FR-UI-01). Without a state in the address the
-	// screen opens with the open alerts; Reset shows all.
+	// screen opens with the open alerts.
 	const filters = queryFilters(['q', 'status', 'kind', 'page', 'size'] as const);
-	if (!route.url.searchParams.has('status')) filters.update({ status: 'open' });
 	const filter = $derived<'open' | 'resolved' | 'all'>(
-		filters.value.status === 'open' || filters.value.status === 'resolved'
+		filters.value.status === 'resolved' || filters.value.status === 'all'
 			? filters.value.status
-			: 'all'
+			: 'open'
 	);
+	const states = $derived({
+		key: 'status',
+		default: 'open',
+		options: [
+			{ value: 'open', label: t('alerts.tab.open') },
+			{ value: 'resolved', label: t('alerts.tab.resolved') },
+			{ value: 'all', label: t('alerts.tab.all') }
+		]
+	});
 
 	const tablePage = $derived(pageNumber(filters.value.page));
 	const pageSize = $derived(pageSizeOf(filters.value.size));
@@ -55,14 +58,14 @@
 		detailOpen = true;
 	}
 
-	const TONES: Record<AlertKind, StatusTone> = {
-		rpo_violated: 'failed',
-		job_failed: 'failed',
-		job_dead_letter: 'failed',
-		job_warnings: 'warning',
-		agent_offline: 'warning',
-		stale_lock: 'warning'
-	};
+	const KINDS: AlertKind[] = [
+		'rpo_violated',
+		'job_failed',
+		'job_dead_letter',
+		'job_warnings',
+		'agent_offline',
+		'stale_lock'
+	];
 
 	function kindLabel(kind: AlertKind): string {
 		return t(`alerts.kind.${kind}` as MessageKey);
@@ -72,46 +75,35 @@
 		return alert.plan_name ?? alert.repository_name ?? alert.agent_hostname ?? '—';
 	}
 
-	const columns = $derived<TableColumn<Alert>[]>([
-		{
-			key: 'kind',
-			header: t('alerts.kind'),
-			nowrap: true,
-			value: (row) => kindLabel(row.kind),
-			render: kindCell
-		},
-		{
-			key: 'subject',
-			header: t('alerts.subject'),
-			truncate: 'sm',
-			primary: true,
-			value: subjectOf
-		},
-		{ key: 'message', header: t('alerts.message'), truncate: 'lg', value: alertCondition },
-		{ key: 'opened_at', header: t('alerts.opened'), date: 'relative' },
-		{
-			key: 'status',
-			header: t('alerts.state'),
-			nowrap: true,
-			value: (row) => row.status,
-			render: stateCell
-		}
-	]);
+	function titleOf(alert: Alert): string {
+		return t('alerts.title.item', { kind: kindLabel(alert.kind), subject: subjectOf(alert) });
+	}
+
+	function meta(alert: Alert): ListMeta[] {
+		const place = alert.plan_name ?? alert.repository_name;
+		return [
+			{ text: t('alerts.meta.opened', { time: ago(alert.opened_at) }), time: alert.opened_at },
+			alert.agent_hostname && alert.agent_hostname !== subjectOf(alert)
+				? alert.agent_hostname
+				: null,
+			place && place !== subjectOf(alert) ? place : null,
+			alert.resolved_at
+				? t('alerts.meta.lasted', {
+						time: elapsed(secondsSpan(alert.opened_at, alert.resolved_at))
+					})
+				: null
+		];
+	}
+
+	function resetFilters(): void {
+		filters.update({ q: '', status: '', kind: '' });
+	}
 
 	const facets = $derived<FilterFacet[]>([
 		{
-			key: 'status',
-			label: t('alerts.state'),
-			multiple: false,
-			options: (['open', 'resolved'] as const).map((value) => ({
-				value,
-				label: t(`alerts.state.${value}`)
-			}))
-		},
-		{
 			key: 'kind',
-			label: t('alerts.kind'),
-			options: (Object.keys(TONES) as AlertKind[]).map((value) => ({
+			label: t('alerts.facet.kind'),
+			options: KINDS.map((value) => ({
 				value,
 				label: kindLabel(value)
 			}))
@@ -240,20 +232,6 @@
 	);
 </script>
 
-{#snippet kindCell(alert: Alert)}
-	<span class="alert__kind">
-		<StatusPill tone={alert.status === 'resolved' ? 'neutral' : TONES[alert.kind]}>
-			{kindLabel(alert.kind)}
-		</StatusPill>
-	</span>
-{/snippet}
-
-{#snippet stateCell(alert: Alert)}
-	<StatusPill tone={alert.status === 'open' ? 'warning' : 'success'}>
-		{t(`alerts.state.${alert.status}`)}
-	</StatusPill>
-{/snippet}
-
 <Page
 	title={t('alerts.title')}
 	description={t('alerts.description')}
@@ -269,13 +247,17 @@
 		</div>
 	{/if}
 
-	<DataTable
-		{columns}
-		rows={alerts}
+	<ListView
+		label={t('alerts.title')}
+		items={alerts}
+		itemKey={(alert) => alert.id}
+		icon={(alert) => iconOf(alertState(alert))}
+		pill={alertPill}
+		title={titleOf}
+		onOpen={openDetail}
+		{meta}
 		{loading}
 		{error}
-		rowKey={(alert) => alert.id}
-		onRowOpen={openDetail}
 		mode="server"
 		page={tablePage}
 		{pageSize}
@@ -284,6 +266,8 @@
 		{totalCapped}
 		onPageChange={(next) => filters.update({ page: String(next) })}
 		onPageSizeChange={(next) => filters.update({ size: String(next) })}
+		filtered={Boolean(filters.value.q || filters.value.kind)}
+		onReset={resetFilters}
 		{emptyTitle}
 		emptyDescription={filter === 'open' ? t('alerts.emptyOpenBody') : undefined}
 		emptyIcon="check-circle"
@@ -293,12 +277,13 @@
 				label={t('alerts.filter')}
 				value={filters.value}
 				search={{ key: 'q', label: t('alerts.search'), placeholder: t('alerts.searchPlaceholder') }}
+				{states}
 				{facets}
 				onchange={filters.update}
-				onreset={filters.reset}
+				onreset={resetFilters}
 			/>
 		{/snippet}
-	</DataTable>
+	</ListView>
 
 	<!-- An alert has no record page: the row opens its details (design/style/ui-principles.md, 2.2). -->
 	<SidePanel
