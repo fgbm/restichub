@@ -17,6 +17,7 @@ interface DataTableProps {
 	rowKey: (row: Row) => string;
 	rowHref?: (row: Row) => string;
 	onRowOpen?: (row: Row) => void;
+	detailTitle?: (row: Row) => string;
 	actions?: (row: Row) => RowAction[];
 	mode?: 'client' | 'server';
 	page?: number;
@@ -112,6 +113,16 @@ describe('DataTable', () => {
 		expect(onRowOpen).toHaveBeenCalledWith(rows[1]);
 		await userEvent.click(screen.getByRole('button', { name: 'host-01' }));
 		expect(onRowOpen).toHaveBeenLastCalledWith(rows[0]);
+	});
+
+	it('opens the built-in details with every column', async () => {
+		render(DataTable, {
+			props: { columns, rows, rowKey, detailTitle: (row) => `Host ${row.name}` }
+		});
+		await userEvent.click(screen.getByText('r2'));
+		const panel = await screen.findByRole('dialog', { name: 'Host host-02' });
+		expect(within(panel).getByText('ID').tagName).toBe('DT');
+		expect(within(panel).getByText('r2').tagName).toBe('DD');
 	});
 
 	it('shows one or two row actions as icon buttons with a label and a tooltip', () => {

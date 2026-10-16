@@ -2,28 +2,27 @@
 	import { onMount } from 'svelte';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { AuditActorType, AuditQuery, AuditRecord } from '#lib/api/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
+		DataTable,
+		FilterBar,
 		Icon,
 		JsonDiff,
 		KeyValue,
-		PageHeader,
-		Panel,
-		Select,
-		SidePanel,
-		Table,
-		TextField,
-		RowActions
+		SidePanel
 	} from '#lib/components/ui/index.ts';
 	import type {
+		FilterFacet,
 		IconName,
 		KeyValueItem,
-		SelectOption,
 		TableColumn
 	} from '#lib/components/ui/index.ts';
+	import { periodWindow } from '#lib/filters.ts';
 	import { en, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
-	import { formatTime, relativeTime } from '#lib/format.ts';
+	import { formatTime } from '#lib/format.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 
 	let { scope = 'tenant' }: { scope?: 'tenant' | 'platform' } = $props();
 
@@ -37,29 +36,34 @@
 	let selected = $state<AuditRecord | null>(null);
 	let panelOpen = $state(false);
 
-	let from = $state('');
-	let to = $state('');
-	let action = $state('');
-	let actorType = $state('');
-	let actorId = $state('');
-	let objectType = $state('');
-	let objectId = $state('');
+	const filters = queryFilters([
+		'action',
+		'actor_type',
+		'actor_id',
+		'object_type',
+		'object_id',
+		'period',
+		'from',
+		'to'
+	] as const);
 
 	const title = $derived(scope === 'platform' ? t('nav.platform.audit') : t('audit.title'));
 
-	function isoOrUndefined(value: string): string | undefined {
-		return value ? new Date(value).toISOString() : undefined;
+	function isoOrUndefined(time: number): string | undefined {
+		return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
 	}
 
 	function buildQuery(cursor?: string): AuditQuery {
+		const value = filters.value;
+		const window = periodWindow(value, Date.now());
 		return {
-			from: isoOrUndefined(from),
-			to: isoOrUndefined(to),
-			action: action || undefined,
-			actor_type: (actorType || undefined) as AuditActorType | undefined,
-			actor_id: actorId || undefined,
-			object_type: objectType || undefined,
-			object_id: objectId || undefined,
+			from: isoOrUndefined(window.start),
+			to: isoOrUndefined(window.end),
+			action: value.action || undefined,
+			actor_type: (value.actor_type || undefined) as AuditActorType | undefined,
+			actor_id: value.actor_id.trim() || undefined,
+			object_type: value.object_type.trim() || undefined,
+			object_id: value.object_id.trim() || undefined,
 			cursor,
 			limit
 		};
@@ -134,26 +138,29 @@
 		}
 	}
 
-	function reset(): void {
-		from = '';
-		to = '';
-		action = '';
-		actorType = '';
-		actorId = '';
-		objectType = '';
-		objectId = '';
+	// Each filter applies at once on the server; a typed identifier waits for a short pause.
+	let loadedQuery: string | undefined;
+	let typing: ReturnType<typeof setTimeout> | undefined;
+	onMount(() => {
+		loadedQuery = JSON.stringify(filters.value);
 		void load();
-	}
+		return () => clearTimeout(typing);
+	});
 
-	onMount(load);
+	$effect(() => {
+		const key = JSON.stringify(filters.value);
+		if (loadedQuery === undefined || key === loadedQuery) return;
+		loadedQuery = key;
+		clearTimeout(typing);
+		typing = setTimeout(() => void load(), 300);
+	});
 
 	const columns = $derived<TableColumn<AuditRecord>[]>([
 		{
 			key: 'occurred_at',
-			nowrap: true,
 			header: t('audit.columns.time'),
-			value: (row) => row.occurred_at,
-			render: timeCell
+			date: 'relative',
+			sortable: false
 		},
 		{
 			key: 'actor',
@@ -165,39 +172,61 @@
 		{
 			key: 'action',
 			header: t('audit.columns.action'),
-			cell: (row) => tAuditAction(row.action),
+			primary: true,
+			value: (row) => tAuditAction(row.action),
 			sortable: false
 		},
 		{
 			key: 'object',
 			header: t('audit.columns.object'),
-			cell: (row) => objectLabel(row),
+			value: (row) => objectLabel(row),
 			mono: true,
+			truncate: 'md',
 			sortable: false
 		},
 		{
 			key: 'source_ip',
 			header: t('audit.columns.sourceIp'),
-			cell: (row) => row.source_ip ?? t('common.unknown'),
+			value: (row) => row.source_ip ?? t('common.unknown'),
 			mono: true,
+			nowrap: true,
+			hideNarrow: true,
 			sortable: false
 		}
 	]);
 
-	const actionOptions = $derived<SelectOption[]>([
-		{ value: '', label: t('audit.filters.allActions') },
-		...Object.keys(en)
-			.filter((key) => key.startsWith('audit.action.'))
-			.map((key) => key.slice('audit.action.'.length))
-			.map((value) => ({ value, label: tAuditAction(value) }))
-	]);
-
-	const actorTypeOptions = $derived<SelectOption[]>([
-		{ value: '', label: t('audit.filters.allTypes') },
-		{ value: 'user', label: tAuditActorType('user') },
-		{ value: 'api_token', label: tAuditActorType('api_token') },
-		{ value: 'agent', label: tAuditActorType('agent') },
-		{ value: 'system', label: tAuditActorType('system') }
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'action',
+			label: t('audit.filters.action'),
+			multiple: false,
+			options: Object.keys(en)
+				.filter((key) => key.startsWith('audit.action.'))
+				.map((key) => key.slice('audit.action.'.length))
+				.map((value) => ({ value, label: tAuditAction(value) }))
+		},
+		{
+			key: 'actor_type',
+			label: t('audit.filters.actorType'),
+			multiple: false,
+			options: (['user', 'api_token', 'agent', 'system'] as const).map((value) => ({
+				value,
+				label: tAuditActorType(value)
+			}))
+		},
+		{
+			key: 'actor_id',
+			label: t('audit.filters.actorId'),
+			placeholder: t('audit.filters.actorPlaceholder'),
+			mono: true
+		},
+		{ key: 'object_type', label: t('audit.filters.objectType'), mono: true },
+		{
+			key: 'object_id',
+			label: t('audit.filters.objectId'),
+			placeholder: t('audit.filters.objectPlaceholder'),
+			mono: true
+		}
 	]);
 
 	const detailItems = $derived<KeyValueItem[]>(
@@ -233,18 +262,6 @@
 	);
 </script>
 
-<svelte:head>
-	<title
-		>{scope === 'platform' ? `${title} · ${t('nav.platformMode')}` : title} · {t('app.name')}</title
-	>
-</svelte:head>
-
-{#snippet timeCell(row: AuditRecord)}
-	<time datetime={row.occurred_at} title={formatTime(row.occurred_at)}>
-		{relativeTime(row.occurred_at)}
-	</time>
-{/snippet}
-
 {#snippet actorCell(row: AuditRecord)}
 	<span class="actor">
 		<span class="avatar" class:avatar--square={row.actor_type !== 'user'}>
@@ -257,148 +274,69 @@
 	{/if}
 {/snippet}
 
-<PageHeader {title} description={t('audit.description')} />
-
-<Panel title={t('audit.filters.title')}>
-	{#snippet actions()}
-		<Button variant="link" onclick={reset}>{t('audit.filters.clearAll')}</Button>
-	{/snippet}
-	<form
-		class="filters"
-		onsubmit={(event) => {
-			event.preventDefault();
-			void load();
-		}}
-	>
-		<TextField
-			id="audit-from"
-			label={t('audit.filters.timeFrom')}
-			help={t('audit.filters.timeHint')}
-			type="datetime-local"
-			bind:value={from}
-		/>
-		<TextField
-			id="audit-to"
-			label={t('audit.filters.timeTo')}
-			type="datetime-local"
-			bind:value={to}
-		/>
-		<Select
-			id="audit-action"
-			label={t('audit.filters.action')}
-			bind:value={action}
-			options={actionOptions}
-		/>
-		<Select
-			id="audit-actor-type"
-			label={t('audit.filters.actorType')}
-			bind:value={actorType}
-			options={actorTypeOptions}
-		/>
-		<TextField
-			id="audit-actor-id"
-			label={t('audit.filters.actorId')}
-			bind:value={actorId}
-			placeholder={t('audit.filters.actorPlaceholder')}
-		/>
-		<TextField
-			id="audit-object-type"
-			label={t('audit.filters.objectType')}
-			bind:value={objectType}
-		/>
-		<TextField
-			id="audit-object-id"
-			label={t('audit.filters.objectId')}
-			bind:value={objectId}
-			placeholder={t('audit.filters.objectPlaceholder')}
-		/>
-		<div class="filters__actions">
-			<Button variant="primary" type="submit">{t('common.apply')}</Button>
-			<Button type="button" onclick={reset}>{t('common.reset')}</Button>
+<Page {title} description={t('audit.description')}>
+	{#if error && !loading}
+		<div class="alert">
+			<Alert tone="danger" title={error} />
 		</div>
-	</form>
-</Panel>
+	{/if}
 
-{#if error && !loading}
-	<div class="alert">
-		<Alert tone="danger" title={error} />
-	</div>
-{/if}
-
-<div class="records">
-	<Table
+	<!-- A record has no page of its own: the row opens its details (design/style/ui-principles.md, 2.2). -->
+	<DataTable
 		{columns}
 		rows={items}
 		{loading}
-		filterable={false}
 		paginated={false}
 		sort={{ key: 'occurred_at', direction: 'desc' }}
 		emptyIcon="audit"
 		rowKey={(record) => record.id}
+		onRowOpen={openRecord}
 	>
-		{#snippet rowActions(record)}
-			<RowActions
-				moreLabel={t('audit.detailsFor', { id: record.id })}
-				items={[{ label: t('audit.details'), icon: 'eye', onSelect: () => openRecord(record) }]}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('audit.filters.title')}
+				value={filters.value}
+				{facets}
+				period
+				hint={t('audit.filters.timeHint')}
+				onchange={filters.update}
+				onreset={filters.reset}
 			/>
 		{/snippet}
-	</Table>
-</div>
+	</DataTable>
 
-<div class="load-more">
-	{#if nextCursor}
-		<Button loading={loadingMore} onclick={loadMore}>{t('common.loadMore')}</Button>
-	{/if}
-	{#if !loading && items.length > 0}
-		<p class="load-more__text">
-			{nextCursor ? t('audit.loaded', { count: items.length }) : t('audit.noMore')}
-		</p>
-	{/if}
-</div>
+	<div class="load-more">
+		{#if nextCursor}
+			<Button loading={loadingMore} onclick={loadMore}>{t('common.loadMore')}</Button>
+		{/if}
+		{#if !loading && items.length > 0}
+			<p class="load-more__text">
+				{nextCursor ? t('audit.loaded', { count: items.length }) : t('audit.noMore')}
+			</p>
+		{/if}
+	</div>
 
-<SidePanel
-	bind:open={panelOpen}
-	title={selected ? t('audit.recordTitle', { id: selected.id }) : ''}
->
-	{#if selected}
-		<KeyValue items={detailItems} />
-		<h3 class="detail-heading">{t('diff.title')}</h3>
-		<JsonDiff diff={selected.diff ?? null} variant="lines" />
-		<h3 class="detail-heading">{t('audit.oldAndNew')}</h3>
-		<JsonDiff diff={selected.diff ?? null} />
-	{/if}
-	{#snippet footer()}
-		<Button icon="copy" onclick={copyRecord}>{t('audit.copyJson')}</Button>
-		<Button onclick={() => (panelOpen = false)}>{t('common.close')}</Button>
-	{/snippet}
-</SidePanel>
+	<SidePanel
+		bind:open={panelOpen}
+		title={selected ? t('audit.recordTitle', { id: selected.id }) : ''}
+	>
+		{#if selected}
+			<KeyValue items={detailItems} stacked />
+			<h3 class="detail-heading">{t('diff.title')}</h3>
+			<JsonDiff diff={selected.diff ?? null} variant="lines" />
+			<h3 class="detail-heading">{t('audit.oldAndNew')}</h3>
+			<JsonDiff diff={selected.diff ?? null} />
+		{/if}
+		{#snippet footer()}
+			<Button icon="copy" onclick={copyRecord}>{t('audit.copyJson')}</Button>
+			<Button onclick={() => (panelOpen = false)}>{t('common.close')}</Button>
+		{/snippet}
+	</SidePanel>
+</Page>
 
 <style>
-	.filters {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: var(--rh-space-4);
-	}
-
-	@media (max-width: 720px) {
-		.filters {
-			grid-template-columns: minmax(0, 1fr);
-		}
-	}
-
-	.filters__actions {
-		display: flex;
-		grid-column: 1 / -1;
-		align-items: center;
-		gap: var(--rh-space-2);
-	}
-
 	.alert {
-		margin-top: var(--rh-space-4);
-	}
-
-	.records {
-		margin-top: var(--rh-space-6);
+		margin-bottom: var(--rh-space-4);
 	}
 
 	.actor {

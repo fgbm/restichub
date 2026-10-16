@@ -8,21 +8,28 @@
 		Plan,
 		UpdatePlanRequest
 	} from '#lib/api/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
-		Badge,
 		Button,
 		Checkbox,
 		ConfirmDialog,
+		DataTable,
 		Dialog,
 		EmptyState,
-		PageHeader,
+		FilterBar,
 		Select,
-		Table,
-		TextField,
-		RowActions
+		StatusPill,
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		RowAction,
+		SelectOption,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatTimeInZoneWithLocal } from '#lib/format.ts';
@@ -84,21 +91,34 @@
 	);
 
 	const columns = $derived<TableColumn<Plan>[]>([
-		{ key: 'name', header: t('plans.plan'), value: (row) => row.name, render: nameCell },
+		{ key: 'name', header: t('plans.plan'), truncate: 'sm' },
 		{
-			key: 'host',
-			header: t('plans.host'),
-			value: (row) => row.agent_hostname,
-			render: hostCell
+			key: 'enabled',
+			header: t('plans.state'),
+			nowrap: true,
+			value: (row) => t(row.enabled ? 'plans.enabled' : 'plans.disabled'),
+			render: stateCell
 		},
-		{ key: 'profile', header: t('plans.profile'), value: (row) => row.profile_name },
+		{ key: 'host', header: t('plans.host'), truncate: 'sm', value: (row) => row.agent_hostname },
+		{
+			key: 'profile',
+			header: t('plans.profile'),
+			truncate: 'sm',
+			value: (row) => row.profile_name
+		},
 		{
 			key: 'schedule',
 			header: t('plans.schedule'),
 			value: (row) => describeCron(row.cron, t),
 			render: scheduleCell
 		},
-		{ key: 'time_zone', header: t('plans.timeZone'), value: (row) => row.time_zone },
+		{
+			key: 'time_zone',
+			header: t('plans.timeZone'),
+			nowrap: true,
+			hideNarrow: true,
+			value: (row) => row.time_zone
+		},
 		{
 			key: 'next_run_at',
 			nowrap: true,
@@ -110,9 +130,46 @@
 		{
 			key: 'missed_run_policy',
 			header: t('plans.missedRunPolicy'),
+			hideNarrow: true,
 			value: (row) => describeMissedRunPolicy(row.missed_run_policy, t)
 		}
 	]);
+
+	const filters = queryFilters(['q', 'host', 'profile', 'state'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'host',
+			label: t('plans.host'),
+			options: facetCounts(plans, (plan) => [plan.agent_hostname])
+		},
+		{
+			key: 'profile',
+			label: t('plans.profile'),
+			options: facetCounts(plans, (plan) => [plan.profile_name])
+		},
+		{
+			key: 'state',
+			label: t('plans.state'),
+			multiple: false,
+			options: (['enabled', 'disabled'] as const).map((value) => ({
+				value,
+				label: t(value === 'enabled' ? 'plans.enabled' : 'plans.disabled'),
+				count: plans.filter((plan) => plan.enabled === (value === 'enabled')).length
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		plans.filter((plan) => {
+			const { q, host, profile, state } = filters.value;
+			if (!matchesSearch(q, [plan.name, plan.agent_hostname, plan.profile_name])) return false;
+			if (host && !splitList(host).includes(plan.agent_hostname)) return false;
+			if (profile && !splitList(profile).includes(plan.profile_name)) return false;
+			if (state && plan.enabled !== (state === 'enabled')) return false;
+			return true;
+		})
+	);
 
 	function describeHours(seconds: number): string {
 		const hours = seconds / 3600;
@@ -121,22 +178,21 @@
 
 	const empty = $derived(!loading && !error && plans.length === 0);
 
-	function actionsFor(plan: Plan): MenuItem[] {
-		const items: MenuItem[] = [];
-		if (canWrite) {
-			items.push({ label: t('plans.run'), icon: 'activity', onSelect: () => void runNow(plan) });
-			items.push({ label: t('plans.edit'), icon: 'settings', onSelect: () => openEdit(plan) });
-			items.push({
+	function actionsFor(plan: Plan): RowAction[] {
+		if (!canWrite) return [];
+		return [
+			{ id: 'run', label: t('plans.run'), icon: 'activity', onSelect: () => void runNow(plan) },
+			{
+				id: 'delete',
 				label: t('plans.delete'),
 				icon: 'octagon',
-				tone: 'danger',
+				danger: true,
 				onSelect: () => {
 					deleteTarget = plan;
 					deleteOpen = true;
 				}
-			});
-		}
-		return items;
+			}
+		];
 	}
 
 	function messageOf(problem: unknown): string {
@@ -314,17 +370,10 @@
 	}
 </script>
 
-{#snippet nameCell(plan: Plan)}
-	<span class="plan">
-		<span class="plan__name">{plan.name}</span>
-		{#if !plan.enabled}
-			<Badge tone="neutral">{t('plans.disabled')}</Badge>
-		{/if}
-	</span>
-{/snippet}
-
-{#snippet hostCell(plan: Plan)}
-	<span class="plan__host">{plan.agent_hostname}</span>
+{#snippet stateCell(plan: Plan)}
+	<StatusPill tone={plan.enabled ? 'success' : 'neutral'}>
+		{t(plan.enabled ? 'plans.enabled' : 'plans.disabled')}
+	</StatusPill>
 {/snippet}
 
 {#snippet scheduleCell(plan: Plan)}
@@ -342,172 +391,177 @@
 	</span>
 {/snippet}
 
-<svelte:head>
-	<title>{t('plans.title')} · {t('app.name')}</title>
-</svelte:head>
-
-<PageHeader
+<Page
 	title={t('plans.title')}
 	description={t('plans.description')}
 	count={loading ? undefined : plans.length}
 >
-	{#if canWrite}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('plans.add')}</Button>
-	{/if}
-</PageHeader>
-
-{#if empty}
-	<EmptyState
-		icon="calendar"
-		title={t('plans.emptyTitle')}
-		description={t('plans.emptyDescription')}
-		bordered
-	>
+	{#snippet actions()}
 		{#if canWrite}
-			<Button variant="primary" onclick={openCreate}>{t('plans.addFirst')}</Button>
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('plans.add')}</Button>
 		{/if}
-	</EmptyState>
-{:else}
-	<Table
-		{columns}
-		rows={plans}
-		{loading}
-		{error}
-		rowKey={(plan) => plan.id}
-		filterPlaceholder={t('plans.searchPlaceholder')}
-	>
-		{#snippet rowActions(plan)}
-			{#if actionsFor(plan).length > 0}
-				<RowActions
-					moreLabel={t('plans.moreActions', { name: plan.name })}
-					items={actionsFor(plan)}
-				/>
-			{/if}
-		{/snippet}
-	</Table>
-{/if}
-
-<Dialog
-	bind:open={formOpen}
-	size="lg"
-	title={editing ? t('plans.editTitle') : t('plans.addTitle')}
-	description={editing ? t('plans.editDescription') : t('plans.addDescription')}
-	onsubmit={save}
->
-	{#if formError}
-		<Alert tone="danger" title={formError} />
-	{/if}
-	<div class="form">
-		<section class="section">
-			<h3 class="section__title">{t('plans.section.source')}</h3>
-			<TextField
-				id="plan-name"
-				label={t('plans.plan')}
-				error={fieldError(formProblem, 'name')}
-				bind:value={name}
-				required
-			/>
-			<Select
-				id="plan-profile"
-				label={t('plans.profile')}
-				options={profilesOptions}
-				error={fieldError(formProblem, 'profile_id')}
-				bind:value={profileId}
-				required
-			/>
-			<Select
-				id="plan-agent"
-				label={t('plans.host')}
-				options={agentOptions}
-				error={fieldError(formProblem, 'agent_id')}
-				bind:value={agentId}
-				required
-			/>
-		</section>
-
-		<section class="section">
-			<h3 class="section__title">{t('plans.section.schedule')}</h3>
-			<TextField
-				id="plan-cron"
-				label={t('plans.cron')}
-				help={t('plans.cronHint')}
-				error={fieldError(formProblem, 'cron')}
-				placeholder="0 2 * * *"
-				bind:value={cron}
-				required
-			/>
-			<div class="presets" role="group" aria-label={t('plans.cronPresets')}>
-				{#each CRON_PRESETS as preset (preset.cron)}
-					<Button type="button" size="sm" onclick={() => (cron = preset.cron)}>
-						{t(preset.label)}
-					</Button>
-				{/each}
-			</div>
-			<TextField
-				id="plan-time-zone"
-				label={t('plans.timeZone')}
-				help={t('plans.timeZoneHint')}
-				error={fieldError(formProblem, 'time_zone')}
-				placeholder={t('plans.timeZonePlaceholder')}
-				list={TIME_ZONE_LIST_ID}
-				bind:value={timeZone}
-				required
-			/>
-			<datalist id={TIME_ZONE_LIST_ID}>
-				{#each TIME_ZONES as zone (zone)}
-					<option value={zone}></option>
-				{/each}
-			</datalist>
-			<Select
-				id="plan-policy"
-				label={t('plans.missedRunPolicy')}
-				options={policyOptions}
-				bind:value={policy}
-			/>
-			<TextField
-				id="plan-rpo"
-				label={t('plans.rpo')}
-				help={editing
-					? `${t('plans.rpoHint')} ${t('plans.rpoEffective', { value: describeHours(editing.effective_rpo_seconds) })}`
-					: t('plans.rpoHint')}
-				error={fieldError(formProblem, 'rpo_seconds')}
-				inputmode="decimal"
-				placeholder="26"
-				bind:value={rpoHours}
-			/>
-			<Checkbox label={t('plans.enabled')} bind:checked={enabled} />
-		</section>
-
-		<section class="section">
-			<h3 class="section__title">{t('plans.nextRuns')}</h3>
-			{#if runsLoading}
-				<p class="preview__hint">{t('common.loading')}</p>
-			{:else if runs && runs.length > 0}
-				<ul class="runs">
-					{#each runs as run (run)}
-						<li>{formatTimeInZoneWithLocal(run, timeZone)}</li>
-					{/each}
-				</ul>
-			{:else}
-				<p class="preview__hint">{t('plans.previewEmpty')}</p>
-			{/if}
-		</section>
-	</div>
-	{#snippet footer()}
-		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
 	{/snippet}
-</Dialog>
 
-<ConfirmDialog
-	bind:open={deleteOpen}
-	title={t('plans.deleteTitle')}
-	message={t('plans.deleteBody', { name: deleteTarget?.name ?? '' })}
-	confirmLabel={t('plans.delete')}
-	tone="danger"
-	loading={deleting}
-	onConfirm={confirmDelete}
-/>
+	{#if empty}
+		<EmptyState
+			icon="calendar"
+			title={t('plans.emptyTitle')}
+			description={t('plans.emptyDescription')}
+			bordered
+		>
+			{#if canWrite}
+				<Button variant="primary" onclick={openCreate}>{t('plans.addFirst')}</Button>
+			{/if}
+		</EmptyState>
+	{:else}
+		<!-- A plan has no record page: the row opens the plan form (design/style/ui-principles.md, 2.2). -->
+		<DataTable
+			{columns}
+			rows={shown}
+			{loading}
+			{error}
+			rowKey={(plan) => plan.id}
+			onRowOpen={canWrite ? openEdit : undefined}
+			actions={actionsFor}
+			moreLabel={(plan) => t('plans.moreActions', { name: plan.name })}
+			emptyTitle={t('filter.noMatches')}
+			emptyDescription={t('filter.noMatchesDescription')}
+		>
+			{#snippet toolbar()}
+				<FilterBar
+					label={t('plans.filters')}
+					value={filters.value}
+					search={{ key: 'q', label: t('hosts.search'), placeholder: t('plans.searchPlaceholder') }}
+					{facets}
+					onchange={filters.update}
+					onreset={filters.reset}
+				/>
+			{/snippet}
+		</DataTable>
+	{/if}
+
+	<Dialog
+		bind:open={formOpen}
+		size="lg"
+		title={editing ? t('plans.editTitle') : t('plans.addTitle')}
+		description={editing ? t('plans.editDescription') : t('plans.addDescription')}
+		onsubmit={save}
+	>
+		{#if formError}
+			<Alert tone="danger" title={formError} />
+		{/if}
+		<div class="form">
+			<section class="section">
+				<h3 class="section__title">{t('plans.section.source')}</h3>
+				<TextField
+					id="plan-name"
+					label={t('plans.plan')}
+					error={fieldError(formProblem, 'name')}
+					bind:value={name}
+					required
+				/>
+				<Select
+					id="plan-profile"
+					label={t('plans.profile')}
+					options={profilesOptions}
+					error={fieldError(formProblem, 'profile_id')}
+					bind:value={profileId}
+					required
+				/>
+				<Select
+					id="plan-agent"
+					label={t('plans.host')}
+					options={agentOptions}
+					error={fieldError(formProblem, 'agent_id')}
+					bind:value={agentId}
+					required
+				/>
+			</section>
+
+			<section class="section">
+				<h3 class="section__title">{t('plans.section.schedule')}</h3>
+				<TextField
+					id="plan-cron"
+					label={t('plans.cron')}
+					help={t('plans.cronHint')}
+					error={fieldError(formProblem, 'cron')}
+					placeholder="0 2 * * *"
+					bind:value={cron}
+					required
+				/>
+				<div class="presets" role="group" aria-label={t('plans.cronPresets')}>
+					{#each CRON_PRESETS as preset (preset.cron)}
+						<Button type="button" size="sm" onclick={() => (cron = preset.cron)}>
+							{t(preset.label)}
+						</Button>
+					{/each}
+				</div>
+				<TextField
+					id="plan-time-zone"
+					label={t('plans.timeZone')}
+					help={t('plans.timeZoneHint')}
+					error={fieldError(formProblem, 'time_zone')}
+					placeholder={t('plans.timeZonePlaceholder')}
+					list={TIME_ZONE_LIST_ID}
+					bind:value={timeZone}
+					required
+				/>
+				<datalist id={TIME_ZONE_LIST_ID}>
+					{#each TIME_ZONES as zone (zone)}
+						<option value={zone}></option>
+					{/each}
+				</datalist>
+				<Select
+					id="plan-policy"
+					label={t('plans.missedRunPolicy')}
+					options={policyOptions}
+					bind:value={policy}
+				/>
+				<TextField
+					id="plan-rpo"
+					label={t('plans.rpo')}
+					help={editing
+						? `${t('plans.rpoHint')} ${t('plans.rpoEffective', { value: describeHours(editing.effective_rpo_seconds) })}`
+						: t('plans.rpoHint')}
+					error={fieldError(formProblem, 'rpo_seconds')}
+					inputmode="decimal"
+					placeholder="26"
+					bind:value={rpoHours}
+				/>
+				<Checkbox label={t('plans.enabled')} bind:checked={enabled} />
+			</section>
+
+			<section class="section">
+				<h3 class="section__title">{t('plans.nextRuns')}</h3>
+				{#if runsLoading}
+					<p class="preview__hint">{t('common.loading')}</p>
+				{:else if runs && runs.length > 0}
+					<ul class="runs">
+						{#each runs as run (run)}
+							<li>{formatTimeInZoneWithLocal(run, timeZone)}</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="preview__hint">{t('plans.previewEmpty')}</p>
+				{/if}
+			</section>
+		</div>
+		{#snippet footer()}
+			<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
+			<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
+		{/snippet}
+	</Dialog>
+
+	<ConfirmDialog
+		bind:open={deleteOpen}
+		title={t('plans.deleteTitle')}
+		message={t('plans.deleteBody', { name: deleteTarget?.name ?? '' })}
+		confirmLabel={t('plans.delete')}
+		tone="danger"
+		loading={deleting}
+		onConfirm={confirmDelete}
+	/>
+</Page>
 
 <style>
 	.plan {
@@ -515,15 +569,6 @@
 		flex-direction: column;
 		align-items: flex-start;
 		gap: var(--rh-space-1);
-	}
-
-	.plan__name {
-		font-weight: var(--rh-font-weight-semibold);
-		white-space: nowrap;
-	}
-
-	.plan__host {
-		white-space: nowrap;
 	}
 
 	.plan__meta {

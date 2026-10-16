@@ -9,15 +9,23 @@
 		CopyField,
 		Dialog,
 		KeyValue,
+		DataTable,
+		FilterBar,
 		Select,
 		StatusPill,
-		Table,
-		TextField,
-		RowActions
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { KeyValueItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		KeyValueItem,
+		RowAction,
+		SelectOption,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { matchesSearch } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { formatTime, relativeTime } from '#lib/format.ts';
+	import { formatTime } from '#lib/format.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let tokens = $state<ApiToken[]>([]);
@@ -70,7 +78,7 @@
 	}
 
 	const columns = $derived<TableColumn<ApiToken>[]>([
-		{ key: 'name', header: t('tokens.name'), render: nameCell },
+		{ key: 'name', header: t('tokens.name'), truncate: 'sm' },
 		{ key: 'display_prefix', header: t('tokens.prefix'), mono: true, sortable: false },
 		{
 			key: 'role',
@@ -78,20 +86,20 @@
 			cell: (row) => roleKeys[row.role],
 			badge: () => 'neutral'
 		},
-		{ key: 'created_at', header: t('common.createdAt'), nowrap: true, render: createdCell },
+		{ key: 'created_at', header: t('common.createdAt'), date: 'relative' },
 		{
 			key: 'expires_at',
-			nowrap: true,
 			header: t('tokens.expiresAt'),
+			date: 'relative',
 			value: (row) => row.expires_at ?? '',
-			render: expiresCell
+			cell: () => t('common.never')
 		},
 		{
 			key: 'last_used_at',
-			nowrap: true,
 			header: t('tokens.lastUsed'),
+			date: 'relative',
 			value: (row) => row.last_used_at ?? '',
-			render: lastUsedCell
+			cell: () => t('common.never')
 		},
 		{
 			key: 'revoked_at',
@@ -100,6 +108,44 @@
 			render: stateCell
 		}
 	]);
+
+	const filters = queryFilters(['q', 'state'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'state',
+			label: t('tokens.state'),
+			multiple: false,
+			options: (['active', 'revoked'] as const).map((value) => ({
+				value,
+				label: t(value === 'active' ? 'tokens.state.active' : 'tokens.state.revoked'),
+				count: tokens.filter((token) => Boolean(token.revoked_at) === (value === 'revoked')).length
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		tokens.filter((token) => {
+			const { q, state } = filters.value;
+			if (state && Boolean(token.revoked_at) !== (state === 'revoked')) return false;
+			return matchesSearch(q, [token.name, token.display_prefix]);
+		})
+	);
+
+	function rowActions(token: ApiToken): RowAction[] {
+		return [
+			{
+				id: 'revoke',
+				label: t('tokens.revoke'),
+				icon: 'circle-slash',
+				hidden: Boolean(token.revoked_at),
+				onSelect: () => {
+					revokeTarget = token;
+					revokeOpen = true;
+				}
+			}
+		];
+	}
 
 	const createdItems = $derived<KeyValueItem[]>(
 		createdToken
@@ -198,39 +244,11 @@
 	}
 </script>
 
-{#snippet timeCell(value: string | null | undefined)}
-	{#if value}
-		<time datetime={value} title={formatTime(value)}>{relativeTime(value)}</time>
-	{:else}
-		{t('common.never')}
-	{/if}
-{/snippet}
-
-{#snippet createdCell(token: ApiToken)}
-	{@render timeCell(token.created_at)}
-{/snippet}
-
-{#snippet expiresCell(token: ApiToken)}
-	{@render timeCell(token.expires_at)}
-{/snippet}
-
-{#snippet lastUsedCell(token: ApiToken)}
-	{@render timeCell(token.last_used_at)}
-{/snippet}
-
-{#snippet nameCell(token: ApiToken)}
-	<span class="token-name">{token.name}</span>
-{/snippet}
-
 {#snippet stateCell(token: ApiToken)}
 	<StatusPill tone={token.revoked_at ? 'neutral' : 'success'}>
 		{token.revoked_at ? t('tokens.state.revoked') : t('tokens.state.active')}
 	</StatusPill>
 {/snippet}
-
-<svelte:head>
-	<title>{t('tokens.title')} · {t('app.name')}</title>
-</svelte:head>
 
 <SettingsLayout
 	title={t('tokens.title')}
@@ -241,31 +259,27 @@
 		<Button variant="primary" icon="plus" onclick={openCreate}>{t('tokens.create')}</Button>
 	{/snippet}
 
-	<Table
+	<DataTable
 		{columns}
-		rows={tokens}
+		rows={shown}
 		{loading}
 		{error}
 		rowKey={(token) => token.id}
-		filterPlaceholder={t('tokens.searchPlaceholder')}
+		detailTitle={(token) => token.name}
+		actions={rowActions}
+		emptyTitle={filters.value.q || filters.value.state ? t('filter.noMatches') : undefined}
 	>
-		{#snippet rowActions(token)}
-			<RowActions
-				moreLabel={t('tokens.revokeFor', { name: token.name })}
-				items={[
-					{
-						label: t('tokens.revoke'),
-						icon: 'circle-slash',
-						disabled: !!token.revoked_at,
-						onSelect: () => {
-							revokeTarget = token;
-							revokeOpen = true;
-						}
-					}
-				]}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('tokens.filters')}
+				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('tokens.searchPlaceholder') }}
+				{facets}
+				onchange={filters.update}
+				onreset={filters.reset}
 			/>
 		{/snippet}
-	</Table>
+	</DataTable>
 
 	<Alert variant="inline" icon="lock" title={t('tokens.valueNote')} />
 </SettingsLayout>
@@ -333,9 +347,3 @@
 		</Button>
 	{/snippet}
 </Dialog>
-
-<style>
-	.token-name {
-		font-weight: var(--rh-font-weight-semibold);
-	}
-</style>

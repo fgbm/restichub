@@ -110,7 +110,11 @@ export interface FilterFacet {
 	/** The query parameter of the facet. */
 	key: string;
 	label: string;
-	options: FilterOption[];
+	/** A facet without options takes a free text, such as an identifier. */
+	options?: FilterOption[];
 	/** Several values at once. Default: `true`. */
 	multiple?: boolean;
+	/** The placeholder of a free-text facet. */
+	placeholder?: string;
+	mono?: boolean;
 }

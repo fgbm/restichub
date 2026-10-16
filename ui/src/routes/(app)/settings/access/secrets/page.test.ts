@@ -77,16 +77,15 @@ beforeEach(() => {
 });
 
 describe('Secrets screen', () => {
-	it('lists the secrets with their purpose and their users as links', async () => {
+	it('lists the secrets with their purpose and their users as plain text', async () => {
 		render(Secrets);
 		expect(await screen.findByText('db.password')).toBeInTheDocument();
 		expect(screen.getAllByText('Script secret').length).toBeGreaterThan(0);
 		expect(screen.getByText('Repository password')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: 'db-nightly' })).toHaveAttribute('href', '/profiles');
-		expect(screen.getByRole('link', { name: 'primary-s3' })).toHaveAttribute(
-			'href',
-			'/repositories'
-		);
+		// A row has no link to another entity (design/style/ui-principles.md, 2.4).
+		expect(screen.getByText(/Profile db-nightly/)).toBeInTheDocument();
+		expect(screen.getByText(/Repository primary-s3/)).toBeInTheDocument();
+		expect(within(screen.getByRole('table')).queryByRole('link')).not.toBeInTheDocument();
 		expect(screen.getByText('Not used')).toBeInTheDocument();
 	});
 

@@ -223,10 +223,6 @@
 	</Badge>
 {/snippet}
 
-<svelte:head>
-	<title>{t('jobTemplates.title')} · {t('app.name')}</title>
-</svelte:head>
-
 <SettingsLayout
 	title={t('jobTemplates.title')}
 	description={t('jobTemplates.description')}

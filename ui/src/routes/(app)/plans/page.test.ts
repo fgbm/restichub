@@ -176,9 +176,7 @@ describe('the Plans screen', () => {
 
 		await screen.findByText('nightly-web');
 		expect(screen.queryByText(/dispatcher/i)).not.toBeInTheDocument();
-		await user.click(screen.getByRole('button', { name: 'More actions for nightly-web' }));
-		// The menu content is hidden in jsdom, so the text query finds the item.
-		await user.click(await screen.findByText('Run now'));
+		await user.click(screen.getByRole('button', { name: 'Run now' }));
 
 		await waitFor(() => expect(mocks.runPlan).toHaveBeenCalledWith('pl_1'));
 		await waitFor(() =>
@@ -193,8 +191,16 @@ describe('the Plans screen', () => {
 
 		await screen.findByText('nightly-web');
 		expect(screen.queryByRole('button', { name: 'Add plan' })).not.toBeInTheDocument();
-		expect(
-			screen.queryByRole('button', { name: 'More actions for nightly-web' })
-		).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Run now' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'nightly-web' })).not.toBeInTheDocument();
+	});
+
+	it('opens the plan form from the row', async () => {
+		const user = userEvent.setup();
+		mocks.listPlans.mockResolvedValue([plan()]);
+		render(Plans);
+
+		await user.click(await screen.findByRole('button', { name: 'nightly-web' }));
+		expect(await screen.findByRole('dialog', { name: 'Edit the plan' })).toBeInTheDocument();
 	});
 });

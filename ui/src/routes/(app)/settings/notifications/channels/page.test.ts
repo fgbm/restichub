@@ -165,8 +165,7 @@ describe('the channel settings', () => {
 		);
 		render(Channels);
 		await screen.findByText('hook');
-		await user.click(screen.getByRole('button', { name: 'More actions for hook' }));
-		await user.click(await screen.findByText('Send test'));
+		await user.click(screen.getByRole('button', { name: 'Send test' }));
 	}
 
 	it('sends a test message', async () => {
@@ -198,12 +197,19 @@ describe('the channel settings', () => {
 		render(Channels);
 		await screen.findByText('ops-mail');
 
-		await user.click(screen.getByRole('button', { name: 'More actions for ops-mail' }));
-		await user.click(await screen.findByText('Delete channel'));
+		await user.click(screen.getByRole('button', { name: 'Delete channel' }));
 		const dialog = await screen.findByRole('dialog', { name: 'Delete the channel?' });
 		await user.click(within(dialog).getByRole('button', { name: 'Delete channel' }));
 
 		await waitFor(() => expect(mocks.deleteChannel).toHaveBeenCalledWith('ch_1'));
 		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The channel is deleted.');
+	});
+
+	it('opens the channel form from the row', async () => {
+		const user = userEvent.setup();
+		mocks.listChannels.mockResolvedValue(list([channel()]));
+		render(Channels);
+		await user.click(await screen.findByRole('button', { name: 'ops-mail' }));
+		expect(await screen.findByRole('dialog')).toBeInTheDocument();
 	});
 });

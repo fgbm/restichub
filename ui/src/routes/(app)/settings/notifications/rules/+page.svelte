@@ -80,10 +80,6 @@
 	}
 </script>
 
-<svelte:head>
-	<title>{t('rules.title')} · {t('app.name')}</title>
-</svelte:head>
-
 <SettingsLayout title={t('rules.title')} description={t('rules.description')}>
 	{#snippet actions()}
 		<Button variant="primary" loading={saving} disabled={loading} onclick={save}>

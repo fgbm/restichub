@@ -11,13 +11,21 @@
 		Icon,
 		Panel,
 		PasswordField,
+		DataTable,
+		FilterBar,
 		Select,
 		StatusPill,
-		Table,
-		TextField,
-		RowActions
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { IconName, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		IconName,
+		RowAction,
+		SelectOption,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { matchesSearch, splitList } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -74,21 +82,14 @@
 		{ role: 'viewer', icon: 'eye', body: 'users.roles.viewer' }
 	];
 
-	function initials(user: User): string {
-		return (user.display_name || user.username)
-			.split(/\s+/)
-			.filter(Boolean)
-			.slice(0, 2)
-			.map((part) => part[0]?.toUpperCase() ?? '')
-			.join('');
-	}
-
 	const columns = $derived<TableColumn<User>[]>([
+		{ key: 'display_name', header: t('users.user'), truncate: 'sm' },
 		{
-			key: 'display_name',
-			header: t('users.user'),
-			value: (row) => `${row.display_name} ${row.username}`,
-			render: userCell
+			key: 'username',
+			header: t('users.username'),
+			mono: true,
+			nowrap: true,
+			render: loginCell
 		},
 		{
 			key: 'role',
@@ -103,6 +104,61 @@
 			render: stateCell
 		}
 	]);
+
+	const filters = queryFilters(['q', 'role', 'state'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'role',
+			label: t('users.role'),
+			options: (Object.keys(roleKeys) as Role[])
+				.filter((role) => users.some((user) => user.role === role))
+				.map((role) => ({
+					value: role,
+					label: roleKeys[role],
+					count: users.filter((user) => user.role === role).length
+				}))
+		},
+		{
+			key: 'state',
+			label: t('common.status'),
+			multiple: false,
+			options: (['active', 'disabled'] as const).map((value) => ({
+				value,
+				label: t(value === 'active' ? 'common.active' : 'common.disabled'),
+				count: users.filter((user) => user.disabled === (value === 'disabled')).length
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		users.filter((user) => {
+			const { q, role, state } = filters.value;
+			if (role && !splitList(role).includes(user.role)) return false;
+			if (state && user.disabled !== (state === 'disabled')) return false;
+			return matchesSearch(q, [user.display_name, user.username]);
+		})
+	);
+
+	function rowActions(user: User): RowAction[] {
+		return [
+			{
+				id: 'reset',
+				label: t('users.resetPassword'),
+				hint: user.shared ? t('users.sharedResetHint') : undefined,
+				icon: 'key',
+				disabled: user.shared,
+				onSelect: () => openReset(user)
+			},
+			{
+				id: 'disable',
+				label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
+				icon: 'octagon',
+				danger: true,
+				onSelect: () => toggleDisabled(user)
+			}
+		];
+	}
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -194,18 +250,12 @@
 	}
 </script>
 
-{#snippet userCell(user: User)}
-	<span class="user">
-		<span class="user__avatar" aria-hidden="true">{initials(user)}</span>
-		<span class="user__text">
-			<span class="user__line">
-				<span class="user__name">{user.display_name}</span>
-				{#if user.shared}
-					<Badge icon="users">{t('users.shared')}</Badge>
-				{/if}
-			</span>
-			<span class="user__login">{user.username}</span>
-		</span>
+{#snippet loginCell(user: User)}
+	<span class="user__line">
+		{user.username}
+		{#if user.shared}
+			<Badge icon="users">{t('users.shared')}</Badge>
+		{/if}
 	</span>
 {/snippet}
 
@@ -214,10 +264,6 @@
 		{user.disabled ? t('common.disabled') : t('common.active')}
 	</StatusPill>
 {/snippet}
-
-<svelte:head>
-	<title>{t('users.title')} · {t('app.name')}</title>
-</svelte:head>
 
 <SettingsLayout
 	title={t('users.title')}
@@ -230,35 +276,30 @@
 
 	<Alert variant="inline" icon="users" title={t('users.sharedNote')} />
 
-	<Table
+	<DataTable
 		{columns}
-		rows={users}
+		rows={shown}
 		{loading}
 		{error}
 		rowKey={(user) => user.id}
-		filterPlaceholder={t('users.searchPlaceholder')}
+		detailTitle={(user) => user.display_name}
+		actions={rowActions}
+		moreLabel={(user) => t('users.moreActions', { name: user.display_name })}
+		emptyTitle={filters.value.q || filters.value.role || filters.value.state
+			? t('filter.noMatches')
+			: undefined}
 	>
-		{#snippet rowActions(user)}
-			<RowActions
-				moreLabel={t('users.moreActions', { name: user.display_name })}
-				items={[
-					{
-						label: t('users.resetPassword'),
-						hint: user.shared ? t('users.sharedResetHint') : undefined,
-						icon: 'key',
-						disabled: user.shared,
-						onSelect: () => openReset(user)
-					},
-					{
-						label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
-						icon: 'octagon',
-						tone: 'danger',
-						onSelect: () => toggleDisabled(user)
-					}
-				]}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('users.filters')}
+				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('users.searchPlaceholder') }}
+				{facets}
+				onchange={filters.update}
+				onreset={filters.reset}
 			/>
 		{/snippet}
-	</Table>
+	</DataTable>
 
 	<Panel title={t('users.roles')} flush>
 		<ul class="roles">
@@ -349,46 +390,10 @@
 </Dialog>
 
 <style>
-	.user {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-	}
-
-	.user__avatar {
-		display: inline-flex;
-		flex: none;
-		align-items: center;
-		justify-content: center;
-		width: 24px;
-		height: 24px;
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-pill);
-		background-color: var(--rh-color-neutral-bg);
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-2xs);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.user__text {
-		display: flex;
-		flex-direction: column;
-	}
-
 	.user__line {
 		display: inline-flex;
 		align-items: center;
 		gap: var(--rh-space-3);
-	}
-
-	.user__name {
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.user__login {
-		color: var(--rh-color-text-muted);
-		font-family: var(--rh-font-mono);
-		font-size: var(--rh-font-size-sm);
 	}
 
 	.roles {

@@ -315,10 +315,6 @@
 	</Badge>
 {/snippet}
 
-<svelte:head>
-	<title>{t('scriptTemplates.title')} · {t('app.name')}</title>
-</svelte:head>
-
 <SettingsLayout
 	title={t('scriptTemplates.title')}
 	description={t('scriptTemplates.description')}

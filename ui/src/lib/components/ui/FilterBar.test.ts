@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import FilterBar from './FilterBar.svelte';
@@ -106,5 +106,25 @@ describe('FilterBar', () => {
 		expect(await screen.findByLabelText('From')).toHaveAttribute('type', 'date');
 		await user.click(screen.getByText('Last 24 hours'));
 		expect(onchange).toHaveBeenLastCalledWith({ period: '24h', from: '', to: '' });
+	});
+
+	it('takes a free text in a facet without options', async () => {
+		const user = userEvent.setup();
+		const onchange = vi.fn();
+		render(FilterBar, {
+			props: {
+				label: 'Audit filters',
+				value: { object_id: 'r_1' },
+				facets: [{ key: 'object_id', label: 'Object ID' }],
+				onchange
+			}
+		});
+		expect(screen.getByRole('list', { name: 'Applied filters' })).toHaveTextContent(
+			'Object ID: r_1'
+		);
+		await user.click(screen.getByRole('button', { name: /^Object ID/ }));
+		const field = await waitFor(() => document.getElementById('filter-object_id') as HTMLElement);
+		await user.type(field, '2');
+		expect(onchange).toHaveBeenLastCalledWith({ object_id: 'r_12' });
 	});
 });

@@ -13,17 +13,10 @@ const legacyScreens = [
 	'src/lib/components/HostPage.svelte',
 	'src/lib/components/ProfileEditor.svelte',
 	'src/lib/components/RepositoryEditor.svelte',
-	'src/lib/screens/AuditLog.svelte',
 	'src/routes/(app)/+page.svelte',
-	'src/routes/(app)/alerts/+page.svelte',
-	'src/routes/(app)/plans/+page.svelte',
 	'src/routes/(app)/platform/tenants/+page.svelte',
 	'src/routes/(app)/platform/users/+page.svelte',
 	'src/routes/(app)/restore/[[]repository]/[[]snapshot]/+page.svelte',
-	'src/routes/(app)/settings/access/api-tokens/+page.svelte',
-	'src/routes/(app)/settings/access/secrets/+page.svelte',
-	'src/routes/(app)/settings/access/users/+page.svelte',
-	'src/routes/(app)/settings/notifications/channels/+page.svelte',
 	'src/routes/(app)/settings/scripts/jobs/+page.svelte',
 	'src/routes/(app)/settings/scripts/templates/+page.svelte'
 ];
