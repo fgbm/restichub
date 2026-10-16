@@ -13,6 +13,7 @@
 		type NavHref
 	} from '#lib/navigation.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
+	import { filtersFromQuery, filtersToQuery, targetExtra } from '#lib/restore.ts';
 	import { getPageTitle } from '#lib/stores/page-title.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
 	import { getTheme, setTheme } from '#lib/stores/theme.svelte.ts';
@@ -68,6 +69,8 @@
 	interface Crumb {
 		label: string;
 		href?: NavHref;
+		/** The query of the link, such as the filters of the list that the page came from. */
+		query?: string;
 	}
 
 	function isActive(href: NavHref): boolean {
@@ -97,6 +100,22 @@
 			return title
 				? [{ label: t(item.labelKey), href: item.href }, { label: title }]
 				: [{ label: t(item.labelKey) }];
+		}
+		// The snapshot page keeps the filters and the target of the list in the link back.
+		if (page.route.id === '/(app)/restore/[repository]/[snapshot]') {
+			const repositoryId = page.params.repository ?? '';
+			const snapshotId = page.params.snapshot ?? '';
+			const query = filtersToQuery(filtersFromQuery(page.url.searchParams), {
+				repository: repositoryId,
+				snapshot: snapshotId,
+				...targetExtra(page.url.searchParams)
+			});
+			const name = getPageTitle();
+			return [
+				{ label: t(item.labelKey), href: item.href, query: query.toString() },
+				...(name ? [{ label: name }] : []),
+				{ label: t('restore.snapshotTitle', { id: snapshotId.slice(0, 8) }) }
+			];
 		}
 		// The profile editor shows the profile name, or "New profile", after the list.
 		if (page.route.id === '/(app)/profiles/[id]' || page.route.id === '/(app)/profiles/new') {
@@ -208,7 +227,10 @@
 				{#if index === crumbs.length - 1}
 					<span aria-current="page">{crumb.label}</span>
 				{:else if crumb.href}
-					<a href={resolve(crumb.href)}>{crumb.label}</a>
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the address starts with a resolved path -->
+					<a href={crumb.query ? `${resolve(crumb.href)}?${crumb.query}` : resolve(crumb.href)}
+						>{crumb.label}</a
+					>
 				{:else}
 					<span>{crumb.label}</span>
 				{/if}

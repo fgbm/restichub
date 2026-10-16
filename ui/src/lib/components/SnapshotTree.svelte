@@ -216,7 +216,7 @@
 
 <style>
 	.tree {
-		max-height: min(60vh, 34rem);
+		height: 100%;
 		overflow: auto;
 		font-size: var(--rh-font-size-sm);
 	}
@@ -236,6 +236,7 @@
 		align-items: center;
 		gap: var(--rh-space-2);
 		min-height: 2rem;
+		min-width: 0;
 		padding-inline: var(--rh-space-1);
 		border-radius: var(--rh-radius-sm);
 	}
@@ -299,9 +300,11 @@
 	}
 
 	.tree__meta {
+		flex: none;
 		margin-inline-start: auto;
 		color: var(--rh-color-text-muted);
 		font-variant-numeric: tabular-nums;
+		text-align: end;
 		white-space: nowrap;
 	}
 
