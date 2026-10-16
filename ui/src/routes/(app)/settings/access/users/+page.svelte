@@ -8,14 +8,14 @@
 		Badge,
 		Button,
 		Dialog,
-		DropdownMenu,
 		Icon,
 		Panel,
 		PasswordField,
 		Select,
 		StatusPill,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { IconName, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
@@ -239,29 +239,24 @@
 		filterPlaceholder={t('users.searchPlaceholder')}
 	>
 		{#snippet rowActions(user)}
-			<span class="row-actions">
-				<Button
-					size="sm"
-					icon="key"
-					disabled={user.shared}
-					title={user.shared ? t('users.sharedResetHint') : t('users.resetPassword')}
-					aria-label={t('users.resetFor', { name: user.display_name })}
-					onclick={() => openReset(user)}
-				/>
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('users.moreActions', { name: user.display_name })}
-					items={[
-						{
-							label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
-							icon: 'octagon',
-							tone: 'danger',
-							onSelect: () => toggleDisabled(user)
-						}
-					]}
-				/>
-			</span>
+			<RowActions
+				moreLabel={t('users.moreActions', { name: user.display_name })}
+				items={[
+					{
+						label: t('users.resetPassword'),
+						hint: user.shared ? t('users.sharedResetHint') : undefined,
+						icon: 'key',
+						disabled: user.shared,
+						onSelect: () => openReset(user)
+					},
+					{
+						label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
+						icon: 'octagon',
+						tone: 'danger',
+						onSelect: () => toggleDisabled(user)
+					}
+				]}
+			/>
 		{/snippet}
 	</Table>
 
@@ -394,11 +389,6 @@
 		color: var(--rh-color-text-muted);
 		font-family: var(--rh-font-mono);
 		font-size: var(--rh-font-size-sm);
-	}
-
-	.row-actions {
-		display: inline-flex;
-		gap: var(--rh-space-1);
 	}
 
 	.roles {

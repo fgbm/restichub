@@ -179,7 +179,7 @@
 		border: 2px solid var(--rh-color-border);
 		border-top-color: currentColor;
 		border-radius: 50%;
-		animation: btn-spin 0.7s linear infinite;
+		animation: btn-spin var(--rh-spin-duration) linear infinite;
 	}
 
 	@keyframes btn-spin {

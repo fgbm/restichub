@@ -74,6 +74,10 @@ beforeEach(() => {
 	mocks.deleteScriptTemplate.mockResolvedValue(undefined);
 });
 
+async function rowOf(name: string): Promise<HTMLElement> {
+	return (await screen.findByText(name)).closest('tr') as HTMLElement;
+}
+
 async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
 	await user.click(await screen.findByRole('button', { name: `More actions for ${name}` }));
 }
@@ -88,19 +92,19 @@ describe('Script templates screen', () => {
 	});
 
 	it('offers no delete action for a built-in template', async () => {
-		const user = userEvent.setup();
 		render(Templates);
-		await openMenu(user, 'Free disk space check (Linux)');
-		expect(await screen.findByText('View')).toBeInTheDocument();
-		expect(screen.getByText('Make a copy')).toBeInTheDocument();
-		expect(screen.queryByText('Delete')).not.toBeInTheDocument();
+		const row = await rowOf('Free disk space check (Linux)');
+		expect(within(row).getByRole('button', { name: 'View' })).toBeInTheDocument();
+		expect(within(row).getByRole('button', { name: 'Make a copy' })).toBeInTheDocument();
+		expect(within(row).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
 	});
 
 	it('opens a built-in template read-only and copies it into a new template', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		await openMenu(user, 'Free disk space check (Linux)');
-		await user.click(await screen.findByText('View'));
+		await user.click(
+			within(await rowOf('Free disk space check (Linux)')).getByRole('button', { name: 'View' })
+		);
 		const dialog = await screen.findByRole('dialog');
 		expect(
 			within(dialog).getByText('A built-in template is read-only. Make a copy to change it.')

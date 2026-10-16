@@ -110,9 +110,11 @@ describe('the Repositories screen maintenance', () => {
 
 		await screen.findByText('repo-a');
 		expect(screen.queryByRole('button', { name: 'Add repository' })).not.toBeInTheDocument();
-		await user.click(screen.getByRole('button', { name: 'More actions for repo-a' }));
-		expect(screen.queryByText('Edit')).not.toBeInTheDocument();
-		await user.click(await screen.findByText('Run retention now'));
+		expect(
+			screen.queryByRole('button', { name: 'More actions for repo-a' })
+		).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Run retention now' }));
 
 		await waitFor(() => expect(mocks.runMaintenance).toHaveBeenCalledWith('r_1', 'retention'));
 		await waitFor(() =>
@@ -148,14 +150,12 @@ describe('the Repositories screen maintenance', () => {
 	});
 
 	it('fr_sc_06 offers no unlock-all action to an Operator', async () => {
-		const user = userEvent.setup();
 		session.role = 'operator';
 		render(Repositories);
 
 		await screen.findByText('repo-a');
-		await user.click(screen.getByRole('button', { name: 'More actions for repo-a' }));
-		await screen.findByText('Run retention now');
-		expect(screen.queryByText('Unlock all')).not.toBeInTheDocument();
+		await screen.findByRole('button', { name: 'Run retention now' });
+		expect(screen.queryByRole('button', { name: 'Unlock all' })).not.toBeInTheDocument();
 	});
 
 	it('fr_sc_09 hides every action from a Viewer', async () => {

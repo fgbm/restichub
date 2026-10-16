@@ -25,8 +25,9 @@ test('the snapshot list takes filters and the tree loads a large directory by pa
 
 	// The first visit reads the snapshots at once.
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(8);
-	await page.locator('#restore-host').fill('ws-anna');
-	await page.getByRole('button', { name: 'Find snapshots' }).click();
+	await page.getByRole('button', { name: 'Host', exact: true }).click();
+	await page.getByLabel('ws-anna').check();
+	await page.keyboard.press('Escape');
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(2);
 
 	await page
@@ -43,12 +44,11 @@ test('the snapshot list takes filters and the tree loads a large directory by pa
 
 	// The back link keeps the filters of the list.
 	await page.getByRole('link', { name: /Back to the snapshots/ }).click();
-	await expect(page.locator('#restore-host')).toHaveValue('ws-anna');
+	await expect(page.getByText('Host: ws-anna')).toBeVisible();
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(2);
 
 	// A directory with 2500 entries comes in pages of 1000.
-	await page.locator('#restore-host').fill('');
-	await page.getByRole('button', { name: 'Find snapshots' }).click();
+	await page.getByRole('button', { name: 'Reset', exact: true }).click();
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(8);
 	await page
 		.getByRole('link', { name: /^Open snapshot / })

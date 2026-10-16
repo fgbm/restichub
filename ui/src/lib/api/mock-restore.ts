@@ -32,8 +32,40 @@ function snapshot(
 	};
 }
 
+/** A development switch: the repository holds a long list over three hosts and several tags. */
+export const MANY_SNAPSHOTS_KEY = 'restichub.mock.snapshots';
+
+function manySnapshots(): SnapshotItem[] {
+	const profile = 'restichub-profile-0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c';
+	return Array.from({ length: 40 }, (_, index) => {
+		const kind = index % 3;
+		if (kind === 0) {
+			return snapshot(
+				index,
+				'MindCore',
+				index % 6 === 0 ? [profile, 'daily'] : [profile, 'daily', 'documents'],
+				['C:\\Users\\vch', 'D:\\Projects'],
+				index * 14 + 2
+			);
+		}
+		if (kind === 1) {
+			return snapshot(
+				index,
+				'nas-backup',
+				index % 4 === 1 ? ['weekly', 'offsite'] : ['daily'],
+				['/srv', '/etc'],
+				index * 14 + 5
+			);
+		}
+		return snapshot(index, 'ws-anna', ['laptop', 'daily'], ['/home/anna'], index * 14 + 9);
+	}).sort((a, b) => (b.time ?? '').localeCompare(a.time ?? ''));
+}
+
 /** The snapshots of a repository, the newest first. */
 export function makeSnapshots(): SnapshotItem[] {
+	if (typeof localStorage !== 'undefined' && localStorage.getItem(MANY_SNAPSHOTS_KEY) === 'many') {
+		return manySnapshots();
+	}
 	return [
 		snapshot(0, 'nas-backup', ['daily'], ['/srv', '/etc'], 3),
 		snapshot(1, 'ws-anna', ['daily'], ['/home/anna'], 9),

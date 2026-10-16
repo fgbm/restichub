@@ -40,8 +40,7 @@ test('the jobs screen lists the jobs and cancels a queued job', async ({ page })
 
 	// Cancel the queued job after the confirmation dialog.
 	const queued = table.getByRole('row').filter({ hasText: 'Waiting' });
-	await queued.getByRole('button', { name: /More actions for the job/ }).click();
-	await page.getByRole('menuitem', { name: 'Cancel job' }).click();
+	await queued.getByRole('button', { name: 'Cancel job' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Cancel the job?' });
 	await expect(dialog).toBeVisible();
 	await dialog.getByRole('button', { name: 'Cancel job' }).click();
