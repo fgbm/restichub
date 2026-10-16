@@ -2064,5 +2064,14 @@ export const ru: Record<MessageKey, string> = {
 	'secrets.count.jobTemplate.one': '{n} шаблон задания',
 	'secrets.count.jobTemplate.few': '{n} шаблона задания',
 	'secrets.count.jobTemplate.many': '{n} шаблонов задания',
-	'secrets.count.jobTemplate.other': '{n} шаблона задания'
+	'secrets.count.jobTemplate.other': '{n} шаблона задания',
+	'tokens.tab.valid': 'Действующие',
+	'tokens.tab.ended': 'Истёкшие и отозванные',
+	'tokens.sort.name': 'Имя',
+	'tokens.sort.used': 'Последнее использование',
+	'tokens.sort.expires': 'Срок',
+	'tokens.meta.used': 'использован {time}',
+	'tokens.meta.neverUsed': 'не использовался',
+	'tokens.meta.noExpiry': 'бессрочный',
+	'tokens.emptyTitle': 'Токенов API пока нет'
 };

@@ -2053,7 +2053,16 @@ export const en = {
 	'secrets.count.jobTemplate.one': '{n} job template',
 	'secrets.count.jobTemplate.few': '{n} job templates',
 	'secrets.count.jobTemplate.many': '{n} job templates',
-	'secrets.count.jobTemplate.other': '{n} job templates'
+	'secrets.count.jobTemplate.other': '{n} job templates',
+	'tokens.tab.valid': 'Valid',
+	'tokens.tab.ended': 'Expired and revoked',
+	'tokens.sort.name': 'Name',
+	'tokens.sort.used': 'Last use',
+	'tokens.sort.expires': 'Expiry',
+	'tokens.meta.used': 'used {time}',
+	'tokens.meta.neverUsed': 'never used',
+	'tokens.meta.noExpiry': 'no expiry',
+	'tokens.emptyTitle': 'No API tokens yet'
 } as const;
 
 export type MessageKey = keyof typeof en;
