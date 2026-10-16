@@ -215,7 +215,7 @@ function makeAgents(): Agent[] {
 		status: options.status ?? 'active',
 		restore_roots:
 			os === 'windows'
-				? ['C:\\ProgramData\\ResticHub\\Restore']
+				? ['C:\\ProgramData\\ResticHub-Restore']
 				: os === 'linux'
 					? ['/var/lib/restichub-restore']
 					: [],

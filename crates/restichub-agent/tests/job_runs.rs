@@ -259,6 +259,54 @@ async fn fr_ag_05_a_step_without_a_timeout_honours_the_job_timeout() {
     let _ = std::fs::remove_dir_all(&path);
 }
 
+/// AC-LG-04: the line that says why restic did not start passes the scrubber, and the job error
+/// says that restic did not start.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_lg_04_the_not_started_line_is_scrubbed() {
+    let dir = config_dir("job-runs-not-started");
+    let path = repository("job-runs-not-started-repo");
+    common::script_exit_codes(&path, 0, 0);
+    let program = common::fake_restic();
+    let jobs = restichub_agent::jobs::Jobs::open(program, "0".repeat(64), dir.join("cache"), &dir)
+        .expect("the job journal must open");
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    jobs.greeted(false);
+    let mut repository_access = access("repo-1", &path);
+    repository_access.password = "canary-password-4711".to_owned();
+    let job = job(
+        "job-not-started",
+        vec![repository_access],
+        vec![test_access_step("repo-1")],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+
+    let mut log = Vec::new();
+    let result = loop {
+        let message = next_message(&mut rx).await;
+        match message.payload {
+            Some(agent_message::Payload::LogChunk(chunk)) => log.extend(chunk.data),
+            Some(agent_message::Payload::JobResult(result)) => break result,
+            _ => {}
+        }
+    };
+    let log = String::from_utf8_lossy(&log);
+    assert!(
+        log.contains("restic did not start: ")
+            && log.contains("the restic binary does not match the recorded SHA-256"),
+        "{log}"
+    );
+    assert!(!log.contains("canary-password-4711"), "{log}");
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(
+        result.error.map(|error| error.code),
+        Some("step_not_started".to_owned())
+    );
+    assert_eq!(runs(&path), 0, "restic must not run");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
 /// ADR-0020: the agent refuses a job beyond the concurrency cap with `busy`.
 #[tokio::test(flavor = "multi_thread")]
 async fn adr_0020_a_job_beyond_the_concurrency_cap_is_rejected_busy() {

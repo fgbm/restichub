@@ -18,7 +18,8 @@ pub fn default_root() -> PathBuf {
     {
         let program_data = std::env::var_os("ProgramData")
             .map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from);
-        program_data.join("ResticHub").join("Restore")
+        // Outside the agent tree, which the agent protects with its own DACL (ADR-0035).
+        program_data.join("ResticHub-Restore")
     }
     #[cfg(not(windows))]
     {
@@ -630,5 +631,25 @@ mod tests {
     fn ac_rs_05_the_roots_are_reported_as_text() {
         let access = RestoreAccess::new(vec![PathBuf::from("/srv/restore")], Vec::new());
         assert_eq!(access.root_strings(), vec!["/srv/restore".to_owned()]);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn ac_rs_05_the_default_root_is_outside_the_agent_tree() {
+        let agent_root = crate::paths::config_dir()
+            .parent()
+            .map(Path::to_path_buf)
+            .expect("the configuration directory has a parent");
+        assert!(!default_root().starts_with(&agent_root));
+        assert_eq!(
+            default_root().file_name().and_then(|name| name.to_str()),
+            Some("ResticHub-Restore")
+        );
     }
 }

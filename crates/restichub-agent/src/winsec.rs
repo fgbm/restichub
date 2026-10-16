@@ -21,9 +21,8 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    ConvertStringSidToSidW, GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
-    SetNamedSecurityInfoW,
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
+    GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
 };
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
@@ -316,9 +315,9 @@ pub fn check_program_directory(path: &Path) -> Result<()> {
 fn check(path: &Path, rights: u32) -> Result<()> {
     let security = open_security(path)?;
     check_owner(path, security.owner)?;
-    if let Some((mask, account)) = first_foreign_grant(security.dacl, rights)? {
+    if let Some(mask) = first_foreign_grant(security.dacl, rights)? {
         bail!(
-            "{} grants the access mask {mask:#010x} to {account}, which is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
+            "{} grants the access mask {mask:#010x} to an account that is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
             path.display()
         );
     }
@@ -371,9 +370,8 @@ fn open_security(path: &Path) -> Result<Security> {
 fn check_owner(path: &Path, owner: PSID) -> Result<()> {
     if owner.is_null() || !is_trusted_sid(owner) {
         bail!(
-            "{} is owned by {}, not by SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
-            path.display(),
-            sid_to_string(owner)
+            "{} is owned by an account that is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
+            path.display()
         );
     }
     Ok(())
@@ -383,9 +381,9 @@ fn check_owner(path: &Path, owner: PSID) -> Result<()> {
 ///
 /// A missing DACL grants everyone full access, so it gives [`u32::MAX`]. An allow entry of a type
 /// this module does not parse also gives [`u32::MAX`], because it may hold any right.
-fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<(u32, String)>> {
+fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<u32>> {
     if dacl.is_null() {
-        return Ok(Some((u32::MAX, "every account".to_owned())));
+        return Ok(Some(u32::MAX));
     }
     let mut size = ACL_SIZE_INFORMATION::default();
     // SAFETY: the DACL is a valid ACL and the out parameter is a local.
@@ -432,17 +430,14 @@ fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<(u32, Strin
                 // SAFETY: SidStart is the first byte of the security identifier of the entry.
                 let sid = std::ptr::addr_of!(allowed.SidStart).cast::<core::ffi::c_void>() as PSID;
                 if granted != 0 && !is_trusted_sid(sid) {
-                    return Ok(Some((granted, sid_to_string(sid))));
+                    return Ok(Some(granted));
                 }
             }
             // An allow entry of a type this module does not parse may hold any right.
             ACCESS_ALLOWED_OBJECT_ACE_TYPE
             | ACCESS_ALLOWED_CALLBACK_ACE_TYPE
             | ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE => {
-                return Ok(Some((
-                    u32::MAX,
-                    "an unparsed access control entry".to_owned(),
-                )));
+                return Ok(Some(u32::MAX));
             }
             ACCESS_DENIED_ACE_TYPE
             | ACCESS_DENIED_OBJECT_ACE_TYPE
@@ -457,44 +452,11 @@ fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<(u32, Strin
             | SYSTEM_SCOPED_POLICY_ID_ACE_TYPE => {}
             // Unknown types fail closed.
             _ => {
-                return Ok(Some((
-                    u32::MAX,
-                    "an unparsed access control entry".to_owned(),
-                )));
+                return Ok(Some(u32::MAX));
             }
         }
     }
     Ok(None)
-}
-
-/// The text form of a security identifier, for a message.
-fn sid_to_string(sid: PSID) -> String {
-    if sid.is_null() {
-        return "an unknown account".to_owned();
-    }
-    let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
-    // SAFETY: the SID is valid and the out parameter is a local.
-    let ok = unsafe { ConvertSidToStringSidW(sid, &mut text) };
-    if ok == 0 || text.is_null() {
-        return "an unknown account".to_owned();
-    }
-    // SAFETY: the call returned a null-terminated UTF-16 string.
-    let value = unsafe { utf16_string(text) };
-    // SAFETY: the string came from the conversion function and needs LocalFree.
-    unsafe { LocalFree(text as HLOCAL) };
-    value
-}
-
-/// Reads a null-terminated UTF-16 value.
-unsafe fn utf16_string(pointer: *const u16) -> String {
-    let mut length = 0;
-    // SAFETY: the caller gives a null-terminated string.
-    while unsafe { *pointer.add(length) } != 0 {
-        length += 1;
-    }
-    // SAFETY: the length counts the units before the terminator.
-    let slice = unsafe { std::slice::from_raw_parts(pointer, length) };
-    String::from_utf16_lossy(slice)
 }
 
 fn is_trusted_sid(sid: PSID) -> bool {
@@ -587,9 +549,9 @@ fn apply_descriptor(path: &Path, sddl: &str) -> Result<()> {
     };
     if status != ERROR_SUCCESS {
         bail!(
-            "cannot set the access control of {}: {} (error {status}); run the command as an administrator",
+            "cannot set the access control of {}: {}",
             path.display(),
-            std::io::Error::last_os_error()
+            std::io::Error::from_raw_os_error(status as i32)
         );
     }
     Ok(())
@@ -665,6 +627,18 @@ mod tests {
         grant(&dir, "(OI)(CI)(WD)").expect("cannot add the access control entry");
         assert!(check_admin_only(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_access_control_change_reports_the_returned_code() {
+        let base = temp("acl-missing");
+        std::fs::create_dir_all(&base).expect("cannot create the base");
+        let missing = base.join("absent");
+        let error = apply_descriptor(&missing, DIR_SDDL).expect_err("a missing path must fail");
+        let text = format!("{error:#}");
+        // ERROR_FILE_NOT_FOUND, not the stale last error of the thread.
+        assert!(text.contains("os error 2"), "{text}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

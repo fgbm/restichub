@@ -352,7 +352,11 @@ impl Jobs {
             Err(error) => {
                 let detail = format!("{error:#}");
                 tracing::warn!(%detail, "cannot start restic");
-                log.push(step_id, LogStream::Agent, "restic did not start");
+                log.push(
+                    step_id,
+                    LogStream::Agent,
+                    &scrubber.scrub(&format!("restic did not start: {detail}")),
+                );
                 self.send_log(log).await;
                 return StepOutcome::not_started();
             }

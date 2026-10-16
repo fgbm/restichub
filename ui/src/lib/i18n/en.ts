@@ -690,11 +690,13 @@ export const en = {
 	'jobs.reason.wrong_password':
 		'The repository password or the access keys are wrong. Correct them in the repository.',
 	'jobs.reason.step_failed': 'restic stopped with an error. Read the job log.',
+	'jobs.reason.step_not_started': 'restic did not start. Read the job log.',
 	'jobs.reason.hook_failed': 'A script ended with an error. Read the log of the script.',
 	'jobs.reason.cancelled': 'The job was cancelled.',
 	'jobs.reason.succeeded_with_warnings': 'Finished with warnings.',
 	'jobs.errorCode.interrupted': 'interrupted by an agent restart',
 	'jobs.errorCode.step_failed': 'restic error',
+	'jobs.errorCode.step_not_started': 'restic did not start',
 	'jobs.errorCode.wrong_password': 'wrong password or keys',
 	'jobs.errorCode.repository_missing': 'repository not found',
 	'jobs.errorCode.hook_failed': 'script or hook error',

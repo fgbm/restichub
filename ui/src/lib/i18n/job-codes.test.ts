@@ -49,6 +49,7 @@ const STEP_STATUS: Record<Schemas['StepStatus'], true> = {
 const RESULT_MESSAGES = [
 	'interrupted',
 	'step_failed',
+	'step_not_started',
 	'wrong_password',
 	'repository_missing',
 	'hook_failed',

@@ -22,6 +22,8 @@ pub(super) struct Progress {
     /// Set by the first failed script, so the job error names it (AC-HK-13).
     pub(super) script_failure: Option<ScriptFailure>,
     pub(super) limit: Option<StepError>,
+    /// A restic step failed before the process started.
+    pub(super) restic_not_started: bool,
 }
 
 /// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
@@ -96,6 +98,7 @@ pub(super) fn job_error(outcome: JobStatus, progress: &Progress) -> Option<Error
         }
         JobStatus::ConfigError => "wrong_password",
         JobStatus::NotInitialized => "repository_missing",
+        JobStatus::Failed if progress.restic_not_started => "step_not_started",
         JobStatus::Failed => "step_failed",
         JobStatus::Cancelled => "cancelled",
         JobStatus::RepositoryLocked => "repository_locked",
