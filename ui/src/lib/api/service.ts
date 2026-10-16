@@ -10,6 +10,7 @@ import { endpoints } from './endpoints';
 import type {
 	Agent,
 	AgentListResponse,
+	AgentQuery,
 	AlertListResponse,
 	AlertQuery,
 	AlertRule,
@@ -131,6 +132,8 @@ export interface ApiService {
 
 	/** The enrolled agents of the tenant (ADR-0026). */
 	listAgents(): Promise<Agent[]>;
+	/** One filtered, sorted page of the hosts, with the total (FR-UI-01). */
+	searchAgents(query: AgentQuery): Promise<AgentListResponse>;
 	getAgent(id: string): Promise<Agent>;
 	renameAgent(id: string, hostname: string): Promise<Agent>;
 	revokeAgent(id: string): Promise<void>;
@@ -285,6 +288,10 @@ const httpService: ApiService = {
 
 	listAgents: () =>
 		api.get<AgentListResponse>(endpoints.agents.list).then((response) => response.items),
+	searchAgents: (query) =>
+		api.get<AgentListResponse>(endpoints.agents.list, {
+			query: { ...query, facets: query.facets ? 'true' : undefined }
+		}),
 	getAgent: (id) => api.get<Agent>(endpoints.agents.byId(id)),
 	renameAgent: (id, hostname) =>
 		api.patch<Agent>(endpoints.agents.byId(id), { hostname } satisfies RenameAgentRequest),

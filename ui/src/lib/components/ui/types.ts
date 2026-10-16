@@ -117,4 +117,6 @@ export interface FilterFacet {
 	/** The placeholder of a free-text facet. */
 	placeholder?: string;
 	mono?: boolean;
+	/** A short muted line at the top of the popover. */
+	hint?: string;
 }

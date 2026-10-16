@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import { createRawSnippet } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import FilterBar from './FilterBar.svelte';
 import type { FilterFacet } from './types';
@@ -126,5 +127,24 @@ describe('FilterBar', () => {
 		const field = await waitFor(() => document.getElementById('filter-object_id') as HTMLElement);
 		await user.type(field, '2');
 		expect(onchange).toHaveBeenLastCalledWith({ object_id: 'r_12' });
+	});
+
+	it('shows the hint of a facet in its popover and puts the end content in the row', async () => {
+		const user = userEvent.setup();
+		const { container } = render(FilterBar, {
+			props: {
+				label: 'Snapshot filters',
+				value: {},
+				facets: [{ ...facets[1], hint: 'Any chosen value matches.' }],
+				end: createRawSnippet(() => ({ render: () => '<button type="button">Refresh</button>' })),
+				onchange: vi.fn()
+			}
+		});
+		expect(screen.queryByText('Any chosen value matches.')).toBeNull();
+		expect(container.querySelector('.filter-bar__row .filter-bar__end')).toContainElement(
+			screen.getByRole('button', { name: 'Refresh' })
+		);
+		await user.click(screen.getByRole('button', { name: /^OS/ }));
+		expect(await screen.findByText('Any chosen value matches.')).toBeInTheDocument();
 	});
 });

@@ -32,6 +32,8 @@ macro_rules! agent_columns {
     };
 }
 
+pub(crate) use agent_columns;
+
 /// Joins the oldest other active host of the tenant with the same machine hash. Both records of a
 /// pair get the join, so both show the warning (FR-ID-11).
 macro_rules! duplicate_join {
@@ -44,6 +46,8 @@ macro_rules! duplicate_join {
              ORDER BY o.created_at, o.id LIMIT 1) d ON true"
     };
 }
+
+pub(crate) use duplicate_join;
 
 pub const MAX_PAGE_LIMIT: i64 = 200;
 
@@ -122,28 +126,6 @@ pub struct AgentCursor {
     pub id: AgentId,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct AgentPage {
-    /// Clamped to [`MAX_PAGE_LIMIT`].
-    pub limit: i64,
-    pub after: Option<AgentCursor>,
-}
-
-impl Default for AgentPage {
-    fn default() -> Self {
-        Self {
-            limit: DEFAULT_PAGE_LIMIT,
-            after: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AgentPageResult {
-    pub agents: Vec<Agent>,
-    pub has_more: bool,
-}
-
 /// The fields of a new registry row. The enrollment exchange (#48) fills them from the CSR and the
 /// token labels.
 #[derive(Debug, Clone)]
@@ -188,42 +170,6 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewAgent<'_>) -> Result<AgentId
     .await
     .map_err(DbError::Query)?;
     Ok(id)
-}
-
-/// Newest first, narrowed by an optional status filter.
-pub async fn list(
-    tx: &mut TenantTx<'_>,
-    status: Option<AgentStatus>,
-    page: &AgentPage,
-) -> Result<AgentPageResult, DbError> {
-    let limit = page.limit.clamp(1, MAX_PAGE_LIMIT);
-    let (cursor_time, cursor_id) = match page.after {
-        Some(cursor) => (Some(cursor.created_at), Some(cursor.id.as_uuid())),
-        None => (None, None),
-    };
-    let mut agents: Vec<Agent> = sqlx::query_as::<_, AgentRow>(concat!(
-        "SELECT ",
-        agent_columns!(),
-        " FROM agents a ",
-        duplicate_join!(),
-        " WHERE ($1::text IS NULL OR a.status = $1) \
-           AND ($2::timestamptz IS NULL OR (a.created_at, a.id) < ($2::timestamptz, $3::uuid)) \
-         ORDER BY a.created_at DESC, a.id DESC \
-         LIMIT $4"
-    ))
-    .bind(status.map(AgentStatus::as_str))
-    .bind(cursor_time)
-    .bind(cursor_id)
-    .bind(limit + 1)
-    .fetch_all(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?
-    .into_iter()
-    .map(Agent::from)
-    .collect();
-    let has_more = agents.len() as i64 > limit;
-    agents.truncate(limit as usize);
-    Ok(AgentPageResult { agents, has_more })
 }
 
 /// Reads one agent of the tenant. An agent of another tenant is absent (AC-TN-01).
@@ -666,7 +612,7 @@ pub async fn revoke(
 }
 
 #[derive(sqlx::FromRow)]
-struct AgentRow {
+pub(crate) struct AgentRow {
     id: Uuid,
     hostname: String,
     os: String,

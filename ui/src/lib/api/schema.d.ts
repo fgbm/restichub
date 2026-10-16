@@ -33,7 +33,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lists the agents of the tenant with keyset pagination and an optional status filter. */
+        /** Lists the agents of the tenant with filters, a sort order and a cursor or numbered pages. */
         get: operations["list_agents"];
         put?: never;
         post?: never;
@@ -483,7 +483,7 @@ export interface paths {
         };
         /**
          * Lists the jobs of the tenant.
-         * @description The list is newest first. Filter by plan, repository, agent and status.
+         * @description The list is newest first by default. Filter by plan, repository, agent, kind, status and creation time; sort by a column; read the next page with the cursor or with an offset.
          */
         get: operations["list_jobs"];
         put?: never;
@@ -1492,10 +1492,36 @@ export interface components {
          * @enum {string}
          */
         AdminState: "none" | "present";
+        AgentListFacets: {
+            agent_versions: components["schemas"]["FacetValue"][];
+            labels: components["schemas"]["FacetValue"][];
+            /** @description The values of the tenant, each with its number of hosts. */
+            os: components["schemas"]["FacetValue"][];
+            /** @description Counted under the other filters, so each state shows what it adds. */
+            states: components["schemas"]["AgentStateCounts"];
+        };
         AgentListResponse: {
+            facets?: components["schemas"]["AgentListFacets"] | null;
             items: components["schemas"]["AgentView"][];
-            /** @description Null when the table holds no later agent. */
+            /** @description Null when the list holds no later agent, and for a numbered page or another order. */
             next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The number of agents that match the filters on all pages, at most 10000.
+             */
+            total: number;
+            /** @description More agents match than `total` counts. */
+            total_capped: boolean;
+        };
+        AgentStateCounts: {
+            /** Format: int64 */
+            offline: number;
+            /** Format: int64 */
+            online: number;
+            /** Format: int64 */
+            revoked: number;
+            /** Format: int64 */
+            waiting: number;
         };
         /**
          * @description The status of an enrolled agent (ADR-0026, FR-ID-04).
@@ -2227,6 +2253,12 @@ export interface components {
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token";
+        /** @description One value of a filter with the number of rows that hold it. */
+        FacetValue: {
+            /** Format: int64 */
+            count: number;
+            value: string;
+        };
         /**
          * @description What a failed script does to the job.
          * @enum {string}
@@ -2320,7 +2352,15 @@ export interface components {
         };
         JobListResponse: {
             items: components["schemas"]["JobView"][];
+            /** @description Null when the list holds no later job, and for a numbered page or another order. */
             next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The number of jobs that match the filters on all pages, at most 10000.
+             */
+            total: number;
+            /** @description More jobs match than `total` counts. */
+            total_capped: boolean;
         };
         /**
          * @description The typed result of a finished job (FR-AG-09, AC-RP-01).
@@ -3537,10 +3577,28 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description `active` or `revoked`. */
-                status: string | null;
+                status: ("active" | "revoked") | null;
                 cursor: string | null;
                 limit: number | null;
+                /** @description The first row of a numbered page, at most 10000. Do not combine with `cursor`. */
+                offset: number | null;
+                /** @description A part of the host name or of a label, in any case; at most 200 characters. */
+                q: string | null;
+                /** @description Comma-separated, at most 50 values in each list: `online`, `offline`, `waiting`, `revoked`. */
+                state: string | null;
+                /** @description Comma-separated operating systems. */
+                os: string | null;
+                /** @description Comma-separated, for example `0.4.1,0.4.2`. */
+                agent_version: string | null;
+                /** @description Comma-separated; a host with one of them matches. */
+                label: string | null;
+                server_scripts: ("enabled" | "disabled") | null;
+                /** @description Default: `created_at`. A cursor takes only the default order. */
+                sort: ("created_at" | "hostname" | "last_seen_at" | "agent_version" | "os") | null;
+                /** @description Default: `desc`. */
+                order: ("asc" | "desc") | null;
+                /** @description Adds the state counts and the filter values to the response. */
+                facets: boolean | null;
             };
             cookie?: never;
         };
@@ -5063,10 +5121,25 @@ export interface operations {
             path: {
                 cursor: string | null;
                 limit: number | null;
+                /** @description The first row of a numbered page, at most 10000. Do not combine with `cursor`. */
+                offset: number | null;
+                /** @description Comma-separated identifiers. Each list holds at most 50 values. */
                 plan_id: string | null;
+                /** @description Comma-separated identifiers. */
                 repository_id: string | null;
+                /** @description Comma-separated identifiers. */
                 agent_id: string | null;
+                /** @description Comma-separated, for example `backup,check`. */
+                kind: string | null;
                 status: components["schemas"]["JobStatus"] | null;
+                /** @description In RFC 3339: the first creation time that the list holds. */
+                from: string | null;
+                /** @description In RFC 3339: the last creation time that the list holds. Not before `from`. */
+                to: string | null;
+                /** @description Default: `created_at`. A cursor takes only the default order. */
+                sort: ("created_at" | "started_at" | "status" | "plan" | "host") | null;
+                /** @description Default: `desc`. */
+                order: ("asc" | "desc") | null;
             };
             cookie?: never;
         };

@@ -84,6 +84,27 @@ export type AgentStatus = components['schemas']['AgentStatus'];
 
 export type AgentListResponse = components['schemas']['AgentListResponse'];
 
+export type AgentListFacets = components['schemas']['AgentListFacets'];
+
+/** The connection state of a host in the list (FR-UI-01). */
+export type HostState = 'online' | 'offline' | 'waiting' | 'revoked';
+
+/** The filters, the order and the page of the host list (FR-UI-01). A list holds comma values. */
+export interface AgentQuery {
+	q?: string;
+	state?: string;
+	os?: string;
+	agent_version?: string;
+	label?: string;
+	server_scripts?: 'enabled' | 'disabled';
+	sort?: 'created_at' | 'hostname' | 'last_seen_at' | 'agent_version' | 'os';
+	order?: 'asc' | 'desc';
+	offset?: number;
+	limit?: number;
+	/** Adds the state counts and the filter values. */
+	facets?: boolean;
+}
+
 export type RenameAgentRequest = components['schemas']['RenameAgentRequest'];
 
 export type ReplaceAgentResponse = components['schemas']['ReplaceAgentResponse'];
@@ -165,13 +186,20 @@ export interface JobLogQuery {
 /** One page of the job list, newest first (FR-SC-09). */
 export type JobListResponse = components['schemas']['JobListResponse'];
 
-/** The filters and the cursor of the job list (FR-SC-09). */
+/** The filters, the order and the page of the job list (FR-SC-09). A list holds comma values. */
 export interface JobQuery {
 	status?: JobStatus;
 	plan_id?: string;
 	repository_id?: string;
 	agent_id?: string;
+	kind?: string;
+	/** RFC 3339 times of the first and the last creation time. */
+	from?: string;
+	to?: string;
+	sort?: 'created_at' | 'started_at' | 'status' | 'plan' | 'host';
+	order?: 'asc' | 'desc';
 	cursor?: string;
+	offset?: number;
 	limit?: number;
 }
 

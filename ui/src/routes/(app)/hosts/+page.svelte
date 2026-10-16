@@ -7,6 +7,8 @@
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
 		Agent,
+		AgentListFacets,
+		AgentQuery,
 		EnrollmentToken,
 		EnrollmentTokenCreated,
 		ApiProblem
@@ -27,17 +29,15 @@
 		StatusPill,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, RowAction, TableColumn } from '#lib/components/ui/index.ts';
-	import { facetCounts, matchesSearch } from '#lib/filters.ts';
+	import type { FilterFacet, RowAction, TableColumn, TableSort } from '#lib/components/ui/index.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { formatTime, relativeTime } from '#lib/format.ts';
+	import { formatCount, formatTime, relativeTime } from '#lib/format.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let hostActions: HostActions;
-	let agents = $state<Agent[]>([]);
 	let enrollmentTokens = $state<EnrollmentToken[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
@@ -63,17 +63,46 @@
 		t('hosts.installPlaceholder', { url: origin, token: createdToken?.token ?? '<token>' })
 	);
 
+	// The names of the hosts that a token names. The page rows fill it; a host on another page is
+	// read once by its identifier, so the screen never reads the whole host list.
+	let hostNames = $state<Record<string, string>>({});
+	const askedHosts: Record<string, boolean> = {};
+
+	function rememberHosts(list: Agent[]): void {
+		const added = list.filter((agent) => hostNames[agent.id] !== agent.hostname);
+		if (added.length === 0) return;
+		hostNames = {
+			...hostNames,
+			...Object.fromEntries(added.map((agent) => [agent.id, agent.hostname]))
+		};
+	}
+
+	async function resolveHosts(ids: (string | null | undefined)[]): Promise<void> {
+		const missing = ids.filter((id): id is string => !!id && !(id in hostNames) && !askedHosts[id]);
+		await Promise.all(
+			missing.map(async (id) => {
+				askedHosts[id] = true;
+				try {
+					rememberHosts([await service.getAgent(id)]);
+				} catch {
+					delete askedHosts[id];
+				}
+			})
+		);
+	}
+
 	// The dialog shows the host when the agent used the token that the dialog created.
 	const registeredHost = $derived.by(() => {
 		if (!createdToken) return null;
 		const used = enrollmentTokens.find((token) => token.id === createdToken?.id);
 		if (!used?.used_at || !used.used_by_agent_id) return null;
-		return agents.find((agent) => agent.id === used.used_by_agent_id) ?? null;
+		const hostname = hostNames[used.used_by_agent_id];
+		return hostname ? { hostname } : null;
 	});
 
 	function replacesName(token: EnrollmentToken): string | null {
 		if (!token.replaces_agent_id) return null;
-		return agents.find((agent) => agent.id === token.replaces_agent_id)?.hostname ?? null;
+		return hostNames[token.replaces_agent_id] ?? null;
 	}
 
 	// A token stays in the pending list only while it can still enroll a host (FR-ID-01).
@@ -89,6 +118,7 @@
 		{
 			key: 'status',
 			header: t('hosts.status'),
+			sortable: false,
 			value: (row) => statusLabel(row),
 			render: statusCell
 		},
@@ -102,6 +132,7 @@
 		{
 			key: 'server_scripts',
 			hideNarrow: true,
+			sortable: false,
 			header: t('hosts.serverScripts'),
 			value: (row) => scriptsLabel(row),
 			render: scriptsCell
@@ -124,6 +155,7 @@
 		{
 			key: 'certificate_expires_at',
 			hideNarrow: true,
+			sortable: false,
 			header: t('hosts.certificate'),
 			value: (row) => row.certificate_expires_at,
 			render: certificateCell
@@ -138,35 +170,150 @@
 		return agent.online ? 'online' : 'offline';
 	}
 
-	const filters = queryFilters(['q', 'state', 'os'] as const);
+	// The list filters, sorts and pages on the server (FR-UI-01). Without a state in the address the
+	// list leaves out the revoked hosts; the state facet shows how many there are.
+	const PAGE_SIZE = 25;
+	const VISIBLE_STATES = 'online,offline,waiting';
+	const filters = queryFilters([
+		'q',
+		'state',
+		'os',
+		'agent_version',
+		'label',
+		'scripts',
+		'page',
+		'sort',
+		'order'
+	] as const);
+
+	let pageRows = $state<Agent[]>([]);
+	let total = $state(0);
+	let totalCapped = $state(false);
+	let facetValues = $state<AgentListFacets | null>(null);
+	let pageLoading = $state(true);
+	let pageError = $state<string | null>(null);
+
+	const SORT_KEYS: Record<string, NonNullable<AgentQuery['sort']>> = {
+		hostname: 'hostname',
+		os: 'os',
+		agent_version: 'agent_version',
+		last_seen_at: 'last_seen_at'
+	};
+	const tablePage = $derived(Math.max(1, Number(filters.value.page) || 1));
+	const tableSort = $derived<TableSort | undefined>(
+		filters.value.sort
+			? { key: filters.value.sort, direction: filters.value.order === 'asc' ? 'asc' : 'desc' }
+			: undefined
+	);
+
+	function queryOf(): AgentQuery {
+		const value = filters.value;
+		return {
+			q: value.q.trim() || undefined,
+			state: value.state || VISIBLE_STATES,
+			os: value.os || undefined,
+			agent_version: value.agent_version || undefined,
+			label: value.label || undefined,
+			server_scripts:
+				value.scripts === 'enabled' || value.scripts === 'disabled' ? value.scripts : undefined,
+			sort: SORT_KEYS[value.sort],
+			order: value.sort ? (value.order === 'asc' ? 'asc' : 'desc') : undefined,
+			offset: (tablePage - 1) * PAGE_SIZE,
+			limit: PAGE_SIZE
+		};
+	}
+
+	// The facets follow the filters only, so a new page, a new order and a poll do not count again.
+	function filterKey(): string {
+		const value = filters.value;
+		return JSON.stringify([
+			value.q.trim(),
+			value.state,
+			value.os,
+			value.agent_version,
+			value.label,
+			value.scripts
+		]);
+	}
+	let facetKey: string | null = null;
+
+	// A poll and a filter change can overlap; only the last request may fill the table.
+	let request = 0;
+
+	async function loadPage(refreshFacets = false): Promise<void> {
+		const mine = ++request;
+		const key = filterKey();
+		const withFacets = refreshFacets || key !== facetKey;
+		try {
+			const result = await service.searchAgents({
+				...queryOf(),
+				facets: withFacets || undefined
+			});
+			if (mine !== request) return;
+			pageRows = result.items;
+			total = result.total;
+			totalCapped = result.total_capped;
+			if (result.facets) {
+				facetValues = result.facets;
+				facetKey = key;
+			}
+			rememberHosts(result.items);
+			pageError = null;
+		} catch (problem) {
+			if (mine !== request) return;
+			pageError = messageOf(problem);
+		} finally {
+			if (mine === request) pageLoading = false;
+		}
+	}
+
+	// The first page loads with the rest of the screen. A typed search waits for a short pause.
+	let loadedQuery = JSON.stringify(queryOf());
+	let typing: ReturnType<typeof setTimeout> | undefined;
+	$effect(() => {
+		const key = JSON.stringify(queryOf());
+		if (key === loadedQuery) return;
+		loadedQuery = key;
+		clearTimeout(typing);
+		typing = setTimeout(() => void loadPage(), 250);
+	});
+	onMount(() => () => clearTimeout(typing));
 
 	const facets = $derived<FilterFacet[]>([
 		{
 			key: 'state',
 			label: t('hosts.status'),
-			multiple: false,
 			options: (['online', 'offline', 'waiting', 'revoked'] as const).map((value) => ({
 				value,
 				label: stateLabel(value),
-				count: agents.filter((agent) => stateOf(agent) === value).length
+				count: facetValues?.states[value]
 			}))
 		},
 		{
 			key: 'os',
 			label: t('hosts.os'),
-			options: facetCounts(agents, (agent) => [agent.os])
+			options: (facetValues?.os ?? []).map(({ value, count }) => ({ value, count }))
+		},
+		{
+			key: 'agent_version',
+			label: t('hosts.agent'),
+			options: (facetValues?.agent_versions ?? []).map(({ value, count }) => ({ value, count }))
+		},
+		{
+			key: 'label',
+			label: t('hosts.labels'),
+			options: (facetValues?.labels ?? []).map(({ value, count }) => ({ value, count }))
+		},
+		{
+			key: 'scripts',
+			label: t('hosts.serverScripts'),
+			multiple: false,
+			options: (['enabled', 'disabled'] as const).map((value) => ({
+				value,
+				label: t(`hosts.serverScripts.${value}`)
+			}))
 		}
 	]);
-
-	const shown = $derived(
-		agents.filter((agent) => {
-			const { q, state, os } = filters.value;
-			if (!matchesSearch(q, [agent.hostname, ...agent.labels])) return false;
-			if (state && stateOf(agent) !== state) return false;
-			if (os && !os.split(',').includes(agent.os)) return false;
-			return true;
-		})
-	);
 
 	function rowActions(agent: Agent): RowAction[] {
 		if (!canWrite || agent.status !== 'active') return [];
@@ -233,45 +380,61 @@
 		return user && user.id === token.created_by ? user.display_name : token.created_by;
 	}
 
-	const empty = $derived(!loading && !error && agents.length === 0);
+	// The state counts ignore the state filter, so without another filter they count every host.
+	const narrowed = $derived(
+		Boolean(
+			filters.value.q.trim() ||
+			filters.value.os ||
+			filters.value.agent_version ||
+			filters.value.label ||
+			filters.value.scripts
+		)
+	);
+	const hostCount = $derived(
+		facetValues ? Object.values(facetValues.states).reduce((sum, count) => sum + count, 0) : null
+	);
+	const empty = $derived(!loading && !error && !narrowed && hostCount === 0);
 
 	function messageOf(problem: unknown): string {
-		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		if (problem instanceof ApiError) {
+			// The server pages only through the rows that it counts.
+			if (problem.problem.field === 'offset') return t('filter.tooDeep');
+			return tErrorCode(problem.code) ?? problem.title;
+		}
 		return t('table.error');
+	}
+
+	function tokenHosts(): (string | null | undefined)[] {
+		return enrollmentTokens.flatMap((token) => [token.used_by_agent_id, token.replaces_agent_id]);
 	}
 
 	async function load(): Promise<void> {
 		loading = true;
 		error = null;
+		const page = loadPage(true);
 		try {
-			const [agentList, tokenList] = await Promise.all([
-				service.listAgents(),
-				service.listEnrollmentTokens()
-			]);
-			agents = agentList;
-			enrollmentTokens = tokenList;
+			enrollmentTokens = await service.listEnrollmentTokens();
 		} catch (problem) {
 			error = messageOf(problem);
-		} finally {
-			loading = false;
-			reader.loaded();
 		}
+		await page;
+		loading = false;
+		reader.loaded();
+		await resolveHosts(tokenHosts());
 	}
 
 	// A used token leaves the pending list and a new host appears without a manual reload.
 	const REFRESH_MS = 10_000;
 
 	async function refresh(): Promise<void> {
+		const page = loadPage();
 		try {
-			const [agentList, tokenList] = await Promise.all([
-				service.listAgents(),
-				service.listEnrollmentTokens()
-			]);
-			agents = agentList;
-			enrollmentTokens = tokenList;
+			enrollmentTokens = await service.listEnrollmentTokens();
 		} catch {
 			// The next tick tries again; the visible list stays.
 		}
+		await page;
+		await resolveHosts(tokenHosts());
 	}
 
 	// The stream pushes a change of a host. The poll covers a stream that is down.
@@ -443,7 +606,7 @@
 <Page
 	title={t('hosts.title')}
 	description={t('hosts.description')}
-	count={loading ? undefined : agents.length}
+	count={pageLoading ? undefined : totalCapped ? `${formatCount(total)}+` : total}
 >
 	{#snippet actions()}
 		{#if canWrite}
@@ -498,6 +661,12 @@
 		</div>
 	{/if}
 
+	{#if totalCapped && !pageLoading}
+		<div class="capped">
+			<Alert tone="info" title={t('filter.capped', { count: formatCount(total) })} />
+		</div>
+	{/if}
+
 	{#if empty}
 		<EmptyState
 			icon="host"
@@ -512,9 +681,16 @@
 	{:else}
 		<DataTable
 			{columns}
-			rows={shown}
-			{loading}
-			{error}
+			rows={pageRows}
+			mode="server"
+			page={tablePage}
+			pageSize={PAGE_SIZE}
+			{total}
+			sort={tableSort}
+			onPageChange={(next) => filters.update({ page: String(next) })}
+			onSortChange={(next) => filters.update({ sort: next.key, order: next.direction })}
+			loading={loading || pageLoading}
+			error={error ?? pageError}
 			rowKey={(agent) => agent.id}
 			rowHref={(agent) => resolve('/(app)/hosts/[id]', { id: agent.id })}
 			actions={rowActions}
@@ -529,7 +705,15 @@
 					search={{ key: 'q', label: t('hosts.search'), placeholder: t('hosts.searchPlaceholder') }}
 					{facets}
 					onchange={filters.update}
-					onreset={filters.reset}
+					onreset={() =>
+						filters.update({
+							q: '',
+							state: '',
+							os: '',
+							agent_version: '',
+							label: '',
+							scripts: ''
+						})}
 				/>
 			{/snippet}
 		</DataTable>
@@ -641,7 +825,8 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
-	.pending {
+	.pending,
+	.capped {
 		margin-bottom: var(--rh-space-4);
 	}
 

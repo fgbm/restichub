@@ -10,6 +10,9 @@ import { MockAlerts } from './mock-alerts';
 import { MockScripts } from './mock-scripts';
 import type {
 	Agent,
+	AgentListResponse,
+	AgentQuery,
+	HostState,
 	AlertListResponse,
 	AlertQuery,
 	AlertRule,
@@ -1038,6 +1041,81 @@ export class MockApiService {
 		return [...this.agents];
 	}
 
+	async searchAgents(query: AgentQuery): Promise<AgentListResponse> {
+		const list = (value?: string) =>
+			(value ?? '')
+				.split(',')
+				.map((item) => item.trim())
+				.filter(Boolean);
+		const stateOf = (agent: Agent): HostState => {
+			if (agent.status === 'revoked') return 'revoked';
+			if (!agent.first_connected_at) return 'waiting';
+			return agent.online ? 'online' : 'offline';
+		};
+		const needle = (query.q ?? '').trim().toLowerCase();
+		const states = list(query.state);
+		const systems = list(query.os);
+		const versions = list(query.agent_version);
+		const labels = list(query.label);
+		const others = (agent: Agent) =>
+			(!needle ||
+				agent.hostname.toLowerCase().includes(needle) ||
+				agent.labels.some((label) => label.toLowerCase().includes(needle))) &&
+			(systems.length === 0 || systems.includes(agent.os)) &&
+			(versions.length === 0 || versions.includes(agent.agent_version)) &&
+			(labels.length === 0 || agent.labels.some((label) => labels.includes(label))) &&
+			(!query.server_scripts ||
+				(agent.server_scripts === 'enabled') === (query.server_scripts === 'enabled'));
+		const matching = this.agents.filter(
+			(agent) => others(agent) && (states.length === 0 || states.includes(stateOf(agent)))
+		);
+		const key = query.sort ?? 'created_at';
+		const factor = (query.order ?? 'desc') === 'desc' ? -1 : 1;
+		const value = (agent: Agent): string =>
+			key === 'hostname'
+				? agent.hostname.toLowerCase()
+				: key === 'last_seen_at'
+					? (agent.last_seen_at ?? '')
+					: key === 'agent_version'
+						? agent.agent_version
+						: key === 'os'
+							? agent.os
+							: agent.created_at;
+		const sorted = [...matching].sort((a, b) => factor * value(a).localeCompare(value(b)));
+		const offset = query.offset ?? 0;
+		const limit = query.limit ?? 50;
+		const visible = this.agents.filter(
+			(agent) => states.length === 0 || states.includes('revoked') || agent.status !== 'revoked'
+		);
+		const count = (pick: (agent: Agent) => string[]) => {
+			const counts = new Map<string, number>();
+			for (const agent of visible) {
+				for (const item of pick(agent)) counts.set(item, (counts.get(item) ?? 0) + 1);
+			}
+			return [...counts].map(([item, total]) => ({ value: item, count: total }));
+		};
+		const base = this.agents.filter(others);
+		return {
+			items: sorted.slice(offset, offset + limit).map((agent) => ({ ...agent })),
+			next_cursor: null,
+			total: matching.length,
+			total_capped: false,
+			facets: query.facets
+				? {
+						states: {
+							online: base.filter((agent) => stateOf(agent) === 'online').length,
+							offline: base.filter((agent) => stateOf(agent) === 'offline').length,
+							waiting: base.filter((agent) => stateOf(agent) === 'waiting').length,
+							revoked: base.filter((agent) => stateOf(agent) === 'revoked').length
+						},
+						os: count((agent) => [agent.os]),
+						agent_versions: count((agent) => [agent.agent_version]),
+						labels: count((agent) => agent.labels)
+					}
+				: null
+		};
+	}
+
 	async getAgent(id: string): Promise<Agent> {
 		const agent = this.agents.find((item) => item.id === id);
 		if (!agent) throw new Error('not found');
@@ -1568,22 +1646,49 @@ export class MockApiService {
 	}
 
 	async listJobs(query?: JobQuery): Promise<JobListResponse> {
+		const list = (value?: string) =>
+			(value ?? '')
+				.split(',')
+				.map((item) => item.trim())
+				.filter(Boolean);
+		const plans = list(query?.plan_id);
+		const repositories = list(query?.repository_id);
+		const agents = list(query?.agent_id);
+		const kinds = list(query?.kind);
+		const key = query?.sort ?? 'created_at';
+		const factor = (query?.order ?? 'desc') === 'desc' ? -1 : 1;
+		const value = (job: Job): string =>
+			key === 'started_at'
+				? (job.started_at ?? '')
+				: key === 'status'
+					? job.status
+					: key === 'plan'
+						? (job.plan_name ?? '')
+						: key === 'host'
+							? (job.agent_hostname ?? '')
+							: job.created_at;
 		const rows = this.jobs
 			.map((entry) => entry.job)
 			.filter(
 				(job) =>
 					(!query?.status || job.status === query.status) &&
-					(!query?.plan_id || job.plan_id === query.plan_id) &&
-					(!query?.repository_id || job.repository_id === query.repository_id) &&
-					(!query?.agent_id || job.agent_id === query.agent_id)
+					(plans.length === 0 || plans.includes(job.plan_id ?? '')) &&
+					(repositories.length === 0 || repositories.includes(job.repository_id ?? '')) &&
+					(agents.length === 0 || agents.includes(job.agent_id)) &&
+					(kinds.length === 0 || kinds.includes(job.kind)) &&
+					(!query?.from || job.created_at >= query.from) &&
+					(!query?.to || job.created_at <= query.to)
 			)
-			.sort((a, b) => b.created_at.localeCompare(a.created_at));
+			.sort((a, b) => factor * value(a).localeCompare(value(b)));
 		const limit = query?.limit ?? 50;
-		const start = query?.cursor ? Number(query.cursor) : 0;
+		const start = query?.cursor ? Number(query.cursor) : (query?.offset ?? 0);
 		const page = rows.slice(start, start + limit);
 		return {
 			items: page.map((job) => ({ ...job })),
-			next_cursor: start + limit < rows.length ? String(start + limit) : null
+			next_cursor:
+				query?.offset === undefined && start + limit < rows.length ? String(start + limit) : null,
+			total: rows.length,
+			total_capped: false
 		};
 	}
 

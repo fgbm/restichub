@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::enums::{JobKind, JobStatus};
+use crate::enums::JobKind;
 use crate::ids::{AgentId, JobId, PlanId, RepositoryId, SecretId};
 use crate::jobs::{Job, JobRow, job_columns};
 use crate::tx::TenantTx;
@@ -52,44 +52,6 @@ pub struct JobDetail {
     pub plan_name: Option<String>,
     pub agent_hostname: Option<String>,
     pub repository_name: Option<String>,
-}
-
-/// The filters of the job list. An absent filter matches every job.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct JobFilter {
-    pub plan_id: Option<PlanId>,
-    pub repository_id: Option<RepositoryId>,
-    pub agent_id: Option<AgentId>,
-    pub status: Option<JobStatus>,
-}
-
-/// The keyset cursor of the job list. It orders by `(created_at, id)`, newest first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct JobCursor {
-    pub created_at: OffsetDateTime,
-    pub id: JobId,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct JobPage {
-    /// Clamped to [`MAX_PAGE_LIMIT`].
-    pub limit: i64,
-    pub after: Option<JobCursor>,
-}
-
-impl Default for JobPage {
-    fn default() -> Self {
-        Self {
-            limit: DEFAULT_PAGE_LIMIT,
-            after: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct JobPageResult {
-    pub jobs: Vec<JobDetail>,
-    pub has_more: bool,
 }
 
 /// Takes the queue lock of the tenant for the rest of the transaction.
@@ -860,57 +822,8 @@ pub async fn get_detail(tx: &mut TenantTx<'_>, id: JobId) -> Result<Option<JobDe
     Ok(row.map(JobDetail::from))
 }
 
-/// Lists the jobs of the tenant, newest first, with keyset pagination.
-///
-/// The browse jobs of the Restore screen (`snapshots` and `ls`) are internal and stay out.
-pub async fn list(
-    tx: &mut TenantTx<'_>,
-    filter: &JobFilter,
-    page: &JobPage,
-) -> Result<JobPageResult, DbError> {
-    let limit = page.limit.clamp(1, MAX_PAGE_LIMIT);
-    let (after_time, after_id) = match page.after {
-        Some(cursor) => (Some(cursor.created_at), Some(cursor.id)),
-        None => (None, None),
-    };
-    let rows = sqlx::query_as::<_, DetailRow>(concat!(
-        "SELECT ",
-        job_columns!("j."),
-        ", p.name AS plan_name, a.hostname AS agent_hostname, r.name AS repository_name \
-          FROM jobs j \
-          LEFT JOIN plans p ON p.tenant_id = j.tenant_id AND p.id = j.plan_id \
-          LEFT JOIN agents a ON a.tenant_id = j.tenant_id AND a.id = j.agent_id \
-          LEFT JOIN repositories r ON r.tenant_id = j.tenant_id AND r.id = j.repository_id \
-          WHERE j.kind NOT IN ('snapshots', 'ls') \
-            AND ($1::uuid IS NULL OR j.plan_id = $1) \
-            AND ($2::uuid IS NULL OR j.repository_id = $2) \
-            AND ($3::uuid IS NULL OR j.agent_id = $3) \
-            AND ($4::text IS NULL OR j.status = $4) \
-            AND ($5::timestamptz IS NULL OR (j.created_at, j.id) < ($5, $6)) \
-          ORDER BY j.created_at DESC, j.id DESC \
-          LIMIT $7"
-    ))
-    .bind(filter.plan_id)
-    .bind(filter.repository_id)
-    .bind(filter.agent_id)
-    .bind(filter.status.map(JobStatus::as_str))
-    .bind(after_time)
-    .bind(after_id)
-    .bind(limit + 1)
-    .fetch_all(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
-    let has_more = rows.len() as i64 > limit;
-    let jobs = rows
-        .into_iter()
-        .take(limit as usize)
-        .map(JobDetail::from)
-        .collect();
-    Ok(JobPageResult { jobs, has_more })
-}
-
 #[derive(sqlx::FromRow)]
-struct DetailRow {
+pub(crate) struct DetailRow {
     #[sqlx(flatten)]
     job: JobRow,
     plan_name: Option<String>,

@@ -7,11 +7,13 @@
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '#lib/api/index.ts';
 import Jobs from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
 	listJobs: vi.fn(),
 	cancelJob: vi.fn(),
+	listAgents: vi.fn(),
 	pushToast: vi.fn()
 }));
 
@@ -20,6 +22,11 @@ const session = vi.hoisted(() => ({ role: 'operator' as string }));
 const route = vi.hoisted(() => ({ url: new URL('http://localhost/jobs') }));
 
 vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/navigation', () => ({
+	goto: async (address: string) => {
+		route.url = new URL(address, 'http://localhost');
+	}
+}));
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
 		user: {
@@ -44,7 +51,10 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 		service: {
 			...actual.service,
 			listJobs: mocks.listJobs,
-			cancelJob: mocks.cancelJob
+			cancelJob: mocks.cancelJob,
+			listAgents: mocks.listAgents,
+			listRepositories: async () => [],
+			listPlans: async () => []
 		}
 	};
 });
@@ -78,11 +88,12 @@ describe('the Jobs screen', () => {
 		route.url = new URL('http://localhost/jobs');
 		vi.clearAllMocks();
 		session.role = 'operator';
-		mocks.listJobs.mockResolvedValue({ items: [], next_cursor: null });
+		mocks.listJobs.mockResolvedValue({ items: [], next_cursor: null, total: 0 });
+		mocks.listAgents.mockResolvedValue([{ id: 'a_1', hostname: 'win-fs01' }]);
 	});
 
 	it('lists a job with its status, plan, host and repository', async () => {
-		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
 		render(Jobs);
 
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
@@ -94,7 +105,7 @@ describe('the Jobs screen', () => {
 
 	it('reads only the jobs of the host that the link names', async () => {
 		route.url = new URL('http://localhost/jobs?agent_id=a_1');
-		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
 		render(Jobs);
 
 		await waitFor(() =>
@@ -108,7 +119,8 @@ describe('the Jobs screen', () => {
 	it('shows a dash for an empty start and duration and keeps the filter in the toolbar', async () => {
 		mocks.listJobs.mockResolvedValue({
 			items: [job({ status: 'queued', started_at: null })],
-			next_cursor: null
+			next_cursor: null,
+			total: 1
 		});
 		render(Jobs);
 
@@ -137,7 +149,8 @@ describe('the Jobs screen', () => {
 					finished_at: '2026-10-14T10:03:00Z'
 				})
 			],
-			next_cursor: null
+			next_cursor: null,
+			total: 2
 		});
 		render(Jobs);
 
@@ -167,7 +180,8 @@ describe('the Jobs screen', () => {
 					finished_at: '2026-10-14T10:03:00Z'
 				})
 			],
-			next_cursor: null
+			next_cursor: null,
+			total: 2
 		});
 		render(Jobs);
 
@@ -186,7 +200,7 @@ describe('the Jobs screen', () => {
 	});
 
 	it('keeps the status, the start time and the duration on one line', async () => {
-		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
 		render(Jobs);
 
 		const table = await screen.findByRole('table');
@@ -197,7 +211,7 @@ describe('the Jobs screen', () => {
 	});
 
 	it('opens the job page from the row link', async () => {
-		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
 		render(Jobs);
 
 		const link = await screen.findByRole('link', { name: 'nightly-web' });
@@ -212,7 +226,7 @@ describe('the Jobs screen', () => {
 
 	it('cancels a running job after the confirmation', async () => {
 		const user = userEvent.setup();
-		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
 		mocks.cancelJob.mockResolvedValue(job());
 		render(Jobs);
 
@@ -231,30 +245,86 @@ describe('the Jobs screen', () => {
 		);
 	});
 
-	it('loads the next page with the cursor', async () => {
+	it('fr_ui_01 reads a numbered page from the server with the filters of the address', async () => {
 		const user = userEvent.setup();
-		mocks.listJobs
-			.mockResolvedValueOnce({ items: [job()], next_cursor: 'c1' })
-			.mockResolvedValueOnce({
-				items: [job({ id: 'j_9', plan_name: 'older-plan' })],
-				next_cursor: null
-			});
+		route.url = new URL('http://localhost/jobs?status=failed&kind=backup');
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 60 });
 		render(Jobs);
 
 		await screen.findByText('nightly-web');
-		await user.click(screen.getByRole('button', { name: 'Load more' }));
-		await screen.findByText('older-plan');
-		expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'c1' }));
+		expect(mocks.listJobs).toHaveBeenCalledWith(
+			expect.objectContaining({ status: 'failed', kind: 'backup', offset: 0, limit: 25 })
+		);
+		expect(screen.getByText('Showing 1 to 25 of 60')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Next' }));
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25 }))
+		);
 	});
 
 	it('hides the cancel action from a Viewer', async () => {
 		session.role = 'viewer';
-		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
 		render(Jobs);
 
 		await screen.findByText('nightly-web');
 		expect(
 			screen.queryByRole('button', { name: 'More actions for the job nightly-web' })
 		).not.toBeInTheDocument();
+	});
+
+	it('fr_ui_01 keeps the newest page when an older reload answers late', async () => {
+		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+		try {
+			const user = userEvent.setup();
+			let answerReload: (rows: unknown[]) => void = () => {};
+			const page = (rows: unknown[]) => ({
+				items: rows,
+				next_cursor: null,
+				total: 30,
+				total_capped: false
+			});
+			mocks.listJobs
+				.mockResolvedValueOnce(page([job({ id: 'j_1', plan_name: 'first-page' })]))
+				.mockReturnValueOnce(
+					new Promise((resolve) => {
+						answerReload = (rows) => resolve(page(rows));
+					})
+				)
+				.mockResolvedValue(page([job({ id: 'j_2', plan_name: 'second-page' })]));
+			render(Jobs);
+
+			await screen.findByText('first-page');
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(mocks.listJobs).toHaveBeenCalledTimes(2);
+			await user.click(screen.getByRole('button', { name: 'Next' }));
+			await screen.findByText('second-page');
+			answerReload([job({ id: 'j_3', plan_name: 'stale-page' })]);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(screen.getByText('second-page')).toBeInTheDocument();
+			expect(screen.queryByText('stale-page')).not.toBeInTheDocument();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('fr_ui_01 asks to narrow the filters for a page past the counted rows', async () => {
+		route.url = new URL('http://localhost/jobs?page=500');
+		mocks.listJobs.mockRejectedValue(
+			new ApiError({
+				status: 400,
+				code: 'invalid_argument',
+				title: 'Bad Request',
+				field: 'offset',
+				reason: 'out_of_range'
+			})
+		);
+		render(Jobs);
+
+		expect(
+			await screen.findByText(
+				'This page is too far into the list. Narrow the filters to see older records.'
+			)
+		).toBeInTheDocument();
 	});
 });

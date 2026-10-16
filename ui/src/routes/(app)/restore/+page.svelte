@@ -13,7 +13,6 @@
 		DataTable,
 		EmptyState,
 		FilterBar,
-		Panel,
 		Select,
 		Skeleton
 	} from '#lib/components/ui/index.ts';
@@ -23,7 +22,7 @@
 	import { EMPTY_FILTERS, filtersFromQuery, filtersToQuery, targetExtra } from '#lib/restore.ts';
 	import type { RestoreFilters } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
-	import { applyFilters, facetCounts, hasFilters, tagLabel } from '#lib/snapshot-filter.ts';
+	import { applyFilters, facetCounts, tagLabel } from '#lib/snapshot-filter.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
 	const PAGE_SIZE = 15;
@@ -52,7 +51,11 @@
 		repositories.map((item) => ({ value: item.id, label: item.name }))
 	);
 	const snapshots = $derived(view?.state === 'done' ? view.snapshots : []);
-	const matching = $derived(applyFilters(snapshots, filters, Date.now()));
+	const matching = $derived(
+		[...applyFilters(snapshots, filters, Date.now())].sort(
+			(left, right) => timeOf(right) - timeOf(left)
+		)
+	);
 
 	const columns = $derived<TableColumn<SnapshotItem>[]>([
 		{
@@ -84,17 +87,23 @@
 		{
 			key: 'host',
 			label: t('restore.facetHost'),
+			hint: t('restore.filterHint'),
 			options: facetCounts(snapshots, (item) => [item.hostname])
 		},
 		{
 			key: 'tag',
 			label: t('restore.facetTag'),
+			hint: t('restore.filterHint'),
 			options: facetCounts(snapshots, (item) => item.tags).map((option) => ({
 				...option,
 				label: tagLabel(option.value, profiles)
 			}))
 		}
 	]);
+
+	function timeOf(snapshot: SnapshotItem): number {
+		return snapshot.time ? Date.parse(snapshot.time) : Number.NEGATIVE_INFINITY;
+	}
 
 	function describe(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -225,17 +234,32 @@
 	<span class="row__paths" title={row.paths.join(', ')}>{row.paths.join(', ')}</span>
 {/snippet}
 
+{#snippet refresh()}
+	<Button
+		variant="ghost"
+		size="sm"
+		icon="refresh"
+		aria-label={t('restore.refresh')}
+		title={t('restore.refresh')}
+		loading={pending}
+		disabled={!repositoryId}
+		onclick={() => void find()}
+	/>
+{/snippet}
+
 {#snippet tagsCell(row: SnapshotItem)}
 	<SnapshotTags tags={row.tags} {profiles} />
 {/snippet}
 
-<Page title={t('restore.title')} description={t('restore.description')}>
+<Page
+	title={t('restore.title')}
+	description={t('restore.description')}
+	count={view?.state === 'done' ? snapshots.length : undefined}
+>
 	{#snippet context()}
 		{#if canRestore && repositories.length > 0}
 			<div class="repository">
-				<label class="repository__label" for="restore-repository"
-					>{t('restore.repositoryLabel')}</label
-				>
+				<label for="restore-repository">{t('restore.repositoryLabel')}</label>
 				<Select
 					id="restore-repository"
 					options={repositoryOptions}
@@ -260,99 +284,96 @@
 			</Button>
 		</EmptyState>
 	{:else}
-		{#if error}
-			<Alert tone="danger" title={error} />
-		{/if}
-		{#if view?.state === 'failed'}
-			<Alert tone="danger" title={t('restore.listFailed', { reason: reasonOf(view.error_code) })}>
-				{#snippet actions()}
-					{#if view?.job_id}
-						<a class="alert-link" href={resolve('/(app)/jobs/[id]', { id: view.job_id })}>
-							{t('restore.openJob')}
-						</a>
-					{/if}
-				{/snippet}
-			</Alert>
-		{/if}
-		{#if view?.truncated}
-			<Alert tone="attention" title={t('restore.listTruncated')} />
+		{#if error || view?.state === 'failed' || view?.truncated}
+			<div class="notices">
+				{#if error}
+					<Alert tone="danger" title={error}>
+						{#snippet actions()}
+							{@render refresh()}
+						{/snippet}
+					</Alert>
+				{/if}
+				{#if view?.state === 'failed'}
+					<Alert
+						tone="danger"
+						title={t('restore.listFailed', { reason: reasonOf(view.error_code) })}
+					>
+						{#snippet actions()}
+							{#if view?.job_id}
+								<a class="alert-link" href={resolve('/(app)/jobs/[id]', { id: view.job_id })}>
+									{t('restore.openJob')}
+								</a>
+							{/if}
+							{@render refresh()}
+						{/snippet}
+					</Alert>
+				{/if}
+				{#if view?.truncated}
+					<Alert tone="attention" title={t('restore.listTruncated')} />
+				{/if}
+			</div>
 		{/if}
 
-		<div class="list">
-			<Panel
-				title={t('restore.snapshots')}
-				subtitle={view?.state === 'done'
-					? hasFilters(filters)
-						? t('restore.listFiltered', { shown: matching.length, total: snapshots.length })
-						: t('restore.listCount', { count: snapshots.length })
-					: ''}
-				flush
+		{#if loading || (pending && !view)}
+			<div class="list__state">
+				<p class="muted">{t('restore.listLoading')}</p>
+				<Skeleton variant="row" />
+			</div>
+		{:else if view?.state === 'done' && snapshots.length === 0}
+			<EmptyState
+				icon="restore"
+				title={t('restore.listNoSnapshots')}
+				description={t('restore.listNoSnapshotsDescription')}
+				bordered
 			>
-				{#snippet actions()}
-					{#if view?.state === 'done' && view.fetched_at}
-						<span class="muted"
-							>{t('restore.listAge', { time: relativeTime(view.fetched_at) })}</span
-						>
-					{/if}
-					<Button
-						variant="ghost"
-						size="sm"
-						icon="refresh"
-						aria-label={t('restore.refresh')}
-						title={t('restore.refresh')}
-						loading={pending}
-						disabled={!repositoryId}
-						onclick={() => void find()}
-					/>
-				{/snippet}
-				{#if loading || (pending && !view)}
-					<div class="list__state">
-						<p class="muted">{t('restore.listLoading')}</p>
-						<Skeleton variant="row" />
-					</div>
-				{:else if view?.state === 'done' && snapshots.length === 0}
-					<EmptyState
-						icon="restore"
-						title={t('restore.listNoSnapshots')}
-						description={t('restore.listNoSnapshotsDescription')}
-					/>
-				{:else if view?.state === 'done'}
-					<DataTable
-						{columns}
-						rows={matching}
-						rowKey={(row) => row.id}
-						rowHref={detailHref}
-						rowLabel={(row) => t('restore.openSnapshot', { id: row.short_id })}
-						rowSelected={(row) => row.id === opened}
-						bind:page={tablePage}
-						pageSize={PAGE_SIZE}
-						flush
-						emptyIcon="search"
-						emptyTitle={t('restore.listEmpty')}
-						emptyDescription={t('filter.noMatchesDescription')}
+				<Button
+					icon="refresh"
+					loading={pending}
+					disabled={!repositoryId}
+					onclick={() => void find()}>{t('restore.refresh')}</Button
+				>
+			</EmptyState>
+		{:else if view?.state === 'done'}
+			<DataTable
+				{columns}
+				rows={matching}
+				rowKey={(row) => row.id}
+				rowHref={detailHref}
+				rowLabel={(row) => t('restore.openSnapshot', { id: row.short_id })}
+				rowSelected={(row) => row.id === opened}
+				bind:page={tablePage}
+				pageSize={PAGE_SIZE}
+				emptyIcon="search"
+				emptyTitle={t('restore.listEmpty')}
+				emptyDescription={t('filter.noMatchesDescription')}
+			>
+				{#snippet toolbar()}
+					<FilterBar
+						label={t('restore.filterBar')}
+						value={{ ...filters }}
+						search={{
+							key: 'path',
+							id: 'restore-path',
+							label: t('restore.pathSearch'),
+							placeholder: t('restore.pathPlaceholder')
+						}}
+						{facets}
+						period
+						onchange={change}
+						onreset={reset}
 					>
-						{#snippet toolbar()}
-							<FilterBar
-								label={t('restore.filterBar')}
-								value={{ ...filters }}
-								search={{
-									key: 'path',
-									id: 'restore-path',
-									label: t('restore.pathSearch'),
-									placeholder: t('restore.pathPlaceholder'),
-									mono: true
-								}}
-								{facets}
-								period
-								hint={t('restore.filterHint')}
-								onchange={change}
-								onreset={reset}
-							/>
+						{#snippet end()}
+							{#if view?.fetched_at}
+								<span class="muted"
+									>{t('restore.listAge', { time: relativeTime(view.fetched_at) })}</span
+								>
+							{/if}
+							{@render refresh()}
 						{/snippet}
-					</DataTable>
-				{/if}
-			</Panel>
-		</div>
+					</FilterBar>
+				{/snippet}
+			</DataTable>
+		{/if}
 	{/if}
 </Page>
 
@@ -363,21 +384,25 @@
 		gap: var(--rh-space-2);
 	}
 
-	.repository__label {
-		color: var(--rh-color-text-muted);
-		white-space: nowrap;
+	.repository :global(.rh-field) {
+		flex: 1 1 auto;
 	}
 
 	.repository :global(.rh-select) {
 		min-width: 12rem;
 	}
 
-	.list {
-		margin-top: var(--rh-space-4);
+	.notices {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-3);
+		margin-bottom: var(--rh-space-4);
 	}
 
 	.list__state {
 		padding: var(--rh-space-4);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
 	}
 
 	.muted {

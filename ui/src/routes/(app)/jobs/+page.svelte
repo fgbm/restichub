@@ -4,9 +4,10 @@
 	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Job, JobStatus } from '#lib/api/index.ts';
+	import type { Job, JobKind, JobQuery, JobStatus } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
+		Alert,
 		Button,
 		ConfirmDialog,
 		DataTable,
@@ -18,12 +19,13 @@
 		FilterFacet,
 		RowAction,
 		StatusTone,
-		TableColumn
+		TableColumn,
+		TableSort
 	} from '#lib/components/ui/index.ts';
-	import { matchesSearch } from '#lib/filters.ts';
+	import { periodWindow } from '#lib/filters.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { formatDuration } from '#lib/format.ts';
+	import { formatCount, formatDuration } from '#lib/format.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -37,23 +39,81 @@
 		'expired',
 		'dead_letter'
 	];
-	const PAGE_SIZE = 50;
+	// The kinds that a person starts or a plan runs; the browse jobs of Restore stay out.
+	const KINDS: JobKind[] = [
+		'backup',
+		'check',
+		'forget',
+		'prune',
+		'restore',
+		'init',
+		'test_access',
+		'unlock',
+		'unlock_all'
+	];
+	const PAGE_SIZE = 25;
 
 	let jobs = $state<Job[]>([]);
-	let nextCursor = $state<string | null>(null);
+	let total = $state(0);
+	let totalCapped = $state(false);
 	let loading = $state(true);
-	let loadingMore = $state(false);
 	let error = $state<string | null>(null);
-	// The host page links here with the host to show (`?agent_id=`).
-	const filters = queryFilters(['q', 'status', 'agent_id'] as const);
-	const statusFilter = $derived(filters.value.status);
-	const agentFilter = $derived(filters.value.agent_id || undefined);
+	let hosts = $state<{ id: string; hostname: string }[]>([]);
+	let repositories = $state<{ id: string; name: string }[]>([]);
+	let plans = $state<{ id: string; name: string }[]>([]);
+	// The list filters, sorts and pages on the server (FR-UI-01). The host page links here with the
+	// host to show (`?agent_id=`).
+	const filters = queryFilters([
+		'agent_id',
+		'repository_id',
+		'plan_id',
+		'kind',
+		'status',
+		'period',
+		'from',
+		'to',
+		'page',
+		'sort',
+		'order'
+	] as const);
+	const SORT_KEYS: Record<string, NonNullable<JobQuery['sort']>> = {
+		status: 'status',
+		plan: 'plan',
+		host: 'host',
+		started: 'started_at'
+	};
+	const tablePage = $derived(Math.max(1, Number(filters.value.page) || 1));
+	const tableSort = $derived<TableSort | undefined>(
+		filters.value.sort
+			? { key: filters.value.sort, direction: filters.value.order === 'asc' ? 'asc' : 'desc' }
+			: undefined
+	);
 
 	let cancelTarget = $state<Job | null>(null);
 	let cancelOpen = $state(false);
 	let cancelling = $state(false);
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
+
+	function queryOf(): JobQuery {
+		const value = filters.value;
+		const window = periodWindow(value, Date.now());
+		const iso = (time: number) =>
+			Number.isFinite(time) ? new Date(time).toISOString() : undefined;
+		return {
+			agent_id: value.agent_id || undefined,
+			repository_id: value.repository_id || undefined,
+			plan_id: value.plan_id || undefined,
+			kind: value.kind || undefined,
+			status: value.status ? (value.status as JobStatus) : undefined,
+			from: iso(window.start),
+			to: iso(window.end),
+			sort: SORT_KEYS[value.sort],
+			order: value.sort ? (value.order === 'asc' ? 'asc' : 'desc') : undefined,
+			offset: (tablePage - 1) * PAGE_SIZE,
+			limit: PAGE_SIZE
+		};
+	}
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -65,14 +125,22 @@
 		{
 			key: 'agent_id',
 			label: t('jobs.host'),
-			multiple: false,
-			options: [
-				...new Map(
-					jobs
-						.filter((job) => job.agent_id)
-						.map((job) => [job.agent_id, job.agent_hostname ?? job.agent_id])
-				)
-			].map(([value, label]) => ({ value, label }))
+			options: hosts.map((host) => ({ value: host.id, label: host.hostname }))
+		},
+		{
+			key: 'repository_id',
+			label: t('jobs.repository'),
+			options: repositories.map((repository) => ({ value: repository.id, label: repository.name }))
+		},
+		{
+			key: 'plan_id',
+			label: t('jobs.plan'),
+			options: plans.map((plan) => ({ value: plan.id, label: plan.name }))
+		},
+		{
+			key: 'kind',
+			label: t('jobDetail.kind'),
+			options: KINDS.map((value) => ({ value, label: t(`jobs.kind.${value}` as MessageKey) }))
 		}
 	]);
 
@@ -89,6 +157,7 @@
 			key: 'kind',
 			header: t('jobDetail.kind'),
 			nowrap: true,
+			sortable: false,
 			value: (row) => t(`jobs.kind.${row.kind}` as MessageKey)
 		},
 		{
@@ -101,6 +170,7 @@
 			key: 'repository',
 			header: t('jobs.repository'),
 			truncate: 'sm',
+			sortable: false,
 			value: (row) => row.repository_name ?? ''
 		},
 		{
@@ -112,30 +182,15 @@
 		{
 			key: 'duration',
 			nowrap: true,
+			sortable: false,
 			align: 'right',
 			header: t('jobs.duration'),
 			value: (row) => durationOf(row) || '—'
 		}
 	]);
 
-	const shown = $derived(
-		jobs.filter((job) =>
-			matchesSearch(filters.value.q, [
-				planLabel(job),
-				job.agent_hostname,
-				job.repository_name,
-				job.id
-			])
-		)
-	);
-
 	const empty = $derived(
-		!loading &&
-			!error &&
-			jobs.length === 0 &&
-			statusFilter === '' &&
-			!agentFilter &&
-			!filters.value.q
+		!loading && !error && total === 0 && !Object.values(filters.value).some(Boolean)
 	);
 
 	// A cancelled job ends as `failed` with the result `cancelled`; the screen shows it apart.
@@ -205,69 +260,63 @@
 	}
 
 	function messageOf(problem: unknown): string {
-		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		if (problem instanceof ApiError) {
+			// The server pages only through the rows that it counts.
+			if (problem.problem.field === 'offset') return t('filter.tooDeep');
+			return tErrorCode(problem.code) ?? problem.title;
+		}
 		return t('table.error');
 	}
 
+	// A silent reload and a filter change can overlap; only the last request may fill the table.
+	let request = 0;
+
 	async function load(silent = false): Promise<void> {
-		if (!silent) {
-			loading = true;
-			extended = false;
-		}
+		const mine = ++request;
+		if (!silent) loading = true;
 		error = null;
 		try {
-			const page = await service.listJobs({
-				limit: PAGE_SIZE,
-				status: statusFilter ? (statusFilter as JobStatus) : undefined,
-				agent_id: agentFilter
-			});
+			const page = await service.listJobs(queryOf());
+			if (mine !== request) return;
 			jobs = page.items;
-			nextCursor = page.next_cursor ?? null;
+			total = page.total;
+			totalCapped = page.total_capped;
 		} catch (problem) {
+			if (mine !== request) return;
 			error = messageOf(problem);
 		} finally {
-			loading = false;
+			if (mine === request) loading = false;
 		}
 	}
 
-	async function loadMore(): Promise<void> {
-		if (!nextCursor) return;
-		loadingMore = true;
-		try {
-			const page = await service.listJobs({
-				limit: PAGE_SIZE,
-				status: statusFilter ? (statusFilter as JobStatus) : undefined,
-				agent_id: agentFilter,
-				cursor: nextCursor
-			});
-			jobs = [...jobs, ...page.items];
-			nextCursor = page.next_cursor ?? null;
-			extended = true;
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			loadingMore = false;
-		}
+	// The filter values come from the hosts, the repositories and the plans of the tenant.
+	async function loadOptions(): Promise<void> {
+		const [hostList, repositoryList, planList] = await Promise.allSettled([
+			service.listAgents(),
+			service.listRepositories(),
+			service.listPlans()
+		]);
+		if (hostList.status === 'fulfilled') hosts = hostList.value;
+		if (repositoryList.status === 'fulfilled') repositories = repositoryList.value;
+		if (planList.status === 'fulfilled') plans = planList.value;
 	}
 
-	let loadedFilter: string | undefined;
+	// The key is the filter state, not the query: a period preset gives a new time on each read.
+	let loadedQuery = JSON.stringify(filters.value);
 	onMount(() => {
-		loadedFilter = `${statusFilter}|${agentFilter ?? ''}`;
 		void load();
+		void loadOptions();
 	});
 
-	// The status and the host filter on the server; the search narrows the loaded rows.
 	$effect(() => {
-		const key = `${statusFilter}|${agentFilter ?? ''}`;
-		if (loadedFilter === undefined || key === loadedFilter) return;
-		loadedFilter = key;
+		const key = JSON.stringify(filters.value);
+		if (key === loadedQuery) return;
+		loadedQuery = key;
 		void load();
 	});
 
-	// A page that the user extended with "load more" keeps its rows until the next full load.
-	let extended = false;
 	async function reload(): Promise<void> {
-		if (extended || loading || loadingMore) return;
+		if (loading) return;
 		await load(true);
 	}
 
@@ -314,11 +363,17 @@
 <Page
 	title={t('jobs.title')}
 	description={t('jobs.description')}
-	count={loading ? undefined : jobs.length}
+	count={loading ? undefined : totalCapped ? `${formatCount(total)}+` : total}
 >
 	{#snippet actions()}
 		<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
 	{/snippet}
+
+	{#if totalCapped && !loading}
+		<div class="capped">
+			<Alert tone="info" title={t('filter.capped', { count: formatCount(total) })} />
+		</div>
+	{/if}
 
 	{#if empty}
 		<EmptyState
@@ -330,12 +385,18 @@
 	{:else}
 		<DataTable
 			{columns}
-			rows={shown}
+			rows={jobs}
+			mode="server"
+			page={tablePage}
+			pageSize={PAGE_SIZE}
+			{total}
+			sort={tableSort}
+			onPageChange={(next) => filters.update({ page: String(next) })}
+			onSortChange={(next) => filters.update({ sort: next.key, order: next.direction })}
 			{loading}
 			{error}
 			rowKey={(job) => job.id}
 			rowHref={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
-			paginated={false}
 			actions={actionsFor}
 			moreLabel={(job) => t('jobs.moreActions', { name: planLabel(job) })}
 			emptyTitle={t('filter.noMatches')}
@@ -345,18 +406,23 @@
 				<FilterBar
 					label={t('jobs.filters')}
 					value={filters.value}
-					search={{ key: 'q', label: t('hosts.search'), placeholder: t('jobs.searchPlaceholder') }}
 					{facets}
+					period
 					onchange={filters.update}
-					onreset={filters.reset}
+					onreset={() =>
+						filters.update({
+							agent_id: '',
+							repository_id: '',
+							plan_id: '',
+							kind: '',
+							status: '',
+							period: '',
+							from: '',
+							to: ''
+						})}
 				/>
 			{/snippet}
 		</DataTable>
-		{#if nextCursor}
-			<div class="more">
-				<Button loading={loadingMore} onclick={loadMore}>{t('jobs.loadMore')}</Button>
-			</div>
-		{/if}
 	{/if}
 
 	<ConfirmDialog
@@ -372,9 +438,7 @@
 </Page>
 
 <style>
-	.more {
-		display: flex;
-		justify-content: center;
-		margin-top: var(--rh-space-4);
+	.capped {
+		margin-bottom: var(--rh-space-4);
 	}
 </style>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import {
 		CUSTOM_PERIOD,
 		PERIOD_PRESETS,
@@ -26,6 +27,7 @@
 		facets = [],
 		period = false,
 		hint,
+		end,
 		onchange,
 		onreset
 	}: {
@@ -39,6 +41,8 @@
 		period?: boolean;
 		/** A short help text behind an info icon. */
 		hint?: string;
+		/** Content at the right end of the row, for example the age of the list and a refresh button. */
+		end?: Snippet;
 		onchange: (patch: FilterState) => void;
 		/** Default: every key of the bar becomes empty. */
 		onreset?: () => void;
@@ -193,6 +197,9 @@
 						<Icon name="chevron-down" size="xs" />
 					</span>
 				{/snippet}
+				{#if facet.hint}
+					<p class="facet__hint">{facet.hint}</p>
+				{/if}
 				{#if isText(facet)}
 					<TextField
 						id="filter-{facet.key}"
@@ -303,6 +310,10 @@
 		{#if active}
 			<Button variant="ghost" size="sm" onclick={reset}>{t('filter.reset')}</Button>
 		{/if}
+
+		{#if end}
+			<div class="filter-bar__end">{@render end()}</div>
+		{/if}
 	</div>
 
 	{#if chips.length > 0}
@@ -396,6 +407,20 @@
 		font-weight: var(--rh-font-weight-semibold);
 		line-height: 18px;
 		text-align: center;
+	}
+
+	.facet__hint {
+		max-width: 16rem;
+		margin: 0 0 var(--rh-space-2);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.filter-bar__end {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+		margin-left: auto;
 	}
 
 	.hint {

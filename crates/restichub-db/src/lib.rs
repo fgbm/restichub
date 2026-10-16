@@ -13,6 +13,7 @@ use std::time::Duration;
 use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 
+pub mod agent_search;
 pub mod agents;
 pub mod alerts;
 pub mod api_tokens;
@@ -26,6 +27,7 @@ pub mod enrollment_tokens;
 pub mod enums;
 pub mod ids;
 pub mod job_logs;
+pub mod job_search;
 pub mod job_steps;
 pub mod jobs;
 pub mod kek;
