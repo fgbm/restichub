@@ -2155,5 +2155,7 @@ export const ru: Record<MessageKey, string> = {
 	'templates.facet.phase': 'Фаза',
 	'restore.snapshots': 'Снимки',
 	'restore.restoreSnapshot': 'Восстановить',
-	'restore.noTime': 'Без времени'
+	'restore.noTime': 'Без времени',
+	'audit.facet.actor': 'Кто',
+	'audit.facet.object': 'Объект'
 };

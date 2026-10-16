@@ -93,9 +93,10 @@
 		return tOr(`audit.object.${type}`, type);
 	}
 
-	// The action and the object type; the name of the object is not in the record.
+	// A configuration action names its object type; the other actions name it already. The name of
+	// the object is not in the record.
 	function titleOf(row: AuditRecord): string {
-		return row.object_type
+		return row.action.startsWith('config_') && row.object_type
 			? t('audit.item.title', {
 					action: tAuditAction(row.action),
 					object: objectTypeLabel(row.object_type)
@@ -103,10 +104,13 @@
 			: tAuditAction(row.action);
 	}
 
+	function lowerFirst(text: string): string {
+		return text.charAt(0).toLocaleLowerCase() + text.slice(1);
+	}
+
 	function meta(row: AuditRecord): ListMeta[] {
-		const actor = row.actor_id
-			? `${tAuditActorType(row.actor_type).toLocaleLowerCase()} ${row.actor_id}`
-			: tAuditActorType(row.actor_type).toLocaleLowerCase();
+		const type = lowerFirst(tAuditActorType(row.actor_type));
+		const actor = row.actor_id ? `${type} ${row.actor_id}` : type;
 		return [
 			actor,
 			scope === 'platform' ? { text: row.tenant_id, mono: true } : null,
@@ -183,6 +187,16 @@
 
 	const facets = $derived<FilterFacet[]>([
 		{
+			key: 'actor_type',
+			label: t('audit.facet.actor'),
+			multiple: false,
+			options: (['user', 'api_token', 'agent', 'system'] as const).map((value) => ({
+				value,
+				label: tAuditActorType(value)
+			}))
+		},
+		{ key: 'object_type', label: t('audit.facet.object'), mono: true },
+		{
 			key: 'action',
 			label: t('audit.filters.action'),
 			multiple: false,
@@ -192,21 +206,11 @@
 				.map((value) => ({ value, label: tAuditAction(value) }))
 		},
 		{
-			key: 'actor_type',
-			label: t('audit.filters.actorType'),
-			multiple: false,
-			options: (['user', 'api_token', 'agent', 'system'] as const).map((value) => ({
-				value,
-				label: tAuditActorType(value)
-			}))
-		},
-		{
 			key: 'actor_id',
 			label: t('audit.filters.actorId'),
 			placeholder: t('audit.filters.actorPlaceholder'),
 			mono: true
 		},
-		{ key: 'object_type', label: t('audit.filters.objectType'), mono: true },
 		{
 			key: 'object_id',
 			label: t('audit.filters.objectId'),

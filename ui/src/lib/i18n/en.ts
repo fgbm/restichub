@@ -2144,7 +2144,9 @@ export const en = {
 	'templates.facet.phase': 'Phase',
 	'restore.snapshots': 'Snapshots',
 	'restore.restoreSnapshot': 'Restore',
-	'restore.noTime': 'No time'
+	'restore.noTime': 'No time',
+	'audit.facet.actor': 'Who',
+	'audit.facet.object': 'Object'
 } as const;
 
 export type MessageKey = keyof typeof en;
