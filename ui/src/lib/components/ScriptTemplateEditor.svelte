@@ -510,23 +510,25 @@
 	>
 		<p class="muted">{t('scriptTemplates.parametersHint')}</p>
 		{#if parameters.length > 0}
-			<DataTable
-				{columns}
-				rows={parameters}
-				rowKey={(parameter) => String(parameter.key)}
-				paginated={false}
-				actions={readonly
-					? undefined
-					: (parameter) => [
-							{
-								id: 'remove',
-								label: t('scriptTemplates.parameter.remove'),
-								icon: 'trash',
-								danger: true,
-								onSelect: () => removeParameter(parameter.key)
-							}
-						]}
-			/>
+			<div class="params">
+				<DataTable
+					{columns}
+					rows={parameters}
+					rowKey={(parameter) => String(parameter.key)}
+					paginated={false}
+					actions={readonly
+						? undefined
+						: (parameter) => [
+								{
+									id: 'remove',
+									label: t('scriptTemplates.parameter.remove'),
+									icon: 'trash',
+									danger: true,
+									onSelect: () => removeParameter(parameter.key)
+								}
+							]}
+				/>
+			</div>
 		{:else}
 			<p class="muted">{t('scripts.parametersEmpty')}</p>
 		{/if}
@@ -586,6 +588,12 @@
 		margin: 0;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	/* A narrow screen scrolls the parameter table instead of squeezing its fields. */
+	.params :global(td .rh-input),
+	.params :global(td .rh-select) {
+		min-width: 8rem;
 	}
 
 	.secret {
