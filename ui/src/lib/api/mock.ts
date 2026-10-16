@@ -1331,6 +1331,7 @@ export class MockApiService {
 	>();
 	private latestSnapshots = new Map<string, { job: string; fetchedAt: number }>();
 	private storedPages = new Set<string>();
+	private restoreRequests = new Map<string, RestoreRequest>();
 
 	private pageKey(repositoryId: string, page: LsQueryRequest): string {
 		return [
@@ -1467,7 +1468,9 @@ export class MockApiService {
 		if (request.dry_run && request.verify) {
 			throw problemError('invalid_argument', 'verify', 'invalid_body');
 		}
-		return this.startJob(id, 'restore', { agent_id: request.agent_id }, false);
+		const job = this.startJob(id, 'restore', { agent_id: request.agent_id }, false);
+		this.restoreRequests.set(job.id, request);
+		return job;
 	}
 
 	async getJob(id: string): Promise<JobDetail> {
@@ -1487,7 +1490,22 @@ export class MockApiService {
 				);
 			}
 		}
-		return detailOf(entry.job, Date.now());
+		const detail = detailOf(entry.job, Date.now());
+		const request = this.restoreRequests.get(id);
+		return request
+			? {
+					...detail,
+					restore: {
+						snapshot_id: request.snapshot_id,
+						includes: request.includes ?? [],
+						excludes: request.excludes ?? [],
+						target: request.target,
+						overwrite: request.overwrite,
+						dry_run: request.dry_run ?? false,
+						verify: request.verify ?? false
+					}
+				}
+			: detail;
 	}
 
 	async getJobLogs(id: string, query?: JobLogQuery): Promise<JobLogPage> {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import RestoreParams from '#lib/components/RestoreParams.svelte';
 	import { onMount } from 'svelte';
 	import { coalesce } from '#lib/events.ts';
 	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
@@ -597,6 +598,9 @@
 		</div>
 
 		<aside class="layout__side">
+			{#if job.restore}
+				<RestoreParams restore={job.restore} hostname={job.agent_hostname} />
+			{/if}
 			<Panel title={t('jobDetail.about')}>
 				<dl class="about">
 					<dt>{t('jobDetail.id')}</dt>
@@ -689,6 +693,7 @@
 
 	.head {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: flex-start;
 		gap: var(--rh-space-4);
 		padding-bottom: var(--rh-space-6);
@@ -696,7 +701,7 @@
 
 	.head__text {
 		min-width: 0;
-		flex: 1;
+		flex: 1 1 18rem;
 	}
 
 	.head__title-row {

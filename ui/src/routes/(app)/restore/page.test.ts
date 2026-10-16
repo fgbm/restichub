@@ -1,18 +1,20 @@
 /*
- * The Restore screen lists the snapshots of a repository, shows the tree of one snapshot and starts
- * a restore (FR-RS-01 to FR-RS-04).
+ * The Restore page lists the snapshots of a repository with their filters (FR-RS-01). A snapshot
+ * opens on its own page (restore-snapshot.test.ts).
  *
  * The test replaces the session store, the navigation and the service, so it renders the screen
  * alone. Only an Admin and an Operator use the screen.
  */
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { agent, listing, repository, snapshot } from './restore-fixtures';
 import Restore from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
 	listRepositories: vi.fn(),
 	listAgents: vi.fn(),
+	listProfiles: vi.fn(),
 	getSnapshots: vi.fn(),
 	startSnapshots: vi.fn(),
 	startLs: vi.fn(),
@@ -23,10 +25,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const session = vi.hoisted(() => ({ role: 'operator' as string }));
+const route = vi.hoisted(() => ({
+	url: new URL('http://localhost/restore'),
+	params: {} as Record<string, string>
+}));
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
+vi.mock('$app/state', () => ({ page: route }));
 vi.mock('$app/paths', () => ({
-	resolve: (path: string, params?: { id: string }) => path.replace('[id]', params?.id ?? '')
+	resolve: (path: string, params: Record<string, string> = {}) =>
+		path.replace(/\[(\w+)\]/g, (_, key: string) => params[key] ?? '')
 }));
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 vi.mock('#lib/stores/session.svelte.ts', () => ({
@@ -45,6 +53,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			listRepositories: mocks.listRepositories,
 			listAgents: mocks.listAgents,
+			listProfiles: mocks.listProfiles,
 			getSnapshots: mocks.getSnapshots,
 			startSnapshots: mocks.startSnapshots,
 			startLs: mocks.startLs,
@@ -54,114 +63,27 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	};
 });
 
-const repository = {
-	id: 'r_1',
-	name: 'offsite-s3',
-	backend: { kind: 's3', endpoint: 's3.example.net', bucket: 'b' },
-	credentials: { password: true, s3_access_key: true, s3_secret_key: true, rest_password: false },
-	initialized: true,
-	maintenance_agent_id: 'a_1',
-	created_at: '2026-10-01T00:00:00Z',
-	updated_at: '2026-10-01T00:00:00Z'
-};
-
-const agent = {
-	id: 'a_1',
-	hostname: 'nas-backup',
-	os: 'linux',
-	arch: 'amd64',
-	agent_version: '0.4.2',
-	restic_version: '0.19.0',
-	labels: [],
-	restore_roots: ['/var/lib/restichub-restore'],
-	status: 'active',
-	last_seen_at: '2026-10-15T00:00:00Z',
-	created_at: '2026-09-01T00:00:00Z',
-	certificate_expires_at: '2027-09-01T00:00:00Z',
-	certificate_serial: '0f01',
-	revoked_at: null
-};
-
-function snapshot(id: string, host: string) {
-	return {
-		id: id.padEnd(64, '0'),
-		short_id: id,
-		time: '2026-10-14T12:00:00Z',
-		hostname: host,
-		username: 'root',
-		tags: ['daily'],
-		paths: ['/srv'],
-		program_version: 'restic 0.18.1',
-		total_files: 10,
-		total_bytes: 1024
-	};
-}
-
-function listing(state: string, snapshots: ReturnType<typeof snapshot>[] = []) {
-	return {
-		state,
-		job_id: 'b_1',
-		agent_id: 'a_1',
-		fetched_at: '2026-10-15T00:00:00Z',
-		age_seconds: 0,
-		truncated: false,
-		hosts: [],
-		tags: [],
-		paths: [],
-		error_code: null,
-		snapshots
-	};
-}
-
-function node(name: string, kind: 'dir' | 'file', parent = '') {
-	return {
-		name,
-		kind,
-		path: `${parent}/${name}`,
-		size: kind === 'file' ? 2048 : 0,
-		permissions: kind === 'dir' ? 'drwxr-xr-x' : '-rw-r--r--',
-		mtime: '2026-10-14T12:00:00Z',
-		link_target: ''
-	};
-}
-
-function page(nodes: ReturnType<typeof node>[], path = '') {
-	return {
-		state: 'done',
-		job_id: 'l_1',
-		snapshot_id: 'a1b2c3d4'.padEnd(64, '0'),
-		path,
-		offset: 0,
-		limit: 1000,
-		fetched_at: '2026-10-15T00:00:00Z',
-		cached: false,
-		last: true,
-		next_offset: null,
-		error_code: null,
-		nodes
-	};
-}
-
 beforeEach(() => {
 	session.role = 'operator';
 	vi.clearAllMocks();
+	route.url = new URL('http://localhost/restore');
 	mocks.listRepositories.mockResolvedValue([repository]);
 	mocks.listAgents.mockResolvedValue([agent]);
+	mocks.listProfiles.mockResolvedValue([]);
 	mocks.getSnapshots.mockResolvedValue(
 		listing('done', [snapshot('a1b2c3d4', 'nas-backup'), snapshot('b2c3d4e5', 'ws-anna')])
 	);
-	mocks.startLs.mockResolvedValue(page([node('srv', 'dir'), node('notes.txt', 'file')]));
 });
 
-describe('Restore screen', () => {
+describe('Restore page', () => {
 	it('fr_rs_01_lists_the_stored_snapshots_and_runs_a_new_request_with_the_filters', async () => {
 		const user = userEvent.setup();
 		render(Restore);
-		expect(await screen.findByRole('button', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
-		expect(screen.getByRole('button', { name: 'Open snapshot b2c3d4e5' })).toBeVisible();
+		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
+		expect(screen.getByRole('link', { name: 'Open snapshot b2c3d4e5' })).toBeVisible();
 
 		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('b2c3d4e5', 'ws-anna')]));
-		await user.type(screen.getByLabelText('Host'), 'ws-anna');
+		await user.type(screen.getByLabelText('Snapshot host'), 'ws-anna');
 		await user.type(screen.getByLabelText('Tag'), 'daily');
 		await user.click(screen.getByRole('button', { name: 'Find snapshots' }));
 		await waitFor(() =>
@@ -172,7 +94,71 @@ describe('Restore screen', () => {
 			})
 		);
 		await waitFor(() =>
-			expect(screen.queryByRole('button', { name: 'Open snapshot a1b2c3d4' })).toBeNull()
+			expect(screen.queryByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeNull()
+		);
+		// The address keeps the filters, so the back link of the snapshot page restores them.
+		await waitFor(() =>
+			expect(mocks.goto).toHaveBeenCalledWith(
+				'/(app)/restore?host=ws-anna&tag=daily&repository=r_1',
+				{ replaceState: true }
+			)
+		);
+	});
+
+	it('fr_rs_01_a_snapshot_links_to_its_own_page_with_the_filters', async () => {
+		route.url = new URL('http://localhost/restore?repository=r_1&tag=daily');
+		mocks.getSnapshots.mockResolvedValue({
+			...listing('done', [snapshot('a1b2c3d4', 'nas-backup')]),
+			tags: ['daily']
+		});
+		render(Restore);
+		const link = await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		expect(link).toHaveAttribute(
+			'href',
+			`/(app)/restore/r_1/${'a1b2c3d4'.padEnd(64, '0')}?tag=daily`
+		);
+		// The stored list already holds the tag filter, so no new request starts.
+		expect(mocks.startSnapshots).not.toHaveBeenCalled();
+	});
+
+	it('fr_rs_01_a_filter_in_the_address_that_the_stored_list_lacks_starts_a_request', async () => {
+		route.url = new URL('http://localhost/restore?repository=r_1&host=ws-anna');
+		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('b2c3d4e5', 'ws-anna')]));
+		render(Restore);
+		await waitFor(() =>
+			expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', {
+				hosts: ['ws-anna'],
+				tags: [],
+				paths: []
+			})
+		);
+	});
+
+	it('fr_rs_01_marks_the_snapshot_that_the_person_had_open', async () => {
+		route.url = new URL(`http://localhost/restore?snapshot=${'b2c3d4e5'.padEnd(64, '0')}`);
+		render(Restore);
+		expect(await screen.findByRole('link', { name: 'Open snapshot b2c3d4e5' })).toHaveAttribute(
+			'aria-current',
+			'true'
+		);
+		expect(screen.getByRole('link', { name: 'Open snapshot a1b2c3d4' })).not.toHaveAttribute(
+			'aria-current'
+		);
+	});
+
+	it('fr_rs_01_reset_clears_every_filter_and_searches_again', async () => {
+		const user = userEvent.setup();
+		route.url = new URL('http://localhost/restore?repository=r_1&tag=daily&from=2026-10-01');
+		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('a1b2c3d4', 'nas-backup')]));
+		render(Restore);
+		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		expect(screen.getByLabelText('Tag')).toHaveValue('daily');
+		mocks.startSnapshots.mockClear();
+		await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+		expect(screen.getByLabelText('Tag')).toHaveValue('');
+		expect(screen.getByLabelText('From')).toHaveValue('');
+		await waitFor(() =>
+			expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', { hosts: [], tags: [], paths: [] })
 		);
 	});
 
@@ -180,94 +166,58 @@ describe('Restore screen', () => {
 		mocks.getSnapshots.mockResolvedValue(listing('empty'));
 		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('a1b2c3d4', 'nas-backup')]));
 		render(Restore);
-		expect(await screen.findByRole('button', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
+		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
 		expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', { hosts: [], tags: [], paths: [] });
 	});
 
-	it('fr_rs_01_shows_the_reason_when_the_list_job_fails', async () => {
+	it('fr_rs_01_the_failed_list_banner_links_to_the_job_log', async () => {
 		mocks.getSnapshots.mockResolvedValue({
 			...listing('failed'),
 			error_code: 'agent_capability_missing'
 		});
 		render(Restore);
 		expect(await screen.findByText(/The snapshot list failed/)).toBeVisible();
-	});
-
-	it('fr_rs_02_loads_the_root_of_a_snapshot_and_a_directory_on_request', async () => {
-		const user = userEvent.setup();
-		render(Restore);
-		await user.click(await screen.findByRole('button', { name: 'Open snapshot a1b2c3d4' }));
-		const tree = await screen.findByRole('tree', { name: 'Files of the snapshot' });
-		expect(await within(tree).findByText('notes.txt')).toBeVisible();
-		expect(mocks.startLs).toHaveBeenCalledWith(
-			'r_1',
-			expect.objectContaining({ path: '', offset: 0, limit: 1000 })
-		);
-
-		mocks.startLs.mockResolvedValue(page([node('data', 'dir', '/srv')], '/srv'));
-		await user.click(within(tree).getByRole('button', { name: 'Expand srv' }));
-		expect(await within(tree).findByText('data')).toBeVisible();
-		expect(mocks.startLs).toHaveBeenLastCalledWith(
-			'r_1',
-			expect.objectContaining({ path: '/srv' })
+		expect(screen.getByRole('link', { name: 'Open the job log' })).toHaveAttribute(
+			'href',
+			'/(app)/jobs/b_1'
 		);
 	});
 
-	it('fr_rs_04_starts_a_restore_with_the_selected_paths_and_warns_about_a_system_path', async () => {
-		const user = userEvent.setup();
-		mocks.restoreSnapshot.mockResolvedValue({ id: 'j_9' });
-		render(Restore);
-		await user.click(await screen.findByRole('button', { name: 'Open snapshot a1b2c3d4' }));
-		const tree = await screen.findByRole('tree', { name: 'Files of the snapshot' });
-		await user.click(await within(tree).findByRole('checkbox', { name: 'Select notes.txt' }));
-		expect(screen.getByText('Selected: 1')).toBeVisible();
-
-		await user.click(screen.getByRole('button', { name: 'Restore…' }));
-		const dialog = await screen.findByRole('dialog');
-		const field = within(dialog).getByLabelText(/Target path/);
-		// The target starts as a folder in the first restore root of the host.
-		expect(field).toHaveValue('/var/lib/restichub-restore/a1b2c3d4');
-		expect(within(dialog).queryByText('System path')).toBeNull();
-		await user.clear(field);
-		await user.type(field, '/etc');
-		expect(within(dialog).getByText('System path')).toBeVisible();
-		expect(
-			within(dialog).getByText('The target is outside the restore roots of the host.')
-		).toBeVisible();
-		expect(within(dialog).getByRole('button', { name: 'Start restore' })).toBeDisabled();
-		await user.clear(field);
-		await user.type(field, '/var/lib/restichub-restore/out');
-		expect(within(dialog).queryByText('System path')).toBeNull();
-		await user.click(within(dialog).getByRole('checkbox', { name: /Dry run/ }));
-		expect(within(dialog).getByRole('checkbox', { name: /Verify after/ })).toBeDisabled();
-		await user.click(within(dialog).getByRole('button', { name: 'Start restore' }));
-
-		await waitFor(() =>
-			expect(mocks.restoreSnapshot).toHaveBeenCalledWith('r_1', {
-				agent_id: 'a_1',
-				snapshot_id: 'a1b2c3d4'.padEnd(64, '0'),
-				includes: ['/notes.txt'],
-				excludes: [],
-				target: '/var/lib/restichub-restore/out',
-				overwrite: 'never',
-				dry_run: true,
-				verify: false
-			})
+	it('fr_rs_01_shortens_an_automatic_profile_tag_and_keeps_the_full_value_in_the_title', async () => {
+		const id = '0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c';
+		const other = '7c1e5d90-2a44-4f1b-9b0e-3d6a8c2f1e55';
+		mocks.listProfiles.mockResolvedValue([{ id, name: 'Office files' }]);
+		mocks.getSnapshots.mockResolvedValue(
+			listing('done', [
+				{
+					...snapshot('a1b2c3d4', 'nas-backup'),
+					tags: [`restichub-profile-${id}`, `restichub-profile-${other}`, 'daily']
+				}
+			])
 		);
-		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(app)/jobs/j_9'));
+		render(Restore);
+		const resolved = await screen.findByText('Profile Office files');
+		expect(resolved.closest('[title]')).toHaveAttribute('title', `restichub-profile-${id}`);
+		const unresolved = screen.getByText('Profile 7c1e5d90');
+		expect(unresolved.closest('[title]')).toHaveAttribute('title', `restichub-profile-${other}`);
+		expect(screen.getByText('daily')).toBeVisible();
 	});
 
-	it('fr_rs_04_refuses_a_relative_target_path', async () => {
+	it('fr_rs_01_shows_more_snapshots_on_request', async () => {
 		const user = userEvent.setup();
+		mocks.getSnapshots.mockResolvedValue(
+			listing(
+				'done',
+				Array.from({ length: 20 }, (_, index) =>
+					snapshot(`aa${String(index).padStart(6, '0')}`, 'nas-backup')
+				)
+			)
+		);
 		render(Restore);
-		await user.click(await screen.findByRole('button', { name: 'Open snapshot a1b2c3d4' }));
-		await user.click(screen.getByRole('button', { name: 'Restore…' }));
-		const dialog = await screen.findByRole('dialog');
-		const field = within(dialog).getByLabelText(/Target path/);
-		await user.clear(field);
-		await user.type(field, 'restore');
-		expect(within(dialog).getByText('Enter an absolute path.')).toBeVisible();
-		expect(within(dialog).getByRole('button', { name: 'Start restore' })).toBeDisabled();
+		await screen.findByRole('link', { name: 'Open snapshot aa000000' });
+		expect(screen.getAllByRole('link', { name: /^Open snapshot / })).toHaveLength(15);
+		await user.click(screen.getByRole('button', { name: 'Show more (5 left)' }));
+		expect(screen.getAllByRole('link', { name: /^Open snapshot / })).toHaveLength(20);
 	});
 
 	it('ac_au_02_a_viewer_gets_no_restore_screen', async () => {
@@ -277,9 +227,12 @@ describe('Restore screen', () => {
 		expect(mocks.startSnapshots).not.toHaveBeenCalled();
 	});
 
-	it('fr_rs_01_a_tenant_without_an_initialized_repository_sees_an_empty_state', async () => {
+	it('fr_rs_01_a_tenant_without_an_initialized_repository_sees_an_empty_state_with_a_link', async () => {
+		const user = userEvent.setup();
 		mocks.listRepositories.mockResolvedValue([{ ...repository, initialized: false }]);
 		render(Restore);
 		expect(await screen.findByText('No repository to restore from')).toBeVisible();
+		await user.click(screen.getByRole('button', { name: 'Open repositories' }));
+		expect(mocks.goto).toHaveBeenCalledWith('/(app)/repositories');
 	});
 });
