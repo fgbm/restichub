@@ -413,6 +413,7 @@ fn root_entries(config: &Path, root: &Path) -> Vec<(String, Kind)> {
         }
     };
     add(config, Kind::Config, false);
+    add(&crate::identity::lock_file(config), Kind::Agent, false);
     add(
         &crate::identity::sibling(config, ".staging"),
         Kind::Identity,
@@ -911,6 +912,29 @@ mod tests {
         result.expect("the repair must succeed");
         assert!(!is_open(&file), "the explicit entry must be gone");
         assert_eq!(actions, vec![Action::Protected(file)]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_an_open_top_level_with_the_held_identity_lock_is_repaired() {
+        let (base, root, config) = tree("repair-lock");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        let lock = crate::identity::lock_file(&config);
+        assert_eq!(lock, root.join("Agent.lock"));
+        grant(&lock, "(R,W)").expect("cannot add the entry");
+        grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let held = std::fs::File::open(&lock).expect("cannot open the lock");
+        held.lock().expect("cannot take the lock");
+
+        let (result, actions) = repair(&config, &root);
+        assert!(result.expect("the repair must succeed").is_empty());
+        check_admin_only(&root).expect("the top level must be protected");
+        assert!(!is_open(&lock), "the entry on the lock file must be gone");
+        assert!(actions.contains(&Action::Protected(lock)), "{actions:?}");
+        drop(held);
+        crate::identity::StoredIdentity::load(&config).expect("the identity stays usable");
         let _ = std::fs::remove_dir_all(&base);
     }
 

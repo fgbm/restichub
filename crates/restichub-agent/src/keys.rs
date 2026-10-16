@@ -61,7 +61,7 @@ impl KeyState {
     /// Returns an error when the enrollment set is not valid, when the chain file cannot be read,
     /// or when a stored update does not verify. A malformed chain names a re-registration.
     pub fn load(identity: &StoredIdentity, dir: &Path) -> Result<Self> {
-        let dir = crate::identity::recover(dir);
+        let dir = crate::identity::current(dir);
         let mut ring = crate::verify::verify_key_set(
             &identity.signing_keys.keys,
             &identity.signing_keys.signature,
@@ -160,7 +160,7 @@ impl KeyState {
 /// Loads the stored updates. A missing file is an empty chain; any other error names a re-registration
 /// (ADR-0030).
 fn read_chain(dir: &Path) -> Result<StoredKeyUpdates> {
-    let dir = crate::identity::recover(dir);
+    let dir = crate::identity::current(dir);
     let path = dir.join(KEY_UPDATES_FILE);
     match std::fs::read(&path) {
         Ok(bytes) => serde_json::from_slice(&bytes).with_context(|| {

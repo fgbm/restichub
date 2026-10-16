@@ -76,6 +76,8 @@ The directory holds these files:
 - `signing-key-updates.json`: the signed key updates that the agent accepted. The agent verifies a job after a key rotation with this chain.
 - `job-journal.json`: the accepted and completed jobs. A job that the control plane delivers again does not run a second time.
 
+An empty lock file is next to the directory: `/etc/restichub-agent.lock` on Linux and `%ProgramData%\ResticHub\Agent.lock` on Windows. The lock keeps two agent processes from changing the identity at the same time.
+
 The token never reaches a file and never reaches a log.
 
 ## Check the connection
