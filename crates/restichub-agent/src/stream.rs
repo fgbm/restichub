@@ -38,7 +38,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
-use crate::identity::StoredIdentity;
+use crate::identity::{IdentityReplaced, StoredIdentity};
 use crate::jobs::Jobs;
 use crate::keys::{Applied, KeyState};
 use crate::rotation::{self, PendingRotation};
@@ -488,6 +488,8 @@ struct Upkeep {
     /// The not-before and not-after times of the newest certificate. A rotation moves them, so the
     /// next request comes at two thirds of the new lifetime.
     validity: Option<(OffsetDateTime, OffsetDateTime)>,
+    /// The certificate on disk that the next rotation replaces.
+    certificate_der: Vec<u8>,
     pending: Option<PendingRotation>,
     timer: std::pin::Pin<Box<tokio::time::Sleep>>,
     armed: bool,
@@ -504,6 +506,7 @@ impl Upkeep {
         };
         let mut upkeep = Self {
             validity,
+            certificate_der: identity.certificate_der.clone(),
             pending: None,
             timer: Box::pin(tokio::time::sleep(Duration::ZERO)),
             armed: false,
@@ -700,8 +703,16 @@ async fn handle_control(
                 return Ok(Handled::Go);
             };
             let now = (timeouts.now)();
-            match install(identity, dir, &pending, &issued, now) {
+            match install(
+                identity,
+                dir,
+                &upkeep.certificate_der,
+                &pending,
+                &issued,
+                now,
+            ) {
                 Ok(serial) => {
+                    upkeep.certificate_der.clone_from(&issued.certificate_der);
                     tracing::info!(
                         "the agent stored a rotated certificate; the next connection uses it"
                     );
@@ -718,6 +729,13 @@ async fn handle_control(
                         .and_then(|stored| stored.certificate_validity())
                         .ok();
                     upkeep.arm_at_due(timeouts);
+                }
+                Err(error) if error.downcast_ref::<IdentityReplaced>().is_some() => {
+                    tracing::warn!(
+                        %error,
+                        "the agent dropped the rotated certificate and connects with the stored identity"
+                    );
+                    return Ok(Handled::Stop(Disconnect::Closed { healthy: false }));
                 }
                 Err(error) => {
                     tracing::warn!(%error, "the agent refused the rotated certificate");
@@ -740,12 +758,13 @@ async fn handle_control(
 fn install(
     identity: &StoredIdentity,
     dir: &Path,
+    replaced_der: &[u8],
     pending: &PendingRotation,
     issued: &restichub_proto::agent::v1::CertificateIssued,
     now: OffsetDateTime,
 ) -> Result<Vec<u8>> {
     let rotated = rotation::accept(identity, pending, issued, now)?;
-    StoredIdentity::install_rotation(dir, &rotated)?;
+    StoredIdentity::install_rotation(dir, &identity.agent_id, replaced_der, &rotated)?;
     rotation::serial_of(&rotated.certificate_der)
 }
 

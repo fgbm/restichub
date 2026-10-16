@@ -149,15 +149,32 @@ impl StoredIdentity {
     /// the marker keeps the old identity. A crash after it is finished by the next [`Self::load`],
     /// so the key and the certificate never stay apart.
     ///
+    /// `agent_id` and `replaced_der` name the identity that the rotation started from.
+    ///
     /// # Errors
     ///
-    /// Returns an error when a staged file cannot be written or moved.
-    pub fn install_rotation(dir: &Path, rotated: &Rotated) -> Result<()> {
+    /// Returns [`IdentityReplaced`] when the directory holds another identity now, and an error
+    /// when a staged file cannot be written or moved.
+    pub fn install_rotation(
+        dir: &Path,
+        agent_id: &str,
+        replaced_der: &[u8],
+        rotated: &Rotated,
+    ) -> Result<()> {
         let _lock = lock(dir)?;
         let dir = recover(dir);
         // An interrupted earlier rotation with a complete staged set finishes first. Dropping the
         // set after some files moved would leave a new key with an old certificate.
         finish_rotation(&dir)?;
+        // A register that saved while the request was open put a new identity here. The rotated
+        // certificate belongs to the old one and would break the new identity.
+        let metadata: Metadata =
+            serde_json::from_slice(&read(dir.join(METADATA_FILE))?).context("bad identity.json")?;
+        if metadata.agent_id != agent_id
+            || first_block(&read(dir.join(CERT_FILE))?)? != replaced_der
+        {
+            return Err(IdentityReplaced.into());
+        }
         discard_staged(&dir);
         paths::create_protected_file(&staged(&dir, KEY_FILE), rotated.key_pem.as_bytes())?;
         paths::create_protected_file(
@@ -217,6 +234,18 @@ pub struct Rotated {
     pub certificate_der: Vec<u8>,
     pub ca_chain_der: Vec<Vec<u8>>,
 }
+
+/// The stored identity is no longer the one that a rotation started from (FR-ID-03).
+#[derive(Debug)]
+pub struct IdentityReplaced;
+
+impl std::fmt::Display for IdentityReplaced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the stored identity changed after the rotation started")
+    }
+}
+
+impl std::error::Error for IdentityReplaced {}
 
 fn staged(dir: &Path, name: &str) -> std::path::PathBuf {
     dir.join(format!("{name}{STAGED_SUFFIX}"))
@@ -629,6 +658,11 @@ pub(crate) mod tests {
         remove(&dir);
     }
 
+    fn install_from_sample(dir: &Path, rotated: &Rotated) -> Result<()> {
+        let sample = sample();
+        StoredIdentity::install_rotation(dir, &sample.agent_id, &sample.certificate_der, rotated)
+    }
+
     fn rotated() -> Rotated {
         Rotated {
             key_pem: "-----BEGIN PRIVATE KEY-----\nNEW\n-----END PRIVATE KEY-----\n".to_owned(),
@@ -642,7 +676,7 @@ pub(crate) mod tests {
         let dir = temp_dir("rotation");
         sample().save(&dir).expect("the save must succeed");
         std::fs::write(dir.join("journal.db"), b"state").expect("cannot write other state");
-        StoredIdentity::install_rotation(&dir, &rotated()).expect("the rotation must install");
+        install_from_sample(&dir, &rotated()).expect("the rotation must install");
         let loaded = StoredIdentity::load(&dir).expect("the identity must load");
         assert_eq!(loaded.certificate_der, vec![9, 9, 9]);
         assert!(loaded.key_pem.contains("NEW"));
@@ -702,6 +736,47 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn fr_id_03_a_rotation_of_a_replaced_identity_is_refused_and_keeps_the_new_one() {
+        let dir = temp_dir("rotation-replaced");
+        sample().save(&dir).expect("the save must succeed");
+        // The rotation started from the sample identity; a register then stored another one.
+        let mut new = sample();
+        new.key_pem = "new registration key".to_owned();
+        new.certificate_der = vec![7, 7, 7];
+        new.save(&dir).expect("the second save must succeed");
+
+        let error =
+            install_from_sample(&dir, &rotated()).expect_err("the rotation must be refused");
+        assert!(
+            error.downcast_ref::<IdentityReplaced>().is_some(),
+            "{error:#}"
+        );
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.key_pem, new.key_pem);
+        assert_eq!(loaded.certificate_der, new.certificate_der);
+        assert_eq!(loaded.ca_chain_der, new.ca_chain_der);
+        for name in [KEY_FILE, CERT_FILE, CA_CHAIN_FILE] {
+            assert!(!staged(&dir, name).exists(), "{name} is staged");
+        }
+        assert!(!dir.join(ROTATION_MARKER).exists());
+
+        let mut other = sample();
+        other.agent_id = "other-agent".to_owned();
+        other.save(&dir).expect("the third save must succeed");
+        let error =
+            install_from_sample(&dir, &rotated()).expect_err("the rotation must be refused");
+        assert!(
+            error.downcast_ref::<IdentityReplaced>().is_some(),
+            "{error:#}"
+        );
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.agent_id, "other-agent");
+        assert_eq!(loaded.key_pem, sample().key_pem);
+        assert_eq!(loaded.certificate_der, sample().certificate_der);
+        remove(&dir);
+    }
+
+    #[test]
     fn fr_id_03_a_new_rotation_finishes_a_half_moved_staged_set_first() {
         let dir = temp_dir("rotation-half-moved");
         sample().save(&dir).expect("the save must succeed");
@@ -731,7 +806,7 @@ pub(crate) mod tests {
             certificate_der: vec![9],
             ca_chain_der: vec![vec![8]],
         };
-        StoredIdentity::install_rotation(&dir, &next).expect("the rotation must install");
+        install_from_sample(&dir, &next).expect("the rotation must install");
 
         let key = std::fs::read_to_string(dir.join(KEY_FILE)).expect("the key");
         let cert = std::fs::read_to_string(dir.join(CERT_FILE)).expect("the certificate");
@@ -816,7 +891,7 @@ pub(crate) mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let rotation_dir = dir.clone();
         let rotation = std::thread::spawn(move || {
-            let _ = tx.send(StoredIdentity::install_rotation(&rotation_dir, &rotated()));
+            let _ = tx.send(install_from_sample(&rotation_dir, &rotated()));
         });
         assert_waits(&rx, "the rotation");
         for name in [KEY_FILE, CERT_FILE, CA_CHAIN_FILE] {
