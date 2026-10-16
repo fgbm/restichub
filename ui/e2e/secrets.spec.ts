@@ -50,7 +50,8 @@ test('a secret is created, its value is replaced and it is deleted', async ({ pa
 test('a secret in use cannot be deleted and the dialog names its users', async ({ page }) => {
 	await openSecrets(page);
 	const row = page.getByRole('row').filter({ hasText: 'db.password' });
-	await expect(row.getByRole('link', { name: 'db-nightly' })).toBeVisible();
+	// A row has no link to another entity; the dialog names the users with links.
+	await expect(row.getByText(/db-nightly/)).toBeVisible();
 
 	await row.getByRole('button', { name: 'Delete' }).click();
 	const dialog = page.getByRole('dialog');

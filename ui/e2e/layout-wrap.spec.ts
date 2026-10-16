@@ -73,7 +73,8 @@ for (const width of [1440, 1280]) {
 			// A reload drops the mock session, so the test follows the links of the shell.
 			if (path.startsWith('/settings/')) await page.locator('a[href="/settings"]').first().click();
 			await page.locator(`a[href="${path}"]`).first().click();
-			await expect(page).toHaveURL(new RegExp(`${path === '/' ? '/$' : path}$`));
+			// A list may add its default filter to the address, such as the open alerts.
+			await expect(page).toHaveURL(new RegExp(`${path === '/' ? '/' : path}(\\?.*)?$`));
 			await page.getByRole('heading', { level: 1 }).waitFor();
 			await page.waitForTimeout(400);
 			if (WITH_DATA.has(path)) {
@@ -82,10 +83,7 @@ for (const width of [1440, 1280]) {
 			}
 			expect(await wrapped(page), `${path} at ${width} px`).toEqual([]);
 			if (path === '/jobs') {
-				await page
-					.getByRole('link', { name: /Открыть задание/ })
-					.first()
-					.click();
+				await page.getByRole('table').getByRole('link').first().click();
 				await expect(page.locator('.about__time').first()).toBeVisible();
 				expect(await wrapped(page), `a job detail at ${width} px`).toEqual([]);
 				await page.goBack();

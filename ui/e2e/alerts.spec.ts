@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { chooseFacet } from './filters';
 
 // The Overview dashboard, the Alerts list and the notification settings (FR-MN-01, FR-MN-03,
 // FR-MN-04).
@@ -25,8 +26,8 @@ test('the overview shows the plan state, the hosts and the open alerts', async (
 
 	await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
 	await expect(page.locator('.stats').getByText('Hosts offline')).toBeVisible();
-	const plans = page.getByRole('table');
-	await expect(plans.getByText('nightly-web')).toBeVisible();
+	const plans = page.getByRole('table').first();
+	await expect(plans.getByText('nightly-web').first()).toBeVisible();
 	await expect(plans.getByText('At risk')).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Open alerts' })).toBeVisible();
 	await expect(page.getByText('Host offline').first()).toBeVisible();
@@ -34,7 +35,7 @@ test('the overview shows the plan state, the hosts and the open alerts', async (
 	await page.getByRole('link', { name: 'All alerts' }).click();
 	await expect(page.getByRole('heading', { level: 1, name: 'Alerts' })).toBeVisible();
 	await expect(page.getByText('mac-build-01').first()).toBeVisible();
-	await page.locator('#alerts-status').selectOption({ label: 'Resolved' });
+	await chooseFacet(page, 'State', 'Resolved');
 	await expect(page.getByText('Backup overdue')).toBeVisible();
 	await expect(page.getByText('mac-build-01')).toHaveCount(0);
 });
@@ -87,13 +88,12 @@ test('an Admin adds an email channel and a webhook, tests one and deletes one', 
 	await expect(page.getByText('whsec_mock_9f3a1c7d5b2e4a60')).toHaveCount(0);
 
 	// The test button reports the result.
-	await page.getByRole('button', { name: 'More actions for team-hook' }).click();
-	await page.getByRole('menuitem', { name: 'Send test' }).click();
+	const hook = page.getByRole('row', { name: /team-hook/ });
+	await hook.getByRole('button', { name: 'Send test' }).click();
 	await expect(page.getByText('The test message is sent.')).toBeVisible();
 
 	// Delete a channel.
-	await page.getByRole('button', { name: 'More actions for team-hook' }).click();
-	await page.getByRole('menuitem', { name: 'Delete channel' }).click();
+	await hook.getByRole('button', { name: 'Delete channel' }).click();
 	await page
 		.getByRole('dialog', { name: 'Delete the channel?' })
 		.getByRole('button', { name: 'Delete channel' })

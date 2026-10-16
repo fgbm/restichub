@@ -21,6 +21,8 @@ These components apply the rules of [design/style/ui-principles.md](../design/st
 
 The top bar (`AppShell`) shows the section levels from the navigation, then the levels of the page. Each level above the current page is a link. The section level links to the list with its last query string, so the list opens with the same filters and the same page. Do not add a back link to the page body. The lint rule `ui/no-back-link` reports a back link.
 
+`PageMeta` declares only the title and the breadcrumb levels, for a page that draws its own header.
+
 ## RecordPage
 
 `RecordPage` is a `Page` for one record, with the route `/<list>/<id>`. It has the sections on the left and a sticky side panel on the right. Below 1024 px, the side panel moves above the sections and does not stick.
@@ -94,4 +96,4 @@ The rules are in `eslint-rules/ui-principles.js`, and `npm run lint` runs them i
 - `ui/no-row-actions-snippet`: the older `rowActions` snippet.
 - `ui/no-back-link`: a link with a back text, a back message key or an `arrow-left` icon.
 
-The list `legacyScreens` in `eslint.config.js` holds the screens that do not use these components yet. Do not add a screen to this list.
+Each screen obeys these rules. Do not add an exception to `eslint.config.js`.

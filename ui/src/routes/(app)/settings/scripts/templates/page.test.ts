@@ -78,10 +78,6 @@ async function rowOf(name: string): Promise<HTMLElement> {
 	return (await screen.findByText(name)).closest('tr') as HTMLElement;
 }
 
-async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
-	await user.click(await screen.findByRole('button', { name: `More actions for ${name}` }));
-}
-
 describe('Script templates screen', () => {
 	it('lists the built-in and the own templates with their source', async () => {
 		render(Templates);
@@ -94,7 +90,6 @@ describe('Script templates screen', () => {
 	it('offers no delete action for a built-in template', async () => {
 		render(Templates);
 		const row = await rowOf('Free disk space check (Linux)');
-		expect(within(row).getByRole('button', { name: 'View' })).toBeInTheDocument();
 		expect(within(row).getByRole('button', { name: 'Make a copy' })).toBeInTheDocument();
 		expect(within(row).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
 	});
@@ -102,8 +97,11 @@ describe('Script templates screen', () => {
 	it('opens a built-in template read-only and copies it into a new template', async () => {
 		const user = userEvent.setup();
 		render(Templates);
+		// The row opens the template; opening is not a row action.
 		await user.click(
-			within(await rowOf('Free disk space check (Linux)')).getByRole('button', { name: 'View' })
+			within(await rowOf('Free disk space check (Linux)')).getByRole('button', {
+				name: 'Free disk space check (Linux)'
+			})
 		);
 		const dialog = await screen.findByRole('dialog');
 		expect(
@@ -175,8 +173,9 @@ describe('Script templates screen', () => {
 	it('deletes an own template after a confirmation', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		await openMenu(user, 'Remove old dumps');
-		await user.click(await screen.findByText('Delete'));
+		await user.click(
+			within(await rowOf('Remove old dumps')).getByRole('button', { name: 'Delete' })
+		);
 		const dialog = await screen.findByRole('dialog', { name: 'Delete the template?' });
 		expect(within(dialog).getByText(/The profiles keep the scripts/)).toBeInTheDocument();
 		await user.click(within(dialog).getByRole('button', { name: 'Delete' }));

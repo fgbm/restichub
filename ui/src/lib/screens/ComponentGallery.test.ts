@@ -8,7 +8,7 @@ describe('ComponentGallery', () => {
 		render(ComponentGallery);
 		expect(screen.getByRole('heading', { level: 1, name: 'Components' })).toBeInTheDocument();
 		expect(screen.getByRole('heading', { name: 'Buttons' })).toBeInTheDocument();
-		expect(screen.getByRole('heading', { name: 'Table' })).toBeInTheDocument();
+		expect(screen.getByRole('heading', { name: 'DataTable' })).toBeInTheDocument();
 		expect(
 			screen.getByRole('heading', { name: 'Menus, dialogs and side panel' })
 		).toBeInTheDocument();

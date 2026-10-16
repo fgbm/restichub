@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { chooseFacet } from './filters';
 
 // The job detail screen shows the progress, the steps, the summary and the log of one job
 // (FR-MN-02, FR-LG-01).
@@ -27,9 +28,10 @@ async function openJobs(page: Page): Promise<void> {
 test('a finished job shows its summary, its steps and its log', async ({ page }) => {
 	await openJobs(page);
 	// The sample holds a succeeded job and a job with warnings; the first row of a status is enough.
-	await page.locator('#jobs-status').selectOption({ label: 'Succeeded' });
+	await chooseFacet(page, 'Status', 'Succeeded');
 	await page
-		.getByRole('link', { name: /Open the job nightly-web/ })
+		.getByRole('table')
+		.getByRole('link', { name: 'nightly-web', exact: true })
 		.first()
 		.click();
 
@@ -72,8 +74,12 @@ test('a finished job shows its summary, its steps and its log', async ({ page })
 
 test('a running job shows its progress and the log follows the new lines', async ({ page }) => {
 	await openJobs(page);
-	await page.locator('#jobs-status').selectOption({ label: 'Running' });
-	await page.getByRole('link', { name: /Open the job nightly-web/ }).click();
+	await chooseFacet(page, 'Status', 'Running');
+	await page
+		.getByRole('table')
+		.getByRole('link', { name: 'nightly-web', exact: true })
+		.first()
+		.click();
 
 	await expect(page.getByRole('progressbar', { name: 'Progress' })).toBeVisible();
 	// The steps that did not start show with the count of the complete ones.
@@ -115,8 +121,12 @@ test('a running job shows its progress and the log follows the new lines', async
 
 test('a running job shows its limit and no acceptance window', async ({ page }) => {
 	await openJobs(page);
-	await page.locator('#jobs-status').selectOption({ label: 'Running' });
-	await page.getByRole('link', { name: /Open the job nightly-web/ }).click();
+	await chooseFacet(page, 'Status', 'Running');
+	await page
+		.getByRole('table')
+		.getByRole('link', { name: 'nightly-web', exact: true })
+		.first()
+		.click();
 
 	// A run has no fixed time limit: the host stops a step that makes no progress (ADR-0039).
 	await expect(page.getByText('Limit', { exact: true })).toBeVisible();

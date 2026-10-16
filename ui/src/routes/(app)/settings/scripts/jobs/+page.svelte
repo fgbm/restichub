@@ -9,13 +9,15 @@
 		Badge,
 		Button,
 		ConfirmDialog,
+		DataTable,
 		Dialog,
 		EmptyState,
-		Table,
-		TextField,
-		RowActions
+		FilterBar,
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { MenuItem, TableColumn } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, RowAction, TableColumn } from '#lib/components/ui/index.ts';
+	import { matchesSearch } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { draftOf, scriptOf, templateDescription, templateName } from '#lib/scripts.ts';
 	import type { ScriptDraft } from '#lib/scripts.ts';
@@ -47,12 +49,21 @@
 		{
 			key: 'name',
 			header: t('jobTemplates.name'),
-			value: (row) => templateName(row, 'job'),
-			render: nameCell
+			truncate: 'sm',
+			value: (row) => templateName(row, 'job')
+		},
+		{
+			key: 'description',
+			header: t('scriptTemplates.description.label'),
+			truncate: 'md',
+			hideNarrow: true,
+			sortable: false,
+			value: (row) => templateDescription(row, 'job')
 		},
 		{
 			key: 'scripts',
 			header: t('jobTemplates.scripts'),
+			align: 'right',
 			value: (row) => String(row.scripts.length),
 			cell: (row) => String(row.scripts.length)
 		},
@@ -65,6 +76,32 @@
 	]);
 
 	const empty = $derived(!loading && !error && templates.length === 0);
+
+	const filters = queryFilters(['q', 'source'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'source',
+			label: t('scriptTemplates.source'),
+			multiple: false,
+			options: (['builtin', 'own'] as const).map((value) => ({
+				value,
+				label: t(value === 'builtin' ? 'scriptTemplates.builtin' : 'scriptTemplates.own'),
+				count: templates.filter((template) => template.builtin === (value === 'builtin')).length
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		templates.filter((template) => {
+			const { q, source } = filters.value;
+			if (source && template.builtin !== (source === 'builtin')) return false;
+			return matchesSearch(q, [
+				templateName(template, 'job'),
+				templateDescription(template, 'job')
+			]);
+		})
+	);
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -178,27 +215,26 @@
 		}
 	}
 
-	function actionsFor(template: JobTemplate): MenuItem[] {
-		const items: MenuItem[] = [
+	function actionsFor(template: JobTemplate): RowAction[] {
+		return [
 			{
-				label: t(template.builtin ? 'scriptTemplates.view' : 'scriptTemplates.edit'),
-				icon: template.builtin ? 'eye' : 'settings',
-				onSelect: () => openEdit(template)
+				id: 'copy',
+				label: t('jobTemplates.copy'),
+				icon: 'copy',
+				onSelect: () => openCopy(template)
 			},
-			{ label: t('jobTemplates.copy'), icon: 'copy', onSelect: () => openCopy(template) }
-		];
-		if (!template.builtin) {
-			items.push({
+			{
+				id: 'delete',
 				label: t('scriptTemplates.delete'),
 				icon: 'octagon',
-				tone: 'danger',
+				danger: true,
+				hidden: template.builtin,
 				onSelect: () => {
 					deleteTarget = template;
 					deleteOpen = true;
 				}
-			});
-		}
-		return items;
+			}
+		];
 	}
 
 	const dialogTitle = $derived(
@@ -210,22 +246,11 @@
 	);
 </script>
 
-{#snippet nameCell(template: JobTemplate)}
-	<span class="template">
-		<span class="template__name">{templateName(template, 'job')}</span>
-		<span class="template__meta">{templateDescription(template, 'job')}</span>
-	</span>
-{/snippet}
-
 {#snippet sourceCell(template: JobTemplate)}
 	<Badge tone={template.builtin ? 'accent' : 'neutral'}>
 		{template.builtin ? t('scriptTemplates.builtin') : t('scriptTemplates.own')}
 	</Badge>
 {/snippet}
-
-<svelte:head>
-	<title>{t('jobTemplates.title')} · {t('app.name')}</title>
-</svelte:head>
 
 <SettingsLayout
 	title={t('jobTemplates.title')}
@@ -248,21 +273,35 @@
 			</Button>
 		</EmptyState>
 	{:else}
-		<Table
+		<!-- A template has no record page: the row opens its form (design/style/ui-principles.md, 2.2). -->
+		<DataTable
 			{columns}
-			rows={templates}
+			rows={shown}
 			{loading}
 			{error}
 			rowKey={(template) => template.id}
-			filterPlaceholder={t('jobTemplates.searchPlaceholder')}
+			onRowOpen={openEdit}
+			actions={actionsFor}
+			moreLabel={(template) =>
+				t('scriptTemplates.moreActions', { name: templateName(template, 'job') })}
+			emptyTitle={t('filter.noMatches')}
+			emptyDescription={t('filter.noMatchesDescription')}
 		>
-			{#snippet rowActions(template)}
-				<RowActions
-					moreLabel={t('scriptTemplates.moreActions', { name: templateName(template, 'job') })}
-					items={actionsFor(template)}
+			{#snippet toolbar()}
+				<FilterBar
+					label={t('scriptTemplates.filters')}
+					value={filters.value}
+					search={{
+						key: 'q',
+						label: t('hosts.search'),
+						placeholder: t('jobTemplates.searchPlaceholder')
+					}}
+					{facets}
+					onchange={filters.update}
+					onreset={filters.reset}
 				/>
 			{/snippet}
-		</Table>
+		</DataTable>
 	{/if}
 </SettingsLayout>
 
@@ -337,20 +376,6 @@
 />
 
 <style>
-	.template {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.template__name {
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.template__meta {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
 	.form {
 		display: flex;
 		flex-direction: column;

@@ -7,7 +7,17 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Alerts from './+page.svelte';
 
-const mocks = vi.hoisted(() => ({ listAlerts: vi.fn(), pushToast: vi.fn() }));
+const mocks = vi.hoisted(() => ({ listAlerts: vi.fn(), pushToast: vi.fn(), goto: vi.fn() }));
+
+const route = vi.hoisted(() => ({ url: new URL('http://localhost/alerts') }));
+
+vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/navigation', () => ({
+	goto: (address: string) => {
+		mocks.goto(address);
+		route.url = new URL(address, 'http://localhost');
+	}
+}));
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
@@ -42,9 +52,11 @@ function alert(overrides: Record<string, unknown> = {}) {
 describe('the Alerts screen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		route.url = new URL('http://localhost/alerts');
 	});
 
-	it('lists an open alert with its subject, its text and the link to the job', async () => {
+	it('lists an open alert and opens its details with the link to the job', async () => {
+		const user = userEvent.setup();
 		mocks.listAlerts.mockResolvedValue({ items: [alert()], next_cursor: null });
 		render(Alerts);
 
@@ -52,9 +64,19 @@ describe('the Alerts screen', () => {
 		expect(mocks.listAlerts).toHaveBeenCalledWith({ status: 'open', limit: 50 });
 		expect(screen.getByText('Job failed')).toBeInTheDocument();
 		expect(screen.getByText('The backup job failed (config_error).')).toBeInTheDocument();
-		expect(screen.getByText('compile_failed')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: /Open the job/ })).toHaveAttribute('href', '/jobs/j_9');
-		expect(screen.getByText('win-fs01 · primary-s3')).toBeInTheDocument();
+		// The error text is in the details, not in the list (design/style/ui-principles.md, 2.5).
+		expect(screen.queryByText('compile_failed')).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: /Open the job/ })).not.toBeInTheDocument();
+
+		await user.click(screen.getByRole('button', { name: 'nightly-web' }));
+		const panel = await screen.findByRole('dialog');
+		expect(within(panel).getByText('compile_failed')).toBeInTheDocument();
+		expect(within(panel).getByText('win-fs01')).toBeInTheDocument();
+		expect(within(panel).getByText('primary-s3')).toBeInTheDocument();
+		expect(within(panel).getByRole('link', { name: 'Open the job' })).toHaveAttribute(
+			'href',
+			'/jobs/j_9'
+		);
 	});
 
 	it('shows the empty state of the open list', async () => {
@@ -85,7 +107,9 @@ describe('the Alerts screen', () => {
 		render(Alerts);
 		await screen.findByText('nightly-web');
 
-		await user.selectOptions(screen.getByLabelText('Show alerts'), 'resolved');
+		const bar = screen.getByRole('group', { name: 'Show alerts' });
+		await user.click(within(bar).getByRole('button', { name: /^State/ }));
+		await user.click((await screen.findByText('Resolved')).closest('button') as HTMLElement);
 
 		await waitFor(() =>
 			expect(mocks.listAlerts).toHaveBeenLastCalledWith({ status: 'resolved', limit: 50 })

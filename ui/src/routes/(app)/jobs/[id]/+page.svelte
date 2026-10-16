@@ -9,15 +9,14 @@
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { JobDetail, JobLogLine, JobStep } from '#lib/api/index.ts';
 	import StepLog from '#lib/components/StepLog.svelte';
+	import { RecordPage } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Badge,
 		Button,
 		ConfirmDialog,
-		EmptyState,
 		Icon,
 		Panel,
-		Skeleton,
 		StatusPill
 	} from '#lib/components/ui/index.ts';
 	import type { StatusTone } from '#lib/components/ui/index.ts';
@@ -140,6 +139,21 @@
 	const title = $derived(
 		job ? (job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey)) : t('jobs.title')
 	);
+
+	const subtitle = $derived.by(() => {
+		if (!job) return '';
+		const parts = [
+			job.plan_name
+				? `${t('jobs.plan')} ${job.plan_name}`
+				: t(`jobs.kind.${job.kind}` as MessageKey),
+			`${t('jobs.host').toLowerCase()} ${job.agent_hostname ?? t('common.none')}`,
+			t(`jobDetail.triggeredBy.${job.trigger}` as MessageKey)
+		];
+		if (progress && progress.total > 0 && live) {
+			parts.push(t('jobDetail.stepOf', { current: progress.position, total: progress.total }));
+		}
+		return parts.join(' · ');
+	});
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -376,52 +390,26 @@
 	}
 </script>
 
-<svelte:head>
-	<title>{title} · {t('jobs.title')} · {t('app.name')}</title>
-</svelte:head>
-
-{#if loading}
-	<Skeleton variant="row" />
-	<div class="gap"></div>
-	<Skeleton variant="row" />
-{:else if notFound}
-	<EmptyState icon="job" title={t('jobDetail.notFound')} bordered />
-{:else if error && !job}
-	<Alert tone="danger" title={error}></Alert>
-{:else if job}
-	<header class="head">
-		<div class="head__text">
-			<div class="head__title-row">
-				<h1 class="head__title mono">{job.id}</h1>
-				<StatusPill
-					{tone}
-					title={warnings ? t('jobs.statusFull.succeeded_with_warnings') : undefined}
-				>
-					{statusLabel}
-				</StatusPill>
-				{#if live}<span class="head__live">{t('jobDetail.live')}</span>{/if}
-			</div>
-			<p class="head__subtitle">
-				{#if job.plan_name}
-					{t('jobs.plan')}
-					<a href={resolve('/(app)/plans')}>{job.plan_name}</a>
-					·
-				{:else}
-					{t(`jobs.kind.${job.kind}` as MessageKey)}
-					·
-				{/if}
-				{t('jobs.host').toLowerCase()}
-				<a href={resolve('/(app)/hosts')}>{job.agent_hostname ?? t('common.none')}</a>
-				· {t(`jobDetail.triggeredBy.${job.trigger}` as MessageKey)}
-				{#if progress && progress.total > 0 && live}
-					· {t('jobDetail.stepOf', { current: progress.position, total: progress.total })}
-				{/if}
-			</p>
-			{#if reasonOf(job)}
-				<p class="head__reason">{reasonOf(job)}</p>
-			{/if}
-		</div>
-		<div class="head__actions">
+<RecordPage
+	title={job?.id ?? id}
+	description={subtitle}
+	crumbs={[{ label: id }]}
+	{loading}
+	error={notFound ? t('jobDetail.notFound') : error && !job ? error : null}
+>
+	{#snippet status()}
+		{#if job}
+			<StatusPill
+				{tone}
+				title={warnings ? t('jobs.statusFull.succeeded_with_warnings') : undefined}
+			>
+				{statusLabel}
+			</StatusPill>
+			{#if live}<span class="head__live">{t('jobDetail.live')}</span>{/if}
+		{/if}
+	{/snippet}
+	{#snippet actions()}
+		{#if job}
 			<Button icon="download" loading={downloading} onclick={downloadLog}>
 				{t('jobDetail.downloadLog')}
 			</Button>
@@ -435,180 +423,31 @@
 					{t('jobs.cancel')}
 				</Button>
 			{/if}
-		</div>
-	</header>
-
-	{#if stats.length > 0}
-		<Panel title={t('jobDetail.summary')} subtitle={t('jobDetail.summaryHint')}>
-			<div class="stats">
-				{#each stats as stat (stat.label)}
-					<div class="stat">
-						<span class="stat__value" class:stat__value--mono={stat.mono}>{statValue(stat)}</span>
-						<span class="stat__label">{t(stat.label)}</span>
-					</div>
-				{/each}
-			</div>
-		</Panel>
-	{/if}
-
-	<div class="layout">
-		<div class="layout__main">
-			<Panel
-				title={t('jobDetail.steps')}
-				subtitle={progress && progress.total > 0
-					? t('jobDetail.stepsComplete', { done: progress.complete, total: progress.total })
-					: undefined}
-			>
-				{#if rows.length === 0}
-					<p class="muted">{t('jobDetail.stepsEmpty')}</p>
-				{:else}
-					{#if progress && progress.total > 1}
-						<progress
-							class="progress progress--steps"
-							aria-label={t('jobDetail.steps')}
-							max="1"
-							value={progress.fraction}
-						></progress>
-					{/if}
-					<ol class="timeline">
-						{#each rows as row (row.id)}
-							{@const marker =
-								row.state === 'running' ? 'running' : row.step ? markerOf(row.step.status) : 'idle'}
-							<li class="timeline__item">
-								<span class="timeline__marker timeline__marker--{marker}">
-									<Icon name={MARKER_ICONS[marker]} size="lg" spin={marker === 'running'} />
-								</span>
-								{#if hasLog(row)}
-									<button
-										type="button"
-										class="timeline__head timeline__toggle"
-										aria-expanded={isOpen(row)}
-										aria-label={t(isOpen(row) ? 'jobDetail.hideStepLog' : 'jobDetail.showStepLog', {
-											name: rowTitle(row)
-										})}
-										onclick={() => toggle(row)}
-									>
-										<Icon name={isOpen(row) ? 'chevron-down' : 'chevron-right'} size="xs" />
-										<span class="timeline__title">{rowTitle(row)}</span>
-										{#if row.kind === 'script' || row.kind === 'hook'}
-											<Badge tone="neutral"
-												>{t(`jobDetail.stepKind.${row.kind}` as MessageKey)}</Badge
-											>
-										{/if}
-										{#if row.phase}
-											<Badge tone="info"
-												>{t(`profiles.hooks.phase.${row.phase}` as MessageKey)}</Badge
-											>
-										{/if}
-										{#if !isOpen(row) && stepLines(row).length > 0}
-											<span class="timeline__counts">{countsText(countLines(stepLines(row)))}</span>
-										{/if}
-										<span class="timeline__meta">{rowMeta(row)}</span>
-									</button>
-								{:else}
-									<div class="timeline__head">
-										<span class="timeline__title">{rowTitle(row)}</span>
-										{#if row.kind === 'script' || row.kind === 'hook'}
-											<Badge tone="neutral"
-												>{t(`jobDetail.stepKind.${row.kind}` as MessageKey)}</Badge
-											>
-										{/if}
-										{#if row.phase}
-											<Badge tone="info"
-												>{t(`profiles.hooks.phase.${row.phase}` as MessageKey)}</Badge
-											>
-										{/if}
-										<span class="timeline__meta">{rowMeta(row)}</span>
-									</div>
-								{/if}
-								{#if row.step}
-									{#if stepError(row.step)}
-										<p class="timeline__body">{stepError(row.step)}</p>
-									{/if}
-									{#if row.step.possible_stale_lock}
-										<p class="timeline__body">{t('jobDetail.staleLock')}</p>
-									{/if}
-									{#if statsOf(row.step.output).length > 0}
-										<p class="timeline__body">
-											{#each statsOf(row.step.output).slice(0, 3) as stat, index (stat.label)}
-												{index > 0 ? ' · ' : ''}{t(stat.label)}: {statValue(stat)}
-											{/each}
-										</p>
-									{/if}
-								{:else if row.state === 'running' && runningProgress}
-									<progress
-										class="progress"
-										aria-label={t('jobDetail.progress')}
-										max="1"
-										value={runningProgress.percent_done}
-									></progress>
-									<p class="timeline__body">
-										{#if runningProgress.total_files > 0}
-											{t('jobDetail.progressFiles', {
-												done: formatCount(runningProgress.files_done),
-												total: formatCount(runningProgress.total_files)
-											})}
-											·
-										{/if}
-										{t('jobDetail.progressBytes', {
-											done: formatBytes(runningProgress.bytes_done),
-											total: formatBytes(runningProgress.total_bytes)
-										})}
-										{#if runningProgress.seconds_remaining > 0}
-											· {t('jobDetail.progressRemaining', {
-												time: formatSeconds(runningProgress.seconds_remaining)
-											})}
-										{/if}
-									</p>
-									{#if runningProgress.current_files.length > 0}
-										<p class="timeline__body timeline__body--mono">
-											{t('jobDetail.progressCurrent', { file: runningProgress.current_files[0] })}
-										</p>
-									{/if}
-								{/if}
-								{#if hasLog(row) && isOpen(row)}
-									<StepLog
-										stepId={row.id}
-										name={rowTitle(row)}
-										lines={stepLines(row)}
-										live={row.state === 'running'}
-										onCopy={copyLog}
-									/>
-								{/if}
-							</li>
-						{/each}
-					</ol>
-				{/if}
-			</Panel>
-
-			<div class="gap"></div>
-			{#if logPurged}
-				<Alert tone="info" title={t('jobDetail.logPurged')}></Alert>
-				<div class="gap"></div>
+		{/if}
+	{/snippet}
+	{#snippet banners()}
+		{#if job}
+			{#if reasonOf(job)}
+				<p class="head__reason">{reasonOf(job)}</p>
 			{/if}
-			{#if groups.general.length > 0}
-				<div class="gap"></div>
-				<Panel title={t('jobDetail.generalLog')} subtitle={t('jobDetail.generalLogHint')}>
-					<StepLog
-						stepId="general"
-						name={t('jobDetail.generalLog')}
-						lines={groups.general}
-						onCopy={copyLog}
-					/>
+			{#if stats.length > 0}
+				<Panel title={t('jobDetail.summary')} subtitle={t('jobDetail.summaryHint')}>
+					<div class="stats">
+						{#each stats as stat (stat.label)}
+							<div class="stat">
+								<span class="stat__value" class:stat__value--mono={stat.mono}
+									>{statValue(stat)}</span
+								>
+								<span class="stat__label">{t(stat.label)}</span>
+							</div>
+						{/each}
+					</div>
 				</Panel>
 			{/if}
-			{#if logTruncated}
-				<p class="muted note">{t('jobDetail.logTruncated')}</p>
-			{/if}
-			{#if capped}
-				<p class="muted note">{t('jobDetail.logCapped', { count: formatCount(MAX_LINES) })}</p>
-			{/if}
-			{#if logError}
-				<p class="note note--error">{t('jobDetail.logError')}</p>
-			{/if}
-		</div>
-
-		<aside class="layout__side">
+		{/if}
+	{/snippet}
+	{#snippet side()}
+		{#if job}
 			{#if job.restore}
 				<RestoreParams restore={job.restore} hostname={job.agent_hostname} />
 			{/if}
@@ -680,9 +519,161 @@
 					{/if}
 				</dl>
 			</Panel>
-		</aside>
-	</div>
-{/if}
+		{/if}
+	{/snippet}
+
+	{#if job}
+		<Panel
+			title={t('jobDetail.steps')}
+			subtitle={progress && progress.total > 0
+				? t('jobDetail.stepsComplete', { done: progress.complete, total: progress.total })
+				: undefined}
+		>
+			{#if rows.length === 0}
+				<p class="muted">{t('jobDetail.stepsEmpty')}</p>
+			{:else}
+				{#if progress && progress.total > 1}
+					<progress
+						class="progress progress--steps"
+						aria-label={t('jobDetail.steps')}
+						max="1"
+						value={progress.fraction}
+					></progress>
+				{/if}
+				<ol class="timeline">
+					{#each rows as row (row.id)}
+						{@const marker =
+							row.state === 'running' ? 'running' : row.step ? markerOf(row.step.status) : 'idle'}
+						<li class="timeline__item">
+							<span class="timeline__marker timeline__marker--{marker}">
+								<Icon name={MARKER_ICONS[marker]} size="lg" spin={marker === 'running'} />
+							</span>
+							{#if hasLog(row)}
+								<button
+									type="button"
+									class="timeline__head timeline__toggle"
+									aria-expanded={isOpen(row)}
+									aria-label={t(isOpen(row) ? 'jobDetail.hideStepLog' : 'jobDetail.showStepLog', {
+										name: rowTitle(row)
+									})}
+									onclick={() => toggle(row)}
+								>
+									<Icon name={isOpen(row) ? 'chevron-down' : 'chevron-right'} size="xs" />
+									<span class="timeline__title">{rowTitle(row)}</span>
+									{#if row.kind === 'script' || row.kind === 'hook'}
+										<Badge tone="neutral">{t(`jobDetail.stepKind.${row.kind}` as MessageKey)}</Badge
+										>
+									{/if}
+									{#if row.phase}
+										<Badge tone="info">{t(`profiles.hooks.phase.${row.phase}` as MessageKey)}</Badge
+										>
+									{/if}
+									{#if !isOpen(row) && stepLines(row).length > 0}
+										<span class="timeline__counts">{countsText(countLines(stepLines(row)))}</span>
+									{/if}
+									<span class="timeline__meta">{rowMeta(row)}</span>
+								</button>
+							{:else}
+								<div class="timeline__head">
+									<span class="timeline__title">{rowTitle(row)}</span>
+									{#if row.kind === 'script' || row.kind === 'hook'}
+										<Badge tone="neutral">{t(`jobDetail.stepKind.${row.kind}` as MessageKey)}</Badge
+										>
+									{/if}
+									{#if row.phase}
+										<Badge tone="info">{t(`profiles.hooks.phase.${row.phase}` as MessageKey)}</Badge
+										>
+									{/if}
+									<span class="timeline__meta">{rowMeta(row)}</span>
+								</div>
+							{/if}
+							{#if row.step}
+								{#if stepError(row.step)}
+									<p class="timeline__body">{stepError(row.step)}</p>
+								{/if}
+								{#if row.step.possible_stale_lock}
+									<p class="timeline__body">{t('jobDetail.staleLock')}</p>
+								{/if}
+								{#if statsOf(row.step.output).length > 0}
+									<p class="timeline__body">
+										{#each statsOf(row.step.output).slice(0, 3) as stat, index (stat.label)}
+											{index > 0 ? ' · ' : ''}{t(stat.label)}: {statValue(stat)}
+										{/each}
+									</p>
+								{/if}
+							{:else if row.state === 'running' && runningProgress}
+								<progress
+									class="progress"
+									aria-label={t('jobDetail.progress')}
+									max="1"
+									value={runningProgress.percent_done}
+								></progress>
+								<p class="timeline__body">
+									{#if runningProgress.total_files > 0}
+										{t('jobDetail.progressFiles', {
+											done: formatCount(runningProgress.files_done),
+											total: formatCount(runningProgress.total_files)
+										})}
+										·
+									{/if}
+									{t('jobDetail.progressBytes', {
+										done: formatBytes(runningProgress.bytes_done),
+										total: formatBytes(runningProgress.total_bytes)
+									})}
+									{#if runningProgress.seconds_remaining > 0}
+										· {t('jobDetail.progressRemaining', {
+											time: formatSeconds(runningProgress.seconds_remaining)
+										})}
+									{/if}
+								</p>
+								{#if runningProgress.current_files.length > 0}
+									<p class="timeline__body timeline__body--mono">
+										{t('jobDetail.progressCurrent', { file: runningProgress.current_files[0] })}
+									</p>
+								{/if}
+							{/if}
+							{#if hasLog(row) && isOpen(row)}
+								<StepLog
+									stepId={row.id}
+									name={rowTitle(row)}
+									lines={stepLines(row)}
+									live={row.state === 'running'}
+									onCopy={copyLog}
+								/>
+							{/if}
+						</li>
+					{/each}
+				</ol>
+			{/if}
+		</Panel>
+
+		<div class="gap"></div>
+		{#if logPurged}
+			<Alert tone="info" title={t('jobDetail.logPurged')}></Alert>
+			<div class="gap"></div>
+		{/if}
+		{#if groups.general.length > 0}
+			<div class="gap"></div>
+			<Panel title={t('jobDetail.generalLog')} subtitle={t('jobDetail.generalLogHint')}>
+				<StepLog
+					stepId="general"
+					name={t('jobDetail.generalLog')}
+					lines={groups.general}
+					onCopy={copyLog}
+				/>
+			</Panel>
+		{/if}
+		{#if logTruncated}
+			<p class="muted note">{t('jobDetail.logTruncated')}</p>
+		{/if}
+		{#if capped}
+			<p class="muted note">{t('jobDetail.logCapped', { count: formatCount(MAX_LINES) })}</p>
+		{/if}
+		{#if logError}
+			<p class="note note--error">{t('jobDetail.logError')}</p>
+		{/if}
+	{/if}
+</RecordPage>
 
 <ConfirmDialog
 	bind:open={cancelOpen}
@@ -696,10 +687,6 @@
 />
 
 <style>
-	.gap {
-		height: var(--rh-space-4);
-	}
-
 	.mono {
 		font-family: var(--rh-font-mono);
 	}
@@ -708,33 +695,6 @@
 		margin: 0;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
-	}
-
-	.head {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-start;
-		gap: var(--rh-space-4);
-		padding-bottom: var(--rh-space-6);
-	}
-
-	.head__text {
-		min-width: 0;
-		flex: 1 1 18rem;
-	}
-
-	.head__title-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--rh-space-3);
-	}
-
-	.head__title {
-		margin: 0;
-		font-size: var(--rh-font-size-xl);
-		font-weight: var(--rh-font-weight-semibold);
-		line-height: var(--rh-line-height-tight);
 	}
 
 	.head__live {
@@ -746,23 +706,10 @@
 		font-size: var(--rh-font-size-xs);
 	}
 
-	.head__subtitle {
-		margin: var(--rh-space-2) 0 0;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-		overflow-wrap: anywhere;
-	}
-
 	.head__reason {
 		margin: var(--rh-space-2) 0 0;
 		color: var(--rh-color-danger-text);
 		font-size: var(--rh-font-size-sm);
-	}
-
-	.head__actions {
-		display: flex;
-		flex: none;
-		gap: var(--rh-space-2);
 	}
 
 	.stats {
@@ -795,19 +742,7 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
-	.layout {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(340px, 24rem);
-		gap: var(--rh-space-8);
-		align-items: start;
-		margin-top: var(--rh-space-6);
-	}
-
 	@media (max-width: 1000px) {
-		.layout {
-			grid-template-columns: minmax(0, 1fr);
-		}
-
 		.stats {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}

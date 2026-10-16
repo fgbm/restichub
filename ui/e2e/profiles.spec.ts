@@ -70,8 +70,10 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await expect(page.getByRole('link', { name: 'web-daily' })).toBeVisible();
 
 	// The preview shows the steps and the command line with masked secrets.
-	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
-	await page.getByRole('menuitem', { name: 'Preview' }).click();
+	await page
+		.getByRole('row', { name: /web-daily/ })
+		.getByRole('button', { name: 'Preview' })
+		.click();
 	await expect(page.getByRole('dialog', { name: 'Preview' })).toBeVisible();
 	await page.locator('#preview-host').selectOption({ label: 'win-fs01' });
 	await expect(page.getByText('restic backup', { exact: false })).toBeVisible();
@@ -80,7 +82,7 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 
 	// Edit: the name link opens the page, the name changes.
 	await page.getByRole('link', { name: 'web-daily' }).click();
-	await expect(page.getByRole('heading', { level: 1, name: 'Edit profile' })).toBeVisible();
+	await expect(page.getByRole('heading', { level: 1, name: 'web-daily' })).toBeVisible();
 	await expect(breadcrumb(page)).toContainText('web-daily');
 	await page.locator('#profile-name').fill('web-renamed');
 	await page.getByRole('button', { name: 'Save' }).click();
@@ -88,22 +90,31 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await expect(page.getByRole('link', { name: 'web-renamed' })).toBeVisible();
 
 	// Delete.
-	await page.getByRole('button', { name: 'More actions for web-renamed' }).click();
-	await page.getByRole('menuitem', { name: 'Delete profile' }).click();
-	await page.getByRole('button', { name: 'Delete profile', exact: true }).click();
+	await page
+		.getByRole('row', { name: /web-renamed/ })
+		.getByRole('button', { name: 'Delete profile' })
+		.click();
+	await page
+		.getByRole('dialog')
+		.getByRole('button', { name: 'Delete profile', exact: true })
+		.click();
 	await expect(page.getByText('The profile is deleted.')).toBeVisible();
 	await expect(page.getByText('No profiles yet')).toBeVisible();
 });
 
-test('the Edit action and the profile link open the same page', async ({ page }) => {
+test('a click on the row and the profile link open the same page', async ({ page }) => {
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.profiles', 'sample'));
 	await signIn(page);
 	await createRepository(page);
 	await openProfiles(page);
 	await expect(page.getByRole('link', { name: 'web-daily' })).toBeVisible();
 
-	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	// The row link covers the row: a click on another cell opens the record (UI principles 2.1).
+	await page
+		.getByRole('row', { name: /web-daily/ })
+		.getByRole('cell')
+		.nth(2)
+		.click();
 	await expect(page).toHaveURL(/\/profiles\/p_1$/);
 	await expect(page.locator('#profile-name')).toHaveValue('web-daily');
 

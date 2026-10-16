@@ -3,17 +3,32 @@
 	import { coalesce } from '#lib/events.ts';
 	import { onEvent } from '#lib/stores/events.svelte.ts';
 	import { resolve } from '$app/paths';
+	import { page as route } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Alert, AlertKind } from '#lib/api/index.ts';
-	import { Button, PageHeader, Select, StatusPill, Table } from '#lib/components/ui/index.ts';
-	import type { SelectOption, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
+	import {
+		Button,
+		DataTable,
+		FilterBar,
+		KeyValue,
+		SidePanel,
+		StatusPill
+	} from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		KeyValueItem,
+		StatusTone,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { alertCondition } from '#lib/alert-text.ts';
-	import { formatTime, relativeTime } from '#lib/format.ts';
+	import { formatTime } from '#lib/format.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
-	type Filter = 'open' | 'resolved' | 'all';
 	const PAGE_SIZE = 50;
 
 	let alerts = $state<Alert[]>([]);
@@ -21,14 +36,22 @@
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let error = $state<string | null>(null);
-	let filter = $state<Filter>('open');
-
-	const filterOptions = $derived<SelectOption[]>(
-		(['open', 'resolved', 'all'] as const).map((value) => ({
-			value,
-			label: t(`alerts.filter.${value}` as MessageKey)
-		}))
+	// Without a state in the address the screen opens with the open alerts; Reset shows all.
+	const filters = queryFilters(['q', 'status', 'kind'] as const);
+	if (!route.url.searchParams.has('status')) filters.update({ status: 'open' });
+	const filter = $derived<'open' | 'resolved' | 'all'>(
+		filters.value.status === 'open' || filters.value.status === 'resolved'
+			? filters.value.status
+			: 'all'
 	);
+
+	let detail = $state<Alert | null>(null);
+	let detailOpen = $state(false);
+
+	function openDetail(alert: Alert): void {
+		detail = alert;
+		detailOpen = true;
+	}
 
 	const TONES: Record<AlertKind, StatusTone> = {
 		rpo_violated: 'failed',
@@ -47,40 +70,103 @@
 		return alert.plan_name ?? alert.repository_name ?? alert.agent_hostname ?? '—';
 	}
 
-	function contextOf(alert: Alert): string {
-		return [alert.agent_hostname, alert.repository_name]
-			.filter((part) => part && part !== subjectOf(alert))
-			.join(' · ');
-	}
-
 	const columns = $derived<TableColumn<Alert>[]>([
 		{
 			key: 'kind',
 			header: t('alerts.kind'),
+			nowrap: true,
 			value: (row) => kindLabel(row.kind),
 			render: kindCell
 		},
-		{ key: 'subject', header: t('alerts.subject'), value: subjectOf, render: subjectCell },
 		{
-			key: 'message',
-			header: t('alerts.message'),
-			value: (row) => `${alertCondition(row)} ${row.error_text ?? ''}`.trim(),
-			render: messageCell
+			key: 'subject',
+			header: t('alerts.subject'),
+			truncate: 'sm',
+			primary: true,
+			value: subjectOf
 		},
-		{
-			key: 'opened_at',
-			nowrap: true,
-			header: t('alerts.opened'),
-			value: (row) => row.opened_at,
-			render: openedCell
-		},
+		{ key: 'message', header: t('alerts.message'), truncate: 'lg', value: alertCondition },
+		{ key: 'opened_at', header: t('alerts.opened'), date: 'relative' },
 		{
 			key: 'status',
 			header: t('alerts.state'),
+			nowrap: true,
 			value: (row) => row.status,
 			render: stateCell
 		}
 	]);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'status',
+			label: t('alerts.state'),
+			multiple: false,
+			options: (['open', 'resolved'] as const).map((value) => ({
+				value,
+				label: t(`alerts.state.${value}`)
+			}))
+		},
+		{
+			key: 'kind',
+			label: t('alerts.kind'),
+			options: facetCounts(alerts, (alert) => [alert.kind]).map((option) => ({
+				...option,
+				label: kindLabel(option.value as AlertKind)
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		alerts.filter((alert) => {
+			const { q, kind } = filters.value;
+			if (kind && !splitList(kind).includes(alert.kind)) return false;
+			return matchesSearch(q, [
+				kindLabel(alert.kind),
+				subjectOf(alert),
+				alert.agent_hostname,
+				alert.repository_name,
+				alertCondition(alert)
+			]);
+		})
+	);
+
+	const detailItems = $derived<KeyValueItem[]>(
+		detail
+			? [
+					{ key: 'state', label: t('alerts.state'), value: t(`alerts.state.${detail.status}`) },
+					{ key: 'condition', label: t('alerts.message'), value: alertCondition(detail) },
+					...(detail.error_text
+						? [
+								{
+									key: 'error',
+									label: t('alerts.errorText'),
+									value: detail.error_text,
+									mono: true
+								}
+							]
+						: []),
+					...(detail.plan_name
+						? [{ key: 'plan', label: t('jobs.plan'), value: detail.plan_name }]
+						: []),
+					...(detail.agent_hostname
+						? [{ key: 'host', label: t('jobs.host'), value: detail.agent_hostname }]
+						: []),
+					...(detail.repository_name
+						? [{ key: 'repository', label: t('jobs.repository'), value: detail.repository_name }]
+						: []),
+					{ key: 'opened', label: t('alerts.opened'), value: formatTime(detail.opened_at) },
+					...(detail.resolved_at
+						? [
+								{
+									key: 'resolved',
+									label: t('alerts.resolvedAt'),
+									value: formatTime(detail.resolved_at)
+								}
+							]
+						: [])
+				]
+			: []
+	);
 
 	const emptyTitle = $derived(
 		filter === 'open'
@@ -131,7 +217,19 @@
 		}
 	}
 
-	onMount(() => void load());
+	let loadedFilter: string | undefined;
+	onMount(() => {
+		loadedFilter = filter;
+		void load();
+	});
+
+	// The state filters on the server; the search and the kind narrow the loaded rows.
+	$effect(() => {
+		const key = filter;
+		if (loadedFilter === undefined || key === loadedFilter) return;
+		loadedFilter = key;
+		void load();
+	});
 
 	// A page that the user extended with "load more" shows its rows until the next full load.
 	let extended = false;
@@ -154,121 +252,68 @@
 	</span>
 {/snippet}
 
-{#snippet subjectCell(alert: Alert)}
-	<span class="alert">
-		{#if alert.job_id}
-			<a
-				class="alert__name"
-				href={resolve('/(app)/jobs/[id]', { id: alert.job_id })}
-				aria-label={`${t('alerts.openJob')}: ${subjectOf(alert)}`}>{subjectOf(alert)}</a
-			>
-		{:else}
-			<span class="alert__name">{subjectOf(alert)}</span>
-		{/if}
-		{#if contextOf(alert)}
-			<span class="alert__meta">{contextOf(alert)}</span>
-		{/if}
-	</span>
-{/snippet}
-
-{#snippet messageCell(alert: Alert)}
-	<span class="alert">
-		<span>{alertCondition(alert)}</span>
-		{#if alert.error_text}
-			<span class="alert__meta" title={t('alerts.errorText')}>{alert.error_text}</span>
-		{/if}
-	</span>
-{/snippet}
-
-{#snippet openedCell(alert: Alert)}
-	<time datetime={alert.opened_at} title={formatTime(alert.opened_at)}>
-		{relativeTime(alert.opened_at)}
-	</time>
-{/snippet}
-
 {#snippet stateCell(alert: Alert)}
-	<span class="alert">
-		<StatusPill tone={alert.status === 'open' ? 'warning' : 'success'}>
-			{t(`alerts.state.${alert.status}` as MessageKey)}
-		</StatusPill>
-		{#if alert.resolved_at}
-			<span class="alert__meta" title={formatTime(alert.resolved_at)}>
-				{t('alerts.resolvedAt')}: {relativeTime(alert.resolved_at)}
-			</span>
-		{/if}
-	</span>
+	<StatusPill tone={alert.status === 'open' ? 'warning' : 'success'}>
+		{t(`alerts.state.${alert.status}`)}
+	</StatusPill>
 {/snippet}
 
-<svelte:head>
-	<title>{t('alerts.title')} · {t('app.name')}</title>
-</svelte:head>
-
-<PageHeader
+<Page
 	title={t('alerts.title')}
 	description={t('alerts.description')}
 	count={loading ? undefined : alerts.length}
 >
-	<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
-</PageHeader>
-
-<Table
-	{columns}
-	rows={alerts}
-	{loading}
-	{error}
-	rowKey={(alert) => alert.id}
-	paginated={false}
-	filterPlaceholder={t('alerts.searchPlaceholder')}
-	{emptyTitle}
-	emptyDescription={filter === 'open' ? t('alerts.emptyOpenBody') : undefined}
-	emptyIcon="check-circle"
->
-	{#snippet toolbar()}
-		<div class="filter">
-			<Select
-				id="alerts-status"
-				aria-label={t('alerts.filter')}
-				options={filterOptions}
-				bind:value={filter}
-				onchange={() => load()}
-			/>
-		</div>
+	{#snippet actions()}
+		<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
 	{/snippet}
-</Table>
-{#if nextCursor}
-	<div class="more">
-		<Button loading={loadingMore} onclick={loadMore}>{t('common.loadMore')}</Button>
-	</div>
-{/if}
+
+	<DataTable
+		{columns}
+		rows={shown}
+		{loading}
+		{error}
+		rowKey={(alert) => alert.id}
+		onRowOpen={openDetail}
+		paginated={false}
+		{emptyTitle}
+		emptyDescription={filter === 'open' ? t('alerts.emptyOpenBody') : undefined}
+		emptyIcon="check-circle"
+	>
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('alerts.filter')}
+				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('alerts.searchPlaceholder') }}
+				{facets}
+				onchange={filters.update}
+				onreset={filters.reset}
+			/>
+		{/snippet}
+	</DataTable>
+	{#if nextCursor}
+		<div class="more">
+			<Button loading={loadingMore} onclick={loadMore}>{t('common.loadMore')}</Button>
+		</div>
+	{/if}
+
+	<!-- An alert has no record page: the row opens its details (design/style/ui-principles.md, 2.2). -->
+	<SidePanel
+		bind:open={detailOpen}
+		title={detail ? kindLabel(detail.kind) : ''}
+		subtitle={detail ? subjectOf(detail) : undefined}
+	>
+		<KeyValue items={detailItems} stacked />
+		{#snippet footer()}
+			{#if detail?.job_id}
+				<a class="detail__job" href={resolve('/(app)/jobs/[id]', { id: detail.job_id })}>
+					{t('alerts.openJob')}
+				</a>
+			{/if}
+		{/snippet}
+	</SidePanel>
+</Page>
 
 <style>
-	.alert {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: var(--rh-space-1);
-	}
-
-	.alert__name {
-		color: var(--rh-color-text);
-		font-weight: var(--rh-font-weight-semibold);
-		text-decoration: none;
-	}
-
-	a.alert__name:hover {
-		color: var(--rh-color-link-hover);
-		text-decoration: underline;
-	}
-
-	.alert__meta {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.filter {
-		min-width: 10rem;
-	}
-
 	.more {
 		display: flex;
 		justify-content: center;

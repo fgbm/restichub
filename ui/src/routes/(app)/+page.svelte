@@ -6,18 +6,19 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { AlertKind, Dashboard, LockState, RpoState } from '#lib/api/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
 		Card,
+		DataTable,
 		EmptyState,
 		Icon,
-		PageHeader,
 		Panel,
 		Skeleton,
 		StatusPill
 	} from '#lib/components/ui/index.ts';
-	import type { IconName, StatusTone } from '#lib/components/ui/index.ts';
+	import type { IconName, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { alertCondition } from '#lib/alert-text.ts';
@@ -161,290 +162,307 @@
 			? t('dashboard.hours', { n: Math.round(minutes / 60) })
 			: t('dashboard.minutes', { n: minutes });
 	}
+
+	type DashboardPlan = Dashboard['plans']['items'][number];
+	type FailedJob = Dashboard['failed_jobs'][number];
+
+	const planColumns = $derived<TableColumn<DashboardPlan>[]>([
+		{
+			key: 'name',
+			header: t('dashboard.plans.plan'),
+			sortable: false,
+			render: planCell
+		},
+		{
+			key: 'last_success_at',
+			header: t('dashboard.plans.lastSuccess'),
+			date: 'relative',
+			sortable: false,
+			value: (row) => row.last_success_at ?? '',
+			cell: () => t('dashboard.plans.noSuccess')
+		},
+		{
+			key: 'rpo_seconds',
+			header: t('dashboard.plans.rpo'),
+			nowrap: true,
+			sortable: false,
+			value: (row) => hours(row.rpo_seconds)
+		},
+		{ key: 'state', header: t('dashboard.plans.state'), sortable: false, render: rpoCell }
+	]);
+
+	const jobColumns = $derived<TableColumn<FailedJob>[]>([
+		{ key: 'status', header: t('jobs.status'), sortable: false, render: failedCell },
+		{
+			key: 'name',
+			header: t('jobs.plan'),
+			primary: true,
+			sortable: false,
+			render: jobCell
+		},
+		{ key: 'finished_at', header: t('jobDetail.finishedAt'), date: 'relative', sortable: false }
+	]);
 </script>
 
-<svelte:head>
-	<title>{t('overview.title')} · {t('app.name')}</title>
-</svelte:head>
+{#snippet planCell(plan: DashboardPlan)}
+	<span class="cell__name">{plan.name}</span>
+	<span class="cell__meta">{plan.agent_hostname} · {plan.repository_name}</span>
+{/snippet}
 
-<PageHeader title={t('overview.title')} description={t('overview.description')}>
+{#snippet rpoCell(plan: DashboardPlan)}
+	{#if plan.enabled}
+		<StatusPill tone={RPO_TONES[plan.state]}>{t(`rpo.${plan.state}` as MessageKey)}</StatusPill>
+	{:else}
+		<StatusPill tone="neutral">{t('dashboard.plans.paused')}</StatusPill>
+	{/if}
+{/snippet}
+
+{#snippet failedCell(job: FailedJob)}
+	<StatusPill tone="failed">{t(`jobs.status.${job.status}` as MessageKey)}</StatusPill>
+{/snippet}
+
+{#snippet jobCell(job: FailedJob)}
+	<span class="cell__name">{job.plan_name ?? job.repository_name ?? job.agent_hostname}</span>
+	<span class="cell__meta">{job.agent_hostname}</span>
+{/snippet}
+
+<Page title={t('overview.title')} description={t('overview.description')}>
+	{#snippet actions()}
+		{#if hasTenant}
+			<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
+		{/if}
+	{/snippet}
+
 	{#if hasTenant}
-		<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
-	{/if}
-</PageHeader>
+		{#if loading && !dashboard}
+			<div class="overview" aria-busy="true">
+				<Skeleton variant="row" />
+				<Skeleton variant="row" />
+				<Skeleton variant="row" />
+			</div>
+		{:else if error && !dashboard}
+			<Alert tone="danger" title={error}>
+				<Button size="sm" onclick={() => load()}>{t('common.retry')}</Button>
+			</Alert>
+		{:else if dashboard && firstRun}
+			<div class="overview">
+				<Alert tone="info" title={t('overview.welcomeTitle')}>{t('overview.welcomeBody')}</Alert>
 
-{#if hasTenant}
-	{#if loading && !dashboard}
-		<div class="overview" aria-busy="true">
-			<Skeleton variant="row" />
-			<Skeleton variant="row" />
-			<Skeleton variant="row" />
-		</div>
-	{:else if error && !dashboard}
-		<Alert tone="danger" title={error}>
-			<Button size="sm" onclick={() => load()}>{t('common.retry')}</Button>
-		</Alert>
-	{:else if dashboard && firstRun}
-		<div class="overview">
-			<Alert tone="info" title={t('overview.welcomeTitle')}>{t('overview.welcomeBody')}</Alert>
-
-			<Panel title={t('overview.getStarted')} flush>
-				{#snippet actions()}
-					<span>{t('overview.progress', { done, total: steps.length })}</span>
-				{/snippet}
-				<ol class="checklist">
-					{#each steps as step, index (step.title)}
-						<li class="checklist__item" class:checklist__item--done={step.done}>
-							<span class="checklist__mark">
-								{#if step.done}
-									<Icon name="check" size="xs" />
-								{:else}
-									{index + 1}
+				<Panel title={t('overview.getStarted')} flush>
+					{#snippet actions()}
+						<span>{t('overview.progress', { done, total: steps.length })}</span>
+					{/snippet}
+					<ol class="checklist">
+						{#each steps as step, index (step.title)}
+							<li class="checklist__item" class:checklist__item--done={step.done}>
+								<span class="checklist__mark">
+									{#if step.done}
+										<Icon name="check" size="xs" />
+									{:else}
+										{index + 1}
+									{/if}
+								</span>
+								<div class="checklist__main">
+									<p class="checklist__title">{step.title}</p>
+									<p class="checklist__body">{step.body}</p>
+								</div>
+								{#if step.action}
+									<Button disabled={!step.onAction} onclick={step.onAction}>{step.action}</Button>
 								{/if}
-							</span>
-							<div class="checklist__main">
-								<p class="checklist__title">{step.title}</p>
-								<p class="checklist__body">{step.body}</p>
-							</div>
-							{#if step.action}
-								<Button disabled={!step.onAction} onclick={step.onAction}>{step.action}</Button>
-							{/if}
-						</li>
+							</li>
+						{/each}
+					</ol>
+				</Panel>
+
+				<div class="empties">
+					{#each empties as empty (empty.icon)}
+						<EmptyState
+							icon={empty.icon}
+							title={t(empty.title)}
+							description={t(empty.body)}
+							bordered
+						/>
 					{/each}
-				</ol>
-			</Panel>
+				</div>
 
-			<div class="empties">
-				{#each empties as empty (empty.icon)}
-					<EmptyState
-						icon={empty.icon}
-						title={t(empty.title)}
-						description={t(empty.body)}
-						bordered
-					/>
-				{/each}
+				<Panel title={t('overview.how.title')}>
+					<ul class="hints">
+						{#each hints as hint (hint)}
+							<li><Icon name="check" size="xs" />{t(hint)}</li>
+						{/each}
+					</ul>
+				</Panel>
 			</div>
+		{:else if dashboard}
+			<div class="overview">
+				{#if error}
+					<Alert tone="danger" title={error} />
+				{/if}
 
-			<Panel title={t('overview.how.title')}>
-				<ul class="hints">
-					{#each hints as hint (hint)}
-						<li><Icon name="check" size="xs" />{t(hint)}</li>
-					{/each}
-				</ul>
-			</Panel>
-		</div>
-	{:else if dashboard}
-		<div class="overview">
-			{#if error}
-				<Alert tone="danger" title={error} />
-			{/if}
+				<div class="stats">
+					<div class="stat">
+						<span class="stat__value">{dashboard.hosts.online}</span>
+						<span class="stat__label">{t('dashboard.stat.online')}</span>
+					</div>
+					<div class="stat" class:stat--warning={dashboard.hosts.waiting > 0}>
+						<span class="stat__value">{dashboard.hosts.waiting}</span>
+						<span class="stat__label">{t('dashboard.stat.waiting')}</span>
+					</div>
+					<div class="stat" class:stat--warning={dashboard.hosts.offline > 0}>
+						<span class="stat__value">{dashboard.hosts.offline}</span>
+						<span class="stat__label">{t('dashboard.stat.offline')}</span>
+					</div>
+					<div class="stat" class:stat--warning={dashboard.plans.at_risk > 0}>
+						<span class="stat__value">{dashboard.plans.at_risk}</span>
+						<span class="stat__label">{t('dashboard.stat.atRisk')}</span>
+					</div>
+					<div class="stat" class:stat--danger={dashboard.plans.violated > 0}>
+						<span class="stat__value">{dashboard.plans.violated}</span>
+						<span class="stat__label">{t('dashboard.stat.violated')}</span>
+					</div>
+					<div class="stat" class:stat--danger={dashboard.alerts.total > 0}>
+						<span class="stat__value">{dashboard.alerts.total}</span>
+						<span class="stat__label">{t('dashboard.stat.alerts')}</span>
+					</div>
+				</div>
 
-			<div class="stats">
-				<div class="stat">
-					<span class="stat__value">{dashboard.hosts.online}</span>
-					<span class="stat__label">{t('dashboard.stat.online')}</span>
-				</div>
-				<div class="stat" class:stat--warning={dashboard.hosts.waiting > 0}>
-					<span class="stat__value">{dashboard.hosts.waiting}</span>
-					<span class="stat__label">{t('dashboard.stat.waiting')}</span>
-				</div>
-				<div class="stat" class:stat--warning={dashboard.hosts.offline > 0}>
-					<span class="stat__value">{dashboard.hosts.offline}</span>
-					<span class="stat__label">{t('dashboard.stat.offline')}</span>
-				</div>
-				<div class="stat" class:stat--warning={dashboard.plans.at_risk > 0}>
-					<span class="stat__value">{dashboard.plans.at_risk}</span>
-					<span class="stat__label">{t('dashboard.stat.atRisk')}</span>
-				</div>
-				<div class="stat" class:stat--danger={dashboard.plans.violated > 0}>
-					<span class="stat__value">{dashboard.plans.violated}</span>
-					<span class="stat__label">{t('dashboard.stat.violated')}</span>
-				</div>
-				<div class="stat" class:stat--danger={dashboard.alerts.total > 0}>
-					<span class="stat__value">{dashboard.alerts.total}</span>
-					<span class="stat__label">{t('dashboard.stat.alerts')}</span>
-				</div>
-			</div>
+				<div class="columns">
+					<Panel title={t('dashboard.plans.title')} flush>
+						{#snippet actions()}
+							<a class="link" href={resolve('/(app)/plans')}>{t('nav.plans')}</a>
+						{/snippet}
+						{#if dashboard.plans.items.length === 0}
+							<p class="empty">{t('dashboard.plans.empty')}</p>
+						{:else}
+							<!-- A plan has no record page: the row opens the plan list with this plan. -->
+							<DataTable
+								columns={planColumns}
+								rows={dashboard.plans.items}
+								rowKey={(plan) => plan.id}
+								rowHref={(plan) => `${resolve('/(app)/plans')}?q=${encodeURIComponent(plan.name)}`}
+								paginated={false}
+								flush
+							/>
+						{/if}
+					</Panel>
 
-			<div class="columns">
-				<Panel title={t('dashboard.plans.title')} flush>
-					{#snippet actions()}
-						<a class="link" href={resolve('/(app)/plans')}>{t('nav.plans')}</a>
-					{/snippet}
-					{#if dashboard.plans.items.length === 0}
-						<p class="empty">{t('dashboard.plans.empty')}</p>
-					{:else}
-						<table class="list">
-							<thead>
-								<tr>
-									<th>{t('dashboard.plans.plan')}</th>
-									<th>{t('dashboard.plans.lastSuccess')}</th>
-									<th>{t('dashboard.plans.rpo')}</th>
-									<th>{t('dashboard.plans.state')}</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each dashboard.plans.items as plan (plan.id)}
-									<tr>
-										<td>
-											<span class="cell__name">{plan.name}</span>
-											<span class="cell__meta">{plan.agent_hostname} · {plan.repository_name}</span>
-										</td>
-										<td>
-											{#if plan.last_success_at}
-												<time
-													datetime={plan.last_success_at}
-													title={formatTime(plan.last_success_at)}
-												>
-													{relativeTime(plan.last_success_at)}
-												</time>
-											{:else}
-												<span class="cell__meta">{t('dashboard.plans.noSuccess')}</span>
-											{/if}
-										</td>
-										<td>{hours(plan.rpo_seconds)}</td>
-										<td>
-											{#if plan.enabled}
-												<StatusPill tone={RPO_TONES[plan.state]}>
-													{t(`rpo.${plan.state}` as MessageKey)}
-												</StatusPill>
-											{:else}
-												<StatusPill tone="neutral">{t('dashboard.plans.paused')}</StatusPill>
-											{/if}
-										</td>
-									</tr>
+					<Panel title={t('dashboard.alerts.title')} flush>
+						{#snippet actions()}
+							<a class="link" href={resolve('/(app)/alerts')}>{t('dashboard.alerts.viewAll')}</a>
+						{/snippet}
+						{#if dashboard.alerts.items.length === 0}
+							<p class="empty">{t('dashboard.alerts.empty')}</p>
+						{:else}
+							<ul class="rows">
+								{#each dashboard.alerts.items as alert (alert.id)}
+									<li class="row">
+										<StatusPill tone={ALERT_TONES[alert.kind]}>
+											{t(`alerts.kind.${alert.kind}` as MessageKey)}
+										</StatusPill>
+										<div class="row__main">
+											<span class="cell__name">
+												{alert.plan_name ?? alert.repository_name ?? alert.agent_hostname}
+											</span>
+											<span class="cell__meta">{alertCondition(alert)}</span>
+										</div>
+										<time
+											class="cell__meta"
+											datetime={alert.opened_at}
+											title={formatTime(alert.opened_at)}
+										>
+											{relativeTime(alert.opened_at)}
+										</time>
+									</li>
 								{/each}
-							</tbody>
-						</table>
-					{/if}
-				</Panel>
+							</ul>
+						{/if}
+					</Panel>
+				</div>
 
-				<Panel title={t('dashboard.alerts.title')} flush>
-					{#snippet actions()}
-						<a class="link" href={resolve('/(app)/alerts')}>{t('dashboard.alerts.viewAll')}</a>
-					{/snippet}
-					{#if dashboard.alerts.items.length === 0}
-						<p class="empty">{t('dashboard.alerts.empty')}</p>
-					{:else}
-						<ul class="rows">
-							{#each dashboard.alerts.items as alert (alert.id)}
-								<li class="row">
-									<StatusPill tone={ALERT_TONES[alert.kind]}>
-										{t(`alerts.kind.${alert.kind}` as MessageKey)}
-									</StatusPill>
-									<div class="row__main">
-										<span class="cell__name">
-											{alert.plan_name ?? alert.repository_name ?? alert.agent_hostname}
-										</span>
-										<span class="cell__meta">{alertCondition(alert)}</span>
-									</div>
-									<time
-										class="cell__meta"
-										datetime={alert.opened_at}
-										title={formatTime(alert.opened_at)}
-									>
-										{relativeTime(alert.opened_at)}
-									</time>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				</Panel>
+				<div class="columns columns--three">
+					<Panel title={t('dashboard.hosts.title')} flush>
+						{#snippet actions()}
+							<a class="link" href={resolve('/(app)/hosts')}>{t('nav.hosts')}</a>
+						{/snippet}
+						{#if dashboard.hosts.items.length === 0}
+							<p class="empty">{t('dashboard.hosts.empty')}</p>
+						{:else}
+							<ul class="rows">
+								{#each dashboard.hosts.items as host (host.id)}
+									<li class="row">
+										<StatusPill tone={host.waiting ? 'info' : host.online ? 'success' : 'neutral'}>
+											{host.waiting
+												? t('dashboard.hosts.waiting')
+												: host.online
+													? t('dashboard.hosts.online')
+													: t('dashboard.hosts.offline')}
+										</StatusPill>
+										<div class="row__main">
+											<span class="cell__name">{host.hostname}</span>
+											<span class="cell__meta">
+												{host.last_seen_at
+													? t('dashboard.hosts.seen', { time: relativeTime(host.last_seen_at) })
+													: t('dashboard.hosts.neverSeen')}
+											</span>
+										</div>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					</Panel>
+
+					<Panel title={t('dashboard.repositories.title')} flush>
+						{#snippet actions()}
+							<a class="link" href={resolve('/(app)/repositories')}>{t('nav.repositories')}</a>
+						{/snippet}
+						{#if dashboard.repositories.length === 0}
+							<p class="empty">{t('dashboard.repositories.empty')}</p>
+						{:else}
+							<ul class="rows">
+								{#each dashboard.repositories as repository (repository.id)}
+									<li class="row">
+										<StatusPill tone={LOCK_TONES[repository.lock_state]}>
+											{t(`lock.${repository.lock_state}` as MessageKey)}
+										</StatusPill>
+										<div class="row__main">
+											<span class="cell__name">{repository.name}</span>
+										</div>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					</Panel>
+
+					<Panel title={t('dashboard.failedJobs.title')} flush>
+						{#snippet actions()}
+							<a class="link" href={resolve('/(app)/jobs')}>{t('nav.jobs')}</a>
+						{/snippet}
+						{#if dashboard.failed_jobs.length === 0}
+							<p class="empty">{t('dashboard.failedJobs.empty')}</p>
+						{:else}
+							<DataTable
+								columns={jobColumns}
+								rows={dashboard.failed_jobs}
+								rowKey={(job) => job.id}
+								rowHref={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
+								paginated={false}
+								flush
+							/>
+						{/if}
+					</Panel>
+				</div>
 			</div>
-
-			<div class="columns columns--three">
-				<Panel title={t('dashboard.hosts.title')} flush>
-					{#snippet actions()}
-						<a class="link" href={resolve('/(app)/hosts')}>{t('nav.hosts')}</a>
-					{/snippet}
-					{#if dashboard.hosts.items.length === 0}
-						<p class="empty">{t('dashboard.hosts.empty')}</p>
-					{:else}
-						<ul class="rows">
-							{#each dashboard.hosts.items as host (host.id)}
-								<li class="row">
-									<StatusPill tone={host.waiting ? 'info' : host.online ? 'success' : 'neutral'}>
-										{host.waiting
-											? t('dashboard.hosts.waiting')
-											: host.online
-												? t('dashboard.hosts.online')
-												: t('dashboard.hosts.offline')}
-									</StatusPill>
-									<div class="row__main">
-										<span class="cell__name">{host.hostname}</span>
-										<span class="cell__meta">
-											{host.last_seen_at
-												? t('dashboard.hosts.seen', { time: relativeTime(host.last_seen_at) })
-												: t('dashboard.hosts.neverSeen')}
-										</span>
-									</div>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				</Panel>
-
-				<Panel title={t('dashboard.repositories.title')} flush>
-					{#snippet actions()}
-						<a class="link" href={resolve('/(app)/repositories')}>{t('nav.repositories')}</a>
-					{/snippet}
-					{#if dashboard.repositories.length === 0}
-						<p class="empty">{t('dashboard.repositories.empty')}</p>
-					{:else}
-						<ul class="rows">
-							{#each dashboard.repositories as repository (repository.id)}
-								<li class="row">
-									<StatusPill tone={LOCK_TONES[repository.lock_state]}>
-										{t(`lock.${repository.lock_state}` as MessageKey)}
-									</StatusPill>
-									<div class="row__main">
-										<span class="cell__name">{repository.name}</span>
-									</div>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				</Panel>
-
-				<Panel title={t('dashboard.failedJobs.title')} flush>
-					{#snippet actions()}
-						<a class="link" href={resolve('/(app)/jobs')}>{t('nav.jobs')}</a>
-					{/snippet}
-					{#if dashboard.failed_jobs.length === 0}
-						<p class="empty">{t('dashboard.failedJobs.empty')}</p>
-					{:else}
-						<ul class="rows">
-							{#each dashboard.failed_jobs as job (job.id)}
-								<li class="row">
-									<StatusPill tone="failed">
-										{t(`jobs.status.${job.status}` as MessageKey)}
-									</StatusPill>
-									<div class="row__main">
-										<a class="cell__name" href={resolve('/(app)/jobs/[id]', { id: job.id })}>
-											{job.plan_name ?? job.repository_name ?? job.agent_hostname}
-										</a>
-										<span class="cell__meta">{job.agent_hostname}</span>
-									</div>
-									<time
-										class="cell__meta"
-										datetime={job.finished_at}
-										title={formatTime(job.finished_at)}
-									>
-										{relativeTime(job.finished_at)}
-									</time>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				</Panel>
-			</div>
-		</div>
+		{/if}
+	{:else}
+		<Card>
+			<EmptyState
+				title={t('overview.title')}
+				description={t('overview.noOrganizations')}
+				bordered
+			/>
+		</Card>
 	{/if}
-{:else}
-	<Card>
-		<EmptyState title={t('overview.title')} description={t('overview.noOrganizations')} bordered />
-	</Card>
-{/if}
+</Page>
 
 <style>
 	.overview {
@@ -620,39 +638,11 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
-	.list {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.list th {
-		padding: var(--rh-space-2) var(--rh-space-4);
-		color: var(--rh-color-text-subtle);
-		font-weight: var(--rh-font-weight-semibold);
-		text-align: left;
-	}
-
-	.list td {
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
-		vertical-align: top;
-	}
-
 	.cell__name {
 		display: block;
 		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
 		text-decoration: none;
-	}
-
-	a.cell__name:hover {
-		color: var(--rh-color-link-hover);
-		text-decoration: underline;
-	}
-
-	.list td time {
-		white-space: nowrap;
 	}
 
 	.row time {

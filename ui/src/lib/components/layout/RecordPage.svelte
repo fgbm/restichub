@@ -119,6 +119,10 @@
 		overflow-y: auto;
 	}
 
+	.record__side > :global(*) {
+		flex-shrink: 0;
+	}
+
 	.record__footer {
 		position: sticky;
 		bottom: 0;

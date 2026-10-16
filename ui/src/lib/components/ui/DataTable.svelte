@@ -8,6 +8,7 @@
 	import Icon from './Icon.svelte';
 	import type { IconName } from './icons';
 	import RowActions from './RowActions.svelte';
+	import SidePanel from './SidePanel.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import type { MenuItem, RowAction, TableColumn, TableSort } from './types';
 
@@ -16,7 +17,10 @@
 		rows = [],
 		rowKey,
 		rowHref,
+		rowLabel,
+		rowSelected,
 		onRowOpen,
+		detailTitle,
 		actions,
 		moreLabel,
 		mode = 'client',
@@ -41,8 +45,14 @@
 		rowKey: (row: T) => string;
 		/** The resolved address of the record page; the row opens it through a real link. */
 		rowHref?: (row: T) => string;
+		/** The accessible name of the row link, when the primary cell text is too terse. */
+		rowLabel?: (row: T) => string;
+		/** Marks the row of the record that the person opened last. */
+		rowSelected?: (row: T) => boolean;
 		/** For a table without a record page: the row opens a side panel. */
 		onRowOpen?: (row: T) => void;
+		/** The row opens a built-in side panel with every column, under this title. */
+		detailTitle?: (row: T) => string;
 		/** The row actions. One or two show as icon buttons, three or more as one "…" menu. */
 		actions?: (row: T) => RowAction[];
 		/** The accessible name of the "…" button of a row. */
@@ -73,7 +83,18 @@
 
 	const server = $derived(mode === 'server');
 	const primaryKey = $derived((columns.find((column) => column.primary) ?? columns[0])?.key);
-	const opens = $derived(Boolean(rowHref || onRowOpen));
+	let detailRow = $state<T | null>(null);
+	let detailOpen = $state(false);
+	const openRow = $derived(
+		onRowOpen ??
+			(detailTitle
+				? (row: T) => {
+						detailRow = row;
+						detailOpen = true;
+					}
+				: undefined)
+	);
+	const opens = $derived(Boolean(rowHref || openRow));
 	const columnCount = $derived(columns.length + (actions ? 1 : 0));
 
 	let userSorted = $state(false);
@@ -167,7 +188,7 @@
 			}
 			rowElement.querySelector<HTMLAnchorElement>('a.row-link')?.click();
 		} else {
-			onRowOpen?.(row);
+			openRow?.(row);
 		}
 	}
 
@@ -264,8 +285,10 @@
 					</tr>
 				{:else}
 					{#each shown as row (rowKey(row))}
+						{@const selected = rowSelected?.(row) ?? false}
 						<tr
 							class:table__row--opens={opens}
+							class:table__row--selected={selected}
 							onclick={opens ? (event) => openFromRow(event, row) : undefined}
 							onauxclick={rowHref ? (event) => openFromRow(event, row) : undefined}
 						>
@@ -278,10 +301,21 @@
 									class:table__cell--narrow-hidden={column.hideNarrow}
 								>
 									{#if column.key === primaryKey && rowHref}
-										<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- rowHref returns a resolved path -->
-										<a class="row-link" href={rowHref(row)}>{@render content(row, column)}</a>
-									{:else if column.key === primaryKey && onRowOpen}
-										<button type="button" class="row-link" onclick={() => onRowOpen?.(row)}>
+										<!-- eslint-disable svelte/no-navigation-without-resolve -- rowHref returns a resolved path -->
+										<a
+											class="row-link"
+											href={rowHref(row)}
+											aria-label={rowLabel?.(row)}
+											aria-current={selected ? 'true' : undefined}>{@render content(row, column)}</a
+										>
+										<!-- eslint-enable svelte/no-navigation-without-resolve -->
+									{:else if column.key === primaryKey && openRow}
+										<button
+											type="button"
+											class="row-link"
+											aria-label={rowLabel?.(row)}
+											onclick={() => openRow?.(row)}
+										>
 											{@render content(row, column)}
 										</button>
 									{:else}
@@ -333,6 +367,21 @@
 		</div>
 	{/if}
 </div>
+
+{#if detailTitle}
+	<SidePanel bind:open={detailOpen} title={detailRow ? detailTitle(detailRow) : ''}>
+		{#if detailRow}
+			<dl class="table-detail">
+				{#each columns as column (column.key)}
+					<div class="table-detail__row">
+						<dt>{column.header}</dt>
+						<dd class:table__cell--mono={column.mono}>{@render content(detailRow, column)}</dd>
+					</div>
+				{/each}
+			</dl>
+		{/if}
+	</SidePanel>
+{/if}
 
 <style>
 	.table-wrap {
@@ -448,6 +497,10 @@
 		cursor: pointer;
 	}
 
+	tbody tr.table__row--selected {
+		background-color: var(--rh-color-selected);
+	}
+
 	/* The record link reads as the row, not as a link (UI principles 2.1). */
 	.row-link {
 		display: inline;
@@ -460,6 +513,10 @@
 		text-align: inherit;
 		text-decoration: none;
 		cursor: pointer;
+	}
+
+	button.row-link {
+		vertical-align: middle;
 	}
 
 	.row-link:hover {
@@ -538,6 +595,35 @@
 		padding: var(--rh-space-6) var(--rh-space-4);
 		color: var(--rh-color-danger);
 		text-align: center;
+	}
+
+	.table-detail {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-3);
+		margin: 0;
+	}
+
+	.table-detail__row {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.table-detail dt {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.table-detail dd {
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.table-detail :global(.table__truncate) {
+		max-width: none;
+		white-space: normal;
 	}
 
 	.table-footer {

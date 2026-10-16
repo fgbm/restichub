@@ -148,7 +148,14 @@ describe('the Overview screen', () => {
 		expect(screen.getByText('No lock')).toBeInTheDocument();
 		expect(screen.getByText('mac-build-01')).toBeInTheDocument();
 		expect(screen.getByText('Backup overdue')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: 'broken' })).toHaveAttribute('href', '/jobs/j_9');
+		expect(screen.getByRole('link', { name: 'broken win-fs01' })).toHaveAttribute(
+			'href',
+			'/jobs/j_9'
+		);
+		expect(screen.getByRole('link', { name: 'broken win-fs01 · primary-s3' })).toHaveAttribute(
+			'href',
+			'/plans?q=broken'
+		);
 	});
 
 	it('shows the first steps for an organization with nothing', async () => {

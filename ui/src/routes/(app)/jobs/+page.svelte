@@ -2,31 +2,29 @@
 	import { onMount } from 'svelte';
 	import { coalesce } from '#lib/events.ts';
 	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
-	import { page as route } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Job, JobStatus } from '#lib/api/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
-		Badge,
 		Button,
 		ConfirmDialog,
+		DataTable,
 		EmptyState,
-		PageHeader,
-		Select,
-		StatusPill,
-		Table,
-		RowActions
+		FilterBar,
+		StatusPill
 	} from '#lib/components/ui/index.ts';
 	import type {
-		MenuItem,
-		SelectOption,
+		FilterFacet,
+		RowAction,
 		StatusTone,
 		TableColumn
 	} from '#lib/components/ui/index.ts';
+	import { matchesSearch } from '#lib/filters.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { jobReason } from '#lib/job-reason.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { formatDuration, formatLocalTime } from '#lib/format.ts';
+	import { formatDuration } from '#lib/format.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -46,9 +44,10 @@
 	let loading = $state(true);
 	let loadingMore = $state(false);
 	let error = $state<string | null>(null);
-	let statusFilter = $state('');
 	// The host page links here with the host to show (`?agent_id=`).
-	const agentFilter = $derived(route.url.searchParams.get('agent_id') ?? undefined);
+	const filters = queryFilters(['q', 'status', 'agent_id'] as const);
+	const statusFilter = $derived(filters.value.status);
+	const agentFilter = $derived(filters.value.agent_id || undefined);
 
 	let cancelTarget = $state<Job | null>(null);
 	let cancelOpen = $state(false);
@@ -56,9 +55,25 @@
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 
-	const statusOptions = $derived<SelectOption[]>([
-		{ value: '', label: t('jobs.allStatuses') },
-		...STATUSES.map((value) => ({ value, label: t(`jobs.status.${value}` as MessageKey) }))
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'status',
+			label: t('jobs.status'),
+			multiple: false,
+			options: STATUSES.map((value) => ({ value, label: t(`jobs.status.${value}` as MessageKey) }))
+		},
+		{
+			key: 'agent_id',
+			label: t('jobs.host'),
+			multiple: false,
+			options: [
+				...new Map(
+					jobs
+						.filter((job) => job.agent_id)
+						.map((job) => [job.agent_id, job.agent_hostname ?? job.agent_id])
+				)
+			].map(([value, label]) => ({ value, label }))
+		}
 	]);
 
 	const columns = $derived<TableColumn<Job>[]>([
@@ -69,32 +84,58 @@
 			value: statusLabel,
 			render: statusCell
 		},
-		{ key: 'plan', header: t('jobs.plan'), value: planLabel, render: planCell },
+		{ key: 'plan', header: t('jobs.plan'), value: planLabel, truncate: 'sm', primary: true },
+		{
+			key: 'kind',
+			header: t('jobDetail.kind'),
+			nowrap: true,
+			value: (row) => t(`jobs.kind.${row.kind}` as MessageKey)
+		},
 		{
 			key: 'host',
 			header: t('jobs.host'),
-			value: (row) => row.agent_hostname ?? '',
-			render: hostCell
+			truncate: 'sm',
+			value: (row) => row.agent_hostname ?? t('common.none')
 		},
-		{ key: 'repository', header: t('jobs.repository'), value: (row) => row.repository_name ?? '' },
+		{
+			key: 'repository',
+			header: t('jobs.repository'),
+			truncate: 'sm',
+			value: (row) => row.repository_name ?? ''
+		},
 		{
 			key: 'started',
-			nowrap: true,
 			header: t('jobs.started'),
-			value: (row) => row.started_at ?? '',
-			render: startedCell
+			date: 'absolute',
+			value: (row) => row.started_at ?? ''
 		},
 		{
 			key: 'duration',
 			nowrap: true,
+			align: 'right',
 			header: t('jobs.duration'),
-			value: (row) => durationOf(row),
-			render: durationCell
+			value: (row) => durationOf(row) || '—'
 		}
 	]);
 
+	const shown = $derived(
+		jobs.filter((job) =>
+			matchesSearch(filters.value.q, [
+				planLabel(job),
+				job.agent_hostname,
+				job.repository_name,
+				job.id
+			])
+		)
+	);
+
 	const empty = $derived(
-		!loading && !error && jobs.length === 0 && statusFilter === '' && !agentFilter
+		!loading &&
+			!error &&
+			jobs.length === 0 &&
+			statusFilter === '' &&
+			!agentFilter &&
+			!filters.value.q
 	);
 
 	// A cancelled job ends as `failed` with the result `cancelled`; the screen shows it apart.
@@ -138,11 +179,6 @@
 		return job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey);
 	}
 
-	function reasonOf(job: Job): string | null {
-		if (isCancelled(job)) return null;
-		return jobReason(job);
-	}
-
 	function durationOf(job: Job): string {
 		if (!job.started_at) return '';
 		return formatDuration(job.started_at, job.finished_at ?? new Date().toISOString());
@@ -152,13 +188,14 @@
 		return job.status === 'queued' || job.status === 'sent' || job.status === 'running';
 	}
 
-	function actionsFor(job: Job): MenuItem[] {
+	function actionsFor(job: Job): RowAction[] {
 		if (!canWrite || !cancellable(job)) return [];
 		return [
 			{
+				id: 'cancel',
 				label: t('jobs.cancel'),
 				icon: 'stop',
-				tone: 'danger',
+				danger: true,
 				onSelect: () => {
 					cancelTarget = job;
 					cancelOpen = true;
@@ -215,13 +252,15 @@
 
 	let loadedFilter: string | undefined;
 	onMount(() => {
-		loadedFilter = agentFilter;
+		loadedFilter = `${statusFilter}|${agentFilter ?? ''}`;
 		void load();
 	});
 
+	// The status and the host filter on the server; the search narrows the loaded rows.
 	$effect(() => {
-		if (agentFilter === loadedFilter) return;
-		loadedFilter = agentFilter;
+		const key = `${statusFilter}|${agentFilter ?? ''}`;
+		if (loadedFilter === undefined || key === loadedFilter) return;
+		loadedFilter = key;
 		void load();
 	});
 
@@ -269,164 +308,70 @@
 </script>
 
 {#snippet statusCell(job: Job)}
-	<span class="job">
-		<StatusPill tone={toneOf(job)} title={fullLabel(job)}>{statusLabel(job)}</StatusPill>
-		{#if reasonOf(job)}
-			<span class="job__meta job__reason">{reasonOf(job)}</span>
-		{/if}
-	</span>
+	<StatusPill tone={toneOf(job)} title={fullLabel(job)}>{statusLabel(job)}</StatusPill>
 {/snippet}
 
-{#snippet planCell(job: Job)}
-	<span class="job">
-		<a
-			class="job__name"
-			href={resolve('/(app)/jobs/[id]', { id: job.id })}
-			aria-label={t('jobDetail.openJob', { name: planLabel(job) })}>{planLabel(job)}</a
-		>
-		{#if job.plan_name}
-			<span class="job__meta">{t(`jobs.kind.${job.kind}` as MessageKey)}</span>
-		{/if}
-	</span>
-{/snippet}
-
-{#snippet hostCell(job: Job)}
-	<span class="job__host">{job.agent_hostname ?? t('common.none')}</span>
-{/snippet}
-
-{#snippet startedCell(job: Job)}
-	<span class="job__meta">
-		{job.started_at ? formatLocalTime(job.started_at) : '—'}
-	</span>
-{/snippet}
-
-{#snippet durationCell(job: Job)}
-	<span class="job__meta">{durationOf(job) || '—'}</span>
-{/snippet}
-
-<svelte:head>
-	<title>{t('jobs.title')} · {t('app.name')}</title>
-</svelte:head>
-
-<PageHeader
+<Page
 	title={t('jobs.title')}
 	description={t('jobs.description')}
 	count={loading ? undefined : jobs.length}
 >
-	<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
-</PageHeader>
+	{#snippet actions()}
+		<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
+	{/snippet}
 
-{#if agentFilter}
-	<p class="agent-filter">
-		<Badge tone="info">
-			{t('jobs.filterHost', { name: jobs[0]?.agent_hostname ?? agentFilter })}
-		</Badge>
-		<a href={resolve('/(app)/jobs')}>{t('jobs.filterHostClear')}</a>
-	</p>
-{/if}
-
-{#if empty}
-	<EmptyState
-		icon="job"
-		title={t('jobs.emptyTitle')}
-		description={t('jobs.emptyDescription')}
-		bordered
-	/>
-{:else}
-	<Table
-		{columns}
-		rows={jobs}
-		{loading}
-		{error}
-		rowKey={(job) => job.id}
-		paginated={false}
-		filterPlaceholder={t('jobs.searchPlaceholder')}
-	>
-		{#snippet toolbar()}
-			<div class="filter">
-				<Select
-					id="jobs-status"
-					aria-label={t('jobs.filterStatus')}
-					options={statusOptions}
-					bind:value={statusFilter}
-					onchange={() => load()}
+	{#if empty}
+		<EmptyState
+			icon="job"
+			title={t('jobs.emptyTitle')}
+			description={t('jobs.emptyDescription')}
+			bordered
+		/>
+	{:else}
+		<DataTable
+			{columns}
+			rows={shown}
+			{loading}
+			{error}
+			rowKey={(job) => job.id}
+			rowHref={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
+			paginated={false}
+			actions={actionsFor}
+			moreLabel={(job) => t('jobs.moreActions', { name: planLabel(job) })}
+			emptyTitle={t('filter.noMatches')}
+			emptyDescription={t('filter.noMatchesDescription')}
+		>
+			{#snippet toolbar()}
+				<FilterBar
+					label={t('jobs.filters')}
+					value={filters.value}
+					search={{ key: 'q', label: t('hosts.search'), placeholder: t('jobs.searchPlaceholder') }}
+					{facets}
+					onchange={filters.update}
+					onreset={filters.reset}
 				/>
+			{/snippet}
+		</DataTable>
+		{#if nextCursor}
+			<div class="more">
+				<Button loading={loadingMore} onclick={loadMore}>{t('jobs.loadMore')}</Button>
 			</div>
-		{/snippet}
-		{#snippet rowActions(job)}
-			{#if actionsFor(job).length > 0}
-				<RowActions
-					moreLabel={t('jobs.moreActions', { name: planLabel(job) })}
-					items={actionsFor(job)}
-				/>
-			{/if}
-		{/snippet}
-	</Table>
-	{#if nextCursor}
-		<div class="more">
-			<Button loading={loadingMore} onclick={loadMore}>{t('jobs.loadMore')}</Button>
-		</div>
+		{/if}
 	{/if}
-{/if}
 
-<ConfirmDialog
-	bind:open={cancelOpen}
-	title={t('jobs.cancelTitle')}
-	message={t('jobs.cancelBody', { name: cancelTarget ? planLabel(cancelTarget) : '' })}
-	confirmLabel={t('jobs.cancel')}
-	cancelLabel={t('jobs.cancelKeep')}
-	tone="danger"
-	loading={cancelling}
-	onConfirm={confirmCancel}
-/>
+	<ConfirmDialog
+		bind:open={cancelOpen}
+		title={t('jobs.cancelTitle')}
+		message={t('jobs.cancelBody', { name: cancelTarget ? planLabel(cancelTarget) : '' })}
+		confirmLabel={t('jobs.cancel')}
+		cancelLabel={t('jobs.cancelKeep')}
+		tone="danger"
+		loading={cancelling}
+		onConfirm={confirmCancel}
+	/>
+</Page>
 
 <style>
-	.agent-filter {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--rh-space-3);
-		margin: 0 0 var(--rh-space-3);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.job {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: var(--rh-space-1);
-	}
-
-	.job__name {
-		color: var(--rh-color-text);
-		font-weight: var(--rh-font-weight-semibold);
-		text-decoration: none;
-		white-space: nowrap;
-	}
-
-	.job__name:hover {
-		color: var(--rh-color-link-hover);
-		text-decoration: underline;
-	}
-
-	.job__host {
-		white-space: nowrap;
-	}
-
-	.job__meta {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.job__reason {
-		max-width: 22ch;
-		white-space: normal;
-	}
-
-	.filter {
-		min-width: 12rem;
-	}
-
 	.more {
 		display: flex;
 		justify-content: center;

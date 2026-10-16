@@ -31,7 +31,8 @@
 		Skeleton,
 		StatusPill,
 		Switch,
-		Table,
+		DataTable,
+		FilterBar,
 		Tabs,
 		TextField,
 		Toast,
@@ -78,6 +79,8 @@
 		tone: StatusTone;
 		lastBackup: string;
 	}
+
+	let galleryFilters = $state<Record<string, string>>({ q: '', status: 'online' });
 
 	const columns: TableColumn<Host>[] = [
 		{ key: 'name', header: 'Host', render: hostCell },
@@ -347,17 +350,47 @@
 	</section>
 
 	<section>
-		<h2>Table</h2>
-		<Table {columns} {rows} rowKey={(row) => row.id} sort={{ key: 'name', direction: 'asc' }}>
-			{#snippet rowActions(row)}
-				<span class="row-actions">
-					<Button size="sm" icon="refresh" aria-label="Refresh {row.name}" />
-					<DropdownMenu items={menuItems} icon="more" label="More for {row.name}" align="end" />
-				</span>
+		<h2>DataTable</h2>
+		<DataTable
+			{columns}
+			{rows}
+			rowKey={(row) => row.id}
+			rowHref={() => '#'}
+			sort={{ key: 'name', direction: 'asc' }}
+			actions={(row) => [
+				{ id: 'refresh', label: `Refresh ${row.name}`, icon: 'refresh', onSelect: () => {} },
+				{
+					id: 'remove',
+					label: `Remove ${row.name}`,
+					icon: 'trash',
+					danger: true,
+					onSelect: () => {}
+				}
+			]}
+		>
+			{#snippet toolbar()}
+				<FilterBar
+					label="Host filters"
+					value={galleryFilters}
+					search={{ key: 'q', label: 'Search' }}
+					facets={[
+						{
+							key: 'status',
+							label: 'Status',
+							multiple: false,
+							options: [
+								{ value: 'online', label: 'Online', count: 2 },
+								{ value: 'offline', label: 'Offline', count: 1 }
+							]
+						}
+					]}
+					period
+					onchange={(patch) => (galleryFilters = { ...galleryFilters, ...patch })}
+				/>
 			{/snippet}
-		</Table>
+		</DataTable>
 		<div class="grid-2 spaced">
-			<Table {columns} rows={[]} rowKey={(row) => row.id} loading pageSize={3} filterable={false} />
+			<DataTable {columns} rows={[]} rowKey={(row) => row.id} loading pageSize={3} />
 			<Panel title="Empty state in a box" flush>
 				<EmptyState
 					icon="host"
@@ -554,10 +587,5 @@
 	.sub {
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
-	}
-
-	.row-actions {
-		display: inline-flex;
-		gap: var(--rh-space-1);
 	}
 </style>

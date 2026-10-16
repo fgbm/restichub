@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
@@ -21,18 +21,9 @@
 	import RichText from './RichText.svelte';
 	import ScriptsEditor from './ScriptsEditor.svelte';
 	import TagInput from './TagInput.svelte';
-	import {
-		Alert,
-		Button,
-		Checkbox,
-		Field,
-		Icon,
-		PageHeader,
-		Select,
-		Skeleton,
-		TextField
-	} from './ui/index.ts';
-	import type { SelectOption } from './ui/index.ts';
+	import { RecordPage, SummaryPanel } from './layout/index.ts';
+	import { Alert, Button, Checkbox, Field, Icon, Select, TextField } from './ui/index.ts';
+	import type { KeyValueItem, SelectOption } from './ui/index.ts';
 	import { formatMinutes } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import {
@@ -46,7 +37,6 @@
 		minutesToHours
 	} from '#lib/profile-form.ts';
 	import type { Os, ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
-	import { setPageTitle } from '#lib/stores/page-title.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -173,7 +163,6 @@
 			} else {
 				draft = emptyDraft(repositoryList[0]?.id ?? '', defaults);
 			}
-			setPageTitle(profileId ? draft.name : t('pe.newTitle'));
 			// The templates and the secrets serve the script editor only. A failure leaves the
 			// editor without choices and does not block the page.
 			const [templateList, jobTemplateList, secretList] = await Promise.allSettled([
@@ -205,7 +194,6 @@
 	});
 
 	onMount(load);
-	onDestroy(() => setPageTitle(null));
 
 	// A section that holds a server error opens, so the message is not hidden.
 	$effect(() => {
@@ -263,6 +251,10 @@
 		}
 	}
 
+	const resultItems = $derived<KeyValueItem[]>(
+		SUMMARY_ORDER.map((key) => ({ key, label: t(titles[key]), value: summaries[key].text }))
+	);
+
 	async function copyCommands(): Promise<void> {
 		await navigator.clipboard?.writeText(steps.map((step) => step.command).join('\n\n'));
 		copied = true;
@@ -270,394 +262,68 @@
 	}
 </script>
 
-<svelte:head>
-	<title>{(profileId ? draft.name : '') || t('pe.newTitle')} · {t('app.name')}</title>
-</svelte:head>
-
-<PageHeader
-	title={profileId ? t('pe.editTitle') : t('pe.newTitle')}
+<RecordPage
+	title={profileId ? (existing?.name ?? '') : t('pe.newTitle')}
 	description={t('pe.description')}
+	{loading}
+	error={loadError}
+	onsubmit={() => void save()}
 >
-	<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
-	<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
-</PageHeader>
-
-{#if loading}
-	<Skeleton />
-{:else if loadError}
-	<Alert tone="danger" title={loadError} />
-	<p><a href={resolve('/(app)/profiles')}>{t('pe.backToList')}</a></p>
-{:else}
-	{#if formError}
-		<Alert tone="danger" title={formError} />
-	{/if}
-	{#if warnings.length > 0}
-		<Alert tone="attention" title={t('profiles.warningsTitle')}>
-			<ul class="warnings">
-				{#each warnings as warning (warning.field + warning.reason + (warning.os ?? ''))}
-					<li>{warning.field} · {warning.reason}{warning.os ? ` · ${warning.os}` : ''}</li>
-				{/each}
-			</ul>
-		</Alert>
-	{/if}
-	<form
-		class="layout"
-		onsubmit={(event) => {
-			event.preventDefault();
-			void save();
-		}}
-	>
-		<div class="main">
-			<ProfileSection
-				id="basics"
-				title={t(titles.basics)}
-				summary={summaries.basics.text}
-				state={summaries.basics.state}
-				required
-				bind:open={open.basics}
-			>
-				<div class="grid2">
-					<TextField
-						id="profile-name"
-						label={t('profiles.profile')}
-						help={t('pe.name.help')}
-						error={fieldError(formProblem, 'name')}
-						bind:value={draft.name}
-						required
-					/>
-					<Select
-						id="profile-repository"
-						label={t('profiles.repository')}
-						options={repositoryOptions}
-						error={fieldError(formProblem, 'repository_id')}
-						bind:value={draft.repositoryId}
-						required
-					/>
-				</div>
-			</ProfileSection>
-
-			<ProfileSection
-				id="paths"
-				title={t(titles.paths)}
-				summary={summaries.paths.text}
-				state={summaries.paths.state}
-				required
-				bind:open={open.paths}
-			>
-				<p class="lead">{t('pe.paths.lead')}</p>
-				<Field
-					label={t('profiles.pathsAll')}
-					error={fieldError(formProblem, 'paths.all')}
-					for="profile-paths-all"
-				>
-					<textarea
-						id="profile-paths-all"
-						class="rh-textarea rh-input--mono"
-						rows="2"
-						bind:value={draft.pathsAll}></textarea>
-				</Field>
-				<div class="grid3">
-					<Field
-						label={t('profiles.pathsWindows')}
-						error={fieldError(formProblem, 'paths.windows')}
-						for="profile-paths-windows"
-					>
-						<textarea
-							id="profile-paths-windows"
-							class="rh-textarea rh-input--mono"
-							rows="3"
-							bind:value={draft.pathsWindows}></textarea>
-					</Field>
-					<Field
-						label={t('profiles.pathsLinux')}
-						error={fieldError(formProblem, 'paths.linux')}
-						for="profile-paths-linux"
-					>
-						<textarea
-							id="profile-paths-linux"
-							class="rh-textarea rh-input--mono"
-							rows="3"
-							bind:value={draft.pathsLinux}></textarea>
-					</Field>
-					<Field
-						label={t('profiles.pathsMacos')}
-						error={fieldError(formProblem, 'paths.macos')}
-						for="profile-paths-macos"
-					>
-						<textarea
-							id="profile-paths-macos"
-							class="rh-textarea rh-input--mono"
-							rows="3"
-							bind:value={draft.pathsMacos}></textarea>
-					</Field>
-				</div>
-			</ProfileSection>
-
-			<ProfileSection
-				id="excludes"
-				title={t(titles.excludes)}
-				summary={summaries.excludes.text}
-				state={summaries.excludes.state}
-				switchable
-				bind:enabled={draft.enabled.excludes}
-				bind:open={open.excludes}
-			>
-				<p class="lead"><RichText text={t('pe.excludes.lead')} /></p>
-				<div class="grid2">
-					<Field
-						label={t('profiles.excludes')}
-						error={fieldError(formProblem, 'excludes')}
-						for="profile-excludes"
-					>
-						<textarea
-							id="profile-excludes"
-							class="rh-textarea rh-input--mono"
-							rows="3"
-							bind:value={draft.excludes}></textarea>
-					</Field>
-					<Field
-						label={t('profiles.excludeFiles')}
-						help={t('pe.excludes.filesHelp')}
-						error={fieldError(formProblem, 'exclude_files')}
-						for="profile-exclude-files"
-					>
-						<textarea
-							id="profile-exclude-files"
-							class="rh-textarea rh-input--mono"
-							rows="3"
-							bind:value={draft.excludeFiles}></textarea>
-					</Field>
-				</div>
-			</ProfileSection>
-
-			<ProfileSection
-				id="tags"
-				title={t(titles.tags)}
-				summary={summaries.tags.text}
-				state={summaries.tags.state}
-				switchable
-				bind:enabled={draft.enabled.tags}
-				bind:open={open.tags}
-			>
-				<p class="lead">{t('pe.tags.lead')}</p>
-				<TagInput
-					id="profile-tags"
-					label={t('profiles.tags')}
-					help={t('pe.tags.help')}
-					error={fieldError(formProblem, 'tags')}
-					bind:value={draft.tags}
-				/>
-			</ProfileSection>
-
-			<ProfileSection
-				id="options"
-				title={t(titles.options)}
-				summary={summaries.options.text}
-				state={summaries.options.state}
-				switchable
-				bind:enabled={draft.enabled.options}
-				bind:open={open.options}
-			>
-				<div class="checks">
-					<Checkbox
-						label={t('profiles.options.vss')}
-						help={t('pe.options.vssHelp')}
-						bind:checked={draft.vss}
-					/>
-					<Checkbox
-						label={t('profiles.options.oneFileSystem')}
-						help={t('pe.options.oneFsHelp')}
-						bind:checked={draft.oneFileSystem}
-					/>
-					<Checkbox
-						label={t('profiles.options.excludeCaches')}
-						help={t('pe.options.cachesHelp')}
-						bind:checked={draft.excludeCaches}
-					/>
-				</div>
-				<div class="grid2">
-					<TextField
-						id="profile-limit-upload"
-						type="number"
-						min="0"
-						label={t('profiles.options.limitUpload')}
-						placeholder={t('profiles.options.limitNone')}
-						error={fieldError(formProblem, 'options.limit_upload_kib')}
-						bind:value={draft.limitUpload}
-					/>
-					<TextField
-						id="profile-limit-download"
-						type="number"
-						min="0"
-						label={t('profiles.options.limitDownload')}
-						placeholder={t('profiles.options.limitNone')}
-						error={fieldError(formProblem, 'options.limit_download_kib')}
-						bind:value={draft.limitDownload}
-					/>
-				</div>
-			</ProfileSection>
-
-			<ProfileSection
-				id="retention"
-				title={t(titles.retention)}
-				summary={summaries.retention.text}
-				state={summaries.retention.state}
-				switchable
-				bind:enabled={draft.enabled.retention}
-				bind:open={open.retention}
-			>
-				<RetentionEditor bind:draft problem={formProblem} />
-			</ProfileSection>
-
-			<ProfileSection
-				id="check"
-				title={t(titles.check)}
-				summary={summaries.check.text}
-				state={summaries.check.state}
-				switchable
-				bind:enabled={draft.enabled.check}
-				bind:open={open.check}
-			>
-				<p class="lead">{t('pe.check.lead')}</p>
-				<TextField
-					id="profile-read-data-subset"
-					mono
-					label={t('profiles.check.readDataSubset')}
-					help={t('pe.check.help')}
-					placeholder={t('pe.check.placeholder')}
-					error={fieldError(formProblem, 'check.read_data_subset')}
-					bind:value={draft.readDataSubset}
-				/>
-			</ProfileSection>
-
-			<ProfileSection
-				id="scripts"
-				title={t(titles.scripts)}
-				summary={summaries.scripts.text}
-				state={summaries.scripts.state}
-				switchable
-				bind:enabled={draft.enabled.scripts}
-				bind:open={open.scripts}
-			>
-				{#if formProblem?.field?.startsWith('scripts')}
-					<Alert tone="danger" title={tErrorCode(formProblem.code) ?? formProblem.title}>
-						{formProblem.field}{formProblem.reason ? `: ${formProblem.reason}` : ''}
-					</Alert>
-				{/if}
-				<ScriptsEditor
-					bind:scripts={draft.scripts}
-					bind:secrets
-					templates={scriptTemplates}
-					{jobTemplates}
-					targets={scriptTargets}
-					readonly={!canEditScripts}
-					problem={formProblem}
-					framed={false}
-				/>
-			</ProfileSection>
-
-			<ProfileSection
-				id="limits"
-				title={t(titles.limits)}
-				summary={summaries.limits.text}
-				state={summaries.limits.state}
-				bind:open={open.limits}
-			>
-				<p class="lead">{t('pe.limits.lead')}</p>
-				<div class="grid2">
-					<TextField
-						id="profile-stall-timeout"
-						type="number"
-						label={t('pe.limits.stall')}
-						help={limitDefaults
-							? t('pe.limits.stallHelp', {
-									value: formatMinutes(limitDefaults.stall_timeout_minutes)
-								})
-							: undefined}
-						placeholder={limitDefaults
-							? t('pe.limits.stallPlaceholder', {
-									count: limitDefaults.stall_timeout_minutes
-								})
-							: undefined}
-						error={fieldError(formProblem, 'options.stall_timeout_minutes')}
-						bind:value={draft.stallMinutes}
-					/>
-					<TextField
-						id="profile-max-duration"
-						type="number"
-						step="any"
-						label={t('pe.limits.max')}
-						help={limitDefaults
-							? t('pe.limits.maxHelp', { value: formatMinutes(limitDefaults.max_duration_minutes) })
-							: undefined}
-						placeholder={limitDefaults
-							? t('pe.limits.maxPlaceholder', {
-									count: minutesToHours(limitDefaults.max_duration_minutes)
-								})
-							: undefined}
-						error={fieldError(formProblem, 'options.max_duration_minutes')}
-						bind:value={draft.maxDurationHours}
-					/>
-				</div>
-				<p class="muted"><RichText text={t('pe.limits.env')} /></p>
-			</ProfileSection>
-		</div>
-
-		<aside class="side">
-			<div class="box">
-				<div class="box__head">
-					<span>{t('pe.side.result')}</span>
-					<span class="muted">{t('pe.side.count', { on: counts.on, total: counts.total })}</span>
-				</div>
-				<ul class="result">
-					{#each SUMMARY_ORDER as key (key)}
-						<li>
-							<span class="dot dot--{summaries[key].state}" data-state={summaries[key].state}
-							></span>
-							<div>
-								<b>{t(titles[key])}</b>
-								<span class="result__text">{summaries[key].text}</span>
-							</div>
-						</li>
+	{#snippet actions()}
+		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
+		<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
+	{/snippet}
+	{#snippet banners()}
+		{#if formError}
+			<Alert tone="danger" title={formError} />
+		{/if}
+		{#if warnings.length > 0}
+			<Alert tone="attention" title={t('profiles.warningsTitle')}>
+				<ul class="warnings">
+					{#each warnings as warning (warning.field + warning.reason + (warning.os ?? ''))}
+						<li>{warning.field} · {warning.reason}{warning.os ? ` · ${warning.os}` : ''}</li>
 					{/each}
 				</ul>
+			</Alert>
+		{/if}
+	{/snippet}
+	{#snippet side()}
+		<SummaryPanel title={t('pe.side.result')} items={resultItems}>
+			<p class="muted">{t('pe.side.count', { on: counts.on, total: counts.total })}</p>
+		</SummaryPanel>
+		<SummaryPanel title={t('pe.side.commands')}>
+			{#snippet actions()}
+				<Button size="sm" icon="copy" onclick={copyCommands}>
+					{copied ? t('pe.side.copied') : t('pe.side.copy')}
+				</Button>
+			{/snippet}
+			<div class="os">
+				<label for="preview-os">{t('pe.side.os')}</label>
+				<Select
+					id="preview-os"
+					options={[
+						{ value: 'linux', label: 'Linux' },
+						{ value: 'windows', label: 'Windows' },
+						{ value: 'macos', label: 'macOS' }
+					]}
+					bind:value={os}
+				/>
 			</div>
-			<div class="box">
-				<div class="box__head">
-					<span>{t('pe.side.commands')}</span>
-					<Button size="sm" icon="copy" onclick={copyCommands}>
-						{copied ? t('pe.side.copied') : t('pe.side.copy')}
-					</Button>
+			{#each steps as step, index (step.kind + index)}
+				<div class="step">
+					<div class="step__title">{step.title}</div>
+					<pre
+						class="step__cmd"
+						class:step__cmd--script={step.kind === 'script'}>{step.command}</pre>
 				</div>
-				<div class="box__body">
-					<div class="os">
-						<label for="preview-os">{t('pe.side.os')}</label>
-						<Select
-							id="preview-os"
-							options={[
-								{ value: 'linux', label: 'Linux' },
-								{ value: 'windows', label: 'Windows' },
-								{ value: 'macos', label: 'macOS' }
-							]}
-							bind:value={os}
-						/>
-					</div>
-					{#each steps as step, index (step.kind + index)}
-						<div class="step">
-							<div class="step__title">{step.title}</div>
-							<pre
-								class="step__cmd"
-								class:step__cmd--script={step.kind === 'script'}>{step.command}</pre>
-						</div>
-					{/each}
-					<p class="muted note">
-						<Icon name="clock" size="xs" />
-						{summaries.limits.text}
-					</p>
-				</div>
-			</div>
-		</aside>
-
+			{/each}
+			<p class="muted note">
+				<Icon name="clock" size="xs" />
+				{summaries.limits.text}
+			</p>
+		</SummaryPanel>
+	{/snippet}
+	{#snippet footer()}
 		<div class="savebar">
 			<span class="muted savebar__text">
 				{#if !canWrite}
@@ -672,103 +338,304 @@
 				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
 			{/if}
 		</div>
-	</form>
-{/if}
+	{/snippet}
+
+	<ProfileSection
+		id="basics"
+		title={t(titles.basics)}
+		summary={summaries.basics.text}
+		state={summaries.basics.state}
+		required
+		bind:open={open.basics}
+	>
+		<div class="grid2">
+			<TextField
+				id="profile-name"
+				label={t('profiles.profile')}
+				help={t('pe.name.help')}
+				error={fieldError(formProblem, 'name')}
+				bind:value={draft.name}
+				required
+			/>
+			<Select
+				id="profile-repository"
+				label={t('profiles.repository')}
+				options={repositoryOptions}
+				error={fieldError(formProblem, 'repository_id')}
+				bind:value={draft.repositoryId}
+				required
+			/>
+		</div>
+	</ProfileSection>
+
+	<ProfileSection
+		id="paths"
+		title={t(titles.paths)}
+		summary={summaries.paths.text}
+		state={summaries.paths.state}
+		required
+		bind:open={open.paths}
+	>
+		<p class="lead">{t('pe.paths.lead')}</p>
+		<Field
+			label={t('profiles.pathsAll')}
+			error={fieldError(formProblem, 'paths.all')}
+			for="profile-paths-all"
+		>
+			<textarea
+				id="profile-paths-all"
+				class="rh-textarea rh-input--mono"
+				rows="2"
+				bind:value={draft.pathsAll}></textarea>
+		</Field>
+		<div class="grid3">
+			<Field
+				label={t('profiles.pathsWindows')}
+				error={fieldError(formProblem, 'paths.windows')}
+				for="profile-paths-windows"
+			>
+				<textarea
+					id="profile-paths-windows"
+					class="rh-textarea rh-input--mono"
+					rows="3"
+					bind:value={draft.pathsWindows}></textarea>
+			</Field>
+			<Field
+				label={t('profiles.pathsLinux')}
+				error={fieldError(formProblem, 'paths.linux')}
+				for="profile-paths-linux"
+			>
+				<textarea
+					id="profile-paths-linux"
+					class="rh-textarea rh-input--mono"
+					rows="3"
+					bind:value={draft.pathsLinux}></textarea>
+			</Field>
+			<Field
+				label={t('profiles.pathsMacos')}
+				error={fieldError(formProblem, 'paths.macos')}
+				for="profile-paths-macos"
+			>
+				<textarea
+					id="profile-paths-macos"
+					class="rh-textarea rh-input--mono"
+					rows="3"
+					bind:value={draft.pathsMacos}></textarea>
+			</Field>
+		</div>
+	</ProfileSection>
+
+	<ProfileSection
+		id="excludes"
+		title={t(titles.excludes)}
+		summary={summaries.excludes.text}
+		state={summaries.excludes.state}
+		switchable
+		bind:enabled={draft.enabled.excludes}
+		bind:open={open.excludes}
+	>
+		<p class="lead"><RichText text={t('pe.excludes.lead')} /></p>
+		<div class="grid2">
+			<Field
+				label={t('profiles.excludes')}
+				error={fieldError(formProblem, 'excludes')}
+				for="profile-excludes"
+			>
+				<textarea
+					id="profile-excludes"
+					class="rh-textarea rh-input--mono"
+					rows="3"
+					bind:value={draft.excludes}></textarea>
+			</Field>
+			<Field
+				label={t('profiles.excludeFiles')}
+				help={t('pe.excludes.filesHelp')}
+				error={fieldError(formProblem, 'exclude_files')}
+				for="profile-exclude-files"
+			>
+				<textarea
+					id="profile-exclude-files"
+					class="rh-textarea rh-input--mono"
+					rows="3"
+					bind:value={draft.excludeFiles}></textarea>
+			</Field>
+		</div>
+	</ProfileSection>
+
+	<ProfileSection
+		id="tags"
+		title={t(titles.tags)}
+		summary={summaries.tags.text}
+		state={summaries.tags.state}
+		switchable
+		bind:enabled={draft.enabled.tags}
+		bind:open={open.tags}
+	>
+		<p class="lead">{t('pe.tags.lead')}</p>
+		<TagInput
+			id="profile-tags"
+			label={t('profiles.tags')}
+			help={t('pe.tags.help')}
+			error={fieldError(formProblem, 'tags')}
+			bind:value={draft.tags}
+		/>
+	</ProfileSection>
+
+	<ProfileSection
+		id="options"
+		title={t(titles.options)}
+		summary={summaries.options.text}
+		state={summaries.options.state}
+		switchable
+		bind:enabled={draft.enabled.options}
+		bind:open={open.options}
+	>
+		<div class="checks">
+			<Checkbox
+				label={t('profiles.options.vss')}
+				help={t('pe.options.vssHelp')}
+				bind:checked={draft.vss}
+			/>
+			<Checkbox
+				label={t('profiles.options.oneFileSystem')}
+				help={t('pe.options.oneFsHelp')}
+				bind:checked={draft.oneFileSystem}
+			/>
+			<Checkbox
+				label={t('profiles.options.excludeCaches')}
+				help={t('pe.options.cachesHelp')}
+				bind:checked={draft.excludeCaches}
+			/>
+		</div>
+		<div class="grid2">
+			<TextField
+				id="profile-limit-upload"
+				type="number"
+				min="0"
+				label={t('profiles.options.limitUpload')}
+				placeholder={t('profiles.options.limitNone')}
+				error={fieldError(formProblem, 'options.limit_upload_kib')}
+				bind:value={draft.limitUpload}
+			/>
+			<TextField
+				id="profile-limit-download"
+				type="number"
+				min="0"
+				label={t('profiles.options.limitDownload')}
+				placeholder={t('profiles.options.limitNone')}
+				error={fieldError(formProblem, 'options.limit_download_kib')}
+				bind:value={draft.limitDownload}
+			/>
+		</div>
+	</ProfileSection>
+
+	<ProfileSection
+		id="retention"
+		title={t(titles.retention)}
+		summary={summaries.retention.text}
+		state={summaries.retention.state}
+		switchable
+		bind:enabled={draft.enabled.retention}
+		bind:open={open.retention}
+	>
+		<RetentionEditor bind:draft problem={formProblem} />
+	</ProfileSection>
+
+	<ProfileSection
+		id="check"
+		title={t(titles.check)}
+		summary={summaries.check.text}
+		state={summaries.check.state}
+		switchable
+		bind:enabled={draft.enabled.check}
+		bind:open={open.check}
+	>
+		<p class="lead">{t('pe.check.lead')}</p>
+		<TextField
+			id="profile-read-data-subset"
+			mono
+			label={t('profiles.check.readDataSubset')}
+			help={t('pe.check.help')}
+			placeholder={t('pe.check.placeholder')}
+			error={fieldError(formProblem, 'check.read_data_subset')}
+			bind:value={draft.readDataSubset}
+		/>
+	</ProfileSection>
+
+	<ProfileSection
+		id="scripts"
+		title={t(titles.scripts)}
+		summary={summaries.scripts.text}
+		state={summaries.scripts.state}
+		switchable
+		bind:enabled={draft.enabled.scripts}
+		bind:open={open.scripts}
+	>
+		{#if formProblem?.field?.startsWith('scripts')}
+			<Alert tone="danger" title={tErrorCode(formProblem.code) ?? formProblem.title}>
+				{formProblem.field}{formProblem.reason ? `: ${formProblem.reason}` : ''}
+			</Alert>
+		{/if}
+		<ScriptsEditor
+			bind:scripts={draft.scripts}
+			bind:secrets
+			templates={scriptTemplates}
+			{jobTemplates}
+			targets={scriptTargets}
+			readonly={!canEditScripts}
+			problem={formProblem}
+			framed={false}
+		/>
+	</ProfileSection>
+
+	<ProfileSection
+		id="limits"
+		title={t(titles.limits)}
+		summary={summaries.limits.text}
+		state={summaries.limits.state}
+		bind:open={open.limits}
+	>
+		<p class="lead">{t('pe.limits.lead')}</p>
+		<div class="grid2">
+			<TextField
+				id="profile-stall-timeout"
+				type="number"
+				label={t('pe.limits.stall')}
+				help={limitDefaults
+					? t('pe.limits.stallHelp', {
+							value: formatMinutes(limitDefaults.stall_timeout_minutes)
+						})
+					: undefined}
+				placeholder={limitDefaults
+					? t('pe.limits.stallPlaceholder', {
+							count: limitDefaults.stall_timeout_minutes
+						})
+					: undefined}
+				error={fieldError(formProblem, 'options.stall_timeout_minutes')}
+				bind:value={draft.stallMinutes}
+			/>
+			<TextField
+				id="profile-max-duration"
+				type="number"
+				step="any"
+				label={t('pe.limits.max')}
+				help={limitDefaults
+					? t('pe.limits.maxHelp', { value: formatMinutes(limitDefaults.max_duration_minutes) })
+					: undefined}
+				placeholder={limitDefaults
+					? t('pe.limits.maxPlaceholder', {
+							count: minutesToHours(limitDefaults.max_duration_minutes)
+						})
+					: undefined}
+				error={fieldError(formProblem, 'options.max_duration_minutes')}
+				bind:value={draft.maxDurationHours}
+			/>
+		</div>
+		<p class="muted"><RichText text={t('pe.limits.env')} /></p>
+	</ProfileSection>
+</RecordPage>
 
 <style>
-	.layout {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 340px;
-		grid-template-areas:
-			'main side'
-			'bar bar';
-		gap: var(--rh-space-4);
-		align-items: start;
-	}
-
-	.main {
-		display: flex;
-		grid-area: main;
-		flex-direction: column;
-		gap: var(--rh-space-3);
-		min-width: 0;
-	}
-
-	.side {
-		position: sticky;
-		top: calc(var(--rh-layout-topbar-height) + var(--rh-space-4));
-		display: flex;
-		grid-area: side;
-		flex-direction: column;
-		gap: var(--rh-space-3);
-		max-height: calc(100vh - var(--rh-layout-topbar-height) - 120px);
-		overflow-y: auto;
-	}
-
-	.box {
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-lg);
-		background-color: var(--rh-color-surface);
-	}
-
-	.box__head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--rh-space-2);
-		padding: var(--rh-space-2) var(--rh-space-3);
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border-muted);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.box__body {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3);
-	}
-
-	.result {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-2);
-		margin: 0;
-		padding: var(--rh-space-3);
-		list-style: none;
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.result li {
-		display: flex;
-		align-items: flex-start;
-		gap: var(--rh-space-2);
-	}
-
-	.result li .dot {
-		margin-top: 6px;
-	}
-
-	.result__text {
-		display: block;
-		color: var(--rh-color-text-muted);
-	}
-
-	.dot {
-		flex: none;
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background-color: var(--rh-color-border-strong);
-	}
-
-	.dot--on {
-		background-color: var(--rh-color-success);
-	}
-
-	.dot--warn {
-		background-color: var(--rh-color-warning);
-	}
-
 	.os {
 		display: flex;
 		align-items: center;
@@ -839,11 +706,7 @@
 	}
 
 	.savebar {
-		position: sticky;
-		bottom: 0;
-		z-index: var(--rh-z-sticky);
 		display: flex;
-		grid-area: bar;
 		align-items: center;
 		gap: var(--rh-space-3);
 		padding: var(--rh-space-3) var(--rh-space-4);
@@ -854,21 +717,6 @@
 
 	.savebar__text {
 		flex: 1;
-	}
-
-	@media (max-width: 1000px) {
-		.layout {
-			grid-template-columns: minmax(0, 1fr);
-			grid-template-areas:
-				'main'
-				'side'
-				'bar';
-		}
-
-		.side {
-			position: static;
-			max-height: none;
-		}
 	}
 
 	@media (max-width: 720px) {

@@ -8,15 +8,21 @@
 		Alert,
 		Button,
 		Dialog,
+		DataTable,
+		FilterBar,
 		PasswordField,
 		Select,
-		Table,
-		TextField,
-		RowActions
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		RowAction,
+		SelectOption,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { formatTime, relativeTime } from '#lib/format.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import {
 		CREATABLE_PURPOSES,
 		USAGE_KEYS,
@@ -65,26 +71,72 @@
 	}
 
 	const columns = $derived<TableColumn<Secret>[]>([
-		{ key: 'name', header: t('secrets.name'), nowrap: true, render: nameCell },
+		{ key: 'name', header: t('secrets.name'), truncate: 'md' },
 		{
 			key: 'purpose',
 			header: t('secrets.purpose'),
-			cell: (row) => purposeLabel(row.purpose)
+			nowrap: true,
+			value: (row) => purposeLabel(row.purpose)
 		},
 		{
 			key: 'used_by',
 			header: t('secrets.usedBy'),
-			value: (row) => row.used_by.map((usage) => usage.name).join(' '),
-			render: usedByCell
+			truncate: 'md',
+			value: (row) =>
+				row.used_by.length === 0
+					? t('secrets.unused')
+					: row.used_by.map((usage) => `${t(USAGE_KEYS[usage.kind])} ${usage.name}`).join(', ')
 		},
-		{ key: 'created_at', header: t('common.createdAt'), nowrap: true, render: createdCell },
+		{ key: 'created_at', header: t('common.createdAt'), date: 'relative' },
 		{
 			key: 'updated_at',
 			header: t('secrets.replacedAt'),
-			nowrap: true,
-			render: replacedCell
+			date: 'relative',
+			value: (row) => (wasReplaced(row) ? row.updated_at : ''),
+			cell: () => t('common.never')
 		}
 	]);
+
+	const filters = queryFilters(['q', 'purpose'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'purpose',
+			label: t('secrets.purpose'),
+			options: facetCounts(secrets, (secret) => [secret.purpose]).map((option) => ({
+				...option,
+				label: purposeLabel(option.value)
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		secrets.filter((secret) => {
+			const { q, purpose } = filters.value;
+			if (purpose && !splitList(purpose).includes(secret.purpose)) return false;
+			return matchesSearch(q, [secret.name, ...secret.used_by.map((usage) => usage.name)]);
+		})
+	);
+
+	function rowActions(secret: Secret): RowAction[] {
+		if (!canWrite) return [];
+		return [
+			{
+				id: 'replace',
+				label: t('secrets.replace'),
+				icon: 'refresh',
+				hidden: !canReplaceValue(secret),
+				onSelect: () => openReplace(secret)
+			},
+			{
+				id: 'delete',
+				label: t('secrets.delete'),
+				icon: 'trash',
+				danger: true,
+				onSelect: () => openDelete(secret)
+			}
+		];
+	}
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -198,33 +250,6 @@
 	});
 </script>
 
-{#snippet rowActions(secret: Secret)}
-	<RowActions
-		moreLabel={t('secrets.moreActions', { name: secret.name })}
-		items={[
-			...(canReplaceValue(secret)
-				? [
-						{
-							label: t('secrets.replace'),
-							icon: 'refresh' as const,
-							onSelect: () => openReplace(secret)
-						}
-					]
-				: []),
-			{
-				label: t('secrets.delete'),
-				icon: 'trash',
-				tone: 'danger',
-				onSelect: () => openDelete(secret)
-			}
-		]}
-	/>
-{/snippet}
-
-{#snippet nameCell(secret: Secret)}
-	<span class="secret-name" title={secret.name}>{secret.name}</span>
-{/snippet}
-
 {#snippet usersList(secret: Secret)}
 	<ul class="users">
 		{#each secret.used_by as usage (usage.kind + usage.id)}
@@ -235,34 +260,6 @@
 		{/each}
 	</ul>
 {/snippet}
-
-{#snippet usedByCell(secret: Secret)}
-	{#if secret.used_by.length === 0}
-		<span class="muted">{t('secrets.unused')}</span>
-	{:else}
-		{@render usersList(secret)}
-	{/if}
-{/snippet}
-
-{#snippet createdCell(secret: Secret)}
-	<time datetime={secret.created_at} title={formatTime(secret.created_at)}>
-		{relativeTime(secret.created_at)}
-	</time>
-{/snippet}
-
-{#snippet replacedCell(secret: Secret)}
-	{#if wasReplaced(secret)}
-		<time datetime={secret.updated_at} title={formatTime(secret.updated_at)}>
-			{relativeTime(secret.updated_at)}
-		</time>
-	{:else}
-		<span class="muted">{t('common.never')}</span>
-	{/if}
-{/snippet}
-
-<svelte:head>
-	<title>{t('secrets.title')} · {t('app.name')}</title>
-</svelte:head>
 
 <SettingsLayout
 	title={t('secrets.title')}
@@ -275,15 +272,28 @@
 		{/if}
 	{/snippet}
 
-	<Table
+	<DataTable
 		{columns}
-		rows={secrets}
+		rows={shown}
 		{loading}
 		{error}
 		rowKey={(secret) => secret.id}
-		rowActions={canWrite ? rowActions : undefined}
-		filterPlaceholder={t('secrets.searchPlaceholder')}
-	/>
+		detailTitle={(secret) => secret.name}
+		actions={canWrite ? rowActions : undefined}
+		moreLabel={(secret) => t('secrets.moreActions', { name: secret.name })}
+		emptyTitle={filters.value.q || filters.value.purpose ? t('filter.noMatches') : undefined}
+	>
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('secrets.filters')}
+				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('secrets.searchPlaceholder') }}
+				{facets}
+				onchange={filters.update}
+				onreset={filters.reset}
+			/>
+		{/snippet}
+	</DataTable>
 
 	<Alert variant="inline" icon="lock" title={t('secrets.note')} />
 </SettingsLayout>
@@ -389,19 +399,6 @@
 </Dialog>
 
 <style>
-	.secret-name {
-		display: block;
-		max-width: 28ch;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.muted {
-		color: var(--rh-color-text-subtle);
-	}
-
 	.users {
 		display: flex;
 		flex-direction: column;

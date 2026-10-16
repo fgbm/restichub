@@ -5,7 +5,8 @@
 	import { t } from '#lib/i18n/index.ts';
 	import { settingsGroupsForRole } from '#lib/navigation.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
-	import { Icon, PageHeader } from './ui/index.ts';
+	import { Page } from './layout/index.ts';
+	import { Icon } from './ui/index.ts';
 
 	let {
 		title,
@@ -25,30 +26,30 @@
 	const pathname = $derived(page.url.pathname);
 </script>
 
-<PageHeader {title} {description} {count} children={actions} />
-
-<div class="settings">
-	<nav class="subnav" aria-label={t('settings.sections')}>
-		{#each groups as group (group.labelKey)}
-			<div class="subnav__group">
-				<p class="subnav__label">{t(group.labelKey)}</p>
-				{#each group.items as item (item.href)}
-					<a
-						class="subnav__link"
-						href={resolve(item.href)}
-						aria-current={pathname.startsWith(resolve(item.href)) ? 'page' : undefined}
-					>
-						<Icon name={item.icon} />
-						{t(item.labelKey)}
-					</a>
-				{/each}
-			</div>
-		{/each}
-	</nav>
-	<div class="settings__content">
-		{@render children()}
+<Page {title} {description} {count} {actions}>
+	<div class="settings">
+		<nav class="subnav" aria-label={t('settings.sections')}>
+			{#each groups as group (group.labelKey)}
+				<div class="subnav__group">
+					<p class="subnav__label">{t(group.labelKey)}</p>
+					{#each group.items as item (item.href)}
+						<a
+							class="subnav__link"
+							href={resolve(item.href)}
+							aria-current={pathname.startsWith(resolve(item.href)) ? 'page' : undefined}
+						>
+							<Icon name={item.icon} />
+							{t(item.labelKey)}
+						</a>
+					{/each}
+				</div>
+			{/each}
+		</nav>
+		<div class="settings__content">
+			{@render children()}
+		</div>
 	</div>
-</div>
+</Page>
 
 <style>
 	.settings {

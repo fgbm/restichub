@@ -122,7 +122,7 @@ describe('Restore page', () => {
 		route.url = new URL('http://localhost/restore?repository=r_1&host=nobody');
 		render(Restore);
 		expect(await screen.findByText('No snapshot matches these filters.')).toBeVisible();
-		await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+		await user.click(screen.getByRole('button', { name: 'Reset' }));
 		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
 	});
 
@@ -221,7 +221,7 @@ describe('Restore page', () => {
 		expect(screen.getByText('daily')).toBeVisible();
 	});
 
-	it('fr_rs_01_shows_more_snapshots_on_request', async () => {
+	it('fr_rs_01_pages_the_snapshots', async () => {
 		const user = userEvent.setup();
 		mocks.getSnapshots.mockResolvedValue(
 			listing(
@@ -234,8 +234,8 @@ describe('Restore page', () => {
 		render(Restore);
 		await screen.findByRole('link', { name: 'Open snapshot aa000000' });
 		expect(screen.getAllByRole('link', { name: /^Open snapshot / })).toHaveLength(15);
-		await user.click(screen.getByRole('button', { name: 'Show more (5 left)' }));
-		expect(screen.getAllByRole('link', { name: /^Open snapshot / })).toHaveLength(20);
+		await user.click(screen.getByRole('button', { name: 'Next' }));
+		expect(screen.getAllByRole('link', { name: /^Open snapshot / })).toHaveLength(5);
 	});
 
 	it('ac_au_02_a_viewer_gets_no_restore_screen', async () => {

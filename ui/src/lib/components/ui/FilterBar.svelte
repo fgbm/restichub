@@ -48,7 +48,12 @@
 
 	const periodValue = $derived(periodOf(value));
 
+	function isText(facet: FilterFacet): boolean {
+		return facet.options === undefined;
+	}
+
 	function selected(facet: FilterFacet): string[] {
+		if (isText(facet)) return value[facet.key]?.trim() ? [value[facet.key].trim()] : [];
 		return facet.multiple === false
 			? value[facet.key]
 				? [value[facet.key]]
@@ -58,9 +63,10 @@
 
 	// A value from the address that the options do not hold stays in the facet, so a person can clear it.
 	function optionsOf(facet: FilterFacet): { value: string; label: string; count?: number }[] {
-		const known = new Set(facet.options.map((option) => option.value));
+		const options = facet.options ?? [];
+		const known = new Set(options.map((option) => option.value));
 		return [
-			...facet.options.map((option) => ({ ...option, label: option.label ?? option.value })),
+			...options.map((option) => ({ ...option, label: option.label ?? option.value })),
 			...selected(facet)
 				.filter((item) => !known.has(item))
 				.map((item) => ({ value: item, label: item, count: 0 }))
@@ -68,7 +74,7 @@
 	}
 
 	function labelOf(facet: FilterFacet, item: string): string {
-		return facet.options.find((option) => option.value === item)?.label ?? item;
+		return facet.options?.find((option) => option.value === item)?.label ?? item;
 	}
 
 	function pick(facet: FilterFacet, item: string): void {
@@ -121,7 +127,7 @@
 					remove: () =>
 						onchange({
 							[facet.key]:
-								facet.multiple === false
+								facet.multiple === false || isText(facet)
 									? ''
 									: joinList(selected(facet).filter((other) => other !== item))
 						})
@@ -181,45 +187,56 @@
 				{#snippet trigger()}
 					<span class="facet" class:facet--active={chosen.length > 0}>
 						{facet.label}
-						{#if chosen.length > 0 && facet.multiple !== false}
+						{#if chosen.length > 0 && facet.multiple !== false && !isText(facet)}
 							<span class="facet__count">{chosen.length}</span>
 						{/if}
 						<Icon name="chevron-down" size="xs" />
 					</span>
 				{/snippet}
-				<ul class="options">
-					{#each optionsOf(facet) as option (option.value)}
-						<li class="option">
-							{#if facet.multiple === false}
-								<button
-									type="button"
-									class="choice"
-									aria-pressed={chosen.includes(option.value)}
-									onclick={() => pick(facet, option.value)}
-								>
-									<span>{option.label}</span>
-									<span class="choice__end">
-										{#if option.count !== undefined}
-											<span class="option__count">{option.count}</span>
-										{/if}
-										{#if chosen.includes(option.value)}<Icon name="check" size="md" />{/if}
-									</span>
-								</button>
-							{:else}
-								<Checkbox
-									label={option.label}
-									checked={chosen.includes(option.value)}
-									onchange={() => pick(facet, option.value)}
-								/>
-								{#if option.count !== undefined}
-									<span class="option__count">{option.count}</span>
+				{#if isText(facet)}
+					<TextField
+						id="filter-{facet.key}"
+						label={facet.label}
+						mono={facet.mono}
+						placeholder={facet.placeholder}
+						value={value[facet.key] ?? ''}
+						oninput={(event) => onchange({ [facet.key]: event.currentTarget.value })}
+					/>
+				{:else}
+					<ul class="options">
+						{#each optionsOf(facet) as option (option.value)}
+							<li class="option">
+								{#if facet.multiple === false}
+									<button
+										type="button"
+										class="choice"
+										aria-pressed={chosen.includes(option.value)}
+										onclick={() => pick(facet, option.value)}
+									>
+										<span>{option.label}</span>
+										<span class="choice__end">
+											{#if option.count !== undefined}
+												<span class="option__count">{option.count}</span>
+											{/if}
+											{#if chosen.includes(option.value)}<Icon name="check" size="md" />{/if}
+										</span>
+									</button>
+								{:else}
+									<Checkbox
+										label={option.label}
+										checked={chosen.includes(option.value)}
+										onchange={() => pick(facet, option.value)}
+									/>
+									{#if option.count !== undefined}
+										<span class="option__count">{option.count}</span>
+									{/if}
 								{/if}
-							{/if}
-						</li>
-					{:else}
-						<li class="options__empty">{t('filter.facetEmpty')}</li>
-					{/each}
-				</ul>
+							</li>
+						{:else}
+							<li class="options__empty">{t('filter.facetEmpty')}</li>
+						{/each}
+					</ul>
+				{/if}
 			</Popover>
 		{/each}
 

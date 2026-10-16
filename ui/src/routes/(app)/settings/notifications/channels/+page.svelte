@@ -18,16 +18,22 @@
 		Dialog,
 		EmptyState,
 		Field,
+		DataTable,
+		FilterBar,
 		Select,
 		StatusPill,
-		Table,
-		TextField,
-		RowActions
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		RowAction,
+		SelectOption,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tChannelError, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	const FIELDS = ['name', 'kind', 'recipients', 'url'];
@@ -61,22 +67,43 @@
 	]);
 
 	const columns = $derived<TableColumn<NotificationChannel>[]>([
-		{ key: 'name', header: t('channels.name'), render: nameCell },
+		{ key: 'name', header: t('channels.name'), truncate: 'sm' },
 		{
 			key: 'kind',
 			header: t('channels.kind'),
 			cell: (row) => t(`channels.kind.${row.kind}` as MessageKey),
 			badge: () => 'neutral'
 		},
-		{ key: 'target', header: t('channels.target'), value: targetOf, render: targetCell },
+		{ key: 'target', header: t('channels.target'), truncate: 'lg', value: targetOf },
 		{
 			key: 'enabled',
 			header: t('common.status'),
 			value: (row) => (row.enabled ? t('common.enabled') : t('common.disabled')),
 			render: stateCell
 		},
-		{ key: 'created_at', header: t('common.createdAt'), nowrap: true, render: createdCell }
+		{ key: 'created_at', header: t('common.createdAt'), date: 'relative' }
 	]);
+
+	const filters = queryFilters(['q', 'kind'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'kind',
+			label: t('channels.kind'),
+			options: facetCounts(channels, (channel) => [channel.kind]).map((option) => ({
+				...option,
+				label: t(`channels.kind.${option.value}` as MessageKey)
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		channels.filter((channel) => {
+			const { q, kind } = filters.value;
+			if (kind && !splitList(kind).includes(channel.kind)) return false;
+			return matchesSearch(q, [channel.name, targetOf(channel)]);
+		})
+	);
 
 	function targetOf(channel: NotificationChannel): string {
 		return channel.kind === 'email' ? channel.recipients.join(', ') : (channel.url_origin ?? '');
@@ -236,14 +263,19 @@
 		}
 	}
 
-	function actionsFor(channel: NotificationChannel): MenuItem[] {
+	function actionsFor(channel: NotificationChannel): RowAction[] {
 		return [
-			{ label: t('channels.test'), icon: 'mail', onSelect: () => void sendTest(channel) },
-			{ label: t('common.edit'), icon: 'settings', onSelect: () => openEdit(channel) },
 			{
+				id: 'test',
+				label: t('channels.test'),
+				icon: 'mail',
+				onSelect: () => void sendTest(channel)
+			},
+			{
+				id: 'delete',
 				label: t('channels.delete'),
 				icon: 'octagon',
-				tone: 'danger',
+				danger: true,
 				onSelect: () => {
 					deleteTarget = channel;
 					deleteOpen = true;
@@ -255,29 +287,11 @@
 	const empty = $derived(!loading && !error && channels.length === 0);
 </script>
 
-{#snippet nameCell(channel: NotificationChannel)}
-	<span class="channel__name">{channel.name}</span>
-{/snippet}
-
-{#snippet targetCell(channel: NotificationChannel)}
-	<span class="channel__target">{targetOf(channel)}</span>
-{/snippet}
-
 {#snippet stateCell(channel: NotificationChannel)}
 	<StatusPill tone={channel.enabled ? 'success' : 'neutral'}>
 		{channel.enabled ? t('common.enabled') : t('common.disabled')}
 	</StatusPill>
 {/snippet}
-
-{#snippet createdCell(channel: NotificationChannel)}
-	<time datetime={channel.created_at} title={formatTime(channel.created_at)}>
-		{relativeTime(channel.created_at)}
-	</time>
-{/snippet}
-
-<svelte:head>
-	<title>{t('channels.title')} · {t('app.name')}</title>
-</svelte:head>
 
 <SettingsLayout
 	title={t('channels.title')}
@@ -302,21 +316,34 @@
 			<Button variant="primary" icon="plus" onclick={openCreate}>{t('channels.addFirst')}</Button>
 		</EmptyState>
 	{:else}
-		<Table
+		<!-- A channel has no record page: the row opens its form (design/style/ui-principles.md, 2.2). -->
+		<DataTable
 			{columns}
-			rows={channels}
+			rows={shown}
 			{loading}
 			{error}
 			rowKey={(channel) => channel.id}
-			filterPlaceholder={t('channels.searchPlaceholder')}
+			onRowOpen={openEdit}
+			actions={actionsFor}
+			moreLabel={(channel) => t('channels.moreActions', { name: channel.name })}
+			emptyTitle={t('filter.noMatches')}
+			emptyDescription={t('filter.noMatchesDescription')}
 		>
-			{#snippet rowActions(channel)}
-				<RowActions
-					moreLabel={t('channels.moreActions', { name: channel.name })}
-					items={actionsFor(channel)}
+			{#snippet toolbar()}
+				<FilterBar
+					label={t('channels.filters')}
+					value={filters.value}
+					search={{
+						key: 'q',
+						label: t('hosts.search'),
+						placeholder: t('channels.searchPlaceholder')
+					}}
+					{facets}
+					onchange={filters.update}
+					onreset={filters.reset}
 				/>
 			{/snippet}
-		</Table>
+		</DataTable>
 
 		<a
 			class="manage-secrets"
@@ -425,15 +452,5 @@
 	.manage-secrets {
 		align-self: flex-start;
 		font-size: var(--rh-font-size-sm);
-	}
-
-	.channel__name {
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.channel__target {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-		word-break: break-word;
 	}
 </style>

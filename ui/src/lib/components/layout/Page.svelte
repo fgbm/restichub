@@ -1,11 +1,12 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { t } from '#lib/i18n/index.ts';
-	import { clearPageMeta, setPageMeta, type Crumb } from '#lib/stores/page-meta.svelte.ts';
+	import type { Crumb } from '#lib/stores/page-meta.svelte.ts';
 	import { Alert, PageHeader, Skeleton } from '../ui/index.ts';
+	import PageMeta from './PageMeta.svelte';
 
 	let {
 		title,
+		documentTitle,
 		crumbs = [],
 		listQuery,
 		description,
@@ -19,6 +20,8 @@
 	}: {
 		/** The heading and the document title. */
 		title: string;
+		/** The document title when it says more than the heading, such as the platform mode. */
+		documentTitle?: string;
 		/** The breadcrumb levels below the section; the last one is this page. A list page has none. */
 		crumbs?: Crumb[];
 		/** The query of the section level of the breadcrumb, for an address opened in a new tab. */
@@ -35,17 +38,9 @@
 		actions?: Snippet;
 		children: Snippet;
 	} = $props();
-
-	const owner = {};
-	$effect(() => {
-		setPageMeta({ crumbs, listQuery }, owner);
-	});
-	$effect(() => () => clearPageMeta(owner));
 </script>
 
-<svelte:head>
-	<title>{title ? `${title} · ${t('app.name')}` : t('app.name')}</title>
-</svelte:head>
+<PageMeta title={documentTitle ?? title} {crumbs} {listQuery} />
 
 {#if loading}
 	<div class="page-loading" aria-busy="true">
