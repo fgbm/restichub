@@ -168,7 +168,9 @@ describe('the Jobs screen', () => {
 		render(Jobs);
 
 		const table = within(await screen.findByRole('table'));
-		expect(await table.findByText('Succeeded with warnings')).toBeInTheDocument();
+		const pill = await table.findByText('Warnings');
+		expect(pill.closest('.status')).toHaveAttribute('title', 'Succeeded with warnings');
+		expect(pill.closest('.status')).toHaveAttribute('aria-label', 'Succeeded with warnings');
 		expect(
 			screen.getByText(
 				'Another process locks the repository. Wait for it to end and run the job again.'

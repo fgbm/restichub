@@ -2,10 +2,14 @@
 	import type { Snippet } from 'svelte';
 	import type { StatusTone } from './types';
 
-	let { tone = 'neutral', children }: { tone?: StatusTone; children: Snippet } = $props();
+	let {
+		tone = 'neutral',
+		title,
+		children
+	}: { tone?: StatusTone; title?: string; children: Snippet } = $props();
 </script>
 
-<span class="status status--{tone}">{@render children()}</span>
+<span class="status status--{tone}" {title} aria-label={title}>{@render children()}</span>
 
 <style>
 	.status {

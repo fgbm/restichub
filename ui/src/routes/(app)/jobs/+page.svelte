@@ -106,6 +106,10 @@
 		return job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings';
 	}
 
+	function fullLabel(job: Job): string | undefined {
+		return hasWarnings(job) ? t('jobs.statusFull.succeeded_with_warnings') : undefined;
+	}
+
 	function statusLabel(job: Job): string {
 		if (hasWarnings(job)) return t('jobs.status.succeeded_with_warnings');
 		return t(`jobs.status.${isCancelled(job) ? 'cancelled' : job.status}` as MessageKey);
@@ -266,7 +270,7 @@
 
 {#snippet statusCell(job: Job)}
 	<span class="job">
-		<StatusPill tone={toneOf(job)}>{statusLabel(job)}</StatusPill>
+		<StatusPill tone={toneOf(job)} title={fullLabel(job)}>{statusLabel(job)}</StatusPill>
 		{#if reasonOf(job)}
 			<span class="job__meta job__reason">{reasonOf(job)}</span>
 		{/if}

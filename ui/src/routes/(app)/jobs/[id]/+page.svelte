@@ -385,7 +385,12 @@
 		<div class="head__text">
 			<div class="head__title-row">
 				<h1 class="head__title mono">{job.id}</h1>
-				<StatusPill {tone}>{statusLabel}</StatusPill>
+				<StatusPill
+					{tone}
+					title={warnings ? t('jobs.statusFull.succeeded_with_warnings') : undefined}
+				>
+					{statusLabel}
+				</StatusPill>
 				{#if live}<span class="head__live">{t('jobDetail.live')}</span>{/if}
 			</div>
 			<p class="head__subtitle">
