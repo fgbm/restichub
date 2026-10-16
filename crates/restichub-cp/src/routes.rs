@@ -311,7 +311,7 @@ pub const ROUTES: &[Route] = &[
         method: "get",
         path: "/api/v1/agents",
         access: Access::Protected(Operation::AgentsRead),
-        handler: || routes!(crate::agents::list_agents),
+        handler: || routes!(crate::agent_list::list_agents),
     },
     Route {
         method: "get",

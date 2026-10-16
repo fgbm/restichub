@@ -9,7 +9,7 @@
 //! the revocation sweep (AC-ID-04).
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::agents as repo;
 use restichub_db::audit::{AuditAction, diff};
@@ -17,7 +17,7 @@ use restichub_db::{AgentId, AgentStatus};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use utoipa::{IntoParams, ToSchema};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
@@ -134,7 +134,7 @@ pub struct DuplicateOfView {
 }
 
 impl AgentView {
-    fn new(agent: &repo::Agent, now: OffsetDateTime) -> Self {
+    pub(crate) fn new(agent: &repo::Agent, now: OffsetDateTime) -> Self {
         Self {
             id: agent.id.to_string(),
             hostname: agent.hostname.clone(),
@@ -182,86 +182,10 @@ impl AgentView {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-pub struct AgentListResponse {
-    pub items: Vec<AgentView>,
-    /// Null when the table holds no later agent.
-    pub next_cursor: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize, IntoParams)]
-#[serde(deny_unknown_fields)]
-pub struct AgentListQuery {
-    /// `active` or `revoked`.
-    pub status: Option<String>,
-    pub cursor: Option<String>,
-    pub limit: Option<i64>,
-}
-
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameAgentRequest {
     pub hostname: String,
-}
-
-/// Lists the agents of the tenant with keyset pagination and an optional status filter.
-#[utoipa::path(
-    get,
-    path = "/api/v1/agents",
-    security(("cookie" = []), ("bearer" = [])),
-    params(AgentListQuery),
-    responses(
-        (status = 200, description = "The agents of the tenant.", body = AgentListResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
-        crate::error::ProtectedResponses,
-    )
-)]
-pub async fn list_agents(
-    State(state): State<AppState>,
-    context: RequestContext,
-    Query(query): Query<AgentListQuery>,
-) -> Result<Json<AgentListResponse>, ApiError> {
-    context.authorize(Operation::AgentsRead)?;
-    let status = match query.status.as_deref() {
-        Some(value) => Some(
-            AgentStatus::parse(value)
-                .ok_or_else(|| ApiError::invalid_field("status", Reason::Unknown))?,
-        ),
-        None => None,
-    };
-    let page = repo::AgentPage {
-        limit: query.limit.unwrap_or(repo::DEFAULT_PAGE_LIMIT),
-        after: query
-            .cursor
-            .as_deref()
-            .map(decode_cursor)
-            .transpose()
-            .map_err(|cause| {
-                ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
-            })?,
-    };
-    let now = state.auth().clock.now();
-    let result = context
-        .tenant_tx(&state, async |tx| Ok(repo::list(tx, status, &page).await?))
-        .await?;
-    let next_cursor = if result.has_more {
-        result.agents.last().map(|agent| {
-            encode_cursor(repo::AgentCursor {
-                created_at: agent.created_at,
-                id: agent.id,
-            })
-        })
-    } else {
-        None
-    };
-    Ok(Json(AgentListResponse {
-        items: result
-            .agents
-            .iter()
-            .map(|agent| AgentView::new(agent, now))
-            .collect(),
-        next_cursor,
-    }))
 }
 
 /// Reads one agent of the tenant.
@@ -551,11 +475,11 @@ fn parse_agent_id(value: &str) -> Result<AgentId, ApiError> {
         })
 }
 
-fn encode_cursor(cursor: repo::AgentCursor) -> String {
+pub(crate) fn encode_cursor(cursor: repo::AgentCursor) -> String {
     format!("{};{}", cursor.created_at.unix_timestamp_nanos(), cursor.id)
 }
 
-fn decode_cursor(value: &str) -> Result<repo::AgentCursor, String> {
+pub(crate) fn decode_cursor(value: &str) -> Result<repo::AgentCursor, String> {
     let (time, id) = value
         .split_once(';')
         .ok_or_else(|| "the cursor holds no `;`".to_owned())?;

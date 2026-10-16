@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 	renameAgent: vi.fn(),
 	reenrollAgent: vi.fn(),
 	replaceAgent: vi.fn(),
+	searchAgents: vi.fn(),
 	pushToast: vi.fn()
 }));
 
@@ -53,7 +54,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			revokeEnrollmentToken: mocks.revokeEnrollmentToken,
 			renameAgent: mocks.renameAgent,
 			reenrollAgent: mocks.reenrollAgent,
-			replaceAgent: mocks.replaceAgent
+			replaceAgent: mocks.replaceAgent,
+			searchAgents: mocks.searchAgents
 		}
 	};
 });
@@ -115,6 +117,44 @@ describe('the Hosts screen', () => {
 		session.role = 'admin';
 		mocks.listAgents.mockResolvedValue([]);
 		mocks.listEnrollmentTokens.mockResolvedValue([]);
+		// The server filters the page; the screen tests show the agents of the last list read.
+		mocks.searchAgents.mockImplementation(async () => {
+			const results = mocks.listAgents.mock.results;
+			const items = results.length > 0 ? await results[results.length - 1].value : [];
+			return {
+				items,
+				next_cursor: null,
+				total: items.length,
+				facets: {
+					states: { online: 1, offline: 2, waiting: 0, revoked: 3 },
+					os: [{ value: 'linux', count: 3 }],
+					agent_versions: [],
+					labels: []
+				}
+			};
+		});
+	});
+
+	it('fr_ui_01 reads one page of the hosts from the server without the revoked hosts', async () => {
+		const user = userEvent.setup();
+		mocks.listAgents.mockResolvedValue([agent({ id: 'a_01', hostname: 'win-fs01' })]);
+		render(Hosts);
+
+		await screen.findByText('win-fs01');
+		expect(mocks.searchAgents).toHaveBeenCalledWith(
+			expect.objectContaining({
+				state: 'online,offline,waiting',
+				offset: 0,
+				limit: 25,
+				facets: true
+			})
+		);
+		expect(screen.getByText('Showing 1 to 1 of 1')).toBeInTheDocument();
+		// The state facet counts the hosts on the server, also the hidden revoked ones.
+		await user.click(screen.getByRole('button', { name: /^Status/ }));
+		const revoked = (await screen.findByText('Revoked')).closest('li') as HTMLElement;
+		expect(revoked).toHaveTextContent('3');
+		await user.keyboard('{Escape}');
 	});
 
 	it('shows only a registration that can still enroll a host', async () => {

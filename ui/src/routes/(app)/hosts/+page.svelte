@@ -7,6 +7,8 @@
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
 		Agent,
+		AgentListFacets,
+		AgentQuery,
 		EnrollmentToken,
 		EnrollmentTokenCreated,
 		ApiProblem
@@ -27,8 +29,7 @@
 		StatusPill,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, RowAction, TableColumn } from '#lib/components/ui/index.ts';
-	import { facetCounts, matchesSearch } from '#lib/filters.ts';
+	import type { FilterFacet, RowAction, TableColumn, TableSort } from '#lib/components/ui/index.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -89,6 +90,7 @@
 		{
 			key: 'status',
 			header: t('hosts.status'),
+			sortable: false,
 			value: (row) => statusLabel(row),
 			render: statusCell
 		},
@@ -102,6 +104,7 @@
 		{
 			key: 'server_scripts',
 			hideNarrow: true,
+			sortable: false,
 			header: t('hosts.serverScripts'),
 			value: (row) => scriptsLabel(row),
 			render: scriptsCell
@@ -124,6 +127,7 @@
 		{
 			key: 'certificate_expires_at',
 			hideNarrow: true,
+			sortable: false,
 			header: t('hosts.certificate'),
 			value: (row) => row.certificate_expires_at,
 			render: certificateCell
@@ -138,35 +142,120 @@
 		return agent.online ? 'online' : 'offline';
 	}
 
-	const filters = queryFilters(['q', 'state', 'os'] as const);
+	// The list filters, sorts and pages on the server (FR-UI-01). Without a state in the address the
+	// list leaves out the revoked hosts; the state facet shows how many there are.
+	const PAGE_SIZE = 25;
+	const VISIBLE_STATES = 'online,offline,waiting';
+	const filters = queryFilters([
+		'q',
+		'state',
+		'os',
+		'agent_version',
+		'label',
+		'scripts',
+		'page',
+		'sort',
+		'order'
+	] as const);
+
+	let pageRows = $state<Agent[]>([]);
+	let total = $state(0);
+	let facetValues = $state<AgentListFacets | null>(null);
+	let pageLoading = $state(true);
+	let pageError = $state<string | null>(null);
+
+	const SORT_KEYS: Record<string, NonNullable<AgentQuery['sort']>> = {
+		hostname: 'hostname',
+		os: 'os',
+		agent_version: 'agent_version',
+		last_seen_at: 'last_seen_at'
+	};
+	const tablePage = $derived(Math.max(1, Number(filters.value.page) || 1));
+	const tableSort = $derived<TableSort | undefined>(
+		filters.value.sort
+			? { key: filters.value.sort, direction: filters.value.order === 'asc' ? 'asc' : 'desc' }
+			: undefined
+	);
+
+	function queryOf(): AgentQuery {
+		const value = filters.value;
+		return {
+			q: value.q.trim() || undefined,
+			state: value.state || VISIBLE_STATES,
+			os: value.os || undefined,
+			agent_version: value.agent_version || undefined,
+			label: value.label || undefined,
+			server_scripts:
+				value.scripts === 'enabled' || value.scripts === 'disabled' ? value.scripts : undefined,
+			sort: SORT_KEYS[value.sort],
+			order: value.sort ? (value.order === 'asc' ? 'asc' : 'desc') : undefined,
+			offset: (tablePage - 1) * PAGE_SIZE,
+			limit: PAGE_SIZE,
+			facets: true
+		};
+	}
+
+	async function loadPage(): Promise<void> {
+		try {
+			const result = await service.searchAgents(queryOf());
+			pageRows = result.items;
+			total = result.total;
+			facetValues = result.facets ?? facetValues;
+			pageError = null;
+		} catch (problem) {
+			pageError = messageOf(problem);
+		} finally {
+			pageLoading = false;
+		}
+	}
+
+	// The first page loads with the rest of the screen. A typed search waits for a short pause.
+	let loadedQuery = JSON.stringify(queryOf());
+	let typing: ReturnType<typeof setTimeout> | undefined;
+	$effect(() => {
+		const key = JSON.stringify(queryOf());
+		if (key === loadedQuery) return;
+		loadedQuery = key;
+		clearTimeout(typing);
+		typing = setTimeout(() => void loadPage(), 250);
+	});
+	onMount(() => () => clearTimeout(typing));
 
 	const facets = $derived<FilterFacet[]>([
 		{
 			key: 'state',
 			label: t('hosts.status'),
-			multiple: false,
 			options: (['online', 'offline', 'waiting', 'revoked'] as const).map((value) => ({
 				value,
 				label: stateLabel(value),
-				count: agents.filter((agent) => stateOf(agent) === value).length
+				count: facetValues?.states[value]
 			}))
 		},
 		{
 			key: 'os',
 			label: t('hosts.os'),
-			options: facetCounts(agents, (agent) => [agent.os])
+			options: (facetValues?.os ?? []).map(({ value, count }) => ({ value, count }))
+		},
+		{
+			key: 'agent_version',
+			label: t('hosts.agent'),
+			options: (facetValues?.agent_versions ?? []).map(({ value, count }) => ({ value, count }))
+		},
+		{
+			key: 'label',
+			label: t('hosts.labels'),
+			options: (facetValues?.labels ?? []).map(({ value, count }) => ({ value, count }))
+		},
+		{
+			key: 'scripts',
+			label: t('hosts.serverScripts'),
+			multiple: false,
+			options: (['enabled', 'disabled'] as const).map((value) => ({
+				value,
+				label: t(`hosts.serverScripts.${value}`)
+			}))
 		}
 	]);
-
-	const shown = $derived(
-		agents.filter((agent) => {
-			const { q, state, os } = filters.value;
-			if (!matchesSearch(q, [agent.hostname, ...agent.labels])) return false;
-			if (state && stateOf(agent) !== state) return false;
-			if (os && !os.split(',').includes(agent.os)) return false;
-			return true;
-		})
-	);
 
 	function rowActions(agent: Agent): RowAction[] {
 		if (!canWrite || agent.status !== 'active') return [];
@@ -256,6 +345,7 @@
 			loading = false;
 			reader.loaded();
 		}
+		await loadPage();
 	}
 
 	// A used token leaves the pending list and a new host appears without a manual reload.
@@ -272,6 +362,7 @@
 		} catch {
 			// The next tick tries again; the visible list stays.
 		}
+		await loadPage();
 	}
 
 	// The stream pushes a change of a host. The poll covers a stream that is down.
@@ -443,7 +534,7 @@
 <Page
 	title={t('hosts.title')}
 	description={t('hosts.description')}
-	count={loading ? undefined : agents.length}
+	count={pageLoading ? undefined : total}
 >
 	{#snippet actions()}
 		{#if canWrite}
@@ -512,9 +603,16 @@
 	{:else}
 		<DataTable
 			{columns}
-			rows={shown}
-			{loading}
-			{error}
+			rows={pageRows}
+			mode="server"
+			page={tablePage}
+			pageSize={PAGE_SIZE}
+			{total}
+			sort={tableSort}
+			onPageChange={(next) => filters.update({ page: String(next) })}
+			onSortChange={(next) => filters.update({ sort: next.key, order: next.direction })}
+			loading={loading || pageLoading}
+			error={error ?? pageError}
 			rowKey={(agent) => agent.id}
 			rowHref={(agent) => resolve('/(app)/hosts/[id]', { id: agent.id })}
 			actions={rowActions}
@@ -529,7 +627,15 @@
 					search={{ key: 'q', label: t('hosts.search'), placeholder: t('hosts.searchPlaceholder') }}
 					{facets}
 					onchange={filters.update}
-					onreset={filters.reset}
+					onreset={() =>
+						filters.update({
+							q: '',
+							state: '',
+							os: '',
+							agent_version: '',
+							label: '',
+							scripts: ''
+						})}
 				/>
 			{/snippet}
 		</DataTable>
