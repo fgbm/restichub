@@ -1117,6 +1117,8 @@ export const en = {
 	'restore.emptyDirectory': 'This directory is empty.',
 	'restore.treeFailed': 'The directory could not be read: {reason}',
 	'restore.retry': 'Try again',
+	'restore.openJob': 'Open the job',
+	'restore.symlink': 'link',
 	'restore.selectionNone': 'Nothing selected. The restore uses the whole snapshot.',
 	'restore.selectionSome': 'Selected: {count}',
 	'restore.clearSelection': 'Clear selection',

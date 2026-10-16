@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Agent, Repository, SnapshotItem, SnapshotsView } from '#lib/api/index.ts';
@@ -281,7 +282,11 @@
 		<Alert tone="danger" title={error} />
 	{/if}
 	{#if view?.state === 'failed'}
-		<Alert tone="danger" title={t('restore.listFailed', { reason: reasonOf(view.error_code) })} />
+		<Alert tone="danger" title={t('restore.listFailed', { reason: reasonOf(view.error_code) })}>
+			{#if view.job_id}
+				<a href={resolve('/(app)/jobs/[id]', { id: view.job_id })}>{t('restore.openJob')}</a>
+			{/if}
+		</Alert>
 	{/if}
 	{#if view?.truncated}
 		<Alert tone="attention" title={t('restore.listTruncated')} />

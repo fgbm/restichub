@@ -1123,6 +1123,8 @@ export const ru: Record<MessageKey, string> = {
 	'restore.emptyDirectory': 'Каталог пуст.',
 	'restore.treeFailed': 'Не удалось прочитать каталог: {reason}',
 	'restore.retry': 'Повторить',
+	'restore.openJob': 'Открыть задание',
+	'restore.symlink': 'ссылка',
 	'restore.selectionNone': 'Ничего не отмечено. Восстановится весь снимок.',
 	'restore.selectionSome': 'Отмечено: {count}',
 	'restore.clearSelection': 'Снять отметки',

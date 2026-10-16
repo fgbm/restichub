@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { NodeItem, SnapshotItem } from '#lib/api/index.ts';
 	import { Button, Icon } from '#lib/components/ui/index.ts';
 	import { formatBytes } from '#lib/format.ts';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import { isCovered } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
 
@@ -17,6 +18,8 @@
 		next: number | null;
 		status: 'loading' | 'idle' | 'failed';
 		error: string | null;
+		/** The job whose log tells why the directory failed. */
+		jobId?: string | null;
 		expanded: boolean;
 	}
 
@@ -38,7 +41,19 @@
 	// A new snapshot invalidates the answers of the old one that are still on their way.
 	let generation = 0;
 
+	/** A browse job that ended without a listing. */
+	class BrowseFailed extends Error {
+		code: string;
+		jobId: string | null;
+		constructor(code: string, jobId: string | null) {
+			super(code);
+			this.code = code;
+			this.jobId = jobId;
+		}
+	}
+
 	function describe(problem: unknown): string {
+		if (problem instanceof BrowseFailed) return tOr(`jobs.reason.${problem.code}`, problem.code);
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
 		if (problem instanceof BrowseTimeout) return problem.message;
 		return t('table.error');
@@ -68,7 +83,7 @@
 				cancelled: () => mine !== generation
 			});
 			if (!view || mine !== generation) return;
-			if (view.state === 'failed') throw new Error(view.error_code ?? 'failed');
+			if (view.state === 'failed') throw new BrowseFailed(view.error_code ?? 'failed', view.job_id);
 			const known = directories[path];
 			directories[path] = {
 				nodes: [...(offset === 0 ? [] : (known?.nodes ?? [])), ...view.nodes],
@@ -85,6 +100,7 @@
 				next: known?.next ?? null,
 				status: 'failed',
 				error: describe(problem),
+				jobId: problem instanceof BrowseFailed ? problem.jobId : null,
 				expanded: true
 			};
 		}
@@ -159,7 +175,9 @@
 						/>
 						<Icon name={node.kind === 'dir' ? 'folder' : 'file'} />
 						<span class="tree__name">{node.name}</span>
-						{#if node.kind !== 'dir'}
+						{#if node.kind === 'symlink'}
+							<span class="tree__meta">{t('restore.symlink')}</span>
+						{:else if node.kind !== 'dir'}
 							<span class="tree__meta">{formatBytes(node.size)}</span>
 						{/if}
 					</div>
@@ -173,6 +191,10 @@
 			{:else if directory.status === 'failed'}
 				<li class="tree__note tree__note--error" role="none">
 					<span>{t('restore.treeFailed', { reason: directory.error ?? '' })}</span>
+					{#if directory.jobId}
+						<a href={resolve('/(app)/jobs/[id]', { id: directory.jobId })}>{t('restore.openJob')}</a
+						>
+					{/if}
 					<Button size="sm" onclick={() => load(path)}>{t('restore.retry')}</Button>
 				</li>
 			{:else if directory.nodes.length === 0}
