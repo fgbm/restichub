@@ -21,7 +21,6 @@
 			{#each items as item (item.label)}
 				<Button
 					size="sm"
-					variant={item.tone === 'danger' ? 'danger' : 'secondary'}
 					icon={item.icon}
 					disabled={item.disabled}
 					title={item.hint ?? item.label}
