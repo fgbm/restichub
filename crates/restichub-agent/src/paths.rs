@@ -123,11 +123,35 @@ pub fn data_dir() -> PathBuf {
 /// The `ResticHub` directory under `%ProgramData%`. The agent owns it and every level below it; the
 /// levels above it belong to Windows and stay as they are.
 #[cfg(windows)]
-fn agent_root() -> PathBuf {
+pub(crate) fn agent_root() -> PathBuf {
     config_dir()
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_default()
+}
+
+/// Repairs the access control that an older build left on the existing agent directories
+/// (FR-AG-04, threat T20).
+///
+/// Only the elevated commands that prepare the directories call it. The service refuses a foreign
+/// access instead. A refusal that the repair does not cover (a foreign owner, a link) comes from
+/// [`ensure_config_dir`]. Linux needs no repair: [`create_protected_dir`] sets the mode of an
+/// existing directory and has no owner check that an old build could trip.
+///
+/// # Errors
+///
+/// Returns an error when a directory holds an entry that the agent does not know, or that another
+/// account owns, or when the access control cannot be set.
+pub fn repair_config_dir(dir: &Path, log: &mut dyn FnMut(&Path)) -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::winrepair::repair_agent_tree(dir, &agent_root(), log)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (dir, log);
+        Ok(())
+    }
 }
 
 /// Makes the directory and every missing parent, and restricts them to the service account

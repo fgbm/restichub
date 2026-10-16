@@ -12,7 +12,7 @@ use time::OffsetDateTime;
 use crate::paths;
 use crate::verify::{CLOCK_HINT, CLOCK_TOLERANCE};
 
-const PROBE_FILE: &str = ".probe";
+pub(crate) const PROBE_FILE: &str = ".probe";
 
 /// Refuses a process without the rights to write the protected directories (FR-IN-07).
 ///
@@ -49,6 +49,9 @@ fn is_elevated() -> Result<bool> {
 
 /// Makes the directories of the agent and proves that the agent can write there (FR-AG-04).
 ///
+/// An existing directory of an older build that grants a foreign account a right is repaired when it
+/// holds only entries of the agent (threat T20); see [`paths::repair_config_dir`].
+///
 /// The check covers the configuration directory, the staging directory that the identity save uses
 /// and the cache directory. It leaves no probe file behind.
 ///
@@ -56,6 +59,9 @@ fn is_elevated() -> Result<bool> {
 ///
 /// Returns an error when a directory cannot be created, is not safe, or does not take a file.
 pub fn prepare_directories(config: &Path, cache: &Path) -> Result<()> {
+    paths::repair_config_dir(config, &mut |path| {
+        println!("repaired the access control of {}", path.display());
+    })?;
     paths::ensure_config_dir(config)
         .with_context(|| format!("cannot prepare the directory {}", config.display()))?;
     let staging = crate::identity::sibling(config, ".staging");

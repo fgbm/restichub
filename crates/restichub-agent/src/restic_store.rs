@@ -15,7 +15,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::restic_release::{VerifiedRelease, check_supported, hex};
 
-const RECORD_FILE: &str = "restic.json";
+pub(crate) const RECORD_FILE: &str = "restic.json";
 
 // Windows refuses to replace an executable that a process runs.
 #[cfg(windows)]

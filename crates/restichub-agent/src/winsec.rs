@@ -30,7 +30,7 @@ use windows_sys::Win32::Security::{
     GetAclInformation, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation,
     INHERIT_ONLY_ACE, MapGenericMask, OWNER_SECURITY_INFORMATION,
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-    TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+    SetFileSecurityW, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateDirectoryW, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
@@ -317,7 +317,7 @@ fn check(path: &Path, rights: u32) -> Result<()> {
     check_owner(path, security.owner)?;
     if let Some(mask) = first_foreign_grant(security.dacl, rights)? {
         bail!(
-            "{} grants the access mask {mask:#010x} to an account that is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
+            "{} grants the access mask {mask:#010x} to an account that is not SYSTEM or Administrators; run `restichub-agent install-service` as an administrator, which repairs the agent directories, or remove the entry of that account from the access control list of the path",
             path.display()
         );
     }
@@ -369,12 +369,85 @@ fn open_security(path: &Path) -> Result<Security> {
 
 fn check_owner(path: &Path, owner: PSID) -> Result<()> {
     if owner.is_null() || !is_trusted_sid(owner) {
+        bail!("{}", foreign_owner_advice(path));
+    }
+    Ok(())
+}
+
+/// The advice for a path that another account owns. The agent never repairs it: the owner can
+/// change the access control and may have put files there. Deleting a directory would also delete
+/// the agent identity, so the text asks for a check of the files, then a reset.
+fn foreign_owner_advice(path: &Path) -> String {
+    let shown = path.display();
+    if path.is_dir() {
+        format!(
+            "{shown} is owned by an account that is not SYSTEM or Administrators, so that account may have put files there; check the files in it first, then take the ownership and reset the access control in an elevated PowerShell, and run the command again:\n  icacls \"{shown}\" /setowner *S-1-5-32-544\n  $acl = New-Object System.Security.AccessControl.DirectorySecurity; $acl.SetSecurityDescriptorSddlForm('{DIR_SDDL}'); Set-Acl -LiteralPath \"{shown}\" -AclObject $acl"
+        )
+    } else {
+        format!(
+            "{shown} is owned by an account that is not SYSTEM or Administrators; an administrator checks the file, removes it and runs the command again"
+        )
+    }
+}
+
+/// What the owner and the DACL of an existing path allow to another account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Exposure {
+    Clean,
+    /// SYSTEM or Administrators own it, but the DACL grants an agent right to another account.
+    ForeignGrant,
+    ForeignOwner,
+}
+
+/// Reads the exposure of a path without failing on a foreign owner or a foreign grant.
+///
+/// # Errors
+///
+/// Returns an error when the access control of the path cannot be read.
+pub(crate) fn exposure(path: &Path) -> Result<Exposure> {
+    let security = open_security(path)?;
+    if security.owner.is_null() || !is_trusted_sid(security.owner) {
+        return Ok(Exposure::ForeignOwner);
+    }
+    Ok(
+        if first_foreign_grant(security.dacl, AGENT_RIGHTS)?.is_some() {
+            Exposure::ForeignGrant
+        } else {
+            Exposure::Clean
+        },
+    )
+}
+
+/// Sets the protected DACL on one path without inheriting it into the children that exist.
+///
+/// The owner stays as it is: the callers repair only paths that SYSTEM or Administrators own.
+///
+/// # Errors
+///
+/// Returns an error when the access control cannot be set.
+pub(crate) fn protect_without_propagation(path: &Path, directory: bool) -> Result<()> {
+    let descriptor = descriptor(if directory { DIR_SDDL } else { FILE_SDDL })?;
+    let wide = wide_path(path);
+    let info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+    // SAFETY: the path is a null-terminated UTF-16 string and the descriptor stays alive.
+    let ok = unsafe { SetFileSecurityW(wide.as_ptr(), info, descriptor.0) };
+    if ok == 0 {
         bail!(
-            "{} is owned by an account that is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
-            path.display()
+            "cannot set the access control of {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
         );
     }
     Ok(())
+}
+
+/// Sets the protected DACL on a directory and lets it flow into the children that exist.
+///
+/// # Errors
+///
+/// Returns an error when the access control cannot be set.
+pub(crate) fn protect_with_children(dir: &Path) -> Result<()> {
+    apply_descriptor(dir, DIR_SDDL)
 }
 
 /// Returns the mask that a non-admin holds, or `None` when no entry grants it.
@@ -590,12 +663,12 @@ fn wide_path(path: &Path) -> Vec<u16> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
 
-    fn temp(name: &str) -> std::path::PathBuf {
+    pub(crate) fn temp(name: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
             "restichub-agent-winsec-{name}-{}",
             std::process::id()
@@ -795,7 +868,7 @@ mod tests {
     }
 
     /// Reads the security identifier of the account that runs the process.
-    fn current_user_sid() -> Result<String> {
+    pub(crate) fn current_user_sid() -> Result<String> {
         let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
         let whoami = Path::new(&system_root).join("System32").join("whoami.exe");
         let output = std::process::Command::new(whoami)
@@ -817,7 +890,7 @@ mod tests {
     }
 
     /// Sets the owner of `path` to the SDDL identity, for a negative test.
-    fn set_owner(path: &Path, sid: &str) -> Result<()> {
+    pub(crate) fn set_owner(path: &Path, sid: &str) -> Result<()> {
         let descriptor = descriptor(&format!("O:{sid}"))?;
         let mut owner: PSID = std::ptr::null_mut();
         let mut defaulted = 0;
@@ -843,7 +916,7 @@ mod tests {
     }
 
     /// Grants the account of BUILTIN\Users the given rights, for a negative test.
-    fn grant(dir: &Path, rights: &str) -> Result<()> {
+    pub(crate) fn grant(dir: &Path, rights: &str) -> Result<()> {
         run_icacls(dir, &["/grant", &format!("*S-1-5-32-545:{rights}")])
     }
 
