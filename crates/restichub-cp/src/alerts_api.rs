@@ -4,7 +4,7 @@
 //! come from the evaluation loop of [`crate::alerts`]; no endpoint creates or resolves one.
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use restichub_db::AlertId;
 use restichub_db::alerts::{
     self as repo, Alert, AlertCursor, AlertKind, AlertPage, AlertParams, AlertRule, AlertStatus,
@@ -19,6 +19,7 @@ use crate::alerts::message::{error_text, link};
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
+use crate::list_query::{ApiQuery, check_window, parse_list, parse_search};
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -40,7 +41,14 @@ pub struct AlertListQuery {
     /// `open` (default), `resolved` or `all`.
     #[param(inline)]
     pub status: Option<StatusFilter>,
+    /// Comma-separated, for example `job_failed,agent_offline`.
+    pub kind: Option<String>,
+    /// Matches the host, the plan or the repository name; at most 200 characters.
+    pub q: Option<String>,
+    /// Not with `offset`.
     pub cursor: Option<String>,
+    /// Skipped alerts, in `0..=10000`. Not with `cursor`.
+    pub offset: Option<i64>,
     pub limit: Option<i64>,
 }
 
@@ -99,7 +107,12 @@ pub(crate) fn views(state: &AppState, alerts: &[Alert]) -> Vec<AlertView> {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AlertListResponse {
     pub items: Vec<AlertView>,
+    /// Null for a page read by `offset`.
     pub next_cursor: Option<String>,
+    /// The alerts that match the filter on all pages, at most 10000.
+    pub total: i64,
+    /// More alerts match than `total` shows.
+    pub total_capped: bool,
 }
 
 /// Lists the alerts of the tenant, newest first.
@@ -117,9 +130,10 @@ pub struct AlertListResponse {
 pub async fn list_alerts(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<AlertListQuery>,
+    ApiQuery(query): ApiQuery<AlertListQuery>,
 ) -> Result<Json<AlertListResponse>, ApiError> {
     context.authorize(Operation::AlertsRead)?;
+    check_window(query.cursor.as_deref(), query.offset, true)?;
     let status = match query.status.unwrap_or_default() {
         StatusFilter::Open => Some(AlertStatus::Open),
         StatusFilter::Resolved => Some(AlertStatus::Resolved),
@@ -128,6 +142,9 @@ pub async fn list_alerts(
     let page = AlertPage {
         limit: query.limit.unwrap_or(repo::DEFAULT_PAGE_LIMIT),
         status,
+        kinds: parse_list("kind", query.kind.as_deref(), AlertKind::parse)?,
+        search: parse_search(query.q.as_deref())?,
+        offset: query.offset.unwrap_or(0),
         after: query
             .cursor
             .as_deref()
@@ -140,7 +157,7 @@ pub async fn list_alerts(
     let result = context
         .tenant_tx(&state, async |tx| Ok(repo::list(tx, &page).await?))
         .await?;
-    let next_cursor = if result.has_more {
+    let next_cursor = if result.has_more && query.offset.is_none() {
         result.alerts.last().map(|alert| {
             encode_cursor(AlertCursor {
                 opened_at: alert.opened_at,
@@ -153,6 +170,8 @@ pub async fn list_alerts(
     Ok(Json(AlertListResponse {
         items: views(&state, &result.alerts),
         next_cursor,
+        total: result.total,
+        total_capped: result.total_capped,
     }))
 }
 

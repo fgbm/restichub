@@ -40,6 +40,42 @@ describe('the HTTP service (issue #20 tenants)', () => {
 		expect(fetchFn.mock.calls[0][0]).toContain('/api/v1/platform/tenants');
 	});
 
+	it('reads every page of a cursor list for a screen that pages on the client', async () => {
+		const fetchFn = vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse({ items: [{ id: 'p1' }], next_cursor: 'c1' }))
+			.mockResolvedValueOnce(jsonResponse({ items: [{ id: 'p2' }], next_cursor: null }));
+		const service = await loadService(fetchFn);
+
+		expect(await service.listPlans()).toEqual([{ id: 'p1' }, { id: 'p2' }]);
+		expect(fetchFn).toHaveBeenCalledTimes(2);
+		expect(fetchFn.mock.calls[0][0]).toContain('limit=200');
+		expect(fetchFn.mock.calls[0][0]).not.toContain('cursor=');
+		expect(fetchFn.mock.calls[1][0]).toContain('cursor=c1');
+	});
+
+	it('stops with an error when the server repeats a cursor', async () => {
+		const fetchFn = vi
+			.fn()
+			.mockImplementation(async () => jsonResponse({ items: [{ id: 'p1' }], next_cursor: 'c1' }));
+		const service = await loadService(fetchFn);
+
+		await expect(service.listPlans()).rejects.toThrow(/cursor c1 again/);
+		expect(fetchFn).toHaveBeenCalledTimes(2);
+	});
+
+	it('stops with an error after the page limit', async () => {
+		let page = 0;
+		const fetchFn = vi.fn().mockImplementation(async () => {
+			page += 1;
+			return jsonResponse({ items: [{ id: `p${page}` }], next_cursor: `c${page}` });
+		});
+		const service = await loadService(fetchFn);
+
+		await expect(service.listPlans()).rejects.toThrow(/more than 50 pages/);
+		expect(fetchFn).toHaveBeenCalledTimes(50);
+	});
+
 	it('posts the create-tenant body and returns the tenant', async () => {
 		const tenant = {
 			id: 't_02',

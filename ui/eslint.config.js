@@ -57,8 +57,15 @@ export default tseslint.config(
 		rules: {
 			'ui/no-raw-table': 'error',
 			'ui/no-row-actions-snippet': 'error',
-			'ui/no-back-link': 'error'
+			'ui/no-back-link': 'error',
+			'ui/no-load-more': 'error'
 		}
+	},
+	{
+		// design/style/ui-principles.md, 2.15: a file tree is not a list page, so a folder loads its
+		// further entries on request.
+		files: ['src/lib/components/SnapshotTree.svelte'],
+		rules: { 'ui/no-load-more': 'off' }
 	},
 	prettier
 );

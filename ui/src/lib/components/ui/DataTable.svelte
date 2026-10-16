@@ -1,6 +1,6 @@
 <script lang="ts" generics="T">
 	import type { Snippet } from 'svelte';
-	import { formatLocalTime, formatTime, relativeTime } from '#lib/format.ts';
+	import { formatCount, formatLocalTime, formatTime, relativeTime } from '#lib/format.ts';
 	import { t } from '#lib/i18n/index.ts';
 	import Badge from './Badge.svelte';
 	import Button from './Button.svelte';
@@ -8,6 +8,7 @@
 	import Icon from './Icon.svelte';
 	import type { IconName } from './icons';
 	import RowActions from './RowActions.svelte';
+	import Select from './Select.svelte';
 	import SidePanel from './SidePanel.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import type { MenuItem, RowAction, TableColumn, TableSort } from './types';
@@ -25,11 +26,14 @@
 		moreLabel,
 		mode = 'client',
 		page = $bindable(1),
-		pageSize = 10,
+		pageSize = $bindable(10),
+		pageSizes = [10, 25, 50, 100],
 		paginated = true,
 		total,
+		totalCapped = false,
 		sort = $bindable(),
 		onPageChange,
+		onPageSizeChange,
 		onSortChange,
 		loading = false,
 		error = null,
@@ -61,13 +65,18 @@
 		mode?: 'client' | 'server';
 		page?: number;
 		pageSize?: number;
+		/** The choices of the page size. In server mode, the choice needs `onPageSizeChange`. */
+		pageSizes?: number[];
 		/** Client mode only. Set to `false` to show all rows. */
 		paginated?: boolean;
 		/** Server mode: the number of rows that match the filters on all pages. */
 		total?: number;
+		/** Server mode: more rows match than `total`, which the server counted up to its limit. */
+		totalCapped?: boolean;
 		/** The current order. In client mode, the order the rows already have until a person sorts. */
 		sort?: TableSort;
 		onPageChange?: (page: number) => void;
+		onPageSizeChange?: (pageSize: number) => void;
 		onSortChange?: (sort: TableSort) => void;
 		loading?: boolean;
 		error?: string | null;
@@ -133,6 +142,35 @@
 		page = next;
 		onPageChange?.(next);
 	}
+
+	const sizeChoices = $derived([...new Set([...pageSizes, pageSize])].sort((a, b) => a - b));
+	const showSizes = $derived(
+		(!server || Boolean(onPageSizeChange)) && totalRows > (sizeChoices[0] ?? pageSize)
+	);
+	const totalLabel = $derived(totalCapped ? `${formatCount(totalRows)}+` : formatCount(totalRows));
+
+	function setPageSize(value: string): void {
+		const next = Number(value);
+		if (!Number.isFinite(next) || next === pageSize) return;
+		pageSize = next;
+		page = 1;
+		onPageSizeChange?.(next);
+	}
+
+	/** The first, the last and the neighbours of the current page; a gap stands for the rest. */
+	const pageItems = $derived.by((): (number | null)[] => {
+		if (pageCount <= 7) return Array.from({ length: pageCount }, (_, index) => index + 1);
+		const from = Math.max(2, Math.min(currentPage - 1, pageCount - 4));
+		const to = Math.min(pageCount - 1, Math.max(currentPage + 1, 5));
+		const middle = Array.from({ length: to - from + 1 }, (_, index) => from + index);
+		return [
+			1,
+			...(from > 2 ? [null] : []),
+			...middle,
+			...(to < pageCount - 1 ? [null] : []),
+			pageCount
+		];
+	});
 
 	function toggleSort(column: TableColumn<T>): void {
 		if (column.sortable === false) return;
@@ -341,29 +379,60 @@
 	{#if showPager && !loading && !error && totalRows > 0}
 		<div class="table-footer">
 			<p class="table-footer__summary">
-				{t('pagination.summary', { from: rangeFrom, to: rangeTo, total: totalRows })}
+				{t('pagination.summary', {
+					from: formatCount(rangeFrom),
+					to: formatCount(rangeTo),
+					total: totalLabel
+				})}
 			</p>
-			{#if pageCount > 1}
-				<div class="table-footer__pager">
-					<Button
-						size="sm"
-						disabled={currentPage <= 1}
-						onclick={() => goTo(currentPage - 1)}
-						icon="chevron-left"
-						aria-label={t('pagination.previous')}
-					/>
-					<span class="table-footer__page">
-						{t('pagination.pageOf', { page: currentPage, pages: pageCount })}
-					</span>
-					<Button
-						size="sm"
-						disabled={currentPage >= pageCount}
-						onclick={() => goTo(currentPage + 1)}
-						icon="chevron-right"
-						aria-label={t('pagination.next')}
-					/>
-				</div>
-			{/if}
+			<div class="table-footer__controls">
+				{#if showSizes}
+					<div class="table-footer__size">
+						<span class="table-footer__size-label" aria-hidden="true">
+							{t('pagination.pageSize')}
+						</span>
+						<Select
+							value={String(pageSize)}
+							options={sizeChoices.map((size) => ({ value: String(size), label: String(size) }))}
+							aria-label={t('pagination.pageSize')}
+							onchange={(event) => setPageSize(event.currentTarget.value)}
+						/>
+					</div>
+				{/if}
+				{#if pageCount > 1}
+					<nav class="table-footer__pager" aria-label={t('pagination.label')}>
+						<Button
+							size="sm"
+							disabled={currentPage <= 1}
+							onclick={() => goTo(currentPage - 1)}
+							icon="chevron-left"
+							aria-label={t('pagination.previous')}
+						/>
+						{#each pageItems as item, index (item ?? `gap-${index}`)}
+							{#if item === null}
+								<span class="table-footer__gap" aria-hidden="true">…</span>
+							{:else}
+								<Button
+									size="sm"
+									variant={item === currentPage ? 'primary' : 'ghost'}
+									aria-current={item === currentPage ? 'page' : undefined}
+									aria-label={t('pagination.page', { page: item })}
+									onclick={() => goTo(item)}
+								>
+									{formatCount(item)}
+								</Button>
+							{/if}
+						{/each}
+						<Button
+							size="sm"
+							disabled={currentPage >= pageCount}
+							onclick={() => goTo(currentPage + 1)}
+							icon="chevron-right"
+							aria-label={t('pagination.next')}
+						/>
+					</nav>
+				{/if}
+			</div>
 		</div>
 	{/if}
 </div>
@@ -642,14 +711,44 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
-	.table-footer__pager {
+	.table-footer__controls {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--rh-space-4);
+	}
+
+	.table-footer__size {
 		display: flex;
 		align-items: center;
 		gap: var(--rh-space-2);
-	}
-
-	.table-footer__page {
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
+		white-space: nowrap;
+	}
+
+	.table-footer__size :global(.rh-select) {
+		width: auto;
+		height: 28px;
+		padding-right: var(--rh-space-6);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.table-footer__pager {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-1);
+	}
+
+	.table-footer__pager :global(.btn:not(.btn--icon)) {
+		min-width: 28px;
+		justify-content: center;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.table-footer__gap {
+		min-width: 20px;
+		color: var(--rh-color-text-muted);
+		text-align: center;
 	}
 </style>

@@ -34,6 +34,7 @@
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatCount, formatTime, relativeTime } from '#lib/format.ts';
+	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -91,11 +92,14 @@
 		);
 	}
 
+	// The token of the open dialog after it left the pending list.
+	let createdUse = $state<EnrollmentToken | null>(null);
+
 	// The dialog shows the host when the agent used the token that the dialog created.
 	const registeredHost = $derived.by(() => {
-		if (!createdToken) return null;
-		const used = enrollmentTokens.find((token) => token.id === createdToken?.id);
-		if (!used?.used_at || !used.used_by_agent_id) return null;
+		const used = createdUse;
+		if (!createdToken || used?.id !== createdToken.id) return null;
+		if (!used.used_at || !used.used_by_agent_id) return null;
 		const hostname = hostNames[used.used_by_agent_id];
 		return hostname ? { hostname } : null;
 	});
@@ -172,7 +176,6 @@
 
 	// The list filters, sorts and pages on the server (FR-UI-01). Without a state in the address the
 	// list leaves out the revoked hosts; the state facet shows how many there are.
-	const PAGE_SIZE = 25;
 	const VISIBLE_STATES = 'online,offline,waiting';
 	const filters = queryFilters([
 		'q',
@@ -182,6 +185,7 @@
 		'label',
 		'scripts',
 		'page',
+		'size',
 		'sort',
 		'order'
 	] as const);
@@ -199,7 +203,8 @@
 		agent_version: 'agent_version',
 		last_seen_at: 'last_seen_at'
 	};
-	const tablePage = $derived(Math.max(1, Number(filters.value.page) || 1));
+	const tablePage = $derived(pageNumber(filters.value.page));
+	const pageSize = $derived(pageSizeOf(filters.value.size));
 	const tableSort = $derived<TableSort | undefined>(
 		filters.value.sort
 			? { key: filters.value.sort, direction: filters.value.order === 'asc' ? 'asc' : 'desc' }
@@ -218,8 +223,8 @@
 				value.scripts === 'enabled' || value.scripts === 'disabled' ? value.scripts : undefined,
 			sort: SORT_KEYS[value.sort],
 			order: value.sort ? (value.order === 'asc' ? 'asc' : 'desc') : undefined,
-			offset: (tablePage - 1) * PAGE_SIZE,
-			limit: PAGE_SIZE
+			offset: (tablePage - 1) * pageSize,
+			limit: pageSize
 		};
 	}
 
@@ -250,6 +255,11 @@
 				facets: withFacets || undefined
 			});
 			if (mine !== request) return;
+			const last = lastPageIfPast(tablePage, pageSize, result.total, result.items.length);
+			if (last !== null) {
+				filters.update({ page: String(last) });
+				return;
+			}
 			pageRows = result.items;
 			total = result.total;
 			totalCapped = result.total_capped;
@@ -405,7 +415,20 @@
 	}
 
 	function tokenHosts(): (string | null | undefined)[] {
-		return enrollmentTokens.flatMap((token) => [token.used_by_agent_id, token.replaces_agent_id]);
+		return [
+			createdUse?.used_by_agent_id,
+			...enrollmentTokens.map((token) => token.replaces_agent_id)
+		];
+	}
+
+	// The used and revoked tokens grow without bound, so the poll reads only the pending ones. The
+	// token of the open dialog is read by itself once, when it leaves that list.
+	async function readTokens(): Promise<void> {
+		enrollmentTokens = await service.listEnrollmentTokens({ pending: true });
+		const id = createdToken?.id;
+		if (!id || createdUse?.id === id || enrollmentTokens.some((token) => token.id === id)) return;
+		const token = await service.getEnrollmentToken(id);
+		if (createdToken?.id === id) createdUse = token;
 	}
 
 	async function load(): Promise<void> {
@@ -413,7 +436,7 @@
 		error = null;
 		const page = loadPage(true);
 		try {
-			enrollmentTokens = await service.listEnrollmentTokens();
+			await readTokens();
 		} catch (problem) {
 			error = messageOf(problem);
 		}
@@ -429,7 +452,7 @@
 	async function refresh(): Promise<void> {
 		const page = loadPage();
 		try {
-			enrollmentTokens = await service.listEnrollmentTokens();
+			await readTokens();
 		} catch {
 			// The next tick tries again; the visible list stays.
 		}
@@ -684,10 +707,13 @@
 			rows={pageRows}
 			mode="server"
 			page={tablePage}
-			pageSize={PAGE_SIZE}
+			{pageSize}
+			pageSizes={PAGE_SIZES}
 			{total}
+			{totalCapped}
 			sort={tableSort}
 			onPageChange={(next) => filters.update({ page: String(next) })}
+			onPageSizeChange={(next) => filters.update({ size: String(next) })}
 			onSortChange={(next) => filters.update({ sort: next.key, order: next.direction })}
 			loading={loading || pageLoading}
 			error={error ?? pageError}
@@ -705,15 +731,7 @@
 					search={{ key: 'q', label: t('hosts.search'), placeholder: t('hosts.searchPlaceholder') }}
 					{facets}
 					onchange={filters.update}
-					onreset={() =>
-						filters.update({
-							q: '',
-							state: '',
-							os: '',
-							agent_version: '',
-							label: '',
-							scripts: ''
-						})}
+					onreset={filters.reset}
 				/>
 			{/snippet}
 		</DataTable>

@@ -102,10 +102,45 @@ const noBackLink = {
 	}
 };
 
+// A message key such as `common.loadMore` or `jobs.showMore`.
+const LOAD_MORE_KEY = /(^|\.)(loadMore|showMore)([A-Z][\w]*)?$/;
+const LOAD_MORE_TEXT = /^\s*(load more|show more|загрузить ещё|показать ещё)/iu;
+
+/** UI principles 2.14: a list pages with the pages of DataTable, not with a "Load more" button. */
+const noLoadMore = {
+	meta: {
+		type: 'problem',
+		schema: [],
+		messages: {
+			more: 'Page the list with DataTable instead of a "Load more" button (design/style/ui-principles.md, 2.14).'
+		}
+	},
+	create(context) {
+		return {
+			SvelteText(node) {
+				if (LOAD_MORE_TEXT.test(node.value)) context.report({ node, messageId: 'more' });
+			},
+			SvelteMustacheTag(node) {
+				const call = node.expression;
+				if (call?.type !== 'CallExpression' || call.callee?.name !== 't') return;
+				const key = call.arguments[0];
+				if (
+					key?.type === 'Literal' &&
+					typeof key.value === 'string' &&
+					LOAD_MORE_KEY.test(key.value)
+				) {
+					context.report({ node, messageId: 'more' });
+				}
+			}
+		};
+	}
+};
+
 export default {
 	rules: {
 		'no-raw-table': noRawTable,
 		'no-row-actions-snippet': noRowActionsSnippet,
-		'no-back-link': noBackLink
+		'no-back-link': noBackLink,
+		'no-load-more': noLoadMore
 	}
 };

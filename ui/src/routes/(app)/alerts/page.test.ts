@@ -1,13 +1,13 @@
 /*
- * The Alerts screen lists the open alerts, the resolved alerts and all alerts, and pages with a
- * cursor (FR-MN-03, AC-MN-02).
+ * The Alerts screen lists the open alerts, the resolved alerts and all alerts, and pages on the
+ * server with numbered pages (FR-MN-03, AC-MN-02, FR-UI-01).
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Alerts from './+page.svelte';
 
-const mocks = vi.hoisted(() => ({ listAlerts: vi.fn(), pushToast: vi.fn(), goto: vi.fn() }));
+const mocks = vi.hoisted(() => ({ listAlerts: vi.fn(), goto: vi.fn() }));
 
 const route = vi.hoisted(() => ({ url: new URL('http://localhost/alerts') }));
 
@@ -18,8 +18,6 @@ vi.mock('$app/navigation', () => ({
 		route.url = new URL(address, 'http://localhost');
 	}
 }));
-
-vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
@@ -49,6 +47,10 @@ function alert(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function list(items: ReturnType<typeof alert>[], total = items.length) {
+	return { items, next_cursor: null, total, total_capped: false };
+}
+
 describe('the Alerts screen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -57,11 +59,11 @@ describe('the Alerts screen', () => {
 
 	it('lists an open alert and opens its details with the link to the job', async () => {
 		const user = userEvent.setup();
-		mocks.listAlerts.mockResolvedValue({ items: [alert()], next_cursor: null });
+		mocks.listAlerts.mockResolvedValue(list([alert()]));
 		render(Alerts);
 
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
-		expect(mocks.listAlerts).toHaveBeenCalledWith({ status: 'open', limit: 50 });
+		expect(mocks.listAlerts).toHaveBeenCalledWith({ status: 'open', offset: 0, limit: 25 });
 		expect(screen.getByText('Job failed')).toBeInTheDocument();
 		expect(screen.getByText('The backup job failed (config_error).')).toBeInTheDocument();
 		// The error text is in the details, not in the list (design/style/ui-principles.md, 2.5).
@@ -80,7 +82,7 @@ describe('the Alerts screen', () => {
 	});
 
 	it('shows the empty state of the open list', async () => {
-		mocks.listAlerts.mockResolvedValue({ items: [], next_cursor: null });
+		mocks.listAlerts.mockResolvedValue(list([]));
 		render(Alerts);
 
 		expect(await screen.findByText('No open alerts')).toBeInTheDocument();
@@ -88,22 +90,19 @@ describe('the Alerts screen', () => {
 
 	it('asks for the resolved alerts when the filter changes', async () => {
 		const user = userEvent.setup();
-		mocks.listAlerts
-			.mockResolvedValueOnce({ items: [alert()], next_cursor: null })
-			.mockResolvedValueOnce({
-				items: [
-					alert({
-						id: 'al_0',
-						kind: 'rpo_violated',
-						status: 'resolved',
-						job_id: null,
-						params: { elapsed_seconds: 31 * 3600, rpo_seconds: 26 * 3600 },
-						error_text: null,
-						resolved_at: '2026-10-15T09:00:00Z'
-					})
-				],
-				next_cursor: null
-			});
+		mocks.listAlerts.mockResolvedValueOnce(list([alert()])).mockResolvedValueOnce(
+			list([
+				alert({
+					id: 'al_0',
+					kind: 'rpo_violated',
+					status: 'resolved',
+					job_id: null,
+					params: { elapsed_seconds: 31 * 3600, rpo_seconds: 26 * 3600 },
+					error_text: null,
+					resolved_at: '2026-10-15T09:00:00Z'
+				})
+			])
+		);
 		render(Alerts);
 		await screen.findByText('nightly-web');
 
@@ -112,31 +111,88 @@ describe('the Alerts screen', () => {
 		await user.click((await screen.findByText('Resolved')).closest('button') as HTMLElement);
 
 		await waitFor(() =>
-			expect(mocks.listAlerts).toHaveBeenLastCalledWith({ status: 'resolved', limit: 50 })
+			expect(mocks.listAlerts).toHaveBeenLastCalledWith({
+				status: 'resolved',
+				offset: 0,
+				limit: 25
+			})
 		);
 		const row = (await screen.findByText('Backup overdue')).closest('tr') as HTMLElement;
 		expect(within(row).getByText('Resolved')).toBeInTheDocument();
 	});
 
-	it('loads the next page with the cursor', async () => {
+	it('reads another numbered page and filters the kind on the server', async () => {
 		const user = userEvent.setup();
-		mocks.listAlerts
-			.mockResolvedValueOnce({ items: [alert()], next_cursor: 'c1' })
-			.mockResolvedValueOnce({
-				items: [alert({ id: 'al_2', plan_name: 'weekly-db', job_id: null })],
-				next_cursor: null
-			});
+		mocks.listAlerts.mockImplementation(async (query: { offset: number }) =>
+			list(
+				Array.from({ length: 25 }, (_, index) =>
+					alert({ id: `al_${query.offset + index}`, plan_name: `plan-${query.offset + index}` })
+				),
+				60
+			)
+		);
+		render(Alerts);
+		await screen.findByText('plan-0');
+		expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+		expect(screen.getByText('Showing 1 to 25 of 60')).toBeInTheDocument();
+
+		await user.click(screen.getByRole('button', { name: 'Page 3' }));
+		await waitFor(() =>
+			expect(mocks.listAlerts).toHaveBeenLastCalledWith({ status: 'open', offset: 50, limit: 25 })
+		);
+		expect(await screen.findByText('plan-50')).toBeInTheDocument();
+
+		const bar = screen.getByRole('group', { name: 'Show alerts' });
+		await user.click(within(bar).getByRole('button', { name: /^Alert/ }));
+		await user.click(await screen.findByLabelText('Host offline'));
+		await waitFor(() =>
+			expect(mocks.listAlerts).toHaveBeenLastCalledWith({
+				status: 'open',
+				kind: 'agent_offline',
+				offset: 0,
+				limit: 25
+			})
+		);
+	});
+
+	it('fr_ui_01 keeps the page size when Reset clears the filters', async () => {
+		const user = userEvent.setup();
+		route.url = new URL('http://localhost/alerts?status=open&kind=job_failed&size=50');
+		mocks.listAlerts.mockResolvedValue(list([alert()]));
 		render(Alerts);
 		await screen.findByText('nightly-web');
-
-		await user.click(screen.getByRole('button', { name: 'Load more' }));
-
-		await waitFor(() => expect(screen.getByText('weekly-db')).toBeInTheDocument());
 		expect(mocks.listAlerts).toHaveBeenLastCalledWith({
 			status: 'open',
-			limit: 50,
-			cursor: 'c1'
+			kind: 'job_failed',
+			offset: 0,
+			limit: 50
 		});
-		expect(screen.getByText('nightly-web')).toBeInTheDocument();
+
+		await user.click(screen.getByRole('button', { name: 'Reset' }));
+		await waitFor(() =>
+			expect(mocks.listAlerts).toHaveBeenLastCalledWith({ status: 'all', offset: 0, limit: 50 })
+		);
+		expect(route.url.searchParams.get('size')).toBe('50');
+		expect(route.url.searchParams.get('kind')).toBeNull();
+	});
+
+	it('fr_ui_01 moves to the last page when a refresh leaves the shown page empty', async () => {
+		route.url = new URL('http://localhost/alerts?status=open&page=3');
+		mocks.listAlerts
+			.mockResolvedValueOnce(list([], 40))
+			.mockImplementation(async (query: { offset: number }) =>
+				list(
+					Array.from({ length: 15 }, (_, index) =>
+						alert({ id: `al_${query.offset + index}`, plan_name: `plan-${query.offset + index}` })
+					),
+					40
+				)
+			);
+		render(Alerts);
+
+		expect(await screen.findByText('plan-25')).toBeInTheDocument();
+		expect(mocks.listAlerts.mock.calls.map(([query]) => query.offset)).toEqual([50, 25]);
+		expect(route.url.searchParams.get('page')).toBe('2');
+		expect(screen.getByText('Showing 26 to 40 of 40')).toBeInTheDocument();
 	});
 });

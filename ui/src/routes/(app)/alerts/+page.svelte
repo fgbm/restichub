@@ -5,9 +5,10 @@
 	import { resolve } from '$app/paths';
 	import { page as route } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Alert, AlertKind } from '#lib/api/index.ts';
+	import type { Alert, AlertKind, AlertQuery } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
+		Alert as Notice,
 		Button,
 		DataTable,
 		FilterBar,
@@ -21,29 +22,30 @@
 		StatusTone,
 		TableColumn
 	} from '#lib/components/ui/index.ts';
-	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { alertCondition } from '#lib/alert-text.ts';
-	import { formatTime } from '#lib/format.ts';
-	import { pushToast } from '#lib/stores/toasts.svelte.ts';
-
-	const PAGE_SIZE = 50;
+	import { formatCount, formatTime } from '#lib/format.ts';
+	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 
 	let alerts = $state<Alert[]>([]);
-	let nextCursor = $state<string | null>(null);
+	let total = $state(0);
+	let totalCapped = $state(false);
 	let loading = $state(true);
-	let loadingMore = $state(false);
 	let error = $state<string | null>(null);
-	// Without a state in the address the screen opens with the open alerts; Reset shows all.
-	const filters = queryFilters(['q', 'status', 'kind'] as const);
+	// The list filters and pages on the server (FR-UI-01). Without a state in the address the
+	// screen opens with the open alerts; Reset shows all.
+	const filters = queryFilters(['q', 'status', 'kind', 'page', 'size'] as const);
 	if (!route.url.searchParams.has('status')) filters.update({ status: 'open' });
 	const filter = $derived<'open' | 'resolved' | 'all'>(
 		filters.value.status === 'open' || filters.value.status === 'resolved'
 			? filters.value.status
 			: 'all'
 	);
+
+	const tablePage = $derived(pageNumber(filters.value.page));
+	const pageSize = $derived(pageSizeOf(filters.value.size));
 
 	let detail = $state<Alert | null>(null);
 	let detailOpen = $state(false);
@@ -109,26 +111,12 @@
 		{
 			key: 'kind',
 			label: t('alerts.kind'),
-			options: facetCounts(alerts, (alert) => [alert.kind]).map((option) => ({
-				...option,
-				label: kindLabel(option.value as AlertKind)
+			options: (Object.keys(TONES) as AlertKind[]).map((value) => ({
+				value,
+				label: kindLabel(value)
 			}))
 		}
 	]);
-
-	const shown = $derived(
-		alerts.filter((alert) => {
-			const { q, kind } = filters.value;
-			if (kind && !splitList(kind).includes(alert.kind)) return false;
-			return matchesSearch(q, [
-				kindLabel(alert.kind),
-				subjectOf(alert),
-				alert.agent_hostname,
-				alert.repository_name,
-				alertCondition(alert)
-			]);
-		})
-	);
 
 	const detailItems = $derived<KeyValueItem[]>(
 		detail
@@ -177,66 +165,74 @@
 	);
 
 	function messageOf(problem: unknown): string {
-		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		if (problem instanceof ApiError) {
+			// The server pages only through the alerts that it counts.
+			if (problem.problem.field === 'offset') return t('filter.tooDeep');
+			return tErrorCode(problem.code) ?? problem.title;
+		}
 		return t('table.error');
 	}
 
+	function queryOf(): AlertQuery {
+		const { q, kind } = filters.value;
+		return {
+			status: filter,
+			kind: kind || undefined,
+			q: q.trim() || undefined,
+			offset: (tablePage - 1) * pageSize,
+			limit: pageSize
+		};
+	}
+
+	// A live reload and a filter change can overlap; only the last request may fill the table.
+	let request = 0;
+
 	async function load(silent = false): Promise<void> {
-		if (!silent) {
-			loading = true;
-			extended = false;
-		}
+		const mine = ++request;
+		if (!silent) loading = true;
 		error = null;
 		try {
-			const page = await service.listAlerts({ status: filter, limit: PAGE_SIZE });
+			const page = await service.listAlerts(queryOf());
+			if (mine !== request) return;
+			const last = lastPageIfPast(tablePage, pageSize, page.total, page.items.length);
+			if (last !== null) {
+				filters.update({ page: String(last) });
+				return;
+			}
 			alerts = page.items;
-			nextCursor = page.next_cursor ?? null;
+			total = page.total;
+			totalCapped = page.total_capped;
 		} catch (problem) {
+			if (mine !== request) return;
 			error = messageOf(problem);
 		} finally {
-			loading = false;
+			if (mine === request) loading = false;
 		}
 	}
 
-	async function loadMore(): Promise<void> {
-		if (!nextCursor) return;
-		loadingMore = true;
-		try {
-			const page = await service.listAlerts({
-				status: filter,
-				limit: PAGE_SIZE,
-				cursor: nextCursor
-			});
-			alerts = [...alerts, ...page.items];
-			extended = true;
-			nextCursor = page.next_cursor ?? null;
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			loadingMore = false;
-		}
-	}
-
-	let loadedFilter: string | undefined;
+	// A typed search waits for a short pause; the other filters and the page apply at once.
+	let loadedQuery: { q: string; rest: string } | undefined;
+	let typing: ReturnType<typeof setTimeout> | undefined;
 	onMount(() => {
-		loadedFilter = filter;
+		const { q, ...rest } = filters.value;
+		loadedQuery = { q, rest: JSON.stringify(rest) };
 		void load();
+		return () => clearTimeout(typing);
 	});
 
-	// The state filters on the server; the search and the kind narrow the loaded rows.
 	$effect(() => {
-		const key = filter;
-		if (loadedFilter === undefined || key === loadedFilter) return;
-		loadedFilter = key;
-		void load();
+		const { q, ...rest } = filters.value;
+		const next = { q, rest: JSON.stringify(rest) };
+		if (loadedQuery === undefined) return;
+		if (next.q === loadedQuery.q && next.rest === loadedQuery.rest) return;
+		const typed = next.rest === loadedQuery.rest;
+		loadedQuery = next;
+		clearTimeout(typing);
+		if (typed) typing = setTimeout(() => void load(), 300);
+		else void load();
 	});
 
-	// A page that the user extended with "load more" shows its rows until the next full load.
-	let extended = false;
-	const reloadSoon = coalesce(
-		() => (extended || loading || loadingMore ? undefined : load(true)),
-		500
-	);
+	const reloadSoon = coalesce(() => (loading ? undefined : load(true)), 500);
 	onMount(() =>
 		onEvent((event) => {
 			if (event.type === 'alert.changed' || event.type === 'resync') reloadSoon();
@@ -261,20 +257,33 @@
 <Page
 	title={t('alerts.title')}
 	description={t('alerts.description')}
-	count={loading ? undefined : alerts.length}
+	count={loading ? undefined : totalCapped ? `${formatCount(total)}+` : total}
 >
 	{#snippet actions()}
 		<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
 	{/snippet}
 
+	{#if totalCapped && !loading}
+		<div class="capped">
+			<Notice tone="info" title={t('filter.capped', { count: formatCount(total) })} />
+		</div>
+	{/if}
+
 	<DataTable
 		{columns}
-		rows={shown}
+		rows={alerts}
 		{loading}
 		{error}
 		rowKey={(alert) => alert.id}
 		onRowOpen={openDetail}
-		paginated={false}
+		mode="server"
+		page={tablePage}
+		{pageSize}
+		pageSizes={PAGE_SIZES}
+		{total}
+		{totalCapped}
+		onPageChange={(next) => filters.update({ page: String(next) })}
+		onPageSizeChange={(next) => filters.update({ size: String(next) })}
 		{emptyTitle}
 		emptyDescription={filter === 'open' ? t('alerts.emptyOpenBody') : undefined}
 		emptyIcon="check-circle"
@@ -283,18 +292,13 @@
 			<FilterBar
 				label={t('alerts.filter')}
 				value={filters.value}
-				search={{ key: 'q', label: t('hosts.search'), placeholder: t('alerts.searchPlaceholder') }}
+				search={{ key: 'q', label: t('alerts.search'), placeholder: t('alerts.searchPlaceholder') }}
 				{facets}
 				onchange={filters.update}
 				onreset={filters.reset}
 			/>
 		{/snippet}
 	</DataTable>
-	{#if nextCursor}
-		<div class="more">
-			<Button loading={loadingMore} onclick={loadMore}>{t('common.loadMore')}</Button>
-		</div>
-	{/if}
 
 	<!-- An alert has no record page: the row opens its details (design/style/ui-principles.md, 2.2). -->
 	<SidePanel
@@ -314,9 +318,7 @@
 </Page>
 
 <style>
-	.more {
-		display: flex;
-		justify-content: center;
-		margin-top: var(--rh-space-4);
+	.capped {
+		margin-bottom: var(--rh-space-4);
 	}
 </style>

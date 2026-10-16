@@ -10,9 +10,11 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 
 use crate::DbError;
+use crate::agent_search::search_pattern;
 use crate::channels::{self, Channel};
 use crate::enums::JobKind;
 use crate::ids::{AgentId, AlertId, ChannelId, DeliveryId, JobId, PlanId, RepositoryId};
+use crate::job_search::COUNT_LIMIT;
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -435,19 +437,39 @@ pub struct AlertCursor {
     pub id: AlertId,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default)]
 pub struct AlertPage {
     /// Clamped to [`MAX_PAGE_LIMIT`].
     pub limit: i64,
     pub after: Option<AlertCursor>,
+    /// Skipped rows of a numbered page; the caller keeps it in `0..=COUNT_LIMIT` and sends no
+    /// cursor with it.
+    pub offset: i64,
     /// `None` lists both states.
     pub status: Option<AlertStatus>,
+    /// Empty: no filter.
+    pub kinds: Vec<AlertKind>,
+    /// Matches the host, the plan or the repository name anywhere, without case.
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AlertPageResult {
     pub alerts: Vec<Alert>,
     pub has_more: bool,
+    /// The alerts that match the filter on all pages, at most [`COUNT_LIMIT`].
+    pub total: i64,
+    /// More alerts match than [`COUNT_LIMIT`].
+    pub total_capped: bool,
+}
+
+macro_rules! alert_filter_sql {
+    () => {
+        " WHERE ($1::text IS NULL OR status = $1) \
+           AND (cardinality($2::text[]) = 0 OR kind = ANY($2)) \
+           AND ($3::text IS NULL OR agent_hostname ILIKE $3 OR plan_name ILIKE $3 \
+                OR repository_name ILIKE $3)"
+    };
 }
 
 pub async fn list(tx: &mut TenantTx<'_>, page: &AlertPage) -> Result<AlertPageResult, DbError> {
@@ -456,24 +478,47 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &AlertPage) -> Result<AlertPageRe
         Some(cursor) => (Some(cursor.opened_at), Some(cursor.id)),
         None => (None, None),
     };
+    let status = page.status.map(AlertStatus::as_str);
+    let kinds: Vec<&str> = page.kinds.iter().map(|kind| kind.as_str()).collect();
+    let pattern = page.search.as_deref().map(search_pattern);
     let mut alerts = sqlx::query_as::<_, Alert>(concat!(
         "SELECT ",
         alert_columns!(),
-        " FROM alert_state \
-         WHERE ($1::text IS NULL OR status = $1) \
-           AND ($2::timestamptz IS NULL OR (opened_at, id) < ($2::timestamptz, $3::uuid)) \
-         ORDER BY opened_at DESC, id DESC LIMIT $4"
+        " FROM alert_state",
+        alert_filter_sql!(),
+        " AND ($4::timestamptz IS NULL OR (opened_at, id) < ($4::timestamptz, $5::uuid)) \
+         ORDER BY opened_at DESC, id DESC LIMIT $6 OFFSET $7"
     ))
-    .bind(page.status.map(AlertStatus::as_str))
+    .bind(status)
+    .bind(&kinds)
+    .bind(pattern.as_deref())
     .bind(cursor_time)
     .bind(cursor_id)
     .bind(limit + 1)
+    .bind(page.offset.max(0))
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
     let has_more = alerts.len() as i64 > limit;
     alerts.truncate(limit as usize);
-    Ok(AlertPageResult { alerts, has_more })
+    let counted: i64 = sqlx::query_scalar(concat!(
+        "SELECT count(*) FROM (SELECT 1 FROM alert_state",
+        alert_filter_sql!(),
+        " LIMIT $4) s"
+    ))
+    .bind(status)
+    .bind(&kinds)
+    .bind(pattern.as_deref())
+    .bind(COUNT_LIMIT + 1)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(AlertPageResult {
+        alerts,
+        has_more,
+        total: counted.min(COUNT_LIMIT),
+        total_capped: counted > COUNT_LIMIT,
+    })
 }
 
 /// Removes the resolved alerts that resolved before `before`. Their deliveries go with them.

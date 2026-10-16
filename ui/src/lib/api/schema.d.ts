@@ -383,7 +383,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Reads the metadata of one enrollment token. */
+        get: operations["get_enrollment_token"];
         put?: never;
         post?: never;
         /**
@@ -1590,7 +1591,15 @@ export interface components {
         AlertKind: "rpo_violated" | "job_failed" | "job_dead_letter" | "job_warnings" | "agent_offline" | "stale_lock";
         AlertListResponse: {
             items: components["schemas"]["AlertView"][];
+            /** @description Null for a page read by `offset`. */
             next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The alerts that match the filter on all pages, at most 10000.
+             */
+            total: number;
+            /** @description More alerts match than `total` shows. */
+            total_capped: boolean;
         };
         /**
          * @description The typed values of an alert condition. The interface and the messages build the text of the
@@ -1751,8 +1760,15 @@ export interface components {
         };
         AuditPageResponse: {
             items: components["schemas"]["AuditItem"][];
-            /** @description Null when the table holds no later record. */
+            /** @description Null when the table holds no later record, and for a page read by `offset`. */
             next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The records that match the filter on all pages, at most 10000.
+             */
+            total: number;
+            /** @description More records match than `total` shows. */
+            total_capped: boolean;
         };
         /**
          * @description The backend settings of a repository (FR-RP-01).
@@ -4028,7 +4044,14 @@ export interface operations {
             path: {
                 /** @description `open` (default), `resolved` or `all`. */
                 status: ("open" | "resolved" | "all") | null;
+                /** @description Comma-separated, for example `job_failed,agent_offline`. */
+                kind: string | null;
+                /** @description Matches the host, the plan or the repository name; at most 200 characters. */
+                q: string | null;
+                /** @description Not with `offset`. */
                 cursor: string | null;
+                /** @description Skipped alerts, in `0..=10000`. Not with `cursor`. */
+                offset: number | null;
                 limit: number | null;
             };
             cookie?: never;
@@ -4227,7 +4250,10 @@ export interface operations {
                 object_id: string | null;
                 /** @description Used by the platform list. */
                 tenant_id: string | null;
+                /** @description Not with `offset`. */
                 cursor: string | null;
+                /** @description Skipped records, in `0..=10000`. Not with `cursor`. */
+                offset: number | null;
                 limit: number | null;
             };
             cookie?: never;
@@ -4594,6 +4620,11 @@ export interface operations {
             path: {
                 cursor: string | null;
                 limit: number | null;
+                /**
+                 * @description `true` lists only the tokens that can still enroll a host: not used, not revoked and not
+                 *     expired.
+                 */
+                pending: boolean | null;
             };
             cookie?: never;
         };
@@ -4679,6 +4710,65 @@ export interface operations {
             };
             /** @description The role is not sufficient. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_enrollment_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the token. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The token metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentTokenView"];
+                };
+            };
+            /** @description The identifier is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The token is not found. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6168,7 +6258,10 @@ export interface operations {
                 object_id: string | null;
                 /** @description Used by the platform list. */
                 tenant_id: string | null;
+                /** @description Not with `offset`. */
                 cursor: string | null;
+                /** @description Skipped records, in `0..=10000`. Not with `cursor`. */
+                offset: number | null;
                 limit: number | null;
             };
             cookie?: never;

@@ -24,11 +24,60 @@ use uuid::Uuid;
 use crate::DbError;
 use crate::enums::ActorType;
 use crate::ids::{ApiTokenId, AuditLogId, SecretId, TenantId, UserId};
+use crate::job_search::COUNT_LIMIT;
 use crate::tx::{PlatformTx, TenantTx};
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
 
 pub const MAX_PAGE_LIMIT: i64 = 200;
+
+/// `$tenant` is the condition on `$8`: a plain `tenant_id = $8` keeps the
+/// `(tenant_id, occurred_at)` index usable in a generic plan of the prepared statement.
+macro_rules! filter_sql {
+    ($tenant:literal) => {
+        concat!(
+            " WHERE ($1::timestamptz IS NULL OR occurred_at >= $1) \
+               AND ($2::timestamptz IS NULL OR occurred_at <= $2) \
+               AND ($3::text IS NULL OR action = $3) \
+               AND ($4::text IS NULL OR actor_type = $4) \
+               AND ($5::uuid IS NULL OR actor_id = $5) \
+               AND ($6::text IS NULL OR object_type = $6) \
+               AND ($7::uuid IS NULL OR object_id = $7) \
+               AND ",
+            $tenant
+        )
+    };
+}
+
+macro_rules! list_sql {
+    ($tenant:literal) => {
+        concat!(
+            "SELECT id, tenant_id, occurred_at, actor_type, actor_id, source_ip, \
+                    action, object_type, object_id, diff \
+             FROM audit_log",
+            filter_sql!($tenant),
+            " AND ($9::timestamptz IS NULL OR (occurred_at, id) < ($9::timestamptz, $10::uuid)) \
+             ORDER BY occurred_at DESC, id DESC \
+             LIMIT $11 OFFSET $12",
+        )
+    };
+}
+
+macro_rules! count_sql {
+    ($tenant:literal) => {
+        concat!(
+            "SELECT count(*) FROM (SELECT 1 FROM audit_log",
+            filter_sql!($tenant),
+            " LIMIT $9) s"
+        )
+    };
+}
+
+const OWN_TENANT: (&str, &str) = (list_sql!("tenant_id = $8"), count_sql!("tenant_id = $8"));
+const ANY_TENANT: (&str, &str) = (
+    list_sql!("($8::uuid IS NULL OR tenant_id = $8)"),
+    count_sql!("($8::uuid IS NULL OR tenant_id = $8)"),
+);
 
 pub const REDACTED: &str = "<redacted>";
 
@@ -618,8 +667,7 @@ pub struct AuditRecord {
 
 #[derive(Debug, Clone, Default)]
 pub struct AuditFilter {
-    /// The platform list filters by it; a tenant list ignores it, because Row-Level Security shows
-    /// its own rows only.
+    /// The platform list filters by it; a tenant list replaces it with its own tenant.
     pub tenant_id: Option<TenantId>,
     /// Start of the time range, inclusive.
     pub from: Option<OffsetDateTime>,
@@ -642,6 +690,9 @@ pub struct AuditPage {
     /// Clamped to [`MAX_PAGE_LIMIT`].
     pub limit: i64,
     pub after: Option<AuditCursor>,
+    /// Skipped rows of a numbered page; the caller keeps it in `0..=COUNT_LIMIT` and sends no
+    /// cursor with it.
+    pub offset: i64,
 }
 
 impl Default for AuditPage {
@@ -649,6 +700,7 @@ impl Default for AuditPage {
         Self {
             limit: DEFAULT_PAGE_LIMIT,
             after: None,
+            offset: 0,
         }
     }
 }
@@ -657,6 +709,10 @@ impl Default for AuditPage {
 pub struct AuditPageResult {
     pub records: Vec<AuditRecord>,
     pub has_more: bool,
+    /// The number of records that match the filter on all pages, at most [`COUNT_LIMIT`].
+    pub total: i64,
+    /// More records match than [`COUNT_LIMIT`].
+    pub total_capped: bool,
 }
 
 pub async fn insert(tx: &mut TenantTx<'_>, event: &AuditEvent) -> Result<AuditLogId, DbError> {
@@ -767,7 +823,13 @@ pub async fn list(
     filter: &AuditFilter,
     page: &AuditPage,
 ) -> Result<AuditPageResult, DbError> {
-    list_rows(tx.as_conn(), filter, page).await
+    // The two read policies are ORed, so Row-Level Security alone gives the planner no tenant
+    // condition for the `(tenant_id, occurred_at)` index; the count would scan every tenant.
+    let filter = AuditFilter {
+        tenant_id: Some(tx.tenant()),
+        ..filter.clone()
+    };
+    list_rows(tx.as_conn(), OWN_TENANT, &filter, page).await
 }
 
 pub async fn list_platform(
@@ -775,16 +837,18 @@ pub async fn list_platform(
     filter: &AuditFilter,
     page: &AuditPage,
 ) -> Result<AuditPageResult, DbError> {
-    list_rows(tx.as_conn(), filter, page).await
+    list_rows(tx.as_conn(), ANY_TENANT, filter, page).await
 }
 
 /// Lists records with a connection.
 ///
 /// The list orders the records by time and identifier, from the newest to the oldest. It reads one
 /// record more than the page holds, to report `has_more` correctly. The keyset cursor of
-/// `page.after` continues the list.
+/// `page.after` continues the list; `page.offset` reads a numbered page. The total ignores the
+/// cursor and the offset.
 async fn list_rows(
     conn: &mut PgConnection,
+    (list_sql, count_sql): (&'static str, &'static str),
     filter: &AuditFilter,
     page: &AuditPage,
 ) -> Result<AuditPageResult, DbError> {
@@ -796,42 +860,46 @@ async fn list_rows(
         Some(cursor) => (Some(cursor.occurred_at), Some(cursor.id.as_uuid())),
         None => (None, None),
     };
-    let mut records: Vec<AuditRecord> = sqlx::query_as::<_, Row>(
-        "SELECT id, tenant_id, occurred_at, actor_type, actor_id, source_ip, \
-                action, object_type, object_id, diff \
-         FROM audit_log \
-         WHERE ($1::timestamptz IS NULL OR occurred_at >= $1) \
-           AND ($2::timestamptz IS NULL OR occurred_at <= $2) \
-           AND ($3::text IS NULL OR action = $3) \
-           AND ($4::text IS NULL OR actor_type = $4) \
-           AND ($5::uuid IS NULL OR actor_id = $5) \
-           AND ($6::text IS NULL OR object_type = $6) \
-           AND ($7::uuid IS NULL OR object_id = $7) \
-           AND ($8::timestamptz IS NULL OR (occurred_at, id) < ($8::timestamptz, $9::uuid)) \
-           AND ($10::uuid IS NULL OR tenant_id = $10) \
-         ORDER BY occurred_at DESC, id DESC \
-         LIMIT $11",
-    )
-    .bind(filter.from)
-    .bind(filter.to)
-    .bind(action)
-    .bind(actor_type)
-    .bind(actor_id)
-    .bind(filter.object_type.as_deref())
-    .bind(filter.object_id)
-    .bind(cursor_time)
-    .bind(cursor_id)
-    .bind(filter.tenant_id)
-    .bind(limit + 1)
-    .fetch_all(conn)
-    .await
-    .map_err(DbError::Query)?
-    .into_iter()
-    .map(AuditRecord::try_from)
-    .collect::<Result<_, _>>()?;
+    let mut records: Vec<AuditRecord> = sqlx::query_as::<_, Row>(list_sql)
+        .bind(filter.from)
+        .bind(filter.to)
+        .bind(action)
+        .bind(actor_type)
+        .bind(actor_id)
+        .bind(filter.object_type.as_deref())
+        .bind(filter.object_id)
+        .bind(filter.tenant_id)
+        .bind(cursor_time)
+        .bind(cursor_id)
+        .bind(limit + 1)
+        .bind(page.offset.max(0))
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(DbError::Query)?
+        .into_iter()
+        .map(AuditRecord::try_from)
+        .collect::<Result<_, _>>()?;
     let has_more = records.len() as i64 > limit;
     records.truncate(limit as usize);
-    Ok(AuditPageResult { records, has_more })
+    let counted: i64 = sqlx::query_scalar(count_sql)
+        .bind(filter.from)
+        .bind(filter.to)
+        .bind(action)
+        .bind(actor_type)
+        .bind(actor_id)
+        .bind(filter.object_type.as_deref())
+        .bind(filter.object_id)
+        .bind(filter.tenant_id)
+        .bind(COUNT_LIMIT + 1)
+        .fetch_one(conn)
+        .await
+        .map_err(DbError::Query)?;
+    Ok(AuditPageResult {
+        records,
+        has_more,
+        total: counted.min(COUNT_LIMIT),
+        total_capped: counted > COUNT_LIMIT,
+    })
 }
 
 type Row = (

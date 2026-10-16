@@ -81,6 +81,8 @@ pub struct EnrollmentTokenPage {
     /// Clamped to [`MAX_PAGE_LIMIT`].
     pub limit: i64,
     pub after: Option<EnrollmentTokenCursor>,
+    /// Only the tokens that can still enroll a host at this time.
+    pub pending_at: Option<OffsetDateTime>,
 }
 
 impl Default for EnrollmentTokenPage {
@@ -88,6 +90,7 @@ impl Default for EnrollmentTokenPage {
         Self {
             limit: DEFAULT_PAGE_LIMIT,
             after: None,
+            pending_at: None,
         }
     }
 }
@@ -138,12 +141,15 @@ pub async fn list(
                 created_by_user_id, created_at, replaces_agent_id, used_by_agent_id \
          FROM enrollment_tokens \
          WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
+           AND ($4::timestamptz IS NULL \
+                OR (used_at IS NULL AND revoked_at IS NULL AND expires_at > $4)) \
          ORDER BY created_at DESC, id DESC \
          LIMIT $3",
     )
     .bind(cursor_time)
     .bind(cursor_id)
     .bind(limit + 1)
+    .bind(page.pending_at)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?

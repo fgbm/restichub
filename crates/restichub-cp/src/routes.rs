@@ -440,6 +440,12 @@ pub const ROUTES: &[Route] = &[
         },
     },
     Route {
+        method: "get",
+        path: "/api/v1/enrollment-tokens/{id}",
+        access: Access::Protected(Operation::EnrollmentTokensRead),
+        handler: || routes!(crate::enrollment_tokens::get_enrollment_token),
+    },
+    Route {
         method: "delete",
         path: "/api/v1/enrollment-tokens/{id}",
         access: Access::Protected(Operation::EnrollmentTokensWrite),

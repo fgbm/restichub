@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 	hostRows: vi.fn(),
 	getAgent: vi.fn(),
 	listEnrollmentTokens: vi.fn(),
+	getEnrollmentToken: vi.fn(),
 	createEnrollmentToken: vi.fn(),
 	revokeEnrollmentToken: vi.fn(),
 	renameAgent: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			getAgent: mocks.getAgent,
 			listEnrollmentTokens: mocks.listEnrollmentTokens,
+			getEnrollmentToken: mocks.getEnrollmentToken,
 			createEnrollmentToken: mocks.createEnrollmentToken,
 			revokeEnrollmentToken: mocks.revokeEnrollmentToken,
 			renameAgent: mocks.renameAgent,
@@ -201,6 +203,34 @@ describe('the Hosts screen', () => {
 				expect.objectContaining({ q: 'web', offset: 0, facets: true })
 			)
 		);
+	});
+
+	it('fr_ui_01 chooses the page size and keeps it when Reset clears the filters', async () => {
+		const user = userEvent.setup();
+		route.url = new URL('http://localhost/hosts?os=windows&size=50');
+		mocks.searchAgents.mockImplementation(async () => ({
+			items: [agent()],
+			next_cursor: null,
+			total: 60,
+			total_capped: false,
+			facets: null
+		}));
+		render(Hosts);
+
+		await screen.findByText('win-fs01');
+		expect(mocks.searchAgents).toHaveBeenLastCalledWith(
+			expect.objectContaining({ os: 'windows', offset: 0, limit: 50 })
+		);
+		expect(screen.getByLabelText('Rows per page')).toHaveValue('50');
+
+		await user.click(screen.getByRole('button', { name: 'Reset' }));
+		await waitFor(() =>
+			expect(mocks.searchAgents).toHaveBeenLastCalledWith(
+				expect.objectContaining({ os: undefined, limit: 50 })
+			)
+		);
+		expect(route.url.searchParams.get('size')).toBe('50');
+		expect(route.url.searchParams.get('os')).toBeNull();
 	});
 
 	it('fr_ui_01 shows the capped total and asks to narrow the filters', async () => {
@@ -537,7 +567,10 @@ describe('the Hosts screen', () => {
 			mocks.listEnrollmentTokens
 				.mockResolvedValueOnce([])
 				.mockResolvedValueOnce([token()])
-				.mockResolvedValue([token({ used_at: PAST, used_by_agent_id: 'a_07' })]);
+				.mockResolvedValue([]);
+			mocks.getEnrollmentToken.mockResolvedValue(
+				token({ used_at: PAST, used_by_agent_id: 'a_07' })
+			);
 			mocks.hostRows
 				.mockResolvedValueOnce([])
 				.mockResolvedValueOnce([])
@@ -553,6 +586,8 @@ describe('the Hosts screen', () => {
 			await within(dialog).findByText('Host registered: brand-new');
 			expect(within(dialog).getByRole('heading', { name: 'Host registered' })).toBeInTheDocument();
 			expect(within(dialog).queryByText('Copy the enrollment token')).not.toBeInTheDocument();
+			expect(mocks.getEnrollmentToken).toHaveBeenCalledTimes(1);
+			expect(mocks.getEnrollmentToken).toHaveBeenCalledWith('e_1');
 		} finally {
 			vi.useRealTimers();
 		}
@@ -606,6 +641,11 @@ describe('the Hosts screen', () => {
 			await waitFor(() =>
 				expect(screen.queryByText('Pending registrations')).not.toBeInTheDocument()
 			);
+			expect(mocks.listEnrollmentTokens).toHaveBeenCalledTimes(2);
+			for (const call of mocks.listEnrollmentTokens.mock.calls) {
+				expect(call).toEqual([{ pending: true }]);
+			}
+			expect(mocks.getEnrollmentToken).not.toHaveBeenCalled();
 		});
 	});
 });

@@ -8,8 +8,7 @@
 //! (AC-AU-01).
 
 use axum::Json;
-use axum::extract::{FromRequestParts, Query, State};
-use axum::http::request::Parts;
+use axum::extract::State;
 use restichub_db::ActorType;
 use restichub_db::DbError;
 use restichub_db::audit as repo;
@@ -23,6 +22,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
+use crate::list_query::{ApiQuery, check_window};
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -96,8 +96,12 @@ impl From<&AuditRecord> for AuditItem {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AuditPageResponse {
     pub items: Vec<AuditItem>,
-    /// Null when the table holds no later record.
+    /// Null when the table holds no later record, and for a page read by `offset`.
     pub next_cursor: Option<String>,
+    /// The records that match the filter on all pages, at most 10000.
+    pub total: i64,
+    /// More records match than `total` shows.
+    pub total_capped: bool,
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
@@ -115,7 +119,10 @@ pub struct AuditQuery {
     pub object_id: Option<String>,
     /// Used by the platform list.
     pub tenant_id: Option<String>,
+    /// Not with `offset`.
     pub cursor: Option<String>,
+    /// Skipped records, in `0..=10000`. Not with `cursor`.
+    pub offset: Option<i64>,
     pub limit: Option<i64>,
 }
 
@@ -198,7 +205,12 @@ impl AuditQuery {
             .map(decode_cursor)
             .transpose()
             .map_err(invalid_cursor)?;
-        Ok(AuditPage { limit, after })
+        check_window(self.cursor.as_deref(), self.offset, true)?;
+        Ok(AuditPage {
+            limit,
+            after,
+            offset: self.offset.unwrap_or(0),
+        })
     }
 }
 
@@ -208,26 +220,6 @@ fn invalid_query(cause: impl Into<String>) -> ApiError {
 
 fn invalid_cursor(cause: impl Into<String>) -> ApiError {
     ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
-}
-
-/// A bad query gives an RFC 9457 problem with the code `invalid_argument`.
-pub struct AuditParams(pub AuditQuery);
-
-impl FromRequestParts<AppState> for AuditParams {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        match Query::<AuditQuery>::from_request_parts(parts, state).await {
-            Ok(Query(query)) => Ok(Self(query)),
-            Err(error) => {
-                tracing::debug!(%error, "the audit query is not valid");
-                Err(invalid_query(error.to_string()))
-            }
-        }
-    }
 }
 
 fn format_time(value: OffsetDateTime) -> String {
@@ -281,16 +273,15 @@ fn decode_cursor(value: &str) -> Result<repo::AuditCursor, String> {
 pub async fn list_tenant_audit(
     State(state): State<AppState>,
     context: RequestContext,
-    params: AuditParams,
+    ApiQuery(query): ApiQuery<AuditQuery>,
 ) -> Result<Json<AuditPageResponse>, ApiError> {
     context.authorize(Operation::AuditRead)?;
-    let query = params.0;
     let filter = query.filter()?;
     let page = query.page()?;
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let result = repo::list(&mut tx, &filter, &page).await?;
     tx.commit().await?;
-    Ok(Json(response(result)))
+    Ok(Json(response(result, query.offset.is_none())))
 }
 
 /// Lists the audit records of the platform.
@@ -308,21 +299,21 @@ pub async fn list_tenant_audit(
 pub async fn list_platform_audit(
     State(state): State<AppState>,
     context: RequestContext,
-    params: AuditParams,
+    ApiQuery(query): ApiQuery<AuditQuery>,
 ) -> Result<Json<AuditPageResponse>, ApiError> {
     context.authorize(Operation::PlatformAuditRead)?;
-    let query = params.0;
     let filter = query.filter()?;
     let page = query.page()?;
     let mut tx = state.db().begin_platform().await?;
     let result = repo::list_platform(&mut tx, &filter, &page).await?;
     tx.commit().await?;
-    Ok(Json(response(result)))
+    Ok(Json(response(result, query.offset.is_none())))
 }
 
-/// `next_cursor` is set only when the table holds a later record.
-fn response(result: repo::AuditPageResult) -> AuditPageResponse {
-    let next_cursor = if result.has_more {
+/// `next_cursor` is set only when the table holds a later record and the page did not use an
+/// offset, so a client keeps one way to read the next page.
+fn response(result: repo::AuditPageResult, by_cursor: bool) -> AuditPageResponse {
+    let next_cursor = if result.has_more && by_cursor {
         result.records.last().map(|record| {
             encode_cursor(repo::AuditCursor {
                 occurred_at: record.occurred_at,
@@ -335,6 +326,8 @@ fn response(result: repo::AuditPageResult) -> AuditPageResponse {
     AuditPageResponse {
         items: result.records.iter().map(AuditItem::from).collect(),
         next_cursor,
+        total: result.total,
+        total_capped: result.total_capped,
     }
 }
 

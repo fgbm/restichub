@@ -79,6 +79,8 @@ curl -s -b cookies.txt -X POST https://<control-plane>/api/v1/plans/<plan-id>/ru
 
 Маршрут списка возвращает `items` и `next_cursor`. Чтобы получить следующую страницу, передайте значение `next_cursor` в параметре `cursor`. Параметр `limit` задаёт размер страницы.
 
+Списки хостов, заданий, оповещений и записей аудита читают и страницу по номеру. Передайте в параметре `offset` число записей, которые нужно пропустить. Тогда ответ содержит `total` — число записей, подходящих под фильтры. Сервер управления считает не больше 10 000 записей. Если подходящих записей больше, `total_capped` равно `true`. Значение `offset` больше 10 000 даёт HTTP 400 `invalid_argument` с полем `offset` и причиной `out_of_range`. Не передавайте `cursor` и `offset` вместе.
+
 ```sh
 curl -s "https://<control-plane>/api/v1/plans?limit=50" \
   -H "Authorization: Bearer rh_<token>"

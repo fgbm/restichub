@@ -187,13 +187,24 @@ export class MockAlerts {
 	async listAlerts(query: AlertQuery = {}): Promise<AlertListResponse> {
 		const status = query.status ?? 'open';
 		const limit = query.limit ?? 50;
+		const kinds = (query.kind ?? '').split(',').filter(Boolean);
+		const search = (query.q ?? '').toLowerCase();
 		const matching = this.alerts
 			.filter((alert) => status === 'all' || alert.status === status)
+			.filter((alert) => kinds.length === 0 || kinds.includes(alert.kind))
+			.filter(
+				(alert) =>
+					!search ||
+					[alert.agent_hostname, alert.plan_name, alert.repository_name].some((name) =>
+						name?.toLowerCase().includes(search)
+					)
+			)
 			.sort((a, b) => b.opened_at.localeCompare(a.opened_at));
-		const start = query.cursor ? Number(query.cursor) : 0;
+		const start = query.cursor ? Number(query.cursor) : (query.offset ?? 0);
 		const page = matching.slice(start, start + limit);
-		const next = start + limit < matching.length ? String(start + limit) : null;
-		return { items: page, next_cursor: next };
+		const next =
+			query.offset === undefined && start + limit < matching.length ? String(start + limit) : null;
+		return { items: page, next_cursor: next, total: matching.length, total_capped: false };
 	}
 
 	async listAlertRules(): Promise<AlertRule[]> {

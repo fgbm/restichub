@@ -118,6 +118,9 @@ pub struct EnrollmentTokenListResponse {
 pub struct EnrollmentTokenListQuery {
     pub cursor: Option<String>,
     pub limit: Option<i64>,
+    /// `true` lists only the tokens that can still enroll a host: not used, not revoked and not
+    /// expired.
+    pub pending: Option<bool>,
 }
 
 /// Creates an enrollment token and returns its value one time.
@@ -234,6 +237,10 @@ pub async fn list_enrollment_tokens(
             .map_err(|cause| {
                 ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
             })?,
+        pending_at: query
+            .pending
+            .unwrap_or(false)
+            .then(|| state.auth().clock.now()),
     };
     let result = context
         .tenant_tx(&state, async |tx| Ok(repo::list(tx, &page).await?))
@@ -256,6 +263,33 @@ pub async fn list_enrollment_tokens(
             .collect(),
         next_cursor,
     }))
+}
+
+/// Reads the metadata of one enrollment token.
+#[utoipa::path(
+    get,
+    path = "/api/v1/enrollment-tokens/{id}",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the token.")),
+    responses(
+        (status = 200, description = "The token metadata.", body = EnrollmentTokenView),
+        (status = 400, description = "The identifier is not valid.", body = crate::error::ProblemBody),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The token is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn get_enrollment_token(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+) -> Result<Json<EnrollmentTokenView>, ApiError> {
+    context.authorize(Operation::EnrollmentTokensRead)?;
+    let token_id = parse_token_id(&id)?;
+    let entry = context
+        .tenant_tx(&state, async |tx| Ok(repo::get(tx, token_id).await?))
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    Ok(Json(EnrollmentTokenView::from(&entry)))
 }
 
 /// Revokes an unused enrollment token of the tenant (a soft change).

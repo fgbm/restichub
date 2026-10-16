@@ -335,6 +335,35 @@ async fn db_audit_list_does_not_show_another_tenant() -> TestResult {
 }
 
 #[tokio::test]
+async fn db_a_tenant_audit_list_reads_its_own_tenant_whatever_the_filter() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let own = insert_audit(&mut tx, AuditAction::ConfigCreate).await?;
+    tx.commit().await?;
+    let mut tx = db.database().begin_tenant(tenant_b).await?;
+    insert_audit(&mut tx, AuditAction::ConfigCreate).await?;
+    tx.commit().await?;
+
+    let filter = AuditFilter {
+        tenant_id: Some(tenant_b),
+        ..AuditFilter::default()
+    };
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let page = audit::list(&mut tx, &filter, &AuditPage::default()).await?;
+    tx.commit().await?;
+    let ids: Vec<AuditLogId> = page.records.iter().map(|record| record.id).collect();
+    assert_eq!(ids, vec![own]);
+    assert_eq!(page.total, 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn db_audit_platform_list_sees_every_tenant() -> TestResult {
     let Some(db) = test_database().await else {
         return Ok(());
@@ -445,7 +474,11 @@ async fn db_audit_pagination_is_stable() -> TestResult {
     let mut seen = Vec::new();
     let mut after = None;
     for _ in 0..3 {
-        let page = AuditPage { limit: 2, after };
+        let page = AuditPage {
+            limit: 2,
+            after,
+            offset: 0,
+        };
         let mut tx = db.database().begin_tenant(tenant_a).await?;
         let records = audit::list(&mut tx, &AuditFilter::default(), &page)
             .await?
@@ -476,6 +509,7 @@ async fn db_audit_pagination_is_stable() -> TestResult {
         &AuditPage {
             limit: 2,
             after: None,
+            offset: 0,
         },
     )
     .await?
@@ -547,6 +581,7 @@ async fn db_audit_page_reports_has_more() -> TestResult {
         &AuditPage {
             limit: 2,
             after: None,
+            offset: 0,
         },
     )
     .await?;
@@ -561,6 +596,7 @@ async fn db_audit_page_reports_has_more() -> TestResult {
         &AuditPage {
             limit: 10,
             after: None,
+            offset: 0,
         },
     )
     .await?;

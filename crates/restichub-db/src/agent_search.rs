@@ -143,7 +143,7 @@ macro_rules! visible_sql {
 }
 
 /// The pattern of a search text: the text matches anywhere, and `%`, `_` and `\` match themselves.
-fn search_pattern(text: &str) -> String {
+pub(crate) fn search_pattern(text: &str) -> String {
     let mut pattern = String::with_capacity(text.len() + 2);
     pattern.push('%');
     for char in text.chars() {
