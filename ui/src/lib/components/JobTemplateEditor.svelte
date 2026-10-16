@@ -208,7 +208,7 @@
 			label: t('scriptTemplates.source'),
 			value: existing?.builtin ? t('scriptTemplates.builtin') : t('scriptTemplates.own')
 		},
-		{ key: 'scripts', label: t('jobTemplates.scripts'), value: String(scripts.length) },
+		{ key: 'scripts', label: t('jobTemplates.scriptCount'), value: String(scripts.length) },
 		...(scripts.length > 0
 			? [
 					{

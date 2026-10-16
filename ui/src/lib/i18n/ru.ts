@@ -2174,5 +2174,6 @@ export const ru: Record<MessageKey, string> = {
 	'jobTemplates.interpreters': 'Интерпретаторы',
 	'jobTemplates.secrets': 'Секретов',
 	'jobTemplates.backupStep': 'Резервная копия',
-	'templates.summary': 'Сводка'
+	'templates.summary': 'Сводка',
+	'jobTemplates.scriptCount': 'Скриптов'
 };

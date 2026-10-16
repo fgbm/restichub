@@ -2163,7 +2163,8 @@ export const en = {
 	'jobTemplates.interpreters': 'Interpreters',
 	'jobTemplates.secrets': 'Secrets',
 	'jobTemplates.backupStep': 'Backup',
-	'templates.summary': 'Summary'
+	'templates.summary': 'Summary',
+	'jobTemplates.scriptCount': 'Scripts'
 } as const;
 
 export type MessageKey = keyof typeof en;
