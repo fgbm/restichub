@@ -446,7 +446,7 @@ pub struct AlertPage {
     pub offset: i64,
     /// `None` lists both states.
     pub status: Option<AlertStatus>,
-    /// Empty lists every kind.
+    /// Empty: no filter.
     pub kinds: Vec<AlertKind>,
     /// Matches the host, the plan or the repository name anywhere, without case.
     pub search: Option<String>,

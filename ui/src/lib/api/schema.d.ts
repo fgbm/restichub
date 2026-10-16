@@ -4043,7 +4043,7 @@ export interface operations {
             path: {
                 /** @description `open` (default), `resolved` or `all`. */
                 status: ("open" | "resolved" | "all") | null;
-                /** @description A comma list of kinds. */
+                /** @description Comma-separated, for example `job_failed,agent_offline`. */
                 kind: string | null;
                 /** @description Matches the host, the plan or the repository name; at most 200 characters. */
                 q: string | null;

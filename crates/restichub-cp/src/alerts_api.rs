@@ -41,7 +41,7 @@ pub struct AlertListQuery {
     /// `open` (default), `resolved` or `all`.
     #[param(inline)]
     pub status: Option<StatusFilter>,
-    /// A comma list of kinds.
+    /// Comma-separated, for example `job_failed,agent_offline`.
     pub kind: Option<String>,
     /// Matches the host, the plan or the repository name; at most 200 characters.
     pub q: Option<String>,
