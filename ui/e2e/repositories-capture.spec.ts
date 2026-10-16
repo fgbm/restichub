@@ -74,7 +74,7 @@ async function addLocal(page: Page, labels: Labels, name: string, host: string |
 
 async function capture(page: Page, labels: Labels, suffix: string): Promise<void> {
 	mkdirSync(out, { recursive: true });
-	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.setViewportSize({ width: Number(process.env.CAPTURE_WIDTH ?? 1440), height: 900 });
 	await page.emulateMedia({ colorScheme: 'light' });
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
 	if (suffix) await page.addInitScript(() => localStorage.setItem('restichub.locale', 'ru'));
