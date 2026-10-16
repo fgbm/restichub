@@ -1,6 +1,6 @@
 /*
- * The Plans screen lists the plans of the organization, creates one and deletes one
- * (FR-SC-01, FR-SC-07).
+ * The Plans screen lists the plans of the organization, links each plan to its page, runs one
+ * now and deletes one (FR-SC-01, FR-SC-07, FR-SC-09).
  *
  * The test replaces the session store, the toast store and the service, so it renders the screen
  * alone. Only an Admin and an Operator see a write action; a Viewer reads.
@@ -12,14 +12,10 @@ import Plans from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
 	listPlans: vi.fn(),
-	listProfiles: vi.fn(),
-	listAgents: vi.fn(),
-	createPlan: vi.fn(),
 	deletePlan: vi.fn(),
 	runPlan: vi.fn(),
-	nextRuns: vi.fn(),
-	previewSchedule: vi.fn(),
-	pushToast: vi.fn()
+	pushToast: vi.fn(),
+	goto: vi.fn()
 }));
 
 const session = vi.hoisted(() => ({ role: 'admin' as string }));
@@ -39,6 +35,7 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 	})
 }));
 
+vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
@@ -48,13 +45,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 		service: {
 			...actual.service,
 			listPlans: mocks.listPlans,
-			listProfiles: mocks.listProfiles,
-			listAgents: mocks.listAgents,
-			createPlan: mocks.createPlan,
 			deletePlan: mocks.deletePlan,
-			runPlan: mocks.runPlan,
-			nextRuns: mocks.nextRuns,
-			previewSchedule: mocks.previewSchedule
+			runPlan: mocks.runPlan
 		}
 	};
 });
@@ -84,22 +76,11 @@ function plan(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function profile() {
-	return { id: 'p_1', name: 'web-daily' };
-}
-
-function agent() {
-	return { id: 'a_1', hostname: 'win-fs01', status: 'active' };
-}
-
 describe('the Plans screen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		session.role = 'admin';
 		mocks.listPlans.mockResolvedValue([]);
-		mocks.listProfiles.mockResolvedValue([profile()]);
-		mocks.listAgents.mockResolvedValue([agent()]);
-		mocks.previewSchedule.mockResolvedValue({ time_zone: 'Europe/Berlin', runs: [] });
 	});
 
 	it('lists a plan with its host and its schedule', async () => {
@@ -114,58 +95,13 @@ describe('the Plans screen', () => {
 		expect(screen.getByText('0 2 * * *')).toBeInTheDocument();
 	});
 
-	it('creates a plan from the dialog', async () => {
+	it('opens the new plan page from the add button', async () => {
 		const user = userEvent.setup();
-		mocks.listPlans.mockResolvedValueOnce([]).mockResolvedValueOnce([plan()]);
-		mocks.createPlan.mockResolvedValue({ plan: plan() });
 		render(Plans);
 
 		await screen.findByText('No plans yet');
 		await user.click(screen.getByRole('button', { name: 'Add plan' }));
-		const dialog = await screen.findByRole('dialog');
-		const input = (id: string) => document.querySelector<HTMLInputElement>(id) as HTMLInputElement;
-		await user.type(input('#plan-name'), 'nightly-web');
-		await user.type(input('#plan-cron'), '0 2 * * *');
-		// The create dialog fills the time zone with the browser zone, so the test replaces it.
-		await user.clear(input('#plan-time-zone'));
-		await user.type(input('#plan-time-zone'), 'Europe/Berlin');
-		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
-
-		await waitFor(() =>
-			expect(mocks.createPlan).toHaveBeenCalledWith({
-				name: 'nightly-web',
-				profile_id: 'p_1',
-				agent_id: 'a_1',
-				cron: '0 2 * * *',
-				time_zone: 'Europe/Berlin',
-				missed_run_policy: 'run_all',
-				enabled: true,
-				rpo_seconds: null
-			})
-		);
-		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
-	});
-
-	it('sends the objective of the plan in seconds (ADR-0036)', async () => {
-		const user = userEvent.setup();
-		mocks.listPlans.mockResolvedValueOnce([]).mockResolvedValueOnce([plan()]);
-		mocks.createPlan.mockResolvedValue({ plan: plan() });
-		render(Plans);
-
-		await screen.findByText('No plans yet');
-		await user.click(screen.getByRole('button', { name: 'Add plan' }));
-		const dialog = await screen.findByRole('dialog');
-		const input = (id: string) => document.querySelector<HTMLInputElement>(id) as HTMLInputElement;
-		await user.type(input('#plan-name'), 'nightly-web');
-		await user.type(input('#plan-cron'), '0 2 * * *');
-		await user.clear(input('#plan-time-zone'));
-		await user.type(input('#plan-time-zone'), 'Europe/Berlin');
-		await user.type(input('#plan-rpo'), '24,5');
-		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
-
-		await waitFor(() =>
-			expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({ rpo_seconds: 88200 }))
-		);
+		expect(mocks.goto).toHaveBeenCalledWith('/plans/new');
 	});
 
 	it('runs a plan now and shows no queue note', async () => {
@@ -192,15 +128,29 @@ describe('the Plans screen', () => {
 		await screen.findByText('nightly-web');
 		expect(screen.queryByRole('button', { name: 'Add plan' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Run now' })).not.toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: 'nightly-web' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Delete plan' })).not.toBeInTheDocument();
 	});
 
-	it('opens the plan form from the row', async () => {
-		const user = userEvent.setup();
+	it('links the plan name to the plan page', async () => {
 		mocks.listPlans.mockResolvedValue([plan()]);
 		render(Plans);
 
-		await user.click(await screen.findByRole('button', { name: 'nightly-web' }));
-		expect(await screen.findByRole('dialog', { name: 'Edit the plan' })).toBeInTheDocument();
+		const link = await screen.findByRole('link', { name: 'nightly-web' });
+		expect(link).toHaveAttribute('href', '/plans/pl_1');
+	});
+
+	it('deletes a plan after the confirmation', async () => {
+		const user = userEvent.setup();
+		mocks.listPlans.mockResolvedValueOnce([plan()]).mockResolvedValueOnce([]);
+		mocks.deletePlan.mockResolvedValue(undefined);
+		render(Plans);
+
+		await screen.findByText('nightly-web');
+		await user.click(screen.getByRole('button', { name: 'Delete plan' }));
+		const dialog = await screen.findByRole('dialog');
+		await user.click(within(dialog).getByRole('button', { name: 'Delete plan' }));
+
+		await waitFor(() => expect(mocks.deletePlan).toHaveBeenCalledWith('pl_1'));
+		expect(await screen.findByText('No plans yet')).toBeInTheDocument();
 	});
 });

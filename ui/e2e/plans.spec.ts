@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// The Plans screen lists the plans, creates one from the dialog and deletes one (FR-SC-01,
+// The Plans screen lists the plans, creates one on the plan page and deletes one (FR-SC-01,
 // FR-SC-07).
 async function signIn(page: Page): Promise<void> {
 	await page.goto('/sign-in');
@@ -31,16 +31,18 @@ test('the plans screen creates and deletes a plan', async ({ page }) => {
 	await expect(page.getByText('No plans yet')).toBeVisible();
 
 	await page.getByRole('button', { name: 'Add plan' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Add a plan' });
-	await expect(dialog).toBeVisible();
+	await expect(page).toHaveURL(/\/plans\/new$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'New plan' })).toBeVisible();
+	await expect(page).toHaveTitle(`New plan · ResticHub`);
 	await page.locator('#plan-name').fill('nightly-web');
 	await page.locator('#plan-profile').selectOption({ label: 'web-daily' });
 	await page.locator('#plan-agent').selectOption({ label: 'win-fs01' });
 	await page.locator('#plan-cron').fill('0 2 * * *');
 	await page.locator('#plan-time-zone').fill('Europe/Berlin');
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Save' }).click();
 
 	await expect(page.getByText('The plan is created.')).toBeVisible();
+	await expect(page.getByRole('heading', { level: 1, name: 'Plans' })).toBeVisible();
 	await expect(page.getByText('nightly-web')).toBeVisible();
 	// The schedule column shows the phrase and the cron expression.
 	await expect(page.getByText('Every day at 02:00')).toBeVisible();
@@ -55,7 +57,7 @@ test('the plans screen creates and deletes a plan', async ({ page }) => {
 	await expect(page.getByText('No plans yet')).toBeVisible();
 });
 
-test('the plan dialog shows the next runs of an existing plan', async ({ page }) => {
+test('the plan page shows the next runs of an existing plan', async ({ page }) => {
 	await seed(page);
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.plans', 'sample'));
 	await signIn(page);
@@ -65,14 +67,13 @@ test('the plan dialog shows the next runs of an existing plan', async ({ page })
 		.click();
 	// The Overview lists the sample plan too, so wait for the Plans screen first.
 	await expect(page.getByRole('heading', { level: 1, name: 'Plans' })).toBeVisible();
-	await expect(page.getByText('nightly-web')).toBeVisible();
 
-	// The row opens the plan form.
-	await page.getByRole('button', { name: 'nightly-web', exact: true }).click();
-	const dialog = page.getByRole('dialog', { name: 'Edit the plan' });
-	await expect(dialog).toBeVisible();
-	// The dialog holds the next five runs of the plan.
-	await expect(dialog.getByText('Next 5 runs')).toBeVisible();
-	const runs = dialog.locator('.runs li');
-	await expect(runs).toHaveCount(5);
+	// The plan name opens the plan page.
+	await page.getByRole('link', { name: 'nightly-web', exact: true }).click();
+	await expect(page).toHaveURL(/\/plans\/[^/]+$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'nightly-web' })).toBeVisible();
+	await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Plans');
+	// The schedule section holds the next five runs of the plan.
+	await expect(page.getByText('Next 5 runs')).toBeVisible();
+	await expect(page.locator('.runs li')).toHaveCount(5);
 });
