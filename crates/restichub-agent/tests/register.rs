@@ -64,6 +64,10 @@ impl ServiceManager for FakeService {
     fn stop(&self) -> anyhow::Result<()> {
         Ok(())
     }
+
+    fn restart(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 fn quick() -> WaitOptions {

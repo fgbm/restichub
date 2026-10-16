@@ -41,7 +41,9 @@ fn run() -> anyhow::Result<()> {
             init_tracing();
             commands::status(&paths::config_dir())
         }
-        Command::TrustServerScripts { enable } => commands::trust_server_scripts(enable),
+        Command::TrustServerScripts { enable, no_restart } => {
+            commands::trust_server_scripts(enable, no_restart)
+        }
         Command::Run => {
             init_tracing();
             #[cfg(windows)]

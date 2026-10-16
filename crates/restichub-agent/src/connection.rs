@@ -24,9 +24,14 @@ pub struct ConnectionStatus {
     pub cp_url: String,
     /// Unix seconds of the start of the last open stream.
     pub connected_at: Option<i64>,
+    /// The nanoseconds within the second of `connected_at`. A file of an older build has none.
+    #[serde(default)]
+    pub connected_at_nanos: u32,
     pub last_error: Option<String>,
     /// Unix seconds of the last error.
     pub last_error_at: Option<i64>,
+    #[serde(default)]
+    pub last_error_at_nanos: u32,
 }
 
 impl ConnectionStatus {
@@ -56,24 +61,30 @@ impl ConnectionStatus {
 
     #[must_use]
     pub fn connected_time(&self) -> Option<OffsetDateTime> {
-        self.connected_at
-            .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
+        time_of(self.connected_at, self.connected_at_nanos)
     }
 
     #[must_use]
     pub fn error_time(&self) -> Option<OffsetDateTime> {
-        self.last_error_at
-            .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
+        time_of(self.last_error_at, self.last_error_at_nanos)
     }
+}
+
+fn time_of(seconds: Option<i64>, nanos: u32) -> Option<OffsetDateTime> {
+    let at = OffsetDateTime::from_unix_timestamp(seconds?).ok()?;
+    at.replace_nanosecond(nanos).ok()
 }
 
 /// Records that the stream is open. A write failure is logged and never stops the agent.
 pub fn record_connected(dir: &Path, cp_url: &str) {
     update(dir, cp_url, |status| {
+        let now = OffsetDateTime::now_utc();
         status.connected = true;
-        status.connected_at = Some(OffsetDateTime::now_utc().unix_timestamp());
+        status.connected_at = Some(now.unix_timestamp());
+        status.connected_at_nanos = now.nanosecond();
         status.last_error = None;
         status.last_error_at = None;
+        status.last_error_at_nanos = 0;
     });
 }
 
@@ -86,9 +97,11 @@ pub fn record_closed(dir: &Path, cp_url: &str) {
 pub fn record_failure(dir: &Path, cp_url: &str, error: &str) {
     let text: String = error.chars().take(MAX_ERROR_CHARS).collect();
     update(dir, cp_url, |status| {
+        let now = OffsetDateTime::now_utc();
         status.connected = false;
         status.last_error = Some(text);
-        status.last_error_at = Some(OffsetDateTime::now_utc().unix_timestamp());
+        status.last_error_at = Some(now.unix_timestamp());
+        status.last_error_at_nanos = now.nanosecond();
     });
 }
 
@@ -130,18 +143,14 @@ pub fn wait_for_connection(
         let status = ConnectionStatus::read(dir).ok().flatten();
         if let Some(status) = &status
             && status.connected
-            && status
-                .connected_time()
-                .is_some_and(|at| at.unix_timestamp() >= since.unix_timestamp())
+            && status.connected_time().is_some_and(|at| at >= since)
         {
             return Wait::Connected(status.clone());
         }
         if Instant::now() >= deadline {
-            return Wait::TimedOut(status.filter(|status| {
-                status
-                    .error_time()
-                    .is_some_and(|at| at.unix_timestamp() >= since.unix_timestamp())
-            }));
+            return Wait::TimedOut(
+                status.filter(|status| status.error_time().is_some_and(|at| at >= since)),
+            );
         }
         std::thread::sleep(poll);
     }
@@ -202,9 +211,11 @@ mod tests {
             [
                 "connected",
                 "connected_at",
+                "connected_at_nanos",
                 "cp_url",
                 "last_error",
-                "last_error_at"
+                "last_error_at",
+                "last_error_at_nanos"
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -239,6 +250,38 @@ mod tests {
             Duration::from_millis(10),
         );
         assert!(matches!(wait, Wait::Connected(_)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_in_07_a_connection_earlier_in_the_same_second_does_not_count() {
+        let dir = temp_dir("same-second");
+        record_connected(&dir, "https://cp.example");
+        let status = ConnectionStatus::read(&dir).expect("read").expect("file");
+        let since = status.connected_time().expect("time") + Duration::from_nanos(1);
+        let wait = wait_for_connection(
+            &dir,
+            since,
+            Duration::from_millis(50),
+            Duration::from_millis(10),
+        );
+        assert!(matches!(wait, Wait::TimedOut(None)), "{wait:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_ag_01_a_status_file_without_nanoseconds_still_reads() {
+        let dir = temp_dir("old-file");
+        std::fs::write(
+            dir.join(STATUS_FILE),
+            r#"{"connected":true,"cp_url":"https://cp.example","connected_at":1760000000,"last_error":null,"last_error_at":null}"#,
+        )
+        .expect("write");
+        let status = ConnectionStatus::read(&dir).expect("read").expect("file");
+        assert_eq!(
+            status.connected_time().map(OffsetDateTime::unix_timestamp),
+            Some(1_760_000_000)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

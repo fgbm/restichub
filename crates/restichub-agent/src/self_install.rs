@@ -387,6 +387,10 @@ mod tests {
             self.stopped.set(true);
             Ok(())
         }
+
+        fn restart(&self) -> Result<()> {
+            Ok(())
+        }
     }
 
     fn temp_dir(name: &str) -> PathBuf {

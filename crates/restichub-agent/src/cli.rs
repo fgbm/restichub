@@ -27,6 +27,7 @@ COMMANDS:
 TRUST-SERVER-SCRIPTS OPTIONS (run as root or Administrator):
   --enable           run scripts that the control plane sends (default: off)
   --disable          refuse scripts that the control plane sends
+  --no-restart       do not restart the installed service; the control plane sees the new state after the next start
 
 REGISTER OPTIONS:
   --url URL          control plane URL, for example https://cp.example
@@ -36,6 +37,7 @@ REGISTER OPTIONS:
   --ca-file PATH     CA certificate that verifies the control plane
   --force            replace an existing identity (re-register)
   --no-service       only enroll; do not install or start the service
+  --trust-server-scripts  turn the trust mode on before the service starts: the control plane can then run any command on this host (default: off)
   --help             print this help
 
 RESTIC OPTIONS (register, install-service, restic update):
@@ -60,6 +62,7 @@ pub enum Command {
     /// Turns the local trust mode for server scripts on or off (FR-HK-08, ADR-0037).
     TrustServerScripts {
         enable: bool,
+        no_restart: bool,
     },
     Version,
     Help,
@@ -75,6 +78,7 @@ pub struct RegisterOptions {
     pub ca_file: Option<PathBuf>,
     pub force: bool,
     pub no_service: bool,
+    pub trust_server_scripts: bool,
     pub restic: ResticFileOptions,
 }
 
@@ -138,6 +142,7 @@ fn parse_register(args: &[String]) -> Result<RegisterOptions> {
             }
             "--force" => options.force = true,
             "--no-service" => options.no_service = true,
+            "--trust-server-scripts" => options.trust_server_scripts = true,
             "--help" | "-h" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -154,12 +159,24 @@ fn parse_register(args: &[String]) -> Result<RegisterOptions> {
 }
 
 fn parse_trust(args: &[String]) -> Result<Command> {
-    match args {
-        [flag] if flag == "--enable" => Ok(Command::TrustServerScripts { enable: true }),
-        [flag] if flag == "--disable" => Ok(Command::TrustServerScripts { enable: false }),
-        [flag] if flag == "--help" || flag == "-h" => Ok(Command::Help),
-        _ => bail!("trust-server-scripts needs exactly one of --enable and --disable"),
+    let mut choice = None;
+    let mut no_restart = false;
+    for arg in args {
+        match arg.as_str() {
+            "--enable" | "--disable" if choice.is_some() => {
+                bail!("trust-server-scripts needs exactly one of --enable and --disable");
+            }
+            "--enable" => choice = Some(true),
+            "--disable" => choice = Some(false),
+            "--no-restart" => no_restart = true,
+            "--help" | "-h" => return Ok(Command::Help),
+            other => bail!("unknown argument: {other}"),
+        }
     }
+    let Some(enable) = choice else {
+        bail!("trust-server-scripts needs exactly one of --enable and --disable");
+    };
+    Ok(Command::TrustServerScripts { enable, no_restart })
 }
 
 fn parse_restic_files(args: &[String]) -> Result<ResticFileOptions> {
@@ -269,14 +286,49 @@ mod tests {
     fn fr_hk_08_trust_server_scripts_needs_one_explicit_choice() {
         assert!(matches!(
             parse_args(&["trust-server-scripts", "--enable"]).expect("command"),
-            Command::TrustServerScripts { enable: true }
+            Command::TrustServerScripts {
+                enable: true,
+                no_restart: false
+            }
         ));
         assert!(matches!(
             parse_args(&["trust-server-scripts", "--disable"]).expect("command"),
-            Command::TrustServerScripts { enable: false }
+            Command::TrustServerScripts {
+                enable: false,
+                no_restart: false
+            }
         ));
         assert!(parse_args(&["trust-server-scripts"]).is_err());
         assert!(parse_args(&["trust-server-scripts", "--enable", "--disable"]).is_err());
+        assert!(parse_args(&["trust-server-scripts", "--no-restart"]).is_err());
+        assert!(parse_args(&["trust-server-scripts", "--enable", "--nope"]).is_err());
+    }
+
+    #[test]
+    fn fr_hk_08_trust_server_scripts_reads_the_no_restart_flag() {
+        assert!(matches!(
+            parse_args(&["trust-server-scripts", "--no-restart", "--enable"]).expect("command"),
+            Command::TrustServerScripts {
+                enable: true,
+                no_restart: true
+            }
+        ));
+    }
+
+    #[test]
+    fn fr_hk_08_register_turns_the_trust_mode_on_only_when_told() {
+        let plain = parse_args(&["register", "--url", "https://cp.example", "--token", "t"])
+            .expect("command");
+        assert!(matches!(plain, Command::Register(options) if !options.trust_server_scripts));
+        let trusted = parse_args(&[
+            "register",
+            "--url",
+            "https://cp.example",
+            "--trust-server-scripts",
+        ])
+        .expect("command");
+        assert!(matches!(trusted, Command::Register(options) if options.trust_server_scripts));
+        assert!(parse_args(&["install-service", "--trust-server-scripts"]).is_err());
     }
 
     #[test]
