@@ -63,6 +63,29 @@ curl -s -b cookies.txt -X POST https://<control-plane>/api/v1/plans/<plan-id>/ru
 
 A request must not hold a cookie and a bearer token together. That request gives HTTP 400.
 
+## Users
+
+A Platform Admin reads and changes every account of the installation through the platform routes. A tenant scope gets HTTP 403 on these routes.
+
+| Route | Function |
+|---|---|
+| `GET /api/v1/platform/users` | Lists every account with its memberships. |
+| `GET /api/v1/platform/users/{id}` | Reads one account with its memberships. An unknown account gives HTTP 404 `not_found`. |
+| `POST /api/v1/platform/users/{id}/password` | Sets a new password from the field `new_password` (12 characters or more) and ends every session of the account. |
+| `PATCH /api/v1/platform/users/{id}` | Disables or enables the account, sets the email, grants or removes the Platform Admin right. |
+
+The password reset refuses the own account with HTTP 403 `forbidden`. To change your own password, send `POST /api/v1/auth/password` with the current password. The audit log of the platform records the reset without the password.
+
+```sh
+curl -s -X POST https://<control-plane>/api/v1/platform/users/<user-id>/password \
+  -b cookies.txt \
+  -H "X-ResticHub-CSRF: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"new_password": "<new-password>"}'
+```
+
+In an organization, `GET /api/v1/users` and `GET /api/v1/users/{id}` return the field `platform_admin`. When it is `true`, the organization scope cannot change the account: a change gives HTTP 403 `forbidden`.
+
 ## Errors
 
 An error response uses the media type of RFC 9457. The body holds these fields:
@@ -116,5 +139,6 @@ A reverse proxy must not buffer the stream. The response sets `X-Accel-Buffering
 
 ## Related pages
 
+- [Users](/restichub/operations/users/)
 - [Prometheus metrics](/restichub/operations/metrics/)
 - [Environment variables](/restichub/operations/environment-variables/)
