@@ -85,6 +85,7 @@
 	let cancelling = $state(false);
 	let rerunning = $state(false);
 	let keyCopied = $state(false);
+	let idCopied = $state(false);
 	let busy = false;
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
@@ -151,14 +152,21 @@
 	}
 
 	async function copyKeyId(keyId: string): Promise<void> {
+		keyCopied = await copyText(keyId);
+		if (keyCopied) setTimeout(() => (keyCopied = false), 1500);
+	}
+
+	async function copyId(jobId: string): Promise<void> {
+		idCopied = await copyText(jobId);
+		if (idCopied) setTimeout(() => (idCopied = false), 1500);
+	}
+
+	async function copyText(text: string): Promise<boolean> {
 		try {
-			await navigator.clipboard.writeText(keyId);
-			keyCopied = true;
-			setTimeout(() => {
-				keyCopied = false;
-			}, 1500);
+			await navigator.clipboard.writeText(text);
+			return true;
 		} catch {
-			keyCopied = false;
+			return false;
 		}
 	}
 
@@ -425,10 +433,8 @@
 		</div>
 	</header>
 
-	<Panel title={t('jobDetail.summary')} subtitle={t('jobDetail.summaryHint')}>
-		{#if stats.length === 0}
-			<p class="muted">{t('jobDetail.summaryEmpty')}</p>
-		{:else}
+	{#if stats.length > 0}
+		<Panel title={t('jobDetail.summary')} subtitle={t('jobDetail.summaryHint')}>
 			<div class="stats">
 				{#each stats as stat (stat.label)}
 					<div class="stat">
@@ -437,8 +443,8 @@
 					</div>
 				{/each}
 			</div>
-		{/if}
-	</Panel>
+		</Panel>
+	{/if}
 
 	<div class="layout">
 		<div class="layout__main">
@@ -451,7 +457,7 @@
 				{#if rows.length === 0}
 					<p class="muted">{t('jobDetail.stepsEmpty')}</p>
 				{:else}
-					{#if progress}
+					{#if progress && progress.total > 1}
 						<progress
 							class="progress progress--steps"
 							aria-label={t('jobDetail.steps')}
@@ -604,7 +610,15 @@
 			<Panel title={t('jobDetail.about')}>
 				<dl class="about">
 					<dt>{t('jobDetail.id')}</dt>
-					<dd class="mono">{job.id}</dd>
+					<dd class="about__key">
+						<span class="mono about__id" title={job.id}>{job.id}</span>
+						<Button
+							size="sm"
+							icon={idCopied ? 'check' : 'copy'}
+							aria-label={idCopied ? t('common.copied') : t('jobDetail.id.copy')}
+							onclick={() => copyId(job?.id ?? '')}
+						/>
+					</dd>
 					<dt>{t('jobDetail.kind')}</dt>
 					<dd>{t(`jobs.kind.${job.kind}` as MessageKey)}</dd>
 					{#if job.plan_name}
@@ -622,18 +636,18 @@
 					<dt>{t('jobDetail.trigger')}</dt>
 					<dd>{t(`jobDetail.trigger.${job.trigger}` as MessageKey)}</dd>
 					<dt>{t('jobDetail.queuedAt')}</dt>
-					<dd class="about__time">{formatLocalTime(job.created_at)}</dd>
+					<dd>{formatLocalTime(job.created_at)}</dd>
 					{#if job.started_at}
 						<dt>{t('jobDetail.startedAt')}</dt>
-						<dd class="about__time">{formatLocalTime(job.started_at)}</dd>
+						<dd>{formatLocalTime(job.started_at)}</dd>
 					{/if}
 					{#if job.finished_at}
 						<dt>{t('jobDetail.finishedAt')}</dt>
-						<dd class="about__time">{formatLocalTime(job.finished_at)}</dd>
+						<dd>{formatLocalTime(job.finished_at)}</dd>
 					{/if}
 					{#if job.expires_at && (job.status === 'queued' || job.status === 'sent')}
 						<dt>{t('jobDetail.acceptUntil')}</dt>
-						<dd class="about__time">{formatLocalTime(job.expires_at)}</dd>
+						<dd>{formatLocalTime(job.expires_at)}</dd>
 					{/if}
 					{#if limitLines(job)}
 						<dt>{t('jobDetail.limit')}</dt>
@@ -943,41 +957,46 @@
 	}
 
 	.about {
-		display: grid;
-		grid-template-columns: minmax(80px, 1fr) fit-content(65%);
+		display: flex;
+		flex-direction: column;
 		margin: 0;
+	}
+
+	.about dt {
+		margin: 0;
+		padding-top: var(--rh-space-3);
+		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.about dd {
+		margin: 0;
+		padding: var(--rh-space-1) 0 var(--rh-space-3);
+		font-size: var(--rh-font-size-base);
+		overflow-wrap: anywhere;
+	}
+
+	.about dt:first-of-type {
+		padding-top: 0;
+		border-top: 0;
 	}
 
 	.about__line {
 		display: block;
 	}
 
-	.about__time {
-		white-space: nowrap;
-	}
-
 	.about__key {
 		display: flex;
 		align-items: center;
+		justify-content: space-between;
 		gap: var(--rh-space-2);
 	}
 
-	.about dt,
-	.about dd {
-		margin: 0;
-		padding: var(--rh-space-2) 0;
-		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
-		font-size: var(--rh-font-size-base);
-		overflow-wrap: anywhere;
-	}
-
-	.about dt {
-		padding-inline-end: var(--rh-space-4);
-		color: var(--rh-color-text-muted);
-	}
-
-	.about dt:first-of-type,
-	.about dd:first-of-type {
-		border-top: 0;
+	.about__id {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 </style>
