@@ -2,6 +2,8 @@
 
 These rules apply to each change in the web UI (ADR-0012). The UI is a restrained administration console.
 
+Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They apply these rules, and lint rules report the markup that does not use them.
+
 ## 1. Navigation
 
 1. The breadcrumb in the top bar (`AppShell`) is the only "back" navigation. A page does not have its own back link in the body.

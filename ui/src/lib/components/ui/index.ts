@@ -6,10 +6,12 @@ export { default as Checkbox } from './Checkbox.svelte';
 export { default as Combobox } from './Combobox.svelte';
 export { default as ConfirmDialog } from './ConfirmDialog.svelte';
 export { default as CopyField } from './CopyField.svelte';
+export { default as DataTable } from './DataTable.svelte';
 export { default as Dialog } from './Dialog.svelte';
 export { default as DropdownMenu } from './DropdownMenu.svelte';
 export { default as EmptyState } from './EmptyState.svelte';
 export { default as Field } from './Field.svelte';
+export { default as FilterBar } from './FilterBar.svelte';
 export { default as Icon } from './Icon.svelte';
 export { default as JsonDiff } from './JsonDiff.svelte';
 export { default as KeyValue } from './KeyValue.svelte';
@@ -33,10 +35,15 @@ export { default as Tooltip } from './Tooltip.svelte';
 export type { IconName } from './icons';
 export type {
 	BadgeTone,
+	FilterFacet,
+	FilterOption,
+	FilterSearch,
 	KeyValueItem,
 	MenuItem,
+	RowAction,
 	SelectOption,
 	StatusTone,
 	TabItem,
-	TableColumn
+	TableColumn,
+	TableSort
 } from './types';

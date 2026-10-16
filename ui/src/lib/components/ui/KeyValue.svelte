@@ -1,13 +1,26 @@
 <script lang="ts">
 	import type { KeyValueItem } from './types';
 
-	let { items, boxed = false }: { items: KeyValueItem[]; boxed?: boolean } = $props();
+	let {
+		items,
+		boxed = false,
+		stacked = false
+	}: {
+		items: KeyValueItem[];
+		boxed?: boolean;
+		/** The label above the value, for the side panel of a record page. */
+		stacked?: boolean;
+	} = $props();
 </script>
 
-<dl class="key-value" class:key-value--boxed={boxed}>
+<dl class="key-value" class:key-value--boxed={boxed} class:key-value--stacked={stacked}>
 	{#each items as item (item.key)}
-		<dt class="key-value__key">{item.label}</dt>
-		<dd class="key-value__value" class:key-value__value--mono={item.mono}>{item.value}</dd>
+		<div class="key-value__row">
+			<dt class="key-value__key">{item.label}</dt>
+			<dd class="key-value__value" class:key-value__value--mono={item.mono}>
+				{#if item.render}{@render item.render()}{:else}{item.value}{/if}
+			</dd>
+		</div>
 	{/each}
 </dl>
 
@@ -26,8 +39,11 @@
 		font-size: var(--rh-font-size-base);
 	}
 
-	.key-value__key:first-of-type,
-	.key-value__value:first-of-type {
+	.key-value__row {
+		display: contents;
+	}
+
+	.key-value__row:first-child > * {
 		border-top: 0;
 	}
 
@@ -44,6 +60,29 @@
 
 	.key-value__value--mono {
 		font-family: var(--rh-font-mono);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.key-value--stacked {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-3);
+	}
+
+	.key-value--stacked .key-value__row {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.key-value--stacked .key-value__key,
+	.key-value--stacked .key-value__value {
+		padding: 0;
+		border-top: 0;
+	}
+
+	.key-value--stacked .key-value__key {
 		font-size: var(--rh-font-size-sm);
 	}
 
