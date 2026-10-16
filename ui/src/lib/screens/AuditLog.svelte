@@ -21,22 +21,23 @@
 	} from '#lib/components/ui/index.ts';
 	import { periodWindow } from '#lib/filters.ts';
 	import { en, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
-	import { formatTime } from '#lib/format.ts';
+	import { formatCount, formatTime } from '#lib/format.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 
 	let { scope = 'tenant' }: { scope?: 'tenant' | 'platform' } = $props();
 
-	const limit = 20;
+	const DEFAULT_PAGE_SIZE = 25;
+	const PAGE_SIZES = [10, 25, 50, 100];
 
 	let items = $state<AuditRecord[]>([]);
-	let nextCursor = $state<string | null>(null);
+	let total = $state(0);
+	let totalCapped = $state(false);
 	let loading = $state(true);
-	let loadingMore = $state(false);
 	let error = $state<string | null>(null);
 	let selected = $state<AuditRecord | null>(null);
 	let panelOpen = $state(false);
 
-	const filters = queryFilters([
+	const FILTER_KEYS = [
 		'action',
 		'actor_type',
 		'actor_id',
@@ -45,7 +46,13 @@
 		'period',
 		'from',
 		'to'
-	] as const);
+	] as const;
+	// The log filters and pages on the server (FR-UI-01).
+	const filters = queryFilters([...FILTER_KEYS, 'page', 'size'] as const);
+	const tablePage = $derived(Math.max(1, Number(filters.value.page) || 1));
+	const pageSize = $derived(
+		PAGE_SIZES.includes(Number(filters.value.size)) ? Number(filters.value.size) : DEFAULT_PAGE_SIZE
+	);
 
 	const title = $derived(scope === 'platform' ? t('nav.platform.audit') : t('audit.title'));
 
@@ -53,7 +60,7 @@
 		return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
 	}
 
-	function buildQuery(cursor?: string): AuditQuery {
+	function buildQuery(): AuditQuery {
 		const value = filters.value;
 		const window = periodWindow(value, Date.now());
 		return {
@@ -64,20 +71,28 @@
 			actor_id: value.actor_id.trim() || undefined,
 			object_type: value.object_type.trim() || undefined,
 			object_id: value.object_id.trim() || undefined,
-			cursor,
-			limit
+			offset: (tablePage - 1) * pageSize,
+			limit: pageSize
 		};
 	}
 
-	function fetchPage(cursor?: string) {
+	function fetchPage() {
 		return scope === 'platform'
-			? service.listPlatformAudit(buildQuery(cursor))
-			: service.listAudit(buildQuery(cursor));
+			? service.listPlatformAudit(buildQuery())
+			: service.listAudit(buildQuery());
 	}
 
 	function messageOf(problem: unknown): string {
-		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		if (problem instanceof ApiError) {
+			// The server pages only through the records that it counts.
+			if (problem.problem.field === 'offset') return t('filter.tooDeep');
+			return tErrorCode(problem.code) ?? problem.title;
+		}
 		return t('table.error');
+	}
+
+	function resetFilters(): void {
+		filters.update(Object.fromEntries(FILTER_KEYS.map((key) => [key, ''])));
 	}
 
 	function actorLabel(row: AuditRecord): string {
@@ -110,31 +125,24 @@
 		}
 	}
 
+	// A page change and a filter change can overlap; only the last request may fill the table.
+	let request = 0;
+
 	async function load(): Promise<void> {
+		const mine = ++request;
 		loading = true;
 		error = null;
 		try {
 			const page = await fetchPage();
+			if (mine !== request) return;
 			items = page.items;
-			nextCursor = page.next_cursor ?? null;
+			total = page.total;
+			totalCapped = page.total_capped;
 		} catch (problem) {
+			if (mine !== request) return;
 			error = messageOf(problem);
 		} finally {
-			loading = false;
-		}
-	}
-
-	async function loadMore(): Promise<void> {
-		if (!nextCursor) return;
-		loadingMore = true;
-		try {
-			const page = await fetchPage(nextCursor);
-			items = [...items, ...page.items];
-			nextCursor = page.next_cursor ?? null;
-		} catch (problem) {
-			error = messageOf(problem);
-		} finally {
-			loadingMore = false;
+			if (mine === request) loading = false;
 		}
 	}
 
@@ -150,9 +158,13 @@
 	$effect(() => {
 		const key = JSON.stringify(filters.value);
 		if (loadedQuery === undefined || key === loadedQuery) return;
+		const pageOnly =
+			JSON.stringify({ ...JSON.parse(loadedQuery), page: '', size: '' }) ===
+			JSON.stringify({ ...filters.value, page: '', size: '' });
 		loadedQuery = key;
 		clearTimeout(typing);
-		typing = setTimeout(() => void load(), 300);
+		if (pageOnly) void load();
+		else typing = setTimeout(() => void load(), 300);
 	});
 
 	const columns = $derived<TableColumn<AuditRecord>[]>([
@@ -283,6 +295,10 @@
 		<div class="alert">
 			<Alert tone="danger" title={error} />
 		</div>
+	{:else if totalCapped && !loading}
+		<div class="alert">
+			<Alert tone="info" title={t('filter.capped', { count: formatCount(total) })} />
+		</div>
 	{/if}
 
 	<!-- A record has no page of its own: the row opens its details (design/style/ui-principles.md, 2.2). -->
@@ -290,7 +306,14 @@
 		{columns}
 		rows={items}
 		{loading}
-		paginated={false}
+		mode="server"
+		page={tablePage}
+		{pageSize}
+		pageSizes={PAGE_SIZES}
+		{total}
+		{totalCapped}
+		onPageChange={(next) => filters.update({ page: String(next) })}
+		onPageSizeChange={(next) => filters.update({ size: String(next) })}
 		sort={{ key: 'occurred_at', direction: 'desc' }}
 		emptyIcon="audit"
 		rowKey={(record) => record.id}
@@ -304,21 +327,10 @@
 				period
 				hint={t('audit.filters.timeHint')}
 				onchange={filters.update}
-				onreset={filters.reset}
+				onreset={resetFilters}
 			/>
 		{/snippet}
 	</DataTable>
-
-	<div class="load-more">
-		{#if nextCursor}
-			<Button loading={loadingMore} onclick={loadMore}>{t('common.loadMore')}</Button>
-		{/if}
-		{#if !loading && items.length > 0}
-			<p class="load-more__text">
-				{nextCursor ? t('audit.loaded', { count: items.length }) : t('audit.noMore')}
-			</p>
-		{/if}
-	</div>
 
 	<SidePanel
 		bind:open={panelOpen}
@@ -367,19 +379,6 @@
 	}
 
 	.actor__id {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.load-more {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-		margin-top: var(--rh-space-4);
-	}
-
-	.load-more__text {
-		margin: 0;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 	}

@@ -355,6 +355,7 @@ export interface AuditQuery {
 	object_type?: string;
 	object_id?: string;
 	cursor?: string;
+	offset?: number;
 	limit?: number;
 }
 

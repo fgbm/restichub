@@ -219,6 +219,36 @@ describe('DataTable', () => {
 		expect(screen.getByText('Showing 6 to 10 of 12')).toBeInTheDocument();
 	});
 
+	it('shows numbered pages with gaps and a page size choice', async () => {
+		const many = Array.from({ length: 200 }, (_, index) => ({
+			id: `r${index}`,
+			name: `h${index}`
+		}));
+		render(DataTable, { props: { columns, rows: many, rowKey, pageSize: 10 } });
+		const pager = screen.getByRole('navigation', { name: 'Pages' });
+		expect(
+			within(pager)
+				.getAllByRole('button')
+				.map((button) => button.textContent?.trim())
+		).toEqual(['', '1', '2', '3', '4', '5', '20', '']);
+		await userEvent.click(within(pager).getByRole('button', { name: 'Page 5' }));
+		expect(screen.getByText('Showing 41 to 50 of 200')).toBeInTheDocument();
+		expect(within(pager).getByRole('button', { name: 'Page 6' })).toBeInTheDocument();
+		expect(within(pager).getByRole('button', { name: 'Page 5' })).toHaveAttribute(
+			'aria-current',
+			'page'
+		);
+		await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Rows per page' }), '50');
+		expect(screen.getByText('Showing 1 to 50 of 200')).toBeInTheDocument();
+	});
+
+	it('in server mode offers a page size only with a handler', () => {
+		render(DataTable, {
+			props: { columns, rows, rowKey, mode: 'server', pageSize: 2, total: 70 }
+		});
+		expect(screen.queryByRole('combobox', { name: 'Rows per page' })).not.toBeInTheDocument();
+	});
+
 	it('in server mode shows the rows as given and asks for another page and order', async () => {
 		const onPageChange = vi.fn();
 		const onSortChange = vi.fn();

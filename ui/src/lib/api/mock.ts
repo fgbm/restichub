@@ -823,7 +823,20 @@ function makeAudit(): AuditRecord[] {
 			object_type: 'user',
 			object_id: 'u_01',
 			diff: { password: { old: REDACTED, new: REDACTED } }
-		}
+		},
+		// A longer history, so the log shows more than one page.
+		...Array.from({ length: 140 }, (_, index): AuditRecord => ({
+			id: `a_run_${String(index).padStart(3, '0')}`,
+			tenant_id: 't_01',
+			occurred_at: iso(60 * 24 * 3 + 30 * (index + 1)),
+			actor_type: 'system',
+			actor_id: null,
+			source_ip: null,
+			action: 'job_run',
+			object_type: 'job',
+			object_id: `j_${String(index).padStart(3, '0')}`,
+			diff: null
+		}))
 	];
 }
 
@@ -2079,12 +2092,15 @@ export class MockApiService {
 		if (query.to) items = items.filter((item) => item.occurred_at <= (query.to as string));
 		items.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
 
-		const start = query.cursor ? Number(query.cursor) : 0;
+		const start = query.cursor ? Number(query.cursor) : (query.offset ?? 0);
 		const page = items.slice(start, start + limit);
 		const nextIndex = start + limit;
 		return {
 			items: page,
-			next_cursor: nextIndex < items.length ? String(nextIndex) : null
+			next_cursor:
+				query.offset === undefined && nextIndex < items.length ? String(nextIndex) : null,
+			total: items.length,
+			total_capped: false
 		};
 	}
 

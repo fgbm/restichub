@@ -93,6 +93,9 @@ export const ru: Record<MessageKey, string> = {
 	'pagination.pageOf': 'Страница {page} из {pages}',
 	'pagination.previous': 'Назад',
 	'pagination.next': 'Вперёд',
+	'pagination.page': 'Страница {page}',
+	'pagination.label': 'Страницы',
+	'pagination.pageSize': 'Строк на странице',
 	'table.empty.title': 'Нет записей',
 	'table.empty.description': 'Нет записей для показа.',
 	'table.loading': 'Загрузка записей',
@@ -117,6 +120,9 @@ export const ru: Record<MessageKey, string> = {
 	'filter.noMatches': 'Нет совпадений',
 	'filter.noMatchesDescription':
 		'Ни одна запись не подходит под фильтры. Измените или сбросьте фильтры.',
+	'filter.capped': 'Подходит больше {count} записей. Сузьте фильтры, чтобы увидеть остальные.',
+	'filter.tooDeep':
+		'Эта страница слишком далеко в списке. Сузьте фильтры, чтобы увидеть более старые записи.',
 
 	// Sign-in
 	'signIn.title': 'Вход',
@@ -993,8 +999,6 @@ export const ru: Record<MessageKey, string> = {
 	'audit.columns.sourceIp': 'IP источника',
 	'audit.detailTitle': 'Запись аудита',
 	'audit.detailSubtitle': 'Запись {id}',
-	'audit.noMore': 'Записей больше нет.',
-	'audit.loaded': 'Загружено записей: {count}.',
 	'audit.filters.title': 'Фильтры',
 	'audit.copyJson': 'Копировать как JSON',
 	'audit.recordTitle': 'Запись аудита {id}',
@@ -1426,6 +1430,7 @@ export const ru: Record<MessageKey, string> = {
 	'reason.incompatible': 'Установленная версия restic не поддерживает этот параметр.',
 	'reason.unavailable': 'Этот параметр пока недоступен.',
 	'reason.mismatch': 'Значение не совпадает.',
+	'reason.out_of_range': 'Значение вне допустимого диапазона.',
 	'scripts.title': 'Скрипты',
 	'scripts.description':
 		'Скрипты выполняются на хосте от имени агента. Они запускаются до и после резервного копирования в порядке списков. Каждый скрипт — отдельный шаг задания со своим журналом.',

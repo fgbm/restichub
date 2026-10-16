@@ -27,7 +27,7 @@
 		/** The query of the section level of the breadcrumb, for an address opened in a new tab. */
 		listQuery?: string;
 		description?: string;
-		count?: number;
+		count?: number | string;
 		/** While the record loads, the page shows a placeholder instead of the header and the body. */
 		loading?: boolean;
 		error?: string | null;

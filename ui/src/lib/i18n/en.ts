@@ -92,6 +92,9 @@ export const en = {
 	'pagination.pageOf': 'Page {page} of {pages}',
 	'pagination.previous': 'Previous',
 	'pagination.next': 'Next',
+	'pagination.page': 'Page {page}',
+	'pagination.label': 'Pages',
+	'pagination.pageSize': 'Rows per page',
 	'table.empty.title': 'No records',
 	'table.empty.description': 'There are no records to show.',
 	'table.loading': 'Loading records',
@@ -115,6 +118,8 @@ export const en = {
 	'filter.periodRange': '{from} – {to}',
 	'filter.noMatches': 'No matches',
 	'filter.noMatchesDescription': 'No records match the filters. Change or reset the filters.',
+	'filter.capped': 'More than {count} records match. Narrow the filters to see the rest.',
+	'filter.tooDeep': 'This page is too far into the list. Narrow the filters to see older records.',
 
 	// Sign-in
 	'signIn.title': 'Sign in',
@@ -986,8 +991,6 @@ export const en = {
 	'audit.columns.sourceIp': 'Source IP',
 	'audit.detailTitle': 'Audit record',
 	'audit.detailSubtitle': 'Record {id}',
-	'audit.noMore': 'No more records.',
-	'audit.loaded': 'Loaded {count} records.',
 	'audit.filters.title': 'Filters',
 	'audit.copyJson': 'Copy as JSON',
 	'audit.recordTitle': 'Audit record {id}',
@@ -1419,6 +1422,7 @@ export const en = {
 	'reason.incompatible': 'The installed restic does not support this option.',
 	'reason.unavailable': 'This setting is not available yet.',
 	'reason.mismatch': 'The value does not match.',
+	'reason.out_of_range': 'The value is out of range.',
 	'scripts.title': 'Scripts',
 	'scripts.description':
 		'Scripts run on the host as the agent account. They run before and after the backup, in the order of the lists. Each script is a step of the job with its own log.',
