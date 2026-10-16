@@ -179,6 +179,8 @@ jobs:
       - name: Start the control plane and create the token
         env:
           CP_BIN: target/debug/restichub-cp.exe
+          # A key that starts with "/" is the value that Git Bash converted to a path.
+          SMOKE_KEK: /wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
         run: scripts/install-smoke.sh cp-up
       - name: Register the agent from a user folder
         shell: bash
