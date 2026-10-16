@@ -1158,7 +1158,6 @@ export const en = {
 	'restore.openJob': 'Open the job log',
 	'restore.showMore': 'Show more ({count} left)',
 	'restore.listCount': '{count} snapshots',
-
 	'restore.snapshotTitle': 'Snapshot {id}',
 	'restore.snapshotMissingTitle': 'The snapshot is not in the stored list',
 	'restore.snapshotMissingDescription': 'Go back to the snapshots and search again.',
