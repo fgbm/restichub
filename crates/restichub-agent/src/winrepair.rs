@@ -5,13 +5,16 @@
 //! delete the agent identity, so an elevated command repairs the access instead. The repair never
 //! hands the agent a file whose content another account could write: it removes the trust mode
 //! file and the staged rotation files, moves the restore roots file aside, and warns that the
-//! identity may be exposed. It refuses an entry that the agent does not know, a link, a file with
-//! more than one name, and an entry of a foreign owner. The service never repairs.
+//! identity may be exposed. An identity that another account could change is not repaired: it is
+//! left as found or removed, as the caller asks. It refuses an entry that the agent does not know,
+//! a link, a file with more than one name, and an entry of a foreign owner. The service never
+//! repairs.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 
+use crate::paths::UntrustedIdentity;
 use crate::winsec::{Entry, Exposure, Rights};
 
 /// The directory that an older build used as the default restore root. The repair never reads
@@ -28,6 +31,8 @@ pub(crate) enum Action {
     RemovedTrustMode(PathBuf),
     MovedRestoreRoots { from: PathBuf, to: PathBuf },
     IdentityExposed(PathBuf),
+    RemovedIdentity(PathBuf),
+    RemovedTemporary(PathBuf),
 }
 
 impl std::fmt::Display for Action {
@@ -58,6 +63,16 @@ impl std::fmt::Display for Action {
                 "warning: another account could read or change {}, so the agent identity may be exposed; {REENROLL_ADVICE}",
                 path.display()
             ),
+            Self::RemovedIdentity(path) => write!(
+                f,
+                "removed {}: another account could change it, so the new registration replaces it",
+                path.display()
+            ),
+            Self::RemovedTemporary(path) => write!(
+                f,
+                "removed {}: another account could change it; it is a leftover of an interrupted write, and the agent does not read it",
+                path.display()
+            ),
         }
     }
 }
@@ -70,6 +85,8 @@ enum Kind {
     OldRestoreRoot,
     /// A file of a certificate rotation that the identity load moves into place.
     Staged,
+    /// A temporary file of an identity write. The identity load never reads it.
+    Temporary,
     TrustMode,
     RestoreRoots,
     Identity,
@@ -90,11 +107,14 @@ impl Kind {
 /// entries of the agent in them (FR-AG-04).
 ///
 /// A level of another owner, a reparse point and a level above `root` are left to the normal
-/// check, which refuses them. `log` gets each change and each warning. Returns the identity
-/// entries that another account could change before the repair.
+/// check, which refuses them. An identity entry that another account could change, or every
+/// identity entry of a configuration directory that another account could change, is handled as
+/// `untrusted` says. `log` gets each change and each warning. Returns the identity entries that
+/// another account could change and that stay as found.
 pub(crate) fn repair_agent_tree(
     config: &Path,
     root: &Path,
+    untrusted: UntrustedIdentity,
     log: &mut dyn FnMut(Action),
 ) -> Result<Vec<PathBuf>> {
     if !config.starts_with(root) {
@@ -107,6 +127,7 @@ pub(crate) fn repair_agent_tree(
     levels.reverse();
     let mut repair = Repair {
         config,
+        untrusted,
         log,
         exposure_told: false,
         changeable: Vec::new(),
@@ -119,6 +140,7 @@ pub(crate) fn repair_agent_tree(
 
 struct Repair<'a> {
     config: &'a Path,
+    untrusted: UntrustedIdentity,
     log: &'a mut dyn FnMut(Action),
     exposure_told: bool,
     changeable: Vec<PathBuf>,
@@ -146,15 +168,20 @@ impl Repair<'_> {
             Exposure::ForeignGrant => true,
             Exposure::Clean => false,
         };
-        if open {
-            let changeable = is_config && entry.exposure(Rights::Change)? == Exposure::ForeignGrant;
+        let changeable =
+            open && is_config && entry.exposure(Rights::Change)? == Exposure::ForeignGrant;
+        if changeable && self.untrusted == UntrustedIdentity::Keep {
+            // A repaired access would hide the grant, so a later install-service would trust
+            // whatever that account wrote. Only a new registration replaces the directory.
+            self.changeable.push(level.to_path_buf());
+        } else if open {
             // The DACL comes before the listing, so no entry can appear after the check.
             entry
                 .protect()
                 .with_context(|| format!("cannot protect {}", level.display()))?;
             (self.log)(Action::Protected(level.to_path_buf()));
-            if is_config {
-                self.identity_exposed(level, changeable);
+            if is_config && !changeable {
+                self.identity_exposed(level);
             }
         }
         drop(entry);
@@ -184,7 +211,10 @@ impl Repair<'_> {
         // never leaves them in a level that the normal check now accepts.
         for (path, kind) in &entries {
             match kind {
-                Some(Kind::Staged) => self.remove_staged(path, open)?,
+                Some(Kind::Staged) => self.remove_leftover(path, open, Action::RemovedStaged)?,
+                Some(Kind::Temporary) => {
+                    self.remove_leftover(path, open, Action::RemovedTemporary)?;
+                }
                 Some(setting @ (Kind::TrustMode | Kind::RestoreRoots)) => {
                     self.distrust_setting(path, *setting)?;
                 }
@@ -203,15 +233,19 @@ impl Repair<'_> {
         }
         for (path, kind) in entries {
             if let Some(kind @ (Kind::Identity | Kind::Agent)) = kind {
-                self.walk(&path, kind)?;
+                self.walk(&path, kind, changeable)?;
             }
         }
         Ok(())
     }
 
-    /// An open level could hold a planted rotation, so its staged files go even when they look
-    /// clean.
-    fn remove_staged(&mut self, path: &Path, open: bool) -> Result<()> {
+    /// An open level could hold a planted file, so its leftovers go even when they look clean.
+    fn remove_leftover(
+        &mut self,
+        path: &Path,
+        open: bool,
+        action: fn(PathBuf) -> Action,
+    ) -> Result<()> {
         if !open {
             let Some(entry) = Entry::open(path)? else {
                 return Ok(());
@@ -224,7 +258,7 @@ impl Repair<'_> {
             }
         }
         remove_file(path)?;
-        (self.log)(Action::RemovedStaged(path.to_path_buf()));
+        (self.log)(action(path.to_path_buf()));
         Ok(())
     }
 
@@ -260,20 +294,26 @@ impl Repair<'_> {
     }
 
     /// Each directory is protected before its listing, so no child can appear after the check.
-    fn walk(&mut self, path: &Path, kind: Kind) -> Result<()> {
+    /// `in_changeable` says that another account could change the directory that holds `path`.
+    fn walk(&mut self, path: &Path, kind: Kind, in_changeable: bool) -> Result<()> {
         let Some(entry) = Entry::open(path)? else {
             return Ok(());
         };
         check_entry(&entry, path, kind)?;
+        if kind == Kind::Identity
+            && (in_changeable || entry.exposure(Rights::Change)? == Exposure::ForeignGrant)
+        {
+            let is_dir = entry.is_dir();
+            drop(entry);
+            return self.untrusted_identity(path, is_dir, in_changeable);
+        }
         if entry.exposure(kind.rights())? == Exposure::ForeignGrant {
-            let changeable =
-                kind == Kind::Identity && entry.exposure(Rights::Change)? == Exposure::ForeignGrant;
             entry
                 .protect()
                 .with_context(|| format!("cannot protect {}", path.display()))?;
             (self.log)(Action::Protected(path.to_path_buf()));
             if kind == Kind::Identity {
-                self.identity_exposed(path, changeable);
+                self.identity_exposed(path);
             }
         }
         if !entry.is_dir() {
@@ -286,15 +326,33 @@ impl Repair<'_> {
             let child = item
                 .with_context(|| format!("cannot list {}", path.display()))?
                 .path();
-            self.walk(&child, kind)?;
+            self.walk(&child, kind, false)?;
         }
         Ok(())
     }
 
-    fn identity_exposed(&mut self, path: &Path, changeable: bool) {
-        if changeable {
-            self.changeable.push(path.to_path_buf());
+    fn untrusted_identity(&mut self, path: &Path, is_dir: bool, in_changeable: bool) -> Result<()> {
+        match self.untrusted {
+            UntrustedIdentity::Keep => {
+                // The directory that holds it is already named.
+                if !in_changeable {
+                    self.changeable.push(path.to_path_buf());
+                }
+            }
+            UntrustedIdentity::Remove => {
+                if is_dir {
+                    std::fs::remove_dir_all(path)
+                        .with_context(|| format!("cannot remove {}", path.display()))?;
+                } else {
+                    remove_file(path)?;
+                }
+                (self.log)(Action::RemovedIdentity(path.to_path_buf()));
+            }
         }
+        Ok(())
+    }
+
+    fn identity_exposed(&mut self, path: &Path) {
         if !self.exposure_told {
             self.exposure_told = true;
             (self.log)(Action::IdentityExposed(path.to_path_buf()));
@@ -409,7 +467,12 @@ fn config_entries() -> Vec<(String, Kind)> {
             format!("{file}{}", crate::identity::STAGED_SUFFIX),
             Kind::Staged,
         ));
-        names.extend(name_of(&Path::new(file).with_extension("tmp")).map(|name| (name, kind)));
+        let temporary = if kind == Kind::Identity {
+            Kind::Temporary
+        } else {
+            kind
+        };
+        names.extend(name_of(&Path::new(file).with_extension("tmp")).map(|name| (name, temporary)));
     }
     names.push((crate::identity::ROTATION_MARKER.to_owned(), Kind::Staged));
     names.push((crate::log_spool::SPOOL_DIR.to_owned(), Kind::Agent));
@@ -449,8 +512,16 @@ mod tests {
     }
 
     fn repair(config: &Path, root: &Path) -> (Result<Vec<PathBuf>>, Vec<Action>) {
+        repair_with(config, root, UntrustedIdentity::Keep)
+    }
+
+    fn repair_with(
+        config: &Path,
+        root: &Path,
+        untrusted: UntrustedIdentity,
+    ) -> (Result<Vec<PathBuf>>, Vec<Action>) {
         let mut actions = Vec::new();
-        let result = repair_agent_tree(config, root, &mut |action| actions.push(action));
+        let result = repair_agent_tree(config, root, untrusted, &mut |action| actions.push(action));
         (result, actions)
     }
 
@@ -547,30 +618,85 @@ mod tests {
     }
 
     #[test]
-    fn fr_ag_04_an_open_identity_directory_is_repaired_with_a_warning_to_register_again() {
+    fn fr_ag_04_a_writable_identity_directory_stays_as_found_until_a_new_registration_replaces_it()
+    {
         let (base, root, config) = tree("repair-config");
-        let key = config.join("agent-key.pem");
-        create_protected_file(&key, b"key").expect("cannot write");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        let key = config.join(crate::identity::KEY_FILE);
+        let journal = config.join(crate::journal::JOURNAL_FILE);
+        create_protected_file(&journal, b"[]").expect("cannot write");
         grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
         grant(&key, "(R,W)").expect("cannot add the entry");
-        let (result, actions) = repair(&config, &root);
-        let changeable = result.expect("the repair must succeed");
-        assert_eq!(changeable, vec![config.clone(), key.clone()]);
+        grant(&journal, "(R,W)").expect("cannot add the entry");
+
+        for run in ["first", "second"] {
+            let (result, actions) = repair(&config, &root);
+            let changeable = result.expect("the repair must succeed");
+            assert_eq!(changeable, vec![config.clone()], "{run} run");
+            assert!(is_open(&config), "{run} run: the directory must stay open");
+            assert!(is_open(&key), "{run} run: the key must stay open");
+            assert!(!is_open(&journal), "{run} run: other files are repaired");
+            assert!(
+                actions
+                    .iter()
+                    .all(|action| *action == Action::Protected(journal.clone())),
+                "{run} run: {actions:?}"
+            );
+        }
+
+        let (result, actions) = repair_with(&config, &root, UntrustedIdentity::Remove);
+        assert!(result.expect("register --force must repair").is_empty());
         check_admin_only(&config).expect("the directory must be protected");
-        assert!(!is_open(&key), "the key must be protected");
-        assert_eq!(
-            actions,
-            vec![
-                Action::Protected(config.clone()),
-                Action::IdentityExposed(config.clone()),
-                Action::Protected(key),
-            ]
-        );
+        assert_eq!(actions[0], Action::Protected(config.clone()));
+        for file in [
+            crate::identity::KEY_FILE,
+            crate::identity::CERT_FILE,
+            crate::identity::CA_CHAIN_FILE,
+            crate::identity::METADATA_FILE,
+            crate::identity::SIGNING_KEYS_FILE,
+        ] {
+            let path = config.join(file);
+            assert!(!path.exists(), "{file} must be removed");
+            assert!(
+                actions.contains(&Action::RemovedIdentity(path)),
+                "{file}: {actions:?}"
+            );
+        }
+        assert!(!crate::identity::StoredIdentity::exists(&config));
+        assert!(journal.exists(), "only the identity goes");
+
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("register --force must write the identity");
+        let (result, actions) = repair(&config, &root);
+        assert!(result.expect("the repair must succeed").is_empty());
+        assert!(actions.is_empty(), "{actions:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_writable_temporary_identity_file_is_removed_without_a_refusal() {
+        let (base, root, config) = tree("repair-temporary");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        let temporary = config.join("ca-chain.tmp");
+        create_protected_file(&temporary, b"planted").expect("cannot write");
+        grant(&temporary, "(R,W)").expect("cannot add the entry");
+        let clean = config.join("identity.tmp");
+        create_protected_file(&clean, b"{}").expect("cannot write");
+
+        let (result, actions) = repair(&config, &root);
+        assert!(result.expect("the repair must succeed").is_empty());
+        assert!(!temporary.exists());
         assert!(
-            actions[1].to_string().contains("register --force"),
-            "{}",
-            actions[1]
+            clean.exists(),
+            "a clean leftover of a protected directory stays"
         );
+        assert_eq!(actions, vec![Action::RemovedTemporary(temporary)]);
+        crate::identity::StoredIdentity::load(&config).expect("the identity stays usable");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -601,18 +727,18 @@ mod tests {
         let chain = config.join(crate::identity::CA_CHAIN_FILE);
         grant(&chain, "(R,W)").expect("cannot add the entry");
 
-        let (result, actions) = repair(&config, &root);
-        let changeable = result.expect("the repair must succeed");
-        assert_eq!(changeable, vec![chain.clone()]);
-        assert!(!is_open(&chain), "the chain must be protected");
-        assert_eq!(
-            actions,
-            vec![
-                Action::Protected(chain.clone()),
-                Action::IdentityExposed(chain)
-            ]
-        );
+        for run in ["first", "second"] {
+            let (result, actions) = repair(&config, &root);
+            let changeable = result.expect("the repair must succeed");
+            assert_eq!(changeable, vec![chain.clone()], "{run} run");
+            assert!(is_open(&chain), "{run} run: the chain must stay as found");
+            assert!(actions.is_empty(), "{run} run: {actions:?}");
+        }
 
+        let (result, actions) = repair_with(&config, &root, UntrustedIdentity::Remove);
+        assert!(result.expect("register --force must repair").is_empty());
+        assert!(!chain.exists());
+        assert_eq!(actions, vec![Action::RemovedIdentity(chain)]);
         crate::identity::tests::sample()
             .save(&config)
             .expect("register --force must replace the identity");
