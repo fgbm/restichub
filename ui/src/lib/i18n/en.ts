@@ -2090,7 +2090,25 @@ export const en = {
 	'platformUsers.orgCount.one': '{n} organization',
 	'platformUsers.orgCount.few': '{n} organizations',
 	'platformUsers.orgCount.many': '{n} organizations',
-	'platformUsers.orgCount.other': '{n} organizations'
+	'platformUsers.orgCount.other': '{n} organizations',
+	'audit.emptyTitle': 'No records',
+	'audit.item.title': '{action}: {object}',
+	'audit.object.user': 'user',
+	'audit.object.job': 'job',
+	'audit.object.tenant': 'organization',
+	'audit.object.agent': 'host',
+	'audit.object.signing_key': 'signing key',
+	'audit.object.secret': 'secret',
+	'audit.object.channel': 'channel',
+	'audit.object.session': 'session',
+	'audit.object.profile': 'profile',
+	'audit.object.plan': 'plan',
+	'audit.object.job_template': 'job template',
+	'audit.object.api_token': 'API token',
+	'audit.object.script_template': 'script template',
+	'audit.object.enrollment_token': 'registration token',
+	'audit.object.repository': 'repository',
+	'audit.object.alert': 'alert'
 } as const;
 
 export type MessageKey = keyof typeof en;

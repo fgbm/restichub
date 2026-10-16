@@ -6,21 +6,17 @@
 	import {
 		Alert,
 		Button,
-		DataTable,
 		FilterBar,
-		Icon,
 		JsonDiff,
 		KeyValue,
+		ListView,
 		SidePanel
 	} from '#lib/components/ui/index.ts';
-	import type {
-		FilterFacet,
-		IconName,
-		KeyValueItem,
-		TableColumn
-	} from '#lib/components/ui/index.ts';
+	import type { FilterFacet, KeyValueItem, ListMeta } from '#lib/components/ui/index.ts';
+	import { clockTime, dayHeading } from '#lib/list-format.ts';
+	import { AUDIT_OBJECT_ICONS } from '#lib/vocabulary.ts';
 	import { periodWindow } from '#lib/filters.ts';
-	import { en, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
+	import { en, t, tAuditAction, tAuditActorType, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import { formatCount, formatTime } from '#lib/format.ts';
 	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -93,12 +89,32 @@
 		return row.actor_id ? `${type} · ${row.actor_id}` : type;
 	}
 
-	const actorIcons: Record<string, IconName> = {
-		user: 'user',
-		api_token: 'key',
-		agent: 'host',
-		system: 'settings'
-	};
+	function objectTypeLabel(type: string): string {
+		return tOr(`audit.object.${type}`, type);
+	}
+
+	// The action and the object type; the name of the object is not in the record.
+	function titleOf(row: AuditRecord): string {
+		return row.object_type
+			? t('audit.item.title', {
+					action: tAuditAction(row.action),
+					object: objectTypeLabel(row.object_type)
+				})
+			: tAuditAction(row.action);
+	}
+
+	function meta(row: AuditRecord): ListMeta[] {
+		const actor = row.actor_id
+			? `${tAuditActorType(row.actor_type).toLocaleLowerCase()} ${row.actor_id}`
+			: tAuditActorType(row.actor_type).toLocaleLowerCase();
+		return [
+			actor,
+			scope === 'platform' ? { text: row.tenant_id, mono: true } : null,
+			{ text: clockTime(row.occurred_at), time: row.occurred_at },
+			row.source_ip ? { text: row.source_ip, mono: true } : null,
+			{ text: row.action, mono: true }
+		];
+	}
 
 	function objectLabel(row: AuditRecord): string {
 		return row.object_id ? `${row.object_type} ${row.object_id}` : row.object_type;
@@ -164,46 +180,6 @@
 		if (pageOnly) void load();
 		else typing = setTimeout(() => void load(), 300);
 	});
-
-	const columns = $derived<TableColumn<AuditRecord>[]>([
-		{
-			key: 'occurred_at',
-			header: t('audit.columns.time'),
-			date: 'relative',
-			sortable: false
-		},
-		{
-			key: 'actor',
-			header: t('audit.columns.actor'),
-			value: (row) => actorLabel(row),
-			sortable: false,
-			render: actorCell
-		},
-		{
-			key: 'action',
-			header: t('audit.columns.action'),
-			primary: true,
-			value: (row) => tAuditAction(row.action),
-			sortable: false
-		},
-		{
-			key: 'object',
-			header: t('audit.columns.object'),
-			value: (row) => objectLabel(row),
-			mono: true,
-			truncate: 'md',
-			sortable: false
-		},
-		{
-			key: 'source_ip',
-			header: t('audit.columns.sourceIp'),
-			value: (row) => row.source_ip ?? t('common.unknown'),
-			mono: true,
-			nowrap: true,
-			hideNarrow: true,
-			sortable: false
-		}
-	]);
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -272,18 +248,6 @@
 	);
 </script>
 
-{#snippet actorCell(row: AuditRecord)}
-	<span class="actor">
-		<span class="avatar" class:avatar--square={row.actor_type !== 'user'}>
-			<Icon name={actorIcons[row.actor_type] ?? 'user'} size="xs" />
-		</span>
-		{tAuditActorType(row.actor_type)}
-	</span>
-	{#if row.actor_id}
-		<div class="actor__id">{row.actor_type} · {row.actor_id}</div>
-	{/if}
-{/snippet}
-
 <Page
 	{title}
 	documentTitle={scope === 'platform' ? `${title} · ${t('nav.platformMode')}` : undefined}
@@ -299,10 +263,16 @@
 		</div>
 	{/if}
 
-	<!-- A record has no page of its own: the row opens its details (design/style/ui-principles.md, 2.2). -->
-	<DataTable
-		{columns}
-		rows={items}
+	<!-- A record has no page of its own: the title opens its details (design/style/ui-principles.md, 2.4). -->
+	<ListView
+		label={title}
+		{items}
+		itemKey={(record) => record.id}
+		icon={(record) => ({ name: AUDIT_OBJECT_ICONS[record.object_type] ?? 'audit' })}
+		title={titleOf}
+		onOpen={openRecord}
+		{meta}
+		groupBy={(record) => dayHeading(record.occurred_at)}
 		{loading}
 		mode="server"
 		page={tablePage}
@@ -312,15 +282,18 @@
 		{totalCapped}
 		onPageChange={(next) => filters.update({ page: String(next) })}
 		onPageSizeChange={(next) => filters.update({ size: String(next) })}
-		sort={{ key: 'occurred_at', direction: 'desc' }}
+		filtered={Object.entries(filters.value).some(
+			([key, value]) => key !== 'page' && key !== 'size' && value
+		)}
+		onReset={filters.reset}
 		emptyIcon="audit"
-		rowKey={(record) => record.id}
-		onRowOpen={openRecord}
+		emptyTitle={t('audit.emptyTitle')}
 	>
 		{#snippet toolbar()}
 			<FilterBar
 				label={t('audit.filters.title')}
 				value={filters.value}
+				total={loading ? undefined : totalCapped ? `${formatCount(total)}+` : formatCount(total)}
 				{facets}
 				period
 				hint={t('audit.filters.timeHint')}
@@ -328,7 +301,7 @@
 				onreset={filters.reset}
 			/>
 		{/snippet}
-	</DataTable>
+	</ListView>
 
 	<SidePanel
 		bind:open={panelOpen}
@@ -351,34 +324,6 @@
 <style>
 	.alert {
 		margin-bottom: var(--rh-space-4);
-	}
-
-	.actor {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-	}
-
-	.avatar {
-		display: inline-flex;
-		flex: none;
-		align-items: center;
-		justify-content: center;
-		width: 24px;
-		height: 24px;
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-pill);
-		background-color: var(--rh-color-neutral-bg);
-		color: var(--rh-color-text-muted);
-	}
-
-	.avatar--square {
-		border-radius: var(--rh-radius-sm);
-	}
-
-	.actor__id {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
 	}
 
 	.detail-heading {
