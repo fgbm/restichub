@@ -33,7 +33,8 @@
 		repository,
 		snapshot,
 		paths,
-		agents
+		agents,
+		preferredAgentId = ''
 	}: {
 		open?: boolean;
 		repository: Repository;
@@ -41,6 +42,8 @@
 		/** The selected paths. An empty list restores the whole snapshot. */
 		paths: string[];
 		agents: Agent[];
+		/** The host to preselect as the target, when it is an active candidate. */
+		preferredAgentId?: string;
 	} = $props();
 
 	let agentId = $state('');
@@ -108,6 +111,7 @@
 		// Each opening starts from the defaults, so a finished restore leaves nothing behind.
 		// The files of a snapshot usually come back to the host that made it.
 		agentId =
+			candidates.find((agent) => agent.id === preferredAgentId)?.id ??
 			candidates.find((agent) => agent.hostname === snapshot.hostname)?.id ??
 			candidates.find((agent) => agent.id === repository.maintenance_agent_id)?.id ??
 			candidates[0]?.id ??

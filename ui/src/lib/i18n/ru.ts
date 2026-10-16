@@ -382,7 +382,6 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.versionUpdate': 'Доступно обновление',
 	'hosts.versionUnsupported': 'Версия не поддерживается',
 	'hosts.versionTitle': 'Протокол {protocol} · сервер управления {version}',
-	'hosts.status.active': 'Активен',
 	'hosts.status.revoked': 'Отозван',
 	'hosts.status.waiting': 'Ожидает подключения',
 	'hosts.waitingTitle': 'Агент зарегистрировался, но ещё не подключился.',
@@ -1548,6 +1547,7 @@ export const ru: Record<MessageKey, string> = {
 	'hp.back': 'К списку хостов',
 	'hp.description': 'Состояние, связь и правила восстановления этого хоста.',
 	'hp.revokedNote': 'Хост отозван. Он больше не подключается.',
+	'hp.revokedBy': 'Отозван пользователем {name}',
 	'hp.duplicateBanner':
 		'Эта запись может дублировать более старую запись «{old}». Старую запись видели {oldSeen}.',
 	'hp.section.general': 'Общее',
@@ -1598,8 +1598,6 @@ export const ru: Record<MessageKey, string> = {
 	'hp.state.alerts': 'Открытые оповещения',
 	'hp.state.alertsNone': 'Нет',
 	'hp.state.alertsLink': 'Показать оповещения',
-	'hp.state.roots': 'Корни восстановления',
-	'hp.state.rootsNone': 'Не сообщены',
 	'hosts.serverScripts': 'Скрипты сервера',
 	'hosts.serverScripts.enabled': 'Включены',
 	'hosts.serverScripts.disabled': 'Выключены',
@@ -1609,7 +1607,7 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.serverScripts.enableHint':
 		'Чтобы разрешить скрипты с сервера управления, выполните на хосте эту команду от имени root или администратора:',
 	'hosts.serverScripts.risk':
-		'Тогда сервер управления выполняет на этом хосте код с правами агента.',
+		'Сервер управления может выполнить на этом хосте любой код с правами агента.',
 	'jobDetail.stepLog': 'Журнал шага',
 	'jobDetail.stepLogEmpty': 'Шаг не записал ни одной строки журнала.',
 	'jobDetail.showStepLog': 'Показать журнал шага «{name}»',

@@ -189,6 +189,15 @@ export function filtersToQuery(
 	return query;
 }
 
+/** The query parameter that names the host the restore lands on. */
+export const TARGET_PARAM = 'target';
+
+/** The address parameters that the restore pages keep: the preselected target host, if any. */
+export function targetExtra(query: { get(name: string): string | null }): Record<string, string> {
+	const target = query.get(TARGET_PARAM);
+	return target ? { [TARGET_PARAM]: target } : {};
+}
+
 export function filtersFromQuery(query: { get(name: string): string | null }): RestoreFilters {
 	return {
 		host: query.get('host') ?? '',

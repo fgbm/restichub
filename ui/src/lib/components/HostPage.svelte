@@ -2,7 +2,7 @@
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Agent, Alert as AlertItem, Dashboard, Job, Plan } from '#lib/api/index.ts';
+	import type { Agent, Alert as AlertItem, Job, Plan, User } from '#lib/api/index.ts';
 	import { eventReader } from '#lib/events.ts';
 	import HostActions from './HostActions.svelte';
 	import ProfileSection from './ProfileSection.svelte';
@@ -39,7 +39,7 @@
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let agent = $state<Agent | null>(null);
-	let dashboardHost = $state<Dashboard['hosts']['items'][number] | null>(null);
+	let users = $state<User[]>([]);
 	let jobs = $state<Job[]>([]);
 	let plans = $state<Plan[]>([]);
 	let openAlerts = $state<AlertItem[]>([]);
@@ -49,6 +49,7 @@
 	);
 
 	const jobsHref = $derived(`${resolve('/(app)/jobs')}?agent_id=${encodeURIComponent(hostId)}`);
+	const restoreHref = $derived(`${resolve('/(app)/restore')}?target=${encodeURIComponent(hostId)}`);
 	const canWrite = $derived(getSession()?.role === 'admin');
 	const active = $derived(agent?.status === 'active');
 	const olderDuplicate = $derived(
@@ -61,9 +62,10 @@
 	}
 
 	async function read(): Promise<void> {
-		const [agentResult, dashboard, jobPage, planList, alertPage] = await Promise.allSettled([
+		const [agentResult, userList, jobPage, planList, alertPage] = await Promise.allSettled([
 			service.getAgent(hostId),
-			service.getDashboard(),
+			// Only an Admin lists the users; the others see no name of the revoking user.
+			canWrite ? service.listUsers() : Promise.resolve([] as User[]),
 			service.listJobs({ agent_id: hostId, limit: RECENT_JOBS }),
 			service.listPlans(),
 			service.listAlerts({ status: 'open', limit: 200 })
@@ -71,11 +73,7 @@
 		if (agentResult.status === 'rejected') throw agentResult.reason;
 		agent = agentResult.value;
 		setPageTitle(agent.hostname);
-		// The dashboard lists at most 50 hosts; a host outside the list has an unknown connection.
-		dashboardHost =
-			dashboard.status === 'fulfilled'
-				? (dashboard.value.hosts.items.find((host) => host.id === hostId) ?? null)
-				: null;
+		users = userList.status === 'fulfilled' ? userList.value : [];
 		jobs = jobPage.status === 'fulfilled' ? jobPage.value.items : [];
 		plans =
 			planList.status === 'fulfilled' ? planList.value.filter((p) => p.agent_id === hostId) : [];
@@ -135,13 +133,11 @@
 		return item.status === 'active' && !item.first_connected_at;
 	}
 
-	// The control plane reports the connection for the hosts of the dashboard only.
 	const connection = $derived.by<{ label: string; tone: StatusTone } | null>(() => {
 		if (!agent) return null;
 		if (agent.status === 'revoked') return { label: t('hosts.status.revoked'), tone: 'neutral' };
 		if (isWaiting(agent)) return { label: t('hosts.status.waiting'), tone: 'info' };
-		if (!dashboardHost) return { label: t('hosts.status.active'), tone: 'success' };
-		return dashboardHost.online
+		return agent.online
 			? { label: t('hp.state.online'), tone: 'success' }
 			: { label: t('hp.state.offline'), tone: 'neutral' };
 	});
@@ -151,6 +147,12 @@
 	);
 	const certExpired = $derived(certLeft <= 0);
 	const certWarn = $derived(agent?.status === 'active' && certLeft < CERT_WARNING_MS);
+
+	const revokedBy = $derived(
+		agent?.revoked_by_user_id
+			? users.find((user) => user.id === agent!.revoked_by_user_id)?.display_name
+			: undefined
+	);
 
 	const hasRoots = $derived((agent?.restore_roots.length ?? 0) > 0);
 
@@ -295,7 +297,11 @@
 
 	{#if agent.status === 'revoked'}
 		<div class="banner">
-			<Alert tone="attention" icon="octagon" title={t('hp.revokedNote')} />
+			<Alert tone="attention" icon="octagon" title={t('hp.revokedNote')}>
+				{#if revokedBy}
+					{t('hp.revokedBy', { name: revokedBy })}
+				{/if}
+			</Alert>
 		</div>
 	{/if}
 	{#if olderDuplicate}
@@ -430,9 +436,11 @@
 					<p class="lead">{t('hp.restore.noneHint')}</p>
 				{/if}
 				{#if active}
-					<a class="link" href={resolve('/(app)/restore')}>
+					<!-- eslint-disable svelte/no-navigation-without-resolve -- resolved path with a query -->
+					<a class="link" href={restoreHref}>
 						{t('hp.restore.link')}
 					</a>
+					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				{/if}
 			</ProfileSection>
 
@@ -574,13 +582,15 @@
 							<span class="result__text">{connection?.label}</span>
 						</div>
 					</li>
-					<li>
-						<span class="dot dot--off"></span>
-						<div>
-							<b>{t('hosts.lastSeen')}</b>
-							<span class="result__text">{@render time(agent.last_seen_at)}</span>
-						</div>
-					</li>
+					{#if !agent.online}
+						<li>
+							<span class="dot dot--off"></span>
+							<div>
+								<b>{t('hosts.lastSeen')}</b>
+								<span class="result__text">{@render time(agent.last_seen_at)}</span>
+							</div>
+						</li>
+					{/if}
 					<li>
 						<span class="dot dot--{openAlerts.length > 0 ? 'warn' : 'on'}"></span>
 						<div>
@@ -598,15 +608,6 @@
 						<div>
 							<b>{t('hosts.certificate')}</b>
 							<span class="result__text">{summaries.link.text}</span>
-						</div>
-					</li>
-					<li>
-						<span class="dot dot--{summaries.restore.state}"></span>
-						<div>
-							<b>{t('hp.state.roots')}</b>
-							<span class="result__text">
-								{hasRoots ? agent.restore_roots.length : t('hp.state.rootsNone')}
-							</span>
 						</div>
 					</li>
 					<li>

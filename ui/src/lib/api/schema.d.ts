@@ -1525,6 +1525,11 @@ export interface components {
             /** @description In RFC 3339. Null until the first rotation of the certificate. */
             last_certificate_rotation_at?: string | null;
             last_seen_at?: string | null;
+            /**
+             * @description Whether the control plane saw the host within the online window of the dashboard. Always
+             *     false for a revoked host.
+             */
+            online: boolean;
             os: string;
             possible_duplicate_of?: components["schemas"]["DuplicateOfView"] | null;
             /** @description Reported in the last hello as `major.minor`. Null before the first hello. */

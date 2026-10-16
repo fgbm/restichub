@@ -96,6 +96,7 @@ function agent(overrides: Record<string, unknown> = {}) {
 		control_plane_version: '0.4.2',
 		version_status: 'current',
 		status: 'active',
+		online: true,
 		last_seen_at: PAST,
 		first_connected_at: PAST,
 		possible_duplicate_of: null,
@@ -308,7 +309,7 @@ describe('the Hosts screen', () => {
 
 		await screen.findByText('host-new');
 		expect(screen.getAllByText('Waiting for connection')).toHaveLength(1);
-		expect(screen.getAllByText('Active')).toHaveLength(1);
+		expect(screen.getAllByText('Online')).toHaveLength(1);
 	});
 
 	it('offers the replacement only on the newer record (FR-ID-11, AC-ID-09)', async () => {
