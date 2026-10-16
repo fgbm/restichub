@@ -72,7 +72,7 @@ When the list is narrower than 560 px, line 2 shows only the first two fields. T
 
 ## DataTable
 
-`DataTable` (`$lib/components/ui`) is the only table component. The lint rule `ui/no-raw-table` reports a raw `<table>` element and the older `Table` component.
+`DataTable` (`$lib/components/ui`) is the only table component. Use it for tabular data only, for example parameters, numbers and comparisons. A list of entities is a `ListView`. The lint rule `ui/no-raw-table` reports a raw `<table>` element and the older `Table` component.
 
 | Property                                           | Function                                                                                                                                                                                                                                                                      |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -132,6 +132,7 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 The rules are in `eslint-rules/ui-principles.js`, and `npm run lint` runs them in CI:
 
 - `ui/no-raw-table`: a raw `<table>` or the older `Table` component.
+- `ui/no-entity-table`: a `DataTable` with `rowHref`, `onRowOpen` or `detailTitle`. A table whose rows open a record is a list of entities, so use `ListView`.
 - `ui/no-row-actions-snippet`: the older `rowActions` snippet.
 - `ui/no-back-link`: a link with a back text, a back message key or an `arrow-left` icon.
 - `ui/no-load-more`: a "Load more" text or a `loadMore` or `showMore` message key.

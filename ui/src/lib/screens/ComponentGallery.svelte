@@ -474,7 +474,6 @@
 			{columns}
 			{rows}
 			rowKey={(row) => row.id}
-			rowHref={() => '#'}
 			sort={{ key: 'name', direction: 'asc' }}
 			actions={(row) => [
 				{ id: 'refresh', label: `Refresh ${row.name}`, icon: 'refresh', onSelect: () => {} },
