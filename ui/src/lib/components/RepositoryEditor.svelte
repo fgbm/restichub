@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
@@ -15,24 +15,14 @@
 		UpdateRepositoryRequest
 	} from '#lib/api/index.ts';
 	import ProfileSection from './ProfileSection.svelte';
-	import {
-		Alert,
-		Button,
-		Icon,
-		PageHeader,
-		PasswordField,
-		Select,
-		Skeleton,
-		StatusPill,
-		TextField
-	} from './ui/index.ts';
-	import type { SelectOption, StatusTone } from './ui/index.ts';
+	import { RecordPage, SummaryPanel } from './layout/index.ts';
+	import { Alert, Button, PasswordField, Select, StatusPill, TextField } from './ui/index.ts';
+	import type { KeyValueItem, SelectOption, StatusTone } from './ui/index.ts';
 	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import type { SummaryState } from '#lib/profile-form.ts';
 	import { browserTimeZone, timeZoneNames } from '#lib/schedule.ts';
-	import { setPageTitle } from '#lib/stores/page-title.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -256,7 +246,6 @@
 				maintenanceAgentId = found.maintenance_agent_id ?? '';
 				await loadMaintenance(found);
 			}
-			setPageTitle(repositoryId ? name : t('rp.newTitle'));
 			baseline = stateKey;
 		} catch (problem) {
 			loadError = messageOf(problem);
@@ -280,7 +269,12 @@
 	}
 
 	onMount(load);
-	onDestroy(() => setPageTitle(null));
+
+	const resultItems = $derived<KeyValueItem[]>(
+		SECTIONS.filter((key) => showSchedules || (key !== 'retention' && key !== 'check')).map(
+			(key) => ({ key, label: t(titles[key]), value: summaries[key].text })
+		)
+	);
 
 	beforeNavigate(({ cancel }) => {
 		if (dirty && !saved && !window.confirm(t('rp.unsaved'))) cancel();
@@ -438,338 +432,26 @@
 	{/if}
 {/snippet}
 
-<svelte:head>
-	<title>{(repositoryId ? name : '') || t('rp.newTitle')} · {t('app.name')}</title>
-</svelte:head>
-
-<a class="back" href={resolve('/(app)/repositories')}>
-	<Icon name="arrow-left" size="xs" />
-	{t('rp.backToList')}
-</a>
-<PageHeader
-	title={repositoryId ? t('rp.editTitle') : t('rp.newTitle')}
+<RecordPage
+	title={repositoryId ? (existing?.name ?? '') : t('rp.newTitle')}
 	description={t(repositoryId ? 'repositories.editDescription' : 'repositories.addDescription')}
+	{loading}
+	error={loadError}
+	onsubmit={() => void save()}
 >
-	<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
-	<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
-</PageHeader>
-
-{#if loading}
-	<Skeleton />
-{:else if loadError}
-	<Alert tone="danger" title={loadError} />
-	<p><a href={resolve('/(app)/repositories')}>{t('rp.backToList')}</a></p>
-{:else}
-	{#if formError}
-		<Alert tone="danger" title={formError} />
-	{/if}
-	<form
-		class="layout"
-		onsubmit={(event) => {
-			event.preventDefault();
-			void save();
-		}}
-	>
-		<div class="main">
-			<ProfileSection
-				id="basics"
-				title={t(titles.basics)}
-				summary={summaries.basics.text}
-				state={summaries.basics.state}
-				required
-				bind:open={open.basics}
-			>
-				<TextField
-					id="repo-name"
-					label={t('repositories.repository')}
-					error={fieldError(formProblem, 'name')}
-					bind:value={name}
-					required
-				/>
-			</ProfileSection>
-
-			<ProfileSection
-				id="location"
-				title={t(titles.location)}
-				summary={summaries.location.text}
-				state={summaries.location.state}
-				required
-				bind:open={open.location}
-			>
-				{#if locationLocked}
-					<Alert tone="attention" icon="lock" title={t('repositories.locationLocked')} />
-				{/if}
-				<Select
-					id="repo-kind"
-					label={t('repositories.backendKind')}
-					options={kindOptions}
-					error={fieldError(formProblem, 'backend')}
-					bind:value={kind}
-					disabled={!!existing}
-				/>
-				{#if kind === 's3'}
-					<div class="grid2">
-						<TextField
-							id="repo-endpoint"
-							label={t('repositories.endpoint')}
-							placeholder={t('repositories.endpointPlaceholder')}
-							error={fieldError(formProblem, 'backend.endpoint')}
-							bind:value={endpoint}
-							disabled={locationLocked}
-							required
-						/>
-						<TextField
-							id="repo-bucket"
-							label={t('repositories.bucket')}
-							placeholder={t('repositories.bucketPlaceholder')}
-							error={fieldError(formProblem, 'backend.bucket')}
-							bind:value={bucket}
-							disabled={locationLocked}
-							required
-						/>
-						<TextField
-							id="repo-prefix"
-							label={t('repositories.prefix')}
-							placeholder={t('repositories.prefixPlaceholder')}
-							error={fieldError(formProblem, 'backend.prefix')}
-							bind:value={prefix}
-							disabled={locationLocked}
-						/>
-						<TextField
-							id="repo-region"
-							label={t('repositories.region')}
-							placeholder={t('repositories.regionPlaceholder')}
-							error={fieldError(formProblem, 'backend.region')}
-							bind:value={region}
-							disabled={locationLocked}
-						/>
-					</div>
-				{:else if kind === 'rest'}
-					<TextField
-						id="repo-endpoint"
-						label={t('repositories.endpoint')}
-						placeholder={t('repositories.endpointPlaceholder')}
-						error={fieldError(formProblem, 'backend.endpoint')}
-						bind:value={endpoint}
-						disabled={locationLocked}
-						required
-					/>
-				{:else}
-					<TextField
-						id="repo-path"
-						label={t('repositories.path')}
-						placeholder={t('repositories.pathPlaceholder')}
-						error={fieldError(formProblem, 'backend.path')}
-						bind:value={path}
-						disabled={locationLocked}
-						required
-					/>
-				{/if}
-			</ProfileSection>
-
-			<ProfileSection
-				id="access"
-				title={t(titles.access)}
-				summary={summaries.access.text}
-				state={summaries.access.state}
-				required
-				bind:open={open.access}
-			>
-				{#if existing}
-					<Alert tone="info" icon="lock" title={t('repositories.password')}>
-						{t('repositories.passwordLocked')}
-					</Alert>
-				{:else}
-					<PasswordField
-						id="repo-password"
-						label={t('repositories.password')}
-						help={t('repositories.passwordHint')}
-						error={fieldError(formProblem, 'password')}
-						autocomplete="new-password"
-						bind:value={password}
-						required
-					/>
-				{/if}
-				{#if kind === 's3'}
-					<div class="grid2">
-						<PasswordField
-							id="repo-s3-access-key"
-							label={t('repositories.s3AccessKey')}
-							help={t('repositories.secretHint')}
-							error={fieldError(formProblem, 's3_access_key')}
-							autocomplete="new-password"
-							bind:value={s3AccessKey}
-							required={!existing}
-						/>
-						<PasswordField
-							id="repo-s3-secret-key"
-							label={t('repositories.s3SecretKey')}
-							help={t('repositories.secretHint')}
-							error={fieldError(formProblem, 's3_secret_key')}
-							autocomplete="new-password"
-							bind:value={s3SecretKey}
-							required={!existing}
-						/>
-					</div>
-				{:else if kind === 'rest'}
-					<PasswordField
-						id="repo-rest-password"
-						label={t('repositories.restPassword')}
-						help={t('repositories.restPasswordHint')}
-						error={fieldError(formProblem, 'rest_password')}
-						autocomplete="new-password"
-						bind:value={restPassword}
-					/>
-				{/if}
-				<a
-					class="manage-secrets"
-					href={resolve('/(app)/settings/access/secrets')}
-					target="_blank"
-					rel="noopener"
-				>
-					{t('secrets.manage')}
-				</a>
-			</ProfileSection>
-
-			{#if showSchedules}
-				<ProfileSection
-					id="retention"
-					title={t(titles.retention)}
-					summary={summaries.retention.text}
-					state={summaries.retention.state}
-					switchable
-					bind:enabled={retentionEnabled}
-					bind:open={open.retention}
-				>
-					<p class="lead">{t('repositories.maintenance.description')}</p>
-					<TextField
-						id="maintenance-time-zone"
-						label={t('repositories.maintenance.timeZone')}
-						help={t('repositories.maintenance.timeZoneHint')}
-						error={fieldError(formProblem, 'time_zone')}
-						list={TIME_ZONE_LIST_ID}
-						bind:value={maintenanceTimeZone}
-						required
-					/>
-					<datalist id={TIME_ZONE_LIST_ID}>
-						{#each TIME_ZONES as zone (zone)}
-							<option value={zone}></option>
-						{/each}
-					</datalist>
-					<p class="lead">{t('repositories.maintenance.retentionHint')}</p>
-					<TextField
-						id="maintenance-retention-cron"
-						mono
-						label={t('repositories.maintenance.cron')}
-						help={t('repositories.maintenance.cronHint')}
-						error={fieldError(formProblem, 'retention.cron')}
-						bind:value={retentionCron}
-						required
-					/>
-					<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
-						{#each RETENTION_PRESETS as preset (preset.cron)}
-							<Button type="button" size="sm" onclick={() => (retentionCron = preset.cron)}>
-								{t(preset.label)}
-							</Button>
-						{/each}
-					</div>
-					<div class="runs-block">
-						<span class="muted">{t('repositories.maintenance.nextRuns')}</span>
-						{@render runsList(retentionEnabled ? retentionRuns : null)}
-					</div>
-					{#if maintenance}
-						<div class="runs-block">
-							<span class="muted">{t('repositories.maintenance.last')}</span>
-							{@render lastRun(maintenance.last_retention)}
-						</div>
-					{/if}
-				</ProfileSection>
-
-				<ProfileSection
-					id="check"
-					title={t(titles.check)}
-					summary={summaries.check.text}
-					state={summaries.check.state}
-					switchable
-					bind:enabled={checkEnabled}
-					bind:open={open.check}
-				>
-					<p class="lead">{t('repositories.maintenance.checkHint')}</p>
-					<TextField
-						id="maintenance-check-cron"
-						mono
-						label={t('repositories.maintenance.cron')}
-						help={t('repositories.maintenance.cronHint')}
-						error={fieldError(formProblem, 'check.cron')}
-						bind:value={checkCron}
-						required
-					/>
-					<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
-						{#each CHECK_PRESETS as preset (preset.cron)}
-							<Button type="button" size="sm" onclick={() => (checkCron = preset.cron)}>
-								{t(preset.label)}
-							</Button>
-						{/each}
-					</div>
-					<p class="muted">{t('rp.check.zone', { zone: maintenanceTimeZone })}</p>
-					<div class="runs-block">
-						<span class="muted">{t('repositories.maintenance.nextRuns')}</span>
-						{@render runsList(checkEnabled ? checkRuns : null)}
-					</div>
-					{#if maintenance}
-						<div class="runs-block">
-							<span class="muted">{t('repositories.maintenance.last')}</span>
-							{@render lastRun(maintenance.last_check)}
-						</div>
-					{/if}
-				</ProfileSection>
-			{/if}
-
-			<ProfileSection
-				id="host"
-				title={t(titles.host)}
-				summary={summaries.host.text}
-				state={summaries.host.state}
-				bind:open={open.host}
-			>
-				<Select
-					id="repo-agent"
-					label={t('repositories.maintenanceHost')}
-					help={t('repositories.maintenanceHostHint')}
-					options={agentOptions}
-					error={fieldError(formProblem, 'maintenance_agent_id')}
-					bind:value={maintenanceAgentId}
-				/>
-				{#if showSchedules && !maintenanceAgentId}
-					<Alert tone="attention" icon="alert" title={t('repositories.maintenance.noHostTitle')}>
-						{t('repositories.maintenance.noHostBody')}
-					</Alert>
-				{/if}
-			</ProfileSection>
-		</div>
-
-		<aside class="side">
-			<div class="box">
-				<div class="box__head">
-					<span>{t('rp.side.result')}</span>
-				</div>
-				<ul class="result">
-					{#each SECTIONS as key (key)}
-						{#if showSchedules || (key !== 'retention' && key !== 'check')}
-							<li>
-								<span class="dot dot--{summaries[key].state}" data-state={summaries[key].state}
-								></span>
-								<div>
-									<b>{t(titles[key])}</b>
-									<span class="result__text">{summaries[key].text}</span>
-								</div>
-							</li>
-						{/if}
-					{/each}
-				</ul>
-			</div>
-		</aside>
-
+	{#snippet actions()}
+		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
+		<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
+	{/snippet}
+	{#snippet banners()}
+		{#if formError}
+			<Alert tone="danger" title={formError} />
+		{/if}
+	{/snippet}
+	{#snippet side()}
+		<SummaryPanel title={t('rp.side.result')} items={resultItems} />
+	{/snippet}
+	{#snippet footer()}
 		<div class="savebar">
 			<span class="muted savebar__text">
 				{#if !canWrite}
@@ -783,111 +465,286 @@
 				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
 			{/if}
 		</div>
-	</form>
-{/if}
+	{/snippet}
+
+	<ProfileSection
+		id="basics"
+		title={t(titles.basics)}
+		summary={summaries.basics.text}
+		state={summaries.basics.state}
+		required
+		bind:open={open.basics}
+	>
+		<TextField
+			id="repo-name"
+			label={t('repositories.repository')}
+			error={fieldError(formProblem, 'name')}
+			bind:value={name}
+			required
+		/>
+	</ProfileSection>
+
+	<ProfileSection
+		id="location"
+		title={t(titles.location)}
+		summary={summaries.location.text}
+		state={summaries.location.state}
+		required
+		bind:open={open.location}
+	>
+		{#if locationLocked}
+			<Alert tone="attention" icon="lock" title={t('repositories.locationLocked')} />
+		{/if}
+		<Select
+			id="repo-kind"
+			label={t('repositories.backendKind')}
+			options={kindOptions}
+			error={fieldError(formProblem, 'backend')}
+			bind:value={kind}
+			disabled={!!existing}
+		/>
+		{#if kind === 's3'}
+			<div class="grid2">
+				<TextField
+					id="repo-endpoint"
+					label={t('repositories.endpoint')}
+					placeholder={t('repositories.endpointPlaceholder')}
+					error={fieldError(formProblem, 'backend.endpoint')}
+					bind:value={endpoint}
+					disabled={locationLocked}
+					required
+				/>
+				<TextField
+					id="repo-bucket"
+					label={t('repositories.bucket')}
+					placeholder={t('repositories.bucketPlaceholder')}
+					error={fieldError(formProblem, 'backend.bucket')}
+					bind:value={bucket}
+					disabled={locationLocked}
+					required
+				/>
+				<TextField
+					id="repo-prefix"
+					label={t('repositories.prefix')}
+					placeholder={t('repositories.prefixPlaceholder')}
+					error={fieldError(formProblem, 'backend.prefix')}
+					bind:value={prefix}
+					disabled={locationLocked}
+				/>
+				<TextField
+					id="repo-region"
+					label={t('repositories.region')}
+					placeholder={t('repositories.regionPlaceholder')}
+					error={fieldError(formProblem, 'backend.region')}
+					bind:value={region}
+					disabled={locationLocked}
+				/>
+			</div>
+		{:else if kind === 'rest'}
+			<TextField
+				id="repo-endpoint"
+				label={t('repositories.endpoint')}
+				placeholder={t('repositories.endpointPlaceholder')}
+				error={fieldError(formProblem, 'backend.endpoint')}
+				bind:value={endpoint}
+				disabled={locationLocked}
+				required
+			/>
+		{:else}
+			<TextField
+				id="repo-path"
+				label={t('repositories.path')}
+				placeholder={t('repositories.pathPlaceholder')}
+				error={fieldError(formProblem, 'backend.path')}
+				bind:value={path}
+				disabled={locationLocked}
+				required
+			/>
+		{/if}
+	</ProfileSection>
+
+	<ProfileSection
+		id="access"
+		title={t(titles.access)}
+		summary={summaries.access.text}
+		state={summaries.access.state}
+		required
+		bind:open={open.access}
+	>
+		{#if existing}
+			<Alert tone="info" icon="lock" title={t('repositories.password')}>
+				{t('repositories.passwordLocked')}
+			</Alert>
+		{:else}
+			<PasswordField
+				id="repo-password"
+				label={t('repositories.password')}
+				help={t('repositories.passwordHint')}
+				error={fieldError(formProblem, 'password')}
+				autocomplete="new-password"
+				bind:value={password}
+				required
+			/>
+		{/if}
+		{#if kind === 's3'}
+			<div class="grid2">
+				<PasswordField
+					id="repo-s3-access-key"
+					label={t('repositories.s3AccessKey')}
+					help={t('repositories.secretHint')}
+					error={fieldError(formProblem, 's3_access_key')}
+					autocomplete="new-password"
+					bind:value={s3AccessKey}
+					required={!existing}
+				/>
+				<PasswordField
+					id="repo-s3-secret-key"
+					label={t('repositories.s3SecretKey')}
+					help={t('repositories.secretHint')}
+					error={fieldError(formProblem, 's3_secret_key')}
+					autocomplete="new-password"
+					bind:value={s3SecretKey}
+					required={!existing}
+				/>
+			</div>
+		{:else if kind === 'rest'}
+			<PasswordField
+				id="repo-rest-password"
+				label={t('repositories.restPassword')}
+				help={t('repositories.restPasswordHint')}
+				error={fieldError(formProblem, 'rest_password')}
+				autocomplete="new-password"
+				bind:value={restPassword}
+			/>
+		{/if}
+		<a
+			class="manage-secrets"
+			href={resolve('/(app)/settings/access/secrets')}
+			target="_blank"
+			rel="noopener"
+		>
+			{t('secrets.manage')}
+		</a>
+	</ProfileSection>
+
+	{#if showSchedules}
+		<ProfileSection
+			id="retention"
+			title={t(titles.retention)}
+			summary={summaries.retention.text}
+			state={summaries.retention.state}
+			switchable
+			bind:enabled={retentionEnabled}
+			bind:open={open.retention}
+		>
+			<p class="lead">{t('repositories.maintenance.description')}</p>
+			<TextField
+				id="maintenance-time-zone"
+				label={t('repositories.maintenance.timeZone')}
+				help={t('repositories.maintenance.timeZoneHint')}
+				error={fieldError(formProblem, 'time_zone')}
+				list={TIME_ZONE_LIST_ID}
+				bind:value={maintenanceTimeZone}
+				required
+			/>
+			<datalist id={TIME_ZONE_LIST_ID}>
+				{#each TIME_ZONES as zone (zone)}
+					<option value={zone}></option>
+				{/each}
+			</datalist>
+			<p class="lead">{t('repositories.maintenance.retentionHint')}</p>
+			<TextField
+				id="maintenance-retention-cron"
+				mono
+				label={t('repositories.maintenance.cron')}
+				help={t('repositories.maintenance.cronHint')}
+				error={fieldError(formProblem, 'retention.cron')}
+				bind:value={retentionCron}
+				required
+			/>
+			<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
+				{#each RETENTION_PRESETS as preset (preset.cron)}
+					<Button type="button" size="sm" onclick={() => (retentionCron = preset.cron)}>
+						{t(preset.label)}
+					</Button>
+				{/each}
+			</div>
+			<div class="runs-block">
+				<span class="muted">{t('repositories.maintenance.nextRuns')}</span>
+				{@render runsList(retentionEnabled ? retentionRuns : null)}
+			</div>
+			{#if maintenance}
+				<div class="runs-block">
+					<span class="muted">{t('repositories.maintenance.last')}</span>
+					{@render lastRun(maintenance.last_retention)}
+				</div>
+			{/if}
+		</ProfileSection>
+
+		<ProfileSection
+			id="check"
+			title={t(titles.check)}
+			summary={summaries.check.text}
+			state={summaries.check.state}
+			switchable
+			bind:enabled={checkEnabled}
+			bind:open={open.check}
+		>
+			<p class="lead">{t('repositories.maintenance.checkHint')}</p>
+			<TextField
+				id="maintenance-check-cron"
+				mono
+				label={t('repositories.maintenance.cron')}
+				help={t('repositories.maintenance.cronHint')}
+				error={fieldError(formProblem, 'check.cron')}
+				bind:value={checkCron}
+				required
+			/>
+			<div class="presets" role="group" aria-label={t('repositories.maintenance.presets')}>
+				{#each CHECK_PRESETS as preset (preset.cron)}
+					<Button type="button" size="sm" onclick={() => (checkCron = preset.cron)}>
+						{t(preset.label)}
+					</Button>
+				{/each}
+			</div>
+			<p class="muted">{t('rp.check.zone', { zone: maintenanceTimeZone })}</p>
+			<div class="runs-block">
+				<span class="muted">{t('repositories.maintenance.nextRuns')}</span>
+				{@render runsList(checkEnabled ? checkRuns : null)}
+			</div>
+			{#if maintenance}
+				<div class="runs-block">
+					<span class="muted">{t('repositories.maintenance.last')}</span>
+					{@render lastRun(maintenance.last_check)}
+				</div>
+			{/if}
+		</ProfileSection>
+	{/if}
+
+	<ProfileSection
+		id="host"
+		title={t(titles.host)}
+		summary={summaries.host.text}
+		state={summaries.host.state}
+		bind:open={open.host}
+	>
+		<Select
+			id="repo-agent"
+			label={t('repositories.maintenanceHost')}
+			help={t('repositories.maintenanceHostHint')}
+			options={agentOptions}
+			error={fieldError(formProblem, 'maintenance_agent_id')}
+			bind:value={maintenanceAgentId}
+		/>
+		{#if showSchedules && !maintenanceAgentId}
+			<Alert tone="attention" icon="alert" title={t('repositories.maintenance.noHostTitle')}>
+				{t('repositories.maintenance.noHostBody')}
+			</Alert>
+		{/if}
+	</ProfileSection>
+</RecordPage>
 
 <style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--rh-space-1);
-		margin-bottom: var(--rh-space-3);
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-		text-decoration: none;
-	}
-
-	.back:hover {
-		color: var(--rh-color-link);
-	}
-
-	.layout {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 340px;
-		grid-template-areas:
-			'main side'
-			'bar bar';
-		gap: var(--rh-space-4);
-		align-items: start;
-	}
-
-	.main {
-		display: flex;
-		grid-area: main;
-		flex-direction: column;
-		gap: var(--rh-space-3);
-		min-width: 0;
-	}
-
-	.side {
-		position: sticky;
-		top: calc(var(--rh-layout-topbar-height) + var(--rh-space-4));
-		display: flex;
-		grid-area: side;
-		flex-direction: column;
-		gap: var(--rh-space-3);
-		max-height: calc(100vh - var(--rh-layout-topbar-height) - 120px);
-		overflow-y: auto;
-	}
-
-	.box {
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-lg);
-		background-color: var(--rh-color-surface);
-	}
-
-	.box__head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--rh-space-2);
-		padding: var(--rh-space-2) var(--rh-space-3);
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border-muted);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.result {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-2);
-		margin: 0;
-		padding: var(--rh-space-3);
-		list-style: none;
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.result li {
-		display: flex;
-		align-items: flex-start;
-		gap: var(--rh-space-2);
-	}
-
-	.result li .dot {
-		margin-top: 6px;
-	}
-
-	.result__text {
-		display: block;
-		color: var(--rh-color-text-muted);
-		overflow-wrap: anywhere;
-	}
-
-	.dot {
-		flex: none;
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background-color: var(--rh-color-border-strong);
-	}
-
-	.dot--on {
-		background-color: var(--rh-color-success);
-	}
-
-	.dot--warn {
-		background-color: var(--rh-color-warning);
-	}
-
 	.muted {
 		margin: 0;
 		color: var(--rh-color-text-muted);
@@ -945,11 +802,7 @@
 	}
 
 	.savebar {
-		position: sticky;
-		bottom: 0;
-		z-index: var(--rh-z-sticky);
 		display: flex;
-		grid-area: bar;
 		align-items: center;
 		gap: var(--rh-space-3);
 		padding: var(--rh-space-3) var(--rh-space-4);
@@ -960,21 +813,6 @@
 
 	.savebar__text {
 		flex: 1;
-	}
-
-	@media (max-width: 1000px) {
-		.layout {
-			grid-template-columns: minmax(0, 1fr);
-			grid-template-areas:
-				'main'
-				'side'
-				'bar';
-		}
-
-		.side {
-			position: static;
-			max-height: none;
-		}
 	}
 
 	@media (max-width: 720px) {

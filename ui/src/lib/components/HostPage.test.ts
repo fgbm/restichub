@@ -126,7 +126,7 @@ describe('the host page', () => {
 		render(HostPage, { hostId: 'a_01' });
 
 		expect((await screen.findAllByText('Offline')).length).toBeGreaterThan(0);
-		const state = screen.getByText('Open alerts').closest('li') as HTMLElement;
+		const state = screen.getByText('Open alerts').closest('.key-value__row') as HTMLElement;
 		expect(within(state).getByText('1')).toBeInTheDocument();
 	});
 
@@ -244,10 +244,11 @@ describe('the host page', () => {
 		render(HostPage, { hostId: 'a_01' });
 
 		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
-		const state = screen.getByText('Connection').closest('li') as HTMLElement;
+		const side = screen.getByRole('complementary');
+		const state = within(side).getByText('Connection').closest('.key-value__row') as HTMLElement;
 		expect(within(state).getByText('Online')).toBeInTheDocument();
-		expect(screen.queryByText('Restore roots', { selector: 'b' })).not.toBeInTheDocument();
-		expect(screen.queryByText('Last seen', { selector: 'b' })).not.toBeInTheDocument();
+		expect(within(side).queryByText('Restore roots')).not.toBeInTheDocument();
+		expect(within(side).queryByText('Last seen')).not.toBeInTheDocument();
 	});
 
 	it('links the restore page with the host as the target host', async () => {

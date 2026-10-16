@@ -10,11 +10,7 @@ import uiPrinciples from './eslint-rules/ui-principles.js';
 // DataTable, Page and RecordPage empties this list.
 const legacyScreens = [
 	'src/lib/components/ui/Table.svelte',
-	'src/lib/components/HostPage.svelte',
-	'src/lib/components/ProfileEditor.svelte',
-	'src/lib/components/RepositoryEditor.svelte',
-	'src/routes/(app)/restore/[[]repository]/[[]snapshot]/+page.svelte',
-	'src/routes/(app)/settings/scripts/templates/+page.svelte'
+	'src/routes/(app)/restore/[[]repository]/[[]snapshot]/+page.svelte'
 ];
 
 export default tseslint.config(
