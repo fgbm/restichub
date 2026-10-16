@@ -86,7 +86,7 @@ describe('Secrets screen', () => {
 		// Line 2 counts the users by kind; the item has no link to another entity.
 		expect(screen.getByText('used by 1 profile')).toBeInTheDocument();
 		expect(screen.getByText('used by 1 repository')).toBeInTheDocument();
-		expect(screen.queryByRole('link')).not.toBeInTheDocument();
+		expect(within(screen.getByRole('list', { name: 'Secrets' })).queryByRole('link')).toBeNull();
 		expect(screen.getByText('Not used', { selector: '.status' })).toBeInTheDocument();
 	});
 
