@@ -33,7 +33,7 @@ test('a secret is created, its value is replaced and it is deleted', async ({ pa
 	await expect(row).toBeVisible();
 	await expect(page.getByText('first-value')).toHaveCount(0);
 
-	await row.getByRole('button', { name: /^Replace the value of/ }).click();
+	await row.getByRole('button', { name: 'Replace value' }).click();
 	dialog = page.getByRole('dialog');
 	await expect(dialog.getByText(/next delivery/)).toBeVisible();
 	await dialog.getByLabel(/^New value/).fill('second-value');
@@ -41,8 +41,7 @@ test('a secret is created, its value is replaced and it is deleted', async ({ pa
 	await expect(page.getByText('The value is replaced.')).toBeVisible();
 	await expect(page.getByText('second-value')).toHaveCount(0);
 
-	await row.getByRole('button', { name: /^More actions for/ }).click();
-	await page.getByRole('menuitem', { name: 'Delete' }).click();
+	await row.getByRole('button', { name: 'Delete' }).click();
 	await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
 	await expect(page.getByText('The secret is deleted.')).toBeVisible();
 	await expect(page.getByRole('row').filter({ hasText: 'backup.token' })).toHaveCount(0);
@@ -53,8 +52,7 @@ test('a secret in use cannot be deleted and the dialog names its users', async (
 	const row = page.getByRole('row').filter({ hasText: 'db.password' });
 	await expect(row.getByRole('link', { name: 'db-nightly' })).toBeVisible();
 
-	await row.getByRole('button', { name: /^More actions for/ }).click();
-	await page.getByRole('menuitem', { name: 'Delete' }).click();
+	await row.getByRole('button', { name: 'Delete' }).click();
 	const dialog = page.getByRole('dialog');
 	await expect(dialog.getByText('The secret is in use')).toBeVisible();
 	await expect(dialog.getByRole('link', { name: 'db-nightly' })).toBeVisible();
@@ -66,6 +64,6 @@ test('a secret in use cannot be deleted and the dialog names its users', async (
 test('the password of a repository offers no replace', async ({ page }) => {
 	await openSecrets(page);
 	const row = page.getByRole('row').filter({ hasText: 'primary-s3.password' });
-	await expect(row.getByRole('button', { name: /^More actions for/ })).toBeVisible();
-	await expect(row.getByRole('button', { name: /^Replace the value of/ })).toHaveCount(0);
+	await expect(row.getByRole('button', { name: 'Delete' })).toBeVisible();
+	await expect(row.getByRole('button', { name: 'Replace value' })).toHaveCount(0);
 });
