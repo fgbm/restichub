@@ -668,7 +668,7 @@ export const ru: Record<MessageKey, string> = {
 	// Plans
 	'jobs.title': 'Задания',
 	'jobs.description': 'Все запуски планов, сначала новые.',
-	'jobs.emptyTitle': 'Заданий пока нет',
+	'jobs.emptyTitle': 'Заданий пока не было',
 	'jobs.emptyDescription': 'Задание появляется, когда план запускается по расписанию или вручную.',
 	'jobs.searchPlaceholder': 'Поиск заданий',
 	'jobs.filters': 'Фильтры заданий',
@@ -2006,5 +2006,15 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.meta.agent': 'агент {version}',
 	'hosts.meta.agentUpdate': 'агент {version}, есть {latest}',
 	'hosts.pending.labels': 'метки: {labels}',
-	'hosts.pending.createdBy': 'создал {name}'
+	'hosts.pending.createdBy': 'создал {name}',
+	'jobs.sort.started': 'Запуск',
+	'jobs.sort.plan': 'План',
+	'jobs.sort.host': 'Хост',
+	'jobs.tab.all': 'Все',
+	'jobs.tab.running': 'Выполняются',
+	'jobs.tab.failed': 'Не выполнены',
+	'jobs.tab.succeeded': 'Успешно',
+	'jobs.meta.attempt': 'попытка {n}',
+	'jobs.emptyAction': 'Добавить план',
+	'jobs.emptyRecent': 'За последние 7 дней заданий не было. Выберите период длиннее, чтобы увидеть старые задания.'
 };

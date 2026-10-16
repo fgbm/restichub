@@ -1996,7 +1996,17 @@ export const en = {
 	'hosts.meta.agent': 'agent {version}',
 	'hosts.meta.agentUpdate': 'agent {version}, {latest} is available',
 	'hosts.pending.labels': 'labels: {labels}',
-	'hosts.pending.createdBy': 'created by {name}'
+	'hosts.pending.createdBy': 'created by {name}',
+	'jobs.sort.started': 'Started',
+	'jobs.sort.plan': 'Plan',
+	'jobs.sort.host': 'Host',
+	'jobs.tab.all': 'All',
+	'jobs.tab.running': 'Running',
+	'jobs.tab.failed': 'Failed',
+	'jobs.tab.succeeded': 'Succeeded',
+	'jobs.meta.attempt': 'attempt {n}',
+	'jobs.emptyAction': 'Add a plan',
+	'jobs.emptyRecent': 'No job ran in the last 7 days. Choose a longer period to see older jobs.'
 } as const;
 
 export type MessageKey = keyof typeof en;

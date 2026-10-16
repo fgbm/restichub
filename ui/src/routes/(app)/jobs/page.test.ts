@@ -97,10 +97,14 @@ describe('the Jobs screen', () => {
 		render(Jobs);
 
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
-		// The status filter lists the same words, so the query reads the table only.
-		expect(within(screen.getByRole('table')).getByText('Running')).toBeInTheDocument();
+		expect(screen.getByText('Running', { selector: '.status' })).toBeInTheDocument();
 		expect(screen.getByText('win-fs01')).toBeInTheDocument();
 		expect(screen.getByText('primary-s3')).toBeInTheDocument();
+		// The list opens on the jobs of the last 7 days.
+		expect(mocks.listJobs).toHaveBeenCalledWith(
+			expect.objectContaining({ from: expect.any(String), sort: 'started_at', order: 'desc' })
+		);
+		expect(route.url.searchParams.get('period')).toBe('7d');
 	});
 
 	it('reads only the jobs of the host that the link names', async () => {
@@ -116,19 +120,22 @@ describe('the Jobs screen', () => {
 		expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
 	});
 
-	it('shows a dash for an empty start and duration and keeps the filter in the toolbar', async () => {
+	it('shows the duration in the number column and a dash for a job that never started', async () => {
 		mocks.listJobs.mockResolvedValue({
-			items: [job({ status: 'queued', started_at: null })],
+			items: [
+				job({ id: 'j_1', status: 'succeeded', finished_at: '2026-10-14T10:05:12Z' }),
+				job({ id: 'j_2', plan_name: 'gone', status: 'dead_letter', started_at: null }),
+				job({ id: 'j_3', plan_name: 'waiting', status: 'queued', started_at: null })
+			],
 			next_cursor: null,
-			total: 1
+			total: 3
 		});
-		render(Jobs);
+		const { container } = render(Jobs);
 
-		const table = within(await screen.findByRole('table'));
-		expect((await table.findAllByText('—')).length).toBe(2);
+		await screen.findByText('waiting');
+		const asides = [...container.querySelectorAll('.item__aside')].map((node) => node.textContent);
+		expect(asides).toEqual(['4 min 12 s', '—', '']);
 		expect(screen.queryByText('None')).not.toBeInTheDocument();
-		const filters = screen.getByRole('group', { name: 'Job filters' });
-		expect(filters.closest('.table-wrap')).not.toBeNull();
 	});
 
 	it('shows a cancelled job apart from a failed one, with the pill only', async () => {
@@ -154,9 +161,8 @@ describe('the Jobs screen', () => {
 		});
 		render(Jobs);
 
-		const table = within(await screen.findByRole('table'));
-		expect(await table.findByText('Cancelled')).toBeInTheDocument();
-		expect(table.getByText('Gave up')).toBeInTheDocument();
+		expect(await screen.findByText('Cancelled', { selector: '.status' })).toBeInTheDocument();
+		expect(screen.getByText('Gave up', { selector: '.status' })).toBeInTheDocument();
 		// The reason is on the job page (design/style/ui-principles.md, 2.5).
 		expect(
 			screen.queryByText('The repository stayed locked after every retry.')
@@ -185,12 +191,11 @@ describe('the Jobs screen', () => {
 		});
 		render(Jobs);
 
-		const table = within(await screen.findByRole('table'));
-		const pill = await table.findByTitle('Succeeded with warnings');
+		const pill = await screen.findByText('Succeeded', { selector: '.status' });
 		expect(pill).toHaveClass('status--warning');
-		expect(pill.closest('.status')).toHaveAttribute('title', 'Succeeded with warnings');
-		expect(pill.closest('.status')).toHaveAttribute('aria-label', 'Succeeded with warnings');
-		expect(table.getByText('Failed')).toBeInTheDocument();
+		expect(pill).toHaveAttribute('title', 'Succeeded with warnings');
+		expect(pill).toHaveAttribute('aria-label', 'Succeeded with warnings');
+		expect(screen.getByText('Failed', { selector: '.status' })).toBeInTheDocument();
 		expect(
 			screen.queryByText(
 				'Another process locks the repository. Wait for it to end and run the job again.'
@@ -199,15 +204,17 @@ describe('the Jobs screen', () => {
 		expect(screen.queryByText('Forget selected no snapshots')).not.toBeInTheDocument();
 	});
 
-	it('keeps the status, the start time and the duration on one line', async () => {
-		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
-		render(Jobs);
+	it('shows a successful job without a pill and a grey icon', async () => {
+		mocks.listJobs.mockResolvedValue({
+			items: [job({ status: 'succeeded', finished_at: '2026-10-14T10:02:00Z' })],
+			next_cursor: null,
+			total: 1
+		});
+		const { container } = render(Jobs);
 
-		const table = await screen.findByRole('table');
-		for (const name of ['Status', 'Started', 'Duration']) {
-			const header = within(table).getByRole('columnheader', { name: new RegExp(name) });
-			expect(header).toHaveClass('table__cell--nowrap');
-		}
+		await screen.findByText('nightly-web');
+		expect(container.querySelector('.status')).toBeNull();
+		expect(container.querySelector('.item__lead')?.className).not.toMatch(/tone--/);
 	});
 
 	it('opens the job page from the row link', async () => {
