@@ -18,14 +18,14 @@
 		ConfirmDialog,
 		CopyField,
 		Dialog,
-		DropdownMenu,
 		EmptyState,
 		Icon,
 		PageHeader,
 		Panel,
 		StatusPill,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -488,10 +488,8 @@
 	>
 		{#snippet rowActions(agent)}
 			{#if canWrite && agent.status === 'active'}
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('hosts.moreActions', { name: agent.hostname })}
+				<RowActions
+					moreLabel={t('hosts.moreActions', { name: agent.hostname })}
 					items={[
 						{
 							label: t('hosts.rename'),

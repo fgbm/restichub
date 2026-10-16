@@ -12,7 +12,8 @@
 		Select,
 		StatusPill,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { KeyValueItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -249,16 +250,19 @@
 		filterPlaceholder={t('tokens.searchPlaceholder')}
 	>
 		{#snippet rowActions(token)}
-			<Button
-				size="sm"
-				icon="circle-slash"
-				disabled={!!token.revoked_at}
-				title={t('tokens.revoke')}
-				aria-label={t('tokens.revokeFor', { name: token.name })}
-				onclick={() => {
-					revokeTarget = token;
-					revokeOpen = true;
-				}}
+			<RowActions
+				moreLabel={t('tokens.revokeFor', { name: token.name })}
+				items={[
+					{
+						label: t('tokens.revoke'),
+						icon: 'circle-slash',
+						disabled: !!token.revoked_at,
+						onSelect: () => {
+							revokeTarget = token;
+							revokeOpen = true;
+						}
+					}
+				]}
 			/>
 		{/snippet}
 	</Table>

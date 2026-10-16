@@ -95,14 +95,14 @@ describe('Secrets screen', () => {
 		render(Secrets);
 		await screen.findByText('db.password');
 		expect(screen.queryByRole('button', { name: 'Add secret' })).not.toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: /^Replace the value of/ })).not.toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: /^More actions for/ })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Replace value' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
 	});
 
 	it('hides the replace action for the password of a repository', async () => {
 		render(Secrets);
 		await screen.findByText('db.password');
-		expect(screen.getAllByRole('button', { name: /^Replace the value of/ })).toHaveLength(2);
+		expect(screen.getAllByRole('button', { name: 'Replace value' })).toHaveLength(2);
 	});
 
 	it('creates a secret and sends the value once', async () => {
@@ -130,7 +130,7 @@ describe('Secrets screen', () => {
 		const user = userEvent.setup();
 		render(Secrets);
 		const row = (await screen.findByText('db.password')).closest('tr') as HTMLElement;
-		await user.click(within(row).getByRole('button', { name: 'Replace the value of db.password' }));
+		await user.click(within(row).getByRole('button', { name: 'Replace value' }));
 		const dialog = await screen.findByRole('dialog');
 		expect(within(dialog).getByText(/next delivery/)).toBeInTheDocument();
 		await user.type(within(dialog).getByLabelText(/^New value/), 'fresh');
@@ -142,8 +142,7 @@ describe('Secrets screen', () => {
 		const user = userEvent.setup();
 		render(Secrets);
 		const row = (await screen.findByText('spare.token')).closest('tr') as HTMLElement;
-		await user.click(within(row).getByRole('button', { name: /^More actions for/ }));
-		await user.click(await screen.findByText('Delete'));
+		await user.click(within(row).getByRole('button', { name: 'Delete' }));
 		const dialog = await screen.findByRole('dialog');
 		await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
 		await waitFor(() => expect(mocks.deleteSecret).toHaveBeenCalledWith('s_free'));
@@ -153,8 +152,7 @@ describe('Secrets screen', () => {
 		const user = userEvent.setup();
 		render(Secrets);
 		const row = (await screen.findByText('db.password')).closest('tr') as HTMLElement;
-		await user.click(within(row).getByRole('button', { name: /^More actions for/ }));
-		await user.click(await screen.findByText('Delete'));
+		await user.click(within(row).getByRole('button', { name: 'Delete' }));
 		const dialog = await screen.findByRole('dialog');
 		expect(within(dialog).getByText('The secret is in use')).toBeInTheDocument();
 		expect(within(dialog).getByRole('link', { name: 'db-nightly' })).toBeInTheDocument();

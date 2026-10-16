@@ -8,11 +8,11 @@
 		Alert,
 		Button,
 		Dialog,
-		DropdownMenu,
 		PasswordField,
 		Select,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -199,30 +199,26 @@
 </script>
 
 {#snippet rowActions(secret: Secret)}
-	<span class="row-actions">
-		{#if canReplaceValue(secret)}
-			<Button
-				size="sm"
-				icon="refresh"
-				title={t('secrets.replace')}
-				aria-label={t('secrets.replaceFor', { name: secret.name })}
-				onclick={() => openReplace(secret)}
-			/>
-		{/if}
-		<DropdownMenu
-			icon="more"
-			align="end"
-			label={t('secrets.moreActions', { name: secret.name })}
-			items={[
-				{
-					label: t('secrets.delete'),
-					icon: 'trash',
-					tone: 'danger',
-					onSelect: () => openDelete(secret)
-				}
-			]}
-		/>
-	</span>
+	<RowActions
+		moreLabel={t('secrets.moreActions', { name: secret.name })}
+		items={[
+			...(canReplaceValue(secret)
+				? [
+						{
+							label: t('secrets.replace'),
+							icon: 'refresh' as const,
+							onSelect: () => openReplace(secret)
+						}
+					]
+				: []),
+			{
+				label: t('secrets.delete'),
+				icon: 'trash',
+				tone: 'danger',
+				onSelect: () => openDelete(secret)
+			}
+		]}
+	/>
 {/snippet}
 
 {#snippet nameCell(secret: Secret)}
@@ -400,11 +396,6 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.row-actions {
-		display: inline-flex;
-		gap: var(--rh-space-1);
 	}
 
 	.muted {

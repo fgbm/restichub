@@ -15,12 +15,12 @@
 		Checkbox,
 		ConfirmDialog,
 		Dialog,
-		DropdownMenu,
 		EmptyState,
 		PageHeader,
 		Select,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -378,10 +378,8 @@
 	>
 		{#snippet rowActions(plan)}
 			{#if actionsFor(plan).length > 0}
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('plans.moreActions', { name: plan.name })}
+				<RowActions
+					moreLabel={t('plans.moreActions', { name: plan.name })}
 					items={actionsFor(plan)}
 				/>
 			{/if}

@@ -16,13 +16,13 @@
 		Checkbox,
 		CopyField,
 		Dialog,
-		DropdownMenu,
 		EmptyState,
 		Field,
 		Select,
 		StatusPill,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tChannelError, tErrorCode } from '#lib/i18n/index.ts';
@@ -311,10 +311,8 @@
 			filterPlaceholder={t('channels.searchPlaceholder')}
 		>
 			{#snippet rowActions(channel)}
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('channels.moreActions', { name: channel.name })}
+				<RowActions
+					moreLabel={t('channels.moreActions', { name: channel.name })}
 					items={actionsFor(channel)}
 				/>
 			{/snippet}

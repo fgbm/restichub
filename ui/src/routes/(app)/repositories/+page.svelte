@@ -16,13 +16,13 @@
 		Button,
 		ConfirmDialog,
 		Dialog,
-		DropdownMenu,
 		EmptyState,
 		PageHeader,
 		Select,
 		StatusPill,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
@@ -391,10 +391,8 @@
 	>
 		{#snippet rowActions(repository)}
 			{#if canWrite || canRun}
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('repositories.moreActions', { name: repository.name })}
+				<RowActions
+					moreLabel={t('repositories.moreActions', { name: repository.name })}
 					items={[
 						...(canRun && repository.maintenance_agent_id && repository.initialized
 							? [

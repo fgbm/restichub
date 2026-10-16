@@ -13,7 +13,8 @@
 		Select,
 		SidePanel,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type {
 		IconName,
@@ -336,12 +337,9 @@
 		rowKey={(record) => record.id}
 	>
 		{#snippet rowActions(record)}
-			<Button
-				size="sm"
-				icon="eye"
-				title={t('audit.details')}
-				aria-label={t('audit.detailsFor', { id: record.id })}
-				onclick={() => openRecord(record)}
+			<RowActions
+				moreLabel={t('audit.detailsFor', { id: record.id })}
+				items={[{ label: t('audit.details'), icon: 'eye', onSelect: () => openRecord(record) }]}
 			/>
 		{/snippet}
 	</Table>

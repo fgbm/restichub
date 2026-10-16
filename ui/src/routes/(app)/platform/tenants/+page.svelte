@@ -6,10 +6,10 @@
 		Alert,
 		Button,
 		Dialog,
-		DropdownMenu,
 		PageHeader,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { TableColumn } from '#lib/components/ui/index.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
@@ -174,23 +174,17 @@
 	filterPlaceholder={t('tenants.searchPlaceholder')}
 >
 	{#snippet rowActions(tenant)}
-		{#if tenant.status !== 'deleted'}
-			<span class="row-actions">
-				<Button
-					size="sm"
-					icon={tenant.status === 'active' ? 'pause' : 'refresh'}
-					loading={busyId === tenant.id}
-					title={tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
-					aria-label={tenant.status === 'active'
-						? t('tenants.suspendFor', { name: tenant.name })
-						: t('tenants.resumeFor', { name: tenant.name })}
-					onclick={() => toggleStatus(tenant)}
-				/>
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('tenants.moreActions', { name: tenant.name })}
-					items={[
+		<RowActions
+			moreLabel={t('tenants.moreActions', { name: tenant.name })}
+			items={tenant.status === 'deleted'
+				? []
+				: [
+						{
+							label: tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume'),
+							icon: tenant.status === 'active' ? 'pause' : 'refresh',
+							disabled: busyId === tenant.id,
+							onSelect: () => toggleStatus(tenant)
+						},
 						{
 							label: t('common.delete'),
 							icon: 'trash',
@@ -203,9 +197,7 @@
 							}
 						}
 					]}
-				/>
-			</span>
-		{/if}
+		/>
 	{/snippet}
 </Table>
 
@@ -262,8 +254,4 @@
 </Dialog>
 
 <style>
-	.row-actions {
-		display: inline-flex;
-		gap: var(--rh-space-1);
-	}
 </style>
