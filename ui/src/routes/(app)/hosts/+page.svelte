@@ -163,8 +163,8 @@
 			label: value.label || undefined,
 			server_scripts:
 				value.scripts === 'enabled' || value.scripts === 'disabled' ? value.scripts : undefined,
-			sort: SORT_KEYS[value.sort],
-			order: value.sort || value.order ? (value.order === 'desc' ? 'desc' : 'asc') : undefined,
+			sort: SORT_KEYS[value.sort || 'hostname'],
+			order: value.order === 'desc' ? 'desc' : 'asc',
 			offset: (tablePage - 1) * pageSize,
 			limit: pageSize
 		};
@@ -234,17 +234,17 @@
 	const facets = $derived<FilterFacet[]>([
 		{
 			key: 'os',
-			label: t('hosts.os'),
+			label: t('hosts.facet.os'),
 			options: (facetValues?.os ?? []).map(({ value, count }) => ({ value, count }))
 		},
 		{
 			key: 'label',
-			label: t('hosts.labels'),
+			label: t('hosts.facet.label'),
 			options: (facetValues?.labels ?? []).map(({ value, count }) => ({ value, count }))
 		},
 		{
 			key: 'agent_version',
-			label: t('hosts.agent'),
+			label: t('hosts.facet.agent'),
 			options: (facetValues?.agent_versions ?? []).map(({ value, count }) => ({ value, count }))
 		},
 		{

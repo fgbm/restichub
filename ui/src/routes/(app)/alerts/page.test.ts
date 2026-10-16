@@ -145,7 +145,7 @@ describe('the Alerts screen', () => {
 		expect(await screen.findByText('Job failed: plan-50')).toBeInTheDocument();
 
 		const bar = screen.getByRole('group', { name: 'Show alerts' });
-		await user.click(within(bar).getByRole('button', { name: /^Alert/ }));
+		await user.click(within(bar).getByRole('button', { name: /^Kind/ }));
 		await user.click(await screen.findByLabelText('Host offline'));
 		await waitFor(() =>
 			expect(mocks.listAlerts).toHaveBeenLastCalledWith({

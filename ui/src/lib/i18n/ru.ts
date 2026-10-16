@@ -2027,5 +2027,9 @@ export const ru: Record<MessageKey, string> = {
 	'plans.status.violated': 'Копия просрочена',
 	'plans.status.atRisk': 'Под угрозой',
 	'plans.meta.lastBackup': 'копия {time}',
-	'plans.meta.noBackup': 'копий не было'
+	'plans.meta.noBackup': 'копий не было',
+	'hosts.facet.os': 'ОС',
+	'hosts.facet.label': 'Метка',
+	'hosts.facet.agent': 'Версия агента',
+	'alerts.facet.kind': 'Вид'
 };

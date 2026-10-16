@@ -226,7 +226,11 @@
 					{#if row.group !== null}
 						<li class="group">{row.group}</li>
 					{/if}
-					<li class="item" class:item--aside={Boolean(aside)}>
+					<li
+						class="item"
+						class:item--aside={Boolean(aside)}
+						class:item--single={fields.length === 0 && !number}
+					>
 						<span
 							class="item__lead"
 							class:tone--danger={lead.tone === 'danger'}
@@ -386,6 +390,10 @@
 		align-self: start;
 		height: 20px;
 		color: var(--rh-color-text-subtle);
+	}
+
+	.item--single .item__lead {
+		align-self: center;
 	}
 
 	.tone--danger {

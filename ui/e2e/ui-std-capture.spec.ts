@@ -77,25 +77,25 @@ for (const width of [1440, 390]) {
 		}
 
 		await open(page, '/hosts');
-		await page.getByRole('table').getByRole('link').first().click();
+		await page.locator('main a.item__title, main a.row-link').first().click();
 		await page.getByRole('heading', { level: 1 }).waitFor();
 		await page.waitForTimeout(500);
 		await shot(page, 'host-page', width);
 
 		await open(page, '/repositories');
-		await page.getByRole('table').getByRole('link').first().click();
+		await page.locator('main a.item__title, main a.row-link').first().click();
 		await page.locator('#repository-name, #rp-name, form').first().waitFor();
 		await page.waitForTimeout(500);
 		await shot(page, 'repository-page', width);
 
 		await open(page, '/profiles');
-		await page.getByRole('table').getByRole('link').first().click();
+		await page.locator('main a.item__title, main a.row-link').first().click();
 		await page.locator('#profile-name').waitFor();
 		await page.waitForTimeout(300);
 		await shot(page, 'profile-page', width);
 
 		await open(page, '/jobs');
-		await page.getByRole('table').getByRole('link').first().click();
+		await page.locator('main a.item__title, main a.row-link').first().click();
 		await page.getByRole('heading', { level: 1 }).waitFor();
 		await page.waitForTimeout(500);
 		await shot(page, 'job-page', width);
@@ -110,28 +110,21 @@ for (const width of [1440, 390]) {
 		await shot(page, 'snapshot-page', width);
 
 		await open(page, '/alerts');
-		await page.getByRole('table').locator('button.row-link').first().click();
+		await page.locator('main button.item__title, main button.row-link').first().click();
 		await page.getByRole('dialog').waitFor();
 		await page.waitForTimeout(400);
 		await page.screenshot({ path: `${out}/alerts-detail-${width}.png` });
 		await page.keyboard.press('Escape');
 
 		await open(page, '/settings/access/api-tokens');
-		await page.getByRole('table').locator('button.row-link').first().click();
+		await page.locator('main button.item__title, main button.row-link').first().click();
 		await page.getByRole('dialog').waitFor();
 		await page.waitForTimeout(400);
 		await page.screenshot({ path: `${out}/settings-tokens-detail-${width}.png` });
 		await page.keyboard.press('Escape');
 
 		await open(page, '/jobs');
-		await page
-			.locator('.filter-bar')
-			.getByRole('button', { name: /^Статус/ })
-			.click();
-		await page.waitForTimeout(300);
-		await page.screenshot({ path: `${out}/jobs-status-facet-${width}.png` });
-		await page.locator('.rh-popover').getByText('Успешно', { exact: true }).first().click();
-		await page.keyboard.press('Escape');
+		await page.locator('.list-head .tab').filter({ hasText: 'Не выполнены' }).click();
 		await page.waitForTimeout(400);
 		await shot(page, 'jobs-filtered', width);
 

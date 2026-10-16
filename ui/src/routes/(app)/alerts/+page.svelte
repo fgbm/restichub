@@ -102,7 +102,7 @@
 	const facets = $derived<FilterFacet[]>([
 		{
 			key: 'kind',
-			label: t('alerts.kind'),
+			label: t('alerts.facet.kind'),
 			options: KINDS.map((value) => ({
 				value,
 				label: kindLabel(value)

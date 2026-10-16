@@ -2016,7 +2016,11 @@ export const en = {
 	'plans.status.violated': 'Backup overdue',
 	'plans.status.atRisk': 'At risk',
 	'plans.meta.lastBackup': 'backup {time}',
-	'plans.meta.noBackup': 'no backup yet'
+	'plans.meta.noBackup': 'no backup yet',
+	'hosts.facet.os': 'OS',
+	'hosts.facet.label': 'Label',
+	'hosts.facet.agent': 'Agent version',
+	'alerts.facet.kind': 'Kind'
 } as const;
 
 export type MessageKey = keyof typeof en;

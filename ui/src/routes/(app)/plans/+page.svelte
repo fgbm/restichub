@@ -9,7 +9,7 @@
 	import type { FilterFacet, ListMeta, RowAction } from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { describeCron } from '#lib/schedule.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -79,6 +79,11 @@
 			Boolean(filters.value.q || filters.value.host || filters.value.profile || filters.value.state)
 	);
 
+	// A field in the middle of line 2 starts with a lower-case letter.
+	function lowerFirst(text: string): string {
+		return text.charAt(0).toLocaleLowerCase(getLocale()) + text.slice(1);
+	}
+
 	function resetFilters(): void {
 		filters.update({ q: '', host: '', profile: '', state: '' });
 	}
@@ -87,7 +92,7 @@
 		return [
 			plan.agent_hostname,
 			plan.profile_name,
-			{ text: describeCron(plan.cron, t), title: `${plan.cron} · ${plan.time_zone}` }
+			{ text: lowerFirst(describeCron(plan.cron, t)), title: `${plan.cron} · ${plan.time_zone}` }
 		];
 	}
 

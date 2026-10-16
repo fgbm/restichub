@@ -45,7 +45,7 @@ test('the plans screen creates and deletes a plan', async ({ page }) => {
 	await expect(page.getByRole('heading', { level: 1, name: 'Plans' })).toBeVisible();
 	await expect(page.getByText('nightly-web')).toBeVisible();
 	// Line 2 shows the schedule as a phrase; the cron expression is in its tooltip.
-	await expect(page.getByText('Every day at 02:00')).toHaveAttribute(
+	await expect(page.getByText('every day at 02:00')).toHaveAttribute(
 		'title',
 		'0 2 * * * · Europe/Berlin'
 	);

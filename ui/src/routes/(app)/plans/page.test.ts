@@ -93,7 +93,7 @@ describe('the Plans screen', () => {
 		expect(screen.getByText('win-fs01')).toBeInTheDocument();
 		expect(screen.getByText('web-daily')).toBeInTheDocument();
 		// The schedule shows the phrase; the cron expression and the zone are in its tooltip.
-		expect(screen.getByText('Every day at 02:00')).toHaveAttribute(
+		expect(screen.getByText('every day at 02:00')).toHaveAttribute(
 			'title',
 			'0 2 * * * · Europe/Berlin'
 		);
