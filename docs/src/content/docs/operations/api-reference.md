@@ -79,6 +79,8 @@ An error response uses the media type of RFC 9457. The body holds these fields:
 
 A list route returns `items` and `next_cursor`. To read the next page, send the value of `next_cursor` as the parameter `cursor`. The parameter `limit` sets the page size.
 
+The lists of hosts, jobs, alerts and audit records also read a numbered page. Send the parameter `offset` with the number of records to skip. The answer then has `total`, the number of records that agree with the filters. The control plane counts at most 10000 records. If more records agree, `total_capped` is `true`. An `offset` above 10000 gives HTTP 400 `invalid_argument` with the field `offset` and the reason `out_of_range`. Do not send `cursor` and `offset` together.
+
 ```sh
 curl -s "https://<control-plane>/api/v1/plans?limit=50" \
   -H "Authorization: Bearer rh_<token>"

@@ -27,6 +27,8 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 11. Each applied filter shows as a chip with a × button. The Reset button removes all filters. A filter applies at once. The page context, for example the repository, is in the page header and not in the list header. A large list filters and pages on the server (ADR-0009).
 12. A list has no bulk selection.
 13. Use a column table (`DataTable`) only for tabular data: file trees, parameters, numbers and comparisons. A table has the same rules for row actions, links and width as a list.
+14. Each list uses the standard pages of `DataTable`: the page numbers, the text "Showing X to Y of Z" and the page size. A list that can become large pages on the server. A small list loads all its items and pages in the browser. Do not add a "Load more" button to a list.
+15. A file tree is not a list page. It can load more entries of one folder when the person asks for them. A short preview of a list, for example the recent jobs on a host page, does not page. It has a link to the full list.
 
 ## 3. Status and text
 

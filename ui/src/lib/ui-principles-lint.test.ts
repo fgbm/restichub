@@ -48,4 +48,19 @@ describe('ui-principles lint rules', () => {
 			{ code: '<p><a href={href}><span>Назад</span></a></p>', errors: [{ messageId: 'back' }] }
 		]
 	});
+
+	tester.run('no-load-more', rules['no-load-more'], {
+		valid: [
+			"<Button onclick={next}>{t('pagination.next')}</Button>",
+			"<p>{t('dashboard.more')}</p>"
+		],
+		invalid: [
+			{
+				code: "<Button onclick={loadMore}>{t('common.loadMore')}</Button>",
+				errors: [{ messageId: 'more' }]
+			},
+			{ code: "<button>{t('jobs.showMore')}</button>", errors: [{ messageId: 'more' }] },
+			{ code: '<button>Загрузить ещё</button>', errors: [{ messageId: 'more' }] }
+		]
+	});
 });

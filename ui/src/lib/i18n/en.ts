@@ -674,7 +674,6 @@ export const en = {
 	'jobs.started': 'Started',
 	'jobs.duration': 'Duration',
 	'jobs.created': 'Queued',
-	'jobs.loadMore': 'Load more',
 	'jobs.moreActions': 'More actions for the job {name}',
 	'jobs.cancel': 'Cancel job',
 	'jobs.cancelTitle': 'Cancel the job?',

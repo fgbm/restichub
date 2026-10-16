@@ -680,7 +680,6 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.started': 'Начало',
 	'jobs.duration': 'Длительность',
 	'jobs.created': 'Поставлено в очередь',
-	'jobs.loadMore': 'Показать ещё',
 	'jobs.moreActions': 'Действия с заданием {name}',
 	'jobs.cancel': 'Отменить задание',
 	'jobs.cancelTitle': 'Отменить задание?',

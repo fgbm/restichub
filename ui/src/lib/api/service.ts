@@ -39,7 +39,6 @@ import type {
 	EnrollmentToken,
 	ReplaceAgentResponse,
 	EnrollmentTokenCreated,
-	EnrollmentTokenListResponse,
 	Instance,
 	Job,
 	JobActionRequest,
@@ -59,7 +58,6 @@ import type {
 	MembershipInput,
 	NextRunsResponse,
 	Plan,
-	PlanListResponse,
 	PlanResponse,
 	PlatformUser,
 	PlatformUserListResponse,
@@ -67,7 +65,6 @@ import type {
 	PreviewResponse,
 	PreviewScheduleRequest,
 	Profile,
-	ProfileListResponse,
 	ProfileResponse,
 	RenameAgentRequest,
 	Repository,
@@ -89,7 +86,6 @@ import type {
 	Tenant,
 	TenantAccess,
 	TenantAccessListResponse,
-	TenantListResponse,
 	UpdateAccountRequest,
 	UpdateAlertRulesRequest,
 	UpdateChannelRequest,
@@ -259,6 +255,26 @@ export interface ApiService {
 	listPlatformAudit(query: AuditQuery): Promise<AuditPage>;
 }
 
+/** The largest page of a cursor list on the server. */
+const MAX_PAGE = 200;
+
+/**
+ * Reads every page of a cursor list. The screens of these lists filter and page on the client, so
+ * they need all rows, not the first page only (design/style/ui-principles.md, 2.14).
+ */
+async function allPages<T>(path: string): Promise<T[]> {
+	const items: T[] = [];
+	let cursor: string | undefined;
+	do {
+		const page = await api.get<{ items: T[]; next_cursor?: string | null }>(path, {
+			query: { limit: MAX_PAGE, cursor }
+		});
+		items.push(...page.items);
+		cursor = page.next_cursor ?? undefined;
+	} while (cursor);
+	return items;
+}
+
 const httpService: ApiService = {
 	signIn: (request) => api.post<Me>(endpoints.auth.signIn, request),
 	signOut: () => api.post<void>(endpoints.auth.signOut),
@@ -286,8 +302,7 @@ const httpService: ApiService = {
 	createToken: (request) => api.post<ApiTokenCreated>(endpoints.apiTokens.create, request),
 	revokeToken: (id) => api.delete<void>(endpoints.apiTokens.byId(id)),
 
-	listAgents: () =>
-		api.get<AgentListResponse>(endpoints.agents.list).then((response) => response.items),
+	listAgents: () => allPages<Agent>(endpoints.agents.list),
 	searchAgents: (query) =>
 		api.get<AgentListResponse>(endpoints.agents.list, {
 			query: { ...query, facets: query.facets ? 'true' : undefined }
@@ -300,10 +315,7 @@ const httpService: ApiService = {
 	replaceAgent: (id, oldAgentId) =>
 		api.post<ReplaceAgentResponse>(endpoints.agents.replace(id), { old_agent_id: oldAgentId }),
 
-	listEnrollmentTokens: () =>
-		api
-			.get<EnrollmentTokenListResponse>(endpoints.enrollmentTokens.list)
-			.then((response) => response.items),
+	listEnrollmentTokens: () => allPages<EnrollmentToken>(endpoints.enrollmentTokens.list),
 	createEnrollmentToken: (request) =>
 		api.post<EnrollmentTokenCreated>(endpoints.enrollmentTokens.create, request),
 	revokeEnrollmentToken: (id) => api.delete<void>(endpoints.enrollmentTokens.byId(id)),
@@ -344,8 +356,7 @@ const httpService: ApiService = {
 		}),
 	cancelJob: (id) => api.post<Job>(endpoints.jobs.cancel(id)),
 
-	listProfiles: () =>
-		api.get<ProfileListResponse>(endpoints.profiles.list).then((response) => response.items),
+	listProfiles: () => allPages<Profile>(endpoints.profiles.list),
 	getJobLimitDefaults: () => api.get<JobLimitDefaults>(endpoints.profiles.defaults),
 	createProfile: (request) => api.post<ProfileResponse>(endpoints.profiles.create, request),
 	updateProfile: (id, request) => api.patch<ProfileResponse>(endpoints.profiles.byId(id), request),
@@ -355,8 +366,7 @@ const httpService: ApiService = {
 			agent_id: agentId
 		} satisfies PreviewRequest),
 
-	listPlans: () =>
-		api.get<PlanListResponse>(endpoints.plans.list).then((response) => response.items),
+	listPlans: () => allPages<Plan>(endpoints.plans.list),
 	createPlan: (request) => api.post<PlanResponse>(endpoints.plans.create, request),
 	updatePlan: (id, request) => api.patch<PlanResponse>(endpoints.plans.byId(id), request),
 	deletePlan: (id) => api.delete<void>(endpoints.plans.byId(id)),
@@ -388,8 +398,7 @@ const httpService: ApiService = {
 		api.patch<JobTemplate>(endpoints.jobTemplates.byId(id), request),
 	deleteJobTemplate: (id) => api.delete<void>(endpoints.jobTemplates.byId(id)),
 
-	listTenants: () =>
-		api.get<TenantListResponse>(endpoints.platform.tenants).then((response) => response.items),
+	listTenants: () => allPages<Tenant>(endpoints.platform.tenants),
 	createTenant: (request) => api.post<Tenant>(endpoints.platform.createTenant, request),
 	suspendTenant: (id) => api.post<void>(endpoints.platform.suspendTenant(id)),
 	resumeTenant: (id) => api.post<void>(endpoints.platform.resumeTenant(id)),

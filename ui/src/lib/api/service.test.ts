@@ -40,6 +40,20 @@ describe('the HTTP service (issue #20 tenants)', () => {
 		expect(fetchFn.mock.calls[0][0]).toContain('/api/v1/platform/tenants');
 	});
 
+	it('reads every page of a cursor list for a screen that pages on the client', async () => {
+		const fetchFn = vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse({ items: [{ id: 'p1' }], next_cursor: 'c1' }))
+			.mockResolvedValueOnce(jsonResponse({ items: [{ id: 'p2' }], next_cursor: null }));
+		const service = await loadService(fetchFn);
+
+		expect(await service.listPlans()).toEqual([{ id: 'p1' }, { id: 'p2' }]);
+		expect(fetchFn).toHaveBeenCalledTimes(2);
+		expect(fetchFn.mock.calls[0][0]).toContain('limit=200');
+		expect(fetchFn.mock.calls[0][0]).not.toContain('cursor=');
+		expect(fetchFn.mock.calls[1][0]).toContain('cursor=c1');
+	});
+
 	it('posts the create-tenant body and returns the tenant', async () => {
 		const tenant = {
 			id: 't_02',
