@@ -2071,7 +2071,17 @@ export const en = {
 	'users.changeRole': 'Change role',
 	'users.changeRoleTitle': 'Change the role',
 	'users.roleChanged': 'The role is changed.',
-	'users.emptyTitle': 'No users yet'
+	'users.emptyTitle': 'No users yet',
+	'tenants.tab.active': 'Active',
+	'tenants.tab.suspended': 'Suspended',
+	'tenants.tab.deleted': 'Deleted',
+	'tenants.sort.name': 'Name',
+	'tenants.meta.created': 'created {date}',
+	'tenants.emptyTitle': 'No organizations yet',
+	'tenants.userCount.one': '{n} user',
+	'tenants.userCount.few': '{n} users',
+	'tenants.userCount.many': '{n} users',
+	'tenants.userCount.other': '{n} users'
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -2082,5 +2082,15 @@ export const ru: Record<MessageKey, string> = {
 	'users.changeRole': 'Изменить роль',
 	'users.changeRoleTitle': 'Изменить роль',
 	'users.roleChanged': 'Роль изменена.',
-	'users.emptyTitle': 'Пользователей пока нет'
+	'users.emptyTitle': 'Пользователей пока нет',
+	'tenants.tab.active': 'Активные',
+	'tenants.tab.suspended': 'Приостановлены',
+	'tenants.tab.deleted': 'Удалены',
+	'tenants.sort.name': 'Имя',
+	'tenants.meta.created': 'создана {date}',
+	'tenants.emptyTitle': 'Организаций пока нет',
+	'tenants.userCount.one': 'пользователей: {n}',
+	'tenants.userCount.few': 'пользователей: {n}',
+	'tenants.userCount.many': 'пользователей: {n}',
+	'tenants.userCount.other': 'пользователей: {n}'
 };

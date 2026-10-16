@@ -6,13 +6,17 @@
 	import {
 		Alert,
 		Button,
-		DataTable,
 		Dialog,
 		FilterBar,
+		KeyValue,
+		ListView,
+		SidePanel,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, RowAction, TableColumn } from '#lib/components/ui/index.ts';
+	import type { KeyValueItem, ListMeta, RowAction } from '#lib/components/ui/index.ts';
 	import { matchesSearch } from '#lib/filters.ts';
+	import { plural } from '#lib/list-format.ts';
+	import { iconOf, pillOf, tenantState } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -47,61 +51,78 @@
 		return t('common.deleted');
 	}
 
-	function statusBadge(status: Tenant['status']): 'success' | 'warning' | 'neutral' {
-		if (status === 'active') return 'success';
-		if (status === 'suspended') return 'warning';
-		return 'neutral';
+	const filters = queryFilters(['q', 'status', 'sort', 'order'] as const);
+
+	const matching = $derived(
+		tenants.filter((tenant) => matchesSearch(filters.value.q, [tenant.name]))
+	);
+	const deletedCount = $derived(matching.filter((tenant) => tenant.status === 'deleted').length);
+
+	const states = $derived({
+		key: 'status',
+		default: 'active',
+		options: [
+			...(['active', 'suspended'] as const).map((value) => ({
+				value,
+				label: t(value === 'active' ? 'tenants.tab.active' : 'tenants.tab.suspended'),
+				count: matching.filter((tenant) => tenant.status === value).length
+			})),
+			...(deletedCount > 0 || filters.value.status === 'deleted'
+				? [{ value: 'deleted', label: t('tenants.tab.deleted'), count: deletedCount }]
+				: [])
+		]
+	});
+
+	const sort = $derived({
+		default: 'name',
+		options: [{ value: 'name', label: t('tenants.sort.name') }]
+	});
+
+	const shown = $derived.by(() => {
+		const status = filters.value.status || 'active';
+		const factor = filters.value.order === 'desc' ? -1 : 1;
+		return matching
+			.filter((tenant) => tenant.status === status)
+			.sort((a, b) => factor * a.name.localeCompare(b.name));
+	});
+
+	function resetFilters(): void {
+		filters.update({ q: '', status: '' });
 	}
 
-	const columns = $derived<TableColumn<Tenant>[]>([
-		{ key: 'name', header: t('tenants.name'), mono: true, truncate: 'md' },
-		{
-			key: 'status',
-			header: t('common.status'),
-			cell: (row) => statusLabel(row.status),
-			badge: (row) => statusBadge(row.status)
-		},
-		{
-			key: 'user_count',
-			header: t('tenants.users'),
-			align: 'right',
-			cell: (row) => String(row.user_count)
-		},
-		{
-			key: 'admin_state',
-			header: t('users.role.admin'),
-			cell: (row) => (row.admin_state === 'none' ? t('tenants.noAdministrator') : ''),
-			badge: (row) => (row.admin_state === 'none' ? 'warning' : null)
-		},
-		{
-			key: 'created_at',
-			header: t('common.createdAt'),
-			nowrap: true,
-			cell: (row) => formatDate(row.created_at)
-		}
-	]);
+	function meta(tenant: Tenant): ListMeta[] {
+		return [
+			plural('tenants.userCount', tenant.user_count),
+			{
+				text: t('tenants.meta.created', {
+					date: new Date(tenant.created_at).toLocaleDateString(getLocale())
+				}),
+				time: tenant.created_at
+			}
+		];
+	}
 
-	const filters = queryFilters(['q', 'status'] as const);
+	let detail = $state<Tenant | null>(null);
+	let detailOpen = $state(false);
 
-	const facets = $derived<FilterFacet[]>([
-		{
-			key: 'status',
-			label: t('common.status'),
-			multiple: false,
-			options: (['active', 'suspended', 'deleted'] as const).map((value) => ({
-				value,
-				label: statusLabel(value),
-				count: tenants.filter((tenant) => tenant.status === value).length
-			}))
-		}
-	]);
+	function openDetail(tenant: Tenant): void {
+		detail = tenant;
+		detailOpen = true;
+	}
 
-	const shown = $derived(
-		tenants.filter((tenant) => {
-			const { q, status } = filters.value;
-			if (status && tenant.status !== status) return false;
-			return matchesSearch(q, [tenant.name]);
-		})
+	const detailItems = $derived<KeyValueItem[]>(
+		detail
+			? [
+					{ key: 'status', label: t('common.status'), value: statusLabel(detail.status) },
+					{ key: 'users', label: t('tenants.users'), value: String(detail.user_count) },
+					{
+						key: 'admin',
+						label: t('users.role.admin'),
+						value: detail.admin_state === 'none' ? t('tenants.noAdministrator') : t('common.yes')
+					},
+					{ key: 'created', label: t('common.createdAt'), value: formatDate(detail.created_at) }
+				]
+			: []
 	);
 
 	function rowActions(tenant: Tenant): RowAction[] {
@@ -110,7 +131,7 @@
 			{
 				id: 'status',
 				label: tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume'),
-				icon: tenant.status === 'active' ? 'pause' : 'refresh',
+				icon: tenant.status === 'active' ? 'pause' : 'play',
 				disabled: busyId === tenant.id,
 				onSelect: () => toggleStatus(tenant)
 			},
@@ -219,27 +240,40 @@
 		<Button variant="primary" icon="plus" onclick={openCreate}>{t('tenants.create')}</Button>
 	{/snippet}
 
-	<DataTable
-		{columns}
-		rows={shown}
-		{loading}
-		{error}
-		rowKey={(tenant) => tenant.id}
-		detailTitle={(tenant) => tenant.name}
+	<ListView
+		label={t('tenants.title')}
+		items={shown}
+		itemKey={(tenant) => tenant.id}
+		icon={(tenant) => iconOf(tenantState(tenant))}
+		pill={(tenant) => pillOf(tenantState(tenant))}
+		title={(tenant) => tenant.name}
+		onOpen={openDetail}
+		{meta}
 		actions={rowActions}
 		moreLabel={(tenant) => t('tenants.moreActions', { name: tenant.name })}
+		{loading}
+		{error}
+		filtered={tenants.length > 0}
+		onReset={resetFilters}
+		emptyIcon="building-2"
+		emptyTitle={t('tenants.emptyTitle')}
 	>
 		{#snippet toolbar()}
 			<FilterBar
 				label={t('tenants.filters')}
 				value={filters.value}
 				search={{ key: 'q', label: t('hosts.search'), placeholder: t('tenants.searchPlaceholder') }}
-				{facets}
+				{states}
+				{sort}
 				onchange={filters.update}
-				onreset={filters.reset}
+				onreset={resetFilters}
 			/>
 		{/snippet}
-	</DataTable>
+	</ListView>
+
+	<SidePanel bind:open={detailOpen} title={detail?.name ?? ''}>
+		<KeyValue items={detailItems} stacked />
+	</SidePanel>
 </Page>
 
 <Dialog bind:open={createOpen} title={t('tenants.createTitle')} onsubmit={createTenant}>
