@@ -18,6 +18,7 @@ pub mod agents;
 pub mod alerts;
 pub mod api_tokens;
 pub mod audit;
+mod audit_list;
 pub mod auth;
 pub mod ca;
 pub mod channels;

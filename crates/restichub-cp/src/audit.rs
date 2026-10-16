@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
-use crate::list_query::{ApiQuery, check_window};
+use crate::list_query::{ApiQuery, check_window, parse_search};
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -72,6 +72,11 @@ pub struct AuditItem {
     pub action: AuditAction,
     pub object_type: String,
     pub object_id: Option<String>,
+    /// The current name of the object. Null for a removed object, an object without a name and,
+    /// in the platform list, an object inside an organization.
+    pub object_name: Option<String>,
+    /// The current name of a user, an API token or an agent actor, with the same rule.
+    pub actor_name: Option<String>,
     #[schema(value_type = Option<Object>)]
     pub diff: Option<Value>,
 }
@@ -88,6 +93,8 @@ impl From<&AuditRecord> for AuditItem {
             action: record.action.clone(),
             object_type: record.object_type.clone(),
             object_id: record.object_id.map(|id| id.to_string()),
+            object_name: record.object_name.clone(),
+            actor_name: record.actor_name.clone(),
             diff: record.diff.clone(),
         }
     }
@@ -119,6 +126,9 @@ pub struct AuditQuery {
     pub object_id: Option<String>,
     /// Used by the platform list.
     pub tenant_id: Option<String>,
+    /// A part of the action code, the object name or the actor name, in any case; at most 200
+    /// characters.
+    pub q: Option<String>,
     /// Not with `offset`.
     pub cursor: Option<String>,
     /// Skipped records, in `0..=10000`. Not with `cursor`.
@@ -168,6 +178,7 @@ impl AuditQuery {
                 .transpose()
                 .map_err(invalid_query)?
                 .map(restichub_db::TenantId::from_uuid),
+            search: parse_search(self.q.as_deref())?,
         })
     }
 
