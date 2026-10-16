@@ -195,6 +195,28 @@ jobs:
           out="$(file "target/${{ matrix.target }}/release/restichub-agent")"
           echo "$out"
           echo "$out" | grep -Eq 'statically linked|static-pie linked' || { echo "::error::the Linux agent is not static"; exit 1; }
+      # The runner of each platform runs the binary that it built. A binary that starts and
+      # prints nothing fails the release.
+      - name: Run the binary
+        shell: bash
+        env:
+          BIN: target/${{ matrix.target }}/release/${{ matrix.binary }}
+          REVISION: ${{ needs.version.outputs.revision }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -uo pipefail
+          expected="restichub-agent ${RELEASE_VERSION}+${REVISION} (protocol "
+          for arg in --version version; do
+            out="$("$BIN" "$arg")"; code=$?
+            printf 'exit code %s (0x%X)\n%s\n' "$code" "$code" "$out"
+            if [ "$code" -ne 0 ] || [ "${out#"$expected"}" = "$out" ]; then
+              echo "::error::'$arg' did not print '$expected...' with exit code 0"; exit 1
+            fi
+          done
+          out="$("$BIN" --help)"; code=$?
+          if [ "$code" -ne 0 ] || [ -z "$out" ]; then
+            echo "::error::--help printed nothing or failed with exit code $code"; exit 1
+          fi
       - name: Assemble the package
         shell: bash
         env:
