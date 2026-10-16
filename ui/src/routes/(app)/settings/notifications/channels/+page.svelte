@@ -16,20 +16,15 @@
 		Checkbox,
 		CopyField,
 		Dialog,
-		EmptyState,
 		Field,
-		DataTable,
 		FilterBar,
+		ListView,
 		Select,
-		StatusPill,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type {
-		FilterFacet,
-		RowAction,
-		SelectOption,
-		TableColumn
-	} from '#lib/components/ui/index.ts';
+	import type { FilterFacet, ListMeta, RowAction, SelectOption } from '#lib/components/ui/index.ts';
+	import { changedAt } from '#lib/list-format.ts';
+	import { channelState, iconOf, pillOf } from '#lib/vocabulary.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tChannelError, tErrorCode } from '#lib/i18n/index.ts';
@@ -66,25 +61,7 @@
 		{ value: 'webhook', label: t('channels.kind.webhook') }
 	]);
 
-	const columns = $derived<TableColumn<NotificationChannel>[]>([
-		{ key: 'name', header: t('channels.name'), truncate: 'sm' },
-		{
-			key: 'kind',
-			header: t('channels.kind'),
-			cell: (row) => t(`channels.kind.${row.kind}` as MessageKey),
-			badge: () => 'neutral'
-		},
-		{ key: 'target', header: t('channels.target'), truncate: 'lg', value: targetOf },
-		{
-			key: 'enabled',
-			header: t('common.status'),
-			value: (row) => (row.enabled ? t('common.enabled') : t('common.disabled')),
-			render: stateCell
-		},
-		{ key: 'created_at', header: t('common.createdAt'), date: 'relative' }
-	]);
-
-	const filters = queryFilters(['q', 'kind'] as const);
+	const filters = queryFilters(['q', 'kind', 'state', 'sort', 'order'] as const);
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -97,13 +74,63 @@
 		}
 	]);
 
-	const shown = $derived(
+	const matching = $derived(
 		channels.filter((channel) => {
 			const { q, kind } = filters.value;
 			if (kind && !splitList(kind).includes(channel.kind)) return false;
 			return matchesSearch(q, [channel.name, targetOf(channel)]);
 		})
 	);
+
+	const states = $derived({
+		default: 'all',
+		options: [
+			{ value: 'all', label: t('channels.tab.all'), count: matching.length },
+			{
+				value: 'disabled',
+				label: t('channels.tab.disabled'),
+				count: matching.filter((channel) => !channel.enabled).length
+			}
+		]
+	});
+
+	const sort = $derived({
+		default: 'name',
+		options: [{ value: 'name', label: t('channels.sort.name') }]
+	});
+
+	const shown = $derived.by(() => {
+		const list = matching.filter(
+			(channel) => filters.value.state !== 'disabled' || !channel.enabled
+		);
+		const factor = filters.value.order === 'desc' ? -1 : 1;
+		return [...list].sort((a, b) => factor * a.name.localeCompare(b.name));
+	});
+
+	const filtered = $derived(
+		channels.length > 0 && Boolean(filters.value.q || filters.value.kind || filters.value.state)
+	);
+
+	function resetFilters(): void {
+		filters.update({ q: '', kind: '', state: '' });
+	}
+
+	function meta(channel: NotificationChannel): ListMeta[] {
+		const target =
+			channel.kind === 'email'
+				? channel.recipients.length > 1
+					? `${channel.recipients[0]} +${channel.recipients.length - 1}`
+					: (channel.recipients[0] ?? '')
+				: { text: channel.url_origin ?? '', mono: true };
+		return [
+			t(`channels.kind.${channel.kind}` as MessageKey),
+			target,
+			{
+				text: t('list.changed', { time: changedAt(channel.updated_at) }),
+				time: channel.updated_at
+			}
+		];
+	}
 
 	function targetOf(channel: NotificationChannel): string {
 		return channel.kind === 'email' ? channel.recipients.join(', ') : (channel.url_origin ?? '');
@@ -263,35 +290,42 @@
 		}
 	}
 
+	async function toggle(channel: NotificationChannel): Promise<void> {
+		try {
+			await service.updateChannel(channel.id, { enabled: !channel.enabled });
+			pushToast('success', t(channel.enabled ? 'channels.disabledToast' : 'channels.enabledToast'));
+			await load();
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		}
+	}
+
+	function openDelete(): void {
+		if (!editing) return;
+		deleteTarget = editing;
+		formOpen = false;
+		deleteOpen = true;
+	}
+
+	// Delete is in the channel form, so an item keeps two actions.
 	function actionsFor(channel: NotificationChannel): RowAction[] {
 		return [
 			{
 				id: 'test',
 				label: t('channels.test'),
-				icon: 'mail',
+				icon: 'send',
+				disabled: !channel.enabled,
 				onSelect: () => void sendTest(channel)
 			},
 			{
-				id: 'delete',
-				label: t('channels.delete'),
-				icon: 'octagon',
-				danger: true,
-				onSelect: () => {
-					deleteTarget = channel;
-					deleteOpen = true;
-				}
+				id: 'toggle',
+				label: t(channel.enabled ? 'channels.disable' : 'channels.enable'),
+				icon: 'power',
+				onSelect: () => void toggle(channel)
 			}
 		];
 	}
-
-	const empty = $derived(!loading && !error && channels.length === 0);
 </script>
-
-{#snippet stateCell(channel: NotificationChannel)}
-	<StatusPill tone={channel.enabled ? 'success' : 'neutral'}>
-		{channel.enabled ? t('common.enabled') : t('common.disabled')}
-	</StatusPill>
-{/snippet}
 
 <SettingsLayout
 	title={t('channels.title')}
@@ -306,45 +340,48 @@
 		<Alert tone="attention" icon="mail" title={t('channels.emailNotConfigured')} />
 	{/if}
 
-	{#if empty}
-		<EmptyState
-			icon="mail"
-			title={t('channels.emptyTitle')}
-			description={t('channels.emptyDescription')}
-			bordered
-		>
-			<Button variant="primary" icon="plus" onclick={openCreate}>{t('channels.addFirst')}</Button>
-		</EmptyState>
-	{:else}
-		<!-- A channel has no record page: the row opens its form (design/style/ui-principles.md, 2.2). -->
-		<DataTable
-			{columns}
-			rows={shown}
-			{loading}
-			{error}
-			rowKey={(channel) => channel.id}
-			onRowOpen={openEdit}
-			actions={actionsFor}
-			moreLabel={(channel) => t('channels.moreActions', { name: channel.name })}
-			emptyTitle={t('filter.noMatches')}
-			emptyDescription={t('filter.noMatchesDescription')}
-		>
-			{#snippet toolbar()}
-				<FilterBar
-					label={t('channels.filters')}
-					value={filters.value}
-					search={{
-						key: 'q',
-						label: t('hosts.search'),
-						placeholder: t('channels.searchPlaceholder')
-					}}
-					{facets}
-					onchange={filters.update}
-					onreset={filters.reset}
-				/>
-			{/snippet}
-		</DataTable>
+	<!-- A channel has no record page: the name opens its form (design/style/ui-principles.md, 2.4). -->
+	<ListView
+		label={t('channels.title')}
+		items={shown}
+		itemKey={(channel) => channel.id}
+		icon={(channel) => iconOf(channelState(channel))}
+		pill={(channel) => pillOf(channelState(channel))}
+		title={(channel) => channel.name}
+		onOpen={openEdit}
+		{meta}
+		actions={actionsFor}
+		moreLabel={(channel) => t('channels.moreActions', { name: channel.name })}
+		{loading}
+		{error}
+		{filtered}
+		onReset={resetFilters}
+		emptyIcon="mail"
+		emptyTitle={t('channels.emptyTitle')}
+		emptyDescription={t('channels.emptyDescription')}
+	>
+		{#snippet emptyActions()}
+			<Button variant="primary" onclick={openCreate}>{t('channels.addFirst')}</Button>
+		{/snippet}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('channels.filters')}
+				value={filters.value}
+				search={{
+					key: 'q',
+					label: t('hosts.search'),
+					placeholder: t('channels.searchPlaceholder')
+				}}
+				{states}
+				{facets}
+				{sort}
+				onchange={filters.update}
+				onreset={resetFilters}
+			/>
+		{/snippet}
+	</ListView>
 
+	{#if channels.length > 0}
 		<a
 			class="manage-secrets"
 			href={resolve('/(app)/settings/access/secrets')}
@@ -414,6 +451,11 @@
 	{/if}
 	<Checkbox label={t('channels.enabled')} bind:checked={enabled} />
 	{#snippet footer()}
+		{#if editing}
+			<span class="footer__start">
+				<Button variant="danger" icon="trash" onclick={openDelete}>{t('channels.delete')}</Button>
+			</span>
+		{/if}
 		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
 		<Button type="submit" variant="primary" loading={saving} disabled={!name}>
 			{t('common.save')}
@@ -449,6 +491,10 @@
 </Dialog>
 
 <style>
+	.footer__start {
+		margin-right: auto;
+	}
+
 	.manage-secrets {
 		align-self: flex-start;
 		font-size: var(--rh-font-size-sm);

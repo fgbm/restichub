@@ -90,12 +90,16 @@ test('an Admin adds an email channel and a webhook, tests one and deletes one', 
 	await expect(page.getByText('whsec_mock_9f3a1c7d5b2e4a60')).toHaveCount(0);
 
 	// The test button reports the result.
-	const hook = page.getByRole('row', { name: /team-hook/ });
+	const hook = page.locator('li.item').filter({ hasText: 'team-hook' });
 	await hook.getByRole('button', { name: 'Send test' }).click();
 	await expect(page.getByText('The test message is sent.')).toBeVisible();
 
-	// Delete a channel.
-	await hook.getByRole('button', { name: 'Delete channel' }).click();
+	// Delete a channel from its form: the item keeps two actions.
+	await hook.getByRole('button', { name: 'team-hook' }).click();
+	await page
+		.getByRole('dialog', { name: 'Edit the channel' })
+		.getByRole('button', { name: 'Delete channel' })
+		.click();
 	await page
 		.getByRole('dialog', { name: 'Delete the channel?' })
 		.getByRole('button', { name: 'Delete channel' })

@@ -22,6 +22,19 @@ describe('ui-principles lint rules', () => {
 		]
 	});
 
+	tester.run('no-entity-table', rules['no-entity-table'], {
+		valid: [
+			'<DataTable {columns} {rows} {rowKey} />',
+			'<DataTable {columns} {rows} {rowKey} actions={remove} />',
+			'<ListView {items} {itemKey} href={hrefOf} />'
+		],
+		invalid: [
+			{ code: '<DataTable {columns} rowHref={hrefOf} />', errors: [{ messageId: 'entity' }] },
+			{ code: '<DataTable {columns} onRowOpen={open} />', errors: [{ messageId: 'entity' }] },
+			{ code: '<DataTable {columns} {detailTitle} />', errors: [{ messageId: 'entity' }] }
+		]
+	});
+
 	tester.run('no-row-actions-snippet', rules['no-row-actions-snippet'], {
 		valid: ['<DataTable actions={rowActionsOf} />'],
 		invalid: [

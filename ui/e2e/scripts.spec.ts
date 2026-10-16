@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { chooseTab } from './filters';
 
 // Server scripts: the Scripts section of the profile form, the script templates, the trust mode
 // of the hosts and the log of each step of a job (FR-HK-08 to FR-HK-12, ADR-0037).
@@ -88,11 +89,13 @@ test('the script templates screen opens a built-in template read-only and copies
 	await openSample(page, 'Settings');
 	await page.getByRole('link', { name: 'Script templates' }).click();
 	await expect(page.getByRole('heading', { level: 1, name: 'Script templates' })).toBeVisible();
-	await expect(page.getByText('PostgreSQL dump with pg_dump (Linux)')).toBeVisible();
+	// The own templates open first; the built-in ones are on their tab.
 	await expect(page.getByText('Remove old dumps')).toBeVisible();
+	await chooseTab(page, 'Built-in');
+	await expect(page.getByText('PostgreSQL dump with pg_dump (Linux)')).toBeVisible();
 
 	await page
-		.getByRole('row')
+		.locator('li.item')
 		.filter({ hasText: 'PostgreSQL dump with pg_dump (Linux)' })
 		.getByRole('button', { name: 'Make a copy' })
 		.click();
@@ -103,18 +106,19 @@ test('the script templates screen opens a built-in template read-only and copies
 	await dialog.getByLabel(/^Template/).fill('Database dump');
 	await dialog.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The template is created.')).toBeVisible();
-	await expect(page.getByText('Database dump', { exact: true })).toBeVisible();
 
 	// A built-in template cannot be deleted.
 	await expect(
 		page
-			.getByRole('row')
+			.locator('li.item')
 			.filter({ hasText: 'PostgreSQL dump with pg_dump (Linux)' })
 			.getByRole('button', { name: 'Delete' })
 	).toHaveCount(0);
 
+	await chooseTab(page, 'Own');
+	await expect(page.getByText('Database dump', { exact: true })).toBeVisible();
 	await page
-		.getByRole('row')
+		.locator('li.item')
 		.filter({ hasText: 'Database dump' })
 		.getByRole('button', { name: 'Delete' })
 		.click();

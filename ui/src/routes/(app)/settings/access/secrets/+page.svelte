@@ -8,18 +8,25 @@
 		Alert,
 		Button,
 		Dialog,
-		DataTable,
 		FilterBar,
+		KeyValue,
+		ListView,
 		PasswordField,
 		Select,
+		SidePanel,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type {
 		FilterFacet,
+		KeyValueItem,
+		ListMeta,
 		RowAction,
-		SelectOption,
-		TableColumn
+		SelectOption
 	} from '#lib/components/ui/index.ts';
+	import type { SecretUsageKind } from '#lib/api/index.ts';
+	import { formatTime } from '#lib/format.ts';
+	import { changedAt, plural } from '#lib/list-format.ts';
+	import { iconOf, pillOf, secretState } from '#lib/vocabulary.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -70,34 +77,7 @@
 		return key ? t(key) : purpose;
 	}
 
-	const columns = $derived<TableColumn<Secret>[]>([
-		{ key: 'name', header: t('secrets.name'), truncate: 'md' },
-		{
-			key: 'purpose',
-			header: t('secrets.purpose'),
-			nowrap: true,
-			value: (row) => purposeLabel(row.purpose)
-		},
-		{
-			key: 'used_by',
-			header: t('secrets.usedBy'),
-			truncate: 'md',
-			value: (row) =>
-				row.used_by.length === 0
-					? t('secrets.unused')
-					: row.used_by.map((usage) => `${t(USAGE_KEYS[usage.kind])} ${usage.name}`).join(', ')
-		},
-		{ key: 'created_at', header: t('common.createdAt'), date: 'relative' },
-		{
-			key: 'updated_at',
-			header: t('secrets.replacedAt'),
-			date: 'relative',
-			value: (row) => (wasReplaced(row) ? row.updated_at : ''),
-			cell: () => t('common.never')
-		}
-	]);
-
-	const filters = queryFilters(['q', 'purpose'] as const);
+	const filters = queryFilters(['q', 'purpose', 'state', 'sort', 'order'] as const);
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -110,12 +90,105 @@
 		}
 	]);
 
-	const shown = $derived(
+	const matching = $derived(
 		secrets.filter((secret) => {
 			const { q, purpose } = filters.value;
 			if (purpose && !splitList(purpose).includes(secret.purpose)) return false;
 			return matchesSearch(q, [secret.name, ...secret.used_by.map((usage) => usage.name)]);
 		})
+	);
+
+	const states = $derived({
+		default: 'all',
+		options: [
+			{ value: 'all', label: t('secrets.tab.all'), count: matching.length },
+			{
+				value: 'unused',
+				label: t('secrets.tab.unused'),
+				count: matching.filter((secret) => secret.used_by.length === 0).length
+			}
+		]
+	});
+
+	const sort = $derived({
+		default: 'name',
+		options: [{ value: 'name', label: t('secrets.sort.name') }]
+	});
+
+	const shown = $derived.by(() => {
+		const list = matching.filter(
+			(secret) => filters.value.state !== 'unused' || secret.used_by.length === 0
+		);
+		const factor = filters.value.order === 'desc' ? -1 : 1;
+		return [...list].sort((a, b) => factor * a.name.localeCompare(b.name));
+	});
+
+	const filtered = $derived(
+		secrets.length > 0 && Boolean(filters.value.q || filters.value.purpose || filters.value.state)
+	);
+
+	function resetFilters(): void {
+		filters.update({ q: '', purpose: '', state: '' });
+	}
+
+	const USAGE_COUNTS: Record<SecretUsageKind, string> = {
+		repository: 'secrets.count.repository',
+		profile: 'secrets.count.profile',
+		channel: 'secrets.count.channel',
+		job_template: 'secrets.count.jobTemplate'
+	};
+
+	// The users by kind, without links: the details panel links each one.
+	function usageText(secret: Secret): string {
+		if (secret.used_by.length === 0) return t('secrets.meta.unused');
+		const counts: Partial<Record<SecretUsageKind, number>> = {};
+		for (const usage of secret.used_by) counts[usage.kind] = (counts[usage.kind] ?? 0) + 1;
+		const parts = (Object.keys(USAGE_COUNTS) as SecretUsageKind[])
+			.filter((kind) => counts[kind])
+			.map((kind) => plural(USAGE_COUNTS[kind], counts[kind] ?? 0));
+		return t('secrets.meta.used', { list: parts.join(', ') });
+	}
+
+	function meta(secret: Secret): ListMeta[] {
+		const at = wasReplaced(secret) ? secret.updated_at : secret.created_at;
+		return [
+			purposeLabel(secret.purpose),
+			usageText(secret),
+			{
+				text: t(wasReplaced(secret) ? 'secrets.meta.replaced' : 'secrets.meta.created', {
+					time: changedAt(at)
+				}),
+				time: at
+			}
+		];
+	}
+
+	let detail = $state<Secret | null>(null);
+	let detailOpen = $state(false);
+
+	function openDetail(secret: Secret): void {
+		detail = secret;
+		detailOpen = true;
+	}
+
+	const detailItems = $derived<KeyValueItem[]>(
+		detail
+			? [
+					{ key: 'purpose', label: t('secrets.purpose'), value: purposeLabel(detail.purpose) },
+					{
+						key: 'used',
+						label: t('secrets.usedBy'),
+						value: detail.used_by.length === 0 ? t('secrets.unused') : '',
+						render: detail.used_by.length > 0 ? detailUsers : undefined
+					},
+					{ key: 'created', label: t('common.createdAt'), value: formatTime(detail.created_at) },
+					{
+						key: 'replaced',
+						label: t('secrets.replacedAt'),
+						value: wasReplaced(detail) ? formatTime(detail.updated_at) : t('common.never')
+					}
+				]
+			: []
 	);
 
 	function rowActions(secret: Secret): RowAction[] {
@@ -124,15 +197,17 @@
 			{
 				id: 'replace',
 				label: t('secrets.replace'),
-				icon: 'refresh',
+				icon: 'replace',
 				hidden: !canReplaceValue(secret),
 				onSelect: () => openReplace(secret)
 			},
 			{
 				id: 'delete',
 				label: t('secrets.delete'),
+				hint: secret.used_by.length > 0 ? t('secrets.deleteInUse') : undefined,
 				icon: 'trash',
 				danger: true,
+				disabled: secret.used_by.length > 0,
 				onSelect: () => openDelete(secret)
 			}
 		];
@@ -261,6 +336,12 @@
 	</ul>
 {/snippet}
 
+{#snippet detailUsers()}
+	{#if detail}
+		{@render usersList(detail)}
+	{/if}
+{/snippet}
+
 <SettingsLayout
 	title={t('secrets.title')}
 	description={t('secrets.description')}
@@ -272,28 +353,41 @@
 		{/if}
 	{/snippet}
 
-	<DataTable
-		{columns}
-		rows={shown}
-		{loading}
-		{error}
-		rowKey={(secret) => secret.id}
-		detailTitle={(secret) => secret.name}
+	<ListView
+		label={t('secrets.title')}
+		items={shown}
+		itemKey={(secret) => secret.id}
+		icon={(secret) => iconOf(secretState(secret))}
+		pill={(secret) => pillOf(secretState(secret))}
+		title={(secret) => secret.name}
+		onOpen={openDetail}
+		{meta}
 		actions={canWrite ? rowActions : undefined}
 		moreLabel={(secret) => t('secrets.moreActions', { name: secret.name })}
-		emptyTitle={filters.value.q || filters.value.purpose ? t('filter.noMatches') : undefined}
+		{loading}
+		{error}
+		{filtered}
+		onReset={resetFilters}
+		emptyIcon="lock"
+		emptyTitle={t('secrets.emptyTitle')}
 	>
 		{#snippet toolbar()}
 			<FilterBar
 				label={t('secrets.filters')}
 				value={filters.value}
 				search={{ key: 'q', label: t('hosts.search'), placeholder: t('secrets.searchPlaceholder') }}
+				{states}
 				{facets}
+				{sort}
 				onchange={filters.update}
-				onreset={filters.reset}
+				onreset={resetFilters}
 			/>
 		{/snippet}
-	</DataTable>
+	</ListView>
+
+	<SidePanel bind:open={detailOpen} title={detail?.name ?? ''}>
+		<KeyValue items={detailItems} stacked />
+	</SidePanel>
 
 	<Alert variant="inline" icon="lock" title={t('secrets.note')} />
 </SettingsLayout>

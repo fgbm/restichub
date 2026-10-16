@@ -253,3 +253,23 @@ export function tenantState(tenant: Pick<Tenant, 'status' | 'admin_state'>): Ent
 	}
 	return state('active', 'tenants.status.active', 'normal', 'building-2');
 }
+
+/** The icon of the object of an audit record; an unknown type has the audit icon. */
+export const AUDIT_OBJECT_ICONS: Record<string, IconName> = {
+	user: 'user',
+	job: 'job',
+	tenant: 'building-2',
+	agent: 'host',
+	signing_key: 'key',
+	secret: 'lock',
+	channel: 'mail',
+	session: 'user',
+	profile: 'checklist',
+	plan: 'calendar',
+	job_template: 'list-ordered',
+	api_token: 'key',
+	script_template: 'square-terminal',
+	enrollment_token: 'ticket',
+	repository: 'repository',
+	alert: 'bell'
+};

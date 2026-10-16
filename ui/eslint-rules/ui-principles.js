@@ -136,8 +136,38 @@ const noLoadMore = {
 	}
 };
 
+// A table row that opens a record makes the table a list of entities.
+const RECORD_PROPS = new Set(['rowHref', 'onRowOpen', 'detailTitle']);
+
+/** UI principles 2.1 and 2.13: a list of entities is a ListView; a DataTable holds tabular data. */
+const noEntityTable = {
+	meta: {
+		type: 'problem',
+		schema: [],
+		messages: {
+			entity:
+				'A table whose rows open a record is a list of entities: use ListView (design/style/ui-principles.md, 2.1 and 2.13).'
+		}
+	},
+	create(context) {
+		return {
+			SvelteElement(node) {
+				if (node.kind !== 'component' || elementName(node) !== 'DataTable') return;
+				const opens = node.startTag.attributes.some(
+					(attribute) =>
+						RECORD_PROPS.has(attribute.key?.name) ||
+						(attribute.type === 'SvelteShorthandAttribute' &&
+							RECORD_PROPS.has(attribute.key?.name ?? attribute.value?.name))
+				);
+				if (opens) context.report({ node, messageId: 'entity' });
+			}
+		};
+	}
+};
+
 export default {
 	rules: {
+		'no-entity-table': noEntityTable,
 		'no-raw-table': noRawTable,
 		'no-row-actions-snippet': noRowActionsSnippet,
 		'no-back-link': noBackLink,

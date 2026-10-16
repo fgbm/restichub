@@ -31,13 +31,14 @@ test('setup, sign in, create an organization and find its audit record', async (
 		.getByRole('dialog')
 		.getByRole('button', { name: 'Create organization', exact: true })
 		.click();
-	await expect(page.getByRole('cell', { name: organization, exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: organization, exact: true })).toBeVisible();
 
 	await page.goto('/platform/audit');
-	await expect(page.getByRole('row', { name: /Create organization/ }).first()).toBeVisible();
-	await expect(page.getByRole('row', { name: /Create organization/ }).first()).toContainText(
-		/tenant [0-9a-f-]{36}/
-	);
+	const record = page.locator('li.item').filter({ hasText: 'Create organization' }).first();
+	await expect(record).toBeVisible();
+	// The details panel of the record names the object.
+	await record.locator('.item__title').click();
+	await expect(page.getByRole('dialog')).toContainText(/tenant [0-9a-f-]{36}/);
 
 	// A member of the new organization opens the event stream of the shell once (FR-UI-02).
 	const csrf = { 'X-ResticHub-CSRF': '1' };

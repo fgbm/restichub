@@ -25,7 +25,14 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
-vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/settings') } }));
+const route = vi.hoisted(() => ({ url: new URL('http://localhost/settings/scripts/templates') }));
+
+vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/navigation', () => ({
+	goto: (address: string) => {
+		route.url = new URL(address, 'http://localhost');
+	}
+}));
 
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
@@ -67,6 +74,7 @@ const OWN = template({
 });
 
 beforeEach(() => {
+	route.url = new URL('http://localhost/settings/scripts/templates');
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.listScriptTemplates.mockResolvedValue([template(), OWN]);
 	mocks.createScriptTemplate.mockResolvedValue(OWN);
@@ -74,22 +82,25 @@ beforeEach(() => {
 	mocks.deleteScriptTemplate.mockResolvedValue(undefined);
 });
 
-async function rowOf(name: string): Promise<HTMLElement> {
-	return (await screen.findByText(name)).closest('tr') as HTMLElement;
+// The own templates open first; a built-in template is on its own tab.
+async function rowOf(name: string, builtin = false): Promise<HTMLElement> {
+	if (builtin) await userEvent.click(await screen.findByRole('button', { name: 'Built-in 1' }));
+	return (await screen.findByText(name)).closest('li') as HTMLElement;
 }
 
 describe('Script templates screen', () => {
 	it('lists the built-in and the own templates with their source', async () => {
 		render(Templates);
-		expect(await screen.findByText('Free disk space check (Linux)')).toBeInTheDocument();
-		expect(screen.getByText('Remove old dumps')).toBeInTheDocument();
-		expect(screen.getAllByText('Built-in').length).toBeGreaterThan(0);
-		expect(screen.getByText('Organization')).toBeInTheDocument();
+		expect(await screen.findByText('Remove old dumps')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Own 1' })).toHaveAttribute('aria-pressed', 'true');
+		expect(screen.queryByText('Free disk space check (Linux)')).toBeNull();
+		await rowOf('Free disk space check (Linux)', true);
+		expect(screen.getByText('built-in')).toBeInTheDocument();
 	});
 
 	it('offers no delete action for a built-in template', async () => {
 		render(Templates);
-		const row = await rowOf('Free disk space check (Linux)');
+		const row = await rowOf('Free disk space check (Linux)', true);
 		expect(within(row).getByRole('button', { name: 'Make a copy' })).toBeInTheDocument();
 		expect(within(row).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
 	});
@@ -99,7 +110,7 @@ describe('Script templates screen', () => {
 		render(Templates);
 		// The row opens the template; opening is not a row action.
 		await user.click(
-			within(await rowOf('Free disk space check (Linux)')).getByRole('button', {
+			within(await rowOf('Free disk space check (Linux)', true)).getByRole('button', {
 				name: 'Free disk space check (Linux)'
 			})
 		);

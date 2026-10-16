@@ -113,12 +113,9 @@ for (const [screen, file, link] of [
 	});
 }
 
-test('the users table matches the mockup', async ({ page }, info) => {
+test('the users screen button matches the mockup', async ({ page }, info) => {
 	await page.goto(mockupUrl('users.html'));
-	const mockup = {
-		head: await measure(page.locator('th').first()),
-		button: await measure(page.locator('.btn--primary').first())
-	};
+	const mockup = { button: await measure(page.locator('.btn--primary').first()) };
 	await attach(page, 'mockup-users', info);
 
 	await signIn(page);
@@ -128,14 +125,10 @@ test('the users table matches the mockup', async ({ page }, info) => {
 		.getByRole('link', { name: 'Users' })
 		.click();
 	await page.getByRole('heading', { level: 1, name: 'Users' }).waitFor();
-	await page.locator('th').first().waitFor();
-	const app = {
-		head: await measure(page.locator('th').first()),
-		button: await measure(page.locator('.btn--primary').first())
-	};
+	await page.locator('li.item').first().waitFor();
+	const app = { button: await measure(page.locator('.btn--primary').first()) };
 	await attach(page, 'app-users', info);
 
-	expectSame(app.head, mockup.head, ['width', 'height']);
 	expectSame(app.button, mockup.button, ['width']);
 });
 

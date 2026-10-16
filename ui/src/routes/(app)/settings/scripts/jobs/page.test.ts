@@ -27,7 +27,14 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
-vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/settings') } }));
+const route = vi.hoisted(() => ({ url: new URL('http://localhost/settings/scripts/jobs') }));
+
+vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/navigation', () => ({
+	goto: (address: string) => {
+		route.url = new URL(address, 'http://localhost');
+	}
+}));
 
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
@@ -74,6 +81,7 @@ const OWN = {
 };
 
 beforeEach(() => {
+	route.url = new URL('http://localhost/settings/scripts/jobs');
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.listJobTemplates.mockResolvedValue([BUILTIN, OWN]);
 	mocks.listScriptTemplates.mockResolvedValue([]);
@@ -85,10 +93,15 @@ beforeEach(() => {
 
 describe('Job templates screen', () => {
 	it('lists the templates with the number of their scripts', async () => {
+		const user = userEvent.setup();
 		render(Templates);
+		// The own templates open first; the built-in ones are on their tab.
+		expect(await screen.findByText('Web application')).toBeInTheDocument();
+		expect(screen.getByText('2 scripts: before, finally')).toBeInTheDocument();
+		expect(screen.queryByText('PostgreSQL server (Linux)')).toBeNull();
+		await user.click(screen.getByRole('button', { name: 'Built-in 1' }));
 		expect(await screen.findByText('PostgreSQL server (Linux)')).toBeInTheDocument();
-		expect(screen.getByText('Web application')).toBeInTheDocument();
-		expect(screen.getAllByText('Built-in').length).toBeGreaterThan(0);
+		expect(screen.getByText('built-in')).toBeInTheDocument();
 	});
 
 	it('opens a template with its scripts in the saved order', async () => {
@@ -108,7 +121,8 @@ describe('Job templates screen', () => {
 	it('saves the scripts of a copy of a built-in template, with an empty secret', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		const row = (await screen.findByText('PostgreSQL server (Linux)')).closest('tr') as HTMLElement;
+		await user.click(await screen.findByRole('button', { name: 'Built-in 1' }));
+		const row = (await screen.findByText('PostgreSQL server (Linux)')).closest('li') as HTMLElement;
 		await user.click(within(row).getByRole('button', { name: 'Make a copy' }));
 		const dialog = await screen.findByRole('dialog');
 		await user.click(within(dialog).getByRole('button', { name: 'Save' }));

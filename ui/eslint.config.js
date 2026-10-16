@@ -56,6 +56,7 @@ export default tseslint.config(
 		plugins: { ui: uiPrinciples },
 		rules: {
 			'ui/no-raw-table': 'error',
+			'ui/no-entity-table': 'error',
 			'ui/no-row-actions-snippet': 'error',
 			'ui/no-back-link': 'error',
 			'ui/no-load-more': 'error'

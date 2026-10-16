@@ -113,8 +113,8 @@ test('the icons and an open dialog need no inline style', async ({ page }) => {
 		.getByRole('navigation', { name: 'Primary navigation' })
 		.getByRole('link', { name: 'Audit', exact: true })
 		.click();
-	// A record of the audit log opens its details from the row.
-	await page.getByRole('table').locator('button.row-link').first().click();
+	// A record of the audit log opens its details from its title.
+	await page.locator('main button.item__title').first().click();
 	const panel = page.getByRole('dialog');
 	await expect(panel).toHaveClass(/rh-panel/);
 	await expect(panel.locator('svg.icon[data-icon="x"]')).toBeVisible();

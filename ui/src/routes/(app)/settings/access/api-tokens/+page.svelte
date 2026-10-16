@@ -9,20 +9,22 @@
 		CopyField,
 		Dialog,
 		KeyValue,
-		DataTable,
 		FilterBar,
+		ListView,
 		Select,
-		StatusPill,
+		SidePanel,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type {
 		FilterFacet,
 		KeyValueItem,
+		ListMeta,
 		RowAction,
-		SelectOption,
-		TableColumn
+		SelectOption
 	} from '#lib/components/ui/index.ts';
-	import { matchesSearch } from '#lib/filters.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { ago, expiry } from '#lib/list-format.ts';
+	import { apiTokenState, iconOf, pillOf } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { formatTime } from '#lib/format.ts';
@@ -77,59 +79,121 @@
 		return value ? formatTime(value) : t('common.never');
 	}
 
-	const columns = $derived<TableColumn<ApiToken>[]>([
-		{ key: 'name', header: t('tokens.name'), truncate: 'sm' },
-		{ key: 'display_prefix', header: t('tokens.prefix'), mono: true, sortable: false },
-		{
-			key: 'role',
-			header: t('users.role'),
-			cell: (row) => roleKeys[row.role],
-			badge: () => 'neutral'
-		},
-		{ key: 'created_at', header: t('common.createdAt'), date: 'relative' },
-		{
-			key: 'expires_at',
-			header: t('tokens.expiresAt'),
-			date: 'relative',
-			value: (row) => row.expires_at ?? '',
-			cell: () => t('common.never')
-		},
-		{
-			key: 'last_used_at',
-			header: t('tokens.lastUsed'),
-			date: 'relative',
-			value: (row) => row.last_used_at ?? '',
-			cell: () => t('common.never')
-		},
-		{
-			key: 'revoked_at',
-			header: t('tokens.state'),
-			value: (row) => (row.revoked_at ? t('tokens.state.revoked') : t('tokens.state.active')),
-			render: stateCell
-		}
-	]);
-
-	const filters = queryFilters(['q', 'state'] as const);
+	const filters = queryFilters(['q', 'role', 'state', 'sort', 'order'] as const);
 
 	const facets = $derived<FilterFacet[]>([
 		{
-			key: 'state',
-			label: t('tokens.state'),
-			multiple: false,
-			options: (['active', 'revoked'] as const).map((value) => ({
-				value,
-				label: t(value === 'active' ? 'tokens.state.active' : 'tokens.state.revoked'),
-				count: tokens.filter((token) => Boolean(token.revoked_at) === (value === 'revoked')).length
+			key: 'role',
+			label: t('users.role'),
+			options: facetCounts(tokens, (token) => [token.role]).map((option) => ({
+				...option,
+				label: roleKeys[option.value as Role] ?? option.value
 			}))
 		}
 	]);
 
-	const shown = $derived(
+	function valid(token: ApiToken): boolean {
+		const state = apiTokenState(token).key;
+		return state === 'active' || state === 'expiring';
+	}
+
+	const matching = $derived(
 		tokens.filter((token) => {
-			const { q, state } = filters.value;
-			if (state && Boolean(token.revoked_at) !== (state === 'revoked')) return false;
+			const { q, role } = filters.value;
+			if (role && !splitList(role).includes(token.role)) return false;
 			return matchesSearch(q, [token.name, token.display_prefix]);
 		})
+	);
+
+	const states = $derived({
+		default: 'valid',
+		options: [
+			{ value: 'valid', label: t('tokens.tab.valid'), count: matching.filter(valid).length },
+			{
+				value: 'ended',
+				label: t('tokens.tab.ended'),
+				count: matching.filter((token) => !valid(token)).length
+			}
+		]
+	});
+
+	const sort = $derived({
+		default: 'name',
+		options: [
+			{ value: 'name', label: t('tokens.sort.name') },
+			{ value: 'used', label: t('tokens.sort.used'), order: 'desc' as const },
+			{ value: 'expires', label: t('tokens.sort.expires') }
+		]
+	});
+
+	const shown = $derived.by(() => {
+		const ended = filters.value.state === 'ended';
+		const list = matching.filter((token) => valid(token) !== ended);
+		const field = filters.value.sort || 'name';
+		const order = filters.value.order || (field === 'used' ? 'desc' : 'asc');
+		const factor = order === 'desc' ? -1 : 1;
+		const key = (token: ApiToken) =>
+			field === 'used'
+				? (token.last_used_at ?? '')
+				: field === 'expires'
+					? (token.expires_at ?? '9999')
+					: token.name;
+		return [...list].sort((a, b) => factor * key(a).localeCompare(key(b)));
+	});
+
+	const filtered = $derived(tokens.length > 0 && Boolean(filters.value.q || filters.value.role));
+
+	function resetFilters(): void {
+		filters.update({ q: '', role: '', state: '' });
+	}
+
+	function meta(token: ApiToken): ListMeta[] {
+		const end = token.expires_at ? expiry(token.expires_at) : null;
+		return [
+			{ text: `${token.display_prefix}…`, mono: true },
+			roleKeys[token.role],
+			token.last_used_at
+				? {
+						text: t('tokens.meta.used', { time: ago(token.last_used_at) }),
+						time: token.last_used_at
+					}
+				: t('tokens.meta.neverUsed'),
+			token.revoked_at
+				? null
+				: end
+					? { text: end.text, time: token.expires_at ?? undefined }
+					: t('tokens.meta.noExpiry')
+		];
+	}
+
+	let detail = $state<ApiToken | null>(null);
+	let detailOpen = $state(false);
+
+	function openDetail(token: ApiToken): void {
+		detail = token;
+		detailOpen = true;
+	}
+
+	const detailItems = $derived<KeyValueItem[]>(
+		detail
+			? [
+					{ key: 'prefix', label: t('tokens.prefix'), value: detail.display_prefix, mono: true },
+					{ key: 'role', label: t('users.role'), value: roleKeys[detail.role] },
+					{ key: 'state', label: t('tokens.state'), value: apiTokenState(detail).label },
+					{ key: 'created', label: t('common.createdAt'), value: formatTime(detail.created_at) },
+					{ key: 'expires', label: t('tokens.expiresAt'), value: formatDate(detail.expires_at) },
+					{ key: 'used', label: t('tokens.lastUsed'), value: formatDate(detail.last_used_at) },
+					...(detail.revoked_at
+						? [
+								{
+									key: 'revoked',
+									label: t('tokens.state.revoked'),
+									value: formatTime(detail.revoked_at)
+								}
+							]
+						: [])
+				]
+			: []
 	);
 
 	function rowActions(token: ApiToken): RowAction[] {
@@ -137,8 +201,9 @@
 			{
 				id: 'revoke',
 				label: t('tokens.revoke'),
-				icon: 'circle-slash',
-				hidden: Boolean(token.revoked_at),
+				icon: 'ban',
+				danger: true,
+				hidden: !valid(token),
 				onSelect: () => {
 					revokeTarget = token;
 					revokeOpen = true;
@@ -244,12 +309,6 @@
 	}
 </script>
 
-{#snippet stateCell(token: ApiToken)}
-	<StatusPill tone={token.revoked_at ? 'neutral' : 'success'}>
-		{token.revoked_at ? t('tokens.state.revoked') : t('tokens.state.active')}
-	</StatusPill>
-{/snippet}
-
 <SettingsLayout
 	title={t('tokens.title')}
 	description={t('tokens.description')}
@@ -259,27 +318,40 @@
 		<Button variant="primary" icon="plus" onclick={openCreate}>{t('tokens.create')}</Button>
 	{/snippet}
 
-	<DataTable
-		{columns}
-		rows={shown}
+	<ListView
+		label={t('tokens.title')}
+		items={shown}
+		itemKey={(token) => token.id}
+		icon={(token) => iconOf(apiTokenState(token))}
+		pill={(token) => pillOf(apiTokenState(token))}
+		title={(token) => token.name}
+		onOpen={openDetail}
+		{meta}
+		actions={rowActions}
 		{loading}
 		{error}
-		rowKey={(token) => token.id}
-		detailTitle={(token) => token.name}
-		actions={rowActions}
-		emptyTitle={filters.value.q || filters.value.state ? t('filter.noMatches') : undefined}
+		{filtered}
+		onReset={resetFilters}
+		emptyIcon="key"
+		emptyTitle={t('tokens.emptyTitle')}
 	>
 		{#snippet toolbar()}
 			<FilterBar
 				label={t('tokens.filters')}
 				value={filters.value}
 				search={{ key: 'q', label: t('hosts.search'), placeholder: t('tokens.searchPlaceholder') }}
+				{states}
 				{facets}
+				{sort}
 				onchange={filters.update}
-				onreset={filters.reset}
+				onreset={resetFilters}
 			/>
 		{/snippet}
-	</DataTable>
+	</ListView>
+
+	<SidePanel bind:open={detailOpen} title={detail?.name ?? ''}>
+		<KeyValue items={detailItems} stacked />
+	</SidePanel>
 
 	<Alert variant="inline" icon="lock" title={t('tokens.valueNote')} />
 </SettingsLayout>
