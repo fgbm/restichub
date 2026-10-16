@@ -127,8 +127,7 @@
 			header: t('hosts.certificate'),
 			value: (row) => row.certificate_expires_at,
 			render: certificateCell
-		},
-		{ key: 'created_at', header: t('hosts.created'), hideNarrow: true, date: 'relative' }
+		}
 	]);
 
 	type HostState = 'online' | 'offline' | 'waiting' | 'revoked';
@@ -605,8 +604,11 @@
 		white-space: nowrap;
 	}
 
+	/* A narrow phone has no room for a long state on one line. */
 	@media (max-width: 720px) {
+		.status,
 		.status :global(.status) {
+			flex-wrap: wrap;
 			white-space: normal;
 		}
 	}

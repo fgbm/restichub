@@ -97,7 +97,7 @@
 		{
 			key: 'description',
 			header: t('scriptTemplates.description.label'),
-			truncate: 'lg',
+			truncate: 'md',
 			hideNarrow: true,
 			sortable: false,
 			value: templateDescription
@@ -113,14 +113,6 @@
 			header: t('scriptTemplates.phase'),
 			nowrap: true,
 			cell: (row) => t(`profiles.hooks.phase.${row.phase}` as MessageKey)
-		},
-		{
-			key: 'parameters',
-			header: t('scriptTemplates.parameters'),
-			value: (row) => String(row.parameters.length),
-			cell: (row) => String(row.parameters.length),
-			align: 'right',
-			hideNarrow: true
 		},
 		{
 			key: 'source',

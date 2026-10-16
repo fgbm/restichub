@@ -112,25 +112,23 @@
 			value: (row) => describeCron(row.cron, t),
 			render: scheduleCell
 		},
-		{
-			key: 'time_zone',
-			header: t('plans.timeZone'),
-			nowrap: true,
-			hideNarrow: true,
-			value: (row) => row.time_zone
-		},
+
 		{
 			key: 'next_run_at',
-			nowrap: true,
 			header: t('plans.nextRun'),
+			truncate: 'md',
 			value: (row) =>
 				row.next_run_at ? formatTimeInZoneWithLocal(row.next_run_at, row.time_zone) : '',
-			render: nextRunCell
+			cell: (row) =>
+				row.next_run_at
+					? formatTimeInZoneWithLocal(row.next_run_at, row.time_zone)
+					: t('common.none')
 		},
 		{
 			key: 'missed_run_policy',
 			header: t('plans.missedRunPolicy'),
 			hideNarrow: true,
+			truncate: 'sm',
 			value: (row) => describeMissedRunPolicy(row.missed_run_policy, t)
 		}
 	]);
@@ -380,14 +378,6 @@
 	<span class="plan">
 		<span>{describeCron(plan.cron, t)}</span>
 		<span class="plan__meta plan__cron">{plan.cron}</span>
-	</span>
-{/snippet}
-
-{#snippet nextRunCell(plan: Plan)}
-	<span class="plan__meta">
-		{plan.next_run_at
-			? formatTimeInZoneWithLocal(plan.next_run_at, plan.time_zone)
-			: t('common.none')}
 	</span>
 {/snippet}
 

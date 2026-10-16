@@ -55,7 +55,7 @@
 		{
 			key: 'description',
 			header: t('scriptTemplates.description.label'),
-			truncate: 'lg',
+			truncate: 'md',
 			hideNarrow: true,
 			sortable: false,
 			value: (row) => templateDescription(row, 'job')

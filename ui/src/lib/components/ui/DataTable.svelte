@@ -515,6 +515,10 @@
 		cursor: pointer;
 	}
 
+	button.row-link {
+		vertical-align: middle;
+	}
+
 	.row-link:hover {
 		text-decoration: none;
 	}
