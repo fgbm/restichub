@@ -2,9 +2,11 @@
 //!
 //! A console command and a Linux service write to the standard error, which journald collects. The
 //! Windows service has no standard error that anybody reads, so it writes the full log to a
-//! size-rotated file in the protected `logs` directory and copies each warning and error to the
-//! Application event log. A sink that fails is dropped once with one warning, and its lines go to
-//! the standard error from then on, so the log never stops a job.
+//! size-rotated file in a protected directory next to the configuration directory and copies each
+//! warning and error to the `ResticHub` event log. A sink that fails gives one warning and is opened
+//! again after a pause, so the log never stops a job.
+
+use std::path::{Path, PathBuf};
 
 use tracing_subscriber::EnvFilter;
 
@@ -20,12 +22,18 @@ mod tests;
 pub use event_log::{register_event_source, remove_event_source};
 pub use rotation::RotatingFile;
 
-/// The directory of the service log below the configuration directory (Windows only).
-pub const LOGS_DIR: &str = "logs";
-
 pub const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
 pub const MAX_FILES: usize = 5;
+
+/// The directory of the Windows service log, `%ProgramData%\ResticHub\Agent-logs`.
+///
+/// It is not inside the configuration directory: a new registration replaces that directory with
+/// one rename, which an open log file would block.
+#[must_use]
+pub fn service_log_dir(config: &Path) -> PathBuf {
+    crate::identity::sibling(config, "-logs")
+}
 
 fn env_filter() -> EnvFilter {
     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
@@ -39,24 +47,21 @@ pub fn init_console() {
         .try_init();
 }
 
-/// Sends the log of the Windows service to the rotated file and the Application event log.
+/// Sends the log of the Windows service to the rotated file and the `ResticHub` event log.
 #[cfg(windows)]
 pub fn init_service() {
-    let dir = crate::paths::config_dir().join(LOGS_DIR);
-    let file = crate::paths::create_protected_dir(&dir)
-        .and_then(|()| Ok(RotatingFile::open(&dir, MAX_FILE_BYTES, MAX_FILES)?));
-    let events =
-        event_log::EventSource::open().map(|source| Box::new(source) as Box<dyn sinks::EventSink>);
-    let log = sinks::ServiceLog::new(file, events, Box::new(write_stderr));
+    let dir = service_log_dir(&crate::paths::config_dir());
+    let log = sinks::ServiceLog::new(
+        Box::new(move || {
+            crate::paths::create_protected_dir(&dir)?;
+            Ok(RotatingFile::open(&dir, MAX_FILE_BYTES, MAX_FILES)?)
+        }),
+        Box::new(|| Ok(Box::new(event_log::EventSource::open()?) as Box<dyn sinks::EventSink>)),
+        Box::new(std::time::Instant::now),
+    );
     let _ = tracing_subscriber::fmt()
         .with_env_filter(env_filter())
         .with_ansi(false)
         .with_writer(sinks::ServiceWriter(std::sync::Arc::new(log)))
         .try_init();
-}
-
-#[cfg(windows)]
-fn write_stderr(bytes: &[u8]) {
-    use std::io::Write as _;
-    let _ = std::io::stderr().write_all(bytes);
 }

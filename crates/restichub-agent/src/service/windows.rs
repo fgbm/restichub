@@ -36,6 +36,8 @@ pub fn run_as_service() -> windows_service::Result<()> {
 }
 
 fn service_main(_arguments: Vec<OsString>) {
+    // An interrupted identity swap is put back before anything else writes below ProgramData.
+    crate::identity::recover(&crate::paths::config_dir());
     crate::logging::init_service();
     if let Err(error) = run_service() {
         tracing::error!(%error, "the service stopped with an error");
@@ -121,6 +123,8 @@ pub fn install(restic: &Path) -> Result<()> {
     {
         anyhow::bail!("the restore root {} is not safe: {reason}", root.display());
     }
+    // Before the service changes, so a registry failure leaves the service as it was.
+    crate::logging::register_event_source()?;
     let manager = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
@@ -176,7 +180,6 @@ pub fn install(restic: &Path) -> Result<()> {
         ]),
     })?;
     service.set_failure_actions_on_non_crash_failures(true)?;
-    crate::logging::register_event_source()?;
     // A running service restarts, so that it uses the new executable path.
     stop_and_wait(&service)?;
     // A start failure is reported, not hidden behind a success message.
@@ -298,9 +301,8 @@ pub fn uninstall() -> Result<()> {
         Err(error) => return Err(error.into()),
     };
     service.delete()?;
-    if service.query_status()?.current_state != ServiceState::Stopped {
-        let _ = service.stop();
-    }
+    // The stopping service still writes events, so the source goes only after it stopped.
+    stop_and_wait(&service)?;
     crate::logging::remove_event_source()?;
     println!("the service {SERVICE_NAME} is removed");
     Ok(())

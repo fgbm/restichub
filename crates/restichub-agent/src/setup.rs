@@ -140,7 +140,7 @@ pub fn render_report(report: &SetupReport, hostname: Option<&str>) -> String {
 
 fn stopped_hint() -> String {
     if cfg!(windows) {
-        "next:          read the Application log in Event Viewer, fix the cause and run: restichub-agent install-service".to_owned()
+        "next:          read the ResticHub log in Event Viewer and the files in %ProgramData%\\ResticHub\\Agent-logs, fix the cause and run: restichub-agent install-service".to_owned()
     } else {
         "next:          run `journalctl -u restichub-agent`, fix the cause and run: restichub-agent install-service".to_owned()
     }

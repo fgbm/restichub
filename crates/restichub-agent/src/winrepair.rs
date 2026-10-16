@@ -438,6 +438,7 @@ fn root_entries(config: &Path, root: &Path) -> Vec<(String, Kind)> {
         Kind::Agent,
         true,
     );
+    add(&crate::logging::service_log_dir(config), Kind::Agent, false);
     names.push((OLD_RESTORE_ROOT.to_owned(), Kind::OldRestoreRoot));
     names
 }
@@ -476,7 +477,6 @@ fn config_entries() -> Vec<(String, Kind)> {
     }
     names.push((crate::identity::ROTATION_MARKER.to_owned(), Kind::Staged));
     names.push((crate::log_spool::SPOOL_DIR.to_owned(), Kind::Agent));
-    names.push((crate::logging::LOGS_DIR.to_owned(), Kind::Agent));
     names.push((crate::preflight::PROBE_FILE.to_owned(), Kind::Agent));
     // Windows keeps the cache and, in older builds, restic below the configuration directory.
     names.extend(
@@ -917,17 +917,35 @@ mod tests {
     #[test]
     fn fr_ag_04_the_service_log_is_a_known_entry_and_its_files_are_protected() {
         let (base, root, config) = tree("repair-logs");
-        let logs = config.join(crate::logging::LOGS_DIR);
+        let logs = crate::logging::service_log_dir(&config);
+        assert_eq!(logs, root.join("Agent-logs"));
         create_protected_tree(&logs, &root).expect("cannot create the logs directory");
         let file = logs.join("agent-000001.log");
         create_protected_file(&file, b"line\n").expect("cannot write");
         grant(&file, "(R,W)").expect("cannot add the entry");
-        grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
-        let (result, actions) = repair_with(&config, &root, UntrustedIdentity::Remove);
+        grant(&logs, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let (result, actions) = repair_with(&config, &root, UntrustedIdentity::Keep);
         result.expect("the repair must succeed");
-        check_admin_only(&config).expect("the directory must be protected");
+        check_admin_only(&logs).expect("the directory must be protected");
         assert!(!is_open(&file), "the entry on the log file must be gone");
+        assert!(actions.contains(&Action::Protected(logs)), "{actions:?}");
         assert!(actions.contains(&Action::Protected(file)), "{actions:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_service_log_directory_that_is_a_junction_is_refused() {
+        let (base, root, config) = tree("repair-logs-junction");
+        let target = base.join("elsewhere");
+        std::fs::create_dir(&target).expect("cannot create the target");
+        junction(&crate::logging::service_log_dir(&config), &target);
+        let (result, _) = repair(&config, &root);
+        let error = format!("{:#}", result.expect_err("a junction must be refused"));
+        assert!(error.contains("reparse point"), "{error}");
+        assert!(
+            create_protected_tree(&crate::logging::service_log_dir(&config), &root).is_err(),
+            "the service must refuse the junction too"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 

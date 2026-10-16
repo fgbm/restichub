@@ -5,6 +5,7 @@
 #   install-smoke.sh db-prepare   create the roles, the passwords and the schema
 #   install-smoke.sh cp-up        start the control plane, create the administrator and the token
 #   install-smoke.sh ca           write the installation CA that the listener presents
+#   install-smoke.sh token FILE   write a new enrollment token to FILE
 #   install-smoke.sh connected    wait until the control plane lists the agent as connected
 #   install-smoke.sh canary-jobs  run ten jobs on three repositories whose passwords are canaries
 #   install-smoke.sh cp-logs      print the log of the control plane
@@ -69,9 +70,14 @@ cp_up() {
 		>/dev/null
 	curl -fsS "${csrf[@]}" -c "$jar" -H 'content-type: application/json' "$web/api/v1/auth/sign-in" \
 		-d "{\"username\":\"smoke\",\"password\":\"$admin_password\"}" >/dev/null
+	token "$smoke_dir/enrollment-token"
+}
+
+token() {
+	local file="${1:?the token file}"
 	curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' "$web/api/v1/enrollment-tokens" \
-		-d '{"ttl_seconds":3600}' | jq -r .token >"$smoke_dir/enrollment-token"
-	[ -s "$smoke_dir/enrollment-token" ]
+		-d '{"ttl_seconds":3600}' | jq -r .token >"$file"
+	[ -s "$file" ]
 }
 
 # The listener certificate comes from the installation CA, which no system store holds. The smoke
@@ -183,6 +189,7 @@ case "${1:-}" in
 db-prepare) db_prepare ;;
 cp-up) cp_up ;;
 ca) ca ;;
+token) shift; token "$@" ;;
 connected) shift; connected "$@" ;;
 canary-jobs) shift; canary_jobs "$@" ;;
 cp-logs) cat "$smoke_dir/cp.log" ;;

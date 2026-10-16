@@ -356,8 +356,8 @@ jobs:
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           bash scripts/install-smoke.sh connected $since 60
           Remove-Item $restore -Recurse -Force
-      # The service writes its full log to the files in ProgramData\ResticHub\Agent\logs and each
-      # warning and error to the Application log with the source "ResticHub Agent". The service
+      # The service writes its full log to the files in ProgramData\ResticHub\Agent-logs and each
+      # warning and error to the ResticHub log with the source "ResticHub Agent". The service
       # control manager writes the state changes of the service to the System log.
       - name: The Event Log and the log files hold no canary after ten jobs (AC-AG-03)
         shell: pwsh
@@ -366,7 +366,7 @@ jobs:
           $start = [DateTime]::UtcNow.AddSeconds(-2)
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
           # A line that is not an absolute path makes the service warn at its start, so the
-          # Application log gets an event of the agent.
+          # ResticHub log gets an event of the agent.
           $roots = Join-Path $env:ProgramData 'ResticHub\Agent-restore-roots.txt'
           Set-Content $roots 'relative-restore-root'
           icacls $roots /setowner '*S-1-5-32-544' | Out-Null
@@ -383,7 +383,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'cannot write the control event' }
           $query = "*[System[TimeCreated[@SystemTime>='$($start.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'))']]]"
           $dump = Join-Path $env:SMOKE_DIR 'eventlog.xml'
-          $text = foreach ($log in 'Application', 'System') {
+          $text = foreach ($log in 'Application', 'System', 'ResticHub') {
             wevtutil qe $log "/q:$query" /f:RenderedXml
             if ($LASTEXITCODE -ne 0) { throw "cannot read the $log log" }
           }
@@ -392,34 +392,92 @@ jobs:
           Get-WinEvent -FilterHashtable @{LogName='System'; StartTime=$start.ToLocalTime()} -ErrorAction SilentlyContinue |
             Where-Object { $_.Message -match 'ResticHub Agent' } | Format-Table -AutoSize TimeCreated, Id, ProviderName, Message
           if (-not (Select-String -Path $dump -Pattern 'ResticHub Agent' -Quiet)) { throw 'the dump holds no event of the service' }
+          Write-Host '--- the ResticHub log'
+          $config = wevtutil gl ResticHub
+          $config | Write-Host
+          $access = ($config | Select-String -Pattern '^channelAccess:\s*(.+)$').Matches.Groups[1].Value
+          $expected = 'O:BAG:SYD:(A;;0xf0007;;;SY)(A;;0x7;;;BA)(A;;0x1;;;S-1-5-32-573)'
+          if ($access -ne $expected) { throw "the ResticHub log grants another access: '$access'" }
           Write-Host '--- the events of the agent in the scanned window'
-          $events = @(Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='ResticHub Agent'; StartTime=$start.ToLocalTime()} -ErrorAction SilentlyContinue)
+          $events = @(Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start.ToLocalTime()} -ErrorAction SilentlyContinue)
           $events | Format-Table -AutoSize -Wrap TimeCreated, Id, LevelDisplayName, Message
           if (-not ($events | Where-Object { $_.LevelDisplayName -eq 'Warning' -and $_.Message -match 'not absolute paths' })) {
-            throw 'the Application log holds no readable warning of the agent'
+            throw 'the ResticHub log holds no readable warning of the agent'
           }
-          $logs = Join-Path $env:ProgramData 'ResticHub\Agent\logs'
+          if (Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='ResticHub Agent'} -MaxEvents 1 -ErrorAction SilentlyContinue) {
+            throw 'an event of the agent is in the Application log'
+          }
+          $logs = Join-Path $env:ProgramData 'ResticHub\Agent-logs'
           $files = @(Get-ChildItem $logs -Filter 'agent-*.log')
           $files | Format-Table -AutoSize Name, Length
           if (-not $files) { throw 'the service wrote no log file' }
           if (-not ($files | Select-String -Pattern 'the control plane greeted the agent' -Quiet)) { throw 'the log files hold no line of the service' }
+          if (Test-Path (Join-Path $env:ProgramData 'ResticHub\Agent\logs')) { throw 'the log is in the identity directory' }
           $acl = Get-Acl $logs
           Write-Host "logs directory: $($acl.Sddl)"
           $foreign = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
             Where-Object { $_.IdentityReference.Value -notin 'S-1-5-18', 'S-1-5-32-544' }
           if (-not $acl.AreAccessRulesProtected -or $foreign) { throw "the logs directory is not for SYSTEM and Administrators only: $($acl.Sddl)" }
+          foreach ($file in $files) {
+            $acl = Get-Acl $file.FullName
+            Write-Host "$($file.Name): $($acl.Sddl)"
+            $foreign = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+              Where-Object { $_.IdentityReference.Value -notin 'S-1-5-18', 'S-1-5-32-544' }
+            if ($foreign) { throw "the log file $($file.Name) is not for SYSTEM and Administrators only: $($acl.Sddl)" }
+          }
           & target/debug/restichub-canary-scan.exe --canary $control --file $dump | Out-Null
           if ($LASTEXITCODE -ne 1) { throw "the scan must find the control event (exit $LASTEXITCODE)" }
           & target/debug/restichub-canary-scan.exe --canary-file $canaries --file $dump --dir $logs
           if ($LASTEXITCODE -ne 0) { throw "the canary is in the Event Log or in the log files (exit $LASTEXITCODE)" }
           Remove-Item $roots
+      # The service holds its log file open, and a new registration renames the identity directory.
+      - name: A new registration works while the service runs and keeps the log files (FR-AG-04)
+        shell: pwsh
+        run: |
+          $agent = Join-Path $env:ProgramFiles 'ResticHub\Agent\restichub-agent.exe'
+          $logs = Join-Path $env:ProgramData 'ResticHub\Agent-logs'
+          $before = @(Get-ChildItem $logs -Filter 'agent-*.log' | Sort-Object Name)
+          if (-not $before) { throw 'no log file before the registration' }
+          $greetings = @($before | Select-String -Pattern 'the control plane greeted the agent').Count
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          $token = "$env:SMOKE_DIR/enrollment-token-2"
+          bash scripts/install-smoke.sh token $token
+          if ($LASTEXITCODE -ne 0) { throw 'cannot create the token' }
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          & $agent register --force --url 'https://localhost:8443' --token-file $token --ca-file "$env:SMOKE_DIR/ca.pem"
+          if ($LASTEXITCODE -ne 0) { throw "register --force exit code $LASTEXITCODE" }
+          foreach ($file in $before) {
+            if (-not (Test-Path $file.FullName)) { throw "the registration removed $($file.Name)" }
+          }
+          if (Test-Path (Join-Path $env:ProgramData 'ResticHub\Agent.old')) { throw 'the old identity stays' }
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          bash scripts/install-smoke.sh connected $since 60
+          if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+          $after = @(Get-ChildItem $logs -Filter 'agent-*.log' | Select-String -Pattern 'the control plane greeted the agent').Count
+          if ($after -le $greetings) { throw 'the service wrote no new line after the registration' }
+      - name: uninstall-service removes the service and the event source and keeps the log (FR-IN-08)
+        shell: pwsh
+        run: |
+          $agent = Join-Path $env:ProgramFiles 'ResticHub\Agent\restichub-agent.exe'
+          $source = 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\ResticHub\ResticHub Agent'
+          if (-not (Test-Path $source)) { throw 'the event source is not registered' }
+          & $agent uninstall-service
+          if ($LASTEXITCODE -ne 0) { throw "uninstall-service exit code $LASTEXITCODE" }
+          if (Get-Service restichub-agent -ErrorAction SilentlyContinue) { throw 'the service stays' }
+          if (Test-Path $source) { throw 'the event source stays' }
+          if (-not (Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\ResticHub')) { throw 'the ResticHub log is gone' }
+          if (-not (Get-WinEvent -LogName ResticHub -MaxEvents 1 -ErrorAction SilentlyContinue)) { throw 'the events are gone' }
+          if (-not (Get-ChildItem (Join-Path $env:ProgramData 'ResticHub\Agent-logs') -Filter 'agent-*.log')) { throw 'the log files are gone' }
+          & $agent uninstall-service
+          if ($LASTEXITCODE -ne 0) { throw "a second uninstall-service exit code $LASTEXITCODE" }
       - name: Diagnostics
         if: failure()
         shell: pwsh
         run: |
           Get-Service restichub-agent -ErrorAction SilentlyContinue | Format-List *
-          Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='ResticHub Agent'} -MaxEvents 50 -ErrorAction SilentlyContinue | Format-List TimeCreated, Message
-          Get-ChildItem (Join-Path $env:ProgramData 'ResticHub\Agent\logs') -Filter 'agent-*.log' -ErrorAction SilentlyContinue |
+          wevtutil gl ResticHub
+          Get-WinEvent -LogName ResticHub -MaxEvents 50 -ErrorAction SilentlyContinue | Format-List TimeCreated, ProviderName, Message
+          Get-ChildItem (Join-Path $env:ProgramData 'ResticHub\Agent-logs') -Filter 'agent-*.log' -ErrorAction SilentlyContinue |
             Sort-Object Name | Select-Object -Last 1 | Get-Content -Tail 80
           Write-Host '--- control plane log'
           bash scripts/install-smoke.sh cp-logs
