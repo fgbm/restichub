@@ -35,7 +35,7 @@ When you turn the trust mode on, the control plane can run any command on this h
    ```
 
    On Windows, start an elevated PowerShell and run `restichub-agent.exe trust-server-scripts --enable`.
-3. Wait for the command to finish. The agent sends the state each time it connects, so the command restarts the installed agent service and waits until the agent is connected again. If no service is running, the new state applies when the service starts. Use `--no-restart` to skip the restart; the control plane then shows the new state only after you restart the service yourself.
+3. Wait for the command to finish. It restarts the installed agent service and waits until the agent is connected again. The agent sends the state each time it connects. If no service is running, the new state applies when the service starts. To skip the restart, use `--no-restart`. The control plane then shows the new state after you restart the service.
 4. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled**. A host that has not reported yet shows **Unknown**. The host list also shows the interpreters that the agent found.
 
 To turn the mode off, run the command with `--disable`. The command restarts the service in the same way. The agent reads the setting for each job, so the change applies to the next job.
