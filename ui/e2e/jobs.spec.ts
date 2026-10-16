@@ -56,7 +56,7 @@ test('the status filter narrows the list', async ({ page }) => {
 
 	await page.locator('#jobs-status').selectOption({ label: 'Succeeded' });
 	const table = page.getByRole('table');
-	await expect(table.getByText('Succeeded', { exact: true })).toBeVisible();
+	await expect(table.getByText('Succeeded', { exact: true }).first()).toBeVisible();
 	await expect(table.getByText('Running')).toHaveCount(0);
 });
 
