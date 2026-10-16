@@ -115,6 +115,8 @@ export const en = {
 	'filter.periodRange': '{from} – {to}',
 	'filter.noMatches': 'No matches',
 	'filter.noMatchesDescription': 'No records match the filters. Change or reset the filters.',
+	'filter.capped': 'More than {count} records match. Narrow the filters to see the rest.',
+	'filter.tooDeep': 'This page is too far into the list. Narrow the filters to see older records.',
 
 	// Sign-in
 	'signIn.title': 'Sign in',
@@ -1424,6 +1426,7 @@ export const en = {
 	'reason.incompatible': 'The installed restic does not support this option.',
 	'reason.unavailable': 'This setting is not available yet.',
 	'reason.mismatch': 'The value does not match.',
+	'reason.out_of_range': 'The value is out of range.',
 	'scripts.title': 'Scripts',
 	'scripts.description':
 		'Scripts run on the host as the agent account. They run before and after the backup, in the order of the lists. Each script is a step of the job with its own log.',

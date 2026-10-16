@@ -12,7 +12,7 @@
 		title: string;
 		description?: string;
 		/** A counter next to the title, for example the number of rows. */
-		count?: number;
+		count?: number | string;
 		/** A status pill next to the title. */
 		status?: Snippet;
 		/** The page context, for example the repository that the list belongs to. */
