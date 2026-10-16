@@ -47,8 +47,11 @@ cp_up() {
 	export RESTICHUB_LISTEN_ADDR="127.0.0.1:8080"
 	export RESTICHUB_DATABASE_URL="postgres://restichub_runtime@127.0.0.1:5432/restichub"
 	export RESTICHUB_DATABASE_PASSWORD=runtime
-	RESTICHUB_KEK="$(head -c 32 /dev/urandom | base64)"
-	export RESTICHUB_KEK
+	# A file, not RESTICHUB_KEK: Git Bash converts an environment value that starts with "/" to a
+	# Windows path before it starts a native program. SMOKE_KEK sets a fixed value for that case.
+	(umask 077 && printf '%s\n' "${SMOKE_KEK:-$(head -c 32 /dev/urandom | base64)}" >"$smoke_dir/kek")
+	unset RESTICHUB_KEK
+	export RESTICHUB_KEK_FILE="$smoke_dir/kek"
 	export RESTICHUB_SERVER_INSECURE_COOKIES=true
 	export RESTICHUB_TENANCY_MODE=single
 	export RESTICHUB_AGENT_LISTEN="127.0.0.1:$listener_port"
