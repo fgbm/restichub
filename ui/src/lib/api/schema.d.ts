@@ -1564,7 +1564,15 @@ export interface components {
         AlertKind: "rpo_violated" | "job_failed" | "job_dead_letter" | "job_warnings" | "agent_offline" | "stale_lock";
         AlertListResponse: {
             items: components["schemas"]["AlertView"][];
+            /** @description Null for a page read by `offset`. */
             next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The alerts that match the filter on all pages, at most 10000.
+             */
+            total: number;
+            /** @description More alerts match than `total` shows. */
+            total_capped: boolean;
         };
         /**
          * @description The typed values of an alert condition. The interface and the messages build the text of the
@@ -3977,7 +3985,14 @@ export interface operations {
             path: {
                 /** @description `open` (default), `resolved` or `all`. */
                 status: ("open" | "resolved" | "all") | null;
+                /** @description A comma list of kinds. */
+                kind: string | null;
+                /** @description Matches the host, the plan or the repository name; at most 200 characters. */
+                q: string | null;
+                /** @description Not with `offset`. */
                 cursor: string | null;
+                /** @description Skipped alerts, in `0..=10000`. Not with `cursor`. */
+                offset: number | null;
                 limit: number | null;
             };
             cookie?: never;

@@ -63,7 +63,6 @@ export const ru: Record<MessageKey, string> = {
 	'common.dismiss': 'Закрыть',
 	'common.done': 'Готово',
 	'common.loading': 'Загрузка',
-	'common.loadMore': 'Загрузить ещё',
 	'common.none': 'Нет',
 	'common.localTime': 'по местному времени',
 	'common.refresh': 'Обновить',

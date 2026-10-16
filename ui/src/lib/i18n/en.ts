@@ -62,7 +62,6 @@ export const en = {
 	'common.dismiss': 'Dismiss',
 	'common.done': 'Done',
 	'common.loading': 'Loading',
-	'common.loadMore': 'Load more',
 	'common.none': 'None',
 	'common.localTime': 'local',
 	'common.refresh': 'Refresh',

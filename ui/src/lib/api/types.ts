@@ -403,7 +403,11 @@ export type UpdateAlertRulesRequest = components['schemas']['UpdateAlertRulesReq
 
 export interface AlertQuery {
 	status?: 'open' | 'resolved' | 'all';
+	/** A comma list of kinds. */
+	kind?: string;
+	q?: string;
 	cursor?: string;
+	offset?: number;
 	limit?: number;
 }
 

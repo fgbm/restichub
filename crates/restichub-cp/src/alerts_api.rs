@@ -40,8 +40,61 @@ pub struct AlertListQuery {
     /// `open` (default), `resolved` or `all`.
     #[param(inline)]
     pub status: Option<StatusFilter>,
+    /// A comma list of kinds.
+    pub kind: Option<String>,
+    /// Matches the host, the plan or the repository name; at most 200 characters.
+    pub q: Option<String>,
+    /// Not with `offset`.
     pub cursor: Option<String>,
+    /// Skipped alerts, in `0..=10000`. Not with `cursor`.
+    pub offset: Option<i64>,
     pub limit: Option<i64>,
+}
+
+const MAX_SEARCH: usize = 200;
+
+impl AlertListQuery {
+    fn kinds(&self) -> Result<Vec<AlertKind>, ApiError> {
+        self.kind
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                AlertKind::parse(value)
+                    .ok_or_else(|| ApiError::invalid_field("kind", Reason::Unknown))
+            })
+            .collect()
+    }
+
+    fn search(&self) -> Result<Option<String>, ApiError> {
+        let Some(text) = self
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            return Ok(None);
+        };
+        if text.chars().count() > MAX_SEARCH {
+            return Err(ApiError::invalid_field("q", Reason::TooLong));
+        }
+        Ok(Some(text.to_owned()))
+    }
+
+    fn offset(&self) -> Result<i64, ApiError> {
+        match self.offset {
+            None => Ok(0),
+            Some(_) if self.cursor.is_some() => Err(ApiError::invalid_field_cause(
+                "offset",
+                Reason::InvalidFormat,
+                "a page reads either a cursor or an offset",
+            )),
+            Some(offset) if (0..=repo::COUNT_LIMIT).contains(&offset) => Ok(offset),
+            Some(_) => Err(ApiError::invalid_field("offset", Reason::OutOfRange)),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -99,7 +152,12 @@ pub(crate) fn views(state: &AppState, alerts: &[Alert]) -> Vec<AlertView> {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AlertListResponse {
     pub items: Vec<AlertView>,
+    /// Null for a page read by `offset`.
     pub next_cursor: Option<String>,
+    /// The alerts that match the filter on all pages, at most 10000.
+    pub total: i64,
+    /// More alerts match than `total` shows.
+    pub total_capped: bool,
 }
 
 /// Lists the alerts of the tenant, newest first.
@@ -128,6 +186,9 @@ pub async fn list_alerts(
     let page = AlertPage {
         limit: query.limit.unwrap_or(repo::DEFAULT_PAGE_LIMIT),
         status,
+        kinds: query.kinds()?,
+        search: query.search()?,
+        offset: query.offset()?,
         after: query
             .cursor
             .as_deref()
@@ -140,7 +201,7 @@ pub async fn list_alerts(
     let result = context
         .tenant_tx(&state, async |tx| Ok(repo::list(tx, &page).await?))
         .await?;
-    let next_cursor = if result.has_more {
+    let next_cursor = if result.has_more && query.offset.is_none() {
         result.alerts.last().map(|alert| {
             encode_cursor(AlertCursor {
                 opened_at: alert.opened_at,
@@ -153,6 +214,8 @@ pub async fn list_alerts(
     Ok(Json(AlertListResponse {
         items: views(&state, &result.alerts),
         next_cursor,
+        total: result.total,
+        total_capped: result.total_capped,
     }))
 }
 
