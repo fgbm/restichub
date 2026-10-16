@@ -59,9 +59,7 @@ fn is_elevated() -> Result<bool> {
 ///
 /// Returns an error when a directory cannot be created, is not safe, or does not take a file.
 pub fn prepare_directories(config: &Path, cache: &Path) -> Result<()> {
-    paths::repair_config_dir(config, &mut |path| {
-        println!("repaired the access control of {}", path.display());
-    })?;
+    paths::repair_config_dir(config, &mut |line| println!("{line}"))?;
     paths::ensure_config_dir(config)
         .with_context(|| format!("cannot prepare the directory {}", config.display()))?;
     let staging = crate::identity::sibling(config, ".staging");

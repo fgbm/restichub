@@ -187,7 +187,16 @@ To upgrade an agent, you do not register the host again. The identity stays.
 
 The command stops the running service, copies the new executable into the program directory, points the service at it and starts it. It keeps the identity and the restic record. It waits for the connection, as `register` does.
 
-On Windows the command also repairs the access control of `%ProgramData%\ResticHub`, when an older agent left a foreign access there. The repair runs only when SYSTEM or Administrators own the directory and the directory holds only files of the agent. The command prints one line for each repaired path. It does not read the old restore root `%ProgramData%\ResticHub\Restore`. The service never repairs the access. A directory of another owner, a link, or a file that the agent does not know stops the command. The message names the item.
+On Windows the command also repairs the access control of `%ProgramData%\ResticHub`, when an older agent left a foreign access there. The command first sets the protected access control on the directory. Then it examines the items in the directory. The command prints one line for each change. It does not read the old restore root `%ProgramData%\ResticHub\Restore`. The service never repairs the access.
+
+The agent does not use a file that another account could change before the repair:
+
+- If another account could change `Agent-server-scripts`, the command removes the file. The trust mode for server scripts is then off. To turn it on again, run `restichub-agent trust-server-scripts --enable` as Administrator.
+- If another account could change `Agent-restore-roots.txt`, the command renames the file to `Agent-restore-roots.txt.untrusted-<time>`. The extra restore roots are then off. Examine the file, and then rename it back to turn them on again.
+- In a directory that another account could change, the command removes the files of an incomplete certificate rotation: `rotation.next` and the files that end with `.next`.
+- If another account could read or change the identity, the command shows a warning. Register the host again (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)).
+
+The command stops at an item that it cannot repair. Such an item has another owner, is a link or a hard link, or is not a file of the agent. The message names the item.
 
 On Linux the command needs no repair: it sets the mode of `/etc/restichub-agent` itself, and an old install leaves no directory that the command refuses.
 
@@ -211,7 +220,8 @@ The exit code is 0 on success and 1 on an error. The exit code is 78 when the se
 | The host stays in "Waiting for connection" | The service does not run, or it cannot reach the control plane. | Run `restichub-agent status` and read "last error". Check the service, the clock and the firewall. |
 | `the control plane does not accept the protocol version of this agent` | The agent and the control plane have different protocol versions. | Update the agent (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)). |
 | `... cannot protect the directory ...ResticHub ... grants the access mask ... to an account that is not SYSTEM or Administrators` | An older agent left `%ProgramData%\ResticHub` with the access of `%ProgramData%`. | Run `restichub-agent install-service` of the new package as Administrator. The command repairs the access and keeps the identity. Do not delete the directory, because it holds the identity. |
-| `... holds ..., which is not a file of the agent` or `... is owned by an account that is not SYSTEM or Administrators, so the agent does not repair ...` | The directory holds a file that the agent does not know, or a file that another account owns. | Check the named file. Remove that file, not the directory. Run the command again. |
+| `... holds ..., which is not a file of the agent`, `... is owned by an account that is not SYSTEM or Administrators, so the agent does not use it`, `... is a hard link ...` or `... is a reparse point ...` | The directory holds a file that the agent does not know, a file that another account owns, a hard link or a link. | Check the named file. Remove that file, not the directory. Run the command again. If the file is a part of the identity, for example `agent-key.pem`, register the host again after the removal. |
+| `warning: another account could read or change ..., so the agent identity may be exposed` | An older agent let another account read or change the identity. The repair stopped that access, but the key can be already known. | Register the host again (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)). |
 | `... is owned by an account that is not SYSTEM or Administrators, so that account may have put files there` | Another account owns a directory of the agent. The agent does not repair it. | Check the files in the directory. Then run the two PowerShell lines from the message: `icacls <directory> /setowner *S-1-5-32-544` and `Set-Acl` with the SDDL `O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`. Run the command again. |
 | The command refuses a directory or file | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
 | `cannot stop the service` on Windows | A job still runs. | Wait for the job, or stop the service by hand. Run the command again. |

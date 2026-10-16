@@ -30,7 +30,7 @@ use windows_sys::Win32::Security::{
     GetAclInformation, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation,
     INHERIT_ONLY_ACE, MapGenericMask, OWNER_SECURITY_INFORMATION,
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-    SetFileSecurityW, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+    TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateDirectoryW, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
@@ -48,6 +48,10 @@ use windows_sys::Win32::System::SystemServices::{
     SYSTEM_SCOPED_POLICY_ID_ACE_TYPE,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+mod entry;
+
+pub(crate) use entry::{Entry, Exposure, Rights};
 
 /// A protected DACL: full control for SYSTEM and Administrators only, inherited by the children,
 /// with Administrators as the owner.
@@ -120,15 +124,17 @@ impl Drop for OwnedSid {
 /// Returns an error when a level cannot be created, when an existing level is a reparse point, has
 /// another owner or a write access for another account, or when the access control cannot be set.
 pub fn create_protected_tree(dir: &Path, root: &Path) -> Result<()> {
-    protect_tree(dir, root, &mut |level| {
+    protect_tree(dir, root, &crate::paths::agent_root(), &mut |level| {
         create_dir(level)?;
         apply_descriptor(level, DIR_SDDL)
     })
 }
 
+/// A refused level below `repaired` names the command that repairs it.
 fn protect_tree(
     dir: &Path,
     root: &Path,
+    repaired: &Path,
     create: &mut dyn FnMut(&Path) -> Result<()>,
 ) -> Result<()> {
     let mut levels = Vec::new();
@@ -157,7 +163,11 @@ fn protect_tree(
                         level.display()
                     );
                 }
-                check_admin_only(level)
+                if level.starts_with(repaired) {
+                    check_with_advice(level, AGENT_RIGHTS, REPAIR_ADVICE)
+                } else {
+                    check_admin_only(level)
+                }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => create(level),
             Err(error) => Err(error).with_context(|| format!("cannot read {}", level.display())),
@@ -312,12 +322,21 @@ pub fn check_program_directory(path: &Path) -> Result<()> {
     check(path, PROGRAM_DIRECTORY_RIGHTS)
 }
 
+/// Only the directories of the agent below `%ProgramData%\ResticHub` have a repair.
+const REPAIR_ADVICE: &str = "run `restichub-agent install-service` as an administrator (`restichub-agent register` on a host without an identity), which repairs the agent directories";
+
+const REMOVE_ENTRY_ADVICE: &str = "an administrator removes the entry of that account from the access control list of the path, then runs the command again";
+
 fn check(path: &Path, rights: u32) -> Result<()> {
+    check_with_advice(path, rights, REMOVE_ENTRY_ADVICE)
+}
+
+fn check_with_advice(path: &Path, rights: u32, advice: &str) -> Result<()> {
     let security = open_security(path)?;
     check_owner(path, security.owner)?;
     if let Some(mask) = first_foreign_grant(security.dacl, rights)? {
         bail!(
-            "{} grants the access mask {mask:#010x} to an account that is not SYSTEM or Administrators; run `restichub-agent install-service` as an administrator, which repairs the agent directories, or remove the entry of that account from the access control list of the path",
+            "{} grants the access mask {mask:#010x} to an account that is not SYSTEM or Administrators; {advice}",
             path.display()
         );
     }
@@ -385,69 +404,10 @@ fn foreign_owner_advice(path: &Path) -> String {
         )
     } else {
         format!(
-            "{shown} is owned by an account that is not SYSTEM or Administrators; an administrator checks the file, removes it and runs the command again"
+            "{shown} is owned by an account that is not SYSTEM or Administrators; an administrator checks the file, removes it and runs the command again; when it is a file of the agent identity, the removal loses the identity, so then {}",
+            crate::winrepair::REENROLL_ADVICE
         )
     }
-}
-
-/// What the owner and the DACL of an existing path allow to another account.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Exposure {
-    Clean,
-    /// SYSTEM or Administrators own it, but the DACL grants an agent right to another account.
-    ForeignGrant,
-    ForeignOwner,
-}
-
-/// Reads the exposure of a path without failing on a foreign owner or a foreign grant.
-///
-/// # Errors
-///
-/// Returns an error when the access control of the path cannot be read.
-pub(crate) fn exposure(path: &Path) -> Result<Exposure> {
-    let security = open_security(path)?;
-    if security.owner.is_null() || !is_trusted_sid(security.owner) {
-        return Ok(Exposure::ForeignOwner);
-    }
-    Ok(
-        if first_foreign_grant(security.dacl, AGENT_RIGHTS)?.is_some() {
-            Exposure::ForeignGrant
-        } else {
-            Exposure::Clean
-        },
-    )
-}
-
-/// Sets the protected DACL on one path without inheriting it into the children that exist.
-///
-/// The owner stays as it is: the callers repair only paths that SYSTEM or Administrators own.
-///
-/// # Errors
-///
-/// Returns an error when the access control cannot be set.
-pub(crate) fn protect_without_propagation(path: &Path, directory: bool) -> Result<()> {
-    let descriptor = descriptor(if directory { DIR_SDDL } else { FILE_SDDL })?;
-    let wide = wide_path(path);
-    let info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
-    // SAFETY: the path is a null-terminated UTF-16 string and the descriptor stays alive.
-    let ok = unsafe { SetFileSecurityW(wide.as_ptr(), info, descriptor.0) };
-    if ok == 0 {
-        bail!(
-            "cannot set the access control of {}: {}",
-            path.display(),
-            std::io::Error::last_os_error()
-        );
-    }
-    Ok(())
-}
-
-/// Sets the protected DACL on a directory and lets it flow into the children that exist.
-///
-/// # Errors
-///
-/// Returns an error when the access control cannot be set.
-pub(crate) fn protect_with_children(dir: &Path) -> Result<()> {
-    apply_descriptor(dir, DIR_SDDL)
 }
 
 /// Returns the mask that a non-admin holds, or `None` when no entry grants it.
@@ -775,12 +735,41 @@ pub(crate) mod tests {
         let dir = root.join("Agent").join("cache");
         create_protected_tree(&dir, &root).expect("cannot create the tree");
         let mut created = Vec::new();
-        protect_tree(&dir, &root, &mut |level| {
+        protect_tree(&dir, &root, &root, &mut |level| {
             created.push(level.to_path_buf());
             Ok(())
         })
         .expect("cannot check the existing tree");
         assert!(created.is_empty(), "an existing level was created again");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_only_a_level_of_the_agent_tree_names_the_repair() {
+        let base = temp("tree-advice");
+        std::fs::create_dir_all(&base).expect("cannot create the base");
+        let root = base.join("ResticHub");
+        let dir = root.join("Agent");
+        create_protected_tree(&dir, &root).expect("cannot create the tree");
+        grant(&root, "(OI)(CI)(WD)").expect("cannot add the access control entry");
+        let refuse = |repaired: &Path| {
+            let error = protect_tree(&dir, &root, repaired, &mut |_| Ok(()))
+                .expect_err("an open level must be refused");
+            format!("{error:#}")
+        };
+        let agent = refuse(&root);
+        assert!(agent.contains("install-service"), "{agent}");
+        let other = refuse(&base.join("elsewhere"));
+        assert!(!other.contains("install-service"), "{other}");
+        assert!(
+            other.contains("removes the entry of that account"),
+            "{other}"
+        );
+        let program = format!(
+            "{:#}",
+            check_program_directory(&root).expect_err("an open program directory")
+        );
+        assert!(!program.contains("install-service"), "{program}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

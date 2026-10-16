@@ -277,21 +277,46 @@ jobs:
           $restoredBefore = (Get-Acl (Join-Path $restore 'restored.txt')).Sddl
           $planted = Join-Path $root 'planted.txt'
           Set-Content $planted 'x'
+          $install = { $script:output = & $agent install-service 2>&1 | Out-String; $script:code = $LASTEXITCODE; Write-Host $script:output }
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-          $output = & $agent install-service 2>&1 | Out-String
-          $code = $LASTEXITCODE
-          Write-Host $output
+          & $install
           if ($code -eq 0) { throw 'an unknown file must stop the repair' }
           if ($output -notmatch 'planted\.txt') { throw 'the message does not name the file' }
-          if (-not (& $users $root)) { throw 'a refused repair changed the access' }
-          Remove-Item $planted
-          $output = & $agent install-service 2>&1 | Out-String
-          $code = $LASTEXITCODE
-          Write-Host $output
-          if ($code -ne 0) { throw "install-service exit code $code" }
           if ($output -notmatch 'repaired the access control of') { throw 'the repair printed no line' }
-          if (& $users $root) { throw 'the access of the level stays loose' }
+          if (& $users $root) { throw 'the level must be protected before the refusal' }
           if (-not (Get-Acl $root).AreAccessRulesProtected) { throw 'the level is not protected' }
+          Remove-Item $planted
+          # A known name that another account owns.
+          $roots = Join-Path $root 'Agent-restore-roots.txt'
+          Set-Content $roots 'C:\restore'
+          icacls $roots /setowner "$env:USERDOMAIN\$env:USERNAME" | Out-Null
+          & $install
+          if ($code -eq 0) { throw 'a known file of another owner must stop the repair' }
+          if ($output -notmatch 'Agent-restore-roots\.txt') { throw 'the message does not name the file' }
+          Remove-Item $roots
+          # A hard link that gives a known name the content of another file.
+          $mode = Join-Path $root 'Agent-server-scripts'
+          $other = Join-Path $env:ProgramData 'restichub-smoke-other.ini'
+          Set-Content $other 'server_scripts = enabled'
+          New-Item -ItemType HardLink -Path $mode -Target $other | Out-Null
+          & $install
+          if ($code -eq 0) { throw 'a hard link must stop the repair' }
+          if ($output -notmatch 'hard link') { throw 'the message does not name the hard link' }
+          Remove-Item $mode
+          Remove-Item $other
+          # Settings that users could change are not trusted after the repair.
+          Set-Content $mode 'server_scripts = enabled'
+          Set-Content $roots 'C:\restore'
+          icacls $mode /grant '*S-1-5-32-545:(R,W)' | Out-Null
+          icacls $roots /grant '*S-1-5-32-545:(R,W)' | Out-Null
+          & $install
+          if ($code -ne 0) { throw "install-service exit code $code" }
+          if ($output -notmatch 'trust-server-scripts --enable') { throw 'the removal of the mode file printed no advice' }
+          if (Test-Path $mode) { throw 'the writable mode file stays' }
+          if (Test-Path $roots) { throw 'the writable restore roots file stays' }
+          if (-not (Get-ChildItem $root -Filter 'Agent-restore-roots.txt.untrusted-*')) { throw 'the restore roots file is not set aside' }
+          Get-ChildItem $root -Filter 'Agent-restore-roots.txt.untrusted-*' | Remove-Item
+          if (& $users $root) { throw 'the access of the level stays loose' }
           if (-not (Test-Path $identity)) { throw 'the identity is gone' }
           if ((Get-Acl (Join-Path $restore 'restored.txt')).Sddl -ne $restoredBefore) { throw 'the old restore root changed' }
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }

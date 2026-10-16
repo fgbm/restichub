@@ -2,33 +2,100 @@
 //!
 //! An older build could leave `%ProgramData%\ResticHub` with the access control of
 //! `%ProgramData%`, which lets a normal user create files there. Deleting the directory would
-//! delete the agent identity, so an elevated command repairs the access instead, but only when the
-//! repair cannot hand a foreign file to the agent: SYSTEM or Administrators own the level, and
-//! the level holds only entries that the agent itself creates, all owned by SYSTEM or
-//! Administrators. The service never repairs.
+//! delete the agent identity, so an elevated command repairs the access instead. The repair never
+//! hands the agent a file whose content another account could write: it removes the trust mode
+//! file and the staged rotation files, moves the restore roots file aside, and warns that the
+//! identity may be exposed. It refuses an entry that the agent does not know, a link, a file with
+//! more than one name, and an entry of a foreign owner. The service never repairs.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
-use crate::winsec::{Exposure, exposure, protect_with_children, protect_without_propagation};
+use crate::winsec::{Entry, Exposure, Rights};
 
-/// The directory that an older build used as the default restore root. The repair checks the owner
-/// of the entry and never reads inside it.
+/// The directory that an older build used as the default restore root. The repair never reads
+/// inside it.
 const OLD_RESTORE_ROOT: &str = "Restore";
 
-/// Repairs the levels from `root` down to `config` that exist, that SYSTEM or Administrators own
-/// and that grant a foreign account a right on the agent (FR-AG-04).
+pub(crate) const REENROLL_ADVICE: &str = "register the agent again: create a token with \"Re-register\" on the host page and run `restichub-agent register --force` with it";
+
+/// What the repair did to one path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Action {
+    Protected(PathBuf),
+    RemovedStaged(PathBuf),
+    RemovedTrustMode(PathBuf),
+    MovedRestoreRoots { from: PathBuf, to: PathBuf },
+    IdentityExposed(PathBuf),
+}
+
+impl std::fmt::Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Protected(path) => {
+                write!(f, "repaired the access control of {}", path.display())
+            }
+            Self::RemovedStaged(path) => write!(
+                f,
+                "removed {}: another account could change it, so the certificate rotation does not use it",
+                path.display()
+            ),
+            Self::RemovedTrustMode(path) => write!(
+                f,
+                "removed {}: another account could change it, so the trust mode for server scripts is off; to turn it on again, an administrator runs `restichub-agent trust-server-scripts --enable`",
+                path.display()
+            ),
+            Self::MovedRestoreRoots { from, to } => write!(
+                f,
+                "moved {} to {}: another account could change it, so the extra restore roots are off; an administrator checks the file and moves it back to {} to turn them on again",
+                from.display(),
+                to.display(),
+                from.display()
+            ),
+            Self::IdentityExposed(path) => write!(
+                f,
+                "warning: another account could read or change {}, so the agent identity may be exposed; {REENROLL_ADVICE}",
+                path.display()
+            ),
+        }
+    }
+}
+
+/// The role of a name that the agent keeps in a repaired level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// The configuration directory, a level of its own.
+    Config,
+    OldRestoreRoot,
+    /// A file of a certificate rotation that the identity load moves into place.
+    Staged,
+    TrustMode,
+    RestoreRoots,
+    Identity,
+    Agent,
+}
+
+impl Kind {
+    fn rights(self) -> Rights {
+        if self == Self::Identity {
+            Rights::ReadOrChange
+        } else {
+            Rights::Change
+        }
+    }
+}
+
+/// Repairs the levels from `root` down to `config` that SYSTEM or Administrators own, and the
+/// entries of the agent in them (FR-AG-04).
 ///
 /// A level of another owner, a reparse point and a level above `root` are left to the normal
-/// check, which refuses them. `log` gets each repaired path.
-///
-/// # Errors
-///
-/// Returns an error when a level to repair holds an entry that the agent does not know, a link, or
-/// an entry that another account owns, or when the access control cannot be set.
-pub fn repair_agent_tree(config: &Path, root: &Path, log: &mut dyn FnMut(&Path)) -> Result<()> {
+/// check, which refuses them. `log` gets each change and each warning.
+pub(crate) fn repair_agent_tree(
+    config: &Path,
+    root: &Path,
+    log: &mut dyn FnMut(Action),
+) -> Result<()> {
     if !config.starts_with(root) {
         return Ok(());
     }
@@ -37,207 +104,322 @@ pub fn repair_agent_tree(config: &Path, root: &Path, log: &mut dyn FnMut(&Path))
         .take_while(|level| level.starts_with(root))
         .collect();
     levels.reverse();
+    let mut repair = Repair {
+        config,
+        log,
+        exposure_told: false,
+    };
     for level in levels {
-        repair_level(level, root, config, log)?;
+        repair.level(level)?;
     }
     Ok(())
 }
 
-fn repair_level(
-    level: &Path,
-    root: &Path,
-    config: &Path,
-    log: &mut dyn FnMut(&Path),
-) -> Result<()> {
-    let metadata = match std::fs::symlink_metadata(level) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("cannot read {}", level.display()));
-        }
-    };
-    if !metadata.is_dir() || is_reparse_point(&metadata) {
-        return Ok(());
-    }
-    if exposure(level)? != Exposure::ForeignGrant {
-        return Ok(());
-    }
-    let known = if level == config {
-        config_entries(config)
-    } else {
-        root_entries(config, root)
-    };
-    let entries = check_entries(level, &known)?;
-    protect_without_propagation(level, true)?;
-    log(level);
-    for entry in entries {
-        // The config directory is a level of its own, and the old restore root is not the agent's.
-        if entry == config || is_old_restore_root(&entry) {
-            continue;
-        }
-        repair_entry(&entry, log)?;
-    }
-    Ok(())
+struct Repair<'a> {
+    config: &'a Path,
+    log: &'a mut dyn FnMut(Action),
+    exposure_told: bool,
 }
 
-/// Reads the entries of `level` and refuses an unknown one, a link, or an entry of a foreign owner.
-fn check_entries(level: &Path, known: &[String]) -> Result<Vec<PathBuf>> {
-    let mut entries = Vec::new();
-    let listing =
-        std::fs::read_dir(level).with_context(|| format!("cannot list {}", level.display()))?;
-    for entry in listing {
-        let entry = entry.with_context(|| format!("cannot list {}", level.display()))?;
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !known.iter().any(|known| known.eq_ignore_ascii_case(&name)) {
+impl Repair<'_> {
+    fn level(&mut self, level: &Path) -> Result<()> {
+        let Some(entry) = Entry::open(level)? else {
+            return Ok(());
+        };
+        if !entry.is_dir() || entry.is_reparse_point() {
+            return Ok(());
+        }
+        let is_config = level == self.config;
+        let rights = if is_config {
+            Rights::ReadOrChange
+        } else {
+            Rights::Change
+        };
+        let open = match entry
+            .exposure(rights)
+            .with_context(|| format!("cannot check {}", level.display()))?
+        {
+            Exposure::ForeignOwner => return Ok(()),
+            Exposure::ForeignGrant => true,
+            Exposure::Clean => false,
+        };
+        if open {
+            // The DACL comes before the listing, so no entry can appear after the check.
+            entry
+                .protect()
+                .with_context(|| format!("cannot protect {}", level.display()))?;
+            (self.log)(Action::Protected(level.to_path_buf()));
+            if is_config {
+                self.identity_exposed(level);
+            }
+        }
+        drop(entry);
+        let known = if is_config {
+            config_entries(level)
+        } else {
+            root_entries(self.config, level)
+        };
+        let mut entries = Vec::new();
+        let listing =
+            std::fs::read_dir(level).with_context(|| format!("cannot list {}", level.display()))?;
+        for item in listing {
+            let path = item
+                .with_context(|| format!("cannot list {}", level.display()))?
+                .path();
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let kind = known
+                .iter()
+                .find(|(known, _)| known.eq_ignore_ascii_case(&name))
+                .map(|(_, kind)| *kind);
+            entries.push((path, kind));
+        }
+        // The files whose content the agent would trust are handled first, so a refusal below
+        // never leaves them in a level that the normal check now accepts.
+        for (path, kind) in &entries {
+            match kind {
+                Some(Kind::Staged) => self.remove_staged(path, open)?,
+                Some(setting @ (Kind::TrustMode | Kind::RestoreRoots)) => {
+                    self.distrust_setting(path, *setting)?;
+                }
+                _ => {}
+            }
+        }
+        // A level that nobody else could write holds no planted entry, so only an open level
+        // refuses an unknown name.
+        if open && let Some((path, _)) = entries.iter().find(|(_, kind)| kind.is_none()) {
             bail!(
-                "{} holds {}, which is not a file of the agent, so the agent does not repair the access control of {}; an administrator checks that file and removes it (the file, not the directory), then runs the command again",
+                "{} holds {}, which is not a file of the agent, so the agent does not repair {}; an administrator checks that file and removes it (the file, not the directory), then runs the command again",
                 level.display(),
                 path.display(),
                 level.display()
             );
         }
-        let metadata = std::fs::symlink_metadata(&path)
-            .with_context(|| format!("cannot read {}", path.display()))?;
-        if is_reparse_point(&metadata) {
-            bail!(
-                "{} is a reparse point; an administrator removes the link, then runs the command again",
-                path.display()
-            );
+        for (path, kind) in entries {
+            if let Some(kind @ (Kind::Identity | Kind::Agent)) = kind {
+                self.walk(&path, kind)?;
+            }
         }
-        if exposure(&path)? == Exposure::ForeignOwner {
-            bail!(
-                "{} is owned by an account that is not SYSTEM or Administrators, so the agent does not repair the access control of {}; an administrator checks that file and removes it (the file, not the directory), then runs the command again",
-                path.display(),
-                level.display()
-            );
-        }
-        entries.push(path);
+        Ok(())
     }
-    Ok(entries)
+
+    /// An open level could hold a planted rotation, so its staged files go even when they look
+    /// clean.
+    fn remove_staged(&mut self, path: &Path, open: bool) -> Result<()> {
+        if !open {
+            let Some(entry) = Entry::open(path)? else {
+                return Ok(());
+            };
+            if !entry.is_reparse_point()
+                && entry.links() <= 1
+                && entry.exposure(Rights::Change)? == Exposure::Clean
+            {
+                return Ok(());
+            }
+        }
+        remove_file(path)?;
+        (self.log)(Action::RemovedStaged(path.to_path_buf()));
+        Ok(())
+    }
+
+    /// A setting that another account could change turns its feature off (ADR-0037).
+    fn distrust_setting(&mut self, path: &Path, kind: Kind) -> Result<()> {
+        let Some(entry) = Entry::open(path)? else {
+            return Ok(());
+        };
+        check_entry(&entry, path, kind)?;
+        if entry.exposure(Rights::Change)? != Exposure::ForeignGrant {
+            return Ok(());
+        }
+        drop(entry);
+        if kind == Kind::TrustMode {
+            remove_file(path)?;
+            (self.log)(Action::RemovedTrustMode(path.to_path_buf()));
+        } else {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let stamp = time::OffsetDateTime::now_utc().unix_timestamp();
+            let aside = path.with_file_name(format!("{name}.untrusted-{stamp}"));
+            std::fs::rename(path, &aside).with_context(|| {
+                format!("cannot move {} to {}", path.display(), aside.display())
+            })?;
+            (self.log)(Action::MovedRestoreRoots {
+                from: path.to_path_buf(),
+                to: aside,
+            });
+        }
+        Ok(())
+    }
+
+    /// Each directory is protected before its listing, so no child can appear after the check.
+    fn walk(&mut self, path: &Path, kind: Kind) -> Result<()> {
+        let Some(entry) = Entry::open(path)? else {
+            return Ok(());
+        };
+        check_entry(&entry, path, kind)?;
+        if entry.exposure(kind.rights())? == Exposure::ForeignGrant {
+            entry
+                .protect()
+                .with_context(|| format!("cannot protect {}", path.display()))?;
+            (self.log)(Action::Protected(path.to_path_buf()));
+            if kind == Kind::Identity {
+                self.identity_exposed(path);
+            }
+        }
+        if !entry.is_dir() {
+            return Ok(());
+        }
+        drop(entry);
+        let listing =
+            std::fs::read_dir(path).with_context(|| format!("cannot list {}", path.display()))?;
+        for item in listing {
+            let child = item
+                .with_context(|| format!("cannot list {}", path.display()))?
+                .path();
+            self.walk(&child, kind)?;
+        }
+        Ok(())
+    }
+
+    fn identity_exposed(&mut self, path: &Path) {
+        if !self.exposure_told {
+            self.exposure_told = true;
+            (self.log)(Action::IdentityExposed(path.to_path_buf()));
+        }
+    }
 }
 
-/// A directory flows its access into the children, so its tree must hold no link and no foreign
-/// owner before the repair.
-fn repair_entry(path: &Path, log: &mut dyn FnMut(&Path)) -> Result<()> {
-    if exposure(path)? != Exposure::ForeignGrant {
-        return Ok(());
-    }
-    if path.is_dir() {
-        check_tree(path)?;
-        protect_with_children(path)?;
+/// Refuses a link, a second name of a file and a foreign owner.
+fn check_entry(entry: &Entry, path: &Path, kind: Kind) -> Result<()> {
+    let remedy = if kind == Kind::Identity {
+        format!(
+            "an administrator checks it and removes it; the removal loses the agent identity, so then {REENROLL_ADVICE}"
+        )
     } else {
-        protect_without_propagation(path, false)?;
+        "an administrator checks it and removes it (the file, not the directory), then runs the command again".to_owned()
+    };
+    if entry.is_reparse_point() {
+        bail!(
+            "{} is a reparse point, so the agent does not use it; {remedy}",
+            path.display()
+        );
     }
-    log(path);
-    Ok(())
-}
-
-fn check_tree(dir: &Path) -> Result<()> {
-    let listing =
-        std::fs::read_dir(dir).with_context(|| format!("cannot list {}", dir.display()))?;
-    for entry in listing {
-        let path = entry
-            .with_context(|| format!("cannot list {}", dir.display()))?
-            .path();
-        let metadata = std::fs::symlink_metadata(&path)
-            .with_context(|| format!("cannot read {}", path.display()))?;
-        if is_reparse_point(&metadata) {
-            bail!(
-                "{} is a reparse point; an administrator removes the link, then runs the command again",
-                path.display()
-            );
-        }
-        if exposure(&path)? == Exposure::ForeignOwner {
-            bail!(
-                "{} is owned by an account that is not SYSTEM or Administrators; an administrator checks that file and removes it (the file, not the directory), then runs the command again",
-                path.display()
-            );
-        }
-        if metadata.is_dir() {
-            check_tree(&path)?;
-        }
+    if !entry.is_dir() && entry.links() > 1 {
+        bail!(
+            "{} is a hard link with {} names, so another path can carry its content and the agent does not use it; {remedy}",
+            path.display(),
+            entry.links()
+        );
+    }
+    if entry.exposure(kind.rights())? == Exposure::ForeignOwner {
+        bail!(
+            "{} is owned by an account that is not SYSTEM or Administrators, so the agent does not use it; {remedy}",
+            path.display()
+        );
     }
     Ok(())
 }
 
-fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-fn is_old_restore_root(path: &Path) -> bool {
-    path.file_name().is_some_and(|name| {
-        name.to_string_lossy()
-            .eq_ignore_ascii_case(OLD_RESTORE_ROOT)
-    })
+fn remove_file(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("cannot remove {}", path.display())),
+    }
 }
 
 /// The names that the agent keeps next to the configuration directory, below `root`.
-fn root_entries(config: &Path, root: &Path) -> Vec<String> {
-    let siblings = [
-        config.to_path_buf(),
-        crate::identity::sibling(config, ".staging"),
-        crate::identity::sibling(config, ".old"),
-        crate::restore_roots::roots_file_for(config),
-        crate::scripts::mode_file_for(config),
-        crate::scripts::allow_list_file_for(config),
-    ];
-    let mut names: Vec<String> = Vec::new();
-    for path in siblings.iter().filter(|path| path.parent() == Some(root)) {
-        names.extend(
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned()),
-        );
-        // An atomic replacement stages the file under this name.
-        names.extend(
-            path.with_extension("tmp")
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned()),
-        );
-    }
-    names.push(OLD_RESTORE_ROOT.to_owned());
+fn root_entries(config: &Path, root: &Path) -> Vec<(String, Kind)> {
+    let mut names = Vec::new();
+    let mut add = |path: &Path, kind: Kind, staged_by_replace: bool| {
+        if path.parent() != Some(root) {
+            return;
+        }
+        names.extend(name_of(path).map(|name| (name, kind)));
+        // An atomic replacement of a file stages it under this name.
+        if staged_by_replace {
+            names.extend(name_of(&path.with_extension("tmp")).map(|name| (name, Kind::Agent)));
+        }
+    };
+    add(config, Kind::Config, false);
+    add(
+        &crate::identity::sibling(config, ".staging"),
+        Kind::Identity,
+        false,
+    );
+    add(
+        &crate::identity::sibling(config, ".old"),
+        Kind::Identity,
+        false,
+    );
+    add(
+        &crate::restore_roots::roots_file_for(config),
+        Kind::RestoreRoots,
+        true,
+    );
+    add(
+        &crate::scripts::mode_file_for(config),
+        Kind::TrustMode,
+        true,
+    );
+    add(
+        &crate::scripts::allow_list_file_for(config),
+        Kind::Agent,
+        true,
+    );
+    names.push((OLD_RESTORE_ROOT.to_owned(), Kind::OldRestoreRoot));
     names
 }
 
-/// The names that the agent keeps in the configuration directory, including the staged and
-/// temporary names of a rotation and of an atomic file replacement.
-fn config_entries(config: &Path) -> Vec<String> {
-    let files = [
+fn config_entries(config: &Path) -> Vec<(String, Kind)> {
+    let identity = [
         crate::identity::KEY_FILE,
         crate::identity::CERT_FILE,
         crate::identity::CA_CHAIN_FILE,
         crate::identity::METADATA_FILE,
         crate::identity::SIGNING_KEYS_FILE,
+    ];
+    let other = [
         crate::keys::KEY_UPDATES_FILE,
         crate::connection::STATUS_FILE,
         crate::journal::JOURNAL_FILE,
         crate::restic_store::RECORD_FILE,
     ];
-    let mut names: Vec<String> = Vec::new();
-    for file in files {
-        names.push(file.to_owned());
-        names.push(format!("{file}{}", crate::identity::STAGED_SUFFIX));
-        names.push(
-            Path::new(file)
-                .with_extension("tmp")
-                .to_string_lossy()
-                .into_owned(),
-        );
+    let mut names = Vec::new();
+    for (file, kind) in identity
+        .iter()
+        .map(|file| (file, Kind::Identity))
+        .chain(other.iter().map(|file| (file, Kind::Agent)))
+    {
+        names.push(((*file).to_owned(), kind));
+        names.push((
+            format!("{file}{}", crate::identity::STAGED_SUFFIX),
+            Kind::Staged,
+        ));
+        names.extend(name_of(&Path::new(file).with_extension("tmp")).map(|name| (name, kind)));
     }
-    names.push(crate::identity::ROTATION_MARKER.to_owned());
-    names.push(crate::log_spool::SPOOL_DIR.to_owned());
-    names.push(crate::preflight::PROBE_FILE.to_owned());
+    names.push((crate::identity::ROTATION_MARKER.to_owned(), Kind::Staged));
+    names.push((crate::log_spool::SPOOL_DIR.to_owned(), Kind::Agent));
+    names.push((crate::preflight::PROBE_FILE.to_owned(), Kind::Agent));
     // Windows keeps the cache and, in older builds, restic below the configuration directory.
     names.extend(
         crate::paths::cache_dir()
             .strip_prefix(config)
             .ok()
             .and_then(|relative| relative.to_str())
-            .map(str::to_owned),
+            .map(|name| (name.to_owned(), Kind::Agent)),
     );
-    names.push("bin".to_owned());
+    names.push(("bin".to_owned(), Kind::Agent));
     names
+}
+
+fn name_of(path: &Path) -> Option<String> {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -257,37 +439,82 @@ mod tests {
         (base, root, config)
     }
 
-    fn repair(config: &Path, root: &Path) -> (Result<()>, Vec<PathBuf>) {
-        let mut repaired = Vec::new();
-        let result = repair_agent_tree(config, root, &mut |path| repaired.push(path.to_path_buf()));
-        (result, repaired)
+    fn repair(config: &Path, root: &Path) -> (Result<()>, Vec<Action>) {
+        let mut actions = Vec::new();
+        let result = repair_agent_tree(config, root, &mut |action| actions.push(action));
+        (result, actions)
+    }
+
+    fn is_open(path: &Path) -> bool {
+        Entry::open(path)
+            .expect("cannot open")
+            .expect("the path must exist")
+            .exposure(Rights::ReadOrChange)
+            .expect("cannot read")
+            != Exposure::Clean
+    }
+
+    fn junction(link: &Path, target: &Path) {
+        let status = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(link)
+            .arg(target)
+            .status()
+            .expect("cannot run mklink");
+        assert!(status.success(), "cannot create the junction");
     }
 
     #[test]
-    fn fr_ag_04_a_foreign_grant_on_the_top_level_with_known_entries_is_repaired() {
+    fn fr_ag_04_an_open_top_level_is_repaired_and_its_writable_settings_are_not_trusted() {
         let (base, root, config) = tree("repair-top");
-        create_protected_file(&config.join("agent-key.pem"), b"key").expect("cannot write");
         let roots = root.join("Agent-restore-roots.txt");
         create_protected_file(&roots, b"C:\\restore").expect("cannot write");
+        let mode = root.join("Agent-server-scripts");
+        create_protected_file(&mode, b"server_scripts = enabled\n").expect("cannot write");
         let restore = root.join("Restore");
         std::fs::create_dir(&restore).expect("cannot create the old restore root");
         let restored = restore.join("restored.txt");
         std::fs::write(&restored, b"data").expect("cannot write");
         grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
         grant(&roots, "(R,W)").expect("cannot add the entry");
+        grant(&mode, "(R,W)").expect("cannot add the entry");
         grant(&restored, "(R,W)").expect("cannot add the entry");
-        assert!(check_admin_only(&root).is_err());
 
-        let (result, repaired) = repair(&config, &root);
+        let (result, actions) = repair(&config, &root);
         result.expect("the repair must succeed");
 
         check_admin_only(&root).expect("the top level must be protected");
-        check_admin_only(&roots).expect("the known file must be protected");
-        check_admin_only(&config).expect("the identity directory must stay protected");
-        assert_eq!(repaired, vec![root.clone(), roots]);
+        assert!(!mode.exists(), "the trust mode must fall back to off");
+        assert!(!roots.exists(), "the restore roots file must be set aside");
+        let [
+            Action::Protected(protected),
+            Action::MovedRestoreRoots { from, to },
+            removed @ Action::RemovedTrustMode(removed_path),
+        ] = actions.as_slice()
+        else {
+            panic!("unexpected actions: {actions:?}");
+        };
+        assert_eq!((protected, from, removed_path), (&root, &roots, &mode));
+        assert!(
+            to.to_string_lossy()
+                .contains("Agent-restore-roots.txt.untrusted-"),
+            "{}",
+            to.display()
+        );
         assert_eq!(
-            exposure(&restored).expect("cannot read"),
-            Exposure::ForeignGrant,
+            std::fs::read(to).expect("the set-aside file must stay"),
+            b"C:\\restore"
+        );
+        assert!(
+            removed
+                .to_string()
+                .contains("trust-server-scripts --enable"),
+            "{removed}"
+        );
+        assert!(
+            is_open(&restored),
             "the old restore tree must stay as it was"
         );
         create_protected_tree(&config, &root).expect("the normal check must pass now");
@@ -295,43 +522,140 @@ mod tests {
     }
 
     #[test]
-    fn fr_ag_04_a_protected_tree_is_not_repaired() {
+    fn fr_ag_04_a_protected_tree_is_not_changed() {
         let (base, root, config) = tree("repair-clean");
-        let (result, repaired) = repair(&config, &root);
+        create_protected_file(&config.join("agent-key.pem"), b"key").expect("cannot write");
+        create_protected_file(
+            &root.join("Agent-server-scripts"),
+            b"server_scripts = enabled\n",
+        )
+        .expect("cannot write");
+        let (result, actions) = repair(&config, &root);
         result.expect("the repair must succeed");
-        assert!(repaired.is_empty());
+        assert!(actions.is_empty(), "{actions:?}");
+        assert!(root.join("Agent-server-scripts").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
-    fn fr_ag_04_the_config_directory_with_a_foreign_grant_is_repaired_with_its_files() {
+    fn fr_ag_04_an_open_identity_directory_is_repaired_with_a_warning_to_register_again() {
         let (base, root, config) = tree("repair-config");
         let key = config.join("agent-key.pem");
         create_protected_file(&key, b"key").expect("cannot write");
         grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
         grant(&key, "(R,W)").expect("cannot add the entry");
-        let (result, repaired) = repair(&config, &root);
+        let (result, actions) = repair(&config, &root);
         result.expect("the repair must succeed");
         check_admin_only(&config).expect("the directory must be protected");
-        check_admin_only(&key).expect("the key must be protected");
-        assert_eq!(repaired, vec![config.clone(), key]);
+        assert!(!is_open(&key), "the key must be protected");
+        assert_eq!(
+            actions,
+            vec![
+                Action::Protected(config.clone()),
+                Action::IdentityExposed(config.clone()),
+                Action::Protected(key),
+            ]
+        );
+        assert!(
+            actions[1].to_string().contains("register --force"),
+            "{}",
+            actions[1]
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
-    fn fr_ag_04_an_unknown_entry_is_refused_and_named() {
+    fn fr_ag_04_a_key_that_users_could_read_is_protected_with_a_warning() {
+        let (base, root, config) = tree("repair-read");
+        let key = config.join("agent-key.pem");
+        create_protected_file(&key, b"key").expect("cannot write");
+        grant(&key, "(R)").expect("cannot add the entry");
+        let (result, actions) = repair(&config, &root);
+        result.expect("the repair must succeed");
+        assert!(!is_open(&key), "the read must be gone");
+        assert_eq!(
+            actions,
+            vec![Action::Protected(key.clone()), Action::IdentityExposed(key),]
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_rotation_in_an_open_identity_directory_is_removed_and_the_key_stays() {
+        let (base, root, config) = tree("repair-rotation");
+        let key = config.join("agent-key.pem");
+        create_protected_file(&key, b"key").expect("cannot write");
+        let marker = config.join("rotation.next");
+        let staged = config.join("agent-key.pem.next");
+        create_protected_file(&marker, b"").expect("cannot write");
+        create_protected_file(&staged, b"planted").expect("cannot write");
+        grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
+
+        let (result, actions) = repair(&config, &root);
+        result.expect("the repair must succeed");
+
+        assert!(!marker.exists() && !staged.exists());
+        assert!(
+            actions.contains(&Action::RemovedStaged(marker)),
+            "{actions:?}"
+        );
+        assert!(
+            actions.contains(&Action::RemovedStaged(staged)),
+            "{actions:?}"
+        );
+        let _ = crate::identity::StoredIdentity::load(&config);
+        assert_eq!(std::fs::read(&key).expect("the key must stay"), b"key");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_writable_staged_file_in_a_protected_directory_is_removed() {
+        let (base, root, config) = tree("repair-staged");
+        let marker = config.join("rotation.next");
+        let staged = config.join("agent-cert.pem.next");
+        create_protected_file(&marker, b"").expect("cannot write");
+        create_protected_file(&staged, b"cert").expect("cannot write");
+        grant(&staged, "(R,W)").expect("cannot add the entry");
+        let (result, actions) = repair(&config, &root);
+        result.expect("the repair must succeed");
+        assert!(
+            marker.exists(),
+            "a clean staged file of a protected directory stays"
+        );
+        assert!(!staged.exists());
+        assert_eq!(actions, vec![Action::RemovedStaged(staged)]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_an_unknown_entry_is_refused_after_the_level_is_protected() {
         let (base, root, config) = tree("repair-unknown");
-        std::fs::write(root.join("planted.exe"), b"x").expect("cannot write");
+        let planted = root.join("planted.exe");
+        std::fs::write(&planted, b"x").expect("cannot write");
+        let mode = root.join("Agent-server-scripts");
+        create_protected_file(&mode, b"server_scripts = enabled\n").expect("cannot write");
+        grant(&mode, "(R,W)").expect("cannot add the entry");
         grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
-        let (result, repaired) = repair(&config, &root);
+        let (result, actions) = repair(&config, &root);
         let error = format!(
             "{:#}",
             result.expect_err("an unknown entry must stop the repair")
         );
         assert!(error.contains("planted.exe"), "{error}");
         assert!(error.contains("the file, not the directory"), "{error}");
-        assert!(repaired.is_empty());
-        assert!(check_admin_only(&root).is_err(), "nothing was changed");
+        check_admin_only(&root).expect("the level stays protected after a refusal");
+        assert!(planted.exists());
+        assert!(
+            !mode.exists(),
+            "a refusal must not leave a writable mode file"
+        );
+        assert_eq!(
+            actions,
+            vec![
+                Action::Protected(root.clone()),
+                Action::RemovedTrustMode(mode)
+            ]
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -346,15 +670,78 @@ mod tests {
         )
         .expect("cannot set the owner");
         grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
-        let (result, repaired) = repair(&config, &root);
+        let (result, _) = repair(&config, &root);
         let error = format!(
             "{:#}",
             result.expect_err("a foreign owner must stop the repair")
         );
         assert!(error.contains("Agent-restore-roots.txt"), "{error}");
         assert!(error.contains("the file, not the directory"), "{error}");
-        assert!(repaired.is_empty());
-        assert!(check_admin_only(&root).is_err(), "nothing was changed");
+        assert!(roots.exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_an_identity_file_of_a_foreign_owner_names_the_new_registration() {
+        let (base, root, config) = tree("repair-owner-key");
+        let key = config.join("agent-key.pem");
+        create_protected_file(&key, b"key").expect("cannot write");
+        set_owner(&key, &current_user_sid().expect("cannot read the user SID"))
+            .expect("cannot set the owner");
+        let (result, _) = repair(&config, &root);
+        let error = format!(
+            "{:#}",
+            result.expect_err("a foreign owner must stop the repair")
+        );
+        assert!(error.contains("agent-key.pem"), "{error}");
+        assert!(error.contains("register --force"), "{error}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_hard_link_with_a_known_name_is_refused() {
+        let (base, root, config) = tree("repair-link");
+        let other = base.join("other.ini");
+        create_protected_file(&other, b"server_scripts = enabled\n").expect("cannot write");
+        let mode = root.join("Agent-server-scripts");
+        std::fs::hard_link(&other, &mode).expect("cannot create the hard link");
+        let (result, actions) = repair(&config, &root);
+        let error = format!("{:#}", result.expect_err("a hard link must be refused"));
+        assert!(error.contains("Agent-server-scripts"), "{error}");
+        assert!(error.contains("hard link"), "{error}");
+        assert!(actions.is_empty(), "{actions:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_junction_in_the_cache_is_refused_and_its_target_stays() {
+        let (base, root, config) = tree("repair-junction");
+        let target = base.join("target");
+        std::fs::create_dir(&target).expect("cannot create the target");
+        grant(&target, "(OI)(CI)(M)").expect("cannot add the entry");
+        let cache = config.join("cache");
+        std::fs::create_dir(&cache).expect("cannot create the cache");
+        junction(&cache.join("link"), &target);
+        grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let (result, _) = repair(&config, &root);
+        let error = format!("{:#}", result.expect_err("a junction must be refused"));
+        assert!(error.contains("reparse point"), "{error}");
+        assert!(is_open(&target), "the repair must not change the target");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_an_explicit_entry_on_a_nested_cache_file_is_removed() {
+        let (base, root, config) = tree("repair-nested");
+        let cache = config.join("cache");
+        create_protected_tree(&cache.join("snapshots"), &root).expect("cannot create the cache");
+        let file = cache.join("snapshots").join("data");
+        create_protected_file(&file, b"x").expect("cannot write");
+        grant(&file, "(R,W)").expect("cannot add the entry");
+        let (result, actions) = repair(&config, &root);
+        result.expect("the repair must succeed");
+        assert!(!is_open(&file), "the explicit entry must be gone");
+        assert_eq!(actions, vec![Action::Protected(file)]);
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -366,9 +753,9 @@ mod tests {
             &current_user_sid().expect("cannot read the user SID"),
         )
         .expect("cannot set the owner");
-        let (result, repaired) = repair(&config, &root);
+        let (result, actions) = repair(&config, &root);
         result.expect("the repair leaves the refusal to the normal check");
-        assert!(repaired.is_empty());
+        assert!(actions.is_empty());
         let error = format!(
             "{:#}",
             create_protected_tree(&config, &root).expect_err("a foreign owner must be refused")
@@ -380,18 +767,6 @@ mod tests {
         );
         assert!(error.contains("Set-Acl"), "{error}");
         assert!(!error.contains("deletes it"), "{error}");
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn fr_ag_04_the_normal_check_still_refuses_a_foreign_grant() {
-        let (base, root, config) = tree("repair-service");
-        grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
-        let error = format!(
-            "{:#}",
-            create_protected_tree(&config, &root).expect_err("the service must refuse")
-        );
-        assert!(error.contains("install-service"), "{error}");
         let _ = std::fs::remove_dir_all(&base);
     }
 }
