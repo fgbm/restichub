@@ -5,6 +5,7 @@
  */
 import { getLocale, t } from '#lib/i18n/index.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
+import { dateTimeFormat, numberFormat, pluralRules } from '#lib/intl.ts';
 
 const MINUTE = 60;
 const HOUR = 3600;
@@ -44,11 +45,7 @@ function startOfDay(time: number): number {
 }
 
 function hoursMinutes(date: Date): string {
-	return new Intl.DateTimeFormat(getLocale(), {
-		hour: '2-digit',
-		minute: '2-digit',
-		hour12: false
-	}).format(date);
+	return dateTimeFormat({ hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
 }
 
 // A three-letter month without a dot, as in "14 Oct" and "3 сен".
@@ -93,7 +90,7 @@ export function dayHeading(value: string, now = Date.now()): string {
 	const day = startOfDay(date.getTime());
 	const today = startOfDay(now);
 	const sameYear = date.getFullYear() === new Date(now).getFullYear();
-	const label = new Intl.DateTimeFormat(getLocale(), {
+	const label = dateTimeFormat({
 		day: 'numeric',
 		month: 'long',
 		...(sameYear ? {} : { year: 'numeric' })
@@ -111,7 +108,7 @@ export function dayKey(value: string): string {
 
 /** The time of day with seconds, such as "09:40:02". */
 export function clockTime(value: string): string {
-	return new Intl.DateTimeFormat(getLocale(), {
+	return dateTimeFormat({
 		hour: '2-digit',
 		minute: '2-digit',
 		second: '2-digit',
@@ -121,7 +118,7 @@ export function clockTime(value: string): string {
 
 /** The tooltip of each time: the full date, the time with seconds and the time zone. */
 export function fullTime(value: string): string {
-	return new Intl.DateTimeFormat(getLocale(), {
+	return dateTimeFormat({
 		day: 'numeric',
 		month: 'long',
 		year: 'numeric',
@@ -164,9 +161,7 @@ export function size(bytes: number): string {
 		amount /= 1024;
 		unit += 1;
 	}
-	const number = new Intl.NumberFormat(getLocale(), {
-		maximumSignificantDigits: unit === 0 ? 21 : 3
-	}).format(amount);
+	const number = numberFormat({ maximumSignificantDigits: unit === 0 ? 21 : 3 }).format(amount);
 	return t(`size.${SIZE_UNITS[unit]}` as MessageKey, { n: number });
 }
 
@@ -176,9 +171,9 @@ export function plural(
 	count: number,
 	params: Record<string, string | number> = {}
 ): string {
-	const form = new Intl.PluralRules(getLocale()).select(count);
+	const form = pluralRules().select(count);
 	return t(`${key}.${form}` as MessageKey, {
-		n: new Intl.NumberFormat(getLocale()).format(count),
+		n: numberFormat().format(count),
 		...params
 	});
 }

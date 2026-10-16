@@ -56,6 +56,19 @@ vi.mock('#lib/stores/events.svelte.ts', () => ({
 	}
 }));
 
+const rendered = vi.hoisted(() => ({ meta: [] as string[] }));
+
+vi.mock('#lib/job-item.ts', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('#lib/job-item.ts')>();
+	return {
+		...actual,
+		jobMeta: (...args: Parameters<typeof actual.jobMeta>) => {
+			rendered.meta.push(args[0].id);
+			return actual.jobMeta(...args);
+		}
+	};
+});
+
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
 	return {
@@ -409,6 +422,46 @@ describe('the Jobs screen', () => {
 			expect(withCounts()).toBe(1);
 			await vi.advanceTimersByTimeAsync(5_000);
 			expect(withCounts()).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('fr_ui_02 keeps the spinner and the unchanged rows across a job event', async () => {
+		vi.useFakeTimers();
+		try {
+			// Each read answers with new objects, as the server does.
+			mocks.listJobs.mockImplementation(async () => ({
+				items: [
+					job(),
+					job({
+						id: 'j_2',
+						plan_name: 'weekly-db',
+						status: 'succeeded',
+						result_code: 'succeeded',
+						finished_at: '2026-10-14T09:30:00Z'
+					})
+				],
+				next_cursor: null,
+				total: 2
+			}));
+			render(Jobs);
+			await vi.advanceTimersByTimeAsync(0);
+			const spinner = document.querySelector('.item .spin');
+			const finished = screen.getByText('weekly-db');
+			expect(spinner).not.toBeNull();
+			mocks.listJobs.mockClear();
+			rendered.meta = [];
+
+			for (const listener of stream.listeners) listener({ type: 'job.status' });
+			await vi.advanceTimersByTimeAsync(1_000);
+
+			expect(mocks.listJobs).toHaveBeenCalled();
+			expect(document.querySelector('.item .spin')).toBe(spinner);
+			expect(spinner?.isConnected).toBe(true);
+			expect(screen.getByText('weekly-db')).toBe(finished);
+			// Only the running row renders again: its duration counts from now.
+			expect(rendered.meta).toEqual(['j_1']);
 		} finally {
 			vi.useRealTimers();
 		}

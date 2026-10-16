@@ -26,6 +26,13 @@ describe('Icon', () => {
 		expect(container.querySelector('svg')).toHaveClass('icon--xs');
 	});
 
+	it('turns a spinner in an HTML wrapper, so the compositor can run it', () => {
+		const { container } = render(Icon, { props: { name: 'loader-circle', spin: true } });
+		const svg = container.querySelector('svg');
+		expect(svg?.parentElement?.tagName).toBe('SPAN');
+		expect(svg?.parentElement).toHaveClass('spin');
+	});
+
 	it('draws the shapes of the symbol in the SVG namespace', () => {
 		const { container } = render(Icon, { props: { name: 'job' } });
 		const shapes = container.querySelectorAll('svg > *');

@@ -29,6 +29,11 @@ export function isUnfinished(job: Pick<Job, 'status'>): boolean {
 	return job.status === 'queued' || job.status === 'sent' || job.status === 'running';
 }
 
+/** The duration counts to now, so the list item must render again on each read. */
+export function isTimed(job: Pick<Job, 'started_at' | 'finished_at'>): boolean {
+	return Boolean(job.started_at) && !job.finished_at;
+}
+
 /** The duration so far or in full; a dash for a finished job that never started. */
 export function jobDuration(job: Job): string {
 	if (job.started_at) return elapsed(secondsSpan(job.started_at, job.finished_at));

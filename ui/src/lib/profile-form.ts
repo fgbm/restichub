@@ -4,7 +4,8 @@
  */
 import type { GroupBy, JobLimitDefaults, Profile } from '#lib/api/index.ts';
 import { formatMinutes } from '#lib/format.ts';
-import { getLocale, t } from '#lib/i18n/index.ts';
+import { t } from '#lib/i18n/index.ts';
+import { pluralRules } from '#lib/intl.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
 import { draftOf, scriptOf } from '#lib/scripts.ts';
 import type { ScriptDraft } from '#lib/scripts.ts';
@@ -299,7 +300,7 @@ export function settingsOf(
 
 /** The plural form of a counted word. The catalog holds `.one`, `.few`, `.many` and `.other`. */
 export function plural(base: string, count: number): string {
-	const category = new Intl.PluralRules(getLocale()).select(count);
+	const category = pluralRules().select(count);
 	return t(`${base}.${category}` as MessageKey);
 }
 
