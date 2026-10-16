@@ -12,6 +12,7 @@ use restichub_db::{PLATFORM_TENANT_ID, auth, memberships, users};
 
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
+use crate::jobs::format_time;
 use crate::json::ApiJson;
 use crate::password;
 use crate::platform_users::parse_uuid;
@@ -45,6 +46,7 @@ pub async fn get_account(
     };
     let member_rows = memberships::list_for_account(&mut tx, user_id).await?;
     let platform_admin_count = users::platform_admin_count_platform(&mut tx).await?;
+    let last_sign_in = users::platform_last_sign_in(&mut tx, user_id).await?;
     tx.commit().await?;
     let account_memberships = member_rows
         .iter()
@@ -53,6 +55,7 @@ pub async fn get_account(
     Ok(Json(PlatformUserRecordView {
         account: PlatformUserView::new(&account, account_memberships),
         platform_admin_count,
+        last_sign_in_at: last_sign_in.map(format_time),
     }))
 }
 

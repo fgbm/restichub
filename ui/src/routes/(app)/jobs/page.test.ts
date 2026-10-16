@@ -44,6 +44,18 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
+const stream = vi.hoisted(() => ({ listeners: [] as ((event: { type: string }) => void)[] }));
+
+vi.mock('#lib/stores/events.svelte.ts', () => ({
+	isStreamConnected: () => false,
+	onEvent: (listener: (event: { type: string }) => void) => {
+		stream.listeners.push(listener);
+		return () => {
+			stream.listeners = stream.listeners.filter((item) => item !== listener);
+		};
+	}
+}));
+
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
 	return {
@@ -254,18 +266,75 @@ describe('the Jobs screen', () => {
 
 	it('fr_ui_01 reads a numbered page from the server with the filters of the address', async () => {
 		const user = userEvent.setup();
-		route.url = new URL('http://localhost/jobs?status=failed&kind=backup');
+		route.url = new URL('http://localhost/jobs?group=failed&kind=backup');
 		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 60 });
 		render(Jobs);
 
 		await screen.findByText('nightly-web');
 		expect(mocks.listJobs).toHaveBeenCalledWith(
-			expect.objectContaining({ status: 'failed', kind: 'backup', offset: 0, limit: 25 })
+			expect.objectContaining({ group: 'failed', kind: 'backup', offset: 0, limit: 25 })
 		);
 		expect(screen.getByText('Showing 1 to 25 of 60')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Next' }));
 		await waitFor(() =>
 			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25 }))
+		);
+	});
+
+	it('fr_ui_01 shows the server counts of the state tabs and asks for the tab', async () => {
+		const user = userEvent.setup();
+		const tab = (count: number, capped = false) => ({ count, capped });
+		mocks.listJobs.mockResolvedValue({
+			items: [job()],
+			next_cursor: null,
+			total: 1,
+			total_capped: false,
+			counts: {
+				all: tab(124),
+				running: tab(2),
+				failed: tab(3),
+				succeeded: tab(10000, true),
+				succeeded_with_warnings: tab(1)
+			}
+		});
+		render(Jobs);
+
+		const failed = await screen.findByRole('button', { name: /^Failed/ });
+		expect(failed).toHaveTextContent('3');
+		expect(failed.querySelector('.count')).toHaveClass('count--danger');
+		expect(screen.getByRole('button', { name: /^Running/ })).toHaveTextContent('2');
+		expect(screen.getByRole('button', { name: /^All/ })).toHaveTextContent('124');
+		expect(screen.getByRole('button', { name: /^Succeeded/ })).toHaveTextContent('10,000+');
+		const warnings = screen.getByRole('button', { name: /^With warnings/ });
+		expect(warnings).toHaveTextContent('1');
+		expect(warnings.querySelector('.count')).not.toHaveClass('count--danger');
+
+		await user.click(warnings);
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(
+				expect.objectContaining({ group: 'succeeded_with_warnings', offset: 0 })
+			)
+		);
+	});
+
+	it('fr_ui_01 searches the names on the server and sorts by the duration', async () => {
+		const user = userEvent.setup();
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
+		render(Jobs);
+
+		await screen.findByText('nightly-web');
+		await user.type(screen.getByRole('searchbox'), 'db-01');
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'db-01' }))
+		);
+
+		route.url = new URL('http://localhost/jobs?sort=duration');
+		mocks.listJobs.mockClear();
+		render(Jobs);
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenCalledWith(
+				expect.objectContaining({ sort: 'duration', order: 'desc' })
+			)
 		);
 	});
 
@@ -313,6 +382,54 @@ describe('the Jobs screen', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('fr_ui_01 reloads the rows on each job event and the tab counts at most once in 5 seconds', async () => {
+		vi.useFakeTimers();
+		try {
+			mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
+			render(Jobs);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(mocks.listJobs).toHaveBeenCalledTimes(1);
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ counts: true }));
+			mocks.listJobs.mockClear();
+
+			const withCounts = () =>
+				mocks.listJobs.mock.calls.filter(([query]) => query.counts === true).length;
+			for (let second = 0; second < 4; second += 1) {
+				for (const listener of stream.listeners) listener({ type: 'job.status' });
+				await vi.advanceTimersByTimeAsync(1_000);
+			}
+			expect(mocks.listJobs.mock.calls.length).toBeGreaterThanOrEqual(4);
+			expect(withCounts()).toBe(0);
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(
+				expect.objectContaining({ counts: undefined })
+			);
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(withCounts()).toBe(1);
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(withCounts()).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('fr_ui_01 opens the tab of the status that an older link names', async () => {
+		route.url = new URL('http://localhost/jobs?status=failed');
+		render(Jobs);
+
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ group: 'failed' }))
+		);
+		expect(route.url.searchParams.get('group')).toBe('failed');
+		expect(route.url.searchParams.has('status')).toBe(false);
+
+		route.url = new URL('http://localhost/jobs?status=queued&group=running');
+		mocks.listJobs.mockClear();
+		render(Jobs);
+		await waitFor(() => expect(mocks.listJobs).toHaveBeenCalled());
+		expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ group: undefined }));
+		expect(route.url.searchParams.has('status')).toBe(false);
 	});
 
 	it('fr_ui_01 asks to narrow the filters for a page past the counted rows', async () => {

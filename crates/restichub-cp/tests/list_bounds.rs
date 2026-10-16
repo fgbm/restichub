@@ -179,8 +179,8 @@ async fn fr_ui_01_the_job_list_counts_a_long_history_only_up_to_the_limit() {
         .await
         .expect("cannot set the tenant scope");
     sqlx::query(
-        "UPDATE jobs SET status = 'succeeded', result_code = 'succeeded', started_at = now(), \
-         finished_at = now() WHERE id = $1",
+        "UPDATE jobs SET status = 'succeeded', result_code = 'succeeded_with_warnings', \
+         started_at = now(), finished_at = now() WHERE id = $1",
     )
     .bind(job.as_uuid())
     .execute(&mut *tx)
@@ -195,6 +195,29 @@ async fn fr_ui_01_the_job_list_counts_a_long_history_only_up_to_the_limit() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["total"], 10_000);
+    assert_eq!(page["total_capped"], true);
+    assert!(page["counts"].is_null(), "{page}");
+    // Each tab stops at the limit too, and the total of a tab is its count.
+    let (status, _, page) = send(
+        &app,
+        request(
+            "GET",
+            "/api/v1/jobs?limit=1&group=succeeded_with_warnings&counts=true",
+            Some(&viewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    for tab in ["all", "succeeded_with_warnings"] {
+        assert_eq!(page["counts"][tab]["count"], 10_000, "{tab}");
+        assert_eq!(page["counts"][tab]["capped"], true, "{tab}");
+    }
+    for tab in ["running", "failed", "succeeded"] {
+        assert_eq!(page["counts"][tab]["count"], 0, "{tab}");
+        assert_eq!(page["counts"][tab]["capped"], false, "{tab}");
+    }
     assert_eq!(page["total"], 10_000);
     assert_eq!(page["total_capped"], true);
     let (status, _, page) = send(

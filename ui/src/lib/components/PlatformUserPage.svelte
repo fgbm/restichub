@@ -224,10 +224,7 @@
 		}
 	}
 
-	// `last_sign_in_at` comes with a later API change; until then the row stays hidden.
-	const lastSignIn = $derived(
-		(user as { last_sign_in_at?: string | null } | null)?.last_sign_in_at ?? null
-	);
+	const lastSignIn = $derived(user?.last_sign_in_at ?? null);
 
 	const accountItems = $derived.by<KeyValueItem[]>(() => {
 		if (!user) return [];

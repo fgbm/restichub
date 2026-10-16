@@ -184,6 +184,7 @@ pub async fn deliver_tenant(
                     attempt,
                     &error.code(),
                     retry_at,
+                    finished,
                 )
                 .await?;
                 if !recorded {

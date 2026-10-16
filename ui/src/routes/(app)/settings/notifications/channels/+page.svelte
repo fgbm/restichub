@@ -23,7 +23,7 @@
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type { FilterFacet, ListMeta, RowAction, SelectOption } from '#lib/components/ui/index.ts';
-	import { changedAt } from '#lib/list-format.ts';
+	import { ago, changedAt } from '#lib/list-format.ts';
 	import { channelState, iconOf, pillOf } from '#lib/vocabulary.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -125,6 +125,15 @@
 		return [
 			t(`channels.kind.${channel.kind}` as MessageKey),
 			target,
+			channel.last_delivery_at && {
+				text: t(
+					channel.last_delivery_ok ? 'channels.meta.delivered' : 'channels.meta.deliveryFailed',
+					{
+						time: ago(channel.last_delivery_at)
+					}
+				),
+				time: channel.last_delivery_at
+			},
 			{
 				text: t('list.changed', { time: changedAt(channel.updated_at) }),
 				time: channel.updated_at

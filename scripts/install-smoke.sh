@@ -6,6 +6,7 @@
 #   install-smoke.sh cp-up        start the control plane, create the administrator and the token
 #   install-smoke.sh ca           write the installation CA that the listener presents
 #   install-smoke.sh connected    wait until the control plane lists the agent as connected
+#   install-smoke.sh canary-jobs  run ten jobs on three repositories whose passwords are canaries
 #   install-smoke.sh cp-logs      print the log of the control plane
 #
 # The state lives in $SMOKE_DIR. The values are for a throw-away control plane on the loopback
@@ -113,11 +114,77 @@ connected() {
 	return 1
 }
 
+wait_job() {
+	local id="$1" status=""
+	for _ in $(seq 1 120); do
+		status="$(curl -fsS -b "$jar" "$web/api/v1/jobs/$id" | jq -r .status)"
+		case "$status" in
+		succeeded) return 0 ;;
+		failed | expired) break ;;
+		esac
+		sleep 1
+	done
+	echo "job $id ended with status '$status'" >&2
+	curl -fsS -b "$jar" "$web/api/v1/jobs/$id" >&2 || true
+	return 1
+}
+
+# Right after a restart of the service, the control plane can still answer 409 agent_offline.
+start_job() {
+	local answer code
+	for _ in $(seq 1 30); do
+		answer="$(curl -sS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
+			-w '\n%{http_code}' "$web/api/v1/repositories/$1/$2" -d '{}')"
+		code="${answer##*$'\n'}"
+		if [ "$code" = 202 ]; then
+			printf '%s' "${answer%$'\n'*}" | jq -r .id
+			return 0
+		fi
+		[ "$code" = 409 ] || break
+		sleep 1
+	done
+	echo "cannot start the $2 job: HTTP $code ${answer%$'\n'*}" >&2
+	return 1
+}
+
+run_job() {
+	local id
+	id="$(start_job "$1" "$2")"
+	wait_job "$id"
+}
+
+# The installed service runs ten jobs on three local repositories below $2 (AC-AG-03). The password
+# of each repository is one line of the file $1. The password goes to curl on the standard input,
+# so it is never a process argument.
+canary_jobs() {
+	local canaries="$1" root="$2" agent index=0 repository
+	local repositories=()
+	agent="$(agent_json | jq -r '.items[0].id')"
+	while IFS= read -r canary; do
+		index=$((index + 1))
+		repository="$(printf '%s' "$canary" |
+			jq -Rc --arg name "canary-$index" --arg path "$root/repo-$index" --arg agent "$agent" \
+				'{name: $name, backend: {kind: "local", path: $path}, password: ., maintenance_agent_id: $agent}' |
+			curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
+				"$web/api/v1/repositories" --data-binary @- | jq -r .id)"
+		repositories+=("$repository")
+	done <"$canaries"
+	[ "${#repositories[@]}" -eq 3 ] || { echo "three canaries are necessary" >&2; return 1; }
+	for repository in "${repositories[@]}"; do
+		run_job "$repository" init
+		run_job "$repository" test-access
+		run_job "$repository" test-access
+	done
+	run_job "${repositories[0]}" test-access
+	echo "ten canary jobs succeeded"
+}
+
 case "${1:-}" in
 db-prepare) db_prepare ;;
 cp-up) cp_up ;;
 ca) ca ;;
 connected) shift; connected "$@" ;;
+canary-jobs) shift; canary_jobs "$@" ;;
 cp-logs) cat "$smoke_dir/cp.log" ;;
 *) echo "unknown command: ${1:-}" >&2; exit 2 ;;
 esac

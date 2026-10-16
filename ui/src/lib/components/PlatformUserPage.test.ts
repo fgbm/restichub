@@ -99,6 +99,15 @@ describe('Platform user page', () => {
 		expect(facts.queryByText('Last sign-in')).toBeNull();
 	});
 
+	it('shows the last sign-in of the record', async () => {
+		const signedIn = new Date(Date.now() - 2 * 3_600_000).toISOString();
+		mocks.getPlatformUser.mockResolvedValue(account({ last_sign_in_at: signedIn }));
+		render(PlatformUserPage, { userId: 'u_02' });
+		const time = await screen.findByText('2 hours ago', { selector: 'time' });
+		expect(time).toHaveAttribute('datetime', signedIn);
+		expect(screen.getByText('Last sign-in')).toBeInTheDocument();
+	});
+
 	it('marks a membership of a suspended organization', async () => {
 		render(PlatformUserPage, { userId: 'u_02' });
 		await screen.findByText('initech');

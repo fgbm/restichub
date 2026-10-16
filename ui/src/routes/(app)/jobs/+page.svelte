@@ -5,7 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Job, JobKind, JobQuery, JobStatus } from '#lib/api/index.ts';
+	import type { Job, JobGroup, JobKind, JobListResponse, JobQuery } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import { Alert, Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
 	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
@@ -36,6 +36,7 @@
 	let jobs = $state<Job[]>([]);
 	let total = $state(0);
 	let totalCapped = $state(false);
+	let counts = $state<JobListResponse['counts'] | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let hosts = $state<{ id: string; hostname: string }[]>([]);
@@ -44,10 +45,12 @@
 	// The list filters, sorts and pages on the server (FR-UI-01). The host page links here with the
 	// host to show (`?agent_id=`).
 	const filters = queryFilters([
+		'q',
 		'agent_id',
 		'repository_id',
 		'plan_id',
 		'kind',
+		'group',
 		'status',
 		'period',
 		'from',
@@ -59,26 +62,48 @@
 	] as const);
 	const SORT_KEYS: Record<string, NonNullable<JobQuery['sort']>> = {
 		started: 'started_at',
+		duration: 'duration',
+		finished: 'finished_at',
 		plan: 'plan',
 		host: 'host'
 	};
+	// Newest and longest first by default; the other keys read A to Z.
+	const DESCENDING = new Set(['started', 'duration', 'finished']);
 	const sort = $derived({
 		default: 'started',
 		options: [
 			{ value: 'started', label: t('jobs.sort.started'), order: 'desc' as const },
+			{ value: 'duration', label: t('jobs.sort.duration'), order: 'desc' as const },
+			{ value: 'finished', label: t('jobs.sort.finished'), order: 'desc' as const },
 			{ value: 'plan', label: t('jobs.sort.plan') },
 			{ value: 'host', label: t('jobs.sort.host') }
 		]
 	});
-	// The tabs are the status groups that the server filters.
+	const GROUPS: JobGroup[] = ['running', 'failed', 'succeeded_with_warnings', 'succeeded'];
+	const GROUP_LABELS: Record<JobGroup, MessageKey> = {
+		running: 'jobs.tab.running',
+		failed: 'jobs.tab.failed',
+		succeeded_with_warnings: 'jobs.tab.warnings',
+		succeeded: 'jobs.tab.succeeded'
+	};
+	// The tabs are the status groups that the server filters and counts.
 	const states = $derived({
-		key: 'status',
+		key: 'group',
 		default: 'all',
 		options: [
-			{ value: 'all', label: t('jobs.tab.all') },
-			{ value: 'running', label: t('jobs.tab.running') },
-			{ value: 'failed', label: t('jobs.tab.failed') },
-			{ value: 'succeeded', label: t('jobs.tab.succeeded') }
+			{
+				value: 'all',
+				label: t('jobs.tab.all'),
+				count: counts?.all.count,
+				capped: counts?.all.capped
+			},
+			...GROUPS.map((group) => ({
+				value: group,
+				label: t(GROUP_LABELS[group]),
+				count: counts?.[group].count,
+				capped: counts?.[group].capped,
+				danger: group === 'failed'
+			}))
 		]
 	});
 	const tablePage = $derived(pageNumber(filters.value.page));
@@ -100,12 +125,13 @@
 			repository_id: value.repository_id || undefined,
 			plan_id: value.plan_id || undefined,
 			kind: value.kind || undefined,
-			status: value.status ? (value.status as JobStatus) : undefined,
+			group: GROUPS.find((group) => group === value.group),
+			q: value.q || undefined,
 			from: iso(window.start),
 			to: iso(window.end),
 			sort: SORT_KEYS[value.sort || 'started'],
 			order:
-				value.order === 'asc' || (value.sort && value.sort !== 'started' && !value.order)
+				value.order === 'asc' || (!value.order && value.sort && !DESCENDING.has(value.sort))
 					? 'asc'
 					: 'desc',
 			offset: (tablePage - 1) * pageSize,
@@ -137,11 +163,12 @@
 	]);
 
 	const FILTER_KEYS = [
+		'q',
 		'agent_id',
 		'repository_id',
 		'plan_id',
 		'kind',
-		'status',
+		'group',
 		'period',
 		'from',
 		'to'
@@ -186,12 +213,12 @@
 	// A silent reload and a filter change can overlap; only the last request may fill the table.
 	let request = 0;
 
-	async function load(silent = false): Promise<void> {
+	async function load(silent = false, withCounts = true): Promise<void> {
 		const mine = ++request;
 		if (!silent) loading = true;
 		error = null;
 		try {
-			const page = await service.listJobs(queryOf());
+			const page = await service.listJobs({ ...queryOf(), counts: withCounts || undefined });
 			if (mine !== request) return;
 			const last = lastPageIfPast(tablePage, pageSize, page.total, page.items.length);
 			if (last !== null) {
@@ -201,6 +228,7 @@
 			jobs = page.items;
 			total = page.total;
 			totalCapped = page.total_capped;
+			if (page.counts) counts = page.counts;
 		} catch (problem) {
 			if (mine !== request) return;
 			error = messageOf(problem);
@@ -221,34 +249,65 @@
 		if (planList.status === 'fulfilled') plans = planList.value;
 	}
 
+	// An older link names a status. The tab of that status replaces it; a status without a tab
+	// opens all jobs.
+	const STATUS_GROUPS: Partial<Record<string, JobGroup>> = {
+		running: 'running',
+		failed: 'failed',
+		dead_letter: 'failed',
+		succeeded: 'succeeded'
+	};
+	if (filters.value.status) {
+		filters.update({
+			status: '',
+			group: STATUS_GROUPS[filters.value.status] ?? '',
+			page: filters.value.page
+		});
+	}
+
 	// The list opens on the jobs of the last 7 days; "All time" in the period facet shows the rest.
 	if (!page.url.searchParams.has('period') && !filters.value.from && !filters.value.to) {
 		filters.update({ period: '7d', page: filters.value.page });
 	}
 
 	// The key is the filter state, not the query: a period preset gives a new time on each read.
-	let loadedQuery = JSON.stringify(filters.value);
+	// A typed search waits for a short pause; the other filters and the page apply at once.
+	let loadedQuery = filterKey();
+	let typing: ReturnType<typeof setTimeout> | undefined;
+	function filterKey(): { q: string; rest: string } {
+		const { q, ...rest } = filters.value;
+		return { q, rest: JSON.stringify(rest) };
+	}
 	onMount(() => {
 		void load();
 		void loadOptions();
+		return () => clearTimeout(typing);
 	});
 
 	$effect(() => {
-		const key = JSON.stringify(filters.value);
-		if (key === loadedQuery) return;
-		loadedQuery = key;
-		void load();
+		const next = filterKey();
+		if (next.q === loadedQuery.q && next.rest === loadedQuery.rest) return;
+		const typed = next.rest === loadedQuery.rest;
+		loadedQuery = next;
+		clearTimeout(typing);
+		if (typed) typing = setTimeout(() => void load(), 300);
+		else void load();
 	});
 
-	async function reload(): Promise<void> {
+	async function reload(withCounts = true): Promise<void> {
 		if (loading) return;
-		await load(true);
+		await load(true, withCounts);
 	}
 
-	const reloadSoon = coalesce(reload, 300);
+	// Each tab count reads up to the count limit, so a busy stream refreshes the rows at once and
+	// the counts at most once in 5 seconds.
+	const reloadSoon = coalesce(() => reload(false), 300);
+	const countsSoon = coalesce(() => reload(true), 5_000);
 	onMount(() =>
 		onEvent((event) => {
-			if (event.type === 'job.status' || event.type === 'resync') reloadSoon();
+			if (event.type !== 'job.status' && event.type !== 'resync') return;
+			reloadSoon();
+			countsSoon();
 		})
 	);
 
@@ -331,6 +390,7 @@
 			<FilterBar
 				label={t('jobs.filters')}
 				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('jobs.searchByName') }}
 				{states}
 				{facets}
 				period

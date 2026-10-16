@@ -70,6 +70,16 @@ describe('Organization user page', () => {
 		).toBeVisible();
 		expect(screen.getByText('egorkin')).toBeInTheDocument();
 		expect(screen.queryByText('Shared account')).toBeNull();
+		expect(screen.queryByText('Last sign-in')).toBeNull();
+	});
+
+	it('shows the last sign-in of the member', async () => {
+		const signedIn = new Date(Date.now() - 2 * 3_600_000).toISOString();
+		mocks.getUser.mockResolvedValue(member({ last_sign_in_at: signedIn }));
+		render(OrgUserPage, { userId: 'u_02' });
+		const time = await screen.findByText('2 hours ago', { selector: 'time' });
+		expect(time).toHaveAttribute('datetime', signedIn);
+		expect(screen.getByText('Last sign-in')).toBeInTheDocument();
 	});
 
 	it('saves the role at once and returns it on an error', async () => {

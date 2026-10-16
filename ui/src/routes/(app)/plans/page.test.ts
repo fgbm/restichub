@@ -72,6 +72,8 @@ function plan(overrides: Record<string, unknown> = {}) {
 		effective_rpo_seconds: 93600,
 		next_run_at: FUTURE,
 		last_fire_time: null,
+		last_success_at: null,
+		rpo_state: 'ok',
 		created_at: FUTURE,
 		updated_at: FUTURE,
 		...overrides
@@ -158,6 +160,29 @@ describe('the Plans screen', () => {
 				expect.objectContaining({ enabled: false, cron: '0 2 * * *', profile_id: 'p_1' })
 			)
 		);
+	});
+
+	it('fr_ui_01 shows the recovery point state and the last backup of each plan', async () => {
+		const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+		mocks.listPlans.mockResolvedValue([
+			plan({ last_success_at: hoursAgo(7) }),
+			plan({ id: 'pl_2', name: 'late', rpo_state: 'at_risk', last_success_at: hoursAgo(22) }),
+			plan({ id: 'pl_3', name: 'stale', rpo_state: 'violated' }),
+			plan({ id: 'pl_4', name: 'off', rpo_state: 'violated', enabled: false })
+		]);
+		const { container } = render(Plans);
+
+		await screen.findByText('late');
+		expect(screen.getByText('backup 7 h ago')).toBeInTheDocument();
+		expect(screen.getByText('backup 22 h ago')).toBeInTheDocument();
+		expect(screen.getAllByText('no backup yet')).toHaveLength(2);
+		expect(screen.getByText('At risk', { selector: '.status' })).toHaveClass('status--warning');
+		expect(screen.getByText('Backup overdue', { selector: '.status' })).toHaveClass(
+			'status--failed'
+		);
+		// A disabled plan shows Disabled, not its overdue backup.
+		expect(container.querySelectorAll('.status')).toHaveLength(3);
+		expect(screen.getByRole('button', { name: 'Need attention 2' })).toBeInTheDocument();
 	});
 
 	it('shows the Disabled pill and filters the disabled plans with a tab', async () => {

@@ -10,6 +10,7 @@
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
+	import { ago } from '#lib/list-format.ts';
 	import { describeCron } from '#lib/schedule.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -46,10 +47,18 @@
 		})
 	);
 
+	const needsAttention = (plan: Plan) =>
+		plan.enabled && (plan.rpo_state === 'at_risk' || plan.rpo_state === 'violated');
+
 	const states = $derived({
 		default: 'all',
 		options: [
 			{ value: 'all', label: t('plans.tab.all'), count: matching.length },
+			{
+				value: 'attention',
+				label: t('plans.tab.attention'),
+				count: matching.filter(needsAttention).length
+			},
 			{
 				value: 'disabled',
 				label: t('plans.tab.disabled'),
@@ -62,15 +71,24 @@
 		default: 'name',
 		options: [
 			{ value: 'name', label: t('plans.sort.name') },
+			{ value: 'success', label: t('plans.sort.lastSuccess') },
 			{ value: 'next', label: t('plans.sort.nextRun') }
 		]
 	});
 
 	const shown = $derived.by(() => {
-		const list = matching.filter((plan) => filters.value.state !== 'disabled' || !plan.enabled);
+		const list = matching.filter((plan) => {
+			if (filters.value.state === 'disabled') return !plan.enabled;
+			if (filters.value.state === 'attention') return needsAttention(plan);
+			return true;
+		});
 		const factor = filters.value.order === 'desc' ? -1 : 1;
-		const key = (plan: Plan) =>
-			filters.value.sort === 'next' ? (plan.next_run_at ?? '9999') : plan.name;
+		// A plan that never succeeded is the oldest.
+		const key = (plan: Plan) => {
+			if (filters.value.sort === 'next') return plan.next_run_at ?? '9999';
+			if (filters.value.sort === 'success') return plan.last_success_at ?? '';
+			return plan.name;
+		};
 		return [...list].sort((a, b) => factor * key(a).localeCompare(key(b)));
 	});
 
@@ -92,7 +110,13 @@
 		return [
 			plan.agent_hostname,
 			plan.profile_name,
-			{ text: lowerFirst(describeCron(plan.cron, t)), title: `${plan.cron} · ${plan.time_zone}` }
+			{ text: lowerFirst(describeCron(plan.cron, t)), title: `${plan.cron} · ${plan.time_zone}` },
+			plan.last_success_at
+				? {
+						text: t('plans.meta.lastBackup', { time: ago(plan.last_success_at) }),
+						time: plan.last_success_at
+					}
+				: t('plans.meta.noBackup')
 		];
 	}
 

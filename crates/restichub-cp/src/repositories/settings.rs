@@ -5,13 +5,17 @@
 
 use restichub_db::audit::REDACTED;
 use restichub_db::repositories::{Repository, RepositorySecrets, RepositorySettings};
-use restichub_db::{AgentId, BackendKind, RepositoryId, SecretId, agents as agents_repo};
+use restichub_db::repository_health::RepositoryHealth;
+use restichub_db::{
+    AgentId, BackendKind, JobStatus, RepositoryId, SecretId, agents as agents_repo,
+};
 use restichub_secrets::{SecretPurpose, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::dashboard::LockState;
 use crate::error::ApiError;
 use crate::secrets::{create_bound_secret, replace_bound_secret};
 use crate::validation;
@@ -124,6 +128,27 @@ pub struct RepositoryView {
     pub updated_at: String,
     /// Null for an API token actor.
     pub created_by: Option<String>,
+    /// Uses the same lock marks as the dashboard (FR-SC-06).
+    pub lock_state: LockState,
+    /// The newest check that ran to its end. A cancelled check does not count.
+    pub last_check: Option<LastCheckView>,
+    /// From the newest snapshot listing of the Restore screen, kept for 7 days. Null without a
+    /// listing or when the listing was cut.
+    pub snapshot_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckResult {
+    Passed,
+    Failed,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LastCheckView {
+    /// In RFC 3339.
+    pub finished_at: String,
+    pub result: CheckResult,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -131,8 +156,9 @@ pub struct RepositoryListResponse {
     pub items: Vec<RepositoryView>,
 }
 
-impl From<&Repository> for RepositoryView {
-    fn from(repository: &Repository) -> Self {
+impl RepositoryView {
+    /// A repository without health facts is a new one: no lock, no check and no listing.
+    pub fn new(repository: &Repository, health: Option<&RepositoryHealth>) -> Self {
         let backend = match repository.backend {
             BackendKind::S3 => BackendSettings::S3 {
                 endpoint: repository.s3_endpoint.clone().unwrap_or_default(),
@@ -162,6 +188,23 @@ impl From<&Repository> for RepositoryView {
             created_at: format_time(repository.created_at),
             updated_at: format_time(repository.updated_at),
             created_by: repository.created_by.map(|id| id.to_string()),
+            lock_state: match health {
+                Some(health) if health.lock_stale => LockState::Stale,
+                Some(health) if health.lock_held => LockState::Held,
+                _ => LockState::Free,
+            },
+            last_check: health.and_then(|health| {
+                let finished_at = health.check_finished_at?;
+                Some(LastCheckView {
+                    finished_at: format_time(finished_at),
+                    result: if health.check_status? == JobStatus::Succeeded {
+                        CheckResult::Passed
+                    } else {
+                        CheckResult::Failed
+                    },
+                })
+            }),
+            snapshot_count: health.and_then(|health| health.snapshot_count),
         }
     }
 }

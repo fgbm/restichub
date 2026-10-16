@@ -93,6 +93,7 @@
 	function meta(tenant: Tenant): ListMeta[] {
 		return [
 			plural('tenants.userCount', tenant.user_count),
+			plural('tenants.hostCount', tenant.agent_count),
 			{
 				text: t('tenants.meta.created', {
 					date: new Date(tenant.created_at).toLocaleDateString(getLocale())

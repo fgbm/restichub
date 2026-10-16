@@ -493,3 +493,120 @@ async fn db_the_canonical_secret_ref_migration_rewrites_the_references() -> Test
     db.cleanup().await;
     Ok(())
 }
+
+/// The migration 0050 gives a delivery of an earlier version the time of its last attempt, so the
+/// channel list shows it after the upgrade.
+#[tokio::test]
+async fn db_the_list_fields_migration_backfills_the_last_delivery_attempt() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let admin = admin_pool(&db).await?;
+    let name = format!("restichub_mig_{}", uuid::Uuid::now_v7().simple());
+    admin_query(&admin, &format!("CREATE DATABASE \"{name}\"")).await?;
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(db.admin_options().database(name.as_str()))
+        .await?;
+
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 50)
+        .cloned()
+        .collect();
+    Migrator {
+        migrations: Cow::Owned(before),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+        table_name: Cow::Borrowed("_sqlx_migrations"),
+        create_schemas: Cow::Owned(Vec::new()),
+    }
+    .run(&pool)
+    .await?;
+
+    let tenant: uuid::Uuid = "00000000-0000-7000-8000-000000000000".parse()?;
+    let channel = uuid::Uuid::now_v7();
+    let alert = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO notification_channels (id, tenant_id, name, kind, recipients) \
+         VALUES ($1, $2, 'ops', 'email', ARRAY['ops@example.com'])",
+    )
+    .bind(channel)
+    .bind(tenant)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO alert_state (id, tenant_id, kind, dedupe_key, status, opened_at) \
+         VALUES ($1, $2, 'job_failed', 'key', 'open', now())",
+    )
+    .bind(alert)
+    .bind(tenant)
+    .execute(&pool)
+    .await?;
+    let deliveries = [
+        (
+            "sent",
+            1,
+            Some("2026-10-01T10:05:00Z"),
+            "2026-10-01T10:05:00Z",
+        ),
+        ("failed", 5, None, "2026-10-02T10:00:00Z"),
+        ("pending", 2, None, "2026-10-03T10:00:00Z"),
+        ("pending", 0, None, "2026-10-04T10:00:00Z"),
+    ];
+    for (status, attempts, sent_at, created_at) in deliveries {
+        sqlx::query(
+            "INSERT INTO alert_deliveries \
+             (id, tenant_id, alert_id, channel_id, event, status, attempts, next_attempt_at, \
+              created_at, sent_at) \
+             VALUES ($1, $2, $3, $4, 'opened', $5, $6, now(), $7::timestamptz, \
+                     $8::timestamptz)",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(tenant)
+        .bind(alert)
+        .bind(channel)
+        .bind(status)
+        .bind(attempts)
+        .bind(created_at)
+        .bind(sent_at)
+        .execute(&pool)
+        .await?;
+    }
+
+    let sql = MIGRATOR
+        .iter()
+        .find(|migration| migration.version == 50)
+        .expect("the list fields migration is present")
+        .sql
+        .as_str()
+        .to_owned();
+    sqlx::raw_sql(AssertSqlSafe(sql)).execute(&pool).await?;
+
+    let rows: Vec<(String, i32, Option<String>)> = sqlx::query_as(
+        "SELECT status, attempts, to_char(attempted_at AT TIME ZONE 'UTC', 'MM-DD HH24:MI') \
+         FROM alert_deliveries ORDER BY created_at",
+    )
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(
+        rows,
+        [
+            ("sent".to_owned(), 1, Some("10-01 10:05".to_owned())),
+            ("failed".to_owned(), 5, Some("10-02 10:00".to_owned())),
+            ("pending".to_owned(), 2, Some("10-03 10:00".to_owned())),
+            ("pending".to_owned(), 0, None),
+        ]
+    );
+
+    pool.close().await;
+    admin_query(
+        &admin,
+        &format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"),
+    )
+    .await?;
+    admin.close().await;
+    db.cleanup().await;
+    Ok(())
+}

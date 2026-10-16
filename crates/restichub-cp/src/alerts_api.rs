@@ -19,7 +19,7 @@ use crate::alerts::message::{error_text, link};
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
-use crate::list_query::{ApiQuery, check_window, parse_list, parse_search};
+use crate::list_query::{ApiQuery, TabCount, check_window, parse_list, parse_search};
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -113,6 +113,14 @@ pub struct AlertListResponse {
     pub total: i64,
     /// More alerts match than `total` shows.
     pub total_capped: bool,
+    /// The alerts of each state tab under the kind and search filters.
+    pub counts: AlertCounts,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AlertCounts {
+    pub open: TabCount,
+    pub resolved: TabCount,
 }
 
 /// Lists the alerts of the tenant, newest first.
@@ -154,8 +162,11 @@ pub async fn list_alerts(
                 ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
             })?,
     };
-    let result = context
-        .tenant_tx(&state, async |tx| Ok(repo::list(tx, &page).await?))
+    let (result, (open, resolved)) = context
+        .tenant_tx(&state, async |tx| {
+            let result = repo::list(tx, &page).await?;
+            Ok((result, repo::status_counts(tx, &page).await?))
+        })
         .await?;
     let next_cursor = if result.has_more && query.offset.is_none() {
         result.alerts.last().map(|alert| {
@@ -172,6 +183,10 @@ pub async fn list_alerts(
         next_cursor,
         total: result.total,
         total_capped: result.total_capped,
+        counts: AlertCounts {
+            open: open.into(),
+            resolved: resolved.into(),
+        },
     }))
 }
 
