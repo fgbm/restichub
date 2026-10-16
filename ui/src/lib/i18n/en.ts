@@ -2028,7 +2028,32 @@ export const en = {
 	'channels.disable': 'Disable',
 	'channels.enabledToast': 'The channel is enabled.',
 	'channels.disabledToast': 'The channel is disabled.',
-	'list.changed': 'changed {time}'
+	'list.changed': 'changed {time}',
+	'secrets.tab.all': 'All',
+	'secrets.tab.unused': 'Not used',
+	'secrets.sort.name': 'Name',
+	'secrets.emptyTitle': 'No secrets yet',
+	'secrets.deleteInUse': 'The secret is in use. Remove it from its users first.',
+	'secrets.meta.unused': 'not used',
+	'secrets.meta.used': 'used by {list}',
+	'secrets.meta.replaced': 'replaced {time}',
+	'secrets.meta.created': 'created {time}',
+	'secrets.count.repository.one': '{n} repository',
+	'secrets.count.repository.few': '{n} repositories',
+	'secrets.count.repository.many': '{n} repositories',
+	'secrets.count.repository.other': '{n} repositories',
+	'secrets.count.profile.one': '{n} profile',
+	'secrets.count.profile.few': '{n} profiles',
+	'secrets.count.profile.many': '{n} profiles',
+	'secrets.count.profile.other': '{n} profiles',
+	'secrets.count.channel.one': '{n} channel',
+	'secrets.count.channel.few': '{n} channels',
+	'secrets.count.channel.many': '{n} channels',
+	'secrets.count.channel.other': '{n} channels',
+	'secrets.count.jobTemplate.one': '{n} job template',
+	'secrets.count.jobTemplate.few': '{n} job templates',
+	'secrets.count.jobTemplate.many': '{n} job templates',
+	'secrets.count.jobTemplate.other': '{n} job templates'
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -83,10 +83,11 @@ describe('Secrets screen', () => {
 		expect(screen.getAllByText('Script secret').length).toBeGreaterThan(0);
 		expect(screen.getByText('Repository password')).toBeInTheDocument();
 		// A row has no link to another entity (design/style/ui-principles.md, 2.4).
-		expect(screen.getByText(/Profile db-nightly/)).toBeInTheDocument();
-		expect(screen.getByText(/Repository primary-s3/)).toBeInTheDocument();
-		expect(within(screen.getByRole('table')).queryByRole('link')).not.toBeInTheDocument();
-		expect(screen.getByText('Not used')).toBeInTheDocument();
+		// Line 2 counts the users by kind; the item has no link to another entity.
+		expect(screen.getByText('used by 1 profile')).toBeInTheDocument();
+		expect(screen.getByText('used by 1 repository')).toBeInTheDocument();
+		expect(screen.queryByRole('link')).not.toBeInTheDocument();
+		expect(screen.getByText('Not used', { selector: '.status' })).toBeInTheDocument();
 	});
 
 	it('shows no change action to a Viewer', async () => {
@@ -128,7 +129,7 @@ describe('Secrets screen', () => {
 	it('replaces the value and tells that the next delivery uses it', async () => {
 		const user = userEvent.setup();
 		render(Secrets);
-		const row = (await screen.findByText('db.password')).closest('tr') as HTMLElement;
+		const row = (await screen.findByText('db.password')).closest('li') as HTMLElement;
 		await user.click(within(row).getByRole('button', { name: 'Replace value' }));
 		const dialog = await screen.findByRole('dialog');
 		expect(within(dialog).getByText(/next delivery/)).toBeInTheDocument();
@@ -140,7 +141,7 @@ describe('Secrets screen', () => {
 	it('deletes a free secret after the confirmation', async () => {
 		const user = userEvent.setup();
 		render(Secrets);
-		const row = (await screen.findByText('spare.token')).closest('tr') as HTMLElement;
+		const row = (await screen.findByText('spare.token')).closest('li') as HTMLElement;
 		await user.click(within(row).getByRole('button', { name: 'Delete' }));
 		const dialog = await screen.findByRole('dialog');
 		await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
@@ -150,12 +151,17 @@ describe('Secrets screen', () => {
 	it('refuses to delete a secret in use and names its users', async () => {
 		const user = userEvent.setup();
 		render(Secrets);
-		const row = (await screen.findByText('db.password')).closest('tr') as HTMLElement;
-		await user.click(within(row).getByRole('button', { name: 'Delete' }));
-		const dialog = await screen.findByRole('dialog');
-		expect(within(dialog).getByText('The secret is in use')).toBeInTheDocument();
-		expect(within(dialog).getByRole('link', { name: 'db-nightly' })).toBeInTheDocument();
-		expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeDisabled();
+		const row = (await screen.findByText('db.password')).closest('li') as HTMLElement;
+		const remove = within(row).getByRole('button', { name: 'Delete' });
+		expect(remove).toBeDisabled();
+		expect(remove).toHaveAttribute(
+			'title',
+			'The secret is in use. Remove it from its users first.'
+		);
+		// The details panel of the secret names its users with links.
+		await user.click(within(row).getByRole('button', { name: 'db.password' }));
+		const panel = await screen.findByRole('dialog');
+		expect(within(panel).getByRole('link', { name: 'db-nightly' })).toBeInTheDocument();
 		expect(mocks.deleteSecret).not.toHaveBeenCalled();
 	});
 });
