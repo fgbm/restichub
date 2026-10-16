@@ -94,10 +94,7 @@ describe('Job templates screen', () => {
 	it('opens a template with its scripts in the saved order', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		await user.click(
-			await screen.findByRole('button', { name: 'More actions for Web application' })
-		);
-		await user.click(await screen.findByText('Edit'));
+		await user.click(await screen.findByRole('button', { name: 'Web application' }));
 		const dialog = await screen.findByRole('dialog');
 		const titles = within(dialog)
 			.getAllByTestId('script-card')
@@ -125,10 +122,8 @@ describe('Job templates screen', () => {
 	it('deletes an own template after a confirmation', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		await user.click(
-			await screen.findByRole('button', { name: 'More actions for Web application' })
-		);
-		await user.click(await screen.findByText('Delete'));
+		await screen.findByRole('button', { name: 'Web application' });
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
 		const dialog = await screen.findByRole('dialog', { name: 'Delete the template?' });
 		await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
 		await waitFor(() => expect(mocks.deleteJobTemplate).toHaveBeenCalledWith('jt_1'));

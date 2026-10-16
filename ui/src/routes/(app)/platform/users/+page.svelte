@@ -2,19 +2,26 @@
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, PlatformUser, Role, Tenant } from '#lib/api/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
 		Checkbox,
+		DataTable,
 		Dialog,
-		PageHeader,
+		FilterBar,
 		PasswordField,
 		Select,
-		Table,
-		TextField,
-		RowActions
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		RowAction,
+		SelectOption,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -76,12 +83,14 @@
 	]);
 
 	const columns = $derived<TableColumn<PlatformUser>[]>([
-		{ key: 'username', header: t('platformUsers.username'), mono: true },
-		{ key: 'display_name', header: t('platformUsers.displayName') },
+		{ key: 'username', header: t('platformUsers.username'), mono: true, truncate: 'sm' },
+		{ key: 'display_name', header: t('platformUsers.displayName'), truncate: 'sm' },
 		{
 			key: 'email',
 			header: t('platformUsers.email'),
-			cell: (row) => row.email ?? ''
+			truncate: 'sm',
+			hideNarrow: true,
+			value: (row) => row.email ?? ''
 		},
 		{
 			key: 'platform_admin',
@@ -98,7 +107,9 @@
 		{
 			key: 'memberships',
 			header: t('platformUsers.memberships'),
-			cell: (row) =>
+			truncate: 'md',
+			hideNarrow: true,
+			value: (row) =>
 				row.memberships.length === 0
 					? t('platformUsers.noOrganizations')
 					: row.memberships
@@ -106,6 +117,67 @@
 							.join(', ')
 		}
 	]);
+
+	const filters = queryFilters(['q', 'tenant', 'admin', 'state'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'tenant',
+			label: t('platformUsers.memberships'),
+			options: facetCounts(accounts, (user) => user.memberships.map((member) => member.tenant_name))
+		},
+		{
+			key: 'admin',
+			label: t('platformUsers.platformAdmin'),
+			multiple: false,
+			options: (['yes', 'no'] as const).map((value) => ({
+				value,
+				label: t(value === 'yes' ? 'common.yes' : 'common.no'),
+				count: accounts.filter((user) => user.platform_admin === (value === 'yes')).length
+			}))
+		},
+		{
+			key: 'state',
+			label: t('common.status'),
+			multiple: false,
+			options: (['enabled', 'disabled'] as const).map((value) => ({
+				value,
+				label: t(value === 'enabled' ? 'common.enabled' : 'common.disabled'),
+				count: accounts.filter((user) => user.disabled === (value === 'disabled')).length
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		accounts.filter((user) => {
+			const { q, tenant, admin, state } = filters.value;
+			const names = user.memberships.map((member) => member.tenant_name);
+			if (tenant && !splitList(tenant).some((name) => names.includes(name))) return false;
+			if (admin && user.platform_admin !== (admin === 'yes')) return false;
+			if (state && user.disabled !== (state === 'disabled')) return false;
+			return matchesSearch(q, [user.username, user.display_name, user.email]);
+		})
+	);
+
+	function rowActions(user: PlatformUser): RowAction[] {
+		return [
+			{
+				id: 'admin',
+				label: user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin'),
+				icon: 'shield',
+				disabled: busyKey !== null,
+				onSelect: () => (user.platform_admin ? revokeRight(user) : openGrant(user))
+			},
+			{
+				id: 'disable',
+				label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
+				icon: 'octagon',
+				danger: true,
+				disabled: busyKey !== null,
+				onSelect: () => toggleDisabled(user)
+			}
+		];
+	}
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -278,55 +350,38 @@
 	}
 </script>
 
-<svelte:head>
-	<title>{t('platformUsers.title')} · {t('nav.platformMode')} · {t('app.name')}</title>
-</svelte:head>
-
-<PageHeader
+<Page
 	title={t('platformUsers.title')}
 	description={t('platformUsers.description')}
 	count={loading ? undefined : accounts.length}
 >
-	<Button variant="primary" icon="plus" onclick={openCreate}>{t('platformUsers.create')}</Button>
-</PageHeader>
-
-<Table
-	{columns}
-	rows={accounts}
-	{loading}
-	{error}
-	rowKey={(user) => user.id}
-	filterPlaceholder={t('users.searchPlaceholder')}
->
-	{#snippet rowActions(user)}
-		<RowActions
-			moreLabel={t('users.moreActions', { name: user.username })}
-			items={[
-				{
-					label: t('platformUsers.memberships'),
-					icon: 'users',
-					onSelect: () => openManage(user)
-				},
-				{
-					label: user.platform_admin
-						? t('platformUsers.revokeAdmin')
-						: t('platformUsers.grantAdmin'),
-					icon: 'shield',
-					disabled: busyKey !== null,
-					onSelect: () => (user.platform_admin ? revokeRight(user) : openGrant(user))
-				},
-				{
-					label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
-					icon: 'octagon',
-					tone: 'danger',
-					separatorBefore: true,
-					disabled: busyKey !== null,
-					onSelect: () => toggleDisabled(user)
-				}
-			]}
-		/>
+	{#snippet actions()}
+		<Button variant="primary" icon="plus" onclick={openCreate}>{t('platformUsers.create')}</Button>
 	{/snippet}
-</Table>
+
+	<!-- An account has no record page: the row opens its memberships (design/style/ui-principles.md, 2.2). -->
+	<DataTable
+		{columns}
+		rows={shown}
+		{loading}
+		{error}
+		rowKey={(user) => user.id}
+		onRowOpen={openManage}
+		actions={rowActions}
+		moreLabel={(user) => t('users.moreActions', { name: user.username })}
+	>
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('users.filters')}
+				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('users.searchPlaceholder') }}
+				{facets}
+				onchange={filters.update}
+				onreset={filters.reset}
+			/>
+		{/snippet}
+	</DataTable>
+</Page>
 
 <Dialog bind:open={createOpen} title={t('platformUsers.createTitle')} onsubmit={createUser}>
 	{#if createError}

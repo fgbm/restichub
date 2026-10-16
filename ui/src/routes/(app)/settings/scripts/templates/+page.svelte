@@ -18,13 +18,20 @@
 		Button,
 		ConfirmDialog,
 		Dialog,
+		DataTable,
 		EmptyState,
+		FilterBar,
 		Select,
-		Table,
-		TextField,
-		RowActions
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		RowAction,
+		SelectOption,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { INTERPRETERS, PHASES, templateDescription, templateName } from '#lib/scripts.ts';
@@ -86,11 +93,14 @@
 	);
 
 	const columns = $derived<TableColumn<ScriptTemplate>[]>([
+		{ key: 'name', header: t('scriptTemplates.name'), truncate: 'sm', value: templateName },
 		{
-			key: 'name',
-			header: t('scriptTemplates.name'),
-			value: (row) => templateName(row),
-			render: nameCell
+			key: 'description',
+			header: t('scriptTemplates.description.label'),
+			truncate: 'lg',
+			hideNarrow: true,
+			sortable: false,
+			value: templateDescription
 		},
 		{
 			key: 'interpreter',
@@ -101,13 +111,16 @@
 		{
 			key: 'phase',
 			header: t('scriptTemplates.phase'),
+			nowrap: true,
 			cell: (row) => t(`profiles.hooks.phase.${row.phase}` as MessageKey)
 		},
 		{
 			key: 'parameters',
 			header: t('scriptTemplates.parameters'),
 			value: (row) => String(row.parameters.length),
-			cell: (row) => String(row.parameters.length)
+			cell: (row) => String(row.parameters.length),
+			align: 'right',
+			hideNarrow: true
 		},
 		{
 			key: 'source',
@@ -118,6 +131,47 @@
 	]);
 
 	const empty = $derived(!loading && !error && templates.length === 0);
+
+	const filters = queryFilters(['q', 'interpreter', 'phase', 'source'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'interpreter',
+			label: t('scriptTemplates.interpreter'),
+			options: facetCounts(templates, (template) => [template.interpreter]).map((option) => ({
+				...option,
+				label: t(`scripts.interpreter.${option.value}` as MessageKey)
+			}))
+		},
+		{
+			key: 'phase',
+			label: t('scriptTemplates.phase'),
+			options: facetCounts(templates, (template) => [template.phase]).map((option) => ({
+				...option,
+				label: t(`profiles.hooks.phase.${option.value}` as MessageKey)
+			}))
+		},
+		{
+			key: 'source',
+			label: t('scriptTemplates.source'),
+			multiple: false,
+			options: (['builtin', 'own'] as const).map((value) => ({
+				value,
+				label: t(value === 'builtin' ? 'scriptTemplates.builtin' : 'scriptTemplates.own'),
+				count: templates.filter((template) => template.builtin === (value === 'builtin')).length
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		templates.filter((template) => {
+			const { q, interpreter, phase, source } = filters.value;
+			if (interpreter && !splitList(interpreter).includes(template.interpreter)) return false;
+			if (phase && !splitList(phase).includes(template.phase)) return false;
+			if (source && template.builtin !== (source === 'builtin')) return false;
+			return matchesSearch(q, [templateName(template), templateDescription(template)]);
+		})
+	);
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -270,27 +324,26 @@
 		}
 	}
 
-	function actionsFor(template: ScriptTemplate): MenuItem[] {
-		const items: MenuItem[] = [
+	function actionsFor(template: ScriptTemplate): RowAction[] {
+		return [
 			{
-				label: t(template.builtin ? 'scriptTemplates.view' : 'scriptTemplates.edit'),
-				icon: template.builtin ? 'eye' : 'settings',
-				onSelect: () => openEdit(template)
+				id: 'copy',
+				label: t('scriptTemplates.copy'),
+				icon: 'copy',
+				onSelect: () => openCopy(template)
 			},
-			{ label: t('scriptTemplates.copy'), icon: 'copy', onSelect: () => openCopy(template) }
-		];
-		if (!template.builtin) {
-			items.push({
+			{
+				id: 'delete',
 				label: t('scriptTemplates.delete'),
 				icon: 'octagon',
-				tone: 'danger',
+				danger: true,
+				hidden: template.builtin,
 				onSelect: () => {
 					deleteTarget = template;
 					deleteOpen = true;
 				}
-			});
-		}
-		return items;
+			}
+		];
 	}
 
 	const dialogTitle = $derived(
@@ -301,13 +354,6 @@
 				: t('scriptTemplates.addTitle')
 	);
 </script>
-
-{#snippet nameCell(template: ScriptTemplate)}
-	<span class="template">
-		<span class="template__name">{templateName(template)}</span>
-		<span class="template__meta">{templateDescription(template)}</span>
-	</span>
-{/snippet}
 
 {#snippet sourceCell(template: ScriptTemplate)}
 	<Badge tone={template.builtin ? 'accent' : 'neutral'}>
@@ -336,21 +382,34 @@
 			</Button>
 		</EmptyState>
 	{:else}
-		<Table
+		<!-- A template has no record page: the row opens its form (design/style/ui-principles.md, 2.2). -->
+		<DataTable
 			{columns}
-			rows={templates}
+			rows={shown}
 			{loading}
 			{error}
 			rowKey={(template) => template.id}
-			filterPlaceholder={t('scriptTemplates.searchPlaceholder')}
+			onRowOpen={openEdit}
+			actions={actionsFor}
+			moreLabel={(template) => t('scriptTemplates.moreActions', { name: templateName(template) })}
+			emptyTitle={t('filter.noMatches')}
+			emptyDescription={t('filter.noMatchesDescription')}
 		>
-			{#snippet rowActions(template)}
-				<RowActions
-					moreLabel={t('scriptTemplates.moreActions', { name: templateName(template) })}
-					items={actionsFor(template)}
+			{#snippet toolbar()}
+				<FilterBar
+					label={t('scriptTemplates.filters')}
+					value={filters.value}
+					search={{
+						key: 'q',
+						label: t('hosts.search'),
+						placeholder: t('scriptTemplates.searchPlaceholder')
+					}}
+					{facets}
+					onchange={filters.update}
+					onreset={filters.reset}
 				/>
 			{/snippet}
-		</Table>
+		</DataTable>
 	{/if}
 </SettingsLayout>
 
@@ -507,20 +566,6 @@
 />
 
 <style>
-	.template {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.template__name {
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.template__meta {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
 	.form {
 		display: flex;
 		flex-direction: column;

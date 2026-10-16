@@ -14,10 +14,7 @@ const legacyScreens = [
 	'src/lib/components/ProfileEditor.svelte',
 	'src/lib/components/RepositoryEditor.svelte',
 	'src/routes/(app)/+page.svelte',
-	'src/routes/(app)/platform/tenants/+page.svelte',
-	'src/routes/(app)/platform/users/+page.svelte',
 	'src/routes/(app)/restore/[[]repository]/[[]snapshot]/+page.svelte',
-	'src/routes/(app)/settings/scripts/jobs/+page.svelte',
 	'src/routes/(app)/settings/scripts/templates/+page.svelte'
 ];
 

@@ -2,16 +2,18 @@
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Tenant } from '#lib/api/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
+		DataTable,
 		Dialog,
-		PageHeader,
-		Table,
-		TextField,
-		RowActions
+		FilterBar,
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { TableColumn } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, RowAction, TableColumn } from '#lib/components/ui/index.ts';
+	import { matchesSearch } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -52,7 +54,7 @@
 	}
 
 	const columns = $derived<TableColumn<Tenant>[]>([
-		{ key: 'name', header: t('tenants.name'), mono: true },
+		{ key: 'name', header: t('tenants.name'), mono: true, truncate: 'md' },
 		{
 			key: 'status',
 			header: t('common.status'),
@@ -62,6 +64,7 @@
 		{
 			key: 'user_count',
 			header: t('tenants.users'),
+			align: 'right',
 			cell: (row) => String(row.user_count)
 		},
 		{
@@ -70,8 +73,61 @@
 			cell: (row) => (row.admin_state === 'none' ? t('tenants.noAdministrator') : ''),
 			badge: (row) => (row.admin_state === 'none' ? 'warning' : null)
 		},
-		{ key: 'created_at', header: t('common.createdAt'), cell: (row) => formatDate(row.created_at) }
+		{
+			key: 'created_at',
+			header: t('common.createdAt'),
+			nowrap: true,
+			cell: (row) => formatDate(row.created_at)
+		}
 	]);
+
+	const filters = queryFilters(['q', 'status'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'status',
+			label: t('common.status'),
+			multiple: false,
+			options: (['active', 'suspended', 'deleted'] as const).map((value) => ({
+				value,
+				label: statusLabel(value),
+				count: tenants.filter((tenant) => tenant.status === value).length
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		tenants.filter((tenant) => {
+			const { q, status } = filters.value;
+			if (status && tenant.status !== status) return false;
+			return matchesSearch(q, [tenant.name]);
+		})
+	);
+
+	function rowActions(tenant: Tenant): RowAction[] {
+		if (tenant.status === 'deleted') return [];
+		return [
+			{
+				id: 'status',
+				label: tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume'),
+				icon: tenant.status === 'active' ? 'pause' : 'refresh',
+				disabled: busyId === tenant.id,
+				onSelect: () => toggleStatus(tenant)
+			},
+			{
+				id: 'delete',
+				label: t('common.delete'),
+				icon: 'trash',
+				danger: true,
+				disabled: tenant.status !== 'suspended',
+				onSelect: () => {
+					deleteTarget = tenant;
+					deleteTyped = '';
+					deleteOpen = true;
+				}
+			}
+		];
+	}
 
 	async function load(): Promise<void> {
 		loading = true;
@@ -153,53 +209,37 @@
 	}
 </script>
 
-<svelte:head>
-	<title>{t('tenants.title')} · {t('nav.platformMode')} · {t('app.name')}</title>
-</svelte:head>
-
-<PageHeader
+<Page
 	title={t('tenants.title')}
 	description={t('tenants.description')}
 	count={loading ? undefined : tenants.length}
 >
-	<Button variant="primary" icon="plus" onclick={openCreate}>{t('tenants.create')}</Button>
-</PageHeader>
-
-<Table
-	{columns}
-	rows={tenants}
-	{loading}
-	{error}
-	rowKey={(tenant) => tenant.id}
-	filterPlaceholder={t('tenants.searchPlaceholder')}
->
-	{#snippet rowActions(tenant)}
-		<RowActions
-			moreLabel={t('tenants.moreActions', { name: tenant.name })}
-			items={tenant.status === 'deleted'
-				? []
-				: [
-						{
-							label: tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume'),
-							icon: tenant.status === 'active' ? 'pause' : 'refresh',
-							disabled: busyId === tenant.id,
-							onSelect: () => toggleStatus(tenant)
-						},
-						{
-							label: t('common.delete'),
-							icon: 'trash',
-							tone: 'danger',
-							disabled: tenant.status !== 'suspended',
-							onSelect: () => {
-								deleteTarget = tenant;
-								deleteTyped = '';
-								deleteOpen = true;
-							}
-						}
-					]}
-		/>
+	{#snippet actions()}
+		<Button variant="primary" icon="plus" onclick={openCreate}>{t('tenants.create')}</Button>
 	{/snippet}
-</Table>
+
+	<DataTable
+		{columns}
+		rows={shown}
+		{loading}
+		{error}
+		rowKey={(tenant) => tenant.id}
+		detailTitle={(tenant) => tenant.name}
+		actions={rowActions}
+		moreLabel={(tenant) => t('tenants.moreActions', { name: tenant.name })}
+	>
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('tenants.filters')}
+				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('tenants.searchPlaceholder') }}
+				{facets}
+				onchange={filters.update}
+				onreset={filters.reset}
+			/>
+		{/snippet}
+	</DataTable>
+</Page>
 
 <Dialog bind:open={createOpen} title={t('tenants.createTitle')} onsubmit={createTenant}>
 	{#if createError}
