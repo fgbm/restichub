@@ -20,6 +20,7 @@
 		rememberListQuery,
 		type PageMeta
 	} from '#lib/stores/page-meta.svelte.ts';
+	import { filtersFromQuery, filtersToQuery, targetExtra } from '#lib/restore.ts';
 	import { getPageTitle } from '#lib/stores/page-title.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
 	import { getTheme, setTheme } from '#lib/stores/theme.svelte.ts';
@@ -99,6 +100,24 @@
 		if (page.route.id === '/(app)/hosts/[id]' || page.route.id === '/(app)/profiles/[id]') {
 			const title = getPageTitle();
 			return title ? { crumbs: [{ label: title }] } : null;
+		}
+		// The snapshot page keeps the filters and the target of the list in the link back.
+		if (page.route.id === '/(app)/restore/[repository]/[snapshot]') {
+			const repositoryId = page.params.repository ?? '';
+			const snapshotId = page.params.snapshot ?? '';
+			const query = filtersToQuery(filtersFromQuery(page.url.searchParams), {
+				repository: repositoryId,
+				snapshot: snapshotId,
+				...targetExtra(page.url.searchParams)
+			});
+			const name = getPageTitle();
+			return {
+				crumbs: [
+					...(name ? [{ label: name }] : []),
+					{ label: t('restore.snapshotTitle', { id: snapshotId.slice(0, 8) }) }
+				],
+				listQuery: query.toString()
+			};
 		}
 		if (page.route.id === '/(app)/profiles/new') return { crumbs: [{ label: t('pe.newTitle') }] };
 		return null;
