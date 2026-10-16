@@ -298,7 +298,7 @@ jobs:
       # The action reads rust-toolchain.toml.
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: Test the real restic against the backends
-        run: cargo test -p restichub-agent --test restic_backends
+        run: cargo test -p restichub-agent --test restic_backends -- --show-output
       - name: Show the server logs on failure
         if: failure()
         run: |
