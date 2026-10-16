@@ -12,6 +12,7 @@ Read this file before you change the repository.
 
 ## Rules
 
+- UI changes obey [design/style/ui-principles.md](design/style/ui-principles.md).
 - Write all repository text in English by ASD-STE100 ([design/style/ste-en.md](design/style/ste-en.md)). Code comments and doc comments are outside this scope; the Code rules below apply to them. Exception: Russian documentation in `docs/src/content/docs/ru/` obeys [design/style/ru-technical.md](design/style/ru-technical.md).
 - Use the terms from the project glossary. Do not use synonyms.
 - Each test that covers an acceptance criterion refers to its ID, for example `ac_ag_05_exit_code_mapping`.

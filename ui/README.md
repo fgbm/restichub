@@ -97,6 +97,10 @@ The Compose file is for development only. It turns on insecure cookies and sets 
 - Support the light theme and the dark theme. Support English and Russian.
 - Do not name a third-party product in code, comments or documentation.
 
+## UI principles
+
+UI changes obey the rules in [design/style/ui-principles.md](../design/style/ui-principles.md).
+
 ## API client
 
 The file `src/lib/api/schema.d.ts` is generated from the OpenAPI document. The command `npm run gen:api` writes it. Start the control plane before you run the command. The control plane serves the document at `/api/v1/openapi.json`. Set `OPENAPI_URL` to use another address. The endpoint paths live in `src/lib/api/endpoints.ts`.

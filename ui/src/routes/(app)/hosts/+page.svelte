@@ -18,14 +18,14 @@
 		ConfirmDialog,
 		CopyField,
 		Dialog,
-		DropdownMenu,
 		EmptyState,
 		Icon,
 		PageHeader,
 		Panel,
 		StatusPill,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -450,9 +450,13 @@
 						</span>
 						{#if canWrite}
 							<span class="pending__action">
-								<Button size="sm" onclick={() => openCancel(token)}>
-									{t('hosts.pending.cancel')}
-								</Button>
+								<Button
+									size="sm"
+									icon="x"
+									title={t('hosts.pending.cancel')}
+									aria-label={t('hosts.pending.cancelFor', { prefix: token.display_prefix })}
+									onclick={() => openCancel(token)}
+								/>
 							</span>
 						{/if}
 					</li>
@@ -484,10 +488,8 @@
 	>
 		{#snippet rowActions(agent)}
 			{#if canWrite && agent.status === 'active'}
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('hosts.moreActions', { name: agent.hostname })}
+				<RowActions
+					moreLabel={t('hosts.moreActions', { name: agent.hostname })}
 					items={[
 						{
 							label: t('hosts.rename'),

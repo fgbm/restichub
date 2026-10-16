@@ -22,6 +22,10 @@ start() {
 	local cp agent
 	cp="$(dc ps -q cp)"
 	agent="$(dc ps -q agent-a | head -n1)"
+	# A capture that starts again after a restart keeps the agent host of the first start.
+	if [ -s "$out/capture/agent-container" ] && docker inspect "$(cat "$out/capture/agent-container")" >/dev/null 2>&1; then
+		agent="$(cat "$out/capture/agent-container")"
+	fi
 	[ -n "$cp" ] && [ -n "$agent" ] || { log "the bench is not running"; return 1; }
 	echo "$agent" >"$out/capture/agent-container"
 	for side in cp agent; do

@@ -31,7 +31,7 @@ test('setup, sign in, create an organization and find its audit record', async (
 		.getByRole('dialog')
 		.getByRole('button', { name: 'Create organization', exact: true })
 		.click();
-	await expect(page.getByRole('cell', { name: organization })).toBeVisible();
+	await expect(page.getByRole('cell', { name: organization, exact: true })).toBeVisible();
 
 	await page.goto('/platform/audit');
 	await expect(page.getByRole('row', { name: /Create organization/ }).first()).toBeVisible();

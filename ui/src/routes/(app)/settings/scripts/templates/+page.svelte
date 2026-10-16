@@ -18,11 +18,11 @@
 		Button,
 		ConfirmDialog,
 		Dialog,
-		DropdownMenu,
 		EmptyState,
 		Select,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -349,10 +349,8 @@
 			filterPlaceholder={t('scriptTemplates.searchPlaceholder')}
 		>
 			{#snippet rowActions(template)}
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('scriptTemplates.moreActions', { name: templateName(template) })}
+				<RowActions
+					moreLabel={t('scriptTemplates.moreActions', { name: templateName(template) })}
 					items={actionsFor(template)}
 				/>
 			{/snippet}
