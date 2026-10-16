@@ -40,6 +40,16 @@ const FAILED_JOBS: i64 = 10;
 const OPEN_ALERTS: usize = 10;
 const LIST_LIMIT: usize = 50;
 
+/// Whether the host counts as online: it opened a stream and the control plane saw it within
+/// [`ONLINE_WINDOW`].
+pub fn is_online(
+    first_connected_at: Option<OffsetDateTime>,
+    last_seen_at: Option<OffsetDateTime>,
+    now: OffsetDateTime,
+) -> bool {
+    first_connected_at.is_some() && last_seen_at.is_some_and(|seen| now - seen <= ONLINE_WINDOW)
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DashboardHost {
     pub id: String,
@@ -236,10 +246,7 @@ pub async fn dashboard(
         .map(|agent| DashboardHost {
             id: agent.id.to_string(),
             hostname: agent.hostname.clone(),
-            online: agent.first_connected_at.is_some()
-                && agent
-                    .last_seen_at
-                    .is_some_and(|seen| now - seen <= ONLINE_WINDOW),
+            online: is_online(agent.first_connected_at, agent.last_seen_at, now),
             waiting: agent.first_connected_at.is_none(),
             last_seen_at: agent.last_seen_at.map(format_time),
         })

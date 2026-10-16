@@ -156,7 +156,8 @@
 
 	function statusLabel(agent: Agent): string {
 		if (agent.status === 'revoked') return t('hosts.status.revoked');
-		return t(isWaiting(agent) ? 'hosts.status.waiting' : 'hosts.status.active');
+		if (isWaiting(agent)) return t('hosts.status.waiting');
+		return t(agent.online ? 'hp.state.online' : 'hp.state.offline');
 	}
 
 	// The token row shows the creator's name when the caller created it (getSession is the caller).
@@ -324,7 +325,11 @@
 	<span class="status">
 		<span title={isWaiting(agent) ? t('hosts.waitingTitle') : undefined}>
 			<StatusPill
-				tone={agent.status === 'revoked' ? 'neutral' : isWaiting(agent) ? 'info' : 'success'}
+				tone={agent.status === 'revoked' || (!agent.online && !isWaiting(agent))
+					? 'neutral'
+					: isWaiting(agent)
+						? 'info'
+						: 'success'}
 			>
 				{statusLabel(agent)}
 			</StatusPill>

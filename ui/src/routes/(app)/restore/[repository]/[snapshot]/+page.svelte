@@ -19,7 +19,13 @@
 	} from '#lib/components/ui/index.ts';
 	import { formatBytes, formatCount, formatLocalTime } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { filtersFromQuery, filtersToQuery, includePaths } from '#lib/restore.ts';
+	import {
+		TARGET_PARAM,
+		filtersFromQuery,
+		filtersToQuery,
+		includePaths,
+		targetExtra
+	} from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
@@ -42,7 +48,7 @@
 	const canRestore = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const paths = $derived(includePaths(selection));
 	const backHref = $derived(
-		`${resolve('/(app)/restore')}?${filtersToQuery(filters, { repository: repositoryId, snapshot: snapshotId })}`
+		`${resolve('/(app)/restore')}?${filtersToQuery(filters, { repository: repositoryId, snapshot: snapshotId, ...targetExtra(page.url.searchParams) })}`
 	);
 
 	function describe(problem: unknown): string {
@@ -173,7 +179,14 @@
 		</div>
 	</div>
 
-	<RestoreDialog bind:open={dialogOpen} {repository} {snapshot} {paths} {agents} />
+	<RestoreDialog
+		bind:open={dialogOpen}
+		{repository}
+		{snapshot}
+		{paths}
+		{agents}
+		preferredAgentId={page.url.searchParams.get(TARGET_PARAM) ?? ''}
+	/>
 {/if}
 
 <style>

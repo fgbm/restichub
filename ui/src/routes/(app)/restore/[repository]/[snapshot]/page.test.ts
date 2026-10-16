@@ -165,6 +165,26 @@ describe('Snapshot page', () => {
 		expect(within(dialog).getByLabelText('Target host')).toHaveValue('a_2');
 	});
 
+	it('fr_rs_04_the_target_parameter_preselects_the_target_host_and_the_back_link_keeps_it', async () => {
+		const user = userEvent.setup();
+		route.url = new URL('http://localhost/restore/r_1/x?target=a_2');
+		render(Snapshot);
+		expect(await screen.findByRole('link', { name: /Back to the snapshots/ })).toHaveAttribute(
+			'href',
+			expect.stringContaining('target=a_2')
+		);
+		const dialog = await openDialog(user);
+		expect(within(dialog).getByLabelText('Target host')).toHaveValue('a_2');
+	});
+
+	it('fr_rs_04_the_target_parameter_of_an_unknown_host_falls_back_to_the_snapshot_host', async () => {
+		const user = userEvent.setup();
+		route.url = new URL('http://localhost/restore/r_1/x?target=a_99');
+		render(Snapshot);
+		const dialog = await openDialog(user);
+		expect(within(dialog).getByLabelText('Target host')).toHaveValue(agent.id);
+	});
+
 	it('fr_rs_04_offers_the_exclude_field_only_when_nothing_is_selected', async () => {
 		const user = userEvent.setup();
 		mocks.restoreSnapshot.mockResolvedValue({ id: 'j_8' });

@@ -375,7 +375,6 @@ export const en = {
 	'hosts.versionUpdate': 'Update available',
 	'hosts.versionUnsupported': 'Unsupported version',
 	'hosts.versionTitle': 'Protocol {protocol} · control plane {version}',
-	'hosts.status.active': 'Active',
 	'hosts.status.revoked': 'Revoked',
 	'hosts.status.waiting': 'Waiting for connection',
 	'hosts.waitingTitle': 'The agent registered but has not connected yet.',
@@ -1541,6 +1540,7 @@ export const en = {
 	'hp.back': 'Back to the hosts',
 	'hp.description': 'The state, the connection and the restore rules of this host.',
 	'hp.revokedNote': 'This host is revoked. It does not connect any more.',
+	'hp.revokedBy': 'Revoked by {name}',
 	'hp.duplicateBanner':
 		'This record may duplicate the older record "{old}". The old record was last seen {oldSeen}.',
 	'hp.section.general': 'General',
@@ -1591,8 +1591,6 @@ export const en = {
 	'hp.state.alerts': 'Open alerts',
 	'hp.state.alertsNone': 'None',
 	'hp.state.alertsLink': 'Show the alerts',
-	'hp.state.roots': 'Restore roots',
-	'hp.state.rootsNone': 'None reported',
 	'hosts.serverScripts': 'Server scripts',
 	'hosts.serverScripts.enabled': 'Enabled',
 	'hosts.serverScripts.disabled': 'Disabled',
@@ -1602,7 +1600,7 @@ export const en = {
 	'hosts.serverScripts.enableHint':
 		'To allow scripts from the control plane, run this command at the host as root or Administrator:',
 	'hosts.serverScripts.risk':
-		'The control plane then runs code on this host with the rights of the agent.',
+		'The control plane can run any code on this host with the rights of the agent.',
 	'jobDetail.stepLog': 'Log of the step',
 	'jobDetail.stepLogEmpty': 'The step wrote no log line.',
 	'jobDetail.showStepLog': 'Show the log of {name}',

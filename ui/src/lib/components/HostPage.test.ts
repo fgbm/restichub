@@ -10,7 +10,7 @@ import HostPage from './HostPage.svelte';
 
 const mocks = vi.hoisted(() => ({
 	getAgent: vi.fn(),
-	getDashboard: vi.fn(),
+	listUsers: vi.fn(),
 	listJobs: vi.fn(),
 	listPlans: vi.fn(),
 	listAlerts: vi.fn(),
@@ -40,7 +40,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 		service: {
 			...actual.service,
 			getAgent: mocks.getAgent,
-			getDashboard: mocks.getDashboard,
+			listUsers: mocks.listUsers,
 			listJobs: mocks.listJobs,
 			listPlans: mocks.listPlans,
 			listAlerts: mocks.listAlerts,
@@ -62,6 +62,7 @@ function agent(overrides: Record<string, unknown> = {}) {
 		control_plane_version: '0.4.2',
 		version_status: 'current',
 		status: 'active',
+		online: true,
 		labels: ['db', 'prod'],
 		restore_roots: ['/var/lib/restichub-restore'],
 		certificate_serial: '0f01',
@@ -80,24 +81,12 @@ function agent(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function dashboard(online: boolean) {
-	return {
-		hosts: {
-			items: [{ id: 'a_01', hostname: 'srv-db-01', last_seen_at: null, online, waiting: false }],
-			online: online ? 1 : 0,
-			offline: online ? 0 : 1,
-			waiting: 0,
-			total: 1
-		}
-	};
-}
-
 describe('the host page', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		session.role = 'admin';
 		mocks.getAgent.mockResolvedValue(agent());
-		mocks.getDashboard.mockResolvedValue(dashboard(true));
+		mocks.listUsers.mockResolvedValue([]);
 		mocks.listJobs.mockResolvedValue({ items: [], next_cursor: null });
 		mocks.listPlans.mockResolvedValue([]);
 		mocks.listAlerts.mockResolvedValue({ items: [], next_cursor: null });
@@ -126,7 +115,7 @@ describe('the host page', () => {
 	});
 
 	it('shows an offline host and the open alerts of the host only', async () => {
-		mocks.getDashboard.mockResolvedValue(dashboard(false));
+		mocks.getAgent.mockResolvedValue(agent({ online: false }));
 		mocks.listAlerts.mockResolvedValue({
 			items: [
 				{ id: 'al_1', agent_id: 'a_01' },
@@ -150,7 +139,7 @@ describe('the host page', () => {
 		expect(await screen.findByText('bash, sh')).toBeInTheDocument();
 		expect(
 			screen.getByText(
-				'The control plane then runs code on this host with the rights of the agent.'
+				'The control plane can run any code on this host with the rights of the agent.'
 			)
 		).toBeInTheDocument();
 	});
@@ -249,6 +238,45 @@ describe('the host page', () => {
 			await screen.findByText('This host is revoked. It does not connect any more.')
 		).toBeVisible();
 		expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument();
+	});
+
+	it('shows the connection of a host from the agent view, not from the dashboard', async () => {
+		render(HostPage, { hostId: 'a_01' });
+
+		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
+		const state = screen.getByText('Connection').closest('li') as HTMLElement;
+		expect(within(state).getByText('Online')).toBeInTheDocument();
+		expect(screen.queryByText('Restore roots', { selector: 'b' })).not.toBeInTheDocument();
+		expect(screen.queryByText('Last seen', { selector: 'b' })).not.toBeInTheDocument();
+	});
+
+	it('links the restore page with the host as the target host', async () => {
+		render(HostPage, { hostId: 'a_01' });
+
+		expect(await screen.findByRole('link', { name: 'Restore to this host' })).toHaveAttribute(
+			'href',
+			'/(app)/restore?target=a_01'
+		);
+	});
+
+	it('names the user that revoked the host when the user list is available', async () => {
+		mocks.listUsers.mockResolvedValue([{ id: 'u_07', display_name: 'Boris' }]);
+		mocks.getAgent.mockResolvedValue(
+			agent({ status: 'revoked', online: false, revoked_by_user_id: 'u_07' })
+		);
+		render(HostPage, { hostId: 'a_01' });
+
+		expect(await screen.findByText('Revoked by Boris')).toBeVisible();
+	});
+
+	it('does not read the users for a viewer and shows no name', async () => {
+		session.role = 'viewer';
+		mocks.getAgent.mockResolvedValue(agent({ status: 'revoked', revoked_by_user_id: 'u_07' }));
+		render(HostPage, { hostId: 'a_01' });
+
+		await screen.findByText('This host is revoked. It does not connect any more.');
+		expect(mocks.listUsers).not.toHaveBeenCalled();
+		expect(screen.queryByText(/Revoked by/)).not.toBeInTheDocument();
 	});
 
 	it('shows the error of a host that does not exist', async () => {

@@ -219,6 +219,9 @@ function makeAgents(): Agent[] {
 				: os === 'linux'
 					? ['/var/lib/restichub-restore']
 					: [],
+		// The sample installation shows two hosts that talk to the control plane now.
+		online:
+			(options.status ?? 'active') === 'active' && !options.waiting && ['1', '2'].includes(id),
 		last_seen_at: iso(seen),
 		first_connected_at: options.waiting ? null : iso(60 * 24 * 30),
 		possible_duplicate_of: options.duplicateOf

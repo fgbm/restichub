@@ -19,7 +19,7 @@
 	import type { SelectOption } from '#lib/components/ui/index.ts';
 	import { formatBytes, formatLocalTime, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
-	import { EMPTY_FILTERS, filtersFromQuery, filtersToQuery } from '#lib/restore.ts';
+	import { EMPTY_FILTERS, filtersFromQuery, filtersToQuery, targetExtra } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
@@ -92,7 +92,7 @@
 	}
 
 	function remember(): void {
-		const address = `${resolve('/(app)/restore')}?${filtersToQuery(filters(), { repository: repositoryId })}`;
+		const address = `${resolve('/(app)/restore')}?${filtersToQuery(filters(), { repository: repositoryId, ...targetExtra(query) })}`;
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the address starts with a resolved path
 		void goto(address, { replaceState: true });
 	}
@@ -172,7 +172,7 @@
 			repository: repositoryId,
 			snapshot: snapshot.id
 		});
-		return `${address}?${filtersToQuery(filters())}`;
+		return `${address}?${filtersToQuery(filters(), targetExtra(query))}`;
 	}
 
 	onMount(async () => {
