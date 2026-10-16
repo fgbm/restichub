@@ -26,6 +26,9 @@ pub struct UserView {
     pub role: Role,
     /// The account holds an active membership in another active tenant.
     pub shared: bool,
+    /// The account holds the installation-wide right, so a tenant scope cannot change it
+    /// (ADR-0029).
+    pub platform_admin: bool,
 }
 
 impl UserView {
@@ -37,6 +40,7 @@ impl UserView {
             disabled: member.disabled || member.account_disabled,
             role: member.role,
             shared: member.shared,
+            platform_admin: member.platform_admin,
         }
     }
 
@@ -49,6 +53,7 @@ impl UserView {
             disabled: account.disabled,
             role,
             shared: false,
+            platform_admin: account.platform_admin,
         }
     }
 }

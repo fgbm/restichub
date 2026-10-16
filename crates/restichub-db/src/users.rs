@@ -191,6 +191,22 @@ pub async fn admin_set_password(
     WriteStatus::parse(&status)
 }
 
+/// The password write of the Platform Admin for any account (migration 0050). It needs the platform
+/// tenant or the platform scope and no membership.
+pub async fn platform_set_password(
+    tx: &mut TenantTx<'_>,
+    id: UserId,
+    password_hash: &str,
+) -> Result<WriteStatus, DbError> {
+    let (status,): (String,) = sqlx::query_as("SELECT auth_platform_set_password($1, $2)")
+        .bind(id)
+        .bind(password_hash)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    WriteStatus::parse(&status)
+}
+
 /// The display name write of an administrator. The same scope rule as [`admin_set_password`].
 pub async fn admin_set_display_name(
     tx: &mut TenantTx<'_>,

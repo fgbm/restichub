@@ -232,6 +232,9 @@ pub fn write_body(
             Some(json!({"role": "viewer"}))
         }
         ("PATCH", "/api/v1/platform/users/{id}") => Some(json!({"disabled": true})),
+        ("POST", "/api/v1/platform/users/{id}/password") => {
+            Some(json!({"new_password": "a long enough password"}))
+        }
         ("POST", "/api/v1/auth/password") => Some(json!({
             "current_password": "wrong",
             "new_password": "a long enough password",

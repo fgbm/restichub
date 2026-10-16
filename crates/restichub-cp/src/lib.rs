@@ -44,6 +44,7 @@ pub mod metrics;
 pub mod password;
 pub mod pki;
 pub mod plans;
+pub mod platform_user;
 pub mod platform_users;
 pub mod profiles;
 pub mod progress_throttle;
