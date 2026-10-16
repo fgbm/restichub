@@ -155,7 +155,7 @@ impl Repair<'_> {
         }
         drop(entry);
         let known = if is_config {
-            config_entries(level)
+            config_entries()
         } else {
             root_entries(self.config, level)
         };
@@ -375,7 +375,7 @@ fn root_entries(config: &Path, root: &Path) -> Vec<(String, Kind)> {
     names
 }
 
-fn config_entries(config: &Path) -> Vec<(String, Kind)> {
+fn config_entries() -> Vec<(String, Kind)> {
     let identity = [
         crate::identity::KEY_FILE,
         crate::identity::CERT_FILE,
@@ -408,7 +408,7 @@ fn config_entries(config: &Path) -> Vec<(String, Kind)> {
     // Windows keeps the cache and, in older builds, restic below the configuration directory.
     names.extend(
         crate::paths::cache_dir()
-            .strip_prefix(config)
+            .strip_prefix(crate::paths::config_dir())
             .ok()
             .and_then(|relative| relative.to_str())
             .map(|name| (name.to_owned(), Kind::Agent)),
