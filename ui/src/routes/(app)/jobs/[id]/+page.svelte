@@ -636,18 +636,18 @@
 					<dt>{t('jobDetail.trigger')}</dt>
 					<dd>{t(`jobDetail.trigger.${job.trigger}` as MessageKey)}</dd>
 					<dt>{t('jobDetail.queuedAt')}</dt>
-					<dd>{formatLocalTime(job.created_at)}</dd>
+					<dd class="about__time">{formatLocalTime(job.created_at)}</dd>
 					{#if job.started_at}
 						<dt>{t('jobDetail.startedAt')}</dt>
-						<dd>{formatLocalTime(job.started_at)}</dd>
+						<dd class="about__time">{formatLocalTime(job.started_at)}</dd>
 					{/if}
 					{#if job.finished_at}
 						<dt>{t('jobDetail.finishedAt')}</dt>
-						<dd>{formatLocalTime(job.finished_at)}</dd>
+						<dd class="about__time">{formatLocalTime(job.finished_at)}</dd>
 					{/if}
 					{#if job.expires_at && (job.status === 'queued' || job.status === 'sent')}
 						<dt>{t('jobDetail.acceptUntil')}</dt>
-						<dd>{formatLocalTime(job.expires_at)}</dd>
+						<dd class="about__time">{formatLocalTime(job.expires_at)}</dd>
 					{/if}
 					{#if limitLines(job)}
 						<dt>{t('jobDetail.limit')}</dt>
@@ -984,6 +984,10 @@
 
 	.about__line {
 		display: block;
+	}
+
+	.about__time {
+		white-space: nowrap;
 	}
 
 	.about__key {
