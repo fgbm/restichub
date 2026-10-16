@@ -94,6 +94,25 @@ for (const width of [1440, 390]) {
 		await page.waitForTimeout(300);
 		await shot(page, 'profile-page', width);
 
+		await open(page, '/settings/scripts/templates');
+		await page.locator('main a.item__title').first().click();
+		await page.locator('#template-name').waitFor();
+		await page.waitForTimeout(400);
+		await shot(page, 'script-template-page', width);
+
+		await open(page, '/settings/scripts/templates');
+		await page.locator('.list-head .tab').filter({ hasText: 'Встроенные' }).click();
+		await page.locator('main a.item__title').first().click();
+		await page.locator('#template-name').waitFor();
+		await page.waitForTimeout(400);
+		await shot(page, 'script-template-builtin-page', width);
+
+		await open(page, '/settings/scripts/jobs');
+		await page.locator('main a.item__title').first().click();
+		await page.locator('#job-template-name').waitFor();
+		await page.waitForTimeout(400);
+		await shot(page, 'job-template-page', width);
+
 		await open(page, '/jobs');
 		await page.locator('main a.item__title, main a.row-link').first().click();
 		await page.getByRole('heading', { level: 1 }).waitFor();

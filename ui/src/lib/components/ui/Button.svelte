@@ -187,4 +187,9 @@
 			transform: rotate(360deg);
 		}
 	}
+
+	/* A quiet delete button: a ghost button that turns red on hover. */
+	.btn:global(.btn--quiet-danger):hover:not(:disabled) {
+		color: var(--rh-color-danger);
+	}
 </style>

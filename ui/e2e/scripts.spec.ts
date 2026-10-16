@@ -92,22 +92,31 @@ test('the script templates screen opens a built-in template read-only and copies
 	// The own templates open first; the built-in ones are on their tab.
 	await expect(page.getByText('Remove old dumps')).toBeVisible();
 	await chooseTab(page, 'Built-in');
-	await expect(page.getByText('PostgreSQL dump with pg_dump (Linux)')).toBeVisible();
 
-	await page
-		.locator('li.item')
-		.filter({ hasText: 'PostgreSQL dump with pg_dump (Linux)' })
-		.getByRole('button', { name: 'Make a copy' })
-		.click();
-	const dialog = page.getByRole('dialog', { name: 'Add a script template' });
-	await expect(dialog.getByLabel(/^Template/)).toHaveValue(
+	// A built-in template opens on its page, read-only, with the copy as its primary action.
+	await page.getByRole('link', { name: 'PostgreSQL dump with pg_dump (Linux)' }).click();
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'PostgreSQL dump with pg_dump (Linux)' })
+	).toBeVisible();
+	const crumbs = page.getByRole('navigation', { name: 'Breadcrumb' });
+	await expect(crumbs.getByRole('link', { name: 'Script templates' })).toBeVisible();
+	await expect(
+		page.getByText('A built-in template is read-only. Make a copy to change it.')
+	).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Environment variables' })).toBeVisible();
+	await page.getByRole('button', { name: 'Make a copy' }).click();
+
+	await expect(page.getByRole('heading', { level: 1, name: 'New script template' })).toBeVisible();
+	await expect(page.locator('#template-name')).toHaveValue(
 		'PostgreSQL dump with pg_dump (Linux) copy'
 	);
-	await dialog.getByLabel(/^Template/).fill('Database dump');
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.locator('#template-name').fill('Database dump');
+	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The template is created.')).toBeVisible();
+	await expect(page.getByRole('heading', { level: 1, name: 'Script templates' })).toBeVisible();
 
 	// A built-in template cannot be deleted.
+	await chooseTab(page, 'Built-in');
 	await expect(
 		page
 			.locator('li.item')
@@ -127,6 +136,20 @@ test('the script templates screen opens a built-in template read-only and copies
 		.getByRole('button', { name: 'Delete' })
 		.click();
 	await expect(page.getByText('The template is deleted.')).toBeVisible();
+});
+
+test('the job templates screen opens a template on its page with the run order', async ({
+	page
+}) => {
+	await openSample(page, 'Settings');
+	await page.getByRole('link', { name: 'Job templates' }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Job templates' })).toBeVisible();
+	await page.locator('li.item a.item__title').first().click();
+	await expect(page.getByRole('heading', { name: 'Run order' })).toBeVisible();
+	await expect(page.getByTestId('script-card').first()).toBeVisible();
+	const crumbs = page.getByRole('navigation', { name: 'Breadcrumb' });
+	await crumbs.getByRole('link', { name: 'Job templates' }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Job templates' })).toBeVisible();
 });
 
 test('the host page shows the trust mode and the command', async ({ page }) => {

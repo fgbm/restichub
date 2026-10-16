@@ -192,7 +192,7 @@ export const settingsNavigation: SettingsGroup[] = [
 			{
 				href: '/(app)/settings/scripts/jobs',
 				labelKey: 'nav.jobTemplates',
-				icon: 'checklist',
+				icon: 'list-ordered',
 				roles: ADMIN_ROLES
 			}
 		]
