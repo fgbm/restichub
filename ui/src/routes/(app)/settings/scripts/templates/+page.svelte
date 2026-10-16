@@ -1,91 +1,28 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError, fieldError, service } from '#lib/api/index.ts';
-	import type {
-		ApiProblem,
-		HookPhase,
-		ScriptFailurePolicy,
-		ScriptInterpreter,
-		ScriptParameterKind,
-		ScriptTemplate,
-		ScriptTemplateParameter
-	} from '#lib/api/index.ts';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { ApiError, service } from '#lib/api/index.ts';
+	import type { HookPhase, ScriptTemplate } from '#lib/api/index.ts';
 	import { SettingsLayout } from '#lib/components/index.ts';
-	import CodeEditor from '#lib/components/CodeEditor.svelte';
-	import {
-		Alert,
-		Button,
-		ConfirmDialog,
-		Dialog,
-		FilterBar,
-		ListView,
-		Select,
-		TextField
-	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, RowAction, SelectOption } from '#lib/components/ui/index.ts';
-	import { scriptTemplateMeta } from '#lib/template-item.ts';
-	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
+	import { Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { INTERPRETERS, PHASES, templateDescription, templateName } from '#lib/scripts.ts';
+	import { templateDescription, templateName } from '#lib/scripts.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
-
-	type ParameterDraft = {
-		name: string;
-		label: string;
-		kind: ScriptParameterKind;
-		defaultValue: string;
-	};
+	import { scriptTemplateMeta } from '#lib/template-item.ts';
+	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
 
 	let templates = $state<ScriptTemplate[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
-	let formOpen = $state(false);
-	// A built-in template opens read-only; the user makes a copy to change it.
-	let viewing = $state(false);
-	let editing = $state<ScriptTemplate | null>(null);
-	let saving = $state(false);
-	let formError = $state<string | null>(null);
-	let formProblem = $state<ApiProblem | null>(null);
-
-	let name = $state('');
-	let description = $state('');
-	let interpreter = $state<ScriptInterpreter>('bash');
-	let phase = $state<HookPhase>('before');
-	let body = $state('');
-	let timeoutSeconds = $state('');
-	let failurePolicy = $state<ScriptFailurePolicy>('abort_backup');
-	let parameters = $state<ParameterDraft[]>([]);
-
 	let deleteTarget = $state<ScriptTemplate | null>(null);
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
-
-	const interpreterOptions = $derived<SelectOption[]>(
-		INTERPRETERS.map((value) => ({
-			value,
-			label: t(`scripts.interpreter.${value}` as MessageKey)
-		}))
-	);
-	const phaseOptions = $derived<SelectOption[]>(
-		PHASES.map((value) => ({
-			value,
-			label: t(`profiles.hooks.phase.${value}` as MessageKey)
-		}))
-	);
-	const policyOptions = $derived<SelectOption[]>([
-		{ value: 'abort_backup', label: t('scripts.policy.abort_backup') },
-		{ value: 'continue', label: t('scripts.policy.continue') }
-	]);
-	const kindOptions = $derived<SelectOption[]>(
-		(['string', 'integer', 'boolean', 'secret_ref'] as const).map((value) => ({
-			value,
-			label: t(`scriptTemplates.parameter.type.${value}` as MessageKey)
-		}))
-	);
 
 	const filters = queryFilters(['q', 'interpreter', 'phase', 'source', 'sort', 'order'] as const);
 
@@ -156,14 +93,6 @@
 		return t('table.error');
 	}
 
-	function problemOf(problem: unknown): ApiProblem | null {
-		if (problem instanceof ApiError) return problem.problem;
-		if (problem && typeof problem === 'object' && 'problem' in problem) {
-			return (problem as { problem: ApiProblem }).problem;
-		}
-		return null;
-	}
-
 	async function load(): Promise<void> {
 		loading = true;
 		error = null;
@@ -178,112 +107,15 @@
 
 	onMount(load);
 
-	function resetForm(): void {
-		name = '';
-		description = '';
-		interpreter = 'bash';
-		phase = 'before';
-		body = '';
-		timeoutSeconds = '';
-		failurePolicy = 'abort_backup';
-		parameters = [];
-		formError = null;
-		formProblem = null;
-	}
-
-	function fill(template: ScriptTemplate): void {
-		name = templateName(template);
-		description = templateDescription(template);
-		interpreter = template.interpreter;
-		phase = template.phase;
-		body = template.body;
-		timeoutSeconds = template.timeout_seconds > 0 ? String(template.timeout_seconds) : '';
-		failurePolicy = template.failure_policy;
-		parameters = template.parameters.map((parameter) => ({
-			name: parameter.name,
-			label: parameter.label,
-			kind: parameter.type,
-			defaultValue: parameter.default ?? ''
-		}));
-	}
-
 	function openCreate(): void {
-		editing = null;
-		viewing = false;
-		resetForm();
-		formOpen = true;
-	}
-
-	function openEdit(template: ScriptTemplate): void {
-		editing = template;
-		viewing = template.builtin;
-		resetForm();
-		fill(template);
-		formOpen = true;
+		void goto(resolve('/(app)/settings/scripts/templates/new'));
 	}
 
 	function openCopy(template: ScriptTemplate): void {
-		editing = null;
-		viewing = false;
-		resetForm();
-		fill(template);
-		name = t('scriptTemplates.copyName', { name: templateName(template) });
-		formOpen = true;
-	}
-
-	function addParameter(): void {
-		parameters = [...parameters, { name: '', label: '', kind: 'string', defaultValue: '' }];
-	}
-
-	function removeParameter(index: number): void {
-		parameters = parameters.filter((_, position) => position !== index);
-	}
-
-	function parameterList(): ScriptTemplateParameter[] {
-		return parameters
-			.filter((parameter) => parameter.name.trim().length > 0)
-			.map((parameter) => {
-				const item: ScriptTemplateParameter = {
-					name: parameter.name.trim(),
-					label: parameter.label.trim() || parameter.name.trim(),
-					type: parameter.kind
-				};
-				if (parameter.kind !== 'secret_ref' && parameter.defaultValue !== '') {
-					item.default = parameter.defaultValue;
-				}
-				return item;
-			});
-	}
-
-	async function save(): Promise<void> {
-		if (viewing) return;
-		saving = true;
-		formError = null;
-		formProblem = null;
-		try {
-			const timeout = Number.parseInt(timeoutSeconds, 10);
-			const shared = {
-				name: name.trim(),
-				description: description.trim(),
-				interpreter,
-				phase,
-				body,
-				timeout_seconds: Number.isFinite(timeout) && timeout > 0 ? timeout : 0,
-				failure_policy: failurePolicy,
-				parameters: parameterList()
-			};
-			if (editing) await service.updateScriptTemplate(editing.id, shared);
-			else await service.createScriptTemplate(shared);
-			pushToast('success', t(editing ? 'scriptTemplates.updated' : 'scriptTemplates.created'));
-			formOpen = false;
-			resetForm();
-			await load();
-		} catch (problem) {
-			formProblem = problemOf(problem);
-			formError = formProblem?.field ? null : messageOf(problem);
-		} finally {
-			saving = false;
-		}
+		const target = `${resolve('/(app)/settings/scripts/templates/new')}?from=${encodeURIComponent(template.id)}`;
+		// The address is the resolved path of the new template page with a query.
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(target);
 	}
 
 	async function confirmDelete(): Promise<void> {
@@ -323,14 +155,6 @@
 			}
 		];
 	}
-
-	const dialogTitle = $derived(
-		viewing
-			? t('scriptTemplates.viewTitle')
-			: editing
-				? t('scriptTemplates.editTitle')
-				: t('scriptTemplates.addTitle')
-	);
 </script>
 
 <SettingsLayout
@@ -348,7 +172,7 @@
 		itemKey={(template) => template.id}
 		icon={() => ({ name: ENTITY_ICONS.scriptTemplate })}
 		title={(template) => templateName(template)}
-		onOpen={openEdit}
+		href={(template) => resolve('/(app)/settings/scripts/templates/[id]', { id: template.id })}
 		meta={scriptTemplateMeta}
 		actions={actionsFor}
 		moreLabel={(template) => t('scriptTemplates.moreActions', { name: templateName(template) })}
@@ -382,146 +206,6 @@
 	</ListView>
 </SettingsLayout>
 
-<Dialog
-	bind:open={formOpen}
-	size="xl"
-	title={dialogTitle}
-	description={t('scriptTemplates.formDescription')}
-	onsubmit={save}
->
-	{#if formError}
-		<Alert tone="danger" title={formError} />
-	{/if}
-	{#if viewing}
-		<Alert variant="inline" icon="lock" title={t('scriptTemplates.builtinNote')} />
-	{/if}
-	<div class="form">
-		<TextField
-			id="template-name"
-			label={t('scriptTemplates.name')}
-			error={fieldError(formProblem, 'name')}
-			bind:value={name}
-			readonly={viewing}
-			required
-		/>
-		<TextField
-			id="template-description"
-			label={t('scriptTemplates.description.label')}
-			error={fieldError(formProblem, 'description')}
-			bind:value={description}
-			readonly={viewing}
-		/>
-		<div class="grid">
-			<Select
-				id="template-interpreter"
-				label={t('scriptTemplates.interpreter')}
-				options={interpreterOptions}
-				bind:value={interpreter}
-				disabled={viewing}
-			/>
-			<Select
-				id="template-phase"
-				label={t('scriptTemplates.phase')}
-				options={phaseOptions}
-				bind:value={phase}
-				disabled={viewing}
-			/>
-			<TextField
-				id="template-timeout"
-				type="number"
-				label={t('scripts.timeout')}
-				help={t('scripts.timeoutHelp')}
-				error={fieldError(formProblem, 'timeout_seconds')}
-				bind:value={timeoutSeconds}
-				readonly={viewing}
-			/>
-			<Select
-				id="template-policy"
-				label={t('scripts.failurePolicy')}
-				options={policyOptions}
-				bind:value={failurePolicy}
-				disabled={viewing}
-			/>
-		</div>
-		<CodeEditor
-			id="template-body"
-			label={t('scripts.body')}
-			help={t('scripts.bodyHelp')}
-			error={fieldError(formProblem, 'body')}
-			bind:value={body}
-			readonly={viewing}
-			required
-		/>
-		<section class="params">
-			<h4 class="params__title">{t('scripts.parameters')}</h4>
-			{#each parameters as parameter, index (index)}
-				<div class="param">
-					<TextField
-						label={t('scripts.parameter.name')}
-						mono
-						error={fieldError(formProblem, `parameters[${index}].name`)}
-						bind:value={parameter.name}
-						readonly={viewing}
-					/>
-					<TextField
-						label={t('scriptTemplates.parameter.label')}
-						error={fieldError(formProblem, `parameters[${index}].label`)}
-						bind:value={parameter.label}
-						readonly={viewing}
-					/>
-					<Select
-						label={t('scripts.parameter.kind')}
-						options={kindOptions}
-						bind:value={parameter.kind}
-						disabled={viewing}
-					/>
-					<TextField
-						label={t('scriptTemplates.parameter.default')}
-						mono
-						error={fieldError(formProblem, `parameters[${index}].default`)}
-						bind:value={parameter.defaultValue}
-						readonly={viewing || parameter.kind === 'secret_ref'}
-					/>
-					{#if !viewing}
-						<Button
-							variant="ghost"
-							icon="trash"
-							aria-label={t('scriptTemplates.parameter.remove')}
-							onclick={() => removeParameter(index)}
-						/>
-					{/if}
-				</div>
-			{:else}
-				<p class="params__help">{t('scripts.parametersEmpty')}</p>
-			{/each}
-			{#if !viewing}
-				<div>
-					<Button variant="ghost" icon="plus" onclick={addParameter}>
-						{t('scriptTemplates.parameter.add')}
-					</Button>
-				</div>
-			{/if}
-		</section>
-	</div>
-	{#snippet footer()}
-		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
-		{#if viewing && editing}
-			<Button
-				variant="primary"
-				onclick={() => {
-					const source = editing;
-					formOpen = false;
-					if (source) openCopy(source);
-				}}
-			>
-				{t('scriptTemplates.copy')}
-			</Button>
-		{:else}
-			<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
-		{/if}
-	{/snippet}
-</Dialog>
-
 <ConfirmDialog
 	bind:open={deleteOpen}
 	title={t('scriptTemplates.deleteTitle')}
@@ -533,42 +217,3 @@
 	loading={deleting}
 	onConfirm={confirmDelete}
 />
-
-<style>
-	.form {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-4);
-	}
-
-	.grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: var(--rh-space-3);
-	}
-
-	.params {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-2);
-	}
-
-	.params__title {
-		margin: 0;
-		font-size: var(--rh-font-size-sm);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.params__help {
-		margin: 0;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.param {
-		display: grid;
-		grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) 130px minmax(0, 1fr) auto;
-		align-items: end;
-		gap: var(--rh-space-2);
-	}
-</style>

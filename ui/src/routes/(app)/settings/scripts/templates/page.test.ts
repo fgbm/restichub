@@ -1,6 +1,6 @@
 /*
- * The Script templates screen lists the built-in and the own templates, opens a built-in template
- * read-only and makes a copy of it, and creates, edits and deletes an own template (FR-HK-12).
+ * The Script templates screen lists the built-in and the own templates, opens each one on its page
+ * and deletes an own template (FR-HK-12).
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => ({
 	createScriptTemplate: vi.fn(),
 	updateScriptTemplate: vi.fn(),
 	deleteScriptTemplate: vi.fn(),
-	pushToast: vi.fn()
+	pushToast: vi.fn(),
+	goto: vi.fn()
 }));
 
 vi.mock('#lib/stores/session.svelte.ts', () => ({
@@ -28,8 +29,13 @@ vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 const route = vi.hoisted(() => ({ url: new URL('http://localhost/settings/scripts/templates') }));
 
 vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/paths', () => ({
+	resolve: (path: string, params?: Record<string, string>) =>
+		params ? path.replace('[id]', params.id).replace('/(app)', '') : path.replace('/(app)', '')
+}));
 vi.mock('$app/navigation', () => ({
 	goto: (address: string) => {
+		mocks.goto(address);
 		route.url = new URL(address, 'http://localhost');
 	}
 }));
@@ -105,80 +111,20 @@ describe('Script templates screen', () => {
 		expect(within(row).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
 	});
 
-	it('opens a built-in template read-only and copies it into a new template', async () => {
+	it('links each template to its page and opens a copy as a new template', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		// The row opens the template; opening is not a row action.
-		await user.click(
-			within(await rowOf('Free disk space check (Linux)', true)).getByRole('button', {
-				name: 'Free disk space check (Linux)'
-			})
+		expect(await screen.findByRole('link', { name: 'Remove old dumps' })).toHaveAttribute(
+			'href',
+			'/settings/scripts/templates/st_1'
 		);
-		const dialog = await screen.findByRole('dialog');
-		expect(
-			within(dialog).getByText('A built-in template is read-only. Make a copy to change it.')
-		).toBeInTheDocument();
-		expect(within(dialog).getByLabelText(/^Template/)).toHaveAttribute('readonly');
-		await user.click(within(dialog).getByRole('button', { name: 'Make a copy' }));
-		const copy = await screen.findByRole('dialog');
-		await waitFor(() =>
-			expect(within(copy).getByLabelText(/^Template/)).toHaveValue(
-				'Free disk space check (Linux) copy'
-			)
+		const row = await rowOf('Free disk space check (Linux)', true);
+		await user.click(within(row).getByRole('button', { name: 'Make a copy' }));
+		expect(mocks.goto).toHaveBeenCalledWith(
+			'/settings/scripts/templates/new?from=builtin%3Adisk-space-check-bash'
 		);
-		expect(within(copy).getByLabelText(/^Template/)).not.toHaveAttribute('readonly');
-		await user.click(within(copy).getByRole('button', { name: 'Save' }));
-		await waitFor(() => expect(mocks.createScriptTemplate).toHaveBeenCalledTimes(1));
-		const request = mocks.createScriptTemplate.mock.calls[0][0];
-		expect(request).toMatchObject({
-			name: 'Free disk space check (Linux) copy',
-			interpreter: 'bash',
-			phase: 'before',
-			timeout_seconds: 60,
-			failure_policy: 'abort_backup',
-			parameters: [{ name: 'CHECK_PATH', label: 'Path', type: 'string', default: '/' }]
-		});
-	});
-
-	it('creates a template with a parameter', async () => {
-		const user = userEvent.setup();
-		render(Templates);
-		await user.click(await screen.findByRole('button', { name: 'Add template' }));
-		const dialog = await screen.findByRole('dialog');
-		await user.type(within(dialog).getByLabelText(/^Template/), 'Stop service');
-		await user.type(within(dialog).getByLabelText(/^Script/), 'systemctl stop "$SERVICE"');
-		await user.click(within(dialog).getByRole('button', { name: 'Add parameter' }));
-		await user.type(within(dialog).getByLabelText('Variable'), 'SERVICE');
-		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
-		await waitFor(() => expect(mocks.createScriptTemplate).toHaveBeenCalledTimes(1));
-		expect(mocks.createScriptTemplate.mock.calls[0][0]).toMatchObject({
-			name: 'Stop service',
-			body: 'systemctl stop "$SERVICE"',
-			parameters: [{ name: 'SERVICE', label: 'SERVICE', type: 'string' }]
-		});
-		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The template is created.');
-	});
-
-	it('shows the field problem of the control plane next to the field', async () => {
-		const user = userEvent.setup();
-		mocks.createScriptTemplate.mockRejectedValue(
-			Object.assign(new Error('name'), {
-				problem: {
-					status: 409,
-					code: 'conflict',
-					title: 'Conflict',
-					field: 'name',
-					reason: 'unknown'
-				}
-			})
-		);
-		render(Templates);
-		await user.click(await screen.findByRole('button', { name: 'Add template' }));
-		const dialog = await screen.findByRole('dialog');
-		await user.type(within(dialog).getByLabelText(/^Template/), 'Remove old dumps');
-		await user.type(within(dialog).getByLabelText(/^Script/), 'true');
-		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
-		expect(await within(dialog).findByRole('alert')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Add template' }));
+		expect(mocks.goto).toHaveBeenLastCalledWith('/settings/scripts/templates/new');
 	});
 
 	it('deletes an own template after a confirmation', async () => {

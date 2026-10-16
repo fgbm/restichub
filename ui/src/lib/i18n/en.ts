@@ -2146,7 +2146,24 @@ export const en = {
 	'restore.restoreSnapshot': 'Restore',
 	'restore.noTime': 'No time',
 	'audit.facet.actor': 'Who',
-	'audit.facet.object': 'Object'
+	'audit.facet.object': 'Object',
+	'scriptTemplates.notFound': 'The script template does not exist.',
+	'scriptTemplates.newTitle': 'New script template',
+	'scriptTemplates.variables': 'Environment variables',
+	'scriptTemplates.section.basics': 'General',
+	'scriptTemplates.section.run': 'Run',
+	'scriptTemplates.parametersHint':
+		'The script reads each parameter as an environment variable. A secret is not in the text of the script.',
+	'templates.changed': 'Changed',
+	'templates.unnamed': 'No name',
+	'templates.lines': 'Lines: {n}',
+	'jobTemplates.notFound': 'The job template does not exist.',
+	'jobTemplates.newTitle': 'New job template',
+	'jobTemplates.order': 'Run order',
+	'jobTemplates.interpreters': 'Interpreters',
+	'jobTemplates.secrets': 'Secrets',
+	'jobTemplates.backupStep': 'Backup',
+	'templates.summary': 'Summary'
 } as const;
 
 export type MessageKey = keyof typeof en;

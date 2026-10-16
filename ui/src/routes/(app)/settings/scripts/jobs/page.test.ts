@@ -1,6 +1,6 @@
 /*
- * The Job templates screen lists the built-in and the own templates and saves an ordered set of
- * scripts (FR-HK-12).
+ * The Job templates screen lists the built-in and the own templates, links each one to its page and
+ * deletes an own template (FR-HK-12).
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -14,7 +14,8 @@ const mocks = vi.hoisted(() => ({
 	createJobTemplate: vi.fn(),
 	updateJobTemplate: vi.fn(),
 	deleteJobTemplate: vi.fn(),
-	pushToast: vi.fn()
+	pushToast: vi.fn(),
+	goto: vi.fn()
 }));
 
 vi.mock('#lib/stores/session.svelte.ts', () => ({
@@ -30,8 +31,13 @@ vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 const route = vi.hoisted(() => ({ url: new URL('http://localhost/settings/scripts/jobs') }));
 
 vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/paths', () => ({
+	resolve: (path: string, params?: Record<string, string>) =>
+		params ? path.replace('[id]', params.id).replace('/(app)', '') : path.replace('/(app)', '')
+}));
 vi.mock('$app/navigation', () => ({
 	goto: (address: string) => {
+		mocks.goto(address);
 		route.url = new URL(address, 'http://localhost');
 	}
 }));
@@ -104,39 +110,25 @@ describe('Job templates screen', () => {
 		expect(screen.getByText('built-in')).toBeInTheDocument();
 	});
 
-	it('opens a template with its scripts in the saved order', async () => {
+	it('links each template to its page and opens a copy as a new template', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		await user.click(await screen.findByRole('button', { name: 'Web application' }));
-		const dialog = await screen.findByRole('dialog');
-		const titles = within(dialog)
-			.getAllByTestId('script-card')
-			.map((card) => card.querySelector('.card__title')?.textContent);
-		expect(titles).toEqual(['stop', 'start']);
-		expect(
-			within(within(dialog).getByTestId('scripts-after')).getAllByTestId('script-card')
-		).toHaveLength(1);
-	});
-
-	it('saves the scripts of a copy of a built-in template, with an empty secret', async () => {
-		const user = userEvent.setup();
-		render(Templates);
-		await user.click(await screen.findByRole('button', { name: 'Built-in 1' }));
+		expect(await screen.findByRole('link', { name: 'Web application' })).toHaveAttribute(
+			'href',
+			'/settings/scripts/jobs/jt_1'
+		);
+		await user.click(screen.getByRole('button', { name: 'Built-in 1' }));
 		const row = (await screen.findByText('PostgreSQL server (Linux)')).closest('li') as HTMLElement;
 		await user.click(within(row).getByRole('button', { name: 'Make a copy' }));
-		const dialog = await screen.findByRole('dialog');
-		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
-		await waitFor(() => expect(mocks.createJobTemplate).toHaveBeenCalledTimes(1));
-		const request = mocks.createJobTemplate.mock.calls[0][0];
-		expect(request.name).toBe('PostgreSQL server (Linux) copy');
-		expect(request.scripts.map((item: { name: string }) => item.name)).toEqual(['check', 'dump']);
-		expect(request.scripts[0].env).toEqual([{ name: 'PGPASSWORD', kind: 'secret_ref', value: '' }]);
+		expect(mocks.goto).toHaveBeenLastCalledWith(
+			'/settings/scripts/jobs/new?from=builtin%3Apostgres-linux'
+		);
 	});
 
 	it('deletes an own template after a confirmation', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		await screen.findByRole('button', { name: 'Web application' });
+		await screen.findByRole('link', { name: 'Web application' });
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 		const dialog = await screen.findByRole('dialog', { name: 'Delete the template?' });
 		await user.click(within(dialog).getByRole('button', { name: 'Delete' }));

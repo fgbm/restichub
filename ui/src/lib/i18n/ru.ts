@@ -2157,5 +2157,22 @@ export const ru: Record<MessageKey, string> = {
 	'restore.restoreSnapshot': 'Восстановить',
 	'restore.noTime': 'Без времени',
 	'audit.facet.actor': 'Кто',
-	'audit.facet.object': 'Объект'
+	'audit.facet.object': 'Объект',
+	'scriptTemplates.notFound': 'Шаблон скрипта не найден.',
+	'scriptTemplates.newTitle': 'Новый шаблон скрипта',
+	'scriptTemplates.variables': 'Переменные окружения',
+	'scriptTemplates.section.basics': 'Основное',
+	'scriptTemplates.section.run': 'Выполнение',
+	'scriptTemplates.parametersHint':
+		'Скрипт читает каждый параметр как переменную окружения. Секрет не входит в текст скрипта.',
+	'templates.changed': 'Изменён',
+	'templates.unnamed': 'Без названия',
+	'templates.lines': 'Строк: {n}',
+	'jobTemplates.notFound': 'Шаблон задания не найден.',
+	'jobTemplates.newTitle': 'Новый шаблон задания',
+	'jobTemplates.order': 'Порядок выполнения',
+	'jobTemplates.interpreters': 'Интерпретаторы',
+	'jobTemplates.secrets': 'Секретов',
+	'jobTemplates.backupStep': 'Резервная копия',
+	'templates.summary': 'Сводка'
 };

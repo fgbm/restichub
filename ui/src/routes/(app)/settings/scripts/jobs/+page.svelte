@@ -1,46 +1,23 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ApiError, fieldError, service } from '#lib/api/index.ts';
-	import type { ApiProblem, JobTemplate, ScriptTemplate, Secret } from '#lib/api/index.ts';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { ApiError, service } from '#lib/api/index.ts';
+	import type { HookPhase, JobTemplate, ScriptInterpreter } from '#lib/api/index.ts';
 	import { SettingsLayout } from '#lib/components/index.ts';
-	import ScriptsEditor from '#lib/components/ScriptsEditor.svelte';
-	import {
-		Alert,
-		Button,
-		ConfirmDialog,
-		Dialog,
-		FilterBar,
-		ListView,
-		TextField
-	} from '#lib/components/ui/index.ts';
+	import { Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
 	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
-	import type { HookPhase, ScriptInterpreter } from '#lib/api/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
-	import { interpreterLabel, jobTemplateMeta } from '#lib/template-item.ts';
-	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { draftOf, scriptOf, templateDescription, templateName } from '#lib/scripts.ts';
-	import type { ScriptDraft } from '#lib/scripts.ts';
+	import { templateDescription, templateName } from '#lib/scripts.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { interpreterLabel, jobTemplateMeta } from '#lib/template-item.ts';
+	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
 
 	let templates = $state<JobTemplate[]>([]);
-	let scriptTemplates = $state<ScriptTemplate[]>([]);
-	let secrets = $state<Secret[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-
-	let formOpen = $state(false);
-	// A built-in template opens read-only; the user makes a copy to change it.
-	let viewing = $state(false);
-	let editing = $state<JobTemplate | null>(null);
-	let saving = $state(false);
-	let formError = $state<string | null>(null);
-	let formProblem = $state<ApiProblem | null>(null);
-
-	let name = $state('');
-	let description = $state('');
-	let scripts = $state<ScriptDraft[]>([]);
 
 	let deleteTarget = $state<JobTemplate | null>(null);
 	let deleteOpen = $state(false);
@@ -129,25 +106,11 @@
 		return t('table.error');
 	}
 
-	function problemOf(problem: unknown): ApiProblem | null {
-		if (problem instanceof ApiError) return problem.problem;
-		if (problem && typeof problem === 'object' && 'problem' in problem) {
-			return (problem as { problem: ApiProblem }).problem;
-		}
-		return null;
-	}
-
 	async function load(): Promise<void> {
 		loading = true;
 		error = null;
 		try {
 			templates = await service.listJobTemplates();
-			const [scriptList, secretList] = await Promise.allSettled([
-				service.listScriptTemplates(),
-				service.listSecrets()
-			]);
-			scriptTemplates = scriptList.status === 'fulfilled' ? scriptList.value : [];
-			secrets = secretList.status === 'fulfilled' ? secretList.value : [];
 		} catch (problem) {
 			error = messageOf(problem);
 		} finally {
@@ -157,67 +120,15 @@
 
 	onMount(load);
 
-	function resetForm(): void {
-		name = '';
-		description = '';
-		scripts = [];
-		formError = null;
-		formProblem = null;
-	}
-
-	function fill(template: JobTemplate): void {
-		name = templateName(template, 'job');
-		description = templateDescription(template, 'job');
-		scripts = template.scripts.map((script) => draftOf(script));
-	}
-
 	function openCreate(): void {
-		editing = null;
-		viewing = false;
-		resetForm();
-		formOpen = true;
-	}
-
-	function openEdit(template: JobTemplate): void {
-		editing = template;
-		viewing = template.builtin;
-		resetForm();
-		fill(template);
-		formOpen = true;
+		void goto(resolve('/(app)/settings/scripts/jobs/new'));
 	}
 
 	function openCopy(template: JobTemplate): void {
-		editing = null;
-		viewing = false;
-		resetForm();
-		fill(template);
-		name = t('scriptTemplates.copyName', { name: templateName(template, 'job') });
-		formOpen = true;
-	}
-
-	async function save(): Promise<void> {
-		if (viewing) return;
-		saving = true;
-		formError = null;
-		formProblem = null;
-		try {
-			const shared = {
-				name: name.trim(),
-				description: description.trim(),
-				scripts: scripts.map(scriptOf)
-			};
-			if (editing) await service.updateJobTemplate(editing.id, shared);
-			else await service.createJobTemplate(shared);
-			pushToast('success', t(editing ? 'jobTemplates.updated' : 'jobTemplates.created'));
-			formOpen = false;
-			resetForm();
-			await load();
-		} catch (problem) {
-			formProblem = problemOf(problem);
-			formError = formProblem?.field ? null : messageOf(problem);
-		} finally {
-			saving = false;
-		}
+		const target = `${resolve('/(app)/settings/scripts/jobs/new')}?from=${encodeURIComponent(template.id)}`;
+		// The address is the resolved path of the new template page with a query.
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(target);
 	}
 
 	async function confirmDelete(): Promise<void> {
@@ -257,14 +168,6 @@
 			}
 		];
 	}
-
-	const dialogTitle = $derived(
-		viewing
-			? t('jobTemplates.viewTitle')
-			: editing
-				? t('jobTemplates.editTitle')
-				: t('jobTemplates.addTitle')
-	);
 </script>
 
 <SettingsLayout
@@ -282,7 +185,7 @@
 		itemKey={(template) => template.id}
 		icon={() => ({ name: ENTITY_ICONS.jobTemplate })}
 		title={(template) => templateName(template, 'job')}
-		onOpen={openEdit}
+		href={(template) => resolve('/(app)/settings/scripts/jobs/[id]', { id: template.id })}
 		meta={jobTemplateMeta}
 		actions={actionsFor}
 		moreLabel={(template) =>
@@ -317,64 +220,6 @@
 	</ListView>
 </SettingsLayout>
 
-<Dialog
-	bind:open={formOpen}
-	size="xl"
-	title={dialogTitle}
-	description={t('jobTemplates.formDescription')}
-	onsubmit={save}
->
-	{#if formError}
-		<Alert tone="danger" title={formError} />
-	{/if}
-	{#if viewing}
-		<Alert variant="inline" icon="lock" title={t('scriptTemplates.builtinNote')} />
-	{/if}
-	<div class="form">
-		<TextField
-			id="job-template-name"
-			label={t('jobTemplates.name')}
-			error={fieldError(formProblem, 'name')}
-			bind:value={name}
-			readonly={viewing}
-			required
-		/>
-		<TextField
-			id="job-template-description"
-			label={t('scriptTemplates.description.label')}
-			error={fieldError(formProblem, 'description')}
-			bind:value={description}
-			readonly={viewing}
-		/>
-		<ScriptsEditor
-			bind:scripts
-			bind:secrets
-			templates={scriptTemplates}
-			jobTemplates={[]}
-			readonly={viewing}
-			problem={formProblem}
-			framed={false}
-		/>
-	</div>
-	{#snippet footer()}
-		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
-		{#if viewing && editing}
-			<Button
-				variant="primary"
-				onclick={() => {
-					const source = editing;
-					formOpen = false;
-					if (source) openCopy(source);
-				}}
-			>
-				{t('jobTemplates.copy')}
-			</Button>
-		{:else}
-			<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
-		{/if}
-	{/snippet}
-</Dialog>
-
 <ConfirmDialog
 	bind:open={deleteOpen}
 	title={t('jobTemplates.deleteTitle')}
@@ -386,11 +231,3 @@
 	loading={deleting}
 	onConfirm={confirmDelete}
 />
-
-<style>
-	.form {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-4);
-	}
-</style>

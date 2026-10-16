@@ -341,8 +341,9 @@
 		{#if existing && canWrite}
 			<Button
 				size="sm"
-				variant="danger"
+				variant="ghost"
 				icon="trash"
+				class="btn--quiet-danger"
 				title={t('plans.delete')}
 				aria-label={t('plans.delete')}
 				onclick={() => (deleteOpen = true)}
