@@ -12,25 +12,9 @@ use restichub_db::{AgentId, JobId, PLATFORM_TENANT_ID, RepositoryId, TenantId};
 use serde_json::Value;
 
 use common::{
-    app, create_tenant, create_tenant_with_key, create_user, request, seed_agent, seed_job,
+    app, create_tenant, create_tenant_with_key, create_user, exec, request, seed_agent, seed_job,
     seed_plan, seed_profile, seed_repository, seed_secret, seed_session, send, session_cookie,
 };
-
-/// Runs one statement on a row of the tenant through the owner connection.
-async fn exec(db: &TestDatabase, tenant: TenantId, sql: &str, id: uuid::Uuid) {
-    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
-    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
-        .bind(tenant.to_string())
-        .execute(&mut *tx)
-        .await
-        .expect("cannot set the tenant scope");
-    sqlx::query(sqlx::AssertSqlSafe(sql.to_owned()))
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .expect("cannot run the statement");
-    tx.commit().await.expect("cannot commit the statement");
-}
 
 async fn get(app: &axum::Router, cookie: &str, uri: &str) -> Value {
     let (status, _, body) = send(app, request("GET", uri, Some(cookie), None)).await;
@@ -196,12 +180,22 @@ async fn fr_ui_01_the_repository_list_shows_the_lock_the_last_check_and_the_snap
         "kind = 'backup', status = 'running', attempt = 1",
     )
     .await;
-    for (count, truncated, age) in [(146, false, "1 hour"), (9, false, "1 day")] {
+    // A listing with a filter counts a part of the repository, also when it is the newest one.
+    let all = r#"{"kind": "snapshots", "hosts": [], "tags": [], "paths": []}"#;
+    let one_host = r#"{"kind": "snapshots", "hosts": ["web-01"], "tags": [], "paths": []}"#;
+    let one_tag = r#"{"kind": "snapshots", "hosts": [], "tags": ["db"], "paths": []}"#;
+    for (repository, count, age, request) in [
+        (checked, 60, "10 minutes", one_host),
+        (checked, 146, "1 hour", all),
+        (checked, 9, "1 day", all),
+        (empty, 12, "10 minutes", one_tag),
+    ] {
+        let truncated = false;
         let listing = job(
             &db,
             tenant,
             host,
-            checked,
+            repository,
             &format!(
                 "kind = 'snapshots', status = 'succeeded', finished_at = now() - interval '{age}'"
             ),
@@ -216,6 +210,16 @@ async fn fr_ui_01_the_repository_list_shows_the_lock_the_last_check_and_the_snap
                  SELECT tenant_id, id, 'snapshots', 'success', 0, 'snapshots', \
                         '{{\"count\": {count}, \"truncated\": {truncated}}}'::jsonb \
                  FROM jobs WHERE id = $1"
+            ),
+            listing.as_uuid(),
+        )
+        .await;
+        exec(
+            &db,
+            tenant,
+            &format!(
+                "INSERT INTO job_requests (tenant_id, job_id, request) \
+                 SELECT tenant_id, id, '{request}'::jsonb FROM jobs WHERE id = $1"
             ),
             listing.as_uuid(),
         )
@@ -339,18 +343,25 @@ async fn fr_ui_01_the_user_list_shows_the_last_sign_in_into_the_tenant() {
     let anna = create_user(db.database(), tenant, "anna", "phc", "operator").await;
     let boris = create_user(db.database(), tenant, "boris", "phc", "viewer").await;
     let admin = create_user(db.database(), tenant, "admin", "phc", "admin").await;
-    for (scope, actor, action) in [
-        (tenant, anna, AuditAction::SignIn),
-        (tenant, admin, AuditAction::SessionSwitch),
+    let other_admin = create_user(db.database(), other, "beth", "phc", "admin").await;
+    let mut tx = db.database().begin_platform().await.expect("cannot begin");
+    let added =
+        restichub_db::auth::add_membership(&mut tx, anna, other, restichub_db::Role::Viewer)
+            .await
+            .expect("cannot add the membership");
+    assert!(added, "the membership must be added");
+    tx.commit().await.expect("cannot commit the membership");
+    for (scope, actor) in [
+        (tenant, anna),
         // A record of another tenant never shows, also for the same account.
-        (other, boris, AuditAction::SignIn),
+        (other, boris),
     ] {
         let mut tx = db
             .database()
             .begin_tenant(scope)
             .await
             .expect("cannot begin");
-        let mut event = AuditEvent::new(action, "user");
+        let mut event = AuditEvent::new(AuditAction::SignIn, "user");
         event.actor = Actor::User(actor);
         event.object_id = Some(actor.as_uuid());
         restichub_db::audit::insert(&mut tx, &event)
@@ -359,12 +370,49 @@ async fn fr_ui_01_the_user_list_shows_the_last_sign_in_into_the_tenant() {
         tx.commit().await.expect("cannot commit the record");
     }
     let cookie = session_cookie(db.database(), tenant, admin).await;
+    let other_cookie = session_cookie(db.database(), other, other_admin).await;
     let app = app(db.database());
+    let last_sign_in = async |cookie: &str| {
+        let page = get(&app, cookie, "/api/v1/users").await;
+        item(&page, "username", "anna")["last_sign_in_at"].clone()
+    };
+    let switch = async |cookie: &str, target: TenantId| {
+        let (status, cookie, body) = send(
+            &app,
+            request(
+                "POST",
+                "/api/v1/auth/switch",
+                Some(cookie),
+                Some(serde_json::json!({"tenant_id": target.to_string()})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        cookie.expect("a rotated session cookie")
+    };
 
     let page = get(&app, &cookie, "/api/v1/users").await;
-    assert!(item(&page, "username", "anna")["last_sign_in_at"].is_string());
-    assert!(item(&page, "username", "admin")["last_sign_in_at"].is_string());
+    assert!(item(&page, "username", "admin")["last_sign_in_at"].is_null());
     assert!(item(&page, "username", "boris")["last_sign_in_at"].is_null());
+    let signed_in = last_sign_in(&cookie).await;
+    assert!(signed_in.is_string(), "{page}");
+    assert!(last_sign_in(&other_cookie).await.is_null());
+
+    // A switch out of the tenant is not a sign-in into it; a switch into a tenant is.
+    let anna_cookie = session_cookie(db.database(), tenant, anna).await;
+    let anna_cookie = switch(&anna_cookie, other).await;
+    assert_eq!(last_sign_in(&cookie).await, signed_in);
+    let switched_in = last_sign_in(&other_cookie).await;
+    assert!(switched_in.is_string());
+    switch(&anna_cookie, tenant).await;
+    let back = last_sign_in(&cookie).await;
+    let time = |value: &Value| {
+        let text = value.as_str().expect("a sign-in time");
+        time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339)
+            .expect("an RFC 3339 time")
+    };
+    assert!(time(&back) > time(&signed_in), "{back} after {signed_in}");
+    assert_eq!(last_sign_in(&other_cookie).await, switched_in);
     db.cleanup().await;
 }
 

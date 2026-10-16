@@ -275,6 +275,8 @@ pub async fn list_members(tx: &mut TenantTx<'_>) -> Result<Vec<Member>, DbError>
 ///
 /// The audit log keeps these records, so the time survives the end of the session. The tenant
 /// condition is explicit: the read policies of the table are ORed (see [`crate::audit::list`]).
+/// A switch writes a record into both tenants; only the record of the target tenant names the
+/// source tenant, and only it counts.
 pub async fn last_sign_ins(
     tx: &mut TenantTx<'_>,
     ids: &[UserId],
@@ -287,6 +289,7 @@ pub async fn last_sign_ins(
              SELECT a.occurred_at FROM audit_log a \
              WHERE a.tenant_id = $1 AND a.actor_id = member.id AND a.actor_type = 'user' \
                AND a.action IN ('sign_in', 'session_switch') \
+               AND (a.action = 'sign_in' OR a.diff #> '{new,source_tenant_id}' IS NOT NULL) \
              ORDER BY a.occurred_at DESC LIMIT 1) s ON true",
     )
     .bind(tx.tenant())

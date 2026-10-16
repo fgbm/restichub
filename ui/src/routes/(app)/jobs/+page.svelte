@@ -51,6 +51,7 @@
 		'plan_id',
 		'kind',
 		'group',
+		'status',
 		'period',
 		'from',
 		'to',
@@ -212,12 +213,12 @@
 	// A silent reload and a filter change can overlap; only the last request may fill the table.
 	let request = 0;
 
-	async function load(silent = false): Promise<void> {
+	async function load(silent = false, withCounts = true): Promise<void> {
 		const mine = ++request;
 		if (!silent) loading = true;
 		error = null;
 		try {
-			const page = await service.listJobs(queryOf());
+			const page = await service.listJobs({ ...queryOf(), counts: withCounts || undefined });
 			if (mine !== request) return;
 			const last = lastPageIfPast(tablePage, pageSize, page.total, page.items.length);
 			if (last !== null) {
@@ -227,7 +228,7 @@
 			jobs = page.items;
 			total = page.total;
 			totalCapped = page.total_capped;
-			counts = page.counts;
+			if (page.counts) counts = page.counts;
 		} catch (problem) {
 			if (mine !== request) return;
 			error = messageOf(problem);
@@ -246,6 +247,22 @@
 		if (hostList.status === 'fulfilled') hosts = hostList.value;
 		if (repositoryList.status === 'fulfilled') repositories = repositoryList.value;
 		if (planList.status === 'fulfilled') plans = planList.value;
+	}
+
+	// An older link names a status. The tab of that status replaces it; a status without a tab
+	// opens all jobs.
+	const STATUS_GROUPS: Partial<Record<string, JobGroup>> = {
+		running: 'running',
+		failed: 'failed',
+		dead_letter: 'failed',
+		succeeded: 'succeeded'
+	};
+	if (filters.value.status) {
+		filters.update({
+			status: '',
+			group: STATUS_GROUPS[filters.value.status] ?? '',
+			page: filters.value.page
+		});
 	}
 
 	// The list opens on the jobs of the last 7 days; "All time" in the period facet shows the rest.
@@ -277,15 +294,20 @@
 		else void load();
 	});
 
-	async function reload(): Promise<void> {
+	async function reload(withCounts = true): Promise<void> {
 		if (loading) return;
-		await load(true);
+		await load(true, withCounts);
 	}
 
-	const reloadSoon = coalesce(reload, 300);
+	// Each tab count reads up to the count limit, so a busy stream refreshes the rows at once and
+	// the counts at most once in 5 seconds.
+	const reloadSoon = coalesce(() => reload(false), 300);
+	const countsSoon = coalesce(() => reload(true), 5_000);
 	onMount(() =>
 		onEvent((event) => {
-			if (event.type === 'job.status' || event.type === 'resync') reloadSoon();
+			if (event.type !== 'job.status' && event.type !== 'resync') return;
+			reloadSoon();
+			countsSoon();
 		})
 	);
 

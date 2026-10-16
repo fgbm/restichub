@@ -1779,13 +1779,15 @@ export class MockApiService {
 				query?.offset === undefined && start + limit < rows.length ? String(start + limit) : null,
 			total: rows.length,
 			total_capped: false,
-			counts: {
-				all: { count: others.length, capped: false },
-				running: count('running'),
-				failed: count('failed'),
-				succeeded: count('succeeded'),
-				succeeded_with_warnings: count('succeeded_with_warnings')
-			}
+			counts: query?.counts
+				? {
+						all: { count: others.length, capped: false },
+						running: count('running'),
+						failed: count('failed'),
+						succeeded: count('succeeded'),
+						succeeded_with_warnings: count('succeeded_with_warnings')
+					}
+				: null
 		};
 	}
 

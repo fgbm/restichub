@@ -12,24 +12,9 @@ use restichub_db::{AgentId, JobId, PLATFORM_TENANT_ID, RepositoryId, TenantId};
 use serde_json::Value;
 
 use common::{
-    app, create_tenant, create_tenant_with_key, create_user, request, seed_agent, seed_job,
+    app, create_tenant, create_tenant_with_key, create_user, exec, request, seed_agent, seed_job,
     seed_plan, seed_profile, seed_repository, seed_secret, seed_session, send,
 };
-
-async fn exec(db: &TestDatabase, tenant: TenantId, sql: &str, id: uuid::Uuid) {
-    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
-    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
-        .bind(tenant.to_string())
-        .execute(&mut *tx)
-        .await
-        .expect("cannot set the tenant scope");
-    sqlx::query(sqlx::AssertSqlSafe(sql.to_owned()))
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .expect("cannot run the statement");
-    tx.commit().await.expect("cannot commit the statement");
-}
 
 async fn get(app: &axum::Router, cookie: &str, uri: &str) -> Value {
     let (status, _, body) = send(app, request("GET", uri, Some(cookie), None)).await;
@@ -164,10 +149,13 @@ async fn fr_sc_09_the_job_list_counts_the_state_tabs_searches_the_names_and_sort
 
     let page = get(&app, &viewer, "/api/v1/jobs").await;
     assert_eq!(page["total"], 7);
+    assert!(page["counts"].is_null(), "{page}");
+    let page = get(&app, &viewer, "/api/v1/jobs?counts=true").await;
+    assert_eq!(page["total"], 7);
     assert_eq!(tabs(&page, &JOB_TABS), [1, 2, 1, 1]);
 
     // A tab filters the list and keeps the counts of the other tabs.
-    let page = get(&app, &viewer, "/api/v1/jobs?group=failed").await;
+    let page = get(&app, &viewer, "/api/v1/jobs?group=failed&counts=true").await;
     assert_eq!(ids(&page), [dead, failed].map(|id| id.to_string()));
     assert_eq!(tabs(&page, &JOB_TABS), [1, 2, 1, 1]);
     assert_eq!(page["total"], 2);
@@ -176,15 +164,21 @@ async fn fr_sc_09_the_job_list_counts_the_state_tabs_searches_the_names_and_sort
     assert_eq!(ids(&page), [warnings.to_string()]);
     let page = get(&app, &viewer, "/api/v1/jobs?group=succeeded").await;
     assert_eq!(ids(&page), [succeeded.to_string()]);
-    let page = get(&app, &viewer, "/api/v1/jobs?status=running").await;
+    let page = get(&app, &viewer, "/api/v1/jobs?status=running&counts=true").await;
     assert_eq!(tabs(&page, &JOB_TABS), [1, 2, 1, 1]);
+    assert_eq!(page["total"], 1);
 
     // The counts honour the host filter like the list does, so the tabs agree with it.
-    let page = get(&app, &viewer, &format!("/api/v1/jobs?agent_id={database}")).await;
+    let page = get(
+        &app,
+        &viewer,
+        &format!("/api/v1/jobs?agent_id={database}&counts=true"),
+    )
+    .await;
     assert_eq!(tabs(&page, &JOB_TABS), [0, 1, 0, 1]);
 
     // The search matches the plan, the host or the repository name; a wildcard is literal.
-    let page = get(&app, &viewer, "/api/v1/jobs?q=NIGHT").await;
+    let page = get(&app, &viewer, "/api/v1/jobs?q=NIGHT&counts=true").await;
     assert_eq!(page["total"], 3);
     assert_eq!(tabs(&page, &JOB_TABS), [1, 1, 1, 0]);
     let page = get(&app, &viewer, "/api/v1/jobs?q=db-0").await;

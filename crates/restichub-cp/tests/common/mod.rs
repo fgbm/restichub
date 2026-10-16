@@ -1142,6 +1142,22 @@ pub async fn test_db() -> Option<TestDatabase> {
     test_database().await
 }
 
+/// Runs one statement on a row of the tenant through the owner connection. `$1` is `id`.
+pub async fn exec(db: &TestDatabase, tenant: TenantId, sql: &str, id: uuid::Uuid) {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query(sqlx::AssertSqlSafe(sql.to_owned()))
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot run the statement");
+    tx.commit().await.expect("cannot commit the statement");
+}
+
 /// Builds an instant of the tests without the `time` macros feature.
 pub fn utc(year: i32, month: time::Month, day: u8, hour: u8, minute: u8) -> OffsetDateTime {
     let date = time::Date::from_calendar_date(year, month, day).expect("a valid date");

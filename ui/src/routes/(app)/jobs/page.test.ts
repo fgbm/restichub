@@ -44,6 +44,18 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
+const stream = vi.hoisted(() => ({ listeners: [] as ((event: { type: string }) => void)[] }));
+
+vi.mock('#lib/stores/events.svelte.ts', () => ({
+	isStreamConnected: () => false,
+	onEvent: (listener: (event: { type: string }) => void) => {
+		stream.listeners.push(listener);
+		return () => {
+			stream.listeners = stream.listeners.filter((item) => item !== listener);
+		};
+	}
+}));
+
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
 	return {
@@ -370,6 +382,54 @@ describe('the Jobs screen', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('fr_ui_01 reloads the rows on each job event and the tab counts at most once in 5 seconds', async () => {
+		vi.useFakeTimers();
+		try {
+			mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
+			render(Jobs);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(mocks.listJobs).toHaveBeenCalledTimes(1);
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ counts: true }));
+			mocks.listJobs.mockClear();
+
+			const withCounts = () =>
+				mocks.listJobs.mock.calls.filter(([query]) => query.counts === true).length;
+			for (let second = 0; second < 4; second += 1) {
+				for (const listener of stream.listeners) listener({ type: 'job.status' });
+				await vi.advanceTimersByTimeAsync(1_000);
+			}
+			expect(mocks.listJobs.mock.calls.length).toBeGreaterThanOrEqual(4);
+			expect(withCounts()).toBe(0);
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(
+				expect.objectContaining({ counts: undefined })
+			);
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(withCounts()).toBe(1);
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(withCounts()).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('fr_ui_01 opens the tab of the status that an older link names', async () => {
+		route.url = new URL('http://localhost/jobs?status=failed');
+		render(Jobs);
+
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ group: 'failed' }))
+		);
+		expect(route.url.searchParams.get('group')).toBe('failed');
+		expect(route.url.searchParams.has('status')).toBe(false);
+
+		route.url = new URL('http://localhost/jobs?status=queued&group=running');
+		mocks.listJobs.mockClear();
+		render(Jobs);
+		await waitFor(() => expect(mocks.listJobs).toHaveBeenCalled());
+		expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ group: undefined }));
+		expect(route.url.searchParams.has('status')).toBe(false);
 	});
 
 	it('fr_ui_01 asks to narrow the filters for a page past the counted rows', async () => {

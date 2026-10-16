@@ -112,10 +112,6 @@ pub struct JobQuery<'a> {
 pub struct JobSearchResult {
     pub jobs: Vec<JobDetail>,
     pub has_more: bool,
-    /// The number of jobs that match the filter on all pages, at most [`COUNT_LIMIT`].
-    pub total: i64,
-    /// More jobs match than [`COUNT_LIMIT`].
-    pub total_capped: bool,
 }
 
 /// A number of rows that a count read only up to [`COUNT_LIMIT`].
@@ -207,7 +203,7 @@ fn binds(filter: &JobFilter) -> Binds {
     }
 }
 
-/// Reads one page of the jobs that match the filter, and their total.
+/// Reads one page of the jobs that match the filter.
 pub async fn search(
     tx: &mut TenantTx<'_>,
     query: &JobQuery<'_>,
@@ -252,13 +248,12 @@ pub async fn search(
         .take(limit as usize)
         .map(JobDetail::from)
         .collect();
-    let total = count(tx, &bound, filter, filter.group).await?;
-    Ok(JobSearchResult {
-        jobs,
-        has_more,
-        total: total.count,
-        total_capped: total.capped,
-    })
+    Ok(JobSearchResult { jobs, has_more })
+}
+
+/// Counts the jobs that match the filter on all pages.
+pub async fn total(tx: &mut TenantTx<'_>, filter: &JobFilter) -> Result<CappedCount, DbError> {
+    count(tx, &binds(filter), filter, filter.group).await
 }
 
 /// The jobs of each state tab under the filter, and of the tab of all jobs.
@@ -266,6 +261,19 @@ pub async fn search(
 pub struct GroupCounts {
     pub all: CappedCount,
     pub groups: Vec<(JobGroup, CappedCount)>,
+}
+
+impl GroupCounts {
+    /// The count of one tab; `None` is the tab of all jobs.
+    pub fn of(&self, wanted: Option<JobGroup>) -> CappedCount {
+        let Some(wanted) = wanted else {
+            return self.all;
+        };
+        self.groups
+            .iter()
+            .find(|(group, _)| *group == wanted)
+            .map_or_else(CappedCount::default, |(_, count)| *count)
+    }
 }
 
 /// Counts the jobs of each state tab under the filter. The status and the tab of the filter do not

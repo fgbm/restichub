@@ -212,6 +212,8 @@ export interface JobQuery {
 	cursor?: string;
 	offset?: number;
 	limit?: number;
+	/** Asks for the counts of the state tabs. */
+	counts?: boolean;
 }
 
 /** The optional agent that runs a repository job. An absent value uses the maintenance agent. */

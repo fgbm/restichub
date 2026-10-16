@@ -10,7 +10,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::job_search::{
-    self, CappedCount, GroupCounts, JobCursor, JobFilter, JobGroup, JobQuery, JobSort, JobWindow,
+    self, GroupCounts, JobCursor, JobFilter, JobGroup, JobQuery, JobSort, JobWindow,
 };
 use restichub_db::jobs::{self as job_repo, NewJob};
 use restichub_db::plans as plans_repo;
@@ -106,6 +106,8 @@ pub struct JobListQuery {
     /// Default: `desc`.
     #[param(inline)]
     pub order: Option<SortOrder>,
+    /// Adds the counts of the state tabs to the response.
+    pub counts: Option<bool>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -118,7 +120,8 @@ pub struct JobListResponse {
     /// More jobs match than `total` counts.
     pub total_capped: bool,
     /// The jobs of each state tab under the other filters; `status` and `group` do not apply.
-    pub counts: JobGroupCounts,
+    /// Present when the request asks for it with `counts=true`.
+    pub counts: Option<JobGroupCounts>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
@@ -151,22 +154,14 @@ pub struct JobGroupCounts {
     pub succeeded_with_warnings: TabCount,
 }
 
-impl JobGroupCounts {
-    fn of(counts: &GroupCounts) -> Self {
-        let get = |wanted: JobGroup| {
-            counts
-                .groups
-                .iter()
-                .find(|(group, _)| *group == wanted)
-                .map_or(CappedCount::of(0), |(_, count)| *count)
-                .into()
-        };
+impl From<&GroupCounts> for JobGroupCounts {
+    fn from(counts: &GroupCounts) -> Self {
         Self {
             all: counts.all.into(),
-            running: get(JobGroup::Running),
-            failed: get(JobGroup::Failed),
-            succeeded: get(JobGroup::Succeeded),
-            succeeded_with_warnings: get(JobGroup::SucceededWithWarnings),
+            running: counts.of(Some(JobGroup::Running)).into(),
+            failed: counts.of(Some(JobGroup::Failed)).into(),
+            succeeded: counts.of(Some(JobGroup::Succeeded)).into(),
+            succeeded_with_warnings: counts.of(Some(JobGroup::SucceededWithWarnings)).into(),
         }
     }
 }
@@ -235,10 +230,21 @@ pub async fn list_jobs(
         window,
         limit: query.limit.unwrap_or(queue_repo::DEFAULT_PAGE_LIMIT),
     };
-    let (result, counts) = context
+    let with_counts = query.counts.unwrap_or(false);
+    let (result, total, counts) = context
         .tenant_tx(&state, async |tx| {
             let result = job_search::search(tx, &page).await?;
-            Ok((result, job_search::group_counts(tx, &filter).await?))
+            let counts = if with_counts {
+                Some(job_search::group_counts(tx, &filter).await?)
+            } else {
+                None
+            };
+            // The tabs ignore the status filter, so only without it the total is one of them.
+            let total = match &counts {
+                Some(counts) if filter.status.is_none() => counts.of(filter.group),
+                _ => job_search::total(tx, &filter).await?,
+            };
+            Ok((result, total, counts))
         })
         .await?;
     let next_cursor = (result.has_more && default_order && query.offset.is_none())
@@ -255,9 +261,9 @@ pub async fn list_jobs(
     Ok(Json(JobListResponse {
         items,
         next_cursor,
-        total: result.total,
-        total_capped: result.total_capped,
-        counts: JobGroupCounts::of(&counts),
+        total: total.count,
+        total_capped: total.capped,
+        counts: counts.as_ref().map(JobGroupCounts::from),
     }))
 }
 

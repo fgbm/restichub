@@ -19,14 +19,15 @@ pub struct RepositoryHealth {
     pub lock_stale: bool,
     pub check_finished_at: Option<OffsetDateTime>,
     pub check_status: Option<JobStatus>,
-    /// The count of the newest snapshot listing; null when it was cut to fit a result.
+    /// The count of the newest unfiltered snapshot listing; null when it was cut to fit a result.
     pub snapshot_count: Option<i64>,
 }
 
 /// Reads the state of the given repositories of the tenant of the transaction.
 ///
 /// A cancelled check does not count: it says nothing about the data. The snapshot count lives as
-/// long as the browse job of the Restore screen that listed it.
+/// long as the browse job of the Restore screen that listed it. Only a listing without a host, tag
+/// or path filter counts the whole repository.
 pub async fn health(
     tx: &mut TenantTx<'_>,
     ids: &[RepositoryId],
@@ -56,6 +57,10 @@ pub async fn health(
              FROM jobs j \
              JOIN job_steps st ON st.tenant_id = j.tenant_id AND st.job_id = j.id \
                               AND st.output_kind = 'snapshots' \
+             JOIN job_requests rq ON rq.tenant_id = j.tenant_id AND rq.job_id = j.id \
+                                 AND rq.request -> 'hosts' = '[]'::jsonb \
+                                 AND rq.request -> 'tags' = '[]'::jsonb \
+                                 AND rq.request -> 'paths' = '[]'::jsonb \
              WHERE j.tenant_id = r.tenant_id AND j.repository_id = r.id AND j.kind = 'snapshots' \
                AND j.status = 'succeeded' AND j.finished_at IS NOT NULL \
              ORDER BY j.finished_at DESC LIMIT 1) s ON true \
