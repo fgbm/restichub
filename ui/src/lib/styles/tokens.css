@@ -79,6 +79,7 @@
 	/* Motion */
 	--rh-transition-fast: 120ms ease;
 	--rh-transition-slow: 150ms ease;
+	--rh-spin-duration: 1.4s;
 }
 
 /* Light theme (default) */
