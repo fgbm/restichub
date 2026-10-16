@@ -137,14 +137,15 @@ pub(crate) fn agent_root() -> PathBuf {
 /// access instead. A refusal that the repair does not cover (a foreign owner of a level) comes from
 /// [`ensure_config_dir`]. Linux needs no repair: [`create_protected_dir`] sets the mode of an
 /// existing directory and has no owner check that an old build could trip. `log` gets one line for
-/// each change and each warning.
+/// each change and each warning. Returns the identity entries that another account could change
+/// before the repair: they may hold replaced trust anchors.
 ///
 /// # Errors
 ///
 /// Returns an error when a directory holds an entry that the agent does not know, a link, a file
 /// with more than one name or an entry that another account owns, or when the access control
 /// cannot be set.
-pub fn repair_config_dir(dir: &Path, log: &mut dyn FnMut(&str)) -> Result<()> {
+pub fn repair_config_dir(dir: &Path, log: &mut dyn FnMut(&str)) -> Result<Vec<PathBuf>> {
     #[cfg(windows)]
     {
         crate::winrepair::repair_agent_tree(dir, &agent_root(), &mut |action| {
@@ -154,7 +155,7 @@ pub fn repair_config_dir(dir: &Path, log: &mut dyn FnMut(&str)) -> Result<()> {
     #[cfg(not(windows))]
     {
         let _ = (dir, log);
-        Ok(())
+        Ok(Vec::new())
     }
 }
 
