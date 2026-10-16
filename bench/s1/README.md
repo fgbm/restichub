@@ -63,7 +63,7 @@ bench/s1/e2e/scenario-14.2.3.sh [OUT]   # recovery after a stale lock; about 40 
 bench/s1/e2e/scenario-14.2.4.sh [OUT]   # agent revocation during a job (AC-ID-04); about 1 minute
 ```
 
-A scenario resets the bench of its project. To run a scenario on a host where a timed run uses the bench, use a separate copy of the repository, so that `bench.env`, `state/` and `out/` are not shared. Set `COMPOSE_PROJECT_NAME`, `CP_WEB_PORT` and `CP_AGENT_PORT` to values that no other bench uses. Set `RESTICHUB_CP_IMAGE` and `BENCH_AGENT_IMAGE` to other image names, so that the build does not replace the images of the timed run:
+A scenario resets the bench of its project. A timed run can use the bench on the same host. Then use a separate copy of the repository for the scenario, so that `bench.env`, `state/` and `out/` are not shared. Set `COMPOSE_PROJECT_NAME`, `CP_WEB_PORT` and `CP_AGENT_PORT` to values that no other bench uses. Set `RESTICHUB_CP_IMAGE` and `BENCH_AGENT_IMAGE` to other image names, so that the build does not replace the images of the timed run:
 
 ```sh
 COMPOSE_PROJECT_NAME=restichub-e2e CP_WEB_PORT=18090 CP_AGENT_PORT=18453 \
