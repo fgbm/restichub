@@ -307,7 +307,12 @@ pub(crate) fn open_or_create_protected(path: &Path) -> Result<std::fs::File> {
     options.read(true).write(true);
     match options.clone().create_new(true).open(path) {
         Ok(file) => {
-            apply_descriptor(path, FILE_SDDL)?;
+            if let Err(error) = apply_descriptor(path, FILE_SDDL) {
+                // A later open would accept the file with the access that it inherited.
+                drop(file);
+                let _ = std::fs::remove_file(path);
+                return Err(error);
+            }
             Ok(file)
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => options
