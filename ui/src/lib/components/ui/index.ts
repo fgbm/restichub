@@ -26,7 +26,6 @@ export { default as SidePanel } from './SidePanel.svelte';
 export { default as Skeleton } from './Skeleton.svelte';
 export { default as StatusPill } from './StatusPill.svelte';
 export { default as Switch } from './Switch.svelte';
-export { default as Table } from './Table.svelte';
 export { default as Tabs } from './Tabs.svelte';
 export { default as TextField } from './TextField.svelte';
 export { default as Toast } from './Toast.svelte';

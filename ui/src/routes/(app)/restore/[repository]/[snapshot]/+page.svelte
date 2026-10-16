@@ -1,24 +1,23 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Agent, Repository, SnapshotItem } from '#lib/api/index.ts';
 	import RestoreDialog from '#lib/components/RestoreDialog.svelte';
 	import SnapshotTags from '#lib/components/SnapshotTags.svelte';
 	import SnapshotTree from '#lib/components/SnapshotTree.svelte';
-	import {
-		Alert,
-		Button,
-		EmptyState,
-		Icon,
-		PageHeader,
-		Skeleton
-	} from '#lib/components/ui/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
+	import { Alert, Button, EmptyState, Icon } from '#lib/components/ui/index.ts';
 	import { formatBytes, formatCount, formatLocalTime } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { TARGET_PARAM, includePaths } from '#lib/restore.ts';
+	import {
+		TARGET_PARAM,
+		filtersFromQuery,
+		filtersToQuery,
+		includePaths,
+		targetExtra
+	} from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
-	import { setPageTitle } from '#lib/stores/page-title.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
 	/** How many selected paths the footer names before it folds the rest. */
@@ -57,7 +56,13 @@
 		}
 	}
 
-	onDestroy(() => setPageTitle(null));
+	const title = $derived(t('restore.snapshotTitle', { id: snapshotId.slice(0, 8) }));
+	// The list level keeps the filters and the target of the list, also in a new tab.
+	const listQuery = filtersToQuery(filtersFromQuery(page.url.searchParams), {
+		repository: repositoryId,
+		snapshot: snapshotId,
+		...targetExtra(page.url.searchParams)
+	}).toString();
 
 	onMount(async () => {
 		try {
@@ -74,7 +79,6 @@
 				service.getSnapshots(repositoryId, { job: item.job_id ?? undefined })
 			);
 			snapshot = list?.snapshots.find((item) => item.id === snapshotId) ?? null;
-			setPageTitle(repository?.name ?? null);
 		} catch (problem) {
 			error = describe(problem);
 		} finally {
@@ -83,139 +87,137 @@
 	});
 </script>
 
-<svelte:head>
-	<title>{t('restore.title')} · {t('app.name')}</title>
-</svelte:head>
-
-{#if !canRestore}
-	<Alert tone="attention" icon="lock" title={t('restore.forbidden')} />
-{:else if loading}
-	<Skeleton variant="row" />
-{:else if error}
-	<Alert tone="danger" title={error} />
-{:else if !snapshot || !repository}
-	<EmptyState
-		icon="restore"
-		title={t('restore.snapshotMissingTitle')}
-		description={t('restore.snapshotMissingDescription')}
-		bordered
-	/>
-{:else}
-	<PageHeader title={t('restore.snapshotTitle', { id: snapshot.short_id })} />
-
-	<div class="layout">
-		<aside class="side">
-			<button
-				type="button"
-				class="side__toggle"
-				aria-expanded={summaryOpen}
-				aria-controls="snapshot-meta"
-				onclick={() => (summaryOpen = !summaryOpen)}
-			>
-				<span class="side__line">
-					<span class="mono">{snapshot.short_id}</span>
-					<span>{snapshot.hostname}</span>
-					<span>{snapshot.time ? formatLocalTime(snapshot.time) : '—'}</span>
-				</span>
-				<Icon name={summaryOpen ? 'chevron-up' : 'chevron-down'} size="xs" />
-			</button>
-			<dl id="snapshot-meta" class="meta" class:meta--open={summaryOpen}>
-				<div>
-					<dt>{t('restore.meta.id')}</dt>
-					<dd class="id">
-						<span class="mono id__text" title={snapshot.id}>{snapshot.id}</span>
-						<Button
-							size="sm"
-							icon={copied ? 'check' : 'copy'}
-							aria-label={t('restore.meta.copyId')}
-							onclick={copyId}
-						/>
-					</dd>
-				</div>
-				<div>
-					<dt>{t('restore.meta.time')}</dt>
-					<dd>{snapshot.time ? formatLocalTime(snapshot.time) : '—'}</dd>
-				</div>
-				<div>
-					<dt>{t('restore.meta.host')}</dt>
-					<dd>{snapshot.hostname}</dd>
-				</div>
-				<div>
-					<dt>{t('restore.meta.repository')}</dt>
-					<dd>{repository.name}</dd>
-				</div>
-				<div>
-					<dt>{t('restore.meta.paths')}</dt>
-					<dd class="mono">{snapshot.paths.join(', ')}</dd>
-				</div>
-				{#if snapshot.total_bytes != null}
+<Page
+	{title}
+	crumbs={[{ label: repository?.name ?? '' }, { label: title }]}
+	{listQuery}
+	loading={canRestore && loading}
+	error={canRestore ? error : null}
+>
+	{#if !canRestore}
+		<Alert tone="attention" icon="lock" title={t('restore.forbidden')} />
+	{:else if !snapshot || !repository}
+		<EmptyState
+			icon="restore"
+			title={t('restore.snapshotMissingTitle')}
+			description={t('restore.snapshotMissingDescription')}
+			bordered
+		/>
+	{:else}
+		<div class="layout">
+			<aside class="side">
+				<button
+					type="button"
+					class="side__toggle"
+					aria-expanded={summaryOpen}
+					aria-controls="snapshot-meta"
+					onclick={() => (summaryOpen = !summaryOpen)}
+				>
+					<span class="side__line">
+						<span class="mono">{snapshot.short_id}</span>
+						<span>{snapshot.hostname}</span>
+						<span>{snapshot.time ? formatLocalTime(snapshot.time) : '—'}</span>
+					</span>
+					<Icon name={summaryOpen ? 'chevron-up' : 'chevron-down'} size="xs" />
+				</button>
+				<dl id="snapshot-meta" class="meta" class:meta--open={summaryOpen}>
 					<div>
-						<dt>{t('restore.meta.content')}</dt>
-						<dd>
-							{t('restore.meta.contentValue', {
-								files: formatCount(snapshot.total_files ?? 0),
-								size: formatBytes(snapshot.total_bytes)
-							})}
+						<dt>{t('restore.meta.id')}</dt>
+						<dd class="id">
+							<span class="mono id__text" title={snapshot.id}>{snapshot.id}</span>
+							<Button
+								size="sm"
+								icon={copied ? 'check' : 'copy'}
+								aria-label={t('restore.meta.copyId')}
+								onclick={copyId}
+							/>
 						</dd>
 					</div>
-				{/if}
-				{#if snapshot.tags.length > 0}
 					<div>
-						<dt>{t('restore.meta.tags')}</dt>
-						<dd><SnapshotTags tags={snapshot.tags} {profiles} /></dd>
+						<dt>{t('restore.meta.time')}</dt>
+						<dd>{snapshot.time ? formatLocalTime(snapshot.time) : '—'}</dd>
 					</div>
-				{/if}
-			</dl>
-		</aside>
-
-		<section class="files">
-			<h2 class="files__head">{t('restore.files')}</h2>
-			<div class="files__body">
-				<SnapshotTree repositoryId={repository.id} {snapshot} bind:selected={selection} />
-			</div>
-			<div class="selection">
-				<div class="selection__text">
-					<span class="selection__count">
-						{paths.length === 0
-							? t('restore.selectionNone')
-							: t('restore.selectionSome', { count: paths.length })}
-					</span>
-					{#if paths.length > 0}
-						<ul class="selection__paths" aria-label={t('restore.selectedList')}>
-							{#each paths.slice(0, NAMED) as item (item)}
-								<li class="selection__path" title={item}>{item}</li>
-							{/each}
-							{#if paths.length > NAMED}
-								<li class="selection__more">
-									{t('restore.selectionMore', { count: paths.length - NAMED })}
-								</li>
-							{/if}
-						</ul>
+					<div>
+						<dt>{t('restore.meta.host')}</dt>
+						<dd>{snapshot.hostname}</dd>
+					</div>
+					<div>
+						<dt>{t('restore.meta.repository')}</dt>
+						<dd>{repository.name}</dd>
+					</div>
+					<div>
+						<dt>{t('restore.meta.paths')}</dt>
+						<dd class="mono">{snapshot.paths.join(', ')}</dd>
+					</div>
+					{#if snapshot.total_bytes != null}
+						<div>
+							<dt>{t('restore.meta.content')}</dt>
+							<dd>
+								{t('restore.meta.contentValue', {
+									files: formatCount(snapshot.total_files ?? 0),
+									size: formatBytes(snapshot.total_bytes)
+								})}
+							</dd>
+						</div>
 					{/if}
+					{#if snapshot.tags.length > 0}
+						<div>
+							<dt>{t('restore.meta.tags')}</dt>
+							<dd><SnapshotTags tags={snapshot.tags} {profiles} /></dd>
+						</div>
+					{/if}
+				</dl>
+			</aside>
+
+			<section class="files">
+				<h2 class="files__head">{t('restore.files')}</h2>
+				<div class="files__body">
+					<SnapshotTree repositoryId={repository.id} {snapshot} bind:selected={selection} />
 				</div>
-				<div class="selection__actions">
-					{#if paths.length > 0}
-						<Button variant="ghost" onclick={() => (selection = new Set())}>
-							{t('restore.clearSelection')}
+				<div class="selection">
+					<div class="selection__text">
+						<span class="selection__count">
+							{paths.length === 0
+								? t('restore.selectionNone')
+								: t('restore.selectionSome', { count: paths.length })}
+						</span>
+						{#if paths.length > 0}
+							<ul class="selection__paths" aria-label={t('restore.selectedList')}>
+								{#each paths.slice(0, NAMED) as item (item)}
+									<li class="selection__path" title={item}>{item}</li>
+								{/each}
+								{#if paths.length > NAMED}
+									<li class="selection__more">
+										{t('restore.selectionMore', { count: paths.length - NAMED })}
+									</li>
+								{/if}
+							</ul>
+						{/if}
+					</div>
+					<div class="selection__actions">
+						{#if paths.length > 0}
+							<Button variant="ghost" onclick={() => (selection = new Set())}>
+								{t('restore.clearSelection')}
+							</Button>
+						{/if}
+						<Button variant="primary" icon="restore" onclick={() => (dialogOpen = true)}>
+							{t('restore.restore')}
 						</Button>
-					{/if}
-					<Button variant="primary" icon="restore" onclick={() => (dialogOpen = true)}>
-						{t('restore.restore')}
-					</Button>
+					</div>
 				</div>
-			</div>
-		</section>
-	</div>
+			</section>
+		</div>
 
-	<RestoreDialog
-		bind:open={dialogOpen}
-		{repository}
-		{snapshot}
-		{paths}
-		{agents}
-		preferredAgentId={page.url.searchParams.get(TARGET_PARAM) ?? ''}
-	/>
-{/if}
+		<RestoreDialog
+			bind:open={dialogOpen}
+			{repository}
+			{snapshot}
+			{paths}
+			{agents}
+			preferredAgentId={page.url.searchParams.get(TARGET_PARAM) ?? ''}
+		/>
+	{/if}
+</Page>
 
 <style>
 	/* The page fills the window below the top bar, the tabs and the title: only the tree scrolls. */

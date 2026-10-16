@@ -6,13 +6,6 @@ import tseslint from 'typescript-eslint';
 import noHardcodedText from './eslint-rules/no-hardcoded-text.js';
 import uiPrinciples from './eslint-rules/ui-principles.js';
 
-// The screens that still use the older Table and their own back links; the migration to
-// DataTable, Page and RecordPage empties this list.
-const legacyScreens = [
-	'src/lib/components/ui/Table.svelte',
-	'src/routes/(app)/restore/[[]repository]/[[]snapshot]/+page.svelte'
-];
-
 export default tseslint.config(
 	{
 		ignores: ['.svelte-kit/', 'build/', 'node_modules/', 'src/lib/api/schema.d.ts', 'mockups/']
@@ -59,13 +52,7 @@ export default tseslint.config(
 		// design/style/ui-principles.md: tables, row actions and the way back come from the shared
 		// components. The sign-in screens have no top bar, so their links back stay.
 		files: ['src/**/*.svelte'],
-		ignores: [
-			'src/routes/(dev)/**',
-			'src/routes/(auth)/**',
-			'src/lib/screens/ComponentGallery.svelte',
-			'src/lib/components/ui/DataTable.svelte',
-			...legacyScreens
-		],
+		ignores: ['src/routes/(auth)/**', 'src/lib/components/ui/DataTable.svelte'],
 		plugins: { ui: uiPrinciples },
 		rules: {
 			'ui/no-raw-table': 'error',

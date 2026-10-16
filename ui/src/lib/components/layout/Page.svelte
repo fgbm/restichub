@@ -1,8 +1,8 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { t } from '#lib/i18n/index.ts';
-	import { clearPageMeta, setPageMeta, type Crumb } from '#lib/stores/page-meta.svelte.ts';
+	import type { Crumb } from '#lib/stores/page-meta.svelte.ts';
 	import { Alert, PageHeader, Skeleton } from '../ui/index.ts';
+	import PageMeta from './PageMeta.svelte';
 
 	let {
 		title,
@@ -35,17 +35,9 @@
 		actions?: Snippet;
 		children: Snippet;
 	} = $props();
-
-	const owner = {};
-	$effect(() => {
-		setPageMeta({ crumbs, listQuery }, owner);
-	});
-	$effect(() => () => clearPageMeta(owner));
 </script>
 
-<svelte:head>
-	<title>{title ? `${title} · ${t('app.name')}` : t('app.name')}</title>
-</svelte:head>
+<PageMeta {title} {crumbs} {listQuery} />
 
 {#if loading}
 	<div class="page-loading" aria-busy="true">

@@ -9,6 +9,7 @@
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { JobDetail, JobLogLine, JobStep } from '#lib/api/index.ts';
 	import StepLog from '#lib/components/StepLog.svelte';
+	import { PageMeta } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Badge,
@@ -368,9 +369,7 @@
 	}
 </script>
 
-<svelte:head>
-	<title>{title} · {t('jobs.title')} · {t('app.name')}</title>
-</svelte:head>
+<PageMeta {title} crumbs={[{ label: id }]} />
 
 {#if loading}
 	<Skeleton variant="row" />
