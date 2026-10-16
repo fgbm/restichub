@@ -178,6 +178,28 @@ An older install kept restic in `/var/lib/restichub-agent/bin`. An older Windows
 
 On Linux the command writes `/etc/systemd/system/restichub-agent.service` and enables the unit. On Windows the command writes a Windows service that runs as LocalSystem. The service starts after a reboot.
 
+### Upgrade the agent
+
+To upgrade an agent, you do not register the host again. The identity stays.
+
+1. Download the new agent package on the host and unpack it in an empty folder.
+2. Run `restichub-agent install-service` from the unpacked package. Use an elevated PowerShell on Windows and `sudo` on Linux.
+
+The command stops the running service, copies the new executable into the program directory, points the service at it and starts it. It keeps the identity and the restic record. It waits for the connection, as `register` does.
+
+On Windows the command also repairs the access control of `%ProgramData%\ResticHub`, when an older agent left a foreign access there. The command first sets the protected access control on the directory. Then it examines the items in the directory. The command prints one line for each change. It does not read the old restore root `%ProgramData%\ResticHub\Restore`. The service never repairs the access.
+
+The agent does not use a file that another account could change before the repair:
+
+- If another account could change `Agent-server-scripts`, the command removes the file. The trust mode for server scripts is then off. To turn it on again, run `restichub-agent trust-server-scripts --enable` as Administrator.
+- If another account could change `Agent-restore-roots.txt`, the command renames the file to `Agent-restore-roots.txt.untrusted-<time>`. The extra restore roots are then off. Examine the file, and then rename it back to turn them on again.
+- In a directory that another account could change, the command removes the files of an incomplete certificate rotation: `rotation.next` and the files that end with `.next`.
+- If another account could read or change the identity, the command shows a warning. Register the host again (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)).
+
+The command stops at an item that it cannot repair. Such an item has another owner, is a link or a hard link, or is not a file of the agent. The message names the item.
+
+On Linux the command needs no repair: it sets the mode of `/etc/restichub-agent` itself, and an old install leaves no directory that the command refuses.
+
 ### Troubleshooting
 
 The exit code is 0 on success and 1 on an error. The exit code is 78 when the service starts without a usable identity. The systemd unit does not restart the service after the code 78, because a restart cannot create an identity.
@@ -197,6 +219,10 @@ The exit code is 0 on success and 1 on an error. The exit code is 78 when the se
 | `cannot load the agent identity in ...; register the agent again with a new enrollment token` | The identity directory is damaged or empty. The service exits with code 78 and does not restart. | Create a token with "Re-register" and run `register --force` with it. |
 | The host stays in "Waiting for connection" | The service does not run, or it cannot reach the control plane. | Run `restichub-agent status` and read "last error". Check the service, the clock and the firewall. |
 | `the control plane does not accept the protocol version of this agent` | The agent and the control plane have different protocol versions. | Update the agent (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)). |
+| `... cannot protect the directory ...ResticHub ... grants the access mask ... to an account that is not SYSTEM or Administrators` | An older agent left `%ProgramData%\ResticHub` with the access of `%ProgramData%`. | Run `restichub-agent install-service` of the new package as Administrator. The command repairs the access and keeps the identity. Do not delete the directory, because it holds the identity. |
+| `... holds ..., which is not a file of the agent`, `... is owned by an account that is not SYSTEM or Administrators, so the agent does not use it`, `... is a hard link ...` or `... is a reparse point ...` | The directory holds a file that the agent does not know, a file that another account owns, a hard link or a link. | Check the named file. Remove that file, not the directory. Run the command again. If the file is a part of the identity, for example `agent-key.pem`, register the host again after the removal. |
+| `warning: another account could read or change ..., so the agent identity may be exposed` | An older agent let another account read or change the identity. The repair stopped that access, but the key can be already known. | Register the host again (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)). |
+| `... is owned by an account that is not SYSTEM or Administrators, so that account may have put files there` | Another account owns a directory of the agent. The agent does not repair it. | Check the files in the directory. Then run the two PowerShell lines from the message: `icacls <directory> /setowner *S-1-5-32-544` and `Set-Acl` with the SDDL `O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`. Run the command again. |
 | The command refuses a directory or file | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
 | `cannot stop the service` on Windows | A job still runs. | Wait for the job, or stop the service by hand. Run the command again. |
 | `the restic binary ... is missing` on Windows after an update | An older agent kept restic in the `bin` directory, and the service could not move it. The log of the service shows `cannot remove` or `cannot replace`. | Close the program that holds the old file, or clear its read-only attribute. Then run `restichub-agent install-service` as Administrator. The command moves restic to `%ProgramFiles%\ResticHub\Agent\restic.exe`. |

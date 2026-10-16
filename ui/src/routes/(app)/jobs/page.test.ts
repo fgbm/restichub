@@ -172,7 +172,10 @@ describe('the Jobs screen', () => {
 		render(Jobs);
 
 		const table = within(await screen.findByRole('table'));
-		expect(await table.findByText('Succeeded with warnings')).toBeInTheDocument();
+		const pill = await table.findByTitle('Succeeded with warnings');
+		expect(pill).toHaveClass('status--warning');
+		expect(pill.closest('.status')).toHaveAttribute('title', 'Succeeded with warnings');
+		expect(pill.closest('.status')).toHaveAttribute('aria-label', 'Succeeded with warnings');
 		expect(table.getByText('Failed')).toBeInTheDocument();
 		expect(
 			screen.queryByText(

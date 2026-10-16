@@ -19,8 +19,48 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   VALE_VERSION: 3.24.0
+  # Line tables keep the panic backtraces. Full debug information makes the compile, the link and
+  # the cache of the many test binaries much slower, most of all on Windows.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
+  # Decides which jobs a pull request needs. A job that this job skips with `if:` reports
+  # "skipped", which satisfies a required check. Do not skip a job that has a matrix: a skipped
+  # matrix job reports the unexpanded name, and the required check never completes. A push to
+  # main runs everything, because the images and the packages depend on it.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.groups.outputs.rust }}
+      windows: ${{ steps.groups.outputs.windows }}
+      ui: ${{ steps.groups.outputs.ui }}
+      openapi: ${{ steps.groups.outputs.openapi }}
+      proto: ${{ steps.groups.outputs.proto }}
+      docs: ${{ steps.groups.outputs.docs }}
+      site: ${{ steps.groups.outputs.site }}
+      comments: ${{ steps.groups.outputs.comments }}
+      deps: ${{ steps.groups.outputs.deps }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the classifier
+        run: python3 -I scripts/test-ci-changes.py
+      - name: Classify the changed files
+        id: groups
+        env:
+          # The toolchain file would install the pinned Rust only to read the crate list.
+          RUSTUP_TOOLCHAIN: stable
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            python3 -I scripts/ci-changes.py --base "$BASE_SHA" | tee -a "$GITHUB_OUTPUT"
+          else
+            python3 -I scripts/ci-changes.py --all | tee -a "$GITHUB_OUTPUT"
+          fi
+
   # The agent tests that run the real restic need the pinned release. The job fetches it with the
   # test script in `packaging`, which verifies the signed checksums and the archive hash, so the
   # Windows runner needs no gpg.
@@ -47,35 +87,23 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  rust:
-    name: Rust (${{ matrix.os }})
-    needs: restic
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            restic: linux
-          - os: windows-latest
-            restic: windows
-    runs-on: ${{ matrix.os }}
+  rust-linux:
+    name: Rust (ubuntu-latest)
+    needs: [changes, restic]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: restic-ci-${{ matrix.restic }}
+          name: restic-ci-linux
           path: ${{ runner.temp }}/restic
       # The tests fail, and do not skip, when this restic is missing.
       - name: Use the verified restic
-        shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ matrix.restic }}" = windows ]; then
-            binary="$RUNNER_TEMP/restic/restic.exe"
-          else
-            binary="$RUNNER_TEMP/restic/restic"
-            chmod +x "$binary"
-          fi
+          binary="$RUNNER_TEMP/restic/restic"
+          chmod +x "$binary"
           "$binary" version
           echo "RESTICHUB_TEST_RESTIC=$binary" >> "$GITHUB_ENV"
           echo "RESTICHUB_REQUIRE_RESTIC=1" >> "$GITHUB_ENV"
@@ -84,26 +112,21 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Format
-        if: runner.os == 'Linux'
         run: cargo fmt --all --check
       - name: Clippy
-        if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets -- -D warnings
       # A broken doc link or an invalid doc comment fails the build, so it never reaches the site.
       - name: Rustdoc
-        if: runner.os == 'Linux'
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps
-      # The database tests skip on Windows because RESTICHUB_TEST_DATABASE_URL is not set. The
-      # `database` job runs them on Linux.
+      # The database tests skip here because RESTICHUB_TEST_DATABASE_URL is not set. The
+      # `database` job runs them.
       - name: Test
         run: cargo test --workspace
       # The database tests are inside the crate behind the test-util feature. A build without the
       # feature must still compile them.
       - name: Check that the database tests are compiled
-        if: runner.os == 'Linux'
-        shell: bash
         run: |
           set -euo pipefail
           count=$(cargo test -p restichub-db -- --list | grep -c '^tests::' || true)
@@ -111,8 +134,6 @@ jobs:
           test "$count" -gt 0
       # The test helper is a dev-only feature. No binary crate may enable it in the normal graph.
       - name: Check that the test helper is not a normal dependency
-        if: runner.os == 'Linux'
-        shell: bash
         run: |
           set -euo pipefail
           for crate_dir in crates/*; do
@@ -126,9 +147,42 @@ jobs:
           done
           echo "no binary crate enables the test helper in the normal graph"
 
+  # A pull request runs the Windows job only when the agent, or a crate that the agent needs in a
+  # normal or build dependency, changes. A change to the control plane alone cannot change the
+  # agent on Windows. A push to main runs it always.
+  rust-windows:
+    name: Rust (windows-latest)
+    needs: [changes, restic]
+    if: needs.changes.outputs.windows == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: restic-ci-windows
+          path: ${{ runner.temp }}/restic
+      # The tests fail, and do not skip, when this restic is missing.
+      - name: Use the verified restic
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$RUNNER_TEMP/restic/restic.exe"
+          "$binary" version
+          echo "RESTICHUB_TEST_RESTIC=$binary" >> "$GITHUB_ENV"
+          echo "RESTICHUB_REQUIRE_RESTIC=1" >> "$GITHUB_ENV"
+      # The action reads rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      # The database tests skip here because RESTICHUB_TEST_DATABASE_URL is not set.
+      - name: Build the tests
+        run: cargo test --workspace --no-run
+      - name: Test
+        run: cargo test --workspace
+
   # A service container runs only on a Linux runner, so the database tests are their own job.
   database:
     name: Database (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -164,15 +218,23 @@ jobs:
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" "prometheus-${version}.linux-amd64/promtool"
           echo "RESTICHUB_TEST_PROMTOOL=$RUNNER_TEMP/prometheus-${version}.linux-amd64/promtool" >> "$GITHUB_ENV"
           echo "RESTICHUB_REQUIRE_PROMTOOL=1" >> "$GITHUB_ENV"
+      # nextest runs the tests of all binaries side by side, and the test helper shares one template
+      # database across the processes. It does not run the doc tests; the Rust job runs them.
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: nextest
+      - name: Build the tests
+        run: cargo test --workspace --no-run
       # The run includes the crash recovery test (AC-NFR-02): it kills the real control plane binary
       # with SIGKILL while 50 jobs run.
       - name: Test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --profile ci
       # The openssl chain check prints its result line; --nocapture puts the line in this log.
+      # The filter keeps the workspace feature set, so the step reuses the build of the first step.
       - name: Show the openssl chain check
         run: >-
-          cargo test -p restichub-cp --test pki_certs --
-          --nocapture openssl_verifies_the_issued_chain
+          cargo nextest run --workspace --profile ci --no-capture
+          -E 'binary(pki_certs) & test(openssl_verifies_the_issued_chain)'
 
   # The heavy jobs run on a push to main and on a pull request with the label `ci-heavy`.
   # The real restic works against an S3 server and a rest-server (AC-RP-01). MinIO no longer
@@ -265,6 +327,8 @@ jobs:
   # one that starts the control plane; the job touches no data.
   openapi:
     name: OpenAPI drift (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.openapi == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -340,6 +404,8 @@ jobs:
 
   cargo-deny:
     name: Dependencies
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -352,6 +418,8 @@ jobs:
 
   proto:
     name: Protocol Buffers
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -369,6 +437,8 @@ jobs:
 
   docs:
     name: Documentation site
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -386,6 +456,8 @@ jobs:
 
   vale:
     name: Style (Vale)
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -400,6 +472,8 @@ jobs:
 
   comments:
     name: Style (comments)
+    needs: changes
+    if: needs.changes.outputs.comments == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -416,6 +490,8 @@ jobs:
 
   ui:
     name: Web UI
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -436,6 +512,8 @@ jobs:
 
   ui-csp:
     name: Web UI CSP
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:

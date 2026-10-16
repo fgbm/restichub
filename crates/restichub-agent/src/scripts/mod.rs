@@ -30,6 +30,8 @@ use zeroize::Zeroizing;
 use crate::exec::Invocation;
 use crate::trust::Trust;
 
+#[cfg(windows)]
+pub(crate) use setting::allow_list_file_for;
 pub use setting::{ScriptMode, mode_file, mode_file_for, removed_allow_list_file, set_mode};
 
 /// The time limit of a script whose step names none.

@@ -165,6 +165,12 @@
 		return t(`jobs.status.${job.status}` as MessageKey);
 	}
 
+	function jobFullLabel(job: Job): string | undefined {
+		return job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings'
+			? t('jobs.statusFull.succeeded_with_warnings')
+			: undefined;
+	}
+
 	function jobTone(job: Job): StatusTone {
 		if (job.status === 'failed' && job.result_code === 'cancelled') return 'cancelled';
 		if (job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings') {
@@ -307,7 +313,7 @@
 {/snippet}
 
 {#snippet jobStatusCell(job: Job)}
-	<StatusPill tone={jobTone(job)}>{jobLabel(job)}</StatusPill>
+	<StatusPill tone={jobTone(job)} title={jobFullLabel(job)}>{jobLabel(job)}</StatusPill>
 {/snippet}
 
 {#snippet connectionValue()}

@@ -306,7 +306,15 @@ async fn ac_rp_02_no_endpoint_returns_a_secret_value() -> Result<(), Box<dyn std
         let Some(methods) = item.as_object() else {
             continue;
         };
-        if !methods.contains_key("get") {
+        let Some(get) = methods.get("get") else {
+            continue;
+        };
+        // An event stream ends only after 15 minutes, and its events hold identifiers only.
+        let is_stream = get
+            .pointer("/responses/200/content")
+            .and_then(Value::as_object)
+            .is_some_and(|content| content.contains_key("text/event-stream"));
+        if is_stream {
             continue;
         }
         let uri = path.replace("{id}", &id);

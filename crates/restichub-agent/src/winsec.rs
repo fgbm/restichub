@@ -49,6 +49,10 @@ use windows_sys::Win32::System::SystemServices::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
+mod entry;
+
+pub(crate) use entry::{Entry, Exposure, Rights};
+
 /// A protected DACL: full control for SYSTEM and Administrators only, inherited by the children,
 /// with Administrators as the owner.
 const DIR_SDDL: &str = "O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
@@ -120,15 +124,17 @@ impl Drop for OwnedSid {
 /// Returns an error when a level cannot be created, when an existing level is a reparse point, has
 /// another owner or a write access for another account, or when the access control cannot be set.
 pub fn create_protected_tree(dir: &Path, root: &Path) -> Result<()> {
-    protect_tree(dir, root, &mut |level| {
+    protect_tree(dir, root, &crate::paths::agent_root(), &mut |level| {
         create_dir(level)?;
         apply_descriptor(level, DIR_SDDL)
     })
 }
 
+/// A refused level below `repaired` names the command that repairs it.
 fn protect_tree(
     dir: &Path,
     root: &Path,
+    repaired: &Path,
     create: &mut dyn FnMut(&Path) -> Result<()>,
 ) -> Result<()> {
     let mut levels = Vec::new();
@@ -157,7 +163,11 @@ fn protect_tree(
                         level.display()
                     );
                 }
-                check_admin_only(level)
+                if level.starts_with(repaired) {
+                    check_with_advice(level, AGENT_RIGHTS, REPAIR_ADVICE)
+                } else {
+                    check_admin_only(level)
+                }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => create(level),
             Err(error) => Err(error).with_context(|| format!("cannot read {}", level.display())),
@@ -312,12 +322,21 @@ pub fn check_program_directory(path: &Path) -> Result<()> {
     check(path, PROGRAM_DIRECTORY_RIGHTS)
 }
 
+/// Only the directories of the agent below `%ProgramData%\ResticHub` have a repair.
+const REPAIR_ADVICE: &str = "run `restichub-agent install-service` as an administrator (`restichub-agent register` on a host without an identity), which repairs the agent directories";
+
+const REMOVE_ENTRY_ADVICE: &str = "an administrator removes the entry of that account from the access control list of the path, then runs the command again";
+
 fn check(path: &Path, rights: u32) -> Result<()> {
+    check_with_advice(path, rights, REMOVE_ENTRY_ADVICE)
+}
+
+fn check_with_advice(path: &Path, rights: u32, advice: &str) -> Result<()> {
     let security = open_security(path)?;
     check_owner(path, security.owner)?;
     if let Some(mask) = first_foreign_grant(security.dacl, rights)? {
         bail!(
-            "{} grants the access mask {mask:#010x} to an account that is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
+            "{} grants the access mask {mask:#010x} to an account that is not SYSTEM or Administrators; {advice}",
             path.display()
         );
     }
@@ -369,12 +388,26 @@ fn open_security(path: &Path) -> Result<Security> {
 
 fn check_owner(path: &Path, owner: PSID) -> Result<()> {
     if owner.is_null() || !is_trusted_sid(owner) {
-        bail!(
-            "{} is owned by an account that is not SYSTEM or Administrators; an administrator deletes it, because it can hold files that another account put there, and then runs the command again",
-            path.display()
-        );
+        bail!("{}", foreign_owner_advice(path));
     }
     Ok(())
+}
+
+/// The advice for a path that another account owns. The agent never repairs it: the owner can
+/// change the access control and may have put files there. Deleting a directory would also delete
+/// the agent identity, so the text asks for a check of the files, then a reset.
+fn foreign_owner_advice(path: &Path) -> String {
+    let shown = path.display();
+    if path.is_dir() {
+        format!(
+            "{shown} is owned by an account that is not SYSTEM or Administrators, so that account may have put files there; check the files in it first, then take the ownership and reset the access control in an elevated PowerShell, and run the command again:\n  icacls \"{shown}\" /setowner *S-1-5-32-544\n  $acl = New-Object System.Security.AccessControl.DirectorySecurity; $acl.SetSecurityDescriptorSddlForm('{DIR_SDDL}'); Set-Acl -LiteralPath \"{shown}\" -AclObject $acl"
+        )
+    } else {
+        format!(
+            "{shown} is owned by an account that is not SYSTEM or Administrators; an administrator checks the file, removes it and runs the command again; when it is a file of the agent identity, the removal loses the identity, so then {}",
+            crate::winrepair::REENROLL_ADVICE
+        )
+    }
 }
 
 /// Returns the mask that a non-admin holds, or `None` when no entry grants it.
@@ -590,12 +623,12 @@ fn wide_path(path: &Path) -> Vec<u16> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
 
-    fn temp(name: &str) -> std::path::PathBuf {
+    pub(crate) fn temp(name: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
             "restichub-agent-winsec-{name}-{}",
             std::process::id()
@@ -702,12 +735,41 @@ mod tests {
         let dir = root.join("Agent").join("cache");
         create_protected_tree(&dir, &root).expect("cannot create the tree");
         let mut created = Vec::new();
-        protect_tree(&dir, &root, &mut |level| {
+        protect_tree(&dir, &root, &root, &mut |level| {
             created.push(level.to_path_buf());
             Ok(())
         })
         .expect("cannot check the existing tree");
         assert!(created.is_empty(), "an existing level was created again");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_only_a_level_of_the_agent_tree_names_the_repair() {
+        let base = temp("tree-advice");
+        std::fs::create_dir_all(&base).expect("cannot create the base");
+        let root = base.join("ResticHub");
+        let dir = root.join("Agent");
+        create_protected_tree(&dir, &root).expect("cannot create the tree");
+        grant(&root, "(OI)(CI)(WD)").expect("cannot add the access control entry");
+        let refuse = |repaired: &Path| {
+            let error = protect_tree(&dir, &root, repaired, &mut |_| Ok(()))
+                .expect_err("an open level must be refused");
+            format!("{error:#}")
+        };
+        let agent = refuse(&root);
+        assert!(agent.contains("install-service"), "{agent}");
+        let other = refuse(&base.join("elsewhere"));
+        assert!(!other.contains("install-service"), "{other}");
+        assert!(
+            other.contains("removes the entry of that account"),
+            "{other}"
+        );
+        let program = format!(
+            "{:#}",
+            check_program_directory(&root).expect_err("an open program directory")
+        );
+        assert!(!program.contains("install-service"), "{program}");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -795,7 +857,7 @@ mod tests {
     }
 
     /// Reads the security identifier of the account that runs the process.
-    fn current_user_sid() -> Result<String> {
+    pub(crate) fn current_user_sid() -> Result<String> {
         let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
         let whoami = Path::new(&system_root).join("System32").join("whoami.exe");
         let output = std::process::Command::new(whoami)
@@ -817,7 +879,7 @@ mod tests {
     }
 
     /// Sets the owner of `path` to the SDDL identity, for a negative test.
-    fn set_owner(path: &Path, sid: &str) -> Result<()> {
+    pub(crate) fn set_owner(path: &Path, sid: &str) -> Result<()> {
         let descriptor = descriptor(&format!("O:{sid}"))?;
         let mut owner: PSID = std::ptr::null_mut();
         let mut defaulted = 0;
@@ -843,7 +905,7 @@ mod tests {
     }
 
     /// Grants the account of BUILTIN\Users the given rights, for a negative test.
-    fn grant(dir: &Path, rights: &str) -> Result<()> {
+    pub(crate) fn grant(dir: &Path, rights: &str) -> Result<()> {
         run_icacls(dir, &["/grant", &format!("*S-1-5-32-545:{rights}")])
     }
 

@@ -34,8 +34,8 @@ test('the jobs screen lists the jobs and cancels a queued job', async ({ page })
 
 	const table = page.getByRole('table');
 	await expect(table.getByText('Running')).toBeVisible();
-	await expect(table.getByText('Succeeded', { exact: true })).toBeVisible();
-	await expect(table.getByText('Succeeded with warnings')).toBeVisible();
+	await expect(table.getByText('Succeeded', { exact: true }).first()).toBeVisible();
+	await expect(table.getByTitle('Succeeded with warnings')).toBeVisible();
 	// A list shows the status only; the reason is on the job page.
 	await expect(table.getByText('The profile no longer fits the host.')).toHaveCount(0);
 
@@ -57,7 +57,7 @@ test('the status filter narrows the list', async ({ page }) => {
 
 	await chooseFacet(page, 'Status', 'Succeeded');
 	const table = page.getByRole('table');
-	await expect(table.getByText('Succeeded', { exact: true })).toBeVisible();
+	await expect(table.getByText('Succeeded', { exact: true }).first()).toBeVisible();
 	await expect(table.getByText('Running')).toHaveCount(0);
 });
 
