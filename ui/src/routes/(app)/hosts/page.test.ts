@@ -12,7 +12,8 @@ import { ApiError } from '#lib/api/index.ts';
 import Hosts from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
-	listAgents: vi.fn(),
+	hostRows: vi.fn(),
+	getAgent: vi.fn(),
 	listEnrollmentTokens: vi.fn(),
 	createEnrollmentToken: vi.fn(),
 	revokeEnrollmentToken: vi.fn(),
@@ -24,6 +25,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const session = vi.hoisted(() => ({ role: 'admin' as string }));
+
+const route = vi.hoisted(() => ({ url: new URL('http://localhost/hosts') }));
+
+vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/navigation', () => ({
+	goto: async (address: string) => {
+		route.url = new URL(address, 'http://localhost');
+	}
+}));
 
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
@@ -48,7 +58,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 		...actual,
 		service: {
 			...actual.service,
-			listAgents: mocks.listAgents,
+			getAgent: mocks.getAgent,
 			listEnrollmentTokens: mocks.listEnrollmentTokens,
 			createEnrollmentToken: mocks.createEnrollmentToken,
 			revokeEnrollmentToken: mocks.revokeEnrollmentToken,
@@ -114,13 +124,14 @@ function agent(overrides: Record<string, unknown> = {}) {
 describe('the Hosts screen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		route.url = new URL('http://localhost/hosts');
 		session.role = 'admin';
-		mocks.listAgents.mockResolvedValue([]);
+		mocks.hostRows.mockResolvedValue([]);
+		mocks.getAgent.mockRejectedValue(new Error('not found'));
 		mocks.listEnrollmentTokens.mockResolvedValue([]);
-		// The server filters the page; the screen tests show the agents of the last list read.
+		// The server filters the page; each read takes the next rows that the test gives.
 		mocks.searchAgents.mockImplementation(async () => {
-			const results = mocks.listAgents.mock.results;
-			const items = results.length > 0 ? await results[results.length - 1].value : [];
+			const items = await mocks.hostRows();
 			return {
 				items,
 				next_cursor: null,
@@ -137,7 +148,7 @@ describe('the Hosts screen', () => {
 
 	it('fr_ui_01 reads one page of the hosts from the server without the revoked hosts', async () => {
 		const user = userEvent.setup();
-		mocks.listAgents.mockResolvedValue([agent({ id: 'a_01', hostname: 'win-fs01' })]);
+		mocks.hostRows.mockResolvedValue([agent({ id: 'a_01', hostname: 'win-fs01' })]);
 		render(Hosts);
 
 		await screen.findByText('win-fs01');
@@ -155,6 +166,66 @@ describe('the Hosts screen', () => {
 		const revoked = (await screen.findByText('Revoked')).closest('li') as HTMLElement;
 		expect(revoked).toHaveTextContent('3');
 		await user.keyboard('{Escape}');
+	});
+
+	it('fr_ui_01 asks for the facets only when a filter changes, not for a new page', async () => {
+		const user = userEvent.setup();
+		mocks.searchAgents.mockImplementation(async (query: { facets?: boolean }) => ({
+			items: [agent()],
+			next_cursor: null,
+			total: 30,
+			total_capped: false,
+			facets: query.facets
+				? {
+						states: { online: 30, offline: 0, waiting: 0, revoked: 0 },
+						os: [],
+						agent_versions: [],
+						labels: []
+					}
+				: null
+		}));
+		render(Hosts);
+
+		await screen.findByText('win-fs01');
+		expect(mocks.searchAgents).toHaveBeenCalledTimes(1);
+		expect(mocks.searchAgents).toHaveBeenLastCalledWith(expect.objectContaining({ facets: true }));
+		await user.click(screen.getByRole('button', { name: 'Next' }));
+		await waitFor(() =>
+			expect(mocks.searchAgents).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25 }))
+		);
+		expect(mocks.searchAgents.mock.lastCall?.[0].facets).toBeUndefined();
+
+		await user.type(screen.getByRole('searchbox'), 'web');
+		await waitFor(() =>
+			expect(mocks.searchAgents).toHaveBeenLastCalledWith(
+				expect.objectContaining({ q: 'web', offset: 0, facets: true })
+			)
+		);
+	});
+
+	it('fr_ui_01 shows the capped total and asks to narrow the filters', async () => {
+		mocks.searchAgents.mockResolvedValue({
+			items: [agent()],
+			next_cursor: null,
+			total: 10_000,
+			total_capped: true,
+			facets: null
+		});
+		render(Hosts);
+
+		expect(
+			await screen.findByText('More than 10,000 records match. Narrow the filters to see the rest.')
+		).toBeInTheDocument();
+		expect(screen.getByText('10,000+')).toBeInTheDocument();
+	});
+
+	it('shows the name of the host that a token re-registers from another page', async () => {
+		mocks.listEnrollmentTokens.mockResolvedValue([token({ replaces_agent_id: 'a_09' })]);
+		mocks.getAgent.mockResolvedValue(agent({ id: 'a_09', hostname: 'far-away' }));
+		render(Hosts);
+
+		expect(await screen.findByText('Re-registers the host "far-away"')).toBeInTheDocument();
+		expect(mocks.getAgent).toHaveBeenCalledWith('a_09');
 	});
 
 	it('shows only a registration that can still enroll a host', async () => {
@@ -192,7 +263,7 @@ describe('the Hosts screen', () => {
 
 	it('hides every write action from a Viewer', async () => {
 		session.role = 'viewer';
-		mocks.listAgents.mockResolvedValue([agent()]);
+		mocks.hostRows.mockResolvedValue([agent()]);
 		mocks.listEnrollmentTokens.mockResolvedValue([token()]);
 		render(Hosts);
 
@@ -206,7 +277,7 @@ describe('the Hosts screen', () => {
 
 	it('renames a host and refuses an empty name', async () => {
 		const user = userEvent.setup();
-		mocks.listAgents.mockResolvedValue([agent()]);
+		mocks.hostRows.mockResolvedValue([agent()]);
 		mocks.renameAgent.mockResolvedValue(agent({ hostname: 'new-name' }));
 		render(Hosts);
 
@@ -234,7 +305,7 @@ describe('the Hosts screen', () => {
 	});
 
 	it('shows the trust mode of each host as plain text in the row (FR-HK-08)', async () => {
-		mocks.listAgents.mockResolvedValue([
+		mocks.hostRows.mockResolvedValue([
 			agent({ id: 'a_01', hostname: 'win-fs01', os: 'windows' }),
 			agent({
 				id: 'a_02',
@@ -257,7 +328,7 @@ describe('the Hosts screen', () => {
 	});
 
 	it('links the host name to the host page', async () => {
-		mocks.listAgents.mockResolvedValue([agent({ id: 'a_01', hostname: 'win-fs01' })]);
+		mocks.hostRows.mockResolvedValue([agent({ id: 'a_01', hostname: 'win-fs01' })]);
 		render(Hosts);
 
 		const link = await screen.findByRole('link', { name: 'win-fs01' });
@@ -265,7 +336,7 @@ describe('the Hosts screen', () => {
 	});
 
 	it('marks an agent that needs an update and an agent with an unsupported version (FR-PR-09)', async () => {
-		mocks.listAgents.mockResolvedValue([
+		mocks.hostRows.mockResolvedValue([
 			agent({ id: 'a_01', hostname: 'host-current' }),
 			agent({
 				id: 'a_02',
@@ -293,7 +364,7 @@ describe('the Hosts screen', () => {
 	});
 
 	it('hides the update badge of a revoked host (FR-PR-09)', async () => {
-		mocks.listAgents.mockResolvedValue([
+		mocks.hostRows.mockResolvedValue([
 			agent({ id: 'a_01', hostname: 'host-live', version_status: 'update_available' }),
 			agent({
 				id: 'a_02',
@@ -310,7 +381,7 @@ describe('the Hosts screen', () => {
 	});
 
 	it('warns about a host that presented a replaced certificate (T17)', async () => {
-		mocks.listAgents.mockResolvedValue([
+		mocks.hostRows.mockResolvedValue([
 			agent({ id: 'a_01', hostname: 'host-clean' }),
 			agent({ id: 'a_02', hostname: 'host-clone', superseded_certificate_used_at: PAST })
 		]);
@@ -323,7 +394,7 @@ describe('the Hosts screen', () => {
 	it('shows the certificate expiry, the last rotation and warns before the expiry (FR-ID-03)', async () => {
 		const soon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
 		const rotated = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
-		mocks.listAgents.mockResolvedValue([
+		mocks.hostRows.mockResolvedValue([
 			agent({ id: 'a_01', hostname: 'host-fresh', last_certificate_rotation_at: rotated }),
 			agent({ id: 'a_02', hostname: 'host-soon', certificate_expires_at: soon })
 		]);
@@ -339,7 +410,7 @@ describe('the Hosts screen', () => {
 	});
 
 	it('shows a host that never connected as waiting (FR-ID-04)', async () => {
-		mocks.listAgents.mockResolvedValue([
+		mocks.hostRows.mockResolvedValue([
 			agent({ id: 'a_01', hostname: 'host-live' }),
 			agent({ id: 'a_02', hostname: 'host-new', first_connected_at: null })
 		]);
@@ -352,7 +423,7 @@ describe('the Hosts screen', () => {
 
 	it('offers the replacement only on the newer record (FR-ID-11, AC-ID-09)', async () => {
 		const user = userEvent.setup({ pointerEventsCheck: 0 });
-		mocks.listAgents.mockResolvedValue([
+		mocks.hostRows.mockResolvedValue([
 			agent({
 				id: 'a_01',
 				hostname: 'old-host',
@@ -401,7 +472,7 @@ describe('the Hosts screen', () => {
 
 	it('issues a re-registration token and shows the command (FR-ID-01)', async () => {
 		const user = userEvent.setup();
-		mocks.listAgents.mockResolvedValue([agent()]);
+		mocks.hostRows.mockResolvedValue([agent()]);
 		mocks.reenrollAgent.mockResolvedValue({
 			id: 'e_9',
 			token: 're_SECRETVALUE',
@@ -467,7 +538,7 @@ describe('the Hosts screen', () => {
 				.mockResolvedValueOnce([])
 				.mockResolvedValueOnce([token()])
 				.mockResolvedValue([token({ used_at: PAST, used_by_agent_id: 'a_07' })]);
-			mocks.listAgents
+			mocks.hostRows
 				.mockResolvedValueOnce([])
 				.mockResolvedValueOnce([])
 				.mockResolvedValue([agent({ id: 'a_07', hostname: 'brand-new' })]);
@@ -493,6 +564,37 @@ describe('the Hosts screen', () => {
 		});
 		afterEach(() => {
 			vi.useRealTimers();
+		});
+
+		it('fr_ui_01 keeps the newest page when an older poll answers late', async () => {
+			const user = userEvent.setup();
+			let answerPoll: (rows: unknown[]) => void = () => {};
+			const page = (rows: unknown[]) => ({
+				items: rows,
+				next_cursor: null,
+				total: 30,
+				total_capped: false,
+				facets: null
+			});
+			mocks.searchAgents
+				.mockResolvedValueOnce(page([agent({ id: 'a_01', hostname: 'first-page' })]))
+				.mockReturnValueOnce(
+					new Promise((resolve) => {
+						answerPoll = (rows) => resolve(page(rows));
+					})
+				)
+				.mockResolvedValue(page([agent({ id: 'a_02', hostname: 'second-page' })]));
+			render(Hosts);
+
+			await screen.findByText('first-page');
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(mocks.searchAgents).toHaveBeenCalledTimes(2);
+			await user.click(screen.getByRole('button', { name: 'Next' }));
+			await screen.findByText('second-page');
+			answerPoll([agent({ id: 'a_03', hostname: 'stale-page' })]);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(screen.getByText('second-page')).toBeInTheDocument();
+			expect(screen.queryByText('stale-page')).not.toBeInTheDocument();
 		});
 
 		it('reloads the pending list every 10 seconds (FR-ID-01)', async () => {

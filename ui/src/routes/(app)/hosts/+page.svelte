@@ -33,12 +33,11 @@
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { formatTime, relativeTime } from '#lib/format.ts';
+	import { formatCount, formatTime, relativeTime } from '#lib/format.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let hostActions: HostActions;
-	let agents = $state<Agent[]>([]);
 	let enrollmentTokens = $state<EnrollmentToken[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
@@ -64,17 +63,46 @@
 		t('hosts.installPlaceholder', { url: origin, token: createdToken?.token ?? '<token>' })
 	);
 
+	// The names of the hosts that a token names. The page rows fill it; a host on another page is
+	// read once by its identifier, so the screen never reads the whole host list.
+	let hostNames = $state<Record<string, string>>({});
+	const askedHosts: Record<string, boolean> = {};
+
+	function rememberHosts(list: Agent[]): void {
+		const added = list.filter((agent) => hostNames[agent.id] !== agent.hostname);
+		if (added.length === 0) return;
+		hostNames = {
+			...hostNames,
+			...Object.fromEntries(added.map((agent) => [agent.id, agent.hostname]))
+		};
+	}
+
+	async function resolveHosts(ids: (string | null | undefined)[]): Promise<void> {
+		const missing = ids.filter((id): id is string => !!id && !(id in hostNames) && !askedHosts[id]);
+		await Promise.all(
+			missing.map(async (id) => {
+				askedHosts[id] = true;
+				try {
+					rememberHosts([await service.getAgent(id)]);
+				} catch {
+					delete askedHosts[id];
+				}
+			})
+		);
+	}
+
 	// The dialog shows the host when the agent used the token that the dialog created.
 	const registeredHost = $derived.by(() => {
 		if (!createdToken) return null;
 		const used = enrollmentTokens.find((token) => token.id === createdToken?.id);
 		if (!used?.used_at || !used.used_by_agent_id) return null;
-		return agents.find((agent) => agent.id === used.used_by_agent_id) ?? null;
+		const hostname = hostNames[used.used_by_agent_id];
+		return hostname ? { hostname } : null;
 	});
 
 	function replacesName(token: EnrollmentToken): string | null {
 		if (!token.replaces_agent_id) return null;
-		return agents.find((agent) => agent.id === token.replaces_agent_id)?.hostname ?? null;
+		return hostNames[token.replaces_agent_id] ?? null;
 	}
 
 	// A token stays in the pending list only while it can still enroll a host (FR-ID-01).
@@ -160,6 +188,7 @@
 
 	let pageRows = $state<Agent[]>([]);
 	let total = $state(0);
+	let totalCapped = $state(false);
 	let facetValues = $state<AgentListFacets | null>(null);
 	let pageLoading = $state(true);
 	let pageError = $state<string | null>(null);
@@ -190,22 +219,51 @@
 			sort: SORT_KEYS[value.sort],
 			order: value.sort ? (value.order === 'asc' ? 'asc' : 'desc') : undefined,
 			offset: (tablePage - 1) * PAGE_SIZE,
-			limit: PAGE_SIZE,
-			facets: true
+			limit: PAGE_SIZE
 		};
 	}
 
-	async function loadPage(): Promise<void> {
+	// The facets follow the filters only, so a new page, a new order and a poll do not count again.
+	function filterKey(): string {
+		const value = filters.value;
+		return JSON.stringify([
+			value.q.trim(),
+			value.state,
+			value.os,
+			value.agent_version,
+			value.label,
+			value.scripts
+		]);
+	}
+	let facetKey: string | null = null;
+
+	// A poll and a filter change can overlap; only the last request may fill the table.
+	let request = 0;
+
+	async function loadPage(refreshFacets = false): Promise<void> {
+		const mine = ++request;
+		const key = filterKey();
+		const withFacets = refreshFacets || key !== facetKey;
 		try {
-			const result = await service.searchAgents(queryOf());
+			const result = await service.searchAgents({
+				...queryOf(),
+				facets: withFacets || undefined
+			});
+			if (mine !== request) return;
 			pageRows = result.items;
 			total = result.total;
-			facetValues = result.facets ?? facetValues;
+			totalCapped = result.total_capped;
+			if (result.facets) {
+				facetValues = result.facets;
+				facetKey = key;
+			}
+			rememberHosts(result.items);
 			pageError = null;
 		} catch (problem) {
+			if (mine !== request) return;
 			pageError = messageOf(problem);
 		} finally {
-			pageLoading = false;
+			if (mine === request) pageLoading = false;
 		}
 	}
 
@@ -322,47 +380,61 @@
 		return user && user.id === token.created_by ? user.display_name : token.created_by;
 	}
 
-	const empty = $derived(!loading && !error && agents.length === 0);
+	// The state counts ignore the state filter, so without another filter they count every host.
+	const narrowed = $derived(
+		Boolean(
+			filters.value.q.trim() ||
+			filters.value.os ||
+			filters.value.agent_version ||
+			filters.value.label ||
+			filters.value.scripts
+		)
+	);
+	const hostCount = $derived(
+		facetValues ? Object.values(facetValues.states).reduce((sum, count) => sum + count, 0) : null
+	);
+	const empty = $derived(!loading && !error && !narrowed && hostCount === 0);
 
 	function messageOf(problem: unknown): string {
-		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		if (problem instanceof ApiError) {
+			// The server pages only through the rows that it counts.
+			if (problem.problem.field === 'offset') return t('filter.tooDeep');
+			return tErrorCode(problem.code) ?? problem.title;
+		}
 		return t('table.error');
+	}
+
+	function tokenHosts(): (string | null | undefined)[] {
+		return enrollmentTokens.flatMap((token) => [token.used_by_agent_id, token.replaces_agent_id]);
 	}
 
 	async function load(): Promise<void> {
 		loading = true;
 		error = null;
+		const page = loadPage(true);
 		try {
-			const [agentList, tokenList] = await Promise.all([
-				service.listAgents(),
-				service.listEnrollmentTokens()
-			]);
-			agents = agentList;
-			enrollmentTokens = tokenList;
+			enrollmentTokens = await service.listEnrollmentTokens();
 		} catch (problem) {
 			error = messageOf(problem);
-		} finally {
-			loading = false;
-			reader.loaded();
 		}
-		await loadPage();
+		await page;
+		loading = false;
+		reader.loaded();
+		await resolveHosts(tokenHosts());
 	}
 
 	// A used token leaves the pending list and a new host appears without a manual reload.
 	const REFRESH_MS = 10_000;
 
 	async function refresh(): Promise<void> {
+		const page = loadPage();
 		try {
-			const [agentList, tokenList] = await Promise.all([
-				service.listAgents(),
-				service.listEnrollmentTokens()
-			]);
-			agents = agentList;
-			enrollmentTokens = tokenList;
+			enrollmentTokens = await service.listEnrollmentTokens();
 		} catch {
 			// The next tick tries again; the visible list stays.
 		}
-		await loadPage();
+		await page;
+		await resolveHosts(tokenHosts());
 	}
 
 	// The stream pushes a change of a host. The poll covers a stream that is down.
@@ -534,7 +606,7 @@
 <Page
 	title={t('hosts.title')}
 	description={t('hosts.description')}
-	count={pageLoading ? undefined : total}
+	count={pageLoading ? undefined : totalCapped ? `${formatCount(total)}+` : total}
 >
 	{#snippet actions()}
 		{#if canWrite}
@@ -586,6 +658,12 @@
 					{/each}
 				</ul>
 			</Panel>
+		</div>
+	{/if}
+
+	{#if totalCapped && !pageLoading}
+		<div class="capped">
+			<Alert tone="info" title={t('filter.capped', { count: formatCount(total) })} />
 		</div>
 	{/if}
 
@@ -747,7 +825,8 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
-	.pending {
+	.pending,
+	.capped {
 		margin-bottom: var(--rh-space-4);
 	}
 

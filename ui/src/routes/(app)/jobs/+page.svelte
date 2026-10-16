@@ -7,6 +7,7 @@
 	import type { Job, JobKind, JobQuery, JobStatus } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
+		Alert,
 		Button,
 		ConfirmDialog,
 		DataTable,
@@ -24,7 +25,7 @@
 	import { periodWindow } from '#lib/filters.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { formatDuration } from '#lib/format.ts';
+	import { formatCount, formatDuration } from '#lib/format.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -54,6 +55,7 @@
 
 	let jobs = $state<Job[]>([]);
 	let total = $state(0);
+	let totalCapped = $state(false);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let hosts = $state<{ id: string; hostname: string }[]>([]);
@@ -258,21 +260,32 @@
 	}
 
 	function messageOf(problem: unknown): string {
-		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
+		if (problem instanceof ApiError) {
+			// The server pages only through the rows that it counts.
+			if (problem.problem.field === 'offset') return t('filter.tooDeep');
+			return tErrorCode(problem.code) ?? problem.title;
+		}
 		return t('table.error');
 	}
 
+	// A silent reload and a filter change can overlap; only the last request may fill the table.
+	let request = 0;
+
 	async function load(silent = false): Promise<void> {
+		const mine = ++request;
 		if (!silent) loading = true;
 		error = null;
 		try {
 			const page = await service.listJobs(queryOf());
+			if (mine !== request) return;
 			jobs = page.items;
 			total = page.total;
+			totalCapped = page.total_capped;
 		} catch (problem) {
+			if (mine !== request) return;
 			error = messageOf(problem);
 		} finally {
-			loading = false;
+			if (mine === request) loading = false;
 		}
 	}
 
@@ -288,14 +301,15 @@
 		if (planList.status === 'fulfilled') plans = planList.value;
 	}
 
-	let loadedQuery = JSON.stringify(queryOf());
+	// The key is the filter state, not the query: a period preset gives a new time on each read.
+	let loadedQuery = JSON.stringify(filters.value);
 	onMount(() => {
 		void load();
 		void loadOptions();
 	});
 
 	$effect(() => {
-		const key = JSON.stringify(queryOf());
+		const key = JSON.stringify(filters.value);
 		if (key === loadedQuery) return;
 		loadedQuery = key;
 		void load();
@@ -349,11 +363,17 @@
 <Page
 	title={t('jobs.title')}
 	description={t('jobs.description')}
-	count={loading ? undefined : total}
+	count={loading ? undefined : totalCapped ? `${formatCount(total)}+` : total}
 >
 	{#snippet actions()}
 		<Button icon="refresh" onclick={() => load()}>{t('common.refresh')}</Button>
 	{/snippet}
+
+	{#if totalCapped && !loading}
+		<div class="capped">
+			<Alert tone="info" title={t('filter.capped', { count: formatCount(total) })} />
+		</div>
+	{/if}
 
 	{#if empty}
 		<EmptyState
@@ -416,3 +436,9 @@
 		onConfirm={confirmCancel}
 	/>
 </Page>
+
+<style>
+	.capped {
+		margin-bottom: var(--rh-space-4);
+	}
+</style>

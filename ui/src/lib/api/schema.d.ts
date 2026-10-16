@@ -1507,9 +1507,11 @@ export interface components {
             next_cursor?: string | null;
             /**
              * Format: int64
-             * @description The number of agents that match the filters on all pages.
+             * @description The number of agents that match the filters on all pages, at most 10000.
              */
             total: number;
+            /** @description More agents match than `total` counts. */
+            total_capped: boolean;
         };
         AgentStateCounts: {
             /** Format: int64 */
@@ -2339,9 +2341,11 @@ export interface components {
             next_cursor?: string | null;
             /**
              * Format: int64
-             * @description The number of jobs that match the filters on all pages.
+             * @description The number of jobs that match the filters on all pages, at most 10000.
              */
             total: number;
+            /** @description More jobs match than `total` counts. */
+            total_capped: boolean;
         };
         /**
          * @description The typed result of a finished job (FR-AG-09, AC-RP-01).
@@ -3558,15 +3562,17 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description `active` or `revoked`. */
-                status: string | null;
+                status: ("active" | "revoked") | null;
                 cursor: string | null;
                 limit: number | null;
-                /** @description The first row of a numbered page. Do not combine with `cursor`. */
+                /** @description The first row of a numbered page, at most 10000. Do not combine with `cursor`. */
                 offset: number | null;
-                /** @description A part of the host name or of a label, in any case. */
+                /** @description A part of the host name or of a label, in any case; at most 200 characters. */
                 q: string | null;
-                /** @description Comma-separated: `online`, `offline`, `waiting`, `revoked`. */
+                /**
+                 * @description Comma-separated: `online`, `offline`, `waiting`, `revoked`. Each list holds at most 50
+                 *     values.
+                 */
                 state: string | null;
                 /** @description Comma-separated operating systems. */
                 os: string | null;
@@ -5093,9 +5099,9 @@ export interface operations {
             path: {
                 cursor: string | null;
                 limit: number | null;
-                /** @description The first row of a numbered page. Do not combine with `cursor`. */
+                /** @description The first row of a numbered page, at most 10000. Do not combine with `cursor`. */
                 offset: number | null;
-                /** @description Comma-separated identifiers. */
+                /** @description Comma-separated identifiers. Each list holds at most 50 values. */
                 plan_id: string | null;
                 /** @description Comma-separated identifiers. */
                 repository_id: string | null;
@@ -5106,7 +5112,7 @@ export interface operations {
                 status: components["schemas"]["JobStatus"] | null;
                 /** @description In RFC 3339: the first creation time that the list holds. */
                 from: string | null;
-                /** @description In RFC 3339: the last creation time that the list holds. */
+                /** @description In RFC 3339: the last creation time that the list holds. Not before `from`. */
                 to: string | null;
                 /** @description Default: `created_at`. A cursor takes only the default order. */
                 sort: ("created_at" | "started_at" | "status" | "plan" | "host") | null;

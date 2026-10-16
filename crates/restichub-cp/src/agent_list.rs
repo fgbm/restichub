@@ -1,10 +1,11 @@
 //! The host list endpoint: filters, sort and pages on the server (FR-UI-01, ADR-0009).
 //!
 //! A client that reads the whole list follows `next_cursor` in the default order. The Hosts screen
-//! reads numbered pages with `offset` and asks for the state counts and the filter values once.
+//! reads numbered pages with `offset` and asks for the state counts and the filter values only
+//! when its filters change.
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use restichub_db::AgentStatus;
 use restichub_db::agent_search::{
     self as search, AgentFilter, AgentQuery, AgentSort, AgentWindow, HostState,
@@ -16,7 +17,9 @@ use utoipa::{IntoParams, ToSchema};
 use crate::agents::{AgentView, decode_cursor, encode_cursor};
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
-use crate::list_query::{FacetValue, SortOrder, check_window, parse_list, split_list};
+use crate::list_query::{
+    ApiQuery, FacetValue, SortOrder, check_window, parse_list, parse_search, split_list,
+};
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -54,15 +57,15 @@ pub enum ServerScriptsFilter {
 #[derive(Debug, Default, Deserialize, IntoParams)]
 #[serde(deny_unknown_fields)]
 pub struct AgentListQuery {
-    /// `active` or `revoked`.
-    pub status: Option<String>,
+    #[param(inline)]
+    pub status: Option<AgentStatus>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
-    /// The first row of a numbered page. Do not combine with `cursor`.
+    /// The first row of a numbered page, at most 10000. Do not combine with `cursor`.
     pub offset: Option<i64>,
-    /// A part of the host name or of a label, in any case.
+    /// A part of the host name or of a label, in any case; at most 200 characters.
     pub q: Option<String>,
-    /// Comma-separated: `online`, `offline`, `waiting`, `revoked`.
+    /// Comma-separated, at most 50 values in each list: `online`, `offline`, `waiting`, `revoked`.
     pub state: Option<String>,
     /// Comma-separated operating systems.
     pub os: Option<String>,
@@ -105,8 +108,10 @@ pub struct AgentListResponse {
     pub items: Vec<AgentView>,
     /// Null when the list holds no later agent, and for a numbered page or another order.
     pub next_cursor: Option<String>,
-    /// The number of agents that match the filters on all pages.
+    /// The number of agents that match the filters on all pages, at most 10000.
     pub total: i64,
+    /// More agents match than `total` counts.
+    pub total_capped: bool,
     /// Present when the request asks for it with `facets=true`.
     pub facets: Option<AgentListFacets>,
 }
@@ -126,23 +131,16 @@ pub struct AgentListResponse {
 pub async fn list_agents(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<AgentListQuery>,
+    ApiQuery(query): ApiQuery<AgentListQuery>,
 ) -> Result<Json<AgentListResponse>, ApiError> {
     context.authorize(Operation::AgentsRead)?;
     let filter = AgentFilter {
-        status: query
-            .status
-            .as_deref()
-            .map(|value| {
-                AgentStatus::parse(value)
-                    .ok_or_else(|| ApiError::invalid_field("status", Reason::Unknown))
-            })
-            .transpose()?,
-        search: query.q.clone(),
+        status: query.status,
+        search: parse_search(query.q.as_deref())?,
         states: parse_list("state", query.state.as_deref(), HostState::parse)?,
-        os: split_list(query.os.as_deref()),
-        agent_versions: split_list(query.agent_version.as_deref()),
-        labels: split_list(query.label.as_deref()),
+        os: split_list("os", query.os.as_deref())?,
+        agent_versions: split_list("agent_version", query.agent_version.as_deref())?,
+        labels: split_list("label", query.label.as_deref())?,
         server_scripts: query
             .server_scripts
             .map(|value| value == ServerScriptsFilter::Enabled),
@@ -197,6 +195,7 @@ pub async fn list_agents(
             .collect(),
         next_cursor,
         total: result.total,
+        total_capped: result.total_capped,
         facets: facets.map(|facets| {
             let count = |wanted: HostState| {
                 facets

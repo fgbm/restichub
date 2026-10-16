@@ -6,7 +6,7 @@
 //! the job (ADR-0010). A job of another tenant gives HTTP 404 (AC-TN-01).
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::job_search::{self, JobCursor, JobFilter, JobQuery, JobSort, JobWindow};
@@ -28,7 +28,9 @@ use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::jobs::{JobView, ensure_agent_active, parse_job_id, resolve_agent};
 use crate::json::ApiJson;
-use crate::list_query::{SortOrder, check_window, parse_list, parse_time, split_list};
+use crate::list_query::{
+    ApiQuery, SortOrder, check_period, check_window, parse_list, parse_time, split_list,
+};
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -69,9 +71,9 @@ impl From<JobSortKey> for JobSort {
 pub struct JobListQuery {
     pub cursor: Option<String>,
     pub limit: Option<i64>,
-    /// The first row of a numbered page. Do not combine with `cursor`.
+    /// The first row of a numbered page, at most 10000. Do not combine with `cursor`.
     pub offset: Option<i64>,
-    /// Comma-separated identifiers.
+    /// Comma-separated identifiers. Each list holds at most 50 values.
     pub plan_id: Option<String>,
     /// Comma-separated identifiers.
     pub repository_id: Option<String>,
@@ -82,7 +84,7 @@ pub struct JobListQuery {
     pub status: Option<JobStatus>,
     /// In RFC 3339: the first creation time that the list holds.
     pub from: Option<String>,
-    /// In RFC 3339: the last creation time that the list holds.
+    /// In RFC 3339: the last creation time that the list holds. Not before `from`.
     pub to: Option<String>,
     /// Default: `created_at`. A cursor takes only the default order.
     #[param(inline)]
@@ -97,8 +99,10 @@ pub struct JobListResponse {
     pub items: Vec<JobView>,
     /// Null when the list holds no later job, and for a numbered page or another order.
     pub next_cursor: Option<String>,
-    /// The number of jobs that match the filters on all pages.
+    /// The number of jobs that match the filters on all pages, at most 10000.
     pub total: i64,
+    /// More jobs match than `total` counts.
+    pub total_capped: bool,
 }
 
 /// The request body of the `unlock_all` action (FR-SC-06).
@@ -129,7 +133,7 @@ pub struct UnlockAllRequest {
 pub async fn list_jobs(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<JobListQuery>,
+    ApiQuery(query): ApiQuery<JobListQuery>,
 ) -> Result<Json<JobListResponse>, ApiError> {
     context.authorize(Operation::JobsRead)?;
     let filter = JobFilter {
@@ -145,6 +149,7 @@ pub async fn list_jobs(
         created_from: parse_time("from", query.from.as_deref())?,
         created_to: parse_time("to", query.to.as_deref())?,
     };
+    check_period(filter.created_from, filter.created_to)?;
     let sort = query.sort.map_or(JobSort::Created, JobSort::from);
     let order = query.order.unwrap_or_default();
     let default_order = sort == JobSort::Created && order.descending();
@@ -180,6 +185,7 @@ pub async fn list_jobs(
         items,
         next_cursor,
         total: result.total,
+        total_capped: result.total_capped,
     }))
 }
 
@@ -472,7 +478,7 @@ fn parse_ids<T>(
     field: &'static str,
     wrap: fn(Uuid) -> T,
 ) -> Result<Vec<T>, ApiError> {
-    split_list(value)
+    split_list(field, value)?
         .iter()
         .map(|item| {
             Uuid::parse_str(item).map(wrap).map_err(|error| {

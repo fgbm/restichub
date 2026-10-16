@@ -36,6 +36,15 @@ async fn get(app: &axum::Router, cookie: &str, uri: &str) -> Value {
     body
 }
 
+fn facet_count(page: &Value, facet: &str, value: &str) -> Option<i64> {
+    page["facets"][facet]
+        .as_array()
+        .expect("the facet values")
+        .iter()
+        .find(|item| item["value"] == value)
+        .and_then(|item| item["count"].as_i64())
+}
+
 fn names(page: &Value, field: &str) -> Vec<String> {
     page.get("items")
         .and_then(Value::as_array)
@@ -129,6 +138,11 @@ async fn fr_ui_01_the_host_list_filters_by_state_system_version_label_scripts_an
     assert_eq!(names(&page, "hostname"), ["web-01"]);
     let page = get(&app, &viewer, "/api/v1/agents?q=%25").await;
     assert_eq!(page["total"], 0);
+    seed_agent(db.database(), tenant, "web_01").await;
+    let page = get(&app, &viewer, "/api/v1/agents?q=web_").await;
+    assert_eq!(names(&page, "hostname"), ["web_01"]);
+    let page = get(&app, &viewer, "/api/v1/agents?q=b%5F0").await;
+    assert_eq!(names(&page, "hostname"), ["web_01"]);
 
     db.cleanup().await;
 }
@@ -139,7 +153,7 @@ async fn fr_ui_01_the_host_list_counts_the_states_and_offers_the_filter_values()
         return;
     };
     let tenant = create_tenant(db.database(), "host-facets").await;
-    seed_hosts(&db, tenant).await;
+    let [_, _, windows, _] = seed_hosts(&db, tenant).await;
     let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
     let app = app(db.database());
 
@@ -155,11 +169,21 @@ async fn fr_ui_01_the_host_list_counts_the_states_and_offers_the_filter_values()
         (states["waiting"].as_i64(), states["revoked"].as_i64()),
         (Some(1), Some(1))
     );
+    // The other values count only the hosts that the state filter can show, so the revoked Linux
+    // host counts only when the filter can show it.
     let os = page["facets"]["os"].as_array().expect("the systems");
     assert!(
         os.iter()
-            .any(|item| item["value"] == "linux" && item["count"] == 3)
+            .any(|item| item["value"] == "linux" && item["count"] == 2)
     );
+    for (uri, linux) in [
+        ("/api/v1/agents?state=online,revoked&facets=true", 3),
+        ("/api/v1/agents?facets=true", 3),
+        ("/api/v1/agents?state=online,offline,waiting&facets=true", 2),
+    ] {
+        let page = get(&app, &viewer, uri).await;
+        assert_eq!(facet_count(&page, "os", "linux"), Some(linux), "{uri}");
+    }
     let labels = page["facets"]["labels"].as_array().expect("the labels");
     assert!(
         labels
@@ -171,6 +195,30 @@ async fn fr_ui_01_the_host_list_counts_the_states_and_offers_the_filter_values()
     let page = get(&app, &viewer, "/api/v1/agents?os=windows&facets=true").await;
     assert_eq!(page["facets"]["states"]["waiting"], 1);
     assert_eq!(page["facets"]["states"]["online"], 0);
+
+    // The versions sort by their numbers, newest first, also in the list.
+    update(
+        &db,
+        tenant,
+        "UPDATE agents SET agent_version = '0.10.0' WHERE id = $1",
+        windows.as_uuid(),
+    )
+    .await;
+    let page = get(&app, &viewer, "/api/v1/agents?facets=true").await;
+    let versions: Vec<&str> = page["facets"]["agent_versions"]
+        .as_array()
+        .expect("the versions")
+        .iter()
+        .filter_map(|item| item["value"].as_str())
+        .collect();
+    assert_eq!(versions, ["0.10.0", "0.4.2", "0.4.1", "0.1.0"]);
+    let page = get(
+        &app,
+        &viewer,
+        "/api/v1/agents?state=online,offline,waiting&sort=agent_version&order=desc",
+    )
+    .await;
+    assert_eq!(names(&page, "hostname"), ["win-01", "web-01", "db-01"]);
 
     // Without the parameter the response holds no facets.
     let page = get(&app, &viewer, "/api/v1/agents").await;
@@ -252,6 +300,13 @@ async fn ac_tn_01_the_filtered_lists_and_their_counts_hold_only_the_rows_of_the_
     let other = create_tenant_with_key(db.database(), "list-other").await;
     seed_hosts(&db, tenant).await;
     let [stranger, ..] = seed_hosts(&db, other).await;
+    update(
+        &db,
+        other,
+        "UPDATE agents SET labels = ARRAY['foreign'], agent_version = '9.9.9' WHERE id = $1",
+        stranger.as_uuid(),
+    )
+    .await;
     let secret = seed_secret(db.database(), other, "pw").await;
     let repository = seed_repository(db.database(), other, "other-repo", secret).await;
     seed_job(db.database(), other, stranger, repository).await;
@@ -268,6 +323,9 @@ async fn ac_tn_01_the_filtered_lists_and_their_counts_hold_only_the_rows_of_the_
         .find(|item| item["value"] == "linux")
         .map(|item| item["count"].clone());
     assert_eq!(linux, Some(Value::from(3)));
+    assert_eq!(facet_count(&page, "labels", "foreign"), None);
+    assert_eq!(facet_count(&page, "agent_versions", "9.9.9"), None);
+    assert_eq!(facet_count(&page, "labels", "web"), Some(1));
 
     // A filter on a host of another tenant finds nothing.
     let page = get(&app, &viewer, &format!("/api/v1/jobs?agent_id={stranger}")).await;
@@ -320,6 +378,13 @@ fn ids(page: &Value) -> Vec<String> {
     names(page, "id")
 }
 
+fn page_created_at(page: &Value) -> String {
+    page["items"][0]["created_at"]
+        .as_str()
+        .expect("the creation time")
+        .to_owned()
+}
+
 #[tokio::test]
 async fn fr_sc_09_the_job_list_filters_by_host_kind_status_and_period_and_pages_by_number() {
     let Some(db) = common::test_db().await else {
@@ -365,6 +430,28 @@ async fn fr_sc_09_the_job_list_filters_by_host_kind_status_and_period_and_pages_
     assert!(page["next_cursor"].is_null());
     let page = get(&app, &viewer, "/api/v1/jobs?sort=host&order=asc&limit=1").await;
     assert_eq!(ids(&page), [check.to_string()]);
+
+    let check_created = page_created_at(&get(&app, &viewer, "/api/v1/jobs?status=failed").await);
+    let page = get(
+        &app,
+        &viewer,
+        &format!("/api/v1/jobs?to={}", check_created.replace('+', "%2B")),
+    )
+    .await;
+    assert_eq!(ids(&page), [check, old].map(|id| id.to_string()));
+
+    // A browse job of the Restore screen never shows, also when the filter asks for it.
+    update(
+        &db,
+        tenant,
+        "UPDATE jobs SET kind = 'snapshots' WHERE id = $1",
+        old.as_uuid(),
+    )
+    .await;
+    let page = get(&app, &viewer, "/api/v1/jobs?kind=snapshots").await;
+    assert_eq!(page["total"], 0);
+    let page = get(&app, &viewer, "/api/v1/jobs").await;
+    assert_eq!(page["total"], 2);
 
     for uri in [
         "/api/v1/jobs?kind=nap",

@@ -7,6 +7,7 @@
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '#lib/api/index.ts';
 import Jobs from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -270,5 +271,60 @@ describe('the Jobs screen', () => {
 		expect(
 			screen.queryByRole('button', { name: 'More actions for the job nightly-web' })
 		).not.toBeInTheDocument();
+	});
+
+	it('fr_ui_01 keeps the newest page when an older reload answers late', async () => {
+		vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+		try {
+			const user = userEvent.setup();
+			let answerReload: (rows: unknown[]) => void = () => {};
+			const page = (rows: unknown[]) => ({
+				items: rows,
+				next_cursor: null,
+				total: 30,
+				total_capped: false
+			});
+			mocks.listJobs
+				.mockResolvedValueOnce(page([job({ id: 'j_1', plan_name: 'first-page' })]))
+				.mockReturnValueOnce(
+					new Promise((resolve) => {
+						answerReload = (rows) => resolve(page(rows));
+					})
+				)
+				.mockResolvedValue(page([job({ id: 'j_2', plan_name: 'second-page' })]));
+			render(Jobs);
+
+			await screen.findByText('first-page');
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(mocks.listJobs).toHaveBeenCalledTimes(2);
+			await user.click(screen.getByRole('button', { name: 'Next' }));
+			await screen.findByText('second-page');
+			answerReload([job({ id: 'j_3', plan_name: 'stale-page' })]);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(screen.getByText('second-page')).toBeInTheDocument();
+			expect(screen.queryByText('stale-page')).not.toBeInTheDocument();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('fr_ui_01 asks to narrow the filters for a page past the counted rows', async () => {
+		route.url = new URL('http://localhost/jobs?page=500');
+		mocks.listJobs.mockRejectedValue(
+			new ApiError({
+				status: 400,
+				code: 'invalid_argument',
+				title: 'Bad Request',
+				field: 'offset',
+				reason: 'out_of_range'
+			})
+		);
+		render(Jobs);
+
+		expect(
+			await screen.findByText(
+				'This page is too far into the list. Narrow the filters to see older records.'
+			)
+		).toBeInTheDocument();
 	});
 });

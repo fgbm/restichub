@@ -13,6 +13,9 @@ use crate::jobs::job_columns;
 use crate::queue::{DetailRow, JobDetail, MAX_PAGE_LIMIT};
 use crate::tx::TenantTx;
 
+/// A list counts at most this many rows, so a long history does not make each page read all of it.
+pub const COUNT_LIMIT: i64 = 10_000;
+
 /// The rows that the list holds. An empty vector does not narrow the list.
 #[derive(Debug, Clone, Default)]
 pub struct JobFilter {
@@ -65,8 +68,10 @@ pub struct JobQuery<'a> {
 pub struct JobSearchResult {
     pub jobs: Vec<JobDetail>,
     pub has_more: bool,
-    /// The number of jobs that match the filter on all pages.
+    /// The number of jobs that match the filter on all pages, at most [`COUNT_LIMIT`].
     pub total: i64,
+    /// More jobs match than [`COUNT_LIMIT`].
+    pub total_capped: bool,
 }
 
 // The binds are the same in each query: $1 plans, $2 repositories, $3 agents, $4 kinds, $5 status,
@@ -171,20 +176,26 @@ pub async fn search(
         .take(limit as usize)
         .map(JobDetail::from)
         .collect();
-    let total: i64 = sqlx::query_scalar(concat!("SELECT count(*) FROM jobs j", filter_sql!()))
-        .bind(&bound.plans)
-        .bind(&bound.repositories)
-        .bind(&bound.agents)
-        .bind(&bound.kinds)
-        .bind(bound.status)
-        .bind(filter.created_from)
-        .bind(filter.created_to)
-        .fetch_one(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+    let counted: i64 = sqlx::query_scalar(concat!(
+        "SELECT count(*) FROM (SELECT 1 FROM jobs j",
+        filter_sql!(),
+        " LIMIT $8) s"
+    ))
+    .bind(&bound.plans)
+    .bind(&bound.repositories)
+    .bind(&bound.agents)
+    .bind(&bound.kinds)
+    .bind(bound.status)
+    .bind(filter.created_from)
+    .bind(filter.created_to)
+    .bind(COUNT_LIMIT + 1)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     Ok(JobSearchResult {
         jobs,
         has_more,
-        total,
+        total: counted.min(COUNT_LIMIT),
+        total_capped: counted > COUNT_LIMIT,
     })
 }

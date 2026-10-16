@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 use crate::DbError;
 use crate::agents::{Agent, AgentCursor, AgentRow, MAX_PAGE_LIMIT, agent_columns, duplicate_join};
 use crate::enums::AgentStatus;
+use crate::job_search::COUNT_LIMIT;
 use crate::tx::TenantTx;
 
 /// Derived from the stored times with the online window of the dashboard.
@@ -33,7 +34,6 @@ impl HostState {
         }
     }
 
-    /// `None` on an unknown string.
     pub fn parse(value: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|state| state.as_str() == value)
     }
@@ -89,8 +89,10 @@ pub struct AgentQuery<'a> {
 pub struct AgentSearchResult {
     pub agents: Vec<Agent>,
     pub has_more: bool,
-    /// The number of hosts that match the filter on all pages.
+    /// The number of hosts that match the filter on all pages, at most [`COUNT_LIMIT`].
     pub total: i64,
+    /// More hosts match than [`COUNT_LIMIT`].
+    pub total_capped: bool,
 }
 
 /// The values that the filter bar offers, each with its number of hosts.
@@ -98,6 +100,8 @@ pub struct AgentSearchResult {
 pub struct AgentFacets {
     /// Counted under the filter without its states, so each state shows what it adds.
     pub states: Vec<(HostState, i64)>,
+    /// The other values count the hosts that the state filter can show, so a revoked host counts
+    /// only when the filter holds no state or holds `revoked`.
     pub os: Vec<(String, i64)>,
     pub agent_versions: Vec<(String, i64)>,
     pub labels: Vec<(String, i64)>,
@@ -131,6 +135,13 @@ macro_rules! filter_sql {
     };
 }
 
+// $1 status, $2 whether a revoked host counts.
+macro_rules! visible_sql {
+    () => {
+        " WHERE ($1::text IS NULL OR a.status = $1) AND ($2::bool OR a.status <> 'revoked')"
+    };
+}
+
 /// The pattern of a search text: the text matches anywhere, and `%`, `_` and `\` match themselves.
 fn search_pattern(text: &str) -> String {
     let mut pattern = String::with_capacity(text.len() + 2);
@@ -145,13 +156,24 @@ fn search_pattern(text: &str) -> String {
     pattern
 }
 
+/// Orders the versions by their numbers, so `0.10.0` follows `0.9.1`. A version that does not
+/// start with three numbers has no key and sorts last, by its text.
+const VERSION_KEY: &str =
+    r"(regexp_match(a.agent_version, '^(\d{1,9})\.(\d{1,9})\.(\d{1,9})'))::int[]";
+// `0.4.1-rc.1` sorts before `0.4.1`, as in semantic versioning.
+const VERSION_RELEASE: &str = r"(a.agent_version ~ '^\d+\.\d+\.\d+$')";
+
+fn version_order(dir: &str) -> String {
+    format!("{VERSION_KEY} {dir} NULLS LAST, {VERSION_RELEASE} {dir}, a.agent_version {dir}")
+}
+
 fn order_sql(sort: AgentSort, descending: bool) -> String {
     let dir = if descending { "DESC" } else { "ASC" };
     match sort {
         AgentSort::Created => format!("a.created_at {dir}, a.id {dir}"),
         AgentSort::Hostname => format!("lower(a.hostname) {dir}, a.id {dir}"),
         AgentSort::LastSeen => format!("a.last_seen_at {dir} NULLS LAST, a.id {dir}"),
-        AgentSort::AgentVersion => format!("a.agent_version {dir}, lower(a.hostname), a.id"),
+        AgentSort::AgentVersion => format!("{}, lower(a.hostname), a.id", version_order(dir)),
         AgentSort::Os => format!("a.os {dir}, lower(a.hostname), a.id"),
     }
 }
@@ -221,27 +243,33 @@ pub async fn search(
         .collect();
     let has_more = agents.len() as i64 > limit;
     agents.truncate(limit as usize);
-    let total: i64 = sqlx::query_scalar(concat!("SELECT count(*) FROM agents a", filter_sql!()))
-        .bind(bound.status)
-        .bind(bound.search.as_deref())
-        .bind(&bound.states)
-        .bind(&filter.os)
-        .bind(&filter.agent_versions)
-        .bind(&filter.labels)
-        .bind(filter.server_scripts)
-        .bind(query.online_since)
-        .fetch_one(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+    let counted: i64 = sqlx::query_scalar(concat!(
+        "SELECT count(*) FROM (SELECT 1 FROM agents a",
+        filter_sql!(),
+        " LIMIT $9) s"
+    ))
+    .bind(bound.status)
+    .bind(bound.search.as_deref())
+    .bind(&bound.states)
+    .bind(&filter.os)
+    .bind(&filter.agent_versions)
+    .bind(&filter.labels)
+    .bind(filter.server_scripts)
+    .bind(query.online_since)
+    .bind(COUNT_LIMIT + 1)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     Ok(AgentSearchResult {
         agents,
         has_more,
-        total,
+        total: counted.min(COUNT_LIMIT),
+        total_capped: counted > COUNT_LIMIT,
     })
 }
 
 /// Counts the hosts of each state under the filter without its states, and lists the systems,
-/// the agent versions and the labels of the tenant.
+/// the agent versions and the labels of the hosts that the state filter can show.
 pub async fn facets(
     tx: &mut TenantTx<'_>,
     filter: &AgentFilter,
@@ -277,21 +305,36 @@ pub async fn facets(
             (state, count)
         })
         .collect();
-    let os =
-        sqlx::query_as("SELECT os, count(*) FROM agents GROUP BY os ORDER BY count(*) DESC, os")
-            .fetch_all(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
-    let agent_versions = sqlx::query_as(
-        "SELECT agent_version, count(*) FROM agents GROUP BY agent_version \
-         ORDER BY agent_version DESC",
-    )
+    let include_revoked = filter.states.is_empty() || filter.states.contains(&HostState::Revoked);
+    let os = sqlx::query_as(concat!(
+        "SELECT a.os, count(*) FROM agents a",
+        visible_sql!(),
+        " GROUP BY a.os ORDER BY count(*) DESC, a.os"
+    ))
+    .bind(bound.status)
+    .bind(include_revoked)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    let labels = sqlx::query_as(
-        "SELECT l, count(*) FROM agents, unnest(labels) l GROUP BY l ORDER BY count(*) DESC, l",
-    )
+    let sql = format!(
+        "SELECT a.agent_version, count(*) FROM agents a {visible} GROUP BY a.agent_version \
+         ORDER BY {order}",
+        visible = visible_sql!(),
+        order = version_order("DESC"),
+    );
+    let agent_versions = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(bound.status)
+        .bind(include_revoked)
+        .fetch_all(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    let labels = sqlx::query_as(concat!(
+        "SELECT l, count(*) FROM agents a CROSS JOIN unnest(a.labels) l",
+        visible_sql!(),
+        " GROUP BY l ORDER BY count(*) DESC, l"
+    ))
+    .bind(bound.status)
+    .bind(include_revoked)
     .fetch_all(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

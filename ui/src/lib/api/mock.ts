@@ -1071,9 +1071,12 @@ export class MockApiService {
 		const sorted = [...matching].sort((a, b) => factor * value(a).localeCompare(value(b)));
 		const offset = query.offset ?? 0;
 		const limit = query.limit ?? 50;
+		const visible = this.agents.filter(
+			(agent) => states.length === 0 || states.includes('revoked') || agent.status !== 'revoked'
+		);
 		const count = (pick: (agent: Agent) => string[]) => {
 			const counts = new Map<string, number>();
-			for (const agent of this.agents) {
+			for (const agent of visible) {
 				for (const item of pick(agent)) counts.set(item, (counts.get(item) ?? 0) + 1);
 			}
 			return [...counts].map(([item, total]) => ({ value: item, count: total }));
@@ -1083,6 +1086,7 @@ export class MockApiService {
 			items: sorted.slice(offset, offset + limit).map((agent) => ({ ...agent })),
 			next_cursor: null,
 			total: matching.length,
+			total_capped: false,
 			facets: query.facets
 				? {
 						states: {
@@ -1670,7 +1674,8 @@ export class MockApiService {
 			items: page.map((job) => ({ ...job })),
 			next_cursor:
 				query?.offset === undefined && start + limit < rows.length ? String(start + limit) : null,
-			total: rows.length
+			total: rows.length,
+			total_capped: false
 		};
 	}
 
