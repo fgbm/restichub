@@ -1780,6 +1780,7 @@ export class MockApiService {
 			total: rows.length,
 			total_capped: false,
 			counts: {
+				all: { count: others.length, capped: false },
 				running: count('running'),
 				failed: count('failed'),
 				succeeded: count('succeeded'),

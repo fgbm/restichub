@@ -192,7 +192,7 @@ export interface JobLogQuery {
 export type JobListResponse = components['schemas']['JobListResponse'];
 
 /** A state tab of the job list: the server counts each one (FR-UI-01). */
-export type JobGroup = keyof components['schemas']['JobGroupCounts'];
+export type JobGroup = Exclude<keyof components['schemas']['JobGroupCounts'], 'all'>;
 
 /** The filters, the order and the page of the job list (FR-SC-09). A list holds comma values. */
 export interface JobQuery {

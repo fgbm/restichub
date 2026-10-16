@@ -2356,6 +2356,8 @@ export interface components {
             trigger: components["schemas"]["JobTrigger"];
         };
         JobGroupCounts: {
+            /** @description Every job under the other filters, in each state. */
+            all: components["schemas"]["TabCount"];
             failed: components["schemas"]["TabCount"];
             running: components["schemas"]["TabCount"];
             succeeded: components["schemas"]["TabCount"];

@@ -10,7 +10,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::job_search::{
-    self, CappedCount, JobCursor, JobFilter, JobGroup, JobQuery, JobSort, JobWindow,
+    self, CappedCount, GroupCounts, JobCursor, JobFilter, JobGroup, JobQuery, JobSort, JobWindow,
 };
 use restichub_db::jobs::{self as job_repo, NewJob};
 use restichub_db::plans as plans_repo;
@@ -143,6 +143,8 @@ impl From<JobGroupKey> for JobGroup {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct JobGroupCounts {
+    /// Every job under the other filters, in each state.
+    pub all: TabCount,
     pub running: TabCount,
     pub failed: TabCount,
     pub succeeded: TabCount,
@@ -150,15 +152,17 @@ pub struct JobGroupCounts {
 }
 
 impl JobGroupCounts {
-    fn of(counts: &[(JobGroup, CappedCount)]) -> Self {
+    fn of(counts: &GroupCounts) -> Self {
         let get = |wanted: JobGroup| {
             counts
+                .groups
                 .iter()
                 .find(|(group, _)| *group == wanted)
                 .map_or(CappedCount::of(0), |(_, count)| *count)
                 .into()
         };
         Self {
+            all: counts.all.into(),
             running: get(JobGroup::Running),
             failed: get(JobGroup::Failed),
             succeeded: get(JobGroup::Succeeded),

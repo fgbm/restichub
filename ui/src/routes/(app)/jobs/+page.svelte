@@ -90,7 +90,12 @@
 		key: 'group',
 		default: 'all',
 		options: [
-			{ value: 'all', label: t('jobs.tab.all') },
+			{
+				value: 'all',
+				label: t('jobs.tab.all'),
+				count: counts?.all.count,
+				capped: counts?.all.capped
+			},
 			...GROUPS.map((group) => ({
 				value: group,
 				label: t(GROUP_LABELS[group]),

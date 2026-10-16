@@ -119,7 +119,7 @@ pub struct JobSearchResult {
 }
 
 /// A number of rows that a count read only up to [`COUNT_LIMIT`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CappedCount {
     pub count: i64,
     pub capped: bool,
@@ -261,23 +261,31 @@ pub async fn search(
     })
 }
 
+/// The jobs of each state tab under the filter, and of the tab of all jobs.
+#[derive(Debug, Clone, Default)]
+pub struct GroupCounts {
+    pub all: CappedCount,
+    pub groups: Vec<(JobGroup, CappedCount)>,
+}
+
 /// Counts the jobs of each group under the filter. The status and the group of the filter do not
 /// apply: a tab shows what it would hold.
 pub async fn group_counts(
     tx: &mut TenantTx<'_>,
     filter: &JobFilter,
-) -> Result<Vec<(JobGroup, CappedCount)>, DbError> {
+) -> Result<GroupCounts, DbError> {
     let unfiltered = JobFilter {
         status: None,
         group: None,
         ..filter.clone()
     };
     let bound = binds(&unfiltered);
-    let mut counts = Vec::with_capacity(JobGroup::ALL.len());
+    let all = count(tx, &bound, &unfiltered, None).await?;
+    let mut groups = Vec::with_capacity(JobGroup::ALL.len());
     for group in JobGroup::ALL {
-        counts.push((group, count(tx, &bound, &unfiltered, Some(group)).await?));
+        groups.push((group, count(tx, &bound, &unfiltered, Some(group)).await?));
     }
-    Ok(counts)
+    Ok(GroupCounts { all, groups })
 }
 
 async fn count(

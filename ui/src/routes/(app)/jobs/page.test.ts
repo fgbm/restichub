@@ -278,6 +278,7 @@ describe('the Jobs screen', () => {
 			total: 1,
 			total_capped: false,
 			counts: {
+				all: tab(124),
 				running: tab(2),
 				failed: tab(3),
 				succeeded: tab(10000, true),
@@ -290,6 +291,7 @@ describe('the Jobs screen', () => {
 		expect(failed).toHaveTextContent('3');
 		expect(failed.querySelector('.count')).toHaveClass('count--danger');
 		expect(screen.getByRole('button', { name: /^Running/ })).toHaveTextContent('2');
+		expect(screen.getByRole('button', { name: /^All/ })).toHaveTextContent('124');
 		expect(screen.getByRole('button', { name: /^Succeeded/ })).toHaveTextContent('10,000+');
 		const warnings = screen.getByRole('button', { name: /^With warnings/ });
 		expect(warnings).toHaveTextContent('1');

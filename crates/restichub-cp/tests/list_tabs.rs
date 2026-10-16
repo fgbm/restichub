@@ -170,6 +170,8 @@ async fn fr_sc_09_the_job_list_counts_the_state_tabs_searches_the_names_and_sort
     let page = get(&app, &viewer, "/api/v1/jobs?group=failed").await;
     assert_eq!(ids(&page), [dead, failed].map(|id| id.to_string()));
     assert_eq!(tabs(&page, &JOB_TABS), [1, 2, 1, 1]);
+    assert_eq!(page["total"], 2);
+    assert_eq!(tabs(&page, &["all"]), [7]);
     let page = get(&app, &viewer, "/api/v1/jobs?group=succeeded_with_warnings").await;
     assert_eq!(ids(&page), [warnings.to_string()]);
     let page = get(&app, &viewer, "/api/v1/jobs?group=succeeded").await;
