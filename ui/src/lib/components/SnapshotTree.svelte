@@ -5,7 +5,7 @@
 	import { Button, Icon } from '#lib/components/ui/index.ts';
 	import { formatBytes } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { isCovered } from '#lib/restore.ts';
+	import { iconOfNode, isCovered } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
 
 	/** The page size that the screen asks for. The agent returns at most this many entries. */
@@ -157,9 +157,13 @@
 							aria-label={t('restore.select', { name: node.name })}
 							onchange={(event) => choose(node.path, event.currentTarget.checked)}
 						/>
-						<Icon name={node.kind === 'dir' ? 'folder' : 'file'} />
-						<span class="tree__name">{node.name}</span>
-						{#if node.kind !== 'dir'}
+						<span class="tree__icon tree__icon--{node.kind}">
+							<Icon name={iconOfNode(node, !!child?.expanded)} />
+						</span>
+						<span class="tree__name" title={node.name}>{node.name}</span>
+						{#if node.kind === 'symlink' && node.link_target}
+							<span class="tree__target" title={node.link_target}>→ {node.link_target}</span>
+						{:else if node.kind === 'file'}
 							<span class="tree__meta">{formatBytes(node.size)}</span>
 						{/if}
 					</div>
@@ -192,6 +196,8 @@
 
 <style>
 	.tree {
+		max-height: min(60vh, 34rem);
+		overflow: auto;
 		font-size: var(--rh-font-size-sm);
 	}
 
@@ -244,8 +250,28 @@
 		accent-color: var(--rh-color-accent);
 	}
 
+	.tree__icon {
+		display: inline-flex;
+		flex: none;
+		color: var(--rh-color-text-muted);
+	}
+
+	.tree__icon--dir {
+		color: var(--rh-color-link);
+	}
+
+	.tree__target {
+		flex: 0 1 40%;
+		min-width: 0;
+		overflow: hidden;
+		color: var(--rh-color-text-muted);
+		font-family: var(--rh-font-mono, monospace);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	.tree__name {
-		flex: 1;
+		flex: 1 1 auto;
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;

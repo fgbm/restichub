@@ -1,4 +1,5 @@
 <script lang="ts">
+	import RestoreParams from '#lib/components/RestoreParams.svelte';
 	import { onMount } from 'svelte';
 	import { coalesce } from '#lib/events.ts';
 	import { isStreamConnected, onEvent } from '#lib/stores/events.svelte.ts';
@@ -597,6 +598,9 @@
 		</div>
 
 		<aside class="layout__side">
+			{#if job.restore}
+				<RestoreParams restore={job.restore} hostname={job.agent_hostname} />
+			{/if}
 			<Panel title={t('jobDetail.about')}>
 				<dl class="about">
 					<dt>{t('jobDetail.id')}</dt>

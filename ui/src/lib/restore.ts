@@ -189,7 +189,7 @@ export function filtersToQuery(
 	return query;
 }
 
-export function filtersFromQuery(query: URLSearchParams): RestoreFilters {
+export function filtersFromQuery(query: { get(name: string): string | null }): RestoreFilters {
 	return {
 		host: query.get('host') ?? '',
 		tag: query.get('tag') ?? '',
