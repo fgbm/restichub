@@ -115,6 +115,54 @@ async fn fr_ui_01_the_alert_list_reads_numbered_pages_with_filters() {
 }
 
 #[tokio::test]
+async fn fr_ui_01_the_alert_search_finds_a_plan_and_a_repository_name() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant(db.database(), "alert-search").await;
+    seed_alerts(&db, tenant, "job_failed", "web-01", 2).await;
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query(
+        "INSERT INTO alert_state (id, tenant_id, kind, dedupe_key, status, plan_name, \
+                                  repository_name, opened_at) \
+         VALUES (gen_random_uuid(), $1, 'job_failed', 'plan', 'open', 'Nightly-Ledger', NULL, \
+                 now()), \
+                (gen_random_uuid(), $1, 'stale_lock', 'repo', 'open', NULL, \
+                 'cold-vault', now())",
+    )
+    .bind(tenant.as_uuid())
+    .execute(&mut *tx)
+    .await
+    .expect("cannot write the alerts");
+    tx.commit().await.expect("cannot commit the alerts");
+    let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
+    let app = app(db.database());
+
+    for (q, kind) in [("ledger", "job_failed"), ("COLD-v", "stale_lock")] {
+        let (status, _, page) = send(
+            &app,
+            request(
+                "GET",
+                &format!("/api/v1/alerts?status=all&q={q}"),
+                Some(&viewer),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        assert_eq!(page["total"], 1, "{q}: {page}");
+        assert_eq!(page["items"][0]["kind"], kind, "{q}: {page}");
+    }
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
 async fn fr_ui_01_an_alert_parameter_out_of_bounds_gives_a_stable_code() {
     let Some(db) = common::test_db().await else {
         return;
