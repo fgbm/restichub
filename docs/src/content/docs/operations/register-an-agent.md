@@ -20,7 +20,7 @@ restichub-agent register --url https://<control-plane> --token <token>
 - `--ca-file PATH` verifies the control plane with the CA in the file. Without this option the agent uses the system root certificates.
 - `--force` replaces an existing identity. Use it to register the host again.
 - `--no-service` enrolls the host and installs no service. Run `install-service` later.
-- `--trust-server-scripts` turns on the local trust mode before the service starts. The control plane can then run any command on this host, as root or LocalSystem. Without this option the mode is off. See [Scripts](/restichub/operations/scripts/).
+- `--trust-server-scripts` turns on the local trust mode before the token is used. The control plane can then run any command on this host, as root or LocalSystem. Without this option the mode is off. See [Scripts](/restichub/operations/scripts/).
 - `--restic-archive PATH`, `--restic-sums PATH` and `--restic-sums-sig PATH` give the restic release files of an offline host (see "The restic binary"). Give all three or none.
 
 Run the command as `root` on Linux, or in an elevated PowerShell on Windows ("Run as administrator"). You can run it from any folder. The agent checks the rights, creates its directories and proves that it can write there before it contacts the control plane. A failed check does not use the token.
@@ -161,7 +161,7 @@ All commands of the agent:
 | `restic update` | Download the latest restic and replace the installed one. |
 | `uninstall-service` | Stop and remove the service. |
 | `status` | Print the state of the agent. |
-| `trust-server-scripts --enable` or `--disable` | Turn the local trust mode for [server scripts](/restichub/operations/scripts/) on or off. Run it as `root` or Administrator. The command restarts the running service so that the control plane sees the new state. Use `--no-restart` to skip the restart. |
+| `trust-server-scripts --enable` or `--disable` | Turn the local trust mode for [server scripts](/restichub/operations/scripts/) on or off. Run it as `root` or Administrator. The new state applies to the next job. The command restarts an idle service, so that the control plane sees the new state. It does not restart a service with a job in progress. Use `--no-restart` to skip the restart. |
 | `run` | Run the agent in the foreground. The service uses this command. You do not start it by hand. |
 | `version`, `--version` or `-V` | Print the agent version and the protocol version, for example `restichub-agent 0.1.0+3b21922 (protocol 1.1)`. |
 | `help`, `--help` or `-h` | Print the usage. |

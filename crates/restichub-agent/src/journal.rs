@@ -198,6 +198,17 @@ impl FileJournal {
         }
     }
 
+    /// Tells whether a job that has not expired has no result yet. The entry of a job that a crash
+    /// stopped counts too, until it expires.
+    #[must_use]
+    pub fn has_unfinished_job(&self, now: Timestamp) -> bool {
+        let now = i128::from(now.seconds) + i128::from(now.nanos) / 1_000_000_000;
+        let retain = i128::from(CLOCK_SKEW.as_secs());
+        self.entries
+            .iter()
+            .any(|entry| entry.result.is_none() && i128::from(entry.expires_at) + retain > now)
+    }
+
     /// Removes the entry of `job_id` (ADR-0020).
     ///
     /// The caller rolls back an acceptance whose persistence failed, so the journal never claims a

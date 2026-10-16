@@ -35,12 +35,12 @@ When you turn the trust mode on, the control plane can run any command on this h
    ```
 
    On Windows, start an elevated PowerShell and run `restichub-agent.exe trust-server-scripts --enable`.
-3. Wait for the command to finish. It restarts the installed agent service and waits until the agent is connected again. The agent sends the state each time it connects. If no service is running, the new state applies when the service starts. To skip the restart, use `--no-restart`. The control plane then shows the new state after you restart the service.
+3. Wait for the command to finish. The new state applies to the next job. The agent reports the state to the control plane each time it connects. Thus, when the service is idle, the command restarts it and waits until the agent is connected again. When a job is in progress, the command does not restart the service, because a restart stops the job. It tells you to restart the service after the job: `systemctl restart restichub-agent` on Linux, `Restart-Service restichub-agent` on Windows. If no service is running, the control plane sees the new state when the service starts. To skip the restart, use `--no-restart`.
 4. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled**. A host that has not reported yet shows **Unknown**. The host list also shows the interpreters that the agent found.
 
 To turn the mode off, run the command with `--disable`. The command restarts the service in the same way. The agent reads the setting for each job, so the change applies to the next job.
 
-You can also turn the mode on when you register the host: add `--trust-server-scripts` to `register`. The command writes the setting before it starts the service, so the first connection already reports the mode. Without the option the mode stays off.
+You can also turn the mode on when you register the host: add `--trust-server-scripts` to `register`. The command writes the setting before it uses the token, so a setting that the agent cannot trust does not use the token. If the registration fails, the command puts the earlier setting back. The first connection already reports the mode. Without the option the mode stays off.
 
 The command writes a small file next to the configuration directory of the agent. The file holds one line, `server_scripts = enabled` or `server_scripts = disabled`.
 

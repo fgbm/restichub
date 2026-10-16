@@ -123,17 +123,7 @@ fn parse(text: &str) -> bool {
 ///
 /// Returns an error when the file cannot be written or the host does not trust it afterwards.
 pub fn set_mode(config_dir: &Path, enabled: bool) -> Result<()> {
-    set_mode_trusting(config_dir, enabled, Trust::Host)
-}
-
-/// Like [`set_mode`], with the account that the written file must belong to. A test passes
-/// [`Trust::CurrentUser`]; the commands always pass [`Trust::Host`].
-///
-/// # Errors
-///
-/// Returns an error when the file cannot be written or `trust` does not accept it afterwards.
-pub fn set_mode_trusting(config_dir: &Path, enabled: bool, trust: Trust) -> Result<()> {
-    set_mode_at(&mode_file_for(config_dir), enabled, trust)
+    set_mode_at(&mode_file_for(config_dir), enabled, Trust::Host)
 }
 
 pub(super) fn set_mode_at(path: &Path, enabled: bool, trust: Trust) -> Result<()> {

@@ -30,9 +30,7 @@ use zeroize::Zeroizing;
 use crate::exec::Invocation;
 use crate::trust::Trust;
 
-pub use setting::{
-    ScriptMode, mode_file, mode_file_for, removed_allow_list_file, set_mode, set_mode_trusting,
-};
+pub use setting::{ScriptMode, mode_file, mode_file_for, removed_allow_list_file, set_mode};
 
 /// The time limit of a script whose step names none.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3600);
