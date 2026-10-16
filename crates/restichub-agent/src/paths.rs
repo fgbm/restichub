@@ -138,25 +138,38 @@ pub(crate) fn agent_root() -> PathBuf {
 /// [`ensure_config_dir`]. Linux needs no repair: [`create_protected_dir`] sets the mode of an
 /// existing directory and has no owner check that an old build could trip. `log` gets one line for
 /// each change and each warning. Returns the identity entries that another account could change
-/// before the repair: they may hold replaced trust anchors.
+/// and that [`UntrustedIdentity::Keep`] left as found: they may hold replaced trust anchors.
 ///
 /// # Errors
 ///
 /// Returns an error when a directory holds an entry that the agent does not know, a link, a file
 /// with more than one name or an entry that another account owns, or when the access control
 /// cannot be set.
-pub fn repair_config_dir(dir: &Path, log: &mut dyn FnMut(&str)) -> Result<Vec<PathBuf>> {
+pub fn repair_config_dir(
+    dir: &Path,
+    untrusted: UntrustedIdentity,
+    log: &mut dyn FnMut(&str),
+) -> Result<Vec<PathBuf>> {
     #[cfg(windows)]
     {
-        crate::winrepair::repair_agent_tree(dir, &agent_root(), &mut |action| {
+        crate::winrepair::repair_agent_tree(dir, &agent_root(), untrusted, &mut |action| {
             log(&action.to_string());
         })
     }
     #[cfg(not(windows))]
     {
-        let _ = (dir, log);
+        let _ = (dir, untrusted, log);
         Ok(Vec::new())
     }
+}
+
+/// What the repair does with an identity entry that another account could change (T20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UntrustedIdentity {
+    /// Leaves the entry and its directory as found, so each later check refuses them again.
+    Keep,
+    /// Removes the entry, because a new registration replaces the identity.
+    Remove,
 }
 
 /// Makes the directory and every missing parent, and restricts them to the service account

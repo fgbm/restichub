@@ -53,14 +53,22 @@ fn is_elevated() -> Result<bool> {
 /// holds only entries of the agent (threat T20); see [`paths::repair_config_dir`].
 ///
 /// The check covers the configuration directory, the staging directory that the identity save uses
-/// and the cache directory. It leaves no probe file behind. Returns the identity entries that
-/// another account could change before the repair.
+/// and the cache directory. It leaves no probe file behind. `untrusted` says what happens to an
+/// identity that another account could change.
 ///
 /// # Errors
 ///
-/// Returns an error when a directory cannot be created, is not safe, or does not take a file.
-pub fn prepare_directories(config: &Path, cache: &Path) -> Result<Vec<PathBuf>> {
-    let changeable = paths::repair_config_dir(config, &mut |line| println!("{line}"))?;
+/// Returns [`ChangeableIdentity`] when such an identity stays as found, and an error when a
+/// directory cannot be created, is not safe, or does not take a file.
+pub fn prepare_directories(
+    config: &Path,
+    cache: &Path,
+    untrusted: paths::UntrustedIdentity,
+) -> Result<()> {
+    let changeable = paths::repair_config_dir(config, untrusted, &mut |line| println!("{line}"))?;
+    if !changeable.is_empty() {
+        return Err(ChangeableIdentity { paths: changeable }.into());
+    }
     paths::ensure_config_dir(config)
         .with_context(|| format!("cannot prepare the directory {}", config.display()))?;
     let staging = crate::identity::sibling(config, ".staging");
@@ -72,8 +80,40 @@ pub fn prepare_directories(config: &Path, cache: &Path) -> Result<Vec<PathBuf>> 
     staged?;
     prepare_cache(cache)?;
     probe(cache)?;
-    Ok(changeable)
+    Ok(())
 }
+
+/// Another account could change these identity entries, so they may hold a replaced CA chain,
+/// signing keys or endpoint (T20).
+#[derive(Debug)]
+pub struct ChangeableIdentity {
+    pub paths: Vec<PathBuf>,
+}
+
+pub(crate) const REGISTER_AGAIN: &str = "register the host again: create a token with \"Re-register\" on the host page and run `restichub-agent register --force --url <URL> --token <TOKEN>`";
+
+impl ChangeableIdentity {
+    #[must_use]
+    pub fn files(&self) -> String {
+        self.paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+impl std::fmt::Display for ChangeableIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the identity of this host could be changed by another account ({}), so the agent does not use it; {REGISTER_AGAIN}",
+            self.files()
+        )
+    }
+}
+
+impl std::error::Error for ChangeableIdentity {}
 
 /// Makes the cache directory of the restic child (FR-AG-06).
 ///
@@ -135,7 +175,8 @@ mod tests {
         let base = temp("create");
         let config = base.join("one").join("two").join("Agent");
         let cache = base.join("cache").join("restic");
-        prepare_directories(&config, &cache).expect("the directories must be prepared");
+        prepare_directories(&config, &cache, paths::UntrustedIdentity::Keep)
+            .expect("the directories must be prepared");
         assert!(config.is_dir());
         assert!(cache.is_dir());
         assert!(!cache.join(PROBE_FILE).exists());
@@ -149,8 +190,12 @@ mod tests {
         std::fs::create_dir_all(&base).expect("cannot create the base");
         let blocker = base.join("file");
         std::fs::write(&blocker, b"x").expect("cannot write the blocker");
-        let error = prepare_directories(&base.join("Agent"), &blocker.join("cache"))
-            .expect_err("a cache below a file must fail");
+        let error = prepare_directories(
+            &base.join("Agent"),
+            &blocker.join("cache"),
+            paths::UntrustedIdentity::Keep,
+        )
+        .expect_err("a cache below a file must fail");
         assert!(error.to_string().contains("cache directory"), "{error}");
         let _ = std::fs::remove_dir_all(&base);
     }
