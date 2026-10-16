@@ -11,6 +11,8 @@ use crate::cli::{RegisterOptions, ResticFileOptions, UpdateOptions};
 use crate::enroll::{Client, Facts};
 use crate::identity::{StoredIdentity, StoredSigningKeys, generate_key_and_csr};
 use crate::machine_id::MachineId;
+use crate::paths::UntrustedIdentity;
+use crate::preflight::ChangeableIdentity;
 use crate::restic::{Restic, ResticBinary};
 use crate::restic_install::Installer;
 use crate::restic_release::Supply;
@@ -56,7 +58,7 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     // The tree check runs first: the move of an old restic reads from it, so a directory that
     // another account can write must be refused before anything leaves it (T20, FR-IN-07).
-    crate::preflight::prepare_directories(dir, &crate::paths::cache_dir())?;
+    crate::preflight::prepare_directories(dir, &crate::paths::cache_dir(), untrusted(options))?;
     place_program()?;
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -98,7 +100,7 @@ pub async fn provision_and_register(
     supply: &Supply,
 ) -> Result<()> {
     check_register_input(options, dir)?;
-    crate::preflight::prepare_directories(dir, cache)?;
+    crate::preflight::prepare_directories(dir, cache, untrusted(options))?;
     installer.ensure(supply).await?;
     let restic = ResticBinary::installed(&installer.layout)?;
     // The location rules run before the token is spent, so a refused location never leaves an
@@ -240,7 +242,7 @@ fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<
 pub fn install_service(options: &ResticFileOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     let dir = crate::paths::config_dir();
-    prepare_install(&dir, &crate::paths::cache_dir())?;
+    prepare_install(&dir, &crate::paths::cache_dir(), &HostService)?;
     place_program()?;
     let restic = ensure_restic(options)?;
     let report =
@@ -248,28 +250,51 @@ pub fn install_service(options: &ResticFileOptions) -> Result<()> {
     finish_setup(Some(&report), hostname().ok().as_deref())
 }
 
+/// Only `register --force` replaces the identity, so only it may drop an identity that another
+/// account could change; any other run leaves it as found and refuses (T20).
+fn untrusted(options: &RegisterOptions) -> UntrustedIdentity {
+    if options.force {
+        UntrustedIdentity::Remove
+    } else {
+        UntrustedIdentity::Keep
+    }
+}
+
 /// The identity load finishes a staged rotation, so the tree check and the repair run before it, as
 /// in `register`: another account may have planted the staged files (T20).
-fn prepare_install(dir: &Path, cache: &Path) -> Result<()> {
-    let changeable = crate::preflight::prepare_directories(dir, cache)?;
-    refuse_changeable_identity(&changeable)?;
+fn prepare_install(dir: &Path, cache: &Path, manager: &dyn ServiceManager) -> Result<()> {
+    if let Err(error) = crate::preflight::prepare_directories(dir, cache, UntrustedIdentity::Keep) {
+        return Err(match error.downcast::<ChangeableIdentity>() {
+            Ok(changeable) => refuse_changeable_identity(&changeable, manager),
+            Err(error) => error,
+        });
+    }
     crate::setup::require_identity(dir)?;
     Ok(())
 }
 
-/// Another account that could write the identity could have replaced the CA chain, the signing
-/// keys or the endpoint, so the repaired access does not make the identity trusted again (T20).
-fn refuse_changeable_identity(changeable: &[PathBuf]) -> Result<()> {
-    if changeable.is_empty() {
-        return Ok(());
-    }
-    let files = changeable
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    bail!(
-        "the identity of this host could be changed by another account ({files}), so the agent does not use it and the service is not installed; the access control is repaired; register the host again: create a token with \"Re-register\" on the host page and run `restichub-agent register --force --url <URL> --token <TOKEN>`"
+/// The running service may talk to a replaced control plane, so it stops; it stays installed for
+/// the new registration (T20).
+fn refuse_changeable_identity(
+    changeable: &ChangeableIdentity,
+    manager: &dyn ServiceManager,
+) -> anyhow::Error {
+    let service = match manager.state() {
+        Ok(state) if state.installed && state.running => match manager.stop() {
+            Ok(()) => "; the running service is stopped and stays installed".to_owned(),
+            Err(error) => format!(
+                "; the running service did not stop ({error:#}), so stop it by hand: {STOP_COMMAND}"
+            ),
+        },
+        Ok(_) => String::new(),
+        Err(error) => format!(
+            "; the state of the service cannot be read ({error:#}), so make sure that it is stopped: {STOP_COMMAND}"
+        ),
+    };
+    anyhow::anyhow!(
+        "the identity of this host could be changed by another account ({}), so the agent does not use it and the service is not installed{service}; {}",
+        changeable.files(),
+        crate::preflight::REGISTER_AGAIN
     )
 }
 
@@ -339,7 +364,7 @@ pub async fn register_async(
     check_register_input(options, dir)?;
     let url = options.url.clone().unwrap_or_default();
     let token = resolve_token(options)?;
-    crate::preflight::prepare_directories(dir, cache)?;
+    crate::preflight::prepare_directories(dir, cache, untrusted(options))?;
 
     let facts = Facts {
         hostname: hostname()?,
@@ -405,6 +430,10 @@ pub fn trust_server_scripts(enable: bool, no_restart: bool) -> Result<()> {
 const RESTART_COMMAND: &str = "Restart-Service restichub-agent";
 #[cfg(not(windows))]
 const RESTART_COMMAND: &str = "systemctl restart restichub-agent";
+#[cfg(windows)]
+const STOP_COMMAND: &str = "Stop-Service restichub-agent";
+#[cfg(not(windows))]
+const STOP_COMMAND: &str = "systemctl stop restichub-agent";
 
 fn apply_trust_mode(
     manager: &dyn ServiceManager,
@@ -969,7 +998,8 @@ mod tests {
         let (base, dir) = planted_rotation("order");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777))
             .expect("cannot set the mode");
-        let error = prepare_install(&dir, &base.join("cache")).expect_err("no identity");
+        let error = prepare_install(&dir, &base.join("cache"), &StopCounter::new(false))
+            .expect_err("no identity");
         assert!(
             format!("{error:#}").contains("no valid agent identity"),
             "{error:#}"
@@ -987,7 +1017,8 @@ mod tests {
     fn fr_ag_04_install_service_refuses_an_open_directory_before_it_loads_the_identity() {
         let (base, dir) = planted_rotation("order");
         crate::winsec::tests::grant(&dir, "(OI)(CI)(WD)").expect("cannot add the entry");
-        let error = prepare_install(&dir, &dir.join("cache")).expect_err("an open directory");
+        let error = prepare_install(&dir, &dir.join("cache"), &StopCounter::new(false))
+            .expect_err("an open directory");
         assert!(
             format!("{error:#}").contains("cannot prepare the directory"),
             "{error:#}"
@@ -1000,21 +1031,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// A service double that counts the stops; a stop makes it not running.
+    struct StopCounter {
+        state: std::cell::Cell<crate::service::ServiceState>,
+        stops: std::cell::Cell<u32>,
+    }
+
+    impl StopCounter {
+        fn new(running: bool) -> Self {
+            Self {
+                state: std::cell::Cell::new(crate::service::ServiceState {
+                    installed: true,
+                    running,
+                    start_type: crate::service::StartType::Automatic,
+                }),
+                stops: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    impl ServiceManager for StopCounter {
+        fn install_and_start(&self, _restic: &Path) -> Result<()> {
+            bail!("a refused identity must not install the service")
+        }
+
+        fn state(&self) -> Result<crate::service::ServiceState> {
+            Ok(self.state.get())
+        }
+
+        fn stop(&self) -> Result<()> {
+            self.stops.set(self.stops.get() + 1);
+            let mut state = self.state.get();
+            state.running = false;
+            self.state.set(state);
+            Ok(())
+        }
+
+        fn restart(&self) -> Result<()> {
+            bail!("a refused identity must not restart the service")
+        }
+    }
+
     #[test]
-    fn fr_ag_04_install_service_refuses_an_identity_that_another_account_could_change() {
-        refuse_changeable_identity(&[]).expect("an untouched identity is used");
+    fn fr_ag_04_install_service_refuses_an_identity_that_another_account_could_change_and_stops_the_service()
+     {
         let chain = PathBuf::from("Agent").join(crate::identity::CA_CHAIN_FILE);
-        let error = format!(
-            "{:#}",
-            refuse_changeable_identity(std::slice::from_ref(&chain))
-                .expect_err("a changeable identity must be refused")
-        );
+        let changeable = ChangeableIdentity {
+            paths: vec![chain.clone()],
+        };
+        let manager = StopCounter::new(true);
+        let error = format!("{:#}", refuse_changeable_identity(&changeable, &manager));
+        assert_eq!(manager.stops.get(), 1, "the running service must stop");
         assert!(error.contains(&chain.display().to_string()), "{error}");
         assert!(error.contains("the service is not installed"), "{error}");
+        assert!(
+            error.contains("the running service is stopped and stays installed"),
+            "{error}"
+        );
         assert!(
             error.contains("register --force --url <URL> --token <TOKEN>"),
             "{error}"
         );
+
+        let error = format!("{:#}", refuse_changeable_identity(&changeable, &manager));
+        assert_eq!(manager.stops.get(), 1, "a stopped service is left alone");
+        assert!(!error.contains("running service"), "{error}");
     }
 
     #[test]
