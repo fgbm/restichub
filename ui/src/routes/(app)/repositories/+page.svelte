@@ -160,10 +160,7 @@
 			const { q, backend, maintenance } = filters.value;
 			if (!matchesSearch(q, [repository.name, backendAddress(repository)])) return false;
 			if (backend && !splitList(backend).includes(repository.backend.kind)) return false;
-			if (
-				maintenance &&
-				!splitList(maintenance).includes(repository.maintenance_agent_id ?? '')
-			) {
+			if (maintenance && !splitList(maintenance).includes(repository.maintenance_agent_id ?? '')) {
 				return false;
 			}
 			return true;
@@ -177,8 +174,7 @@
 			{
 				value: 'attention',
 				label: t('repositories.tab.attention'),
-				count: matching.filter((repository) => repositoryState(repository).tone !== 'normal')
-					.length
+				count: matching.filter((repository) => repositoryState(repository).tone !== 'normal').length
 			}
 		]
 	});

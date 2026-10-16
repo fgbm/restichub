@@ -1983,7 +1983,20 @@ export const en = {
 	'repositories.tab.attention': 'Need attention',
 	'repositories.sort.name': 'Name',
 	'repositories.meta.maintenance': 'maintenance on {name}',
-	'repositories.meta.noMaintenance': 'no maintenance host'
+	'repositories.meta.noMaintenance': 'no maintenance host',
+	'hosts.tab.active': 'Active',
+	'hosts.tab.offline': 'Offline',
+	'hosts.tab.revoked': 'Revoked',
+	'hosts.sort.name': 'Name',
+	'hosts.sort.lastSeen': 'Last contact',
+	'hosts.sort.agent': 'Agent version',
+	'hosts.meta.contact': 'contact {time}',
+	'hosts.meta.registered': 'registered {time}',
+	'hosts.meta.neverSeen': 'no contact yet',
+	'hosts.meta.agent': 'agent {version}',
+	'hosts.meta.agentUpdate': 'agent {version}, {latest} is available',
+	'hosts.pending.labels': 'labels: {labels}',
+	'hosts.pending.createdBy': 'created by {name}'
 } as const;
 
 export type MessageKey = keyof typeof en;

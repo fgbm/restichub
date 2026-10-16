@@ -16,24 +16,21 @@
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
-		Badge,
 		Button,
 		ConfirmDialog,
 		CopyField,
-		DataTable,
 		Dialog,
-		EmptyState,
 		FilterBar,
-		Icon,
+		ListView,
 		Panel,
-		StatusPill,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, RowAction, TableColumn, TableSort } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, ListMeta, RowAction } from '#lib/components/ui/index.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { formatCount, formatTime, relativeTime } from '#lib/format.ts';
+	import { formatCount } from '#lib/format.ts';
+	import { ago, inFuture } from '#lib/list-format.ts';
+	import { ENTITY_ICONS, hostState, iconOf, pillOf } from '#lib/vocabulary.ts';
 	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -117,63 +114,6 @@
 		)
 	);
 
-	const columns = $derived<TableColumn<Agent>[]>([
-		{ key: 'hostname', header: t('hosts.host'), truncate: 'sm' },
-		{
-			key: 'status',
-			header: t('hosts.status'),
-			sortable: false,
-			value: (row) => statusLabel(row),
-			render: statusCell
-		},
-		{
-			key: 'os',
-			header: t('hosts.system'),
-			hideNarrow: true,
-			nowrap: true,
-			value: (row) => `${row.os} · ${row.arch}`
-		},
-		{
-			key: 'server_scripts',
-			hideNarrow: true,
-			sortable: false,
-			header: t('hosts.serverScripts'),
-			value: (row) => scriptsLabel(row),
-			render: scriptsCell
-		},
-		{
-			key: 'agent_version',
-			hideNarrow: true,
-			header: t('hosts.agent'),
-			value: (row) => row.agent_version,
-			render: versionCell
-		},
-		{
-			key: 'last_seen_at',
-			hideNarrow: true,
-			header: t('hosts.lastSeen'),
-			date: 'relative',
-			value: (row) => row.last_seen_at ?? '',
-			cell: () => t('common.never')
-		},
-		{
-			key: 'certificate_expires_at',
-			hideNarrow: true,
-			sortable: false,
-			header: t('hosts.certificate'),
-			value: (row) => row.certificate_expires_at,
-			render: certificateCell
-		}
-	]);
-
-	type HostState = 'online' | 'offline' | 'waiting' | 'revoked';
-
-	function stateOf(agent: Agent): HostState {
-		if (agent.status === 'revoked') return 'revoked';
-		if (isWaiting(agent)) return 'waiting';
-		return agent.online ? 'online' : 'offline';
-	}
-
 	// The list filters, sorts and pages on the server (FR-UI-01). Without a state in the address the
 	// list leaves out the revoked hosts; the state facet shows how many there are.
 	const VISIBLE_STATES = 'online,offline,waiting';
@@ -199,17 +139,19 @@
 
 	const SORT_KEYS: Record<string, NonNullable<AgentQuery['sort']>> = {
 		hostname: 'hostname',
-		os: 'os',
-		agent_version: 'agent_version',
-		last_seen_at: 'last_seen_at'
+		last_seen_at: 'last_seen_at',
+		agent_version: 'agent_version'
 	};
+	const sort = $derived({
+		default: 'hostname',
+		options: [
+			{ value: 'hostname', label: t('hosts.sort.name') },
+			{ value: 'last_seen_at', label: t('hosts.sort.lastSeen') },
+			{ value: 'agent_version', label: t('hosts.sort.agent') }
+		]
+	});
 	const tablePage = $derived(pageNumber(filters.value.page));
 	const pageSize = $derived(pageSizeOf(filters.value.size));
-	const tableSort = $derived<TableSort | undefined>(
-		filters.value.sort
-			? { key: filters.value.sort, direction: filters.value.order === 'asc' ? 'asc' : 'desc' }
-			: undefined
-	);
 
 	function queryOf(): AgentQuery {
 		const value = filters.value;
@@ -222,7 +164,7 @@
 			server_scripts:
 				value.scripts === 'enabled' || value.scripts === 'disabled' ? value.scripts : undefined,
 			sort: SORT_KEYS[value.sort],
-			order: value.sort ? (value.order === 'asc' ? 'asc' : 'desc') : undefined,
+			order: value.sort || value.order ? (value.order === 'desc' ? 'desc' : 'asc') : undefined,
 			offset: (tablePage - 1) * pageSize,
 			limit: pageSize
 		};
@@ -291,28 +233,19 @@
 
 	const facets = $derived<FilterFacet[]>([
 		{
-			key: 'state',
-			label: t('hosts.status'),
-			options: (['online', 'offline', 'waiting', 'revoked'] as const).map((value) => ({
-				value,
-				label: stateLabel(value),
-				count: facetValues?.states[value]
-			}))
-		},
-		{
 			key: 'os',
 			label: t('hosts.os'),
 			options: (facetValues?.os ?? []).map(({ value, count }) => ({ value, count }))
 		},
 		{
-			key: 'agent_version',
-			label: t('hosts.agent'),
-			options: (facetValues?.agent_versions ?? []).map(({ value, count }) => ({ value, count }))
-		},
-		{
 			key: 'label',
 			label: t('hosts.labels'),
 			options: (facetValues?.labels ?? []).map(({ value, count }) => ({ value, count }))
+		},
+		{
+			key: 'agent_version',
+			label: t('hosts.agent'),
+			options: (facetValues?.agent_versions ?? []).map(({ value, count }) => ({ value, count }))
 		},
 		{
 			key: 'scripts',
@@ -324,6 +257,82 @@
 			}))
 		}
 	]);
+
+	const states = $derived({
+		default: 'active',
+		options: [
+			{
+				value: 'active',
+				label: t('hosts.tab.active'),
+				count: facetValues
+					? facetValues.states.online + facetValues.states.offline + facetValues.states.waiting
+					: undefined
+			},
+			{
+				value: 'offline',
+				label: t('hosts.tab.offline'),
+				count: facetValues?.states.offline
+			},
+			{ value: 'revoked', label: t('hosts.tab.revoked'), count: facetValues?.states.revoked }
+		]
+	});
+
+	function resetFilters(): void {
+		filters.update({ q: '', state: '', os: '', agent_version: '', label: '', scripts: '' });
+	}
+
+	function contact(agent: Agent): ListMeta {
+		if (!agent.first_connected_at) {
+			return {
+				text: t('hosts.meta.registered', { time: ago(agent.created_at) }),
+				time: agent.created_at
+			};
+		}
+		if (!agent.last_seen_at) return t('hosts.meta.neverSeen');
+		return {
+			text: t('hosts.meta.contact', { time: ago(agent.last_seen_at) }),
+			time: agent.last_seen_at
+		};
+	}
+
+	function labelsText(agent: Agent): string {
+		if (agent.labels.length === 0) return '';
+		const first = agent.labels.slice(0, 2).join(', ');
+		return agent.labels.length > 2 ? `${first} +${agent.labels.length - 2}` : first;
+	}
+
+	function meta(agent: Agent): ListMeta[] {
+		const update = agent.version_status === 'update_available' && agent.status === 'active';
+		return [
+			contact(agent),
+			`${agent.os} · ${agent.arch}`,
+			update
+				? t('hosts.meta.agentUpdate', {
+						version: agent.agent_version,
+						latest: agent.control_plane_version
+					})
+				: t('hosts.meta.agent', { version: agent.agent_version }),
+			labelsText(agent)
+		];
+	}
+
+	function tokenMeta(token: EnrollmentToken): ListMeta[] {
+		return [
+			token.labels.length > 0
+				? t('hosts.pending.labels', { labels: token.labels.join(', ') })
+				: null,
+			token.replaces_agent_id
+				? t('hosts.pending.reregisters', {
+						name: replacesName(token) ?? token.replaces_agent_id
+					})
+				: null,
+			t('hosts.pending.createdBy', { name: createdByLabel(token) }),
+			{
+				text: t('time.expiresIn', { time: inFuture(token.expires_at) }),
+				time: token.expires_at
+			}
+		];
+	}
 
 	function rowActions(agent: Agent): RowAction[] {
 		if (!canWrite || agent.status !== 'active') return [];
@@ -350,38 +359,11 @@
 			{
 				id: 'revoke',
 				label: t('hosts.revokeAgent'),
-				icon: 'octagon',
+				icon: 'ban',
 				danger: true,
 				onSelect: () => hostActions.openRevoke(agent)
 			}
 		];
-	}
-
-	function scriptsLabel(agent: Agent): string {
-		return t(`hosts.serverScripts.${agent.server_scripts}` as MessageKey);
-	}
-
-	// An agent rotates at two thirds of the lifetime, so a certificate that is close to its end
-	// means that the agent could not rotate (FR-ID-03).
-	const CERT_WARNING_MS = 3 * 24 * 60 * 60 * 1000;
-
-	function certificateExpiry(agent: Agent): { expired: boolean; warn: boolean } {
-		const left = new Date(agent.certificate_expires_at).getTime() - Date.now();
-		return { expired: left <= 0, warn: agent.status === 'active' && left < CERT_WARNING_MS };
-	}
-
-	function isWaiting(agent: Agent): boolean {
-		return agent.status === 'active' && !agent.first_connected_at;
-	}
-
-	function stateLabel(state: HostState): string {
-		if (state === 'revoked') return t('hosts.status.revoked');
-		if (state === 'waiting') return t('hosts.status.waiting');
-		return t(state === 'online' ? 'hp.state.online' : 'hp.state.offline');
-	}
-
-	function statusLabel(agent: Agent): string {
-		return stateLabel(stateOf(agent));
 	}
 
 	// The token row shows the creator's name when the caller created it (getSession is the caller).
@@ -403,7 +385,7 @@
 	const hostCount = $derived(
 		facetValues ? Object.values(facetValues.states).reduce((sum, count) => sum + count, 0) : null
 	);
-	const empty = $derived(!loading && !error && !narrowed && hostCount === 0);
+	const firstRun = $derived(!narrowed && hostCount === 0);
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) {
@@ -551,81 +533,6 @@
 	}
 </script>
 
-{#snippet statusCell(agent: Agent)}
-	<span class="status">
-		<span title={isWaiting(agent) ? t('hosts.waitingTitle') : undefined}>
-			<StatusPill
-				tone={agent.status === 'revoked' || (!agent.online && !isWaiting(agent))
-					? 'neutral'
-					: isWaiting(agent)
-						? 'info'
-						: 'success'}
-			>
-				{statusLabel(agent)}
-			</StatusPill>
-		</span>
-		<!-- AC-ID-09: both records of a duplicate show the warning in the list. -->
-		{#if agent.possible_duplicate_of && agent.status === 'active'}
-			<span title={t('hosts.duplicateTitle', { name: agent.possible_duplicate_of.hostname })}>
-				<Badge tone="warning">{t('hosts.duplicate')}</Badge>
-			</span>
-		{/if}
-	</span>
-{/snippet}
-
-{#snippet scriptsCell(agent: Agent)}
-	<StatusPill tone={agent.server_scripts === 'enabled' ? 'info' : 'neutral'}>
-		{scriptsLabel(agent)}
-	</StatusPill>
-{/snippet}
-
-{#snippet versionCell(agent: Agent)}
-	<span class="version">
-		<span
-			class="host__version"
-			title={t('hosts.versionTitle', {
-				protocol: agent.protocol_version ?? '-',
-				version: agent.control_plane_version
-			})}>{agent.agent_version}</span
-		>
-		{#if agent.version_status === 'update_available' && agent.status !== 'revoked'}
-			<Badge tone="warning">{t('hosts.versionUpdate')}</Badge>
-		{:else if agent.version_status === 'unsupported'}
-			<Badge tone="danger">{t('hosts.versionUnsupported')}</Badge>
-		{/if}
-	</span>
-{/snippet}
-
-{#snippet certificateCell(agent: Agent)}
-	{@const expiry = certificateExpiry(agent)}
-	<span class="cert">
-		<time
-			class="cert__expiry"
-			class:cert__expiry--warn={expiry.warn}
-			datetime={agent.certificate_expires_at}
-			title={formatTime(agent.certificate_expires_at)}
-		>
-			{t(expiry.expired ? 'hosts.certExpired' : 'hosts.certExpires', {
-				time: relativeTime(agent.certificate_expires_at)
-			})}
-		</time>
-		<span class="cert__rotation">
-			{#if agent.last_certificate_rotation_at}
-				{t('hosts.certRotated', { time: relativeTime(agent.last_certificate_rotation_at) })}
-			{:else}
-				{t('hosts.certNotRotated')}
-			{/if}
-		</span>
-		{#if agent.superseded_certificate_used_at}
-			<Badge tone="danger">
-				<span title={formatTime(agent.superseded_certificate_used_at)}
-					>{t('hosts.certSuperseded')}</span
-				>
-			</Badge>
-		{/if}
-	</span>
-{/snippet}
-
 <Page
 	title={t('hosts.title')}
 	description={t('hosts.description')}
@@ -639,47 +546,36 @@
 
 	{#if pending.length > 0}
 		<div class="pending">
-			<Panel title={t('hosts.pending.title')} subtitle={t('hosts.pending.subtitle')} flush>
-				<ul class="pending__list">
-					{#each pending as token (token.id)}
-						<li class="pending__row">
-							<span class="pending__icon"><Icon name="key" /></span>
-							<span class="pending__body">
-								<span class="pending__head">
-									<span class="pending__prefix">{token.display_prefix}</span>
-									{#each token.labels as label (label)}
-										<Badge tone="neutral">{label}</Badge>
-									{/each}
-									{#if token.replaces_agent_id}
-										<Badge tone="info">
-											{t('hosts.pending.reregisters', {
-												name: replacesName(token) ?? token.replaces_agent_id
-											})}
-										</Badge>
-									{/if}
-								</span>
-								<span class="pending__meta">
-									{t('hosts.pending.meta', {
-										name: createdByLabel(token),
-										created: relativeTime(token.created_at),
-										expires: relativeTime(token.expires_at)
-									})}
-								</span>
-							</span>
-							{#if canWrite}
-								<span class="pending__action">
-									<Button
-										size="sm"
-										icon="x"
-										title={t('hosts.pending.cancel')}
-										aria-label={t('hosts.pending.cancelFor', { prefix: token.display_prefix })}
-										onclick={() => openCancel(token)}
-									/>
-								</span>
-							{/if}
-						</li>
-					{/each}
-				</ul>
+			<Panel flush>
+				{#snippet header()}
+					<h2 class="pending__title">
+						{t('hosts.pending.title')} <span class="pending__count">{pending.length}</span>
+					</h2>
+				{/snippet}
+				<ListView
+					flush
+					paginated={false}
+					label={t('hosts.pending.title')}
+					items={pending}
+					itemKey={(token) => token.id}
+					icon={() => ({ name: ENTITY_ICONS.enrollmentToken })}
+					title={(token) => `${token.display_prefix}…`}
+					titleMono
+					meta={tokenMeta}
+					actions={(token) =>
+						canWrite
+							? [
+									{
+										id: 'cancel',
+										label: t('hosts.pending.cancelFor', { prefix: token.display_prefix }),
+										hint: t('hosts.pending.cancel'),
+										icon: 'x',
+										danger: true,
+										onSelect: () => openCancel(token)
+									}
+								]
+							: []}
+				/>
 			</Panel>
 		</div>
 	{/if}
@@ -690,52 +586,51 @@
 		</div>
 	{/if}
 
-	{#if empty}
-		<EmptyState
-			icon="host"
-			title={t('hosts.emptyTitle')}
-			description={t('hosts.emptyDescription')}
-			bordered
-		>
+	<ListView
+		label={t('hosts.title')}
+		items={pageRows}
+		itemKey={(agent) => agent.id}
+		icon={(agent) => iconOf(hostState(agent))}
+		pill={(agent) => pillOf(hostState(agent))}
+		title={(agent) => agent.hostname}
+		href={(agent) => resolve('/(app)/hosts/[id]', { id: agent.id })}
+		{meta}
+		actions={rowActions}
+		moreLabel={(agent) => t('hosts.moreActions', { name: agent.hostname })}
+		mode="server"
+		page={tablePage}
+		{pageSize}
+		pageSizes={PAGE_SIZES}
+		{total}
+		{totalCapped}
+		onPageChange={(next) => filters.update({ page: String(next) })}
+		onPageSizeChange={(next) => filters.update({ size: String(next) })}
+		loading={loading || pageLoading}
+		error={error ?? pageError}
+		filtered={!firstRun}
+		onReset={resetFilters}
+		emptyIcon="host"
+		emptyTitle={t('hosts.emptyTitle')}
+		emptyDescription={t('hosts.emptyDescription')}
+	>
+		{#snippet emptyActions()}
 			{#if canWrite}
 				<Button variant="primary" onclick={openAdd}>{t('hosts.addFirst')}</Button>
 			{/if}
-		</EmptyState>
-	{:else}
-		<DataTable
-			{columns}
-			rows={pageRows}
-			mode="server"
-			page={tablePage}
-			{pageSize}
-			pageSizes={PAGE_SIZES}
-			{total}
-			{totalCapped}
-			sort={tableSort}
-			onPageChange={(next) => filters.update({ page: String(next) })}
-			onPageSizeChange={(next) => filters.update({ size: String(next) })}
-			onSortChange={(next) => filters.update({ sort: next.key, order: next.direction })}
-			loading={loading || pageLoading}
-			error={error ?? pageError}
-			rowKey={(agent) => agent.id}
-			rowHref={(agent) => resolve('/(app)/hosts/[id]', { id: agent.id })}
-			actions={rowActions}
-			moreLabel={(agent) => t('hosts.moreActions', { name: agent.hostname })}
-			emptyTitle={t('filter.noMatches')}
-			emptyDescription={t('filter.noMatchesDescription')}
-		>
-			{#snippet toolbar()}
-				<FilterBar
-					label={t('hosts.filters')}
-					value={filters.value}
-					search={{ key: 'q', label: t('hosts.search'), placeholder: t('hosts.searchPlaceholder') }}
-					{facets}
-					onchange={filters.update}
-					onreset={filters.reset}
-				/>
-			{/snippet}
-		</DataTable>
-	{/if}
+		{/snippet}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('hosts.filters')}
+				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('hosts.searchPlaceholder') }}
+				{states}
+				{facets}
+				{sort}
+				onchange={filters.update}
+				onreset={resetFilters}
+			/>
+		{/snippet}
+	</ListView>
 
 	<Dialog
 		bind:open={addOpen}
@@ -799,106 +694,28 @@
 </Page>
 
 <style>
-	.status {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--rh-space-1);
-		white-space: nowrap;
-	}
-
-	/* A narrow phone has no room for a long state on one line. */
-	@media (max-width: 720px) {
-		.status,
-		.status :global(.status) {
-			flex-wrap: wrap;
-			white-space: normal;
-		}
-	}
-
-	.host__version {
-		font-family: var(--rh-font-mono);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.version {
-		display: inline-flex;
-		flex-wrap: wrap;
+	.pending__title {
+		display: flex;
 		align-items: center;
 		gap: var(--rh-space-2);
-	}
-
-	.cert {
-		display: flex;
-		flex-direction: column;
-		white-space: nowrap;
-	}
-
-	.cert__expiry--warn {
-		color: var(--rh-color-danger-text);
+		margin: 0;
+		font-size: var(--rh-font-size-sm);
 		font-weight: var(--rh-font-weight-semibold);
 	}
 
-	.cert__rotation {
+	.pending__count {
+		min-width: 20px;
+		padding: 0 6px;
+		border-radius: var(--rh-radius-pill);
+		background-color: var(--rh-color-neutral-bg);
 		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
+		font-size: var(--rh-font-size-xs);
+		line-height: 18px;
+		text-align: center;
 	}
 
 	.pending,
 	.capped {
 		margin-bottom: var(--rh-space-4);
-	}
-
-	.pending__list {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.pending__row {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
-	}
-
-	.pending__row:first-child {
-		border-top: 0;
-	}
-
-	.pending__icon {
-		display: inline-flex;
-		flex: none;
-		width: 28px;
-		justify-content: center;
-		color: var(--rh-color-text-muted);
-	}
-
-	.pending__body {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-1);
-		min-width: 0;
-	}
-
-	.pending__head {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--rh-space-2);
-	}
-
-	.pending__prefix {
-		font-family: var(--rh-font-mono);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.pending__meta {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.pending__action {
-		margin-left: auto;
 	}
 </style>

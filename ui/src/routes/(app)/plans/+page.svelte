@@ -76,9 +76,7 @@
 
 	const filtered = $derived(
 		plans.length > 0 &&
-			Boolean(
-				filters.value.q || filters.value.host || filters.value.profile || filters.value.state
-			)
+			Boolean(filters.value.q || filters.value.host || filters.value.profile || filters.value.state)
 	);
 
 	function resetFilters(): void {

@@ -454,7 +454,7 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.tokenNote': 'Токен действует один раз и истекает через час.',
 	'hosts.installCommand': 'Команда установки',
 	'hosts.installPlaceholder': 'restichub-agent register --url {url} --token {token}',
-	'hosts.pending.title': 'Ожидают подключения',
+	'hosts.pending.title': 'Ожидают регистрации',
 	'hosts.pending.subtitle': 'Токены регистрации, которые ждут хост.',
 	'hosts.pending.meta': 'Создан: {name} · {created} · истекает {expires}',
 	'hosts.pending.cancel': 'Отменить',
@@ -1993,5 +1993,18 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.tab.attention': 'Требуют внимания',
 	'repositories.sort.name': 'Имя',
 	'repositories.meta.maintenance': 'обслуживает {name}',
-	'repositories.meta.noMaintenance': 'нет хоста обслуживания'
+	'repositories.meta.noMaintenance': 'нет хоста обслуживания',
+	'hosts.tab.active': 'Действующие',
+	'hosts.tab.offline': 'Не в сети',
+	'hosts.tab.revoked': 'Отозваны',
+	'hosts.sort.name': 'Имя',
+	'hosts.sort.lastSeen': 'Последняя связь',
+	'hosts.sort.agent': 'Версия агента',
+	'hosts.meta.contact': 'связь {time}',
+	'hosts.meta.registered': 'зарегистрирован {time}',
+	'hosts.meta.neverSeen': 'связи не было',
+	'hosts.meta.agent': 'агент {version}',
+	'hosts.meta.agentUpdate': 'агент {version}, есть {latest}',
+	'hosts.pending.labels': 'метки: {labels}',
+	'hosts.pending.createdBy': 'создал {name}'
 };

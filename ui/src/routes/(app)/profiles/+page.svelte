@@ -29,8 +29,8 @@
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const repositoryNames = $derived(new Map(repositories.map((item) => [item.id, item.name])));
 	const planCounts = $derived.by(() => {
-		const counts = new Map<string, number>();
-		for (const plan of plans) counts.set(plan.profile_id, (counts.get(plan.profile_id) ?? 0) + 1);
+		const counts: Record<string, number> = {};
+		for (const plan of plans) counts[plan.profile_id] = (counts[plan.profile_id] ?? 0) + 1;
 		return counts;
 	});
 
@@ -39,7 +39,7 @@
 	}
 
 	function planCount(profile: Profile): number {
-		return planCounts.get(profile.id) ?? 0;
+		return planCounts[profile.id] ?? 0;
 	}
 
 	const filters = queryFilters(['q', 'repository', 'tag', 'state', 'sort', 'order'] as const);
@@ -103,7 +103,9 @@
 
 	const filtered = $derived(
 		profiles.length > 0 &&
-			Boolean(filters.value.q || filters.value.repository || filters.value.tag || filters.value.state)
+			Boolean(
+				filters.value.q || filters.value.repository || filters.value.tag || filters.value.state
+			)
 	);
 
 	function resetFilters(): void {
@@ -166,8 +168,7 @@
 				id: 'copy',
 				label: t('profiles.copy'),
 				icon: 'copy',
-				onSelect: () =>
-					void goto(`${resolve('/(app)/profiles/new')}?from=${encodeURIComponent(profile.id)}`)
+				onSelect: () => openCopy(profile)
 			},
 			{
 				id: 'delete',
@@ -209,6 +210,13 @@
 	}
 
 	onMount(load);
+
+	function openCopy(profile: Profile): void {
+		const target = `${resolve('/(app)/profiles/new')}?from=${encodeURIComponent(profile.id)}`;
+		// The address is the resolved path of the new profile page with a query.
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(target);
+	}
 
 	function openCreate(): void {
 		void goto(resolve('/(app)/profiles/new'));
