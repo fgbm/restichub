@@ -294,6 +294,29 @@ pub fn create_protected_file(path: &Path, contents: &[u8]) -> Result<()> {
     apply_descriptor(path, FILE_SDDL)
 }
 
+/// Opens the file, or creates it empty with the descriptor of [`create_protected_file`].
+///
+/// An existing file is never replaced: another process may hold a lock on it.
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be opened or created, or its access control cannot be
+/// set.
+pub(crate) fn open_or_create_protected(path: &Path) -> Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true);
+    match options.clone().create_new(true).open(path) {
+        Ok(file) => {
+            apply_descriptor(path, FILE_SDDL)?;
+            Ok(file)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => options
+            .open(path)
+            .with_context(|| format!("cannot open {}", path.display())),
+        Err(error) => Err(error).with_context(|| format!("cannot create {}", path.display())),
+    }
+}
+
 /// Refuses a path that another account owns or can change (FR-AG-04).
 ///
 /// # Errors

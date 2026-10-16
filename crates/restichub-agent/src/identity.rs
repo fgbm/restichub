@@ -69,7 +69,12 @@ impl StoredIdentity {
         let staging = sibling(dir, ".staging");
         let _ = std::fs::remove_dir_all(&staging);
         paths::ensure_config_dir(&staging)?;
-        let _lock = lock(dir)?;
+        // The first registration has no directory to lock yet.
+        let _lock = if lock_file(dir).parent().is_some_and(Path::is_dir) {
+            Some(lock(dir)?)
+        } else {
+            None
+        };
         if let Err(error) = self.stage(&staging) {
             let _ = std::fs::remove_dir_all(&staging);
             return Err(error);
@@ -256,45 +261,100 @@ fn lock(dir: &Path) -> Result<std::fs::File> {
     lock_within(dir, LOCK_WAIT)
 }
 
-/// The lock file is next to `dir`, so the swap of a save never moves or deletes it.
+/// Windows cannot rename a directory that holds an open file, so the lock file is next to `dir`.
+/// The Linux service may write only inside `dir` (`ProtectSystem=strict`), so the lock file is
+/// inside it, and a waiter checks that a swap did not replace it.
 pub(crate) fn lock_file(dir: &Path) -> std::path::PathBuf {
-    sibling(dir, ".lock")
+    #[cfg(windows)]
+    {
+        sibling(dir, ".lock")
+    }
+    #[cfg(not(windows))]
+    {
+        dir.join("identity.lock")
+    }
 }
 
 fn lock_within(dir: &Path, wait: Duration) -> Result<std::fs::File> {
-    let path = lock_file(dir);
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let file = options
-        .open(&path)
-        .with_context(|| format!("cannot open {}", path.display()))?;
     let deadline = Instant::now() + wait;
     loop {
-        match file.try_lock() {
-            Ok(()) => return Ok(file),
-            Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            // TimedOut is not a damaged identity, so the service restarts instead of exiting 78.
-            Err(std::fs::TryLockError::WouldBlock) => {
-                return Err(std::io::Error::from(std::io::ErrorKind::TimedOut)).with_context(
-                    || {
-                        format!(
-                            "another process holds the lock {} for more than {wait:?}; stop that process and run the command again",
-                            path.display()
-                        )
-                    },
-                );
-            }
-            Err(std::fs::TryLockError::Error(error)) => {
-                return Err(error).with_context(|| format!("cannot lock {}", path.display()));
+        let path = lock_path(dir);
+        let file = open_lock_file(&path)?;
+        loop {
+            match file.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                // TimedOut is not a damaged identity, so the service restarts instead of exiting 78.
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(std::io::Error::from(std::io::ErrorKind::TimedOut)).with_context(
+                        || {
+                            format!(
+                                "another process holds the lock {} for more than {wait:?}; stop that process and run the command again",
+                                path.display()
+                            )
+                        },
+                    );
+                }
+                Err(std::fs::TryLockError::Error(error)) => {
+                    return Err(error).with_context(|| format!("cannot lock {}", path.display()));
+                }
             }
         }
+        if still_at(&file, &path) {
+            return Ok(file);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn lock_path(dir: &Path) -> std::path::PathBuf {
+    lock_file(dir)
+}
+
+/// Between the two renames of a save, and after a crash there, the lock file is in the backup.
+#[cfg(not(windows))]
+fn lock_path(dir: &Path) -> std::path::PathBuf {
+    let backup = sibling(dir, ".old");
+    if !dir.exists() && backup.exists() {
+        lock_file(&backup)
+    } else {
+        lock_file(dir)
+    }
+}
+
+#[cfg(windows)]
+fn open_lock_file(path: &Path) -> Result<std::fs::File> {
+    crate::winsec::open_or_create_protected(path)
+}
+
+#[cfg(not(windows))]
+fn open_lock_file(path: &Path) -> Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+        .with_context(|| format!("cannot open {}", path.display()))
+}
+
+#[cfg(windows)]
+fn still_at(_file: &std::fs::File, _path: &Path) -> bool {
+    true
+}
+
+/// A save that swapped the directory while this process waited leaves it with the lock of the old
+/// directory.
+#[cfg(not(windows))]
+fn still_at(file: &std::fs::File, path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    match (file.metadata(), std::fs::metadata(path)) {
+        (Ok(held), Ok(current)) => held.dev() == current.dev() && held.ino() == current.ino(),
+        _ => false,
     }
 }
 
@@ -808,7 +868,6 @@ pub(crate) mod tests {
         let loaded = StoredIdentity::load(&dir).expect("the identity must load");
         assert_eq!(loaded.agent_id, "new-agent");
         assert_eq!(loaded.key_pem, sample().key_pem);
-        assert!(lock_file(&dir).is_file(), "the swap keeps the lock file");
         remove(&dir);
     }
 
@@ -832,6 +891,36 @@ pub(crate) mod tests {
             "{text}"
         );
         drop(held);
+        remove(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_id_03_a_waiter_takes_the_lock_of_the_directory_that_a_save_swapped_in() {
+        let dir = temp_dir("lock-swap");
+        sample().save(&dir).expect("the save must succeed");
+        let held = lock(&dir).expect("cannot take the lock");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiter_dir = dir.clone();
+        let waiter = std::thread::spawn(move || {
+            let _ = tx.send(lock(&waiter_dir).map(drop));
+        });
+        assert_waits(&rx, "the waiter");
+        let old = sibling(&dir, ".swapped");
+        let _ = std::fs::remove_dir_all(&old);
+        std::fs::rename(&dir, &old).expect("cannot move the directory");
+        paths::ensure_config_dir(&dir).expect("cannot create the new directory");
+        let new = lock(&dir).expect("the new directory has a lock of its own");
+        drop(held);
+        assert_waits(&rx, "a waiter on the old lock file");
+        drop(new);
+
+        rx.recv()
+            .expect("the waiter must answer")
+            .expect("the waiter must take the new lock");
+        waiter.join().expect("the waiter must not panic");
+        let _ = std::fs::remove_dir_all(&old);
         remove(&dir);
     }
 
