@@ -140,6 +140,21 @@
 		job ? (job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey)) : t('jobs.title')
 	);
 
+	const subtitle = $derived.by(() => {
+		if (!job) return '';
+		const parts = [
+			job.plan_name
+				? `${t('jobs.plan')} ${job.plan_name}`
+				: t(`jobs.kind.${job.kind}` as MessageKey),
+			`${t('jobs.host').toLowerCase()} ${job.agent_hostname ?? t('common.none')}`,
+			t(`jobDetail.triggeredBy.${job.trigger}` as MessageKey)
+		];
+		if (progress && progress.total > 0 && live) {
+			parts.push(t('jobDetail.stepOf', { current: progress.position, total: progress.total }));
+		}
+		return parts.join(' · ');
+	});
+
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
 		return t('table.error');
@@ -377,6 +392,7 @@
 
 <RecordPage
 	title={job?.id ?? id}
+	description={subtitle}
 	crumbs={[{ label: id }]}
 	{loading}
 	error={notFound ? t('jobDetail.notFound') : error && !job ? error : null}
@@ -411,22 +427,6 @@
 	{/snippet}
 	{#snippet banners()}
 		{#if job}
-			<p class="head__subtitle">
-				{#if job.plan_name}
-					{t('jobs.plan')}
-					<a href={resolve('/(app)/plans')}>{job.plan_name}</a>
-					·
-				{:else}
-					{t(`jobs.kind.${job.kind}` as MessageKey)}
-					·
-				{/if}
-				{t('jobs.host').toLowerCase()}
-				<a href={resolve('/(app)/hosts')}>{job.agent_hostname ?? t('common.none')}</a>
-				· {t(`jobDetail.triggeredBy.${job.trigger}` as MessageKey)}
-				{#if progress && progress.total > 0 && live}
-					· {t('jobDetail.stepOf', { current: progress.position, total: progress.total })}
-				{/if}
-			</p>
 			{#if reasonOf(job)}
 				<p class="head__reason">{reasonOf(job)}</p>
 			{/if}
@@ -704,13 +704,6 @@
 		background-color: var(--rh-color-running-subtle);
 		color: var(--rh-color-running-subtle-text);
 		font-size: var(--rh-font-size-xs);
-	}
-
-	.head__subtitle {
-		margin: var(--rh-space-2) 0 0;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-		overflow-wrap: anywhere;
 	}
 
 	.head__reason {
