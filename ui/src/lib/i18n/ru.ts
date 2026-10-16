@@ -203,6 +203,9 @@ export const ru: Record<MessageKey, string> = {
 	'tenants.created': 'Организация создана.',
 	'tenants.suspend': 'Приостановить',
 	'tenants.resume': 'Возобновить',
+	'tenants.suspendFor': 'Приостановить: {name}',
+	'tenants.resumeFor': 'Возобновить: {name}',
+	'tenants.moreActions': 'Другие действия: {name}',
 	'tenants.suspended': 'Организация приостановлена.',
 	'tenants.resumed': 'Организация возобновлена.',
 	'tenants.deleteTitle': 'Удалить организацию?',
@@ -308,6 +311,7 @@ export const ru: Record<MessageKey, string> = {
 	'tokens.lastUsed': 'Последнее использование',
 	'tokens.created': 'Токен создан.',
 	'tokens.revoke': 'Отозвать',
+	'tokens.revokeFor': 'Отозвать: {name}',
 	'tokens.revokeTitle': 'Отозвать токен?',
 	'tokens.revokeBody':
 		'Это действие отзовёт токен «{name}». Инструменты с этим токеном остановятся. Продолжить?',
@@ -351,6 +355,8 @@ export const ru: Record<MessageKey, string> = {
 	'secrets.usage.channel': 'Канал',
 	'secrets.usage.jobTemplate': 'Шаблон задания',
 	'secrets.replace': 'Заменить значение',
+	'secrets.replaceFor': 'Заменить значение: {name}',
+	'secrets.moreActions': 'Другие действия: {name}',
 	'secrets.replaceTitle': 'Заменить значение секрета',
 	'secrets.replaceHidden': 'Старое значение остаётся скрытым',
 	'secrets.replaceHiddenText':
@@ -442,6 +448,7 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.pending.subtitle': 'Токены регистрации, которые ждут хост.',
 	'hosts.pending.meta': 'Создан: {name} · {created} · истекает {expires}',
 	'hosts.pending.cancel': 'Отменить',
+	'hosts.pending.cancelFor': 'Отменить токен {prefix}',
 	'hosts.pending.keep': 'Оставить',
 	'hosts.pending.cancelTitle': 'Отменить регистрацию?',
 	'hosts.pending.cancelBody':
@@ -991,6 +998,7 @@ export const ru: Record<MessageKey, string> = {
 	'audit.filters.allActions': 'Все действия',
 	'audit.copyJson': 'Копировать как JSON',
 	'audit.details': 'Подробности',
+	'audit.detailsFor': 'Подробности записи {id}',
 	'audit.recordTitle': 'Запись аудита {id}',
 	'audit.oldAndNew': 'Старое и новое',
 	'audit.actorType.user': 'Пользователь',

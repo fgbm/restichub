@@ -20,6 +20,8 @@ export interface TabItem {
 
 export interface MenuItem {
 	label: string;
+	/** Tooltip of the icon button in a row with one or two actions, instead of the label. */
+	hint?: string;
 	icon?: IconName;
 	/** A menu item without an action is a heading, not a command. */
 	onSelect?: () => void;

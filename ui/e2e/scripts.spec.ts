@@ -94,9 +94,10 @@ test('the script templates screen opens a built-in template read-only and copies
 	await expect(page.getByText('Remove old dumps')).toBeVisible();
 
 	await page
-		.getByRole('button', { name: 'More actions for PostgreSQL dump with pg_dump (Linux)' })
+		.getByRole('row')
+		.filter({ hasText: 'PostgreSQL dump with pg_dump (Linux)' })
+		.getByRole('button', { name: 'Make a copy' })
 		.click();
-	await page.getByRole('menuitem', { name: 'Make a copy' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Add a script template' });
 	await expect(dialog.getByLabel(/^Template/)).toHaveValue(
 		'PostgreSQL dump with pg_dump (Linux) copy'
@@ -107,11 +108,12 @@ test('the script templates screen opens a built-in template read-only and copies
 	await expect(page.getByText('Database dump', { exact: true })).toBeVisible();
 
 	// A built-in template cannot be deleted.
-	await page
-		.getByRole('button', { name: 'More actions for PostgreSQL dump with pg_dump (Linux)' })
-		.click();
-	await expect(page.getByRole('menuitem', { name: 'Delete' })).toHaveCount(0);
-	await page.keyboard.press('Escape');
+	await expect(
+		page
+			.getByRole('row')
+			.filter({ hasText: 'PostgreSQL dump with pg_dump (Linux)' })
+			.getByRole('button', { name: 'Delete' })
+	).toHaveCount(0);
 
 	await page.getByRole('button', { name: 'More actions for Database dump' }).click();
 	await page.getByRole('menuitem', { name: 'Delete' }).click();

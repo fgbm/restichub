@@ -9,12 +9,12 @@
 		Badge,
 		Button,
 		ConfirmDialog,
-		DropdownMenu,
 		EmptyState,
 		PageHeader,
 		Select,
 		SidePanel,
-		Table
+		Table,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { MenuItem, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -241,10 +241,8 @@
 		filterPlaceholder={t('profiles.searchPlaceholder')}
 	>
 		{#snippet rowActions(profile)}
-			<DropdownMenu
-				icon="more"
-				align="end"
-				label={t('profiles.moreActions', { name: profile.name })}
+			<RowActions
+				moreLabel={t('profiles.moreActions', { name: profile.name })}
 				items={actionsFor(profile)}
 			/>
 		{/snippet}
