@@ -12,15 +12,21 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 4. A record page has the sections on the left and a sticky side panel on the right. The side panel shows a summary or the record parameters, with the label above the value (see `RepositoryEditor`, `ProfileEditor` and `HostPage`).
 5. A small form or a confirmation stays in a centered modal.
 
-## 2. Tables
+## 2. Lists and tables
 
-1. A click on a row opens the record. The row holds a real link that covers the row. Ctrl-click and middle-click open a new tab. The Tab key and the Enter key work, and a screen reader reads a link. A text selection does not open the record. Do not add an "Open" button or a separate link style on the name.
-2. If a table has no record page, the row opens a side panel.
-3. One or two row actions are icon buttons. Each icon button has a Lucide icon, a tooltip and an `aria-label`. Three or more row actions are in one "…" button. Do not mix an icon button and a "…" button. Do not put a text button in a row. A click on a row control does not open the row. Opening the record is not an action and does not count.
-4. A row has no link to another entity. For example, the host and the repository in a job row are plain text. Related records open from the record page. The list of the items of an entity is a filter.
-5. A list shows only the status pill (`StatusPill`). It does not show a reason or an error text under the pill. The details are on the record page.
-6. A table fits in 1440 px without a horizontal scroll. A long name is cut with an ellipsis and a tooltip shows the full value. A date and a time do not wrap.
-7. A table has one compact filter bar above it. The bar has a search field, popover facets with counts, period presets, and chips of the applied filters. Each chip has a × button. The bar has a Reset button. A filter applies at once. The page context, for example the repository, is in the page header and not in the filter bar. A large list filters and pages on the server (ADR-0009).
+1. A list of entities uses a list view, not a column table. This applies to hosts, jobs, profiles, repositories, plans, channels, secrets, API tokens, users, templates, tenants, snapshots, alerts and audit events. The model is the pull request list of GitHub.
+2. Each item has two lines. Line 1 has a type or status icon or pill and the name in bold. Line 2 has muted metadata with " · " between the values, for example `windows · x86_64 · agent 0.1.0 · last contact 24 s ago`.
+3. The name is the only link in the item. It is a real link to the record page. Ctrl-click and middle-click open a new tab, and a screen reader reads a link. The remaining part of the item is not clickable, so a person can select the text. Do not add an "Open" button.
+4. If an entity has no record page, the name opens a side panel.
+5. The row actions are at the right of the item. One or two row actions are icon buttons. Each icon button has a Lucide icon, a tooltip and an `aria-label`. Three or more row actions are in one "…" button. Do not mix an icon button and a "…" button. Do not put a text button in an item. Opening the record is not an action and does not count.
+6. An item has no link to another entity. For example, the host and the repository in a job item are plain text. Related records open from the record page. The list of the items of an entity is a filter.
+7. An item shows only the status pill (`StatusPill`). It does not show a reason or an error text under the pill. The details are on the record page.
+8. A list fits in 1440 px without a horizontal scroll. A long name is cut with an ellipsis and a tooltip shows the full value. A date and a time do not wrap.
+9. A search field is above the list. The list header has state tabs at the left. Each tab shows a count, for example "Online 312 · Offline 4 · Revoked 7". For jobs, the tabs are the status groups. A tab is a quick filter.
+10. At the right, the list header has facet dropdowns and a Sort dropdown. A facet dropdown has a search field in it. The Sort dropdown sets the field and the order.
+11. Each applied filter shows as a chip with a × button. The Reset button removes all filters. A filter applies at once. The page context, for example the repository, is in the page header and not in the list header. A large list filters and pages on the server (ADR-0009).
+12. A list has no bulk selection.
+13. Use a column table (`DataTable`) only for tabular data: file trees, parameters, numbers and comparisons. A table has the same rules for row actions, links and width as a list.
 
 ## 3. Status and text
 
