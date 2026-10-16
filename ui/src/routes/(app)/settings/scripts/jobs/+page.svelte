@@ -6,17 +6,18 @@
 	import ScriptsEditor from '#lib/components/ScriptsEditor.svelte';
 	import {
 		Alert,
-		Badge,
 		Button,
 		ConfirmDialog,
-		DataTable,
 		Dialog,
-		EmptyState,
 		FilterBar,
+		ListView,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, RowAction, TableColumn } from '#lib/components/ui/index.ts';
-	import { matchesSearch } from '#lib/filters.ts';
+	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
+	import type { HookPhase, ScriptInterpreter } from '#lib/api/index.ts';
+	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { interpreterLabel, jobTemplateMeta } from '#lib/template-item.ts';
+	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { draftOf, scriptOf, templateDescription, templateName } from '#lib/scripts.ts';
@@ -45,63 +46,83 @@
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
 
-	const columns = $derived<TableColumn<JobTemplate>[]>([
-		{
-			key: 'name',
-			header: t('jobTemplates.name'),
-			truncate: 'sm',
-			value: (row) => templateName(row, 'job')
-		},
-		{
-			key: 'description',
-			header: t('scriptTemplates.description.label'),
-			truncate: 'md',
-			hideNarrow: true,
-			sortable: false,
-			value: (row) => templateDescription(row, 'job')
-		},
-		{
-			key: 'scripts',
-			header: t('jobTemplates.scripts'),
-			align: 'right',
-			value: (row) => String(row.scripts.length),
-			cell: (row) => String(row.scripts.length)
-		},
-		{
-			key: 'source',
-			header: t('scriptTemplates.source'),
-			value: (row) => (row.builtin ? t('scriptTemplates.builtin') : t('scriptTemplates.own')),
-			render: sourceCell
-		}
-	]);
-
-	const empty = $derived(!loading && !error && templates.length === 0);
-
-	const filters = queryFilters(['q', 'source'] as const);
+	const filters = queryFilters(['q', 'source', 'interpreter', 'phase', 'sort', 'order'] as const);
 
 	const facets = $derived<FilterFacet[]>([
 		{
-			key: 'source',
-			label: t('scriptTemplates.source'),
-			multiple: false,
-			options: (['builtin', 'own'] as const).map((value) => ({
-				value,
-				label: t(value === 'builtin' ? 'scriptTemplates.builtin' : 'scriptTemplates.own'),
-				count: templates.filter((template) => template.builtin === (value === 'builtin')).length
+			key: 'interpreter',
+			label: t('templates.facet.interpreter'),
+			options: facetCounts(templates, (template) => [
+				...new Set(template.scripts.map((script) => script.interpreter))
+			]).map((option) => ({
+				...option,
+				label: interpreterLabel(option.value as ScriptInterpreter)
+			}))
+		},
+		{
+			key: 'phase',
+			label: t('templates.facet.phase'),
+			options: facetCounts(templates, (template) => [
+				...new Set(template.scripts.map((script) => script.phase))
+			]).map((option) => ({
+				...option,
+				label: t(`templates.phase.${option.value as HookPhase}`)
 			}))
 		}
 	]);
 
-	const shown = $derived(
+	const matching = $derived(
 		templates.filter((template) => {
-			const { q, source } = filters.value;
-			if (source && template.builtin !== (source === 'builtin')) return false;
+			const { q, interpreter, phase } = filters.value;
+			if (
+				interpreter &&
+				!template.scripts.some((script) => splitList(interpreter).includes(script.interpreter))
+			) {
+				return false;
+			}
+			if (phase && !template.scripts.some((script) => splitList(phase).includes(script.phase))) {
+				return false;
+			}
 			return matchesSearch(q, [
 				templateName(template, 'job'),
 				templateDescription(template, 'job')
 			]);
 		})
 	);
+
+	// The own templates come first when there are any.
+	const ownCount = $derived(templates.filter((template) => !template.builtin).length);
+	const states = $derived({
+		key: 'source',
+		default: ownCount > 0 ? 'own' : 'builtin',
+		options: (['own', 'builtin'] as const).map((value) => ({
+			value,
+			label: t(value === 'own' ? 'templates.tab.own' : 'templates.tab.builtin'),
+			count: matching.filter((template) => template.builtin === (value === 'builtin')).length
+		}))
+	});
+
+	const sort = $derived({
+		default: 'name',
+		options: [{ value: 'name', label: t('templates.sort.name') }]
+	});
+
+	const shown = $derived.by(() => {
+		const builtin = (filters.value.source || states.default) === 'builtin';
+		const factor = filters.value.order === 'desc' ? -1 : 1;
+		return matching
+			.filter((template) => template.builtin === builtin)
+			.sort((a, b) => factor * templateName(a, 'job').localeCompare(templateName(b, 'job')));
+	});
+
+	const filtered = $derived(
+		templates.length > 0 &&
+			Boolean(filters.value.q || filters.value.interpreter || filters.value.phase)
+	);
+
+	function resetFilters(): void {
+		filters.update({ q: '', source: '', interpreter: '', phase: '' });
+	}
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -226,7 +247,7 @@
 			{
 				id: 'delete',
 				label: t('scriptTemplates.delete'),
-				icon: 'octagon',
+				icon: 'trash',
 				danger: true,
 				hidden: template.builtin,
 				onSelect: () => {
@@ -246,12 +267,6 @@
 	);
 </script>
 
-{#snippet sourceCell(template: JobTemplate)}
-	<Badge tone={template.builtin ? 'accent' : 'neutral'}>
-		{template.builtin ? t('scriptTemplates.builtin') : t('scriptTemplates.own')}
-	</Badge>
-{/snippet}
-
 <SettingsLayout
 	title={t('jobTemplates.title')}
 	description={t('jobTemplates.description')}
@@ -261,48 +276,45 @@
 		<Button variant="primary" icon="plus" onclick={openCreate}>{t('jobTemplates.add')}</Button>
 	{/snippet}
 
-	{#if empty}
-		<EmptyState
-			icon="checklist"
-			title={t('jobTemplates.emptyTitle')}
-			description={t('jobTemplates.emptyDescription')}
-			bordered
-		>
-			<Button variant="primary" icon="plus" onclick={openCreate}>
-				{t('jobTemplates.addFirst')}
-			</Button>
-		</EmptyState>
-	{:else}
-		<!-- A template has no record page: the row opens its form (design/style/ui-principles.md, 2.2). -->
-		<DataTable
-			{columns}
-			rows={shown}
-			{loading}
-			{error}
-			rowKey={(template) => template.id}
-			onRowOpen={openEdit}
-			actions={actionsFor}
-			moreLabel={(template) =>
-				t('scriptTemplates.moreActions', { name: templateName(template, 'job') })}
-			emptyTitle={t('filter.noMatches')}
-			emptyDescription={t('filter.noMatchesDescription')}
-		>
-			{#snippet toolbar()}
-				<FilterBar
-					label={t('scriptTemplates.filters')}
-					value={filters.value}
-					search={{
-						key: 'q',
-						label: t('hosts.search'),
-						placeholder: t('jobTemplates.searchPlaceholder')
-					}}
-					{facets}
-					onchange={filters.update}
-					onreset={filters.reset}
-				/>
-			{/snippet}
-		</DataTable>
-	{/if}
+	<ListView
+		label={t('jobTemplates.title')}
+		items={shown}
+		itemKey={(template) => template.id}
+		icon={() => ({ name: ENTITY_ICONS.jobTemplate })}
+		title={(template) => templateName(template, 'job')}
+		onOpen={openEdit}
+		meta={jobTemplateMeta}
+		actions={actionsFor}
+		moreLabel={(template) =>
+			t('scriptTemplates.moreActions', { name: templateName(template, 'job') })}
+		{loading}
+		{error}
+		filtered={filtered || (templates.length > 0 && shown.length === 0)}
+		onReset={resetFilters}
+		emptyIcon={ENTITY_ICONS.jobTemplate}
+		emptyTitle={t('jobTemplates.emptyTitle')}
+		emptyDescription={t('jobTemplates.emptyDescription')}
+	>
+		{#snippet emptyActions()}
+			<Button variant="primary" onclick={openCreate}>{t('jobTemplates.addFirst')}</Button>
+		{/snippet}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('scriptTemplates.filters')}
+				value={filters.value}
+				search={{
+					key: 'q',
+					label: t('hosts.search'),
+					placeholder: t('jobTemplates.searchPlaceholder')
+				}}
+				{states}
+				{facets}
+				{sort}
+				onchange={filters.update}
+				onreset={resetFilters}
+			/>
+		{/snippet}
+	</ListView>
 </SettingsLayout>
 
 <Dialog
