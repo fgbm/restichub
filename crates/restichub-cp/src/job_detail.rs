@@ -189,7 +189,7 @@ pub struct JobDetailView {
     /// The identifier of the job signing key that signed the job. Null until the control plane sent
     /// the job, and for a job that it sent before it recorded the key.
     pub signing_key_id: Option<String>,
-    /// The parameters of a restore job. Null for any other job.
+    /// The parameters that the operator chose. Null for every other kind of job.
     pub restore: Option<RestoreParamsView>,
 }
 
@@ -201,7 +201,6 @@ pub struct RestoreParamsView {
     pub includes: Vec<String>,
     /// Empty unless `includes` is empty.
     pub excludes: Vec<String>,
-    /// The directory on the host that runs the job.
     pub target: String,
     pub overwrite: OverwriteMode,
     pub dry_run: bool,

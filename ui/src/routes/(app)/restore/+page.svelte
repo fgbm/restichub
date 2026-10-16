@@ -332,7 +332,8 @@
 
 	.filters__actions {
 		display: flex;
-		align-items: end;
+		grid-column: 1 / -1;
+		align-items: center;
 		gap: var(--rh-space-2);
 	}
 

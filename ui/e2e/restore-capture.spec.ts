@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
-// Captures the Restore screen for a review: the snapshot list, the tree and the restore dialog.
+// Captures the Restore pages for a review: the snapshot list, the snapshot page, the restore dialog
+// and the job page.
 // It runs only with CAPTURE and CAPTURE_DIR set, so CI skips it (FR-RS-01 to FR-RS-04).
 const dir = process.env.CAPTURE_DIR;
 test.skip(!process.env.CAPTURE || !dir, 'set CAPTURE and CAPTURE_DIR to write the screenshots');
@@ -12,6 +13,7 @@ type Labels = {
 	nav: string;
 	restore: string;
 	snapshot: RegExp;
+	back: RegExp;
 	expand: (name: string) => string;
 	select: (name: string) => string;
 	open: string;
@@ -24,6 +26,7 @@ const EN: Labels = {
 	nav: 'Primary navigation',
 	restore: 'Restore',
 	snapshot: /^Open snapshot /,
+	back: /Back to the snapshots/,
 	expand: (name) => `Expand ${name}`,
 	select: (name) => `Select ${name}`,
 	open: 'Restore…',
@@ -36,6 +39,7 @@ const RU: Labels = {
 	nav: 'Основная навигация',
 	restore: 'Восстановление',
 	snapshot: /^Открыть снимок /,
+	back: /Назад к снимкам/,
 	expand: (name) => `Раскрыть ${name}`,
 	select: (name) => `Отметить ${name}`,
 	open: 'Восстановить…',
@@ -44,9 +48,16 @@ const RU: Labels = {
 	existing: 'Существующие файлы'
 };
 
-async function capture(page: Page, scheme: 'light' | 'dark', labels: Labels, suffix: string) {
+async function capture(
+	page: Page,
+	scheme: 'light' | 'dark',
+	labels: Labels,
+	suffix: string,
+	width = 1440
+) {
 	mkdirSync(out, { recursive: true });
-	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.setViewportSize({ width, height: width < 600 ? 800 : 900 });
+	const size = width < 600 ? '-mobile' : '';
 	await page.emulateMedia({ colorScheme: scheme });
 	await page.addInitScript((value) => {
 		localStorage.setItem('restichub.mock.agents', 'sample');
@@ -65,25 +76,52 @@ async function capture(page: Page, scheme: 'light' | 'dark', labels: Labels, suf
 		.getByRole('link', { name: labels.restore, exact: true })
 		.click();
 
-	const rows = page.getByRole('button', { name: labels.snapshot });
+	const rows = page.getByRole('link', { name: labels.snapshot });
 	await expect(rows.first()).toBeVisible();
 	await page.waitForTimeout(300);
-	await page.screenshot({ path: `${out}/restore-snapshots-${scheme}${suffix}.png` });
+	await page.screenshot({
+		path: `${out}/restore-snapshots-${scheme}${suffix}${size}.png`,
+		fullPage: true
+	});
+
+	const listOverflow = await page.evaluate(
+		() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+	);
+	expect(listOverflow).toBeLessThanOrEqual(0);
 
 	await rows.first().click();
 	const tree = page.getByRole('tree');
 	await tree.getByRole('button', { name: labels.expand('srv') }).click();
 	await tree.getByRole('button', { name: labels.expand('www') }).click();
-	await tree.getByRole('button', { name: labels.expand('etc') }).click();
-	await tree.getByRole('checkbox', { name: labels.select('data') }).check();
+	await tree.getByRole('button', { name: labels.expand('data') }).click();
+	await tree.getByRole('button', { name: labels.expand('home') }).click();
+	await tree.getByRole('button', { name: labels.expand('anna') }).click();
+	await tree.getByRole('checkbox', { name: labels.select('backup.sql') }).check();
+	await tree.getByRole('checkbox', { name: labels.select('photo.jpg') }).check();
 	await page.waitForTimeout(300);
-	await page.screenshot({ path: `${out}/restore-tree-${scheme}${suffix}.png` });
+	await page.screenshot({ path: `${out}/restore-snapshot-${scheme}${suffix}${size}.png` });
+	await page.evaluate(() => window.scrollTo(0, 0));
+	await page.waitForTimeout(200);
+	await page.screenshot({ path: `${out}/restore-snapshot-top-${scheme}${suffix}${size}.png` });
+	const overflow = await page.evaluate(
+		() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+	);
+	expect(overflow).toBeLessThanOrEqual(0);
 
 	await page.getByRole('button', { name: labels.open }).click();
 	const dialog = page.getByRole('dialog');
-	await dialog.getByLabel(labels.host).selectOption({ label: 'srv-db-01 · linux' });
 	await page.waitForTimeout(300);
-	await page.screenshot({ path: `${out}/restore-dialog-${scheme}${suffix}.png` });
+	await page.screenshot({ path: `${out}/restore-dialog-${scheme}${suffix}${size}.png` });
+	await dialog.getByLabel(labels.existing).selectOption({ index: 0 });
+	await page.waitForTimeout(200);
+	await page.screenshot({ path: `${out}/restore-dialog-replace-${scheme}${suffix}${size}.png` });
+	await dialog.locator('button[type="submit"]').click();
+	await expect(page.getByRole('heading', { level: 1, name: /^j_/ })).toBeVisible();
+	await page.waitForTimeout(1500);
+	await page.screenshot({
+		path: `${out}/restore-job-${scheme}${suffix}${size}.png`,
+		fullPage: true
+	});
 }
 
 test('captures the Restore screen in English, light', async ({ page }) => {
@@ -96,4 +134,8 @@ test('captures the Restore screen in English, dark', async ({ page }) => {
 
 test('captures the Restore screen in Russian, light', async ({ page }) => {
 	await capture(page, 'light', RU, '-ru');
+});
+
+test('captures the Restore pages in Russian, light, 390 wide', async ({ page }) => {
+	await capture(page, 'light', RU, '-ru', 390);
 });

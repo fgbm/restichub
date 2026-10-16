@@ -24,7 +24,7 @@ describe('RestoreParams', () => {
 		expect(screen.getByText('/var/lib/restichub-restore/a1b2c3d4')).toBeVisible();
 		expect(screen.getByText('The whole snapshot')).toBeVisible();
 		expect(screen.getByText('Replace every file')).toBeVisible();
-		expect(screen.queryByText('Excluded paths')).toBeNull();
+		expect(screen.queryByText('Exclusions')).toBeNull();
 		const verify = screen.getByText('Verify').nextElementSibling;
 		const dryRun = screen.getByText('Dry run').nextElementSibling;
 		expect(verify).toHaveTextContent('Yes');
@@ -39,7 +39,7 @@ describe('RestoreParams', () => {
 		expect(screen.getByText('/srv/data')).toBeVisible();
 		expect(screen.getByText('/etc/nginx')).toBeVisible();
 		expect(screen.queryByText('The whole snapshot')).toBeNull();
-		expect(screen.getByText('Excluded paths')).toBeVisible();
+		expect(screen.getByText('Exclusions')).toBeVisible();
 		expect(screen.getByText('*.tmp')).toBeVisible();
 	});
 });

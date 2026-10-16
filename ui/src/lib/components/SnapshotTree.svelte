@@ -261,7 +261,7 @@
 	}
 
 	.tree__target {
-		flex: 0 1 40%;
+		flex: 0 100 auto;
 		min-width: 0;
 		overflow: hidden;
 		color: var(--rh-color-text-muted);
@@ -271,7 +271,7 @@
 	}
 
 	.tree__name {
-		flex: 1 1 auto;
+		flex: 0 1 auto;
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -279,6 +279,7 @@
 	}
 
 	.tree__meta {
+		margin-inline-start: auto;
 		color: var(--rh-color-text-muted);
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;

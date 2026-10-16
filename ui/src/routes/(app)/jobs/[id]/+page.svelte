@@ -693,6 +693,7 @@
 
 	.head {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: flex-start;
 		gap: var(--rh-space-4);
 		padding-bottom: var(--rh-space-6);
@@ -700,7 +701,7 @@
 
 	.head__text {
 		min-width: 0;
-		flex: 1;
+		flex: 1 1 18rem;
 	}
 
 	.head__title-row {

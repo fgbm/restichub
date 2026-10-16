@@ -24,25 +24,34 @@ test('the snapshot list takes filters and the tree loads a large directory by pa
 	await openRestore(page);
 
 	// The first visit reads the snapshots at once.
-	await expect(page.getByRole('button', { name: /^Open snapshot / })).toHaveCount(6);
+	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(8);
 	await page.locator('#restore-host').fill('ws-anna');
 	await page.getByRole('button', { name: 'Find snapshots' }).click();
-	await expect(page.getByRole('button', { name: /^Open snapshot / })).toHaveCount(2);
+	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(2);
 
 	await page
-		.getByRole('button', { name: /^Open snapshot / })
+		.getByRole('link', { name: /^Open snapshot / })
 		.first()
 		.click();
 	const tree = page.getByRole('tree', { name: 'Files of the snapshot' });
 	await expect(tree.getByText('home', { exact: true })).toBeVisible();
 	await tree.getByRole('button', { name: 'Expand home' }).click();
-	await expect(tree.getByText('anna', { exact: true })).toBeVisible();
+	await tree.getByRole('button', { name: 'Expand anna' }).click();
+	// A link shows its target and has no expand button.
+	await expect(tree.getByText('→ /srv/www')).toBeVisible();
+	await expect(tree.getByRole('button', { name: 'Expand current-project' })).toHaveCount(0);
+
+	// The back link keeps the filters of the list.
+	await page.getByRole('link', { name: /Back to the snapshots/ }).click();
+	await expect(page.locator('#restore-host')).toHaveValue('ws-anna');
+	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(2);
 
 	// A directory with 2500 entries comes in pages of 1000.
 	await page.locator('#restore-host').fill('');
 	await page.getByRole('button', { name: 'Find snapshots' }).click();
+	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(8);
 	await page
-		.getByRole('button', { name: /^Open snapshot / })
+		.getByRole('link', { name: /^Open snapshot / })
 		.first()
 		.click();
 	await tree.getByRole('button', { name: 'Expand srv' }).click();
@@ -62,7 +71,7 @@ test('a restore asks for the target, warns about a system path and opens the job
 }) => {
 	await openRestore(page);
 	await page
-		.getByRole('button', { name: /^Open snapshot / })
+		.getByRole('link', { name: /^Open snapshot / })
 		.first()
 		.click();
 	const tree = page.getByRole('tree', { name: 'Files of the snapshot' });
@@ -71,17 +80,16 @@ test('a restore asks for the target, warns about a system path and opens the job
 
 	await page.getByRole('button', { name: 'Restore…' }).click();
 	const dialog = page.getByRole('dialog');
-	await expect(dialog.getByText('Selected paths: 1')).toBeVisible();
+	await expect(dialog.getByRole('region', { name: 'Summary' })).toContainText('Selected paths: 1');
 	await dialog.getByLabel('Target host').selectOption({ label: 'srv-db-01 · linux' });
 	// The target starts as a folder in the restore root that the host reports.
 	await expect(dialog.getByLabel('Target path')).toHaveValue(
 		/^\/var\/lib\/restichub-restore\/[0-9a-f]{8}$/
 	);
 	await dialog.getByLabel('Target path').fill('/etc');
-	await expect(dialog.getByText('System path', { exact: true })).toBeVisible();
-	await expect(
-		dialog.getByText('The target is outside the restore roots of the host.')
-	).toBeVisible();
+	// One message for a path outside the roots; the system warning stays away.
+	await expect(dialog.getByText(/This path is outside the restore roots/)).toBeVisible();
+	await expect(dialog.getByText('System path', { exact: true })).toHaveCount(0);
 	await dialog.getByLabel('Target path').fill('relative');
 	await expect(dialog.getByText('Enter an absolute path.')).toBeVisible();
 	await expect(dialog.getByRole('button', { name: 'Start restore' })).toBeDisabled();
@@ -95,4 +103,8 @@ test('a restore asks for the target, warns about a system path and opens the job
 	// The job detail shows the restore with its summary.
 	await expect(page.getByRole('heading', { level: 1, name: /^j_/ })).toBeVisible();
 	await expect(page.getByText('Files restored', { exact: true })).toBeVisible({ timeout: 10_000 });
+	// The job page lists what the operator chose.
+	await expect(page.getByText('Restore parameters')).toBeVisible();
+	await expect(page.getByText('/var/lib/restichub-restore/job-1')).toBeVisible();
+	await expect(page.getByText('Replace a file that differs')).toBeVisible();
 });

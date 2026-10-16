@@ -5,7 +5,7 @@
  * The test replaces the session store, the navigation and the service, so it renders the screen
  * alone. Only an Admin and an Operator use the screen.
  */
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { agent, listing, repository, snapshot } from './restore-fixtures';

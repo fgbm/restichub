@@ -2272,6 +2272,7 @@ export interface components {
              */
             planned_steps: string[];
             progress?: components["schemas"]["ProgressView"] | null;
+            /** @description The parameters that the operator chose. Null for every other kind of job. */
             restore?: components["schemas"]["RestoreParamsView"] | null;
             /**
              * @description The identifier of the job signing key that signed the job. Null until the control plane sent
@@ -2931,7 +2932,6 @@ export interface components {
             includes: string[];
             overwrite: components["schemas"]["OverwriteMode"];
             snapshot_id: string;
-            /** @description The directory on the host that runs the job. */
             target: string;
             verify: boolean;
         };

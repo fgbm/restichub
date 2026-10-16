@@ -169,7 +169,7 @@ describe('Snapshot page', () => {
 		const user = userEvent.setup();
 		mocks.restoreSnapshot.mockResolvedValue({ id: 'j_8' });
 		render(Snapshot);
-		let dialog = await openDialog(user);
+		const dialog = await openDialog(user);
 		const field = within(dialog).getByLabelText('Exclude paths');
 		await user.type(field, '*.tmp, /var/cache');
 		expect(within(dialog).getByText('Whole snapshot', { selector: 'span' })).toBeVisible();

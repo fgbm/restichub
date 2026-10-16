@@ -52,7 +52,7 @@
 <style>
 	.params {
 		display: grid;
-		grid-template-columns: minmax(80px, 1fr) fit-content(65%);
+		grid-template-columns: max-content minmax(0, 1fr);
 		margin: 0;
 	}
 
