@@ -143,13 +143,18 @@ describe('the Overview screen', () => {
 		const risky = within(plans).getByRole('link', { name: 'risky' }).closest('li') as HTMLElement;
 		expect(within(risky).getByText('At risk')).toHaveClass('status');
 		// A plan in the usual state has no pill (design/style/ui-principles.md, 2.7).
-		const healthy = within(plans).getByRole('link', { name: 'healthy' }).closest('li') as HTMLElement;
+		const healthy = within(plans)
+			.getByRole('link', { name: 'healthy' })
+			.closest('li') as HTMLElement;
 		expect(healthy.querySelector('.status')).toBeNull();
 
 		const repositories = screen.getByRole('list', { name: 'Repositories' });
 		expect(within(repositories).getByText('Stale lock')).toHaveClass('status');
 		expect(within(repositories).getAllByText(/./, { selector: '.status' })).toHaveLength(1);
-		expect(screen.getByRole('link', { name: 'mac-build-01' })).toHaveAttribute('href', '/hosts/a_2');
+		expect(screen.getByRole('link', { name: 'mac-build-01' })).toHaveAttribute(
+			'href',
+			'/hosts/a_2'
+		);
 		expect(screen.getByText('Backup overdue: broken')).toBeInTheDocument();
 		const failed = screen.getByRole('list', { name: 'Recent failed jobs' });
 		expect(within(failed).getByRole('link', { name: 'broken' })).toHaveAttribute(

@@ -8,12 +8,12 @@
 	import type { Job, JobKind, JobQuery, JobStatus } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import { Alert, Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
-	import type { FilterFacet, ListMeta, RowAction } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
 	import { periodWindow } from '#lib/filters.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatCount } from '#lib/format.ts';
-	import { dayTime, elapsed, secondsSpan } from '#lib/list-format.ts';
+	import { isUnfinished, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
 	import { iconOf, isCancelled, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -158,32 +158,8 @@
 		filters.update(Object.fromEntries(FILTER_KEYS.map((key) => [key, ''])));
 	}
 
-	function planLabel(job: Job): string {
-		return job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey);
-	}
-
-	function durationOf(job: Job): string {
-		if (job.started_at) return elapsed(secondsSpan(job.started_at, job.finished_at));
-		return cancellable(job) ? '' : '—';
-	}
-
-	function meta(job: Job): ListMeta[] {
-		const at = job.started_at ?? job.run_at;
-		return [
-			job.agent_hostname ?? '',
-			at ? { text: dayTime(at), time: at } : null,
-			job.plan_name ? t(`jobs.kind.${job.kind}` as MessageKey) : null,
-			job.repository_name ?? '',
-			job.attempt > 1 ? t('jobs.meta.attempt', { n: job.attempt }) : null
-		];
-	}
-
-	function cancellable(job: Job): boolean {
-		return job.status === 'queued' || job.status === 'sent' || job.status === 'running';
-	}
-
 	function actionsFor(job: Job): RowAction[] {
-		if (!canWrite || !cancellable(job)) return [];
+		if (!canWrite || !isUnfinished(job)) return [];
 		return [
 			{
 				id: 'cancel',
@@ -326,12 +302,12 @@
 		itemKey={(job) => job.id}
 		icon={(job) => iconOf(jobState(job))}
 		pill={(job) => pillOf(jobState(job))}
-		title={planLabel}
+		title={jobTitle}
 		href={(job) => resolve('/(app)/jobs/[id]', { id: job.id })}
-		{meta}
-		aside={durationOf}
+		meta={(job) => jobMeta(job)}
+		aside={jobDuration}
 		actions={actionsFor}
-		moreLabel={(job) => t('jobs.moreActions', { name: planLabel(job) })}
+		moreLabel={(job) => t('jobs.moreActions', { name: jobTitle(job) })}
 		mode="server"
 		page={tablePage}
 		{pageSize}
@@ -368,7 +344,7 @@
 	<ConfirmDialog
 		bind:open={cancelOpen}
 		title={t('jobs.cancelTitle')}
-		message={t('jobs.cancelBody', { name: cancelTarget ? planLabel(cancelTarget) : '' })}
+		message={t('jobs.cancelBody', { name: cancelTarget ? jobTitle(cancelTarget) : '' })}
 		confirmLabel={t('jobs.cancel')}
 		cancelLabel={t('jobs.cancelKeep')}
 		tone="danger"

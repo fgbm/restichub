@@ -412,7 +412,9 @@ describe('the Hosts screen', () => {
 		render(Hosts);
 
 		await screen.findByText('host-soon');
-		expect(screen.getByText('Certificate expires soon', { selector: '.status' })).toBeInTheDocument();
+		expect(
+			screen.getByText('Certificate expires soon', { selector: '.status' })
+		).toBeInTheDocument();
 		expect(screen.getByText('Certificate expired', { selector: '.status' })).toBeInTheDocument();
 		expect(document.querySelectorAll('.status')).toHaveLength(2);
 	});
