@@ -46,7 +46,10 @@ test('a created registration appears pending and a cancel removes it', async ({ 
 	await expect(page.getByText('web')).toBeVisible();
 
 	// The closed add dialog stays mounted for a frame and shows a Cancel button too.
-	await page.locator('.pending__row').getByRole('button', { name: 'Cancel' }).click();
+	await page
+		.locator('.pending__row')
+		.getByRole('button', { name: /^Cancel the token/ })
+		.click();
 	const dialog = page.getByRole('dialog', { name: 'Cancel the registration?' });
 	await dialog.getByRole('button', { name: 'Cancel' }).click();
 

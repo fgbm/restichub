@@ -10,10 +10,10 @@
 		Button,
 		ConfirmDialog,
 		Dialog,
-		DropdownMenu,
 		EmptyState,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { MenuItem, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -257,10 +257,8 @@
 			filterPlaceholder={t('jobTemplates.searchPlaceholder')}
 		>
 			{#snippet rowActions(template)}
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('scriptTemplates.moreActions', { name: templateName(template, 'job') })}
+				<RowActions
+					moreLabel={t('scriptTemplates.moreActions', { name: templateName(template, 'job') })}
 					items={actionsFor(template)}
 				/>
 			{/snippet}

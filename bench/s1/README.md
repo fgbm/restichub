@@ -98,6 +98,21 @@ The output directory holds:
 
 Fill `report-template.md` from `report.md` and add it to the issue: #40 for AC-SC-04, #41 for AC-NFR-06.
 
+### Run on its own host
+
+A run can resume after a restart of the host. Copy the repository to `/opt/restichub`, install `systemd/restichub-bench@.service` into `/etc/systemd/system/` and write one environment file for each run in `/etc/restichub-bench/NAME.env`:
+
+```sh
+PROFILE=7d
+OUT=/var/lib/restichub-bench/s1-7d
+BUILD_NETWORK=host
+CAPTURE_SECONDS=86400
+STOP_AT_END=1
+BENCH_REV=<revision>
+```
+
+Then run `systemctl enable --now restichub-bench@NAME`. The containers have restart policies. After a restart of the host or of the service, `run.sh` finds `OUT/load-started-epoch`. It starts the containers and the capture again and waits for the original end time. At the end it writes `report.md`, stops the containers (`STOP_AT_END=1`) and writes `OUT/finished`. A second run next to the first needs its own `COMPOSE_PROJECT_NAME`, `CP_WEB_PORT`, `CP_AGENT_PORT` and `STATE_DIR`. Set `SKIP_BUILD=1` for it, because the images exist.
+
 ### AC-SC-04: the 7-day run (issue #40)
 
 The criterion: 0 jobs failed because of a lock, 0 `restic check` errors, no false alert. The verdict of `report.md` counts the first two measures. A person reads the alert list in `alerts.json` and marks each false alert.

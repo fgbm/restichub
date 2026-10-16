@@ -65,6 +65,7 @@
 	--rh-layout-topbar-height: 56px;
 	--rh-layout-nav-width: 240px;
 	--rh-layout-content-max-width: 1280px;
+	--rh-layout-side-width: 340px;
 	--rh-control-height: 32px;
 
 	/* z-index scale */
@@ -79,6 +80,7 @@
 	/* Motion */
 	--rh-transition-fast: 120ms ease;
 	--rh-transition-slow: 150ms ease;
+	--rh-spin-duration: 1.4s;
 }
 
 /* Light theme (default) */

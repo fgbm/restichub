@@ -41,8 +41,7 @@ test('captures the templates and the snapshot card in Russian, light', async ({ 
 	await expect(page.getByRole('link', { name: /^Открыть снимок / }).first()).toBeVisible();
 	await page.screenshot({ path: `${out}/snapshots-filled-ru-light.png`, fullPage: true });
 
-	await page.locator('#restore-host').fill('нет-такого-хоста');
-	await page.getByRole('button', { name: 'Найти снимки' }).click();
+	await page.locator('#restore-path').fill('нет-такого-пути');
 	await expect(page.getByText('Ни один снимок не подходит под фильтры.')).toBeVisible();
 	await page.screenshot({ path: `${out}/snapshots-empty-ru-light.png`, fullPage: true });
 });

@@ -5,12 +5,19 @@
 		title,
 		description,
 		count,
+		status,
+		context,
 		children
 	}: {
 		title: string;
 		description?: string;
 		/** A counter next to the title, for example the number of rows. */
 		count?: number;
+		/** A status pill next to the title. */
+		status?: Snippet;
+		/** The page context, for example the repository that the list belongs to. */
+		context?: Snippet;
+		/** The primary actions of the page. */
 		children?: Snippet;
 	} = $props();
 </script>
@@ -20,11 +27,15 @@
 		<div class="page-header__title-row">
 			<h1 class="page-header__title">{title}</h1>
 			{#if count !== undefined}<span class="page-header__count">{count}</span>{/if}
+			{@render status?.()}
 		</div>
 		{#if description}
 			<p class="page-header__description">{description}</p>
 		{/if}
 	</div>
+	{#if context}
+		<div class="page-header__context">{@render context()}</div>
+	{/if}
 	{#if children}
 		<div class="page-header__actions">{@render children()}</div>
 	{/if}
@@ -73,6 +84,21 @@
 		color: var(--rh-color-text-muted);
 	}
 
+	.page-header__text {
+		min-width: 0;
+	}
+
+	.page-header__title {
+		overflow-wrap: anywhere;
+	}
+
+	.page-header__context {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+		min-width: 0;
+	}
+
 	.page-header__actions {
 		display: flex;
 		align-items: center;
@@ -80,5 +106,17 @@
 		margin-left: auto;
 		flex-wrap: wrap;
 		justify-content: flex-end;
+	}
+
+	@media (max-width: 720px) {
+		.page-header {
+			flex-wrap: wrap;
+		}
+
+		.page-header__context,
+		.page-header__actions {
+			margin-left: 0;
+			justify-content: flex-start;
+		}
 	}
 </style>

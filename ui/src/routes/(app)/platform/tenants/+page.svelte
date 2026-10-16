@@ -2,7 +2,15 @@
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Tenant } from '#lib/api/index.ts';
-	import { Alert, Button, Dialog, PageHeader, Table, TextField } from '#lib/components/ui/index.ts';
+	import {
+		Alert,
+		Button,
+		Dialog,
+		PageHeader,
+		Table,
+		TextField,
+		RowActions
+	} from '#lib/components/ui/index.ts';
 	import type { TableColumn } from '#lib/components/ui/index.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -166,28 +174,30 @@
 	filterPlaceholder={t('tenants.searchPlaceholder')}
 >
 	{#snippet rowActions(tenant)}
-		{#if tenant.status !== 'deleted'}
-			<Button
-				size="sm"
-				variant="ghost"
-				loading={busyId === tenant.id}
-				onclick={() => toggleStatus(tenant)}
-			>
-				{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
-			</Button>
-			<Button
-				size="sm"
-				variant="ghost"
-				disabled={tenant.status !== 'suspended'}
-				onclick={() => {
-					deleteTarget = tenant;
-					deleteTyped = '';
-					deleteOpen = true;
-				}}
-			>
-				{t('common.delete')}
-			</Button>
-		{/if}
+		<RowActions
+			moreLabel={t('tenants.moreActions', { name: tenant.name })}
+			items={tenant.status === 'deleted'
+				? []
+				: [
+						{
+							label: tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume'),
+							icon: tenant.status === 'active' ? 'pause' : 'refresh',
+							disabled: busyId === tenant.id,
+							onSelect: () => toggleStatus(tenant)
+						},
+						{
+							label: t('common.delete'),
+							icon: 'trash',
+							tone: 'danger',
+							disabled: tenant.status !== 'suspended',
+							onSelect: () => {
+								deleteTarget = tenant;
+								deleteTyped = '';
+								deleteOpen = true;
+							}
+						}
+					]}
+		/>
 	{/snippet}
 </Table>
 
@@ -242,3 +252,6 @@
 		</Button>
 	{/snippet}
 </Dialog>
+
+<style>
+</style>

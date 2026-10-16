@@ -166,16 +166,26 @@ export function iconOfNode(
 	return [3, 6, 9].some((index) => mode[index] === 'x') ? 'file-executable' : 'file';
 }
 
-/** The filters of the snapshot list, as they travel in the query string of both Restore pages. */
+/** The filters of the snapshot list, as they travel in the query string of both Restore pages. A host
+ * or a tag holds several values joined by commas. */
 export interface RestoreFilters {
 	host: string;
 	tag: string;
 	path: string;
 	from: string;
 	to: string;
+	/** A preset such as `7d`, or `custom` for the dates in `from` and `to`. Empty means all time. */
+	period: string;
 }
 
-export const EMPTY_FILTERS: RestoreFilters = { host: '', tag: '', path: '', from: '', to: '' };
+export const EMPTY_FILTERS: RestoreFilters = {
+	host: '',
+	tag: '',
+	path: '',
+	from: '',
+	to: '',
+	period: ''
+};
 
 /** The query string of the filters. A filter without a value stays out. */
 export function filtersToQuery(
@@ -204,7 +214,8 @@ export function filtersFromQuery(query: { get(name: string): string | null }): R
 		tag: query.get('tag') ?? '',
 		path: query.get('path') ?? '',
 		from: query.get('from') ?? '',
-		to: query.get('to') ?? ''
+		to: query.get('to') ?? '',
+		period: query.get('period') ?? ''
 	};
 }
 

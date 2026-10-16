@@ -111,10 +111,8 @@ describe('Job templates screen', () => {
 	it('saves the scripts of a copy of a built-in template, with an empty secret', async () => {
 		const user = userEvent.setup();
 		render(Templates);
-		await user.click(
-			await screen.findByRole('button', { name: 'More actions for PostgreSQL server (Linux)' })
-		);
-		await user.click(await screen.findByText('Make a copy'));
+		const row = (await screen.findByText('PostgreSQL server (Linux)')).closest('tr') as HTMLElement;
+		await user.click(within(row).getByRole('button', { name: 'Make a copy' }));
 		const dialog = await screen.findByRole('dialog');
 		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(mocks.createJobTemplate).toHaveBeenCalledTimes(1));

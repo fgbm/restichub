@@ -140,7 +140,7 @@ describe('the Hosts screen', () => {
 		render(Hosts);
 
 		await screen.findByText('Pending registrations');
-		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+		await user.click(screen.getByRole('button', { name: 'Cancel the token ab12cd34' }));
 		const dialog = await screen.findByRole('dialog');
 		await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 
@@ -158,7 +158,7 @@ describe('the Hosts screen', () => {
 
 		await screen.findByText('ab12cd34');
 		expect(screen.queryByRole('button', { name: 'Add host' })).not.toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: /^Cancel the token/ })).not.toBeInTheDocument();
 		expect(
 			screen.queryByRole('button', { name: 'More actions for win-fs01' })
 		).not.toBeInTheDocument();
@@ -397,7 +397,7 @@ describe('the Hosts screen', () => {
 		render(Hosts);
 
 		await screen.findByText('Pending registrations');
-		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+		await user.click(screen.getByRole('button', { name: 'Cancel the token ab12cd34' }));
 		const dialog = await screen.findByRole('dialog');
 		await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 

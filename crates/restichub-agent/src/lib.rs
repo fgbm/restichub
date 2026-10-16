@@ -37,4 +37,6 @@ pub mod stream;
 pub mod trust;
 pub mod verify;
 #[cfg(windows)]
+mod winrepair;
+#[cfg(windows)]
 pub mod winsec;
