@@ -30,6 +30,22 @@ pub const DEFAULT_PAGE_LIMIT: i64 = 50;
 
 pub const MAX_PAGE_LIMIT: i64 = 200;
 
+/// A list counts at most this many records, so a long log does not make each page read all of it.
+pub const COUNT_LIMIT: i64 = 10_000;
+
+macro_rules! filter_sql {
+    () => {
+        " WHERE ($1::timestamptz IS NULL OR occurred_at >= $1) \
+           AND ($2::timestamptz IS NULL OR occurred_at <= $2) \
+           AND ($3::text IS NULL OR action = $3) \
+           AND ($4::text IS NULL OR actor_type = $4) \
+           AND ($5::uuid IS NULL OR actor_id = $5) \
+           AND ($6::text IS NULL OR object_type = $6) \
+           AND ($7::uuid IS NULL OR object_id = $7) \
+           AND ($8::uuid IS NULL OR tenant_id = $8)"
+    };
+}
+
 pub const REDACTED: &str = "<redacted>";
 
 /// Last year of a valid RFC 3339 time.
@@ -642,6 +658,8 @@ pub struct AuditPage {
     /// Clamped to [`MAX_PAGE_LIMIT`].
     pub limit: i64,
     pub after: Option<AuditCursor>,
+    /// Skipped records after the cursor; the caller keeps it in `0..=COUNT_LIMIT`.
+    pub offset: i64,
 }
 
 impl Default for AuditPage {
@@ -649,6 +667,7 @@ impl Default for AuditPage {
         Self {
             limit: DEFAULT_PAGE_LIMIT,
             after: None,
+            offset: 0,
         }
     }
 }
@@ -657,6 +676,10 @@ impl Default for AuditPage {
 pub struct AuditPageResult {
     pub records: Vec<AuditRecord>,
     pub has_more: bool,
+    /// The number of records that match the filter on all pages, at most [`COUNT_LIMIT`].
+    pub total: i64,
+    /// More records match than [`COUNT_LIMIT`].
+    pub total_capped: bool,
 }
 
 pub async fn insert(tx: &mut TenantTx<'_>, event: &AuditEvent) -> Result<AuditLogId, DbError> {
@@ -782,7 +805,8 @@ pub async fn list_platform(
 ///
 /// The list orders the records by time and identifier, from the newest to the oldest. It reads one
 /// record more than the page holds, to report `has_more` correctly. The keyset cursor of
-/// `page.after` continues the list.
+/// `page.after` continues the list; `page.offset` reads a numbered page. The total ignores the
+/// cursor and the offset.
 async fn list_rows(
     conn: &mut PgConnection,
     filter: &AuditFilter,
@@ -796,22 +820,15 @@ async fn list_rows(
         Some(cursor) => (Some(cursor.occurred_at), Some(cursor.id.as_uuid())),
         None => (None, None),
     };
-    let mut records: Vec<AuditRecord> = sqlx::query_as::<_, Row>(
+    let mut records: Vec<AuditRecord> = sqlx::query_as::<_, Row>(concat!(
         "SELECT id, tenant_id, occurred_at, actor_type, actor_id, source_ip, \
                 action, object_type, object_id, diff \
-         FROM audit_log \
-         WHERE ($1::timestamptz IS NULL OR occurred_at >= $1) \
-           AND ($2::timestamptz IS NULL OR occurred_at <= $2) \
-           AND ($3::text IS NULL OR action = $3) \
-           AND ($4::text IS NULL OR actor_type = $4) \
-           AND ($5::uuid IS NULL OR actor_id = $5) \
-           AND ($6::text IS NULL OR object_type = $6) \
-           AND ($7::uuid IS NULL OR object_id = $7) \
-           AND ($8::timestamptz IS NULL OR (occurred_at, id) < ($8::timestamptz, $9::uuid)) \
-           AND ($10::uuid IS NULL OR tenant_id = $10) \
+         FROM audit_log",
+        filter_sql!(),
+        " AND ($9::timestamptz IS NULL OR (occurred_at, id) < ($9::timestamptz, $10::uuid)) \
          ORDER BY occurred_at DESC, id DESC \
-         LIMIT $11",
-    )
+         LIMIT $11 OFFSET $12",
+    ))
     .bind(filter.from)
     .bind(filter.to)
     .bind(action)
@@ -819,11 +836,12 @@ async fn list_rows(
     .bind(actor_id)
     .bind(filter.object_type.as_deref())
     .bind(filter.object_id)
+    .bind(filter.tenant_id)
     .bind(cursor_time)
     .bind(cursor_id)
-    .bind(filter.tenant_id)
     .bind(limit + 1)
-    .fetch_all(conn)
+    .bind(page.offset.max(0))
+    .fetch_all(&mut *conn)
     .await
     .map_err(DbError::Query)?
     .into_iter()
@@ -831,7 +849,29 @@ async fn list_rows(
     .collect::<Result<_, _>>()?;
     let has_more = records.len() as i64 > limit;
     records.truncate(limit as usize);
-    Ok(AuditPageResult { records, has_more })
+    let counted: i64 = sqlx::query_scalar(concat!(
+        "SELECT count(*) FROM (SELECT 1 FROM audit_log",
+        filter_sql!(),
+        " LIMIT $9) s"
+    ))
+    .bind(filter.from)
+    .bind(filter.to)
+    .bind(action)
+    .bind(actor_type)
+    .bind(actor_id)
+    .bind(filter.object_type.as_deref())
+    .bind(filter.object_id)
+    .bind(filter.tenant_id)
+    .bind(COUNT_LIMIT + 1)
+    .fetch_one(conn)
+    .await
+    .map_err(DbError::Query)?;
+    Ok(AuditPageResult {
+        records,
+        has_more,
+        total: counted.min(COUNT_LIMIT),
+        total_capped: counted > COUNT_LIMIT,
+    })
 }
 
 type Row = (

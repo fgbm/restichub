@@ -1725,8 +1725,15 @@ export interface components {
         };
         AuditPageResponse: {
             items: components["schemas"]["AuditItem"][];
-            /** @description Null when the table holds no later record. */
+            /** @description Null when the table holds no later record, and for a page read by `offset`. */
             next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description The records that match the filter on all pages, at most 10000.
+             */
+            total: number;
+            /** @description More records match than `total` shows. */
+            total_capped: boolean;
         };
         /**
          * @description The backend settings of a repository (FR-RP-01).
@@ -4169,7 +4176,10 @@ export interface operations {
                 object_id: string | null;
                 /** @description Used by the platform list. */
                 tenant_id: string | null;
+                /** @description Not with `offset`. */
                 cursor: string | null;
+                /** @description Skipped records, in `0..=10000`. Not with `cursor`. */
+                offset: number | null;
                 limit: number | null;
             };
             cookie?: never;
@@ -6095,7 +6105,10 @@ export interface operations {
                 object_id: string | null;
                 /** @description Used by the platform list. */
                 tenant_id: string | null;
+                /** @description Not with `offset`. */
                 cursor: string | null;
+                /** @description Skipped records, in `0..=10000`. Not with `cursor`. */
+                offset: number | null;
                 limit: number | null;
             };
             cookie?: never;

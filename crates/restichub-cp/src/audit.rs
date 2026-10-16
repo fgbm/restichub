@@ -96,8 +96,12 @@ impl From<&AuditRecord> for AuditItem {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AuditPageResponse {
     pub items: Vec<AuditItem>,
-    /// Null when the table holds no later record.
+    /// Null when the table holds no later record, and for a page read by `offset`.
     pub next_cursor: Option<String>,
+    /// The records that match the filter on all pages, at most 10000.
+    pub total: i64,
+    /// More records match than `total` shows.
+    pub total_capped: bool,
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
@@ -115,7 +119,10 @@ pub struct AuditQuery {
     pub object_id: Option<String>,
     /// Used by the platform list.
     pub tenant_id: Option<String>,
+    /// Not with `offset`.
     pub cursor: Option<String>,
+    /// Skipped records, in `0..=10000`. Not with `cursor`.
+    pub offset: Option<i64>,
     pub limit: Option<i64>,
 }
 
@@ -198,7 +205,23 @@ impl AuditQuery {
             .map(decode_cursor)
             .transpose()
             .map_err(invalid_cursor)?;
-        Ok(AuditPage { limit, after })
+        let offset = match self.offset {
+            None => 0,
+            Some(_) if after.is_some() => {
+                return Err(ApiError::invalid_field_cause(
+                    "offset",
+                    Reason::InvalidFormat,
+                    "a page reads either a cursor or an offset",
+                ));
+            }
+            Some(offset) if (0..=repo::COUNT_LIMIT).contains(&offset) => offset,
+            Some(_) => return Err(ApiError::invalid_field("offset", Reason::OutOfRange)),
+        };
+        Ok(AuditPage {
+            limit,
+            after,
+            offset,
+        })
     }
 }
 
@@ -290,7 +313,7 @@ pub async fn list_tenant_audit(
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let result = repo::list(&mut tx, &filter, &page).await?;
     tx.commit().await?;
-    Ok(Json(response(result)))
+    Ok(Json(response(result, query.offset.is_none())))
 }
 
 /// Lists the audit records of the platform.
@@ -317,12 +340,13 @@ pub async fn list_platform_audit(
     let mut tx = state.db().begin_platform().await?;
     let result = repo::list_platform(&mut tx, &filter, &page).await?;
     tx.commit().await?;
-    Ok(Json(response(result)))
+    Ok(Json(response(result, query.offset.is_none())))
 }
 
-/// `next_cursor` is set only when the table holds a later record.
-fn response(result: repo::AuditPageResult) -> AuditPageResponse {
-    let next_cursor = if result.has_more {
+/// `next_cursor` is set only when the table holds a later record and the page did not use an
+/// offset, so a client keeps one way to read the next page.
+fn response(result: repo::AuditPageResult, by_cursor: bool) -> AuditPageResponse {
+    let next_cursor = if result.has_more && by_cursor {
         result.records.last().map(|record| {
             encode_cursor(repo::AuditCursor {
                 occurred_at: record.occurred_at,
@@ -335,6 +359,8 @@ fn response(result: repo::AuditPageResult) -> AuditPageResponse {
     AuditPageResponse {
         items: result.records.iter().map(AuditItem::from).collect(),
         next_cursor,
+        total: result.total,
+        total_capped: result.total_capped,
     }
 }
 

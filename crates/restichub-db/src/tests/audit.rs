@@ -445,7 +445,11 @@ async fn db_audit_pagination_is_stable() -> TestResult {
     let mut seen = Vec::new();
     let mut after = None;
     for _ in 0..3 {
-        let page = AuditPage { limit: 2, after };
+        let page = AuditPage {
+            limit: 2,
+            after,
+            offset: 0,
+        };
         let mut tx = db.database().begin_tenant(tenant_a).await?;
         let records = audit::list(&mut tx, &AuditFilter::default(), &page)
             .await?
@@ -476,6 +480,7 @@ async fn db_audit_pagination_is_stable() -> TestResult {
         &AuditPage {
             limit: 2,
             after: None,
+            offset: 0,
         },
     )
     .await?
@@ -547,6 +552,7 @@ async fn db_audit_page_reports_has_more() -> TestResult {
         &AuditPage {
             limit: 2,
             after: None,
+            offset: 0,
         },
     )
     .await?;
@@ -561,6 +567,7 @@ async fn db_audit_page_reports_has_more() -> TestResult {
         &AuditPage {
             limit: 10,
             after: None,
+            offset: 0,
         },
     )
     .await?;

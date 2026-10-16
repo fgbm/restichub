@@ -63,6 +63,8 @@ pub enum Reason {
     /// The host did not turn on the trust mode for server scripts (FR-HK-10).
     ServerScriptsDisabled,
     Removed,
+    /// A number or a time range is outside the allowed bounds.
+    OutOfRange,
 }
 
 impl Reason {
@@ -86,6 +88,7 @@ impl Reason {
             Self::Mismatch => "mismatch",
             Self::ServerScriptsDisabled => "server_scripts_disabled",
             Self::Removed => "removed",
+            Self::OutOfRange => "out_of_range",
         }
     }
 }
