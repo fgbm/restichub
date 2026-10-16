@@ -5,15 +5,20 @@
 
 mod common;
 
-use axum::http::StatusCode;
+use std::sync::Arc;
+
+use axum::http::{StatusCode, header};
+use restichub_cp::clock::ManualClock;
+use restichub_cp::config::AuthConfig;
 use restichub_db::audit::{Actor, AuditAction, AuditEvent};
 use restichub_db::test_util::TestDatabase;
 use restichub_db::{AgentId, JobId, PLATFORM_TENANT_ID, RepositoryId, TenantId};
 use serde_json::Value;
 
 use common::{
-    app, create_tenant, create_tenant_with_key, create_user, exec, request, seed_agent, seed_job,
-    seed_plan, seed_profile, seed_repository, seed_secret, seed_session, send, session_cookie,
+    app, app_with_auth, create_tenant, create_tenant_with_key, create_user, exec, request,
+    seed_agent, seed_api_token, seed_job, seed_plan, seed_profile, seed_repository, seed_secret,
+    seed_session, send, session_cookie,
 };
 
 async fn get(app: &axum::Router, cookie: &str, uri: &str) -> Value {
@@ -122,6 +127,21 @@ async fn fr_ui_01_the_plan_list_shows_the_rpo_state_and_the_last_success() {
     assert_eq!(plan["rpo_state"], "unknown");
     let plan = get(&app, &viewer, &format!("/api/v1/plans/{late}")).await;
     assert_eq!(plan["rpo_state"], "at_risk");
+
+    // The state reads the clock of the control plane, as the dashboard does.
+    let clock = ManualClock::new(time::OffsetDateTime::now_utc());
+    clock.advance(10 * 3600);
+    let ahead = app_with_auth(db.database(), AuthConfig::default(), Arc::new(clock));
+    let token = seed_api_token(db.database(), tenant, "viewer").await;
+    let mut later = request("GET", "/api/v1/plans", None, None);
+    later.headers_mut().insert(
+        header::AUTHORIZATION,
+        format!("Bearer {token}").parse().expect("a header value"),
+    );
+    let (status, _, page) = send(&ahead, later).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(item(&page, "name", "fresh")["rpo_state"], "ok");
+    assert_eq!(item(&page, "name", "late")["rpo_state"], "violated");
     db.cleanup().await;
 }
 

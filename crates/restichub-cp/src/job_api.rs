@@ -106,7 +106,7 @@ pub struct JobListQuery {
     /// Default: `desc`.
     #[param(inline)]
     pub order: Option<SortOrder>,
-    /// Adds the counts of the state tabs to the response.
+    /// Adds the state tab totals to the response.
     pub counts: Option<bool>,
 }
 
@@ -182,7 +182,7 @@ pub struct UnlockAllRequest {
     get,
     path = "/api/v1/jobs",
     summary = "Lists the jobs of the tenant.",
-    description = "The list is newest first by default. Filter by plan, repository, agent, kind, status, state tab, name search and creation time; sort by a column; read the next page with the cursor or with an offset. The response counts the jobs of each state tab.",
+    description = "The list is newest first by default. Filter by plan, repository, agent, kind, status, state tab, name search and creation time; sort by a column; read the next page with the cursor or with an offset. With `counts=true` the response counts the jobs of each state tab.",
     security(("cookie" = []), ("bearer" = [])),
     params(JobListQuery),
     responses(

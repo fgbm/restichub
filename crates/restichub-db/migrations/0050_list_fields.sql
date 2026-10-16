@@ -1,14 +1,13 @@
 -- The facts that the entity lists show in each item (FR-UI-01, ADR-0036).
 --
 -- `alert_deliveries.attempted_at` is the end of the last attempt of a delivery, sent or failed. The
--- channel list shows the last attempt and its result. A row of an earlier version keeps a null
--- value and does not count.
+-- channel list shows the last attempt and its result.
 --
 -- `tenant_agent_counts()` gives the platform list of the organizations the number of the hosts
 -- that are not revoked. It follows the rules of migration 0013: the platform scope cannot read the
 -- `agents` table, so one narrow `SECURITY DEFINER` function returns the count only and no agent row.
 --
--- The indexes serve one item fact each. The pull request of this migration holds their plans.
+-- The indexes serve one item fact each: the comment above each index names its query.
 
 DO $$
 BEGIN
@@ -20,6 +19,11 @@ END
 $$;
 
 ALTER TABLE alert_deliveries ADD COLUMN attempted_at timestamptz;
+
+-- An earlier version kept no time of a failed attempt, so a delivery that was tried and not sent
+-- takes its creation time.
+UPDATE alert_deliveries SET attempted_at = COALESCE(sent_at, created_at)
+WHERE status <> 'pending' OR attempts > 0;
 
 -- The last attempt of each channel.
 CREATE INDEX alert_deliveries_channel_attempt_idx
@@ -47,7 +51,8 @@ CREATE INDEX audit_log_sign_in_idx ON audit_log (tenant_id, actor_id, occurred_a
     WHERE action IN ('sign_in', 'session_switch');
 
 GRANT USAGE, CREATE ON SCHEMA public TO restichub_auth;
-GRANT SELECT ON agents TO restichub_auth;
+-- The definer role reads only the columns of the count, not the certificate data of a host.
+GRANT SELECT (tenant_id, status) ON agents TO restichub_auth;
 
 CREATE FUNCTION tenant_agent_counts()
 RETURNS TABLE (tenant_id uuid, agent_count bigint)

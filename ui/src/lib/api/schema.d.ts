@@ -484,7 +484,7 @@ export interface paths {
         };
         /**
          * Lists the jobs of the tenant.
-         * @description The list is newest first by default. Filter by plan, repository, agent, kind, status, state tab, name search and creation time; sort by a column; read the next page with the cursor or with an offset. The response counts the jobs of each state tab.
+         * @description The list is newest first by default. Filter by plan, repository, agent, kind, status, state tab, name search and creation time; sort by a column; read the next page with the cursor or with an offset. With `counts=true` the response counts the jobs of each state tab.
          */
         get: operations["list_jobs"];
         put?: never;
@@ -2379,8 +2379,7 @@ export interface components {
             stall_timeout_minutes: number;
         };
         JobListResponse: {
-            /** @description The jobs of each state tab under the other filters; `status` and `group` do not apply. */
-            counts: components["schemas"]["JobGroupCounts"];
+            counts?: components["schemas"]["JobGroupCounts"] | null;
             items: components["schemas"]["JobView"][];
             /** @description Null when the list holds no later job, and for a numbered page or another order. */
             next_cursor?: string | null;
@@ -5290,6 +5289,8 @@ export interface operations {
                 sort: ("created_at" | "started_at" | "finished_at" | "duration" | "status" | "plan" | "host") | null;
                 /** @description Default: `desc`. */
                 order: ("asc" | "desc") | null;
+                /** @description Adds the counts of the state tabs to the response. */
+                counts: boolean | null;
             };
             cookie?: never;
         };

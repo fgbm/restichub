@@ -145,9 +145,9 @@ impl From<RpoState> for PlanRpoState {
     }
 }
 
-impl From<&Plan> for PlanView {
-    fn from(plan: &Plan) -> Self {
-        let now = time::OffsetDateTime::now_utc();
+impl PlanView {
+    /// `now` comes from the clock of the control plane, so the RPO state agrees with the dashboard.
+    fn of(plan: &Plan, now: time::OffsetDateTime) -> Self {
         let rpo = rpo::effective_rpo(&plan.cron, &plan.time_zone, plan.rpo_seconds, now);
         // The dashboard leaves out a plan whose host cannot run a backup any more.
         let rpo_state = if plan.agent_status == AgentStatus::Active {
@@ -243,7 +243,12 @@ pub async fn list_plans(
     } else {
         None
     };
-    let items = result.plans.iter().map(PlanView::from).collect();
+    let now = state.auth().clock.now();
+    let items = result
+        .plans
+        .iter()
+        .map(|plan| PlanView::of(plan, now))
+        .collect();
     Ok(Json(PlanListResponse { items, next_cursor }))
 }
 
@@ -270,7 +275,7 @@ pub async fn get_plan(
         .tenant_tx(&state, async |tx| Ok(repo::get(tx, plan_id).await?))
         .await?;
     match plan {
-        Some(plan) => Ok(Json(PlanView::from(&plan))),
+        Some(plan) => Ok(Json(PlanView::of(&plan, state.auth().clock.now()))),
         None => Err(ApiError::not_found()),
     }
 }
@@ -347,7 +352,7 @@ pub async fn create_plan(
     Ok((
         StatusCode::CREATED,
         Json(PlanResponse {
-            plan: PlanView::from(&created),
+            plan: PlanView::of(&created, state.auth().clock.now()),
         }),
     ))
 }
@@ -439,7 +444,7 @@ pub async fn update_plan(
         ));
     };
     Ok(Json(PlanResponse {
-        plan: PlanView::from(&updated),
+        plan: PlanView::of(&updated, state.auth().clock.now()),
     }))
 }
 
