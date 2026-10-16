@@ -50,6 +50,8 @@ Set the environment variables before `bench.sh setup`:
 | `COMPOSE_PROJECT_NAME`, `CP_WEB_PORT`, `CP_AGENT_PORT`, `STATE_DIR` | `restichub-bench-s1`, 18080, 18443, `state/` | the project name, the published ports and the state directory; set all four to run a second bench next to the first |
 | `BUILD_NETWORK` | `default` | the network of the image build; use `host` when the build containers have no DNS or no route to the internet |
 | `RESTICHUB_CP_IMAGE` | `restichub-cp` | use a prebuilt image of the control plane |
+| `BENCH_AGENT_IMAGE` | `restichub-bench-agent` | the name of the agent images; the tag is the restic version |
+| `SKIP_BUILD` | 0 | 1: the scenarios of section 14.2 and `run.sh` use the images that exist and build nothing |
 
 ## Scenarios of section 14.2
 
@@ -59,6 +61,14 @@ Each scenario starts a fresh bench with one agent host and writes `report.md` in
 bench/s1/e2e/scenario-14.2.1.sh [OUT]   # a new tenant, from the creation to the first backup
 bench/s1/e2e/scenario-14.2.3.sh [OUT]   # recovery after a stale lock; about 40 minutes
 bench/s1/e2e/scenario-14.2.4.sh [OUT]   # agent revocation during a job (AC-ID-04); about 1 minute
+```
+
+A scenario resets the bench of its project. To run a scenario on a host where a timed run uses the bench, use a separate copy of the repository, so that `bench.env`, `state/` and `out/` are not shared. Set `COMPOSE_PROJECT_NAME`, `CP_WEB_PORT` and `CP_AGENT_PORT` to values that no other bench uses. Set `RESTICHUB_CP_IMAGE` and `BENCH_AGENT_IMAGE` to other image names, so that the build does not replace the images of the timed run:
+
+```sh
+COMPOSE_PROJECT_NAME=restichub-e2e CP_WEB_PORT=18090 CP_AGENT_PORT=18453 \
+RESTICHUB_CP_IMAGE=restichub-e2e-cp BENCH_AGENT_IMAGE=restichub-e2e-agent \
+bench/s1/e2e/scenario-14.2.4.sh
 ```
 
 The scenario 14.2.3 kills a running backup with SIGKILL. The control plane waits 30 minutes (FR-SC-06) and runs `unlock` when the repository is idle. The scenario checks the lock list of the repository and the next backup. `KILL_TARGET` selects the victim:

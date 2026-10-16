@@ -41,7 +41,7 @@ fresh_bench() {
 	export AGENTS_A="${1:-1}" AGENTS_B=0 NO_PLANS=1 AGENT_MEM_LIMIT="${AGENT_MEM_LIMIT:-512m}"
 	"$bench_dir/bench.sh" reset
 	"$bench_dir/bench.sh" init
-	"$bench_dir/bench.sh" build
+	if [ "${SKIP_BUILD:-0}" != 1 ]; then "$bench_dir/bench.sh" build; fi
 	"$bench_dir/bench.sh" up
 }
 
