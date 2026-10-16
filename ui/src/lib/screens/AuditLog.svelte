@@ -22,12 +22,10 @@
 	import { periodWindow } from '#lib/filters.ts';
 	import { en, t, tAuditAction, tAuditActorType, tErrorCode } from '#lib/i18n/index.ts';
 	import { formatCount, formatTime } from '#lib/format.ts';
+	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 
 	let { scope = 'tenant' }: { scope?: 'tenant' | 'platform' } = $props();
-
-	const DEFAULT_PAGE_SIZE = 25;
-	const PAGE_SIZES = [10, 25, 50, 100];
 
 	let items = $state<AuditRecord[]>([]);
 	let total = $state(0);
@@ -37,7 +35,8 @@
 	let selected = $state<AuditRecord | null>(null);
 	let panelOpen = $state(false);
 
-	const FILTER_KEYS = [
+	// The log filters and pages on the server (FR-UI-01).
+	const filters = queryFilters([
 		'action',
 		'actor_type',
 		'actor_id',
@@ -45,14 +44,12 @@
 		'object_id',
 		'period',
 		'from',
-		'to'
-	] as const;
-	// The log filters and pages on the server (FR-UI-01).
-	const filters = queryFilters([...FILTER_KEYS, 'page', 'size'] as const);
-	const tablePage = $derived(Math.max(1, Number(filters.value.page) || 1));
-	const pageSize = $derived(
-		PAGE_SIZES.includes(Number(filters.value.size)) ? Number(filters.value.size) : DEFAULT_PAGE_SIZE
-	);
+		'to',
+		'page',
+		'size'
+	] as const);
+	const tablePage = $derived(pageNumber(filters.value.page));
+	const pageSize = $derived(pageSizeOf(filters.value.size));
 
 	const title = $derived(scope === 'platform' ? t('nav.platform.audit') : t('audit.title'));
 
@@ -89,10 +86,6 @@
 			return tErrorCode(problem.code) ?? problem.title;
 		}
 		return t('table.error');
-	}
-
-	function resetFilters(): void {
-		filters.update(Object.fromEntries(FILTER_KEYS.map((key) => [key, ''])));
 	}
 
 	function actorLabel(row: AuditRecord): string {
@@ -135,6 +128,11 @@
 		try {
 			const page = await fetchPage();
 			if (mine !== request) return;
+			const last = lastPageIfPast(tablePage, pageSize, page.total, page.items.length);
+			if (last !== null) {
+				filters.update({ page: String(last) });
+				return;
+			}
 			items = page.items;
 			total = page.total;
 			totalCapped = page.total_capped;
@@ -327,7 +325,7 @@
 				period
 				hint={t('audit.filters.timeHint')}
 				onchange={filters.update}
-				onreset={resetFilters}
+				onreset={filters.reset}
 			/>
 		{/snippet}
 	</DataTable>

@@ -205,6 +205,34 @@ describe('the Hosts screen', () => {
 		);
 	});
 
+	it('fr_ui_01 chooses the page size and keeps it when Reset clears the filters', async () => {
+		const user = userEvent.setup();
+		route.url = new URL('http://localhost/hosts?os=windows&size=50');
+		mocks.searchAgents.mockImplementation(async () => ({
+			items: [agent()],
+			next_cursor: null,
+			total: 60,
+			total_capped: false,
+			facets: null
+		}));
+		render(Hosts);
+
+		await screen.findByText('win-fs01');
+		expect(mocks.searchAgents).toHaveBeenLastCalledWith(
+			expect.objectContaining({ os: 'windows', offset: 0, limit: 50 })
+		);
+		expect(screen.getByLabelText('Rows per page')).toHaveValue('50');
+
+		await user.click(screen.getByRole('button', { name: 'Reset' }));
+		await waitFor(() =>
+			expect(mocks.searchAgents).toHaveBeenLastCalledWith(
+				expect.objectContaining({ os: undefined, limit: 50 })
+			)
+		);
+		expect(route.url.searchParams.get('size')).toBe('50');
+		expect(route.url.searchParams.get('os')).toBeNull();
+	});
+
 	it('fr_ui_01 shows the capped total and asks to narrow the filters', async () => {
 		mocks.searchAgents.mockResolvedValue({
 			items: [agent()],

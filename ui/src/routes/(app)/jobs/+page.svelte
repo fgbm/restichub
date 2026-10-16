@@ -26,6 +26,7 @@
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatCount, formatDuration } from '#lib/format.ts';
+	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -51,7 +52,6 @@
 		'unlock',
 		'unlock_all'
 	];
-	const PAGE_SIZE = 25;
 
 	let jobs = $state<Job[]>([]);
 	let total = $state(0);
@@ -73,6 +73,7 @@
 		'from',
 		'to',
 		'page',
+		'size',
 		'sort',
 		'order'
 	] as const);
@@ -82,7 +83,8 @@
 		host: 'host',
 		started: 'started_at'
 	};
-	const tablePage = $derived(Math.max(1, Number(filters.value.page) || 1));
+	const tablePage = $derived(pageNumber(filters.value.page));
+	const pageSize = $derived(pageSizeOf(filters.value.size));
 	const tableSort = $derived<TableSort | undefined>(
 		filters.value.sort
 			? { key: filters.value.sort, direction: filters.value.order === 'asc' ? 'asc' : 'desc' }
@@ -110,8 +112,8 @@
 			to: iso(window.end),
 			sort: SORT_KEYS[value.sort],
 			order: value.sort ? (value.order === 'asc' ? 'asc' : 'desc') : undefined,
-			offset: (tablePage - 1) * PAGE_SIZE,
-			limit: PAGE_SIZE
+			offset: (tablePage - 1) * pageSize,
+			limit: pageSize
 		};
 	}
 
@@ -278,6 +280,11 @@
 		try {
 			const page = await service.listJobs(queryOf());
 			if (mine !== request) return;
+			const last = lastPageIfPast(tablePage, pageSize, page.total, page.items.length);
+			if (last !== null) {
+				filters.update({ page: String(last) });
+				return;
+			}
 			jobs = page.items;
 			total = page.total;
 			totalCapped = page.total_capped;
@@ -388,10 +395,13 @@
 			rows={jobs}
 			mode="server"
 			page={tablePage}
-			pageSize={PAGE_SIZE}
+			{pageSize}
+			pageSizes={PAGE_SIZES}
 			{total}
+			{totalCapped}
 			sort={tableSort}
 			onPageChange={(next) => filters.update({ page: String(next) })}
+			onPageSizeChange={(next) => filters.update({ size: String(next) })}
 			onSortChange={(next) => filters.update({ sort: next.key, order: next.direction })}
 			{loading}
 			{error}
@@ -409,17 +419,7 @@
 					{facets}
 					period
 					onchange={filters.update}
-					onreset={() =>
-						filters.update({
-							agent_id: '',
-							repository_id: '',
-							plan_id: '',
-							kind: '',
-							status: '',
-							period: '',
-							from: '',
-							to: ''
-						})}
+					onreset={filters.reset}
 				/>
 			{/snippet}
 		</DataTable>
