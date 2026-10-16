@@ -375,3 +375,52 @@ async fn ac_mn_07_db_open_alerts_have_no_hard_limit() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+/// FR-UI-01: each end of an attempt sets the time that the channel list shows, and the result of
+/// the last attempt is the result of the channel.
+#[tokio::test]
+async fn fr_ui_01_db_the_channel_reads_its_last_delivery_attempt() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant, _) = two_tenants(db.database()).await?;
+    let now = OffsetDateTime::now_utc();
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let channel = email_channel(&mut tx, "mail").await?;
+    for index in 0..2 {
+        let alert = open_alert(&mut tx, &format!("agent:{index}"), now).await?;
+        alerts::enqueue(&mut tx, alert, DeliveryEvent::Opened, now).await?;
+    }
+    let read = channels::get(&mut tx, channel).await?.ok_or("no channel")?;
+    assert_eq!((read.last_delivery_at, read.last_delivery_ok), (None, None));
+    tx.commit().await?;
+
+    let lease = now + Duration::minutes(2);
+    let mut tx = db.database().begin_tenant(tenant).await?;
+    let claimed = alerts::claim_due(&mut tx, now, lease, 10, 5).await?;
+    assert_eq!(claimed.len(), 2);
+    let sent = now + Duration::seconds(10);
+    let failed = now + Duration::seconds(20);
+    for (claim, end) in claimed.iter().zip([sent, failed]) {
+        let attempt = alerts::extend_lease(&mut tx, claim.id, 0, lease)
+            .await?
+            .ok_or("no lease")?;
+        if end == sent {
+            assert!(alerts::mark_sent(&mut tx, claim.id, attempt, end, None).await?);
+        } else {
+            let retry = Some(end + Duration::minutes(1));
+            assert!(
+                alerts::mark_attempt_failed(&mut tx, claim.id, attempt, "smtp", retry, end).await?
+            );
+        }
+    }
+    let read = channels::get(&mut tx, channel).await?.ok_or("no channel")?;
+    assert_eq!(read.last_delivery_ok, Some(false));
+    assert_eq!(
+        read.last_delivery_at.map(|time| time.unix_timestamp()),
+        Some(failed.unix_timestamp())
+    );
+    tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}

@@ -289,3 +289,30 @@ async fn db_the_lower_case_unique_indexes_hold() -> TestResult {
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn ac_tn_01_the_host_count_function_answers_only_the_platform_scope() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let rows: Vec<(Uuid, i64)> =
+        sqlx::query_as("SELECT tenant_id, agent_count FROM tenant_agent_counts()")
+            .fetch_all(tx.as_conn())
+            .await?;
+    drop(tx);
+    assert!(
+        rows.is_empty(),
+        "a tenant transaction must get no count row"
+    );
+
+    let mut tx = db.database().begin_platform().await?;
+    sqlx::query_as::<_, (Uuid, i64)>("SELECT tenant_id, agent_count FROM tenant_agent_counts()")
+        .fetch_all(tx.as_conn())
+        .await?;
+    drop(tx);
+    db.cleanup().await;
+    Ok(())
+}
