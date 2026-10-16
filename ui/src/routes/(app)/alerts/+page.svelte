@@ -4,7 +4,7 @@
 	import { onEvent } from '#lib/stores/events.svelte.ts';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Alert, AlertKind, AlertQuery } from '#lib/api/index.ts';
+	import type { Alert, AlertKind, AlertListResponse, AlertQuery } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert as Notice,
@@ -27,6 +27,7 @@
 	let alerts = $state<Alert[]>([]);
 	let total = $state(0);
 	let totalCapped = $state(false);
+	let counts = $state<AlertListResponse['counts'] | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	// The list filters and pages on the server (FR-UI-01). Without a state in the address the
@@ -41,9 +42,24 @@
 		key: 'status',
 		default: 'open',
 		options: [
-			{ value: 'open', label: t('alerts.tab.open') },
-			{ value: 'resolved', label: t('alerts.tab.resolved') },
-			{ value: 'all', label: t('alerts.tab.all') }
+			{
+				value: 'open',
+				label: t('alerts.tab.open'),
+				count: counts?.open.count,
+				capped: counts?.open.capped
+			},
+			{
+				value: 'resolved',
+				label: t('alerts.tab.resolved'),
+				count: counts?.resolved.count,
+				capped: counts?.resolved.capped
+			},
+			{
+				value: 'all',
+				label: t('alerts.tab.all'),
+				count: counts ? counts.open.count + counts.resolved.count : undefined,
+				capped: counts ? counts.open.capped || counts.resolved.capped : undefined
+			}
 		]
 	});
 
@@ -194,6 +210,7 @@
 			alerts = page.items;
 			total = page.total;
 			totalCapped = page.total_capped;
+			counts = page.counts;
 		} catch (problem) {
 			if (mine !== request) return;
 			error = messageOf(problem);

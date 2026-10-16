@@ -11,6 +11,7 @@
 		toggleValue,
 		type FilterState
 	} from '#lib/filters.ts';
+	import { formatCount } from '#lib/format.ts';
 	import { t } from '#lib/i18n/index.ts';
 	import Button from './Button.svelte';
 	import Checkbox from './Checkbox.svelte';
@@ -440,7 +441,7 @@
 								{tab.label}
 								{#if tab.count !== undefined}
 									<span class="count" class:count--danger={tab.danger && tab.count > 0}>
-										{tab.count}
+										{formatCount(tab.count)}{tab.capped ? '+' : ''}
 									</span>
 								{/if}
 							</button>

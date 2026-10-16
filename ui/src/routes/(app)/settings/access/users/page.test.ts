@@ -43,7 +43,8 @@ const users = [
 		display_name: 'Anna Petrova',
 		role: 'admin',
 		disabled: false,
-		shared: false
+		shared: false,
+		last_sign_in_at: new Date(Date.now() - 2 * 3_600_000).toISOString()
 	},
 	{
 		id: 'u_02',
@@ -71,6 +72,13 @@ beforeEach(() => {
 });
 
 describe('Users screen', () => {
+	it('fr_ui_01 shows the last sign-in of a user that has one', async () => {
+		render(Users);
+		await screen.findByText('Anna Petrova');
+		expect(screen.getByText('signed in 2 h ago')).toBeInTheDocument();
+		expect(screen.getAllByText(/^signed in/)).toHaveLength(1);
+	});
+
 	it('shows the active users with the login, the role and a shared account', async () => {
 		render(Users);
 		await screen.findByText('Anna Petrova');

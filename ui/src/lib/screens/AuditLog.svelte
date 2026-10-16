@@ -33,6 +33,7 @@
 
 	// The log filters and pages on the server (FR-UI-01).
 	const filters = queryFilters([
+		'q',
 		'action',
 		'actor_type',
 		'actor_id',
@@ -64,6 +65,7 @@
 			actor_id: value.actor_id.trim() || undefined,
 			object_type: value.object_type.trim() || undefined,
 			object_id: value.object_id.trim() || undefined,
+			q: value.q.trim() || undefined,
 			offset: (tablePage - 1) * pageSize,
 			limit: pageSize
 		};
@@ -86,31 +88,45 @@
 
 	function actorLabel(row: AuditRecord): string {
 		const type = tAuditActorType(row.actor_type);
-		return row.actor_id ? `${type} · ${row.actor_id}` : type;
+		const who = row.actor_name ?? row.actor_id;
+		return who ? `${type} · ${who}` : type;
 	}
 
 	function objectTypeLabel(type: string): string {
 		return tOr(`audit.object.${type}`, type);
 	}
 
-	// A configuration action names its object type; the other actions name it already. The name of
-	// the object is not in the record.
+	// The action and the current name of its object. Without a name, a configuration action names
+	// its object type; the other actions name it already.
 	function titleOf(row: AuditRecord): string {
-		return row.action.startsWith('config_') && row.object_type
-			? t('audit.item.title', {
-					action: tAuditAction(row.action),
-					object: objectTypeLabel(row.object_type)
-				})
+		const object =
+			row.object_name ??
+			(row.action.startsWith('config_') && row.object_type
+				? objectTypeLabel(row.object_type)
+				: null);
+		return object
+			? t('audit.item.title', { action: tAuditAction(row.action), object })
 			: tAuditAction(row.action);
 	}
 
+	// An acronym such as "API" keeps its case.
 	function lowerFirst(text: string): string {
+		const second = text.charAt(1);
+		if (second && second === second.toLocaleUpperCase() && second !== second.toLocaleLowerCase())
+			return text;
 		return text.charAt(0).toLocaleLowerCase() + text.slice(1);
 	}
 
-	function meta(row: AuditRecord): ListMeta[] {
+	// A person reads as the name; a token and an agent keep their kind before the name.
+	function actorOf(row: AuditRecord): string {
+		if (row.actor_name && row.actor_type === 'user') return row.actor_name;
 		const type = lowerFirst(tAuditActorType(row.actor_type));
-		const actor = row.actor_id ? `${type} ${row.actor_id}` : type;
+		const who = row.actor_name ?? row.actor_id;
+		return who ? `${type} ${who}` : type;
+	}
+
+	function meta(row: AuditRecord): ListMeta[] {
+		const actor = actorOf(row);
 		return [
 			actor,
 			scope === 'platform' ? { text: row.tenant_id, mono: true } : null,
@@ -121,7 +137,8 @@
 	}
 
 	function objectLabel(row: AuditRecord): string {
-		return row.object_id ? `${row.object_type} ${row.object_id}` : row.object_type;
+		const label = row.object_id ? `${row.object_type} ${row.object_id}` : row.object_type;
+		return row.object_name ? `${row.object_name} (${label})` : label;
 	}
 
 	function openRecord(record: AuditRecord): void {
@@ -164,7 +181,7 @@
 		}
 	}
 
-	// Each filter applies at once on the server; a typed identifier waits for a short pause.
+	// Each filter applies at once on the server; a typed search or identifier waits for a short pause.
 	let loadedQuery: string | undefined;
 	let typing: ReturnType<typeof setTimeout> | undefined;
 	onMount(() => {
@@ -297,6 +314,7 @@
 			<FilterBar
 				label={t('audit.filters.title')}
 				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('audit.searchByName') }}
 				total={loading ? undefined : totalCapped ? `${formatCount(total)}+` : formatCount(total)}
 				{facets}
 				period

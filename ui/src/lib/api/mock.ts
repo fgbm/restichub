@@ -50,6 +50,7 @@ import type {
 	JobLimitDefaults,
 	JobLogPage,
 	JobLogQuery,
+	JobGroup,
 	JobQuery,
 	JobKind,
 	JobStatus,
@@ -207,6 +208,7 @@ function makeAgents(): Agent[] {
 			waiting?: boolean;
 			duplicateOf?: { id: string; hostname: string; isOlder: boolean; lastSeenMinutes: number };
 			createdMinutesAgo?: number;
+			oldCertificateMinutesAgo?: number;
 		} = {}
 	): Agent => ({
 		id,
@@ -245,7 +247,8 @@ function makeAgents(): Agent[] {
 			options.rotatedMinutesAgo === undefined || options.rotatedMinutesAgo === null
 				? null
 				: iso(options.rotatedMinutesAgo),
-		superseded_certificate_used_at: null,
+		superseded_certificate_used_at:
+			options.oldCertificateMinutesAgo === undefined ? null : iso(options.oldCertificateMinutesAgo),
 		certificate_serial: '0f' + id.padStart(14, '0'),
 		protocol_version: options.protocol ?? '1.1',
 		control_plane_version: '0.4.2',
@@ -274,7 +277,8 @@ function makeAgents(): Agent[] {
 		agent('3', 'win-dc01', 'windows', 'amd64', '0.4.1', 60, {
 			versionStatus: 'update_available',
 			expiresInMinutes: 18 * 24 * 60,
-			rotatedMinutesAgo: 12 * 24 * 60
+			rotatedMinutesAgo: 12 * 24 * 60,
+			oldCertificateMinutesAgo: 90
 		}),
 		agent('4', 'nas-backup', 'linux', 'arm64', '0.4.2', 120, {
 			expiresInMinutes: 22 * 24 * 60,
@@ -313,7 +317,8 @@ function makeRepositories(): Repository[] {
 		id: string,
 		name: string,
 		backend: Repository['backend'],
-		agent: string | null
+		agent: string | null,
+		health: Pick<Repository, 'lock_state' | 'last_check' | 'snapshot_count'>
 	): Repository => ({
 		id,
 		name,
@@ -328,16 +333,26 @@ function makeRepositories(): Repository[] {
 		maintenance_agent_id: agent,
 		created_at: iso(60 * 24 * 40),
 		updated_at: iso(60 * 24 * 2),
-		created_by: 'u_01'
+		created_by: 'u_01',
+		...health
 	});
 	return [
 		repository(
 			'r_1',
 			'offsite-s3',
 			{ kind: 's3', endpoint: 's3.eu.example.net', bucket: 'restichub-offsite', prefix: 'nas' },
-			'4'
+			'4',
+			{
+				lock_state: 'free',
+				last_check: { finished_at: iso(60 * 24 * 2), result: 'passed' },
+				snapshot_count: 146
+			}
 		),
-		repository('r_2', 'nas-local', { kind: 'local', path: '/srv/restic/nas' }, '4')
+		repository('r_2', 'nas-local', { kind: 'local', path: '/srv/restic/nas' }, '4', {
+			lock_state: 'stale',
+			last_check: { finished_at: iso(60 * 24 * 6), result: 'passed' },
+			snapshot_count: 62
+		})
 	];
 }
 
@@ -521,6 +536,8 @@ function makePlans(): Plan[] {
 			effective_rpo_seconds: 26 * 3600,
 			next_run_at: nextFireTime('0 2 * * *', 'Europe/Berlin'),
 			last_fire_time: iso(60 * 24),
+			last_success_at: iso(60 * 7),
+			rpo_state: 'ok',
 			created_at: iso(60 * 24 * 9),
 			updated_at: iso(60 * 24)
 		},
@@ -540,6 +557,8 @@ function makePlans(): Plan[] {
 			effective_rpo_seconds: 26 * 3600,
 			next_run_at: nextFireTime('30 1 * * *', 'Europe/Berlin'),
 			last_fire_time: iso(60 * 6),
+			last_success_at: iso(60 * 22),
+			rpo_state: 'at_risk',
 			created_at: iso(60 * 24 * 3),
 			updated_at: iso(60 * 6)
 		}
@@ -620,7 +639,8 @@ function makeUsers(): User[] {
 			display_name: 'Anna Petrova',
 			role: 'admin',
 			disabled: false,
-			shared: false
+			shared: false,
+			last_sign_in_at: iso(60 * 2)
 		},
 		{
 			id: 'u_02',
@@ -628,7 +648,8 @@ function makeUsers(): User[] {
 			display_name: 'Boris Ivanov',
 			role: 'operator',
 			disabled: false,
-			shared: false
+			shared: false,
+			last_sign_in_at: iso(60 * 24)
 		},
 		{
 			id: 'u_03',
@@ -636,7 +657,8 @@ function makeUsers(): User[] {
 			display_name: 'Vera Sokolova',
 			role: 'viewer',
 			disabled: true,
-			shared: true
+			shared: true,
+			last_sign_in_at: iso(60 * 24 * 90)
 		}
 	];
 }
@@ -663,6 +685,7 @@ function makeTenants(): Tenant[] {
 			status: 'active',
 			created_at: iso(60 * 24 * 90),
 			user_count: 4,
+			agent_count: 24,
 			admin_state: 'present'
 		},
 		{
@@ -671,6 +694,7 @@ function makeTenants(): Tenant[] {
 			status: 'active',
 			created_at: iso(60 * 24 * 60),
 			user_count: 2,
+			agent_count: 3,
 			admin_state: 'present'
 		},
 		{
@@ -679,6 +703,7 @@ function makeTenants(): Tenant[] {
 			status: 'suspended',
 			created_at: iso(60 * 24 * 30),
 			user_count: 0,
+			agent_count: 11,
 			admin_state: 'none'
 		}
 	];
@@ -760,6 +785,8 @@ function makeAudit(): AuditRecord[] {
 			action: 'user_update',
 			object_type: 'user',
 			object_id: 'u_03',
+			object_name: 'Vera Sokolova',
+			actor_name: 'Anna Petrova',
 			diff: { disabled: { old: false, new: true } }
 		},
 		{
@@ -772,6 +799,8 @@ function makeAudit(): AuditRecord[] {
 			action: 'api_token_create',
 			object_type: 'api_token',
 			object_id: 'k_02',
+			object_name: 'monitoring',
+			actor_name: 'Anna Petrova',
 			diff: {
 				old: null,
 				new: { name: 'monitoring', role: 'viewer', display_prefix: 'ef56gh78' }
@@ -787,6 +816,8 @@ function makeAudit(): AuditRecord[] {
 			action: 'tenant_suspend',
 			object_type: 'tenant',
 			object_id: 't_03',
+			object_name: 'initech',
+			actor_name: 'ci-deploy',
 			diff: { status: { old: 'active', new: 'suspended' } }
 		},
 		{
@@ -799,6 +830,8 @@ function makeAudit(): AuditRecord[] {
 			action: 'user_create',
 			object_type: 'user',
 			object_id: 'u_02',
+			object_name: 'Boris Ivanov',
+			actor_name: 'Anna Petrova',
 			diff: {
 				old: null,
 				new: { username: 'operator', display_name: 'Boris Ivanov', role: 'operator' }
@@ -814,6 +847,8 @@ function makeAudit(): AuditRecord[] {
 			action: 'sign_in',
 			object_type: 'user',
 			object_id: 'u_01',
+			object_name: 'Anna Petrova',
+			actor_name: null,
 			diff: null
 		},
 		{
@@ -826,6 +861,8 @@ function makeAudit(): AuditRecord[] {
 			action: 'user_update',
 			object_type: 'user',
 			object_id: 'u_01',
+			object_name: 'Anna Petrova',
+			actor_name: 'Anna Petrova',
 			diff: { password: { old: REDACTED, new: REDACTED } }
 		},
 		// A longer history, so the log shows more than one page.
@@ -839,6 +876,8 @@ function makeAudit(): AuditRecord[] {
 			action: 'job_run',
 			object_type: 'job',
 			object_id: `j_${String(index).padStart(3, '0')}`,
+			object_name: index % 2 === 0 ? 'nightly-web' : 'nightly-db',
+			actor_name: null,
 			diff: null
 		}))
 	];
@@ -1264,7 +1303,8 @@ export class MockApiService {
 			maintenance_agent_id: request.maintenance_agent_id ?? null,
 			created_at: now,
 			updated_at: now,
-			created_by: this.users[0].id
+			created_by: this.users[0].id,
+			lock_state: 'free'
 		};
 		this.repositories = [...this.repositories, repository];
 		return repository;
@@ -1668,29 +1708,68 @@ export class MockApiService {
 		const kinds = list(query?.kind);
 		const key = query?.sort ?? 'created_at';
 		const factor = (query?.order ?? 'desc') === 'desc' ? -1 : 1;
+		const duration = (job: Job) =>
+			job.started_at && job.finished_at
+				? String(Date.parse(job.finished_at) - Date.parse(job.started_at)).padStart(15, '0')
+				: '';
 		const value = (job: Job): string =>
 			key === 'started_at'
 				? (job.started_at ?? '')
-				: key === 'status'
-					? job.status
-					: key === 'plan'
-						? (job.plan_name ?? '')
-						: key === 'host'
-							? (job.agent_hostname ?? '')
-							: job.created_at;
-		const rows = this.jobs
+				: key === 'finished_at'
+					? (job.finished_at ?? '')
+					: key === 'duration'
+						? duration(job)
+						: key === 'status'
+							? job.status
+							: key === 'plan'
+								? (job.plan_name ?? '')
+								: key === 'host'
+									? (job.agent_hostname ?? '')
+									: job.created_at;
+		const search = query?.q?.toLowerCase();
+		const inGroup = (job: Job, group: JobGroup): boolean => {
+			const warnings = job.result_code === 'succeeded_with_warnings';
+			if (group === 'running') return job.status === 'running';
+			if (group === 'failed') {
+				return (
+					(job.status === 'failed' || job.status === 'dead_letter') &&
+					job.result_code !== 'cancelled'
+				);
+			}
+			if (group === 'succeeded_with_warnings') return job.status === 'succeeded' && warnings;
+			return job.status === 'succeeded' && !warnings;
+		};
+		const others = this.jobs
 			.map((entry) => entry.job)
 			.filter(
 				(job) =>
-					(!query?.status || job.status === query.status) &&
 					(plans.length === 0 || plans.includes(job.plan_id ?? '')) &&
 					(repositories.length === 0 || repositories.includes(job.repository_id ?? '')) &&
 					(agents.length === 0 || agents.includes(job.agent_id)) &&
 					(kinds.length === 0 || kinds.includes(job.kind)) &&
+					(!search ||
+						[job.plan_name, job.agent_hostname, job.repository_name].some((name) =>
+							name?.toLowerCase().includes(search)
+						)) &&
 					(!query?.from || job.created_at >= query.from) &&
 					(!query?.to || job.created_at <= query.to)
+			);
+		const count = (group: JobGroup) => ({
+			count: others.filter((job) => inGroup(job, group)).length,
+			capped: false
+		});
+		// An unfinished job has no duration and no finish time: it is last in both orders.
+		const rows = others
+			.filter(
+				(job) =>
+					(!query?.status || job.status === query.status) &&
+					(!query?.group || inGroup(job, query.group))
 			)
-			.sort((a, b) => factor * value(a).localeCompare(value(b)));
+			.sort((a, b) => {
+				const [left, right] = [value(a), value(b)];
+				if (!left !== !right) return left ? -1 : 1;
+				return factor * left.localeCompare(right);
+			});
 		const limit = query?.limit ?? 50;
 		const start = query?.cursor ? Number(query.cursor) : (query?.offset ?? 0);
 		const page = rows.slice(start, start + limit);
@@ -1699,7 +1778,13 @@ export class MockApiService {
 			next_cursor:
 				query?.offset === undefined && start + limit < rows.length ? String(start + limit) : null,
 			total: rows.length,
-			total_capped: false
+			total_capped: false,
+			counts: {
+				running: count('running'),
+				failed: count('failed'),
+				succeeded: count('succeeded'),
+				succeeded_with_warnings: count('succeeded_with_warnings')
+			}
 		};
 	}
 
@@ -1959,6 +2044,7 @@ export class MockApiService {
 			effective_rpo_seconds: request.rpo_seconds ?? 26 * 3600,
 			next_run_at: request.enabled === false ? null : nextFireTime(request.cron, request.time_zone),
 			last_fire_time: null,
+			rpo_state: 'ok',
 			created_at: now,
 			updated_at: now
 		};
@@ -2068,6 +2154,7 @@ export class MockApiService {
 			status: 'active',
 			created_at: new Date().toISOString(),
 			user_count: 0,
+			agent_count: 0,
 			admin_state: 'none'
 		};
 		this.tenants = [...this.tenants, tenant];
@@ -2206,6 +2293,14 @@ export class MockApiService {
 			items = items.filter((item) => item.object_id?.includes(query.object_id as string));
 		if (query.from) items = items.filter((item) => item.occurred_at >= (query.from as string));
 		if (query.to) items = items.filter((item) => item.occurred_at <= (query.to as string));
+		const search = query.q?.toLowerCase();
+		if (search) {
+			items = items.filter((item) =>
+				[item.action, item.object_name, item.actor_name].some((text) =>
+					text?.toLowerCase().includes(search)
+				)
+			);
+		}
 		items.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
 
 		const start = query.cursor ? Number(query.cursor) : (query.offset ?? 0);

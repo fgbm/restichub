@@ -5,7 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Job, JobKind, JobQuery, JobStatus } from '#lib/api/index.ts';
+	import type { Job, JobGroup, JobKind, JobListResponse, JobQuery } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import { Alert, Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
 	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
@@ -36,6 +36,7 @@
 	let jobs = $state<Job[]>([]);
 	let total = $state(0);
 	let totalCapped = $state(false);
+	let counts = $state<JobListResponse['counts'] | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let hosts = $state<{ id: string; hostname: string }[]>([]);
@@ -44,11 +45,12 @@
 	// The list filters, sorts and pages on the server (FR-UI-01). The host page links here with the
 	// host to show (`?agent_id=`).
 	const filters = queryFilters([
+		'q',
 		'agent_id',
 		'repository_id',
 		'plan_id',
 		'kind',
-		'status',
+		'group',
 		'period',
 		'from',
 		'to',
@@ -59,26 +61,43 @@
 	] as const);
 	const SORT_KEYS: Record<string, NonNullable<JobQuery['sort']>> = {
 		started: 'started_at',
+		duration: 'duration',
+		finished: 'finished_at',
 		plan: 'plan',
 		host: 'host'
 	};
+	// Newest and longest first by default; the other keys read A to Z.
+	const DESCENDING = new Set(['started', 'duration', 'finished']);
 	const sort = $derived({
 		default: 'started',
 		options: [
 			{ value: 'started', label: t('jobs.sort.started'), order: 'desc' as const },
+			{ value: 'duration', label: t('jobs.sort.duration'), order: 'desc' as const },
+			{ value: 'finished', label: t('jobs.sort.finished'), order: 'desc' as const },
 			{ value: 'plan', label: t('jobs.sort.plan') },
 			{ value: 'host', label: t('jobs.sort.host') }
 		]
 	});
-	// The tabs are the status groups that the server filters.
+	const GROUPS: JobGroup[] = ['running', 'failed', 'succeeded_with_warnings', 'succeeded'];
+	const GROUP_LABELS: Record<JobGroup, MessageKey> = {
+		running: 'jobs.tab.running',
+		failed: 'jobs.tab.failed',
+		succeeded_with_warnings: 'jobs.tab.warnings',
+		succeeded: 'jobs.tab.succeeded'
+	};
+	// The tabs are the status groups that the server filters and counts.
 	const states = $derived({
-		key: 'status',
+		key: 'group',
 		default: 'all',
 		options: [
 			{ value: 'all', label: t('jobs.tab.all') },
-			{ value: 'running', label: t('jobs.tab.running') },
-			{ value: 'failed', label: t('jobs.tab.failed') },
-			{ value: 'succeeded', label: t('jobs.tab.succeeded') }
+			...GROUPS.map((group) => ({
+				value: group,
+				label: t(GROUP_LABELS[group]),
+				count: counts?.[group].count,
+				capped: counts?.[group].capped,
+				danger: group === 'failed'
+			}))
 		]
 	});
 	const tablePage = $derived(pageNumber(filters.value.page));
@@ -100,12 +119,13 @@
 			repository_id: value.repository_id || undefined,
 			plan_id: value.plan_id || undefined,
 			kind: value.kind || undefined,
-			status: value.status ? (value.status as JobStatus) : undefined,
+			group: GROUPS.find((group) => group === value.group),
+			q: value.q || undefined,
 			from: iso(window.start),
 			to: iso(window.end),
 			sort: SORT_KEYS[value.sort || 'started'],
 			order:
-				value.order === 'asc' || (value.sort && value.sort !== 'started' && !value.order)
+				value.order === 'asc' || (!value.order && value.sort && !DESCENDING.has(value.sort))
 					? 'asc'
 					: 'desc',
 			offset: (tablePage - 1) * pageSize,
@@ -137,11 +157,12 @@
 	]);
 
 	const FILTER_KEYS = [
+		'q',
 		'agent_id',
 		'repository_id',
 		'plan_id',
 		'kind',
-		'status',
+		'group',
 		'period',
 		'from',
 		'to'
@@ -201,6 +222,7 @@
 			jobs = page.items;
 			total = page.total;
 			totalCapped = page.total_capped;
+			counts = page.counts;
 		} catch (problem) {
 			if (mine !== request) return;
 			error = messageOf(problem);
@@ -227,17 +249,27 @@
 	}
 
 	// The key is the filter state, not the query: a period preset gives a new time on each read.
-	let loadedQuery = JSON.stringify(filters.value);
+	// A typed search waits for a short pause; the other filters and the page apply at once.
+	let loadedQuery = filterKey();
+	let typing: ReturnType<typeof setTimeout> | undefined;
+	function filterKey(): { q: string; rest: string } {
+		const { q, ...rest } = filters.value;
+		return { q, rest: JSON.stringify(rest) };
+	}
 	onMount(() => {
 		void load();
 		void loadOptions();
+		return () => clearTimeout(typing);
 	});
 
 	$effect(() => {
-		const key = JSON.stringify(filters.value);
-		if (key === loadedQuery) return;
-		loadedQuery = key;
-		void load();
+		const next = filterKey();
+		if (next.q === loadedQuery.q && next.rest === loadedQuery.rest) return;
+		const typed = next.rest === loadedQuery.rest;
+		loadedQuery = next;
+		clearTimeout(typing);
+		if (typed) typing = setTimeout(() => void load(), 300);
+		else void load();
 	});
 
 	async function reload(): Promise<void> {
@@ -331,6 +363,7 @@
 			<FilterBar
 				label={t('jobs.filters')}
 				value={filters.value}
+				search={{ key: 'q', label: t('hosts.search'), placeholder: t('jobs.searchByName') }}
 				{states}
 				{facets}
 				period

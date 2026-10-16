@@ -191,6 +191,9 @@ export interface JobLogQuery {
 /** One page of the job list, newest first (FR-SC-09). */
 export type JobListResponse = components['schemas']['JobListResponse'];
 
+/** A state tab of the job list: the server counts each one (FR-UI-01). */
+export type JobGroup = keyof components['schemas']['JobGroupCounts'];
+
 /** The filters, the order and the page of the job list (FR-SC-09). A list holds comma values. */
 export interface JobQuery {
 	status?: JobStatus;
@@ -198,10 +201,13 @@ export interface JobQuery {
 	repository_id?: string;
 	agent_id?: string;
 	kind?: string;
+	group?: JobGroup;
+	/** A part of the plan, host or repository name. */
+	q?: string;
 	/** RFC 3339 times of the first and the last creation time. */
 	from?: string;
 	to?: string;
-	sort?: 'created_at' | 'started_at' | 'status' | 'plan' | 'host';
+	sort?: 'created_at' | 'started_at' | 'finished_at' | 'duration' | 'status' | 'plan' | 'host';
 	order?: 'asc' | 'desc';
 	cursor?: string;
 	offset?: number;
@@ -387,6 +393,8 @@ export interface AuditQuery {
 	actor_id?: string;
 	object_type?: string;
 	object_id?: string;
+	/** A part of the action code, the object name or the actor name. */
+	q?: string;
 	cursor?: string;
 	offset?: number;
 	limit?: number;

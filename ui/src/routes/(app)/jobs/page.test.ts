@@ -254,18 +254,73 @@ describe('the Jobs screen', () => {
 
 	it('fr_ui_01 reads a numbered page from the server with the filters of the address', async () => {
 		const user = userEvent.setup();
-		route.url = new URL('http://localhost/jobs?status=failed&kind=backup');
+		route.url = new URL('http://localhost/jobs?group=failed&kind=backup');
 		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 60 });
 		render(Jobs);
 
 		await screen.findByText('nightly-web');
 		expect(mocks.listJobs).toHaveBeenCalledWith(
-			expect.objectContaining({ status: 'failed', kind: 'backup', offset: 0, limit: 25 })
+			expect.objectContaining({ group: 'failed', kind: 'backup', offset: 0, limit: 25 })
 		);
 		expect(screen.getByText('Showing 1 to 25 of 60')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Next' }));
 		await waitFor(() =>
 			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25 }))
+		);
+	});
+
+	it('fr_ui_01 shows the server counts of the state tabs and asks for the tab', async () => {
+		const user = userEvent.setup();
+		const tab = (count: number, capped = false) => ({ count, capped });
+		mocks.listJobs.mockResolvedValue({
+			items: [job()],
+			next_cursor: null,
+			total: 1,
+			total_capped: false,
+			counts: {
+				running: tab(2),
+				failed: tab(3),
+				succeeded: tab(10000, true),
+				succeeded_with_warnings: tab(1)
+			}
+		});
+		render(Jobs);
+
+		const failed = await screen.findByRole('button', { name: /^Failed/ });
+		expect(failed).toHaveTextContent('3');
+		expect(failed.querySelector('.count')).toHaveClass('count--danger');
+		expect(screen.getByRole('button', { name: /^Running/ })).toHaveTextContent('2');
+		expect(screen.getByRole('button', { name: /^Succeeded/ })).toHaveTextContent('10,000+');
+		const warnings = screen.getByRole('button', { name: /^With warnings/ });
+		expect(warnings).toHaveTextContent('1');
+		expect(warnings.querySelector('.count')).not.toHaveClass('count--danger');
+
+		await user.click(warnings);
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(
+				expect.objectContaining({ group: 'succeeded_with_warnings', offset: 0 })
+			)
+		);
+	});
+
+	it('fr_ui_01 searches the names on the server and sorts by the duration', async () => {
+		const user = userEvent.setup();
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null, total: 1 });
+		render(Jobs);
+
+		await screen.findByText('nightly-web');
+		await user.type(screen.getByRole('searchbox'), 'db-01');
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'db-01' }))
+		);
+
+		route.url = new URL('http://localhost/jobs?sort=duration');
+		mocks.listJobs.mockClear();
+		render(Jobs);
+		await waitFor(() =>
+			expect(mocks.listJobs).toHaveBeenCalledWith(
+				expect.objectContaining({ sort: 'duration', order: 'desc' })
+			)
 		);
 	});
 

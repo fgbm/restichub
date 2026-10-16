@@ -419,6 +419,26 @@ describe('the Hosts screen', () => {
 		expect(document.querySelectorAll('.status')).toHaveLength(2);
 	});
 
+	it('fr_ui_01 marks a host whose old certificate connected with the danger pill', async () => {
+		mocks.hostRows.mockResolvedValue([
+			agent({ id: 'a_01', hostname: 'host-fresh' }),
+			agent({
+				id: 'a_02',
+				hostname: 'host-copied',
+				online: false,
+				superseded_certificate_used_at: PAST
+			})
+		]);
+		const { container } = render(Hosts);
+
+		await screen.findByText('host-copied');
+		const pill = screen.getByText('Old certificate used', { selector: '.status' });
+		expect(pill).toHaveClass('status--failed');
+		expect(container.querySelectorAll('.status')).toHaveLength(1);
+		const item = pill.closest('li') as HTMLElement;
+		expect(item.querySelector('.item__lead')?.className).toMatch(/tone--danger/);
+	});
+
 	it('shows a host that never connected as waiting (FR-ID-04)', async () => {
 		mocks.hostRows.mockResolvedValue([
 			agent({ id: 'a_01', hostname: 'host-live' }),
