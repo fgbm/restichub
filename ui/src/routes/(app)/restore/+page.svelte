@@ -4,28 +4,36 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Repository, SnapshotItem, SnapshotsView } from '#lib/api/index.ts';
-	import SnapshotTags from '#lib/components/SnapshotTags.svelte';
+	import type { Agent, Repository, SnapshotItem, SnapshotsView } from '#lib/api/index.ts';
+	import RestoreDialog from '#lib/components/RestoreDialog.svelte';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
-		DataTable,
 		EmptyState,
 		FilterBar,
+		ListView,
 		Select,
 		Skeleton
 	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
-	import { formatBytes, relativeTime } from '#lib/format.ts';
-	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
-	import { EMPTY_FILTERS, filtersFromQuery, filtersToQuery, targetExtra } from '#lib/restore.ts';
+	import type { FilterFacet, ListMeta, SelectOption } from '#lib/components/ui/index.ts';
+	import { formatLocalTime, relativeTime } from '#lib/format.ts';
+	import { dayHeading, size } from '#lib/list-format.ts';
+	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
+	import { getLocale, t, tErrorCode, tOr } from '#lib/i18n/index.ts';
+	import {
+		EMPTY_FILTERS,
+		TARGET_PARAM,
+		filtersFromQuery,
+		filtersToQuery,
+		targetExtra
+	} from '#lib/restore.ts';
 	import type { RestoreFilters } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
 	import { applyFilters, facetCounts, tagLabel } from '#lib/snapshot-filter.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
-	const PAGE_SIZE = 15;
+	const PAGE_SIZE = 25;
 	const ADDRESS_DELAY = 300;
 
 	const query = page.url.searchParams;
@@ -57,31 +65,37 @@
 		)
 	);
 
-	const columns = $derived<TableColumn<SnapshotItem>[]>([
-		{
-			key: 'short_id',
-			header: t('restore.snapshot'),
-			sortable: false,
-			render: snapshotCell
-		},
-		{
-			key: 'time',
-			header: t('restore.time'),
-			date: 'absolute',
-			sortable: false,
-			value: (row) => row.time ?? ''
-		},
-		{ key: 'hostname', header: t('restore.hostColumn'), truncate: 'sm', sortable: false },
-		{ key: 'tags', header: t('restore.tags'), sortable: false, hideNarrow: true, render: tagsCell },
-		{
-			key: 'total_bytes',
-			header: t('restore.size'),
-			align: 'right',
-			nowrap: true,
-			sortable: false,
-			value: (row) => (row.total_bytes == null ? '—' : formatBytes(row.total_bytes))
-		}
-	]);
+	function hoursMinutes(value: string): string {
+		return new Intl.DateTimeFormat(getLocale(), {
+			hour: '2-digit',
+			minute: '2-digit',
+			hour12: false
+		}).format(new Date(value));
+	}
+
+	function meta(snapshot: SnapshotItem): ListMeta[] {
+		const [first, ...rest] = snapshot.paths;
+		return [
+			snapshot.hostname,
+			first ? { text: rest.length > 0 ? `${first} +${rest.length}` : first, mono: true } : null,
+			{
+				text: snapshot.tags.map((tag) => tagLabel(tag, profiles)).join(', '),
+				title: snapshot.tags.join(', ')
+			},
+			{ text: snapshot.short_id, mono: true }
+		];
+	}
+
+	let agents = $state<Agent[]>([]);
+	let restoreOpen = $state(false);
+	let restoreTarget = $state<SnapshotItem | null>(null);
+	const restoreRepository = $derived(repositories.find((item) => item.id === repositoryId));
+
+	async function openRestore(snapshot: SnapshotItem): Promise<void> {
+		if (agents.length === 0) agents = await service.listAgents().catch(() => []);
+		restoreTarget = snapshot;
+		restoreOpen = true;
+	}
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -229,11 +243,6 @@
 	});
 </script>
 
-{#snippet snapshotCell(row: SnapshotItem)}
-	<span class="row__id">{row.short_id}</span>
-	<span class="row__paths" title={row.paths.join(', ')}>{row.paths.join(', ')}</span>
-{/snippet}
-
 {#snippet refresh()}
 	<Button
 		variant="ghost"
@@ -245,10 +254,6 @@
 		disabled={!repositoryId}
 		onclick={() => void find()}
 	/>
-{/snippet}
-
-{#snippet tagsCell(row: SnapshotItem)}
-	<SnapshotTags tags={row.tags} {profiles} />
 {/snippet}
 
 <Page
@@ -334,18 +339,33 @@
 				>
 			</EmptyState>
 		{:else if view?.state === 'done'}
-			<DataTable
-				{columns}
-				rows={matching}
-				rowKey={(row) => row.id}
-				rowHref={detailHref}
-				rowLabel={(row) => t('restore.openSnapshot', { id: row.short_id })}
-				rowSelected={(row) => row.id === opened}
+			<ListView
+				label={t('restore.snapshots')}
+				items={matching}
+				itemKey={(row) => row.id}
+				icon={() => ({ name: ENTITY_ICONS.snapshot })}
+				title={(row) => (row.time ? hoursMinutes(row.time) : row.short_id)}
+				titleLabel={(row) =>
+					t('restore.openSnapshot', {
+						id: row.time ? `${row.short_id}, ${formatLocalTime(row.time)}` : row.short_id
+					})}
+				href={detailHref}
+				selected={(row) => row.id === opened}
+				{meta}
+				aside={(row) => (row.total_bytes == null ? '—' : size(row.total_bytes))}
+				groupBy={(row) => (row.time ? dayHeading(row.time) : t('restore.noTime'))}
+				actions={(row) => [
+					{
+						id: 'restore',
+						label: t('restore.restoreSnapshot'),
+						icon: 'restore',
+						onSelect: () => void openRestore(row)
+					}
+				]}
 				bind:page={tablePage}
 				pageSize={PAGE_SIZE}
-				emptyIcon="search"
-				emptyTitle={t('restore.listEmpty')}
-				emptyDescription={t('filter.noMatchesDescription')}
+				filtered
+				onReset={reset}
 			>
 				{#snippet toolbar()}
 					<FilterBar
@@ -357,6 +377,7 @@
 							label: t('restore.pathSearch'),
 							placeholder: t('restore.pathPlaceholder')
 						}}
+						total={matching.length}
 						{facets}
 						period
 						onchange={change}
@@ -372,8 +393,19 @@
 						{/snippet}
 					</FilterBar>
 				{/snippet}
-			</DataTable>
+			</ListView>
 		{/if}
+	{/if}
+
+	{#if restoreRepository && restoreTarget}
+		<RestoreDialog
+			bind:open={restoreOpen}
+			repository={restoreRepository}
+			snapshot={restoreTarget}
+			paths={[]}
+			{agents}
+			preferredAgentId={query.get(TARGET_PARAM) ?? ''}
+		/>
 	{/if}
 </Page>
 
@@ -413,22 +445,5 @@
 	.alert-link {
 		color: var(--rh-color-link);
 		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.row__id {
-		display: block;
-		font-family: var(--rh-font-mono);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.row__paths {
-		display: block;
-		max-width: 22rem;
-		overflow: hidden;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-		font-weight: var(--rh-font-weight-regular);
-		text-overflow: ellipsis;
-		white-space: nowrap;
 	}
 </style>

@@ -2141,7 +2141,10 @@ export const en = {
 	'templates.tab.builtin': 'Built-in',
 	'templates.sort.name': 'Name',
 	'templates.facet.interpreter': 'Interpreter',
-	'templates.facet.phase': 'Phase'
+	'templates.facet.phase': 'Phase',
+	'restore.snapshots': 'Snapshots',
+	'restore.restoreSnapshot': 'Restore',
+	'restore.noTime': 'No time'
 } as const;
 
 export type MessageKey = keyof typeof en;

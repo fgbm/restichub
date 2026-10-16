@@ -85,14 +85,14 @@ describe('Restore page', () => {
 			])
 		);
 		render(Restore);
-		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
-		expect(screen.getByRole('link', { name: 'Open snapshot b2c3d4e5' })).toBeVisible();
+		expect(await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ })).toBeVisible();
+		expect(screen.getByRole('link', { name: /^Open snapshot b2c3d4e5/ })).toBeVisible();
 
 		await user.type(screen.getByRole('searchbox', { name: 'Search by path' }), 'c:\\users');
 		await waitFor(() =>
-			expect(screen.queryByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeNull()
+			expect(screen.queryByRole('link', { name: /^Open snapshot a1b2c3d4/ })).toBeNull()
 		);
-		expect(screen.getByRole('link', { name: 'Open snapshot b2c3d4e5' })).toBeVisible();
+		expect(screen.getByRole('link', { name: /^Open snapshot b2c3d4e5/ })).toBeVisible();
 		expect(mocks.startSnapshots).not.toHaveBeenCalled();
 		// The address keeps the filters, so the back link of the snapshot page restores them.
 		await waitFor(() =>
@@ -112,10 +112,10 @@ describe('Restore page', () => {
 			])
 		);
 		const { container } = render(Restore);
-		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ });
 		const order = screen
 			.getAllByRole('link', { name: /^Open snapshot / })
-			.map((link) => link.textContent ?? '');
+			.map((link) => link.getAttribute('aria-label') ?? '');
 		expect(order[0]).toContain('b2c3d4e5');
 		expect(order[1]).toContain('c3d4e5f6');
 		expect(order[2]).toContain('a1b2c3d4');
@@ -126,7 +126,7 @@ describe('Restore page', () => {
 	it('fr_rs_01_the_facet_popover_explains_how_the_filters_combine', async () => {
 		const user = userEvent.setup();
 		render(Restore);
-		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ });
 		expect(screen.queryByText('Any chosen value matches. All filters must match.')).toBeNull();
 		await user.click(screen.getByRole('button', { name: 'Tag' }));
 		expect(
@@ -137,24 +137,24 @@ describe('Restore page', () => {
 	it('fr_rs_01_a_host_chosen_in_the_popover_shows_as_a_chip_and_narrows_the_list', async () => {
 		const user = userEvent.setup();
 		render(Restore);
-		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ });
 		await user.click(screen.getByRole('button', { name: 'Host' }));
 		await user.click(await screen.findByLabelText('ws-anna'));
 		expect(screen.getByText('Host: ws-anna')).toBeVisible();
 		await waitFor(() =>
-			expect(screen.queryByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeNull()
+			expect(screen.queryByRole('link', { name: /^Open snapshot a1b2c3d4/ })).toBeNull()
 		);
 		await user.click(screen.getByRole('button', { name: 'Remove the filter Host: ws-anna' }));
-		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
+		expect(await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ })).toBeVisible();
 	});
 
 	it('fr_rs_01_a_filter_that_matches_nothing_offers_a_reset', async () => {
 		const user = userEvent.setup();
 		route.url = new URL('http://localhost/restore?repository=r_1&host=nobody');
 		render(Restore);
-		expect(await screen.findByText('No snapshot matches these filters.')).toBeVisible();
+		expect(await screen.findByText('Nothing found')).toBeVisible();
 		await user.click(screen.getByRole('button', { name: 'Reset' }));
-		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
+		expect(await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ })).toBeVisible();
 	});
 
 	it('fr_rs_01_a_repository_without_snapshots_shows_its_own_empty_state', async () => {
@@ -166,19 +166,19 @@ describe('Restore page', () => {
 	it('fr_rs_01_the_refresh_button_runs_a_list_job_without_filters', async () => {
 		const user = userEvent.setup();
 		render(Restore);
-		await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ });
 		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('c3d4e5f6', 'nas-backup')]));
 		await user.click(screen.getByRole('button', { name: 'Refresh the list from the repository' }));
 		await waitFor(() =>
 			expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', { hosts: [], tags: [], paths: [] })
 		);
-		expect(await screen.findByRole('link', { name: 'Open snapshot c3d4e5f6' })).toBeVisible();
+		expect(await screen.findByRole('link', { name: /^Open snapshot c3d4e5f6/ })).toBeVisible();
 	});
 
 	it('fr_rs_01_a_snapshot_links_to_its_own_page_with_the_filters', async () => {
 		route.url = new URL('http://localhost/restore?repository=r_1&tag=daily');
 		render(Restore);
-		const link = await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' });
+		const link = await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ });
 		expect(link).toHaveAttribute(
 			'href',
 			`/(app)/restore/r_1/${'a1b2c3d4'.padEnd(64, '0')}?tag=daily`
@@ -202,11 +202,11 @@ describe('Restore page', () => {
 	it('fr_rs_01_marks_the_snapshot_that_the_person_had_open', async () => {
 		route.url = new URL(`http://localhost/restore?snapshot=${'b2c3d4e5'.padEnd(64, '0')}`);
 		render(Restore);
-		expect(await screen.findByRole('link', { name: 'Open snapshot b2c3d4e5' })).toHaveAttribute(
+		expect(await screen.findByRole('link', { name: /^Open snapshot b2c3d4e5/ })).toHaveAttribute(
 			'aria-current',
 			'true'
 		);
-		expect(screen.getByRole('link', { name: 'Open snapshot a1b2c3d4' })).not.toHaveAttribute(
+		expect(screen.getByRole('link', { name: /^Open snapshot a1b2c3d4/ })).not.toHaveAttribute(
 			'aria-current'
 		);
 	});
@@ -215,7 +215,7 @@ describe('Restore page', () => {
 		mocks.getSnapshots.mockResolvedValue(listing('empty'));
 		mocks.startSnapshots.mockResolvedValue(listing('done', [snapshot('a1b2c3d4', 'nas-backup')]));
 		render(Restore);
-		expect(await screen.findByRole('link', { name: 'Open snapshot a1b2c3d4' })).toBeVisible();
+		expect(await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ })).toBeVisible();
 		expect(mocks.startSnapshots).toHaveBeenCalledWith('r_1', { hosts: [], tags: [], paths: [] });
 	});
 
@@ -245,11 +245,11 @@ describe('Restore page', () => {
 			])
 		);
 		render(Restore);
-		const resolved = await screen.findByText('Profile Office files');
-		expect(resolved.closest('[title]')).toHaveAttribute('title', `restichub-profile-${id}`);
-		const unresolved = screen.getByText('Profile 7c1e5d90');
-		expect(unresolved.closest('[title]')).toHaveAttribute('title', `restichub-profile-${other}`);
-		expect(screen.getByText('daily')).toBeVisible();
+		const tags = await screen.findByText('Profile Office files, Profile 7c1e5d90, daily');
+		expect(tags).toHaveAttribute(
+			'title',
+			`restichub-profile-${id}, restichub-profile-${other}, daily`
+		);
 	});
 
 	it('fr_rs_01_pages_the_snapshots', async () => {
@@ -257,14 +257,14 @@ describe('Restore page', () => {
 		mocks.getSnapshots.mockResolvedValue(
 			listing(
 				'done',
-				Array.from({ length: 20 }, (_, index) =>
+				Array.from({ length: 30 }, (_, index) =>
 					snapshot(`aa${String(index).padStart(6, '0')}`, 'nas-backup')
 				)
 			)
 		);
 		render(Restore);
-		await screen.findByRole('link', { name: 'Open snapshot aa000000' });
-		expect(screen.getAllByRole('link', { name: /^Open snapshot / })).toHaveLength(15);
+		await screen.findByRole('link', { name: /^Open snapshot aa000000/ });
+		expect(screen.getAllByRole('link', { name: /^Open snapshot / })).toHaveLength(25);
 		await user.click(screen.getByRole('button', { name: 'Next' }));
 		expect(screen.getAllByRole('link', { name: /^Open snapshot / })).toHaveLength(5);
 	});

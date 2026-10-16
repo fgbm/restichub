@@ -31,6 +31,7 @@
 		titleLabel,
 		href,
 		onOpen,
+		selected,
 		pill,
 		meta,
 		aside,
@@ -70,6 +71,8 @@
 		href?: (item: T) => string | undefined;
 		/** For an entity without a record page: the title opens a side panel. */
 		onOpen?: (item: T) => void;
+		/** Marks the item that the person opened last. */
+		selected?: (item: T) => boolean;
 		/** Only an unusual state has a pill. */
 		pill?: (item: T) => ListPill | null;
 		/** The fields of line 2 in the order of priority. A narrow list shows the first two. */
@@ -223,6 +226,7 @@
 					{@const number = aside?.(item) ?? ''}
 					{@const name = title(item)}
 					{@const link = href?.(item)}
+					{@const current = selected?.(item) ?? false}
 					{#if row.group !== null}
 						<li class="group">{row.group}</li>
 					{/if}
@@ -230,6 +234,7 @@
 						class="item"
 						class:item--aside={Boolean(aside)}
 						class:item--single={fields.length === 0 && !number}
+						class:item--selected={current}
 					>
 						<span
 							class="item__lead"
@@ -249,6 +254,7 @@
 										class:item__title--mono={titleMono}
 										href={link}
 										title={name}
+										aria-current={current ? 'true' : undefined}
 										aria-label={titleLabel?.(item)}>{name}</a
 									>
 									<!-- eslint-enable svelte/no-navigation-without-resolve -->
@@ -390,6 +396,10 @@
 		align-self: start;
 		height: 20px;
 		color: var(--rh-color-text-subtle);
+	}
+
+	.item.item--selected {
+		background-color: var(--rh-color-selected);
 	}
 
 	.item--single .item__lead {

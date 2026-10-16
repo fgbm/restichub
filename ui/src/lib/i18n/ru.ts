@@ -2152,5 +2152,8 @@ export const ru: Record<MessageKey, string> = {
 	'templates.tab.builtin': 'Встроенные',
 	'templates.sort.name': 'Имя',
 	'templates.facet.interpreter': 'Интерпретатор',
-	'templates.facet.phase': 'Фаза'
+	'templates.facet.phase': 'Фаза',
+	'restore.snapshots': 'Снимки',
+	'restore.restoreSnapshot': 'Восстановить',
+	'restore.noTime': 'Без времени'
 };
