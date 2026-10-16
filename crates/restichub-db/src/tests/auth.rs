@@ -279,3 +279,40 @@ async fn db_the_creator_of_a_token_and_a_secret_must_be_a_member() -> TestResult
     db.cleanup().await;
     Ok(())
 }
+
+/// The platform password write runs in the platform scope only. A tenant transaction is refused,
+/// the transaction of the platform tenant too: a session without an organization runs in it
+/// (ADR-0029).
+#[tokio::test]
+async fn db_the_platform_password_write_needs_the_platform_scope() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, _) = two_tenants(db.database()).await?;
+    let user = member(db.database(), tenant_a, "reset-scope", Role::Admin).await?;
+
+    for tenant in [crate::PLATFORM_TENANT_ID, tenant_a] {
+        let mut tx = db.database().begin_tenant(tenant).await?;
+        let (status,): (String,) = sqlx::query_as("SELECT auth_platform_set_password($1, $2)")
+            .bind(user)
+            .bind("new-phc")
+            .fetch_one(tx.as_conn())
+            .await?;
+        assert_eq!(status, "forbidden", "tenant {tenant}");
+        drop(tx);
+    }
+
+    let mut tx = db.database().begin_platform().await?;
+    assert_eq!(
+        users::platform_set_password(&mut tx, user, "new-phc").await?,
+        users::WriteStatus::Ok
+    );
+    assert_eq!(
+        users::platform_set_password(&mut tx, UserId::new(), "new-phc").await?,
+        users::WriteStatus::NotFound
+    );
+    tx.commit().await?;
+
+    db.cleanup().await;
+    Ok(())
+}

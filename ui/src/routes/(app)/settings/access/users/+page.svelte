@@ -1,37 +1,29 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { ApiError, assignableRoles, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Role, User } from '#lib/api/index.ts';
 	import { SettingsLayout } from '#lib/components/index.ts';
+	import OrgUserDialogs from '#lib/components/OrgUserDialogs.svelte';
 	import {
 		Alert,
 		Button,
 		Dialog,
-		Icon,
-		KeyValue,
 		ListView,
-		Panel,
 		PasswordField,
 		FilterBar,
 		Select,
-		SidePanel,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type {
-		FilterFacet,
-		IconName,
-		KeyValueItem,
-		ListMeta,
-		RowAction,
-		SelectOption
-	} from '#lib/components/ui/index.ts';
+	import type { FilterFacet, ListMeta, RowAction, SelectOption } from '#lib/components/ui/index.ts';
 	import { iconOf, pillOf, userState } from '#lib/vocabulary.ts';
 	import { matchesSearch, splitList } from '#lib/filters.ts';
 	import { ago } from '#lib/list-format.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
-	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
+	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { orgChangeLock, orgResetLock } from '#lib/user-locks.ts';
 
 	let users = $state<User[]>([]);
 	let loading = $state(true);
@@ -42,11 +34,8 @@
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
 
-	let resetOpen = $state(false);
-	let resetUser = $state<User | null>(null);
-	let resetting = $state(false);
-	let resetError = $state<string | null>(null);
-	let newResetPassword = $state('');
+	let dialogs = $state<OrgUserDialogs>();
+	const selfId = $derived(getSession()?.user?.id ?? null);
 
 	// The fields of the create form. A problem of another field (for example `body`) shows the
 	// general alert instead of the message next to an input.
@@ -78,12 +67,6 @@
 			label: roleKeys[role]
 		}))
 	);
-
-	const roleHelp: { role: Role; icon: IconName; body: MessageKey }[] = [
-		{ role: 'admin', icon: 'shield', body: 'users.roles.admin' },
-		{ role: 'operator', icon: 'shield', body: 'users.roles.operator' },
-		{ role: 'viewer', icon: 'eye', body: 'users.roles.viewer' }
-	];
 
 	const filters = queryFilters(['q', 'role', 'state', 'sort', 'order'] as const);
 
@@ -167,27 +150,6 @@
 		];
 	}
 
-	let detail = $state<User | null>(null);
-	let detailOpen = $state(false);
-
-	function openDetail(user: User): void {
-		detail = user;
-		detailOpen = true;
-	}
-
-	const detailItems = $derived<KeyValueItem[]>(
-		detail
-			? [
-					{ key: 'username', label: t('users.username'), value: detail.username, mono: true },
-					{ key: 'role', label: t('users.role'), value: roleKeys[detail.role] },
-					{ key: 'state', label: t('common.status'), value: userState(detail).label },
-					...(detail.shared
-						? [{ key: 'shared', label: t('users.shared'), value: t('common.yes') }]
-						: [])
-				]
-			: []
-	);
-
 	let roleOpen = $state(false);
 	let roleUser = $state<User | null>(null);
 	let roleValue = $state<Role>('viewer');
@@ -218,27 +180,33 @@
 	}
 
 	function rowActions(user: User): RowAction[] {
+		const resetLock = orgResetLock(user, selfId);
+		const changeLock = orgChangeLock(user, selfId);
 		return [
 			{
 				id: 'role',
 				label: t('users.changeRole'),
 				icon: 'shield',
+				disabled: Boolean(changeLock),
+				hint: changeLock ?? undefined,
 				onSelect: () => openRole(user)
 			},
 			{
 				id: 'reset',
 				label: t('users.resetPassword'),
-				hint: user.shared ? t('users.sharedResetHint') : undefined,
+				hint: resetLock ?? undefined,
 				icon: 'key',
-				disabled: user.shared,
-				onSelect: () => openReset(user)
+				disabled: Boolean(resetLock),
+				onSelect: () => dialogs?.openReset(user)
 			},
 			{
 				id: 'disable',
 				label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
 				icon: 'power',
 				danger: !user.disabled,
-				onSelect: () => toggleDisabled(user)
+				disabled: Boolean(changeLock),
+				hint: changeLock ?? undefined,
+				onSelect: () => void dialogs?.toggleDisabled(user)
 			}
 		];
 	}
@@ -298,39 +266,6 @@
 			creating = false;
 		}
 	}
-
-	function openReset(user: User): void {
-		resetUser = user;
-		newResetPassword = '';
-		resetError = null;
-		resetOpen = true;
-	}
-
-	async function resetPassword(): Promise<void> {
-		if (!resetUser || newResetPassword.length < 12) return;
-		resetting = true;
-		resetError = null;
-		try {
-			await service.resetUserPassword(resetUser.id, { new_password: newResetPassword });
-			pushToast('success', t('users.resetDone'));
-			resetOpen = false;
-			await load();
-		} catch (problem) {
-			resetError = messageOf(problem);
-		} finally {
-			resetting = false;
-		}
-	}
-
-	async function toggleDisabled(user: User): Promise<void> {
-		try {
-			await service.updateUser(user.id, { disabled: !user.disabled });
-			pushToast('success', user.disabled ? t('users.enabledToast') : t('users.disabledToast'));
-			await load();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		}
-	}
 </script>
 
 <SettingsLayout
@@ -351,7 +286,7 @@
 		icon={(user) => iconOf(userState(user))}
 		pill={(user) => pillOf(userState(user))}
 		title={(user) => user.display_name}
-		onOpen={openDetail}
+		href={(user) => resolve('/(app)/settings/access/users/[id]', { id: user.id })}
 		{meta}
 		actions={rowActions}
 		moreLabel={(user) => t('users.moreActions', { name: user.display_name })}
@@ -375,24 +310,6 @@
 			/>
 		{/snippet}
 	</ListView>
-
-	<SidePanel bind:open={detailOpen} title={detail?.display_name ?? ''}>
-		<KeyValue items={detailItems} stacked />
-	</SidePanel>
-
-	<Panel title={t('users.roles')} flush>
-		<ul class="roles">
-			{#each roleHelp as item (item.role)}
-				<li class="roles__row">
-					<span class="roles__icon"><Icon name={item.icon} /></span>
-					<span class="roles__text">
-						<span class="roles__name">{roleKeys[item.role]}</span>
-						<span class="roles__body">{t(item.body)}</span>
-					</span>
-				</li>
-			{/each}
-		</ul>
-	</Panel>
 </SettingsLayout>
 
 <Dialog bind:open={createOpen} title={t('users.createTitle')} onsubmit={createUser}>
@@ -442,32 +359,6 @@
 	{/snippet}
 </Dialog>
 
-<Dialog bind:open={resetOpen} title={t('users.resetTitle')} onsubmit={resetPassword}>
-	{#if resetError}
-		<Alert variant="inline" tone="danger" title={resetError} />
-	{/if}
-	<p>{t('users.resetHint', { name: resetUser?.display_name ?? '' })}</p>
-	<PasswordField
-		id="user-reset-password"
-		label={t('setup.password')}
-		help={t('setup.passwordHint')}
-		bind:value={newResetPassword}
-		autocomplete="new-password"
-		required
-	/>
-	{#snippet footer()}
-		<Button onclick={() => (resetOpen = false)}>{t('common.cancel')}</Button>
-		<Button
-			type="submit"
-			variant="primary"
-			loading={resetting}
-			disabled={newResetPassword.length < 12}
-		>
-			{t('users.resetPassword')}
-		</Button>
-	{/snippet}
-</Dialog>
-
 <Dialog bind:open={roleOpen} size="sm" title={t('users.changeRoleTitle')} onsubmit={saveRole}>
 	{#if roleError}
 		<Alert variant="inline" tone="danger" title={roleError} />
@@ -484,43 +375,4 @@
 	{/snippet}
 </Dialog>
 
-<style>
-	.roles {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.roles__row {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
-	}
-
-	.roles__row:first-child {
-		border-top: 0;
-	}
-
-	.roles__icon {
-		display: inline-flex;
-		width: 28px;
-		justify-content: center;
-		color: var(--rh-color-text-muted);
-	}
-
-	.roles__text {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.roles__name {
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.roles__body {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-</style>
+<OrgUserDialogs bind:this={dialogs} onchanged={load} />

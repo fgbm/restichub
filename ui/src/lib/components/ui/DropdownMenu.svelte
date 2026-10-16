@@ -96,12 +96,21 @@
 							<Primitive.Separator class="rh-menu__separator" />
 						{/if}
 						<Primitive.Item
-							class="rh-menu__item{item.tone === 'danger' ? ' rh-menu__item--danger' : ''}"
+							class="rh-menu__item{item.tone === 'danger'
+								? ' rh-menu__item--danger'
+								: ''}{item.disabled && item.hint ? ' rh-menu__item--hint' : ''}"
 							disabled={item.disabled}
 							onSelect={item.onSelect}
 						>
 							{#if item.icon}<Icon name={item.icon} />{/if}
-							{item.label}
+							{#if item.disabled && item.hint}
+								<span class="rh-menu__text">
+									{item.label}
+									<small class="rh-menu__hint">{item.hint}</small>
+								</span>
+							{:else}
+								{item.label}
+							{/if}
 						</Primitive.Item>
 					{/each}
 				{/if}
@@ -188,6 +197,35 @@
 
 	:global(.rh-menu__item[data-disabled]) {
 		opacity: 0.5;
+	}
+
+	/* A disabled item says why below its label, since a disabled item gets no tooltip. */
+	:global(.rh-menu__item--hint) {
+		align-items: flex-start;
+		height: auto;
+		min-height: var(--rh-control-height);
+		padding-top: var(--rh-space-1);
+		padding-bottom: var(--rh-space-1);
+	}
+
+	:global(.rh-menu__item--hint[data-disabled]) {
+		opacity: 1;
+		color: var(--rh-color-text-subtle);
+	}
+
+	:global(.rh-menu__item--hint > svg) {
+		margin-top: 2px;
+	}
+
+	:global(.rh-menu__text) {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	:global(.rh-menu__hint) {
+		color: var(--rh-color-text-subtle);
+		font-size: var(--rh-font-size-xs);
 	}
 
 	:global(.rh-menu__check) {

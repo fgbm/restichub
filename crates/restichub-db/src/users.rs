@@ -192,6 +192,22 @@ pub async fn admin_set_password(
     WriteStatus::parse(&status)
 }
 
+/// The password write of the Platform Admin for any account (migration 0051). It needs the platform
+/// scope and no membership.
+pub async fn platform_set_password(
+    tx: &mut PlatformTx<'_>,
+    id: UserId,
+    password_hash: &str,
+) -> Result<WriteStatus, DbError> {
+    let (status,): (String,) = sqlx::query_as("SELECT auth_platform_set_password($1, $2)")
+        .bind(id)
+        .bind(password_hash)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    WriteStatus::parse(&status)
+}
+
 /// The display name write of an administrator. The same scope rule as [`admin_set_password`].
 pub async fn admin_set_display_name(
     tx: &mut TenantTx<'_>,
@@ -303,6 +319,31 @@ pub async fn last_sign_ins(
         .collect())
 }
 
+/// The latest of the times that [`last_sign_ins`] gives for the account in each tenant, the
+/// platform tenant included.
+///
+/// The loop over the tenants keeps the tenant prefix of the sign-in index of migration 0050.
+pub async fn platform_last_sign_in(
+    tx: &mut PlatformTx<'_>,
+    id: UserId,
+) -> Result<Option<OffsetDateTime>, DbError> {
+    let (time,): (Option<OffsetDateTime>,) = sqlx::query_as(
+        "SELECT max(s.occurred_at) \
+         FROM tenants t \
+         JOIN LATERAL ( \
+             SELECT a.occurred_at FROM audit_log a \
+             WHERE a.tenant_id = t.id AND a.actor_id = $1 AND a.actor_type = 'user' \
+               AND a.action IN ('sign_in', 'session_switch') \
+               AND (a.action = 'sign_in' OR a.diff #> '{new,source_tenant_id}' IS NOT NULL) \
+             ORDER BY a.occurred_at DESC LIMIT 1) s ON true",
+    )
+    .bind(id)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(time)
+}
+
 /// Reads one member of the tenant of the transaction. `None` when the account is not a member.
 pub async fn get_member(tx: &mut TenantTx<'_>, id: UserId) -> Result<Option<Member>, DbError> {
     let row = sqlx::query_as::<_, MemberRow>(
@@ -396,6 +437,43 @@ pub async fn list_platform_accounts(
             },
         )
         .collect())
+}
+
+/// `None` when no account has the id.
+pub async fn platform_account(
+    tx: &mut PlatformTx<'_>,
+    id: UserId,
+) -> Result<Option<PlatformAccount>, DbError> {
+    let row = sqlx::query_as::<_, (String, String, Option<String>, bool, bool, bool)>(
+        "SELECT username, display_name, email, email_verified, disabled, platform_admin \
+         FROM auth_platform_accounts() WHERE user_id = $1",
+    )
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(
+        |(username, display_name, email, email_verified, disabled, platform_admin)| {
+            PlatformAccount {
+                id,
+                username,
+                display_name,
+                email,
+                email_verified,
+                disabled,
+                platform_admin,
+            }
+        },
+    ))
+}
+
+/// Counts the active installation administrators in a platform transaction (ADR-0029).
+pub async fn platform_admin_count_platform(tx: &mut PlatformTx<'_>) -> Result<i64, DbError> {
+    let (count,): (i64,) = sqlx::query_as("SELECT auth_platform_admin_count()")
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(count)
 }
 
 /// Creates an installation account (Platform Admin only).

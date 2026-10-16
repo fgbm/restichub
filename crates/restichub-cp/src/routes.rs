@@ -227,6 +227,21 @@ pub const ROUTES: &[Route] = &[
         handler: || routes!(crate::platform_users::remove_membership),
     },
     Route {
+        method: "get",
+        path: "/api/v1/platform/users/{id}",
+        access: Access::Protected(Operation::PlatformUsersRead),
+        handler: || routes!(crate::platform_user::get_account),
+    },
+    Route {
+        method: "post",
+        path: "/api/v1/platform/users/{id}/password",
+        access: Access::Protected(Operation::PlatformUsersWrite),
+        handler: || {
+            routes!(crate::platform_user::reset_password)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
         method: "patch",
         path: "/api/v1/platform/users/{id}",
         access: Access::Protected(Operation::PlatformUsersWrite),

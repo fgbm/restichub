@@ -169,6 +169,19 @@ pub async fn delete_account_sessions(
     Ok(deleted as u64)
 }
 
+/// Deletes every session of the account in every tenant, in a platform transaction.
+pub async fn delete_all_account_sessions(
+    tx: &mut crate::PlatformTx<'_>,
+    account_id: UserId,
+) -> Result<u64, DbError> {
+    let (deleted,): (i64,) = sqlx::query_as("SELECT auth_delete_account_sessions($1, NULL)")
+        .bind(account_id)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(deleted as u64)
+}
+
 /// Deletes one session of the account. The tenant switch removes the source session through it.
 pub async fn delete_session(
     tx: &mut crate::TenantTx<'_>,

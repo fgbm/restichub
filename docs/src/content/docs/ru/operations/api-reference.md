@@ -63,6 +63,29 @@ curl -s -b cookies.txt -X POST https://<control-plane>/api/v1/plans/<plan-id>/ru
 
 Не передавайте cookie и токен в одном запросе. Такой запрос получает ответ HTTP 400.
 
+## Пользователи
+
+Администратор платформы читает и изменяет все учётные записи установки через маршруты платформы. Запрос в области организации к этим маршрутам получает HTTP 403.
+
+| Маршрут | Назначение |
+|---|---|
+| `GET /api/v1/platform/users` | Список всех учётных записей с членством. |
+| `GET /api/v1/platform/users/{id}` | Одна учётная запись с членством и полем `platform_admin_count` — числом активных администраторов платформы. Для неизвестной учётной записи — HTTP 404 `not_found`. |
+| `POST /api/v1/platform/users/{id}/password` | Задаёт новый пароль из поля `new_password` (не короче 12 символов) и завершает все сеансы учётной записи. |
+| `PATCH /api/v1/platform/users/{id}` | Отключает или включает учётную запись, задаёт адрес электронной почты, выдаёт или забирает право администратора платформы. |
+
+Сброс пароля своей учётной записи сервер отклоняет с HTTP 403 `forbidden`. Чтобы изменить свой пароль, отправьте `POST /api/v1/auth/password` с текущим паролем. Аудит платформы и аудит каждой организации учётной записи записывают сброс без пароля. В организации `POST /api/v1/users/{id}/password` тоже отклоняет свою учётную запись с HTTP 403 `forbidden`.
+
+```sh
+curl -s -X POST https://<control-plane>/api/v1/platform/users/<user-id>/password \
+  -b cookies.txt \
+  -H "X-ResticHub-CSRF: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"new_password": "<new-password>"}'
+```
+
+В организации запросы `GET /api/v1/users` и `GET /api/v1/users/{id}` возвращают поле `platform_admin`. Если оно равно `true`, область организации не может изменить учётную запись: изменение получает HTTP 403 `forbidden`.
+
 ## Ошибки
 
 Ответ с ошибкой использует тип данных из RFC 9457. В теле есть такие поля:
@@ -120,5 +143,6 @@ curl -N "https://<control-plane>/api/v1/events" \
 
 ## Связанные страницы
 
+- [Пользователи](/restichub/ru/operations/users/)
 - [Метрики Prometheus](/restichub/ru/operations/metrics/)
 - [Переменные окружения](/restichub/ru/operations/environment-variables/)

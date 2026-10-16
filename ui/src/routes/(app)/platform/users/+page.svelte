@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, PlatformUser, Role, Tenant } from '#lib/api/index.ts';
+	import PlatformUserDialogs from '#lib/components/PlatformUserDialogs.svelte';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
@@ -20,7 +22,9 @@
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { activePlatformAdmins, platformChangeLock, platformResetLock } from '#lib/user-locks.ts';
 
 	// The platform tenant holds the role `platform_admin` only, so a membership here is below it.
 	const ASSIGNABLE: Role[] = ['admin', 'operator', 'viewer'];
@@ -42,19 +46,9 @@
 	let newRole = $state<Role>('viewer');
 	let newPlatformAdmin = $state(false);
 
-	let manageOpen = $state(false);
-	let manageUser = $state<PlatformUser | null>(null);
-	let manageTenantId = $state('');
-	let manageRole = $state<Role>('viewer');
-	let busyKey = $state<string | null>(null);
-
-	// A grant of the right asks for a new password: the old password may be known to a tenant Admin
-	// (ADR-0029).
-	let grantOpen = $state(false);
-	let grantUser = $state<PlatformUser | null>(null);
-	let grantPassword = $state('');
-	let granting = $state(false);
-	let grantError = $state<string | null>(null);
+	let dialogs = $state<PlatformUserDialogs>();
+	const selfId = $derived(getSession()?.user?.id ?? null);
+	const activeAdmins = $derived(activePlatformAdmins(accounts));
 
 	const createFields = ['username', 'display_name', 'email', 'password'];
 	const emailTaken = $derived(
@@ -182,27 +176,33 @@
 	}
 
 	function rowActions(user: PlatformUser): RowAction[] {
+		const resetLock = platformResetLock(user, selfId);
+		const changeLock = platformChangeLock(user, selfId, activeAdmins);
 		return [
 			{
-				id: 'memberships',
-				label: t('platformUsers.manage'),
-				icon: 'building-2',
-				onSelect: () => openManage(user)
+				id: 'reset',
+				label: t('users.resetPassword'),
+				icon: 'key',
+				disabled: Boolean(resetLock),
+				hint: resetLock ?? undefined,
+				onSelect: () => dialogs?.openReset(user)
 			},
 			{
 				id: 'admin',
 				label: user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin'),
 				icon: 'shield',
-				disabled: busyKey !== null,
-				onSelect: () => (user.platform_admin ? revokeRight(user) : openGrant(user))
+				disabled: Boolean(changeLock),
+				hint: changeLock ?? undefined,
+				onSelect: () => (user.platform_admin ? dialogs?.openRevoke(user) : dialogs?.openGrant(user))
 			},
 			{
 				id: 'disable',
 				label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
 				icon: 'power',
 				danger: !user.disabled,
-				disabled: busyKey !== null,
-				onSelect: () => toggleDisabled(user)
+				disabled: Boolean(changeLock),
+				hint: changeLock ?? undefined,
+				onSelect: () => void dialogs?.toggleDisabled(user)
 			}
 		];
 	}
@@ -264,118 +264,6 @@
 			creating = false;
 		}
 	}
-
-	function openManage(user: PlatformUser): void {
-		manageUser = user;
-		manageTenantId = '';
-		manageRole = 'viewer';
-		manageOpen = true;
-	}
-
-	async function addMembership(): Promise<void> {
-		if (!manageUser || !manageTenantId) return;
-		busyKey = 'add';
-		try {
-			await service.addPlatformMembership(manageUser.id, {
-				tenant_id: manageTenantId,
-				role: manageRole
-			});
-			pushToast('success', t('platformUsers.added'));
-			await load();
-			refreshManage();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			busyKey = null;
-		}
-	}
-
-	async function changeRole(tenantId: string, role: Role): Promise<void> {
-		if (!manageUser) return;
-		busyKey = `role:${tenantId}`;
-		try {
-			await service.setPlatformMembershipRole(manageUser.id, tenantId, { role });
-			pushToast('success', t('platformUsers.roleChanged'));
-			await load();
-			refreshManage();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			busyKey = null;
-		}
-	}
-
-	async function removeMembership(tenantId: string): Promise<void> {
-		if (!manageUser) return;
-		busyKey = `remove:${tenantId}`;
-		try {
-			await service.removePlatformMembership(manageUser.id, tenantId);
-			pushToast('success', t('platformUsers.removed'));
-			await load();
-			refreshManage();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			busyKey = null;
-		}
-	}
-
-	function refreshManage(): void {
-		if (!manageUser) return;
-		manageUser = accounts.find((account) => account.id === manageUser?.id) ?? null;
-	}
-
-	function openGrant(user: PlatformUser): void {
-		grantUser = user;
-		grantPassword = '';
-		grantError = null;
-		grantOpen = true;
-	}
-
-	async function grantRight(): Promise<void> {
-		if (!grantUser || grantPassword.length < 12) return;
-		granting = true;
-		grantError = null;
-		try {
-			await service.updatePlatformUser(grantUser.id, {
-				platform_admin: true,
-				password: grantPassword
-			});
-			pushToast('success', t('platformUsers.rightGranted'));
-			grantOpen = false;
-			await load();
-		} catch (problem) {
-			grantError = messageOf(problem);
-		} finally {
-			granting = false;
-		}
-	}
-
-	async function revokeRight(user: PlatformUser): Promise<void> {
-		busyKey = `right:${user.id}`;
-		try {
-			await service.updatePlatformUser(user.id, { platform_admin: false });
-			pushToast('success', t('platformUsers.rightRemoved'));
-			await load();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			busyKey = null;
-		}
-	}
-
-	async function toggleDisabled(user: PlatformUser): Promise<void> {
-		busyKey = `disable:${user.id}`;
-		try {
-			await service.updatePlatformUser(user.id, { disabled: !user.disabled });
-			pushToast('success', user.disabled ? t('users.enabledToast') : t('users.disabledToast'));
-			await load();
-		} catch (problem) {
-			pushToast('danger', messageOf(problem));
-		} finally {
-			busyKey = null;
-		}
-	}
 </script>
 
 <Page
@@ -388,8 +276,6 @@
 		<Button variant="primary" icon="plus" onclick={openCreate}>{t('platformUsers.create')}</Button>
 	{/snippet}
 
-	<!-- An account has no record page: the row opens its memberships (design/style/ui-principles.md, 2.2). -->
-	<!-- An account has no record page: the name opens its memberships. -->
 	<ListView
 		label={t('platformUsers.title')}
 		items={shown}
@@ -397,10 +283,10 @@
 		icon={(user) => iconOf(userState(user))}
 		pill={(user) => pillOf(userState(user))}
 		title={(user) => user.display_name}
-		onOpen={openManage}
+		href={(user) => resolve('/(app)/platform/users/[id]', { id: user.id })}
 		{meta}
 		actions={rowActions}
-		moreLabel={(user) => t('users.moreActions', { name: user.username })}
+		moreLabel={(user) => t('users.moreActions', { name: user.display_name })}
 		{loading}
 		{error}
 		{filtered}
@@ -494,97 +380,4 @@
 	{/snippet}
 </Dialog>
 
-<Dialog bind:open={manageOpen} size="lg" icon="users" title={manageUser?.username ?? ''}>
-	{#if manageUser}
-		<h3>{t('platformUsers.memberships')}</h3>
-		{#if manageUser.memberships.length === 0}
-			<p>{t('platformUsers.noOrganizations')}</p>
-		{:else}
-			{#each manageUser.memberships as member (member.tenant_id)}
-				<div class="membership">
-					<span class="membership__name">{member.tenant_name}</span>
-					<Select
-						id={`membership-role-${member.tenant_id}`}
-						label={t('platformUsers.role')}
-						value={member.role}
-						options={roleOptions}
-						onchange={(event) =>
-							changeRole(
-								member.tenant_id,
-								(event.currentTarget as HTMLSelectElement).value as Role
-							)}
-					/>
-					<Button
-						size="sm"
-						variant="ghost"
-						loading={busyKey === `remove:${member.tenant_id}`}
-						onclick={() => removeMembership(member.tenant_id)}
-					>
-						{t('platformUsers.removeMembership')}
-					</Button>
-				</div>
-			{/each}
-		{/if}
-		<h3>{t('platformUsers.addOrganization')}</h3>
-		<Select
-			id="manage-tenant"
-			label={t('platformUsers.organization')}
-			bind:value={manageTenantId}
-			options={tenantOptions}
-		/>
-		{#if manageTenantId}
-			<Select
-				id="manage-role"
-				label={t('platformUsers.role')}
-				bind:value={manageRole}
-				options={roleOptions}
-			/>
-			<Button
-				variant="primary"
-				loading={busyKey === 'add'}
-				disabled={!manageTenantId}
-				onclick={addMembership}
-			>
-				{t('platformUsers.addOrganization')}
-			</Button>
-		{/if}
-	{/if}
-</Dialog>
-
-<Dialog
-	bind:open={grantOpen}
-	icon="shield"
-	title={t('platformUsers.grantTitle')}
-	onsubmit={grantRight}
->
-	{#if grantError}
-		<Alert variant="inline" tone="danger" title={grantError} />
-	{/if}
-	<p>{t('platformUsers.grantHint', { name: grantUser?.username ?? '' })}</p>
-	<PasswordField
-		id="platform-user-grant-password"
-		label={t('setup.password')}
-		help={t('setup.passwordHint')}
-		bind:value={grantPassword}
-		autocomplete="new-password"
-		required
-	/>
-	{#snippet footer()}
-		<Button onclick={() => (grantOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={granting} disabled={grantPassword.length < 12}>
-			{t('platformUsers.grantAdmin')}
-		</Button>
-	{/snippet}
-</Dialog>
-
-<style>
-	.membership {
-		display: flex;
-		align-items: flex-end;
-		gap: var(--rh-space-2);
-	}
-
-	.membership__name {
-		flex: 1;
-	}
-</style>
+<PlatformUserDialogs bind:this={dialogs} onchanged={load} />

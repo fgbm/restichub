@@ -26,7 +26,11 @@ pub struct UserView {
     pub role: Role,
     /// The account holds an active membership in another active tenant.
     pub shared: bool,
-    /// The last sign-in into the tenant or switch to it, in RFC 3339. Set in the user list only.
+    /// The account holds the installation-wide right, so a tenant scope cannot change it
+    /// (ADR-0029).
+    pub platform_admin: bool,
+    /// The last sign-in into the tenant or switch to it, in RFC 3339. Set in the user list and the
+    /// user record only.
     pub last_sign_in_at: Option<String>,
 }
 
@@ -39,6 +43,7 @@ impl UserView {
             disabled: member.disabled || member.account_disabled,
             role: member.role,
             shared: member.shared,
+            platform_admin: member.platform_admin,
             last_sign_in_at: None,
         }
     }
@@ -52,6 +57,7 @@ impl UserView {
             disabled: account.disabled,
             role,
             shared: false,
+            platform_admin: account.platform_admin,
             last_sign_in_at: None,
         }
     }
@@ -155,6 +161,19 @@ impl PlatformUserView {
             memberships,
         }
     }
+}
+
+/// One installation account for its record page.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlatformUserRecordView {
+    #[serde(flatten)]
+    pub account: PlatformUserView,
+    /// The number of the active accounts with the Platform Admin right in the installation. The
+    /// last one cannot lose the right or be disabled (HTTP 409).
+    pub platform_admin_count: i64,
+    /// The last sign-in into any organization or the platform, or switch to an organization, in
+    /// RFC 3339.
+    pub last_sign_in_at: Option<String>,
 }
 
 fn format_time(value: OffsetDateTime) -> String {

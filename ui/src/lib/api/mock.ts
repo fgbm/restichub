@@ -65,6 +65,7 @@ import type {
 	Plan,
 	PlanResponse,
 	PlatformUser,
+	PlatformUserRecord,
 	PreviewResponse,
 	PreviewScheduleRequest,
 	Profile,
@@ -640,6 +641,7 @@ function makeUsers(): User[] {
 			role: 'admin',
 			disabled: false,
 			shared: false,
+			platform_admin: true,
 			last_sign_in_at: iso(60 * 2)
 		},
 		{
@@ -649,6 +651,7 @@ function makeUsers(): User[] {
 			role: 'operator',
 			disabled: false,
 			shared: false,
+			platform_admin: false,
 			last_sign_in_at: iso(60 * 24)
 		},
 		{
@@ -658,6 +661,7 @@ function makeUsers(): User[] {
 			role: 'viewer',
 			disabled: true,
 			shared: true,
+			platform_admin: false,
 			last_sign_in_at: iso(60 * 24 * 90)
 		}
 	];
@@ -723,13 +727,14 @@ function makePlatformUsers(): PlatformUser[] {
 			memberships: [{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false }]
 		},
 		{
-			id: 'pu_02',
-			username: 'anna',
+			// The account of the mock session (`me`), so the record page shows its own account.
+			id: 'u_01',
+			username: 'admin',
 			display_name: 'Anna Petrova',
 			email: 'anna@example.com',
 			email_verified: false,
 			disabled: false,
-			platform_admin: false,
+			platform_admin: true,
 			memberships: [
 				{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false },
 				{ tenant_id: 't_02', tenant_name: 'globex', role: 'viewer', disabled: false }
@@ -1007,6 +1012,12 @@ export class MockApiService {
 		return [...this.users];
 	}
 
+	async getUser(id: string): Promise<User> {
+		const user = this.users.find((item) => item.id === id);
+		if (!user) throw new ApiError({ status: 404, code: 'not_found', title: 'Not Found' });
+		return { ...user };
+	}
+
 	async createUser(request: CreateUserRequest): Promise<User> {
 		const user: User = {
 			id: `u_${this.users.length + 1}`,
@@ -1014,7 +1025,8 @@ export class MockApiService {
 			display_name: request.display_name,
 			role: request.role as User['role'],
 			disabled: false,
-			shared: false
+			shared: false,
+			platform_admin: false
 		};
 		this.users = [...this.users, user];
 		return user;
@@ -2168,6 +2180,25 @@ export class MockApiService {
 		return [...this.platformUsers];
 	}
 
+	async getPlatformUser(id: string): Promise<PlatformUserRecord> {
+		const user = this.platformUsers.find((item) => item.id === id);
+		if (!user) throw new ApiError({ status: 404, code: 'not_found', title: 'Not Found' });
+		return {
+			...user,
+			memberships: user.memberships.map((member) => ({ ...member })),
+			platform_admin_count: this.platformUsers.filter(
+				(item) => item.platform_admin && !item.disabled
+			).length
+		};
+	}
+
+	async resetPlatformUserPassword(id: string, _request: ResetPasswordRequest): Promise<void> {
+		void _request;
+		if (!this.platformUsers.some((item) => item.id === id)) {
+			throw new ApiError({ status: 404, code: 'not_found', title: 'Not Found' });
+		}
+	}
+
 	async createPlatformUser(request: CreatePlatformUserRequest): Promise<PlatformUser> {
 		if (
 			this.platformUsers.some(
@@ -2230,7 +2261,7 @@ export class MockApiService {
 						role: request.role,
 						disabled: false
 					}
-				]
+				].sort((a, b) => a.tenant_name.localeCompare(b.tenant_name))
 			};
 		});
 	}

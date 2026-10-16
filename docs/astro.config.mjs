@@ -41,6 +41,7 @@ export default defineConfig({
 					'operations/restore',
 					'operations/alerts',
 					'operations/alert-configuration',
+					'operations/users',
 				]),
 				group('Hosts and agent', 'Хосты и агент', [
 					'operations/agent-packages',
