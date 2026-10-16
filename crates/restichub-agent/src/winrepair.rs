@@ -117,8 +117,8 @@ fn check_entries(level: &Path, known: &[String]) -> Result<Vec<PathBuf>> {
     Ok(entries)
 }
 
-/// Repairs one known entry that carries a foreign grant. A directory flows its access into the
-/// children, so its tree must hold no link and no foreign owner first.
+/// A directory flows its access into the children, so its tree must hold no link and no foreign
+/// owner before the repair.
 fn repair_entry(path: &Path, log: &mut dyn FnMut(&Path)) -> Result<()> {
     if exposure(path)? != Exposure::ForeignGrant {
         return Ok(());
@@ -183,12 +183,19 @@ fn root_entries(config: &Path, root: &Path) -> Vec<String> {
         crate::scripts::mode_file_for(config),
         crate::scripts::allow_list_file_for(config),
     ];
-    let mut names: Vec<String> = siblings
-        .iter()
-        .filter(|path| path.parent() == Some(root))
-        .filter_map(|path| path.file_name())
-        .map(|name| name.to_string_lossy().into_owned())
-        .collect();
+    let mut names: Vec<String> = Vec::new();
+    for path in siblings.iter().filter(|path| path.parent() == Some(root)) {
+        names.extend(
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+        );
+        // An atomic replacement stages the file under this name.
+        names.extend(
+            path.with_extension("tmp")
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+        );
+    }
     names.push(OLD_RESTORE_ROOT.to_owned());
     names
 }

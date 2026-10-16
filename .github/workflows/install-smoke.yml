@@ -258,6 +258,45 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "install-service exit code $LASTEXITCODE" }
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           bash scripts/install-smoke.sh connected $since 60
+      - name: An upgrade repairs the access of an older agent build (T20)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $root = Join-Path $env:ProgramData 'ResticHub'
+          $agent = Join-Path $env:ProgramFiles 'ResticHub\Agent\restichub-agent.exe'
+          $identity = Join-Path $root 'Agent\identity.json'
+          $restore = Join-Path $root 'Restore'
+          # An older build left the level with the inherited access of ProgramData and an entry for
+          # users, and the old restore root beside the identity.
+          New-Item -ItemType Directory -Force $restore | Out-Null
+          Set-Content (Join-Path $restore 'restored.txt') 'data'
+          icacls $root /inheritance:e | Out-Null
+          icacls $root /grant '*S-1-5-32-545:(OI)(CI)(WD)' | Out-Null
+          $users = { param($path) (Get-Acl $path).Access | Where-Object { $_.IdentityReference -match 'Users' -and $_.FileSystemRights -match 'Write|Append|CreateFiles' } }
+          if (-not (& $users $root)) { throw 'the test did not loosen the access' }
+          $restoredBefore = (Get-Acl (Join-Path $restore 'restored.txt')).Sddl
+          $planted = Join-Path $root 'planted.txt'
+          Set-Content $planted 'x'
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $output = & $agent install-service 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $output
+          if ($code -eq 0) { throw 'an unknown file must stop the repair' }
+          if ($output -notmatch 'planted\.txt') { throw 'the message does not name the file' }
+          if (-not (& $users $root)) { throw 'a refused repair changed the access' }
+          Remove-Item $planted
+          $output = & $agent install-service 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $output
+          if ($code -ne 0) { throw "install-service exit code $code" }
+          if ($output -notmatch 'repaired the access control of') { throw 'the repair printed no line' }
+          if (& $users $root) { throw 'the access of the level stays loose' }
+          if (-not (Get-Acl $root).AreAccessRulesProtected) { throw 'the level is not protected' }
+          if (-not (Test-Path $identity)) { throw 'the identity is gone' }
+          if ((Get-Acl (Join-Path $restore 'restored.txt')).Sddl -ne $restoredBefore) { throw 'the old restore root changed' }
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          bash scripts/install-smoke.sh connected $since 60
+          Remove-Item $restore -Recurse -Force
       - name: Diagnostics
         if: failure()
         shell: pwsh
