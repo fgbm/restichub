@@ -31,6 +31,16 @@ CREATE INDEX alert_deliveries_channel_attempt_idx
 CREATE INDEX jobs_repository_check_idx ON jobs (tenant_id, repository_id, finished_at DESC)
     WHERE kind = 'check' AND status IN ('succeeded', 'failed', 'dead_letter');
 
+-- The job list sorted by the finish time or by the duration, newest or longest first, as the
+-- indexes of 0049 do for the other orders.
+CREATE INDEX jobs_list_finished_idx
+    ON jobs (tenant_id, finished_at DESC NULLS LAST, created_at DESC, id DESC)
+    WHERE kind NOT IN ('snapshots', 'ls');
+
+CREATE INDEX jobs_list_duration_idx
+    ON jobs (tenant_id, (finished_at - started_at) DESC NULLS LAST, created_at DESC, id DESC)
+    WHERE kind NOT IN ('snapshots', 'ls');
+
 -- The last sign-in of each member. The audit log of a tenant holds many more records of other
 -- actions, for example one for each delivered secret.
 CREATE INDEX audit_log_sign_in_idx ON audit_log (tenant_id, actor_id, occurred_at DESC)
