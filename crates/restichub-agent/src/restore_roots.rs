@@ -34,7 +34,7 @@ pub fn roots_file() -> PathBuf {
     roots_file_for(&crate::paths::config_dir())
 }
 
-fn roots_file_for(config_dir: &Path) -> PathBuf {
+pub(crate) fn roots_file_for(config_dir: &Path) -> PathBuf {
     let name = config_dir
         .file_name()
         .and_then(|name| name.to_str())

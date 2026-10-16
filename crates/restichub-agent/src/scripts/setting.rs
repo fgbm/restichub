@@ -54,12 +54,16 @@ pub fn mode_file_for(config_dir: &Path) -> PathBuf {
 /// (ADR-0040), so the start warns about the path.
 #[must_use]
 pub fn removed_allow_list_file(config_dir: &Path) -> Option<PathBuf> {
+    let path = allow_list_file_for(config_dir);
+    std::fs::symlink_metadata(&path).is_ok().then_some(path)
+}
+
+pub(crate) fn allow_list_file_for(config_dir: &Path) -> PathBuf {
     let name = config_dir
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("restichub-agent");
-    let path = config_dir.with_file_name(format!("{name}-hooks.toml"));
-    std::fs::symlink_metadata(&path).is_ok().then_some(path)
+    config_dir.with_file_name(format!("{name}-hooks.toml"))
 }
 
 pub(super) fn read(path: &Path, trust: Trust) -> ScriptMode {
