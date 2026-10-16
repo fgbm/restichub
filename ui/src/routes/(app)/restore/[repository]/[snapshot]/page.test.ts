@@ -94,14 +94,12 @@ async function openDialog(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('Snapshot page', () => {
-	it('fr_rs_02_shows_the_snapshot_header_and_a_back_link_with_the_filters', async () => {
+	it('fr_rs_02_shows_the_snapshot_header_and_the_parameters_in_the_side_panel', async () => {
 		render(Snapshot);
 		expect(await screen.findByRole('heading', { name: 'Snapshot a1b2c3d4' })).toBeVisible();
 		expect(screen.getByText(ID)).toBeVisible();
-		expect(screen.getByRole('link', { name: /Back to the snapshots/ })).toHaveAttribute(
-			'href',
-			`/(app)/restore?host=nas-backup&tag=daily&repository=r_1&snapshot=${ID}`
-		);
+		expect(screen.getByRole('button', { name: 'Copy the snapshot ID' })).toBeVisible();
+		expect(screen.queryByRole('link', { name: /Back to the snapshots/ })).toBeNull();
 	});
 
 	it('fr_rs_02_says_so_when_the_snapshot_is_not_in_the_stored_list', async () => {
@@ -165,14 +163,11 @@ describe('Snapshot page', () => {
 		expect(within(dialog).getByLabelText('Target host')).toHaveValue('a_2');
 	});
 
-	it('fr_rs_04_the_target_parameter_preselects_the_target_host_and_the_back_link_keeps_it', async () => {
+	it('fr_rs_04_the_target_parameter_preselects_the_target_host', async () => {
 		const user = userEvent.setup();
 		route.url = new URL('http://localhost/restore/r_1/x?target=a_2');
 		render(Snapshot);
-		expect(await screen.findByRole('link', { name: /Back to the snapshots/ })).toHaveAttribute(
-			'href',
-			expect.stringContaining('target=a_2')
-		);
+		expect(await screen.findByRole('heading', { name: 'Snapshot a1b2c3d4' })).toBeVisible();
 		const dialog = await openDialog(user);
 		expect(within(dialog).getByLabelText('Target host')).toHaveValue('a_2');
 	});

@@ -13,6 +13,14 @@
 		type NavHref
 	} from '#lib/navigation.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
+	import { buildBreadcrumb, type Crumb } from '#lib/breadcrumb.ts';
+	import {
+		forgetListQueries,
+		getPageMeta,
+		rememberListQuery,
+		type PageMeta
+	} from '#lib/stores/page-meta.svelte.ts';
+	import { filtersFromQuery, filtersToQuery, targetExtra } from '#lib/restore.ts';
 	import { getPageTitle } from '#lib/stores/page-title.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
 	import { getTheme, setTheme } from '#lib/stores/theme.svelte.ts';
@@ -65,47 +73,66 @@
 			.join('')
 	);
 
-	interface Crumb {
-		label: string;
-		href?: NavHref;
-	}
-
 	function isActive(href: NavHref): boolean {
 		const target = resolve(href);
 		return target === '/' ? pathname === '/' : pathname.startsWith(target);
 	}
 
-	const crumbs = $derived.by<Crumb[]>(() => {
+	const section = $derived.by<Crumb[]>(() => {
 		const settingsItem = settingsNavigation
 			.flatMap((group) => group.items)
 			.find((item) => isActive(item.href));
 		if (settingsItem) {
 			return [
-				{ label: t('nav.settings'), href: '/(app)/settings' },
-				{ label: t(settingsItem.labelKey) }
+				{ label: t('nav.settings'), href: resolve('/(app)/settings') },
+				{ label: t(settingsItem.labelKey), href: resolve(settingsItem.href) }
 			];
 		}
 		const item = tabs.find((tab) => isActive(tab.href));
-		if (!item) return [];
-		// The job detail shows the job identifier after its list: "Jobs / j_4821".
+		return item ? [{ label: t(item.labelKey), href: resolve(item.href) }] : [];
+	});
+
+	// A page that declares no levels gets the levels of the older detail routes.
+	const legacyMeta = $derived.by<PageMeta | null>(() => {
 		if (page.route.id === '/(app)/jobs/[id]' && page.params.id) {
-			return [{ label: t(item.labelKey), href: item.href }, { label: page.params.id }];
+			return { crumbs: [{ label: page.params.id }] };
 		}
-		// The host page shows the host name after the list.
-		if (page.route.id === '/(app)/hosts/[id]') {
+		if (page.route.id === '/(app)/hosts/[id]' || page.route.id === '/(app)/profiles/[id]') {
 			const title = getPageTitle();
-			return title
-				? [{ label: t(item.labelKey), href: item.href }, { label: title }]
-				: [{ label: t(item.labelKey) }];
+			return title ? { crumbs: [{ label: title }] } : null;
 		}
-		// The profile editor shows the profile name, or "New profile", after the list.
-		if (page.route.id === '/(app)/profiles/[id]' || page.route.id === '/(app)/profiles/new') {
-			const title = page.route.id === '/(app)/profiles/new' ? t('pe.newTitle') : getPageTitle();
-			return title
-				? [{ label: t(item.labelKey), href: item.href }, { label: title }]
-				: [{ label: t(item.labelKey) }];
+		// The snapshot page keeps the filters and the target of the list in the link back.
+		if (page.route.id === '/(app)/restore/[repository]/[snapshot]') {
+			const repositoryId = page.params.repository ?? '';
+			const snapshotId = page.params.snapshot ?? '';
+			const query = filtersToQuery(filtersFromQuery(page.url.searchParams), {
+				repository: repositoryId,
+				snapshot: snapshotId,
+				...targetExtra(page.url.searchParams)
+			});
+			const name = getPageTitle();
+			return {
+				crumbs: [
+					...(name ? [{ label: name }] : []),
+					{ label: t('restore.snapshotTitle', { id: snapshotId.slice(0, 8) }) }
+				],
+				listQuery: query.toString()
+			};
 		}
-		return [{ label: t(item.labelKey) }];
+		if (page.route.id === '/(app)/profiles/new') return { crumbs: [{ label: t('pe.newTitle') }] };
+		return null;
+	});
+
+	const crumbs = $derived(buildBreadcrumb(section, getPageMeta() ?? legacyMeta));
+
+	$effect(() => rememberListQuery(page.url.pathname, page.url.search));
+
+	// A list filter names objects of one organization, so it does not survive a switch.
+	let shownTenant: string | undefined;
+	$effect(() => {
+		const tenant = session?.tenant?.id;
+		if (shownTenant !== undefined && tenant !== shownTenant) forgetListQueries();
+		shownTenant = tenant;
 	});
 
 	let prefersDark = $state(false);
@@ -208,7 +235,8 @@
 				{#if index === crumbs.length - 1}
 					<span aria-current="page">{crumb.label}</span>
 				{:else if crumb.href}
-					<a href={resolve(crumb.href)}>{crumb.label}</a>
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the levels hold resolved paths -->
+					<a href={crumb.href}>{crumb.label}</a>
 				{:else}
 					<span>{crumb.label}</span>
 				{/if}

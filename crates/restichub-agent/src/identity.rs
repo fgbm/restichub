@@ -16,9 +16,9 @@ pub const CA_CHAIN_FILE: &str = "ca-chain.pem";
 pub const METADATA_FILE: &str = "identity.json";
 pub const SIGNING_KEYS_FILE: &str = "signing-keys.json";
 /// The suffix of a file that a certificate rotation staged and did not yet move into place.
-const STAGED_SUFFIX: &str = ".next";
+pub(crate) const STAGED_SUFFIX: &str = ".next";
 /// The staged marker. Its presence says that the staged key, certificate and chain are complete.
-const ROTATION_MARKER: &str = "rotation.next";
+pub(crate) const ROTATION_MARKER: &str = "rotation.next";
 
 /// The public job signing key set that the identity keeps (ADR-0026).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

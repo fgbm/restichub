@@ -150,6 +150,39 @@ describe('the job detail screen', () => {
 		expect(summary.getByText('128,260')).toBeInTheDocument();
 	});
 
+	it('hides_the_summary_panel_until_a_step_summary_exists', async () => {
+		mocks.getJob.mockResolvedValue(job({ status: 'running', result_code: null, summary: null }));
+		render(JobDetailPage);
+
+		await screen.findByText('About this job');
+		expect(screen.queryByText('Summary')).not.toBeInTheDocument();
+		expect(screen.queryByText('The summary appears when the first step finishes.')).toBeNull();
+	});
+
+	it('shows_the_overall_progress_bar_only_with_more_than_one_step', async () => {
+		mocks.getJob.mockResolvedValue(job({ planned_steps: ['backup'] }));
+		const { unmount } = render(JobDetailPage);
+		await screen.findByText('About this job');
+		expect(screen.queryByRole('progressbar', { name: 'Steps' })).not.toBeInTheDocument();
+		unmount();
+
+		mocks.getJob.mockResolvedValue(job({ planned_steps: ['backup', 'forget'] }));
+		render(JobDetailPage);
+		expect(await screen.findByRole('progressbar', { name: 'Steps' })).toBeInTheDocument();
+	});
+
+	it('truncates_the_job_id_in_the_about_panel_with_a_tooltip_and_a_copy_button', async () => {
+		const user = userEvent.setup();
+		const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+		render(JobDetailPage);
+
+		await screen.findByText('About this job');
+		const id = screen.getAllByText('j_1').find((node) => node.getAttribute('title') === 'j_1');
+		expect(id).toBeDefined();
+		await user.click(screen.getByRole('button', { name: 'Copy the job ID' }));
+		expect(writeText).toHaveBeenCalledWith('j_1');
+	});
+
 	it('fr_mn_02_shows_the_signing_key_with_a_copy_button', async () => {
 		const user = userEvent.setup();
 		const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();

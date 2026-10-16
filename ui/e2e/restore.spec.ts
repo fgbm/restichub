@@ -42,8 +42,11 @@ test('the snapshot list takes filters and the tree loads a large directory by pa
 	await expect(tree.getByText('→ /srv/www')).toBeVisible();
 	await expect(tree.getByRole('button', { name: 'Expand current-project' })).toHaveCount(0);
 
-	// The back link keeps the filters of the list.
-	await page.getByRole('link', { name: /Back to the snapshots/ }).click();
+	// The breadcrumb link to the list keeps its filters.
+	await page
+		.getByRole('navigation', { name: 'Breadcrumb' })
+		.getByRole('link', { name: 'Restore' })
+		.click();
 	await expect(page.getByText('Host: ws-anna')).toBeVisible();
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(2);
 

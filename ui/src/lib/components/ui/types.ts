@@ -20,6 +20,8 @@ export interface TabItem {
 
 export interface MenuItem {
 	label: string;
+	/** Tooltip of the icon button in a row with one or two actions, instead of the label. */
+	hint?: string;
 	icon?: IconName;
 	/** A menu item without an action is a heading, not a command. */
 	onSelect?: () => void;
@@ -52,6 +54,29 @@ export interface TableColumn<T> {
 	badge?: (row: T) => BadgeTone | null;
 	/** Cell markup; wins over `cell` and `badge`. */
 	render?: Snippet<[T]>;
+	/** The cell that holds the link to the record. Default: the first column. */
+	primary?: boolean;
+	/** Cut a long value with an ellipsis; a tooltip shows the full value. */
+	truncate?: boolean | 'sm' | 'md' | 'lg';
+	/** The value is an RFC 3339 time: a relative or an absolute time on one line. */
+	date?: 'relative' | 'absolute';
+}
+
+export interface RowAction {
+	id: string;
+	label: string;
+	icon: IconName;
+	onSelect: () => void;
+	/** Tooltip of the icon button, when it says more than the label. */
+	hint?: string;
+	danger?: boolean;
+	hidden?: boolean;
+	disabled?: boolean;
+}
+
+export interface TableSort {
+	key: string;
+	direction: 'asc' | 'desc';
 }
 
 export interface KeyValueItem {
@@ -59,4 +84,33 @@ export interface KeyValueItem {
 	label: string;
 	value: string;
 	mono?: boolean;
+	/** Value markup, such as a pill or a copy button; wins over `value`. */
+	render?: Snippet;
+}
+
+export interface FilterSearch {
+	/** The query parameter of the search text. */
+	key: string;
+	label: string;
+	placeholder?: string;
+	mono?: boolean;
+	/** Default: `filter-` and the key. */
+	id?: string;
+}
+
+export interface FilterOption {
+	value: string;
+	/** Default: the value. */
+	label?: string;
+	/** The number of items with this value. */
+	count?: number;
+}
+
+export interface FilterFacet {
+	/** The query parameter of the facet. */
+	key: string;
+	label: string;
+	options: FilterOption[];
+	/** Several values at once. Default: `true`. */
+	multiple?: boolean;
 }

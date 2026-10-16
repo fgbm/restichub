@@ -196,13 +196,20 @@ fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<
 pub fn install_service(options: &ResticFileOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     let dir = crate::paths::config_dir();
-    crate::setup::require_identity(&dir)?;
-    crate::preflight::prepare_directories(&dir, &crate::paths::cache_dir())?;
+    prepare_install(&dir, &crate::paths::cache_dir())?;
     place_program()?;
     let restic = ensure_restic(options)?;
     let report =
         crate::setup::install_and_wait(&HostService, &dir, restic.path(), WaitOptions::default())?;
     finish_setup(Some(&report), hostname().ok().as_deref())
+}
+
+/// The identity load finishes a staged rotation, so the tree check and the repair run before it, as
+/// in `register`: another account may have planted the staged files (T20).
+fn prepare_install(dir: &Path, cache: &Path) -> Result<()> {
+    crate::preflight::prepare_directories(dir, cache)?;
+    crate::setup::require_identity(dir)?;
+    Ok(())
 }
 
 /// Installs restic when it is absent and returns it (ADR-0038).
@@ -523,6 +530,58 @@ mod tests {
 
         assert!(format!("{error:#}").contains("differs from its record after the move"));
         assert!(layout.binary_path().exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn planted_rotation(name: &str) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!(
+            "restichub-agent-install-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let dir = base.join("ResticHub").join("Agent");
+        std::fs::create_dir_all(&dir).expect("cannot create the directory");
+        std::fs::write(dir.join("agent-key.pem"), b"key").expect("cannot write the key");
+        std::fs::write(dir.join("agent-key.pem.next"), b"planted").expect("cannot write");
+        std::fs::write(dir.join("rotation.next"), b"").expect("cannot write the marker");
+        (base, dir)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_04_install_service_prepares_the_directory_before_it_loads_the_identity() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let (base, dir) = planted_rotation("order");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777))
+            .expect("cannot set the mode");
+        let error = prepare_install(&dir, &base.join("cache")).expect_err("no identity");
+        assert!(
+            format!("{error:#}").contains("no valid agent identity"),
+            "{error:#}"
+        );
+        let mode = std::fs::metadata(&dir)
+            .expect("cannot read the directory")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700, "the directory was not prepared first");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fr_ag_04_install_service_refuses_an_open_directory_before_it_loads_the_identity() {
+        let (base, dir) = planted_rotation("order");
+        crate::winsec::tests::grant(&dir, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let error = prepare_install(&dir, &dir.join("cache")).expect_err("an open directory");
+        assert!(
+            format!("{error:#}").contains("cannot prepare the directory"),
+            "{error:#}"
+        );
+        assert_eq!(
+            std::fs::read(dir.join("agent-key.pem")).expect("the key must stay"),
+            b"key"
+        );
+        assert!(dir.join("agent-key.pem.next").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 

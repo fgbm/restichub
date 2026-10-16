@@ -7,7 +7,8 @@
 		label,
 		trigger,
 		children,
-		align = 'start'
+		align = 'start',
+		onOpenChange
 	}: {
 		open?: boolean;
 		/** Accessible name of the popover panel. */
@@ -15,10 +16,11 @@
 		trigger: Snippet;
 		children: Snippet;
 		align?: 'start' | 'center' | 'end';
+		onOpenChange?: (open: boolean) => void;
 	} = $props();
 </script>
 
-<Primitive.Root bind:open>
+<Primitive.Root bind:open {onOpenChange}>
 	<Primitive.Trigger class="rh-popover__trigger">
 		{@render trigger()}
 	</Primitive.Trigger>
