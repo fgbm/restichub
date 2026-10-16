@@ -21,34 +21,44 @@
 	const shapes = $derived(icons[name]);
 </script>
 
-<svg
-	class="icon icon--{size} {className}"
-	class:icon--spin={spin}
-	viewBox="0 0 24 24"
-	focusable="false"
-	role={label ? 'img' : undefined}
-	aria-label={label}
-	aria-hidden={label ? undefined : 'true'}
-	data-icon={name}
->
-	{#each shapes as [tag, attributes], index (index)}
-		{#if tag === 'path'}
-			<path {...attributes} />
-		{:else if tag === 'circle'}
-			<circle {...attributes} />
-		{:else if tag === 'rect'}
-			<rect {...attributes} />
-		{:else if tag === 'ellipse'}
-			<ellipse {...attributes} />
-		{:else if tag === 'line'}
-			<line {...attributes} />
-		{:else if tag === 'polyline'}
-			<polyline {...attributes} />
-		{:else}
-			<polygon {...attributes} />
-		{/if}
-	{/each}
-</svg>
+{#snippet glyph()}
+	<svg
+		class="icon icon--{size} {className}"
+		class:icon--spin={spin}
+		viewBox="0 0 24 24"
+		focusable="false"
+		role={label ? 'img' : undefined}
+		aria-label={label}
+		aria-hidden={label ? undefined : 'true'}
+		data-icon={name}
+	>
+		{#each shapes as [tag, attributes], index (index)}
+			{#if tag === 'path'}
+				<path {...attributes} />
+			{:else if tag === 'circle'}
+				<circle {...attributes} />
+			{:else if tag === 'rect'}
+				<rect {...attributes} />
+			{:else if tag === 'ellipse'}
+				<ellipse {...attributes} />
+			{:else if tag === 'line'}
+				<line {...attributes} />
+			{:else if tag === 'polyline'}
+				<polyline {...attributes} />
+			{:else}
+				<polygon {...attributes} />
+			{/if}
+		{/each}
+	</svg>
+{/snippet}
+
+<!-- The HTML wrapper rotates, not the SVG: a browser may run an animation of an SVG element on
+     the main thread, and then the spinner stops while a list renders. -->
+{#if spin}
+	<span class="spin">{@render glyph()}</span>
+{:else}
+	{@render glyph()}
+{/if}
 
 <style>
 	.icon {
@@ -78,8 +88,15 @@
 		height: 24px;
 	}
 
-	.icon--spin {
+	.spin {
+		display: inline-flex;
+		flex: none;
+		vertical-align: -0.15em;
 		animation: icon-spin var(--rh-spin-duration) linear infinite;
+	}
+
+	.spin > .icon {
+		vertical-align: top;
 	}
 
 	@keyframes icon-spin {

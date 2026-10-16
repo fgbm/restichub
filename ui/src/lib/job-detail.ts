@@ -4,7 +4,8 @@
  */
 import { formatBytes, formatCount, formatSeconds } from '#lib/format.ts';
 import type { JobDetail, JobStatus, JobStep, StepOutput } from '#lib/api/index.ts';
-import { getLocale, t } from '#lib/i18n/index.ts';
+import { t } from '#lib/i18n/index.ts';
+import { pluralRules } from '#lib/intl.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
 import type { StatusTone } from '#lib/components/ui/index.ts';
 
@@ -31,7 +32,7 @@ export function limitLines(job: JobDetail): string[] | null {
 
 /** The count of files with the plural form of the current language, such as "128 402 файла". */
 export function formatFiles(count: number): string {
-	const rule = new Intl.PluralRules(getLocale()).select(count);
+	const rule = pluralRules().select(count);
 	return t(`jobDetail.files.${rule}` as MessageKey, { count: formatCount(count) });
 }
 

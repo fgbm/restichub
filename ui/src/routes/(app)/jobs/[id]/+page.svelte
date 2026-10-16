@@ -45,6 +45,7 @@
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { sameData } from '#lib/unchanged.ts';
 
 	const POLL_MS = 2000;
 	// The stream pushes the changes, so a connected page polls only as a safety net.
@@ -254,7 +255,8 @@
 
 	async function loadJob(): Promise<void> {
 		try {
-			job = await service.getJob(id);
+			const next = await service.getJob(id);
+			if (!sameData(job, next)) job = next;
 			error = null;
 			notFound = false;
 		} catch (problem) {

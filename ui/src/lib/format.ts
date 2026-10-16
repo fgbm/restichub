@@ -1,4 +1,5 @@
 import { getLocale, t } from '#lib/i18n/index.ts';
+import { dateTimeFormat, numberFormat, relativeTimeFormat } from '#lib/intl.ts';
 
 export function formatTime(value: string): string {
 	return new Date(value).toLocaleString(getLocale());
@@ -7,11 +8,9 @@ export function formatTime(value: string): string {
 /** Formats an instant in a given IANA time zone (FR-SC-01). */
 export function formatTimeInZone(value: string, timeZone: string): string {
 	try {
-		return new Intl.DateTimeFormat(getLocale(), {
-			dateStyle: 'medium',
-			timeStyle: 'short',
-			timeZone
-		}).format(new Date(value));
+		return dateTimeFormat({ dateStyle: 'medium', timeStyle: 'short', timeZone }).format(
+			new Date(value)
+		);
 	} catch {
 		return formatTime(value);
 	}
@@ -19,9 +18,7 @@ export function formatTimeInZone(value: string, timeZone: string): string {
 
 /** Formats an instant in the time zone of the browser, in the style of [`formatTimeInZone`]. */
 export function formatLocalTime(value: string): string {
-	return new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(
-		new Date(value)
-	);
+	return dateTimeFormat({ dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
 /**
@@ -49,11 +46,7 @@ export function formatDuration(from: string, to: string): string {
 	if (shown.length === 0) shown.push([0, 'second']);
 	return shown
 		.map(([amount, unit]) =>
-			new Intl.NumberFormat(getLocale(), {
-				style: 'unit',
-				unit,
-				unitDisplay: 'narrow'
-			}).format(amount)
+			numberFormat({ style: 'unit', unit, unitDisplay: 'narrow' }).format(amount)
 		)
 		.join(' ');
 }
@@ -70,7 +63,7 @@ const relativeSteps: [Intl.RelativeTimeFormatUnit, number][] = [
 /** A short distance to now, such as "14 minutes ago", in the current locale. */
 export function relativeTime(value: string): string {
 	let amount = (new Date(value).getTime() - Date.now()) / 1000;
-	const format = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' });
+	const format = relativeTimeFormat({ numeric: 'auto' });
 	for (const [unit, size] of relativeSteps) {
 		if (Math.abs(amount) < size) return format.format(Math.round(amount), unit);
 		amount /= size;
@@ -88,22 +81,18 @@ export function formatBytes(value: number): string {
 		amount /= 1024;
 		unit += 1;
 	}
-	const format = new Intl.NumberFormat(getLocale(), {
-		maximumFractionDigits: unit === 0 ? 0 : amount < 10 ? 2 : 1
-	});
+	const format = numberFormat({ maximumFractionDigits: unit === 0 ? 0 : amount < 10 ? 2 : 1 });
 	return `${format.format(amount)} ${byteUnits[unit]}`;
 }
 
 /** An integer with the digit grouping of the locale. */
 export function formatCount(value: number): string {
-	return new Intl.NumberFormat(getLocale()).format(value);
+	return numberFormat().format(value);
 }
 
 /** A time of day with seconds, in the time zone of the browser, such as "21:11:02". */
 export function formatClock(value: string): string {
-	return new Intl.DateTimeFormat(getLocale(), { timeStyle: 'medium', hour12: false }).format(
-		new Date(value)
-	);
+	return dateTimeFormat({ timeStyle: 'medium', hour12: false }).format(new Date(value));
 }
 
 /** A whole number of minutes as hours and minutes, such as "1h 30m". */

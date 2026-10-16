@@ -17,7 +17,7 @@
 		StatusPill
 	} from './ui/index.ts';
 	import type { KeyValueItem, MenuItem, StatusTone } from './ui/index.ts';
-	import { jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
+	import { isTimed, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
 	import { iconOf, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -26,6 +26,7 @@
 	import { enableCommand } from '#lib/scripts.ts';
 	import { onEvent } from '#lib/stores/events.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { keepUnchanged } from '#lib/unchanged.ts';
 
 	let { hostId }: { hostId: string } = $props();
 
@@ -73,7 +74,12 @@
 		if (agentResult.status === 'rejected') throw agentResult.reason;
 		agent = agentResult.value;
 		users = userList.status === 'fulfilled' ? userList.value : [];
-		jobs = jobPage.status === 'fulfilled' ? jobPage.value.items : [];
+		jobs = keepUnchanged(
+			jobs,
+			jobPage.status === 'fulfilled' ? jobPage.value.items : [],
+			(job) => job.id,
+			isTimed
+		);
 		plans =
 			planList.status === 'fulfilled' ? planList.value.filter((p) => p.agent_id === hostId) : [];
 		openAlerts =

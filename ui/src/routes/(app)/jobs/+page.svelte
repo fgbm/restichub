@@ -13,12 +13,13 @@
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatCount } from '#lib/format.ts';
-	import { isUnfinished, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
+	import { isTimed, isUnfinished, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
 	import { iconOf, isCancelled, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { keepUnchanged, sameData } from '#lib/unchanged.ts';
 
 	// The kinds that a person starts or a plan runs; the browse jobs of Restore stay out.
 	const KINDS: JobKind[] = [
@@ -225,10 +226,10 @@
 				filters.update({ page: String(last) });
 				return;
 			}
-			jobs = page.items;
+			jobs = keepUnchanged(jobs, page.items, (job) => job.id, isTimed);
 			total = page.total;
 			totalCapped = page.total_capped;
-			if (page.counts) counts = page.counts;
+			if (page.counts && !sameData(counts, page.counts)) counts = page.counts;
 		} catch (problem) {
 			if (mine !== request) return;
 			error = messageOf(problem);

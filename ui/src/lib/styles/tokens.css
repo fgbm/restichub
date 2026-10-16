@@ -400,11 +400,14 @@ pre {
 	outline-offset: 2px;
 }
 
+/* An endless animation must stop, not run once in 0.01 ms forever: the browser then samples a
+   random phase on each frame and a spinner jumps (design/style/ui-principles.md, 4.3). */
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,
 	*::after {
 		transition-duration: 0.01ms !important;
 		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
 	}
 }

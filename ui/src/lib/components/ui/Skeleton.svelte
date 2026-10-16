@@ -7,15 +7,21 @@
 <span class="skeleton skeleton--{variant}" aria-hidden="true"></span>
 
 <style>
+	/* The shine moves with a transform, so it runs on the compositor and does not stop while the
+	   main thread renders the data that the skeleton waits for. */
 	.skeleton {
+		position: relative;
 		display: block;
-		background: linear-gradient(
-			90deg,
-			var(--rh-color-skeleton),
-			var(--rh-color-skeleton-shine),
-			var(--rh-color-skeleton)
-		);
-		background-size: 200% 100%;
+		overflow: hidden;
+		background: var(--rh-color-skeleton);
+	}
+
+	.skeleton::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(90deg, transparent, var(--rh-color-skeleton-shine), transparent);
+		transform: translateX(-100%);
 		animation: skeleton-shimmer 1.2s ease-in-out infinite;
 	}
 
@@ -39,7 +45,7 @@
 
 	@keyframes skeleton-shimmer {
 		to {
-			background-position: -200% 0;
+			transform: translateX(100%);
 		}
 	}
 </style>
