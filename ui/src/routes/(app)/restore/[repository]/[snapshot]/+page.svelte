@@ -1,7 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
+	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Agent, Repository, SnapshotItem } from '#lib/api/index.ts';
@@ -14,19 +12,13 @@
 		EmptyState,
 		Icon,
 		PageHeader,
-		Panel,
 		Skeleton
 	} from '#lib/components/ui/index.ts';
 	import { formatBytes, formatCount, formatLocalTime } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import {
-		TARGET_PARAM,
-		filtersFromQuery,
-		filtersToQuery,
-		includePaths,
-		targetExtra
-	} from '#lib/restore.ts';
+	import { TARGET_PARAM, includePaths } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
+	import { setPageTitle } from '#lib/stores/page-title.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
 	/** How many selected paths the footer names before it folds the rest. */
@@ -34,7 +26,6 @@
 
 	const repositoryId = page.params.repository ?? '';
 	const snapshotId = page.params.snapshot ?? '';
-	const filters = filtersFromQuery(page.url.searchParams);
 
 	let repository = $state<Repository | null>(null);
 	let agents = $state<Agent[]>([]);
@@ -44,12 +35,11 @@
 	let error = $state<string | null>(null);
 	let selection = $state(new Set<string>());
 	let dialogOpen = $state(false);
+	let summaryOpen = $state(false);
+	let copied = $state(false);
 
 	const canRestore = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const paths = $derived(includePaths(selection));
-	const backHref = $derived(
-		`${resolve('/(app)/restore')}?${filtersToQuery(filters, { repository: repositoryId, snapshot: snapshotId, ...targetExtra(page.url.searchParams) })}`
-	);
 
 	function describe(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -57,12 +47,17 @@
 		return t('table.error');
 	}
 
-	function back(event: MouseEvent): void {
-		if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-		event.preventDefault();
-		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the address starts with a resolved path
-		void goto(backHref);
+	async function copyId(): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(snapshotId);
+			copied = true;
+			setTimeout(() => (copied = false), 1500);
+		} catch {
+			copied = false;
+		}
 	}
+
+	onDestroy(() => setPageTitle(null));
 
 	onMount(async () => {
 		try {
@@ -79,6 +74,7 @@
 				service.getSnapshots(repositoryId, { job: item.job_id ?? undefined })
 			);
 			snapshot = list?.snapshots.find((item) => item.id === snapshotId) ?? null;
+			setPageTitle(repository?.name ?? null);
 		} catch (problem) {
 			error = describe(problem);
 		} finally {
@@ -90,12 +86,6 @@
 <svelte:head>
 	<title>{t('restore.title')} · {t('app.name')}</title>
 </svelte:head>
-
-<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the address starts with a resolved path -->
-<a class="back" href={backHref} onclick={back}>
-	<Icon name="arrow-left" size="xs" />
-	{t('restore.back')}
-</a>
 
 {#if !canRestore}
 	<Alert tone="attention" icon="lock" title={t('restore.forbidden')} />
@@ -113,70 +103,108 @@
 {:else}
 	<PageHeader title={t('restore.snapshotTitle', { id: snapshot.short_id })} />
 
-	<Panel>
-		<dl class="meta">
-			<dt>{t('restore.meta.id')}</dt>
-			<dd class="mono">{snapshot.id}</dd>
-			<dt>{t('restore.meta.time')}</dt>
-			<dd>{snapshot.time ? formatLocalTime(snapshot.time) : '—'}</dd>
-			<dt>{t('restore.meta.host')}</dt>
-			<dd>{snapshot.hostname}</dd>
-			<dt>{t('restore.meta.repository')}</dt>
-			<dd>{repository.name}</dd>
-			<dt>{t('restore.meta.paths')}</dt>
-			<dd class="mono">{snapshot.paths.join(', ')}</dd>
-			{#if snapshot.total_bytes != null}
-				<dt>{t('restore.meta.content')}</dt>
-				<dd>
-					{t('restore.meta.contentValue', {
-						files: formatCount(snapshot.total_files ?? 0),
-						size: formatBytes(snapshot.total_bytes)
-					})}
-				</dd>
-			{/if}
-			{#if snapshot.tags.length > 0}
-				<dt>{t('restore.meta.tags')}</dt>
-				<dd><SnapshotTags tags={snapshot.tags} {profiles} /></dd>
-			{/if}
-		</dl>
-	</Panel>
+	<div class="layout">
+		<aside class="side">
+			<button
+				type="button"
+				class="side__toggle"
+				aria-expanded={summaryOpen}
+				aria-controls="snapshot-meta"
+				onclick={() => (summaryOpen = !summaryOpen)}
+			>
+				<span class="side__line">
+					<span class="mono">{snapshot.short_id}</span>
+					<span>{snapshot.hostname}</span>
+					<span>{snapshot.time ? formatLocalTime(snapshot.time) : '—'}</span>
+				</span>
+				<Icon name={summaryOpen ? 'chevron-up' : 'chevron-down'} size="xs" />
+			</button>
+			<dl id="snapshot-meta" class="meta" class:meta--open={summaryOpen}>
+				<div>
+					<dt>{t('restore.meta.id')}</dt>
+					<dd class="id">
+						<span class="mono id__text" title={snapshot.id}>{snapshot.id}</span>
+						<Button
+							size="sm"
+							icon={copied ? 'check' : 'copy'}
+							aria-label={t('restore.meta.copyId')}
+							onclick={copyId}
+						/>
+					</dd>
+				</div>
+				<div>
+					<dt>{t('restore.meta.time')}</dt>
+					<dd>{snapshot.time ? formatLocalTime(snapshot.time) : '—'}</dd>
+				</div>
+				<div>
+					<dt>{t('restore.meta.host')}</dt>
+					<dd>{snapshot.hostname}</dd>
+				</div>
+				<div>
+					<dt>{t('restore.meta.repository')}</dt>
+					<dd>{repository.name}</dd>
+				</div>
+				<div>
+					<dt>{t('restore.meta.paths')}</dt>
+					<dd class="mono">{snapshot.paths.join(', ')}</dd>
+				</div>
+				{#if snapshot.total_bytes != null}
+					<div>
+						<dt>{t('restore.meta.content')}</dt>
+						<dd>
+							{t('restore.meta.contentValue', {
+								files: formatCount(snapshot.total_files ?? 0),
+								size: formatBytes(snapshot.total_bytes)
+							})}
+						</dd>
+					</div>
+				{/if}
+				{#if snapshot.tags.length > 0}
+					<div>
+						<dt>{t('restore.meta.tags')}</dt>
+						<dd><SnapshotTags tags={snapshot.tags} {profiles} /></dd>
+					</div>
+				{/if}
+			</dl>
+		</aside>
 
-	<div class="tree">
-		<Panel title={t('restore.files')}>
-			<SnapshotTree repositoryId={repository.id} {snapshot} bind:selected={selection} />
-		</Panel>
-	</div>
-
-	<div class="selection">
-		<div class="selection__text">
-			<span class="selection__count">
-				{paths.length === 0
-					? t('restore.selectionNone')
-					: t('restore.selectionSome', { count: paths.length })}
-			</span>
-			{#if paths.length > 0}
-				<ul class="selection__paths" aria-label={t('restore.selectedList')}>
-					{#each paths.slice(0, NAMED) as item (item)}
-						<li class="selection__path" title={item}>{item}</li>
-					{/each}
-					{#if paths.length > NAMED}
-						<li class="selection__more">
-							{t('restore.selectionMore', { count: paths.length - NAMED })}
-						</li>
+		<section class="files">
+			<h2 class="files__head">{t('restore.files')}</h2>
+			<div class="files__body">
+				<SnapshotTree repositoryId={repository.id} {snapshot} bind:selected={selection} />
+			</div>
+			<div class="selection">
+				<div class="selection__text">
+					<span class="selection__count">
+						{paths.length === 0
+							? t('restore.selectionNone')
+							: t('restore.selectionSome', { count: paths.length })}
+					</span>
+					{#if paths.length > 0}
+						<ul class="selection__paths" aria-label={t('restore.selectedList')}>
+							{#each paths.slice(0, NAMED) as item (item)}
+								<li class="selection__path" title={item}>{item}</li>
+							{/each}
+							{#if paths.length > NAMED}
+								<li class="selection__more">
+									{t('restore.selectionMore', { count: paths.length - NAMED })}
+								</li>
+							{/if}
+						</ul>
 					{/if}
-				</ul>
-			{/if}
-		</div>
-		<div class="selection__actions">
-			{#if paths.length > 0}
-				<Button variant="ghost" onclick={() => (selection = new Set())}>
-					{t('restore.clearSelection')}
-				</Button>
-			{/if}
-			<Button variant="primary" icon="restore" onclick={() => (dialogOpen = true)}>
-				{t('restore.restore')}
-			</Button>
-		</div>
+				</div>
+				<div class="selection__actions">
+					{#if paths.length > 0}
+						<Button variant="ghost" onclick={() => (selection = new Set())}>
+							{t('restore.clearSelection')}
+						</Button>
+					{/if}
+					<Button variant="primary" icon="restore" onclick={() => (dialogOpen = true)}>
+						{t('restore.restore')}
+					</Button>
+				</div>
+			</div>
+		</section>
 	</div>
 
 	<RestoreDialog
@@ -190,67 +218,109 @@
 {/if}
 
 <style>
-	.back {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--rh-space-1);
-		margin-bottom: var(--rh-space-3);
-		color: var(--rh-color-link);
-		font-size: var(--rh-font-size-sm);
-		text-decoration: none;
+	/* The page fills the window below the top bar, the tabs and the title: only the tree scrolls. */
+	.layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 20rem;
+		grid-template-areas: 'files side';
+		gap: var(--rh-space-4);
+		align-items: start;
+		height: calc(100dvh - var(--rh-layout-topbar-height) - 12rem);
+		min-height: 24rem;
 	}
 
-	.back:hover {
-		text-decoration: underline;
+	.side {
+		grid-area: side;
+		min-width: 0;
+		max-height: 100%;
+		overflow-y: auto;
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+		background-color: var(--rh-color-surface, var(--rh-color-canvas));
+	}
+
+	.side__toggle {
+		display: none;
 	}
 
 	.meta {
-		display: grid;
-		grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
 		margin: 0;
+		padding: var(--rh-space-1) var(--rh-space-4);
+		font-size: var(--rh-font-size-sm);
 	}
 
-	.meta dt,
-	.meta dd {
-		margin: 0;
+	.meta > div {
 		padding: var(--rh-space-2) 0;
 		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
-		overflow-wrap: anywhere;
+	}
+
+	.meta > div:first-child {
+		border-top: 0;
 	}
 
 	.meta dt {
-		padding-inline-end: var(--rh-space-4);
 		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-xs, var(--rh-font-size-sm));
 	}
 
-	.meta dt:first-of-type,
-	.meta dd:first-of-type {
-		border-top: 0;
+	.meta dd {
+		margin: 0;
+		overflow-wrap: anywhere;
 	}
 
 	.mono {
 		font-family: var(--rh-font-mono, monospace);
-		font-size: var(--rh-font-size-sm);
 	}
 
-	.tree {
-		margin-top: var(--rh-space-4);
+	.id {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.id__text {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.files {
+		display: flex;
+		grid-area: files;
+		flex-direction: column;
+		min-width: 0;
+		height: 100%;
+		overflow: hidden;
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+		background-color: var(--rh-color-canvas);
+	}
+
+	.files__head {
+		margin: 0;
+		padding: var(--rh-space-2) var(--rh-space-4);
+		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
+		background-color: var(--rh-color-canvas-subtle);
+		font-size: var(--rh-font-size-sm);
+		font-weight: var(--rh-font-weight-semibold, 600);
+	}
+
+	.files__body {
+		flex: 1;
+		min-height: 0;
+		padding: var(--rh-space-2);
 	}
 
 	.selection {
-		position: sticky;
-		bottom: 0;
-		z-index: 2;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: var(--rh-space-4);
-		margin-top: var(--rh-space-4);
 		padding: var(--rh-space-3) var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
-		background-color: var(--rh-color-surface, var(--rh-color-canvas));
-		box-shadow: var(--rh-shadow-menu);
+		border-top: var(--rh-border-width) solid var(--rh-color-border);
+		background-color: var(--rh-color-canvas-subtle);
 	}
 
 	.selection__text {
@@ -297,7 +367,60 @@
 		gap: var(--rh-space-2);
 	}
 
+	@media (max-width: 1023px) {
+		.layout {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-areas:
+				'side'
+				'files';
+			grid-template-rows: auto minmax(0, 1fr);
+			align-items: stretch;
+		}
+
+		.side {
+			max-height: none;
+			overflow: visible;
+		}
+
+		.side__toggle {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--rh-space-3);
+			width: 100%;
+			padding: var(--rh-space-2) var(--rh-space-4);
+			border: 0;
+			background: none;
+			color: inherit;
+			font: inherit;
+			font-size: var(--rh-font-size-sm);
+			text-align: start;
+			cursor: pointer;
+		}
+
+		.side__line {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0 var(--rh-space-3);
+			min-width: 0;
+		}
+
+		.meta {
+			display: none;
+			border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
+		}
+
+		.meta--open {
+			display: block;
+		}
+	}
+
 	@media (max-width: 40rem) {
+		.layout {
+			height: calc(100dvh - var(--rh-layout-topbar-height) - 9rem);
+			min-height: 30rem;
+		}
+
 		.selection {
 			flex-direction: column;
 			align-items: stretch;
@@ -305,20 +428,6 @@
 
 		.selection__path {
 			max-width: 12rem;
-		}
-
-		.meta {
-			grid-template-columns: minmax(0, 1fr);
-		}
-
-		.meta dt {
-			padding-bottom: 0;
-			border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
-		}
-
-		.meta dd {
-			padding-top: var(--rh-space-1);
-			border-top: 0;
 		}
 	}
 </style>

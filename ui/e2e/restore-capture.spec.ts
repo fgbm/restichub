@@ -13,7 +13,6 @@ type Labels = {
 	nav: string;
 	restore: string;
 	snapshot: RegExp;
-	back: RegExp;
 	expand: (name: string) => string;
 	select: (name: string) => string;
 	open: string;
@@ -26,7 +25,6 @@ const EN: Labels = {
 	nav: 'Primary navigation',
 	restore: 'Restore',
 	snapshot: /^Open snapshot /,
-	back: /Back to the snapshots/,
 	expand: (name) => `Expand ${name}`,
 	select: (name) => `Select ${name}`,
 	open: 'Restore…',
@@ -39,7 +37,6 @@ const RU: Labels = {
 	nav: 'Основная навигация',
 	restore: 'Восстановление',
 	snapshot: /^Открыть снимок /,
-	back: /Назад к снимкам/,
 	expand: (name) => `Раскрыть ${name}`,
 	select: (name) => `Отметить ${name}`,
 	open: 'Восстановить…',
@@ -56,8 +53,8 @@ async function capture(
 	width = 1440
 ) {
 	mkdirSync(out, { recursive: true });
-	await page.setViewportSize({ width, height: width < 600 ? 800 : 900 });
-	const size = width < 600 ? '-mobile' : '';
+	await page.setViewportSize({ width, height: width < 600 ? 800 : width > 1600 ? 1080 : 900 });
+	const size = width < 600 ? '-mobile' : width > 1600 ? '-1920' : '';
 	await page.emulateMedia({ colorScheme: scheme });
 	await page.addInitScript((value) => {
 		localStorage.setItem('restichub.mock.agents', 'sample');
@@ -100,6 +97,13 @@ async function capture(
 	await tree.getByRole('checkbox', { name: labels.select('photo.jpg') }).check();
 	await page.waitForTimeout(300);
 	await page.screenshot({ path: `${out}/restore-snapshot-${scheme}${suffix}${size}.png` });
+	if (width >= 1024) {
+		// The tree scrolls inside its panel, the page does not.
+		const extra = await page.evaluate(
+			() => document.documentElement.scrollHeight - document.documentElement.clientHeight
+		);
+		expect(extra).toBeLessThanOrEqual(0);
+	}
 	await page.evaluate(() => window.scrollTo(0, 0));
 	await page.waitForTimeout(200);
 	await page.screenshot({ path: `${out}/restore-snapshot-top-${scheme}${suffix}${size}.png` });
@@ -138,4 +142,8 @@ test('captures the Restore screen in Russian, light', async ({ page }) => {
 
 test('captures the Restore pages in Russian, light, 390 wide', async ({ page }) => {
 	await capture(page, 'light', RU, '-ru', 390);
+});
+
+test('captures the Restore pages in Russian, light, 1920 wide', async ({ page }) => {
+	await capture(page, 'light', RU, '-ru', 1920);
 });
