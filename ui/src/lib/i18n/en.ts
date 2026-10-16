@@ -1978,7 +1978,12 @@ export const en = {
 	'profiles.copy': 'Make a copy',
 	'profiles.deleteInUse': 'A plan uses the profile. Delete the plans first.',
 	'profiles.unused': 'Not used',
-	'profiles.copyName': '{name} (copy)'
+	'profiles.copyName': '{name} (copy)',
+	'repositories.tab.all': 'All',
+	'repositories.tab.attention': 'Need attention',
+	'repositories.sort.name': 'Name',
+	'repositories.meta.maintenance': 'maintenance on {name}',
+	'repositories.meta.noMaintenance': 'no maintenance host'
 } as const;
 
 export type MessageKey = keyof typeof en;

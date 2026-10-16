@@ -5,7 +5,7 @@
  * The test replaces the session store, the toast store and the service, so it renders the screen
  * alone. Only an Admin and an Operator see a write action; a Viewer reads.
  */
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Plans from './+page.svelte';

@@ -1988,5 +1988,10 @@ export const ru: Record<MessageKey, string> = {
 	'profiles.copy': 'Сделать копию',
 	'profiles.deleteInUse': 'Профиль используют планы. Сначала удалите их.',
 	'profiles.unused': 'Не используется',
-	'profiles.copyName': '{name} (копия)'
+	'profiles.copyName': '{name} (копия)',
+	'repositories.tab.all': 'Все',
+	'repositories.tab.attention': 'Требуют внимания',
+	'repositories.sort.name': 'Имя',
+	'repositories.meta.maintenance': 'обслуживает {name}',
+	'repositories.meta.noMaintenance': 'нет хоста обслуживания'
 };
