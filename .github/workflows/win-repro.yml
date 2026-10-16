@@ -1,0 +1,53 @@
+name: win-repro
+on:
+  pull_request:
+    paths: ['.github/workflows/win-repro.yml']
+permissions:
+  contents: read
+jobs:
+  repro:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Published rc.4
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          mkdir rc4; cd rc4
+          Invoke-WebRequest https://github.com/fgbm/restichub/releases/download/v0.1.0-rc.4/restichub-agent-0.1.0-rc.4-windows-amd64.zip -OutFile a.zip
+          Expand-Archive a.zip -DestinationPath x
+          Get-ChildItem -Recurse x | Select FullName,Length
+          $exe = (Get-ChildItem -Recurse x -Filter restichub-agent.exe).FullName
+          (Get-FileHash $exe).Hash
+          & $exe --version
+          "exit=$LASTEXITCODE hex=0x{0:X}" -f $LASTEXITCODE
+          Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000,1001} -MaxEvents 5 -ErrorAction SilentlyContinue | Format-List TimeCreated,Message
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          target: x86_64-pc-windows-msvc
+          cache: false
+      - name: Build like release.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}=/build/src --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/build/cargo --remap-path-prefix=${RUSTUP_HOME:-$HOME/.rustup}=/build/rustup -C target-feature=+crt-static"
+          RESTICHUB_BUILD_VERSION=abc1234 RESTICHUB_RELEASE_VERSION=0.1.0-rc.4 cargo build --release --locked -p restichub-agent --target x86_64-pc-windows-msvc
+      - name: Run built exe
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          & target\x86_64-pc-windows-msvc\release\restichub-agent.exe --version
+          "exit=$LASTEXITCODE hex=0x{0:X}" -f $LASTEXITCODE
+          Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000,1001} -MaxEvents 5 -ErrorAction SilentlyContinue | Format-List TimeCreated,Message
+      - name: Build like agent-packages (no target)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}=/build/src -C target-feature=+crt-static"
+          RESTICHUB_BUILD_VERSION=abc1234 cargo build --release --locked -p restichub-agent
+      - name: Run packages-style exe
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          & target\release\restichub-agent.exe --version
+          "exit=$LASTEXITCODE hex=0x{0:X}" -f $LASTEXITCODE
