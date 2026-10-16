@@ -74,6 +74,14 @@ pub trait ServiceManager {
     ///
     /// Returns an error when the running service does not stop.
     fn stop(&self) -> Result<()>;
+
+    /// Stops and starts the service again, so a new process reads the host settings. A missing
+    /// service is not an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the service exists and cannot be restarted.
+    fn restart(&self) -> Result<()>;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -97,6 +105,10 @@ impl ServiceManager for HostService {
             let _ = restic;
             anyhow::bail!("{UNSUPPORTED_SERVICE}")
         }
+    }
+
+    fn restart(&self) -> Result<()> {
+        restart_if_installed().map(|_| ())
     }
 
     fn stop(&self) -> Result<()> {

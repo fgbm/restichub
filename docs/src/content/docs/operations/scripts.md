@@ -35,9 +35,12 @@ When you turn the trust mode on, the control plane can run any command on this h
    ```
 
    On Windows, start an elevated PowerShell and run `restichub-agent.exe trust-server-scripts --enable`.
-3. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled** after the agent connects again. The agent sends the state each time it connects, so the column does not change until the next connection. To see the new state at once, restart the agent service. A host that has not reported yet shows **Unknown**. The host list also shows the interpreters that the agent found.
+3. Wait for the command to finish. The agent sends the state each time it connects, so the command restarts the installed agent service and waits until the agent is connected again. If no service is running, the new state applies when the service starts. Use `--no-restart` to skip the restart; the control plane then shows the new state only after you restart the service yourself.
+4. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled**. A host that has not reported yet shows **Unknown**. The host list also shows the interpreters that the agent found.
 
-To turn the mode off, run the command with `--disable`. The agent reads the setting for each job, so the change applies to the next job.
+To turn the mode off, run the command with `--disable`. The command restarts the service in the same way. The agent reads the setting for each job, so the change applies to the next job.
+
+You can also turn the mode on when you register the host: add `--trust-server-scripts` to `register`. The command writes the setting before it starts the service, so the first connection already reports the mode. Without the option the mode stays off.
 
 The command writes a small file next to the configuration directory of the agent. The file holds one line, `server_scripts = enabled` or `server_scripts = disabled`.
 

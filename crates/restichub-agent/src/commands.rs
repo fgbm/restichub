@@ -17,6 +17,7 @@ use crate::restic_release::Supply;
 use crate::restic_store::Layout;
 use crate::service::{HostService, ServiceManager};
 use crate::setup::{SetupReport, WaitOptions};
+use crate::trust::Trust;
 
 /// The exit code of a service start without a usable identity. The systemd unit does not restart
 /// on it, because a restart cannot create the identity (FR-AG-01).
@@ -124,6 +125,31 @@ pub fn start_after_register(
     restic: &Path,
     wait: WaitOptions,
 ) -> Result<Option<SetupReport>> {
+    start_after_register_trusting(options, dir, manager, restic, wait, Trust::Host)
+}
+
+/// Like [`start_after_register`], with the account that must own the trust mode file.
+///
+/// The trust mode is written before the service starts, so the first hello of the agent already
+/// reports it (FR-HK-08, ADR-0037).
+///
+/// # Errors
+///
+/// Returns an error when the mode cannot be written, or from [`start_after_register`].
+pub fn start_after_register_trusting(
+    options: &RegisterOptions,
+    dir: &Path,
+    manager: &dyn ServiceManager,
+    restic: &Path,
+    wait: WaitOptions,
+    trust: Trust,
+) -> Result<Option<SetupReport>> {
+    if options.trust_server_scripts {
+        crate::scripts::set_mode_trusting(dir, true, trust).context(
+            "the agent is registered, but the trust mode is not set; fix the cause and run: restichub-agent trust-server-scripts --enable",
+        )?;
+        println!("{}", trust_enabled_text(dir));
+    }
     if options.no_service {
         return Ok(None);
     }
@@ -312,26 +338,77 @@ pub async fn register_async(
 
 /// Turns the local trust mode for server scripts on or off (FR-HK-08, ADR-0037).
 ///
+/// The agent reports the mode only when it connects, so a running service restarts and the command
+/// waits until it is connected again, unless `no_restart` is set.
+///
 /// # Errors
 ///
-/// Returns an error when the setting file cannot be written or the host would not trust it, for
-/// example when the command does not run as root or Administrator.
-pub fn trust_server_scripts(enable: bool) -> Result<()> {
-    let dir = crate::paths::config_dir();
-    crate::scripts::set_mode(&dir, enable)?;
-    let file = crate::scripts::mode_file_for(&dir);
+/// Returns an error when the process is not elevated, the setting file cannot be written, the
+/// service cannot be restarted, or the agent does not connect again.
+pub fn trust_server_scripts(enable: bool, no_restart: bool) -> Result<()> {
+    crate::preflight::ensure_elevated()?;
+    apply_trust_mode(
+        &HostService,
+        &crate::paths::config_dir(),
+        enable,
+        no_restart,
+        WaitOptions::default(),
+        Trust::Host,
+    )
+}
+
+/// Writes the trust mode and makes the running service report it (FR-HK-08).
+///
+/// # Errors
+///
+/// Returns an error when the mode cannot be written, the service cannot be restarted, or the agent
+/// does not connect again within the wait.
+pub fn apply_trust_mode(
+    manager: &dyn ServiceManager,
+    dir: &Path,
+    enable: bool,
+    no_restart: bool,
+    wait: WaitOptions,
+    trust: Trust,
+) -> Result<()> {
+    crate::scripts::set_mode_trusting(dir, enable, trust)?;
     if enable {
-        println!(
-            "Server scripts are enabled on this host ({}). The control plane can now run code here as the agent account.",
-            file.display()
-        );
+        println!("{}", trust_enabled_text(dir));
     } else {
         println!(
             "Server scripts are disabled on this host ({}).",
-            file.display()
+            crate::scripts::mode_file_for(dir).display()
         );
     }
-    Ok(())
+    if no_restart {
+        println!(
+            "the control plane sees the new state after the agent service restarts; restart it now"
+        );
+        return Ok(());
+    }
+    let state = manager.state()?;
+    if !state.installed || !state.running {
+        println!("no agent service is running; the new state applies when the service starts");
+        return Ok(());
+    }
+    let since = OffsetDateTime::now_utc();
+    manager.restart()?;
+    match crate::connection::wait_for_connection(dir, since, wait.timeout, wait.poll) {
+        crate::connection::Wait::Connected(_) => {
+            println!("the agent reconnected; the control plane now sees the new state");
+            Ok(())
+        }
+        crate::connection::Wait::TimedOut(_) => bail!(
+            "the service restarted but the agent did not connect again; the control plane shows the new state after it connects: {NOT_CONNECTED}"
+        ),
+    }
+}
+
+fn trust_enabled_text(dir: &Path) -> String {
+    format!(
+        "Server scripts are enabled on this host ({}). The control plane can now run any command here as the agent account.",
+        crate::scripts::mode_file_for(dir).display()
+    )
 }
 
 fn check_register_input(options: &RegisterOptions, dir: &Path) -> Result<()> {
@@ -502,6 +579,228 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
+
+    #[cfg(unix)]
+    mod trust_mode {
+        use std::cell::RefCell;
+        use std::os::unix::fs::PermissionsExt as _;
+        use std::time::Duration;
+
+        use super::*;
+        use crate::service::{ServiceState, StartType};
+
+        /// A service double that records the calls in order. Its state is fixed; a start or a restart
+        /// writes the connection status like a service that connected, when `connects` is set.
+        struct Fake {
+            state: ServiceState,
+            dir: PathBuf,
+            connects: bool,
+            events: RefCell<Vec<String>>,
+        }
+
+        impl Fake {
+            fn new(dir: &Path, state: ServiceState) -> Self {
+                Self {
+                    state,
+                    dir: dir.to_path_buf(),
+                    connects: true,
+                    events: RefCell::new(Vec::new()),
+                }
+            }
+
+            fn events(&self) -> Vec<String> {
+                self.events.borrow().clone()
+            }
+
+            fn connect(&self) {
+                if self.connects {
+                    crate::connection::record_connected(&self.dir, "https://cp.example:8443");
+                }
+            }
+        }
+
+        impl ServiceManager for Fake {
+            fn install_and_start(&self, _restic: &Path) -> Result<()> {
+                let mode = std::fs::read_to_string(crate::scripts::mode_file_for(&self.dir))
+                    .unwrap_or_default();
+                self.events.borrow_mut().push(format!(
+                    "start with mode {}",
+                    if mode.contains("server_scripts = enabled") {
+                        "enabled"
+                    } else {
+                        "off"
+                    }
+                ));
+                self.connect();
+                Ok(())
+            }
+
+            fn state(&self) -> Result<ServiceState> {
+                Ok(self.state)
+            }
+
+            fn stop(&self) -> Result<()> {
+                Ok(())
+            }
+
+            fn restart(&self) -> Result<()> {
+                self.events.borrow_mut().push("restart".to_owned());
+                self.connect();
+                Ok(())
+            }
+        }
+
+        const RUNNING: ServiceState = ServiceState {
+            installed: true,
+            running: true,
+            start_type: StartType::Automatic,
+        };
+
+        const STOPPED: ServiceState = ServiceState {
+            installed: true,
+            running: false,
+            start_type: StartType::Automatic,
+        };
+
+        fn quick() -> WaitOptions {
+            WaitOptions {
+                timeout: Duration::from_millis(100),
+                poll: Duration::from_millis(10),
+            }
+        }
+
+        /// A configuration directory with an identity file set aside from the mode file next to it.
+        fn config_dir(name: &str) -> PathBuf {
+            let base = std::env::temp_dir().join(format!(
+                "restichub-agent-trustmode-{name}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            let dir = base.join("config");
+            std::fs::create_dir_all(&dir).expect("config dir");
+            // The trust check of the current account refuses a directory that others can write.
+            std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).expect("mode");
+            dir
+        }
+
+        fn mode_text(dir: &Path) -> String {
+            std::fs::read_to_string(crate::scripts::mode_file_for(dir)).unwrap_or_default()
+        }
+
+        fn cleanup(dir: &Path) {
+            let _ = std::fs::remove_dir_all(dir.parent().expect("parent"));
+        }
+
+        /// An identity with a real self-signed certificate, so the setup accepts it.
+        fn save_identity(dir: &Path) {
+            let key = rcgen::KeyPair::generate().expect("key");
+            let params = rcgen::CertificateParams::new(vec!["agent.example".to_owned()])
+                .expect("certificate parameters");
+            let certificate = params.self_signed(&key).expect("certificate");
+            let identity = StoredIdentity {
+                agent_id: "0192f1e0-0000-7000-8000-000000000001".to_owned(),
+                tenant_id: "0192f1e0-0000-7000-8000-000000000002".to_owned(),
+                cp_url: "https://cp.example:8443".to_owned(),
+                grpc_endpoint: None,
+                key_pem: key.serialize_pem(),
+                certificate_der: certificate.der().to_vec(),
+                ca_chain_der: vec![certificate.der().to_vec()],
+                signing_keys: StoredSigningKeys {
+                    keys: Vec::new(),
+                    signature: "AAAA".to_owned(),
+                },
+            };
+            identity.save(dir).expect("cannot save the identity");
+        }
+
+        #[test]
+        fn fr_hk_08_register_writes_the_trust_mode_before_the_service_starts() {
+            let dir = config_dir("register");
+            save_identity(&dir);
+            let fake = Fake::new(&dir, RUNNING);
+            let options = RegisterOptions {
+                trust_server_scripts: true,
+                ..RegisterOptions::default()
+            };
+            let report = start_after_register_trusting(
+                &options,
+                &dir,
+                &fake,
+                Path::new("/restic"),
+                quick(),
+                Trust::CurrentUser,
+            )
+            .expect("setup")
+            .expect("report");
+            assert!(report.connected());
+            assert_eq!(fake.events(), ["start with mode enabled"]);
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_register_without_the_flag_leaves_the_trust_mode_off() {
+            let dir = config_dir("register-off");
+            let fake = Fake::new(&dir, RUNNING);
+            let options = RegisterOptions {
+                no_service: true,
+                ..RegisterOptions::default()
+            };
+            start_after_register_trusting(
+                &options,
+                &dir,
+                &fake,
+                Path::new("/restic"),
+                quick(),
+                Trust::CurrentUser,
+            )
+            .expect("no service");
+            assert!(mode_text(&dir).is_empty());
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_trust_enable_restarts_a_running_service_and_waits_for_the_connection() {
+            let dir = config_dir("restart");
+            let fake = Fake::new(&dir, RUNNING);
+            apply_trust_mode(&fake, &dir, true, false, quick(), Trust::CurrentUser).expect("apply");
+            assert!(mode_text(&dir).contains("server_scripts = enabled"));
+            assert_eq!(fake.events(), ["restart"]);
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_trust_enable_fails_when_the_agent_does_not_reconnect() {
+            let dir = config_dir("no-reconnect");
+            let mut fake = Fake::new(&dir, RUNNING);
+            fake.connects = false;
+            let error = apply_trust_mode(&fake, &dir, true, false, quick(), Trust::CurrentUser)
+                .expect_err("no connection");
+            assert!(format!("{error:#}").contains("did not connect again"));
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_trust_change_does_not_restart_a_stopped_or_absent_service() {
+            let dir = config_dir("stopped");
+            for state in [STOPPED, ServiceState::NOT_INSTALLED] {
+                let fake = Fake::new(&dir, state);
+                apply_trust_mode(&fake, &dir, false, false, quick(), Trust::CurrentUser)
+                    .expect("apply");
+                assert!(fake.events().is_empty());
+            }
+            assert!(mode_text(&dir).contains("server_scripts = disabled"));
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_no_restart_leaves_the_service_alone() {
+            let dir = config_dir("no-restart");
+            let fake = Fake::new(&dir, RUNNING);
+            apply_trust_mode(&fake, &dir, true, true, quick(), Trust::CurrentUser).expect("apply");
+            assert!(fake.events().is_empty());
+            cleanup(&dir);
+        }
+    }
 
     #[test]
     fn fr_in_07_a_moved_restic_that_differs_from_its_record_fails() {
