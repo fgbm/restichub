@@ -1114,20 +1114,18 @@ export const en = {
 	'restore.noRepositoriesTitle': 'No repository to restore from',
 	'restore.noRepositoriesDescription':
 		'Add a repository and run a backup first. A repository must be initialized before you can restore from it.',
-	'restore.repositoryLabel': 'Repository:',
+	'restore.repositoryLabel': 'Repository',
 	'restore.filterBar': 'Snapshot filters',
 	'restore.pathSearch': 'Search by path',
 	'restore.pathPlaceholder': 'Path, for example C:\\Users',
 	'restore.facetHost': 'Host',
 	'restore.facetTag': 'Tag',
-	'restore.filterHint':
-		'Several values of one filter match any of them. Different filters must all match.',
+	'restore.filterHint': 'Any chosen value matches. All filters must match.',
 	'restore.refresh': 'Refresh the list from the repository',
 	'restore.listLoading': 'The agent reads the snapshots of the repository…',
 	'restore.listNoSnapshots': 'This repository holds no snapshots',
 	'restore.listNoSnapshotsDescription':
 		'Run a backup to a repository first, then refresh the list.',
-	'restore.listFiltered': '{shown} of {total} snapshots',
 	'restore.listAge': 'Updated {time}',
 	'restore.listPending': 'Reading the snapshots from the repository…',
 	'restore.listEmpty': 'No snapshot matches these filters.',
@@ -1135,7 +1133,6 @@ export const en = {
 	'restore.listTruncated':
 		'The repository holds more snapshots than one result can carry. The list shows the newest ones.',
 	'restore.listFailed': 'The snapshot list failed: {reason}',
-	'restore.snapshots': 'Snapshots',
 	'restore.files': 'Files',
 	'restore.snapshot': 'Snapshot',
 	'restore.time': 'Time',
@@ -1192,7 +1189,6 @@ export const en = {
 	'restore.overwrite.if-newer': 'Replace a file that is older than the snapshot',
 	'restore.overwrite.never': 'Keep every existing file',
 	'restore.openJob': 'Open the job log',
-	'restore.listCount': '{count} snapshots',
 	'restore.snapshotTitle': 'Snapshot {id}',
 	'restore.snapshotMissingTitle': 'The snapshot is not in the stored list',
 	'restore.snapshotMissingDescription': 'Go back to the snapshots and search again.',

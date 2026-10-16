@@ -1121,20 +1121,18 @@ export const ru: Record<MessageKey, string> = {
 	'restore.noRepositoriesTitle': 'Нет репозитория для восстановления',
 	'restore.noRepositoriesDescription':
 		'Добавьте репозиторий и сделайте резервную копию. Из репозитория можно восстанавливать только после инициализации.',
-	'restore.repositoryLabel': 'Репозиторий:',
+	'restore.repositoryLabel': 'Репозиторий',
 	'restore.filterBar': 'Фильтры снимков',
 	'restore.pathSearch': 'Поиск по пути',
 	'restore.pathPlaceholder': 'Путь, например C:\\Users',
 	'restore.facetHost': 'Хост',
 	'restore.facetTag': 'Тег',
-	'restore.filterHint':
-		'Несколько значений одного фильтра подходят по любому из них. Разные фильтры должны совпасть все.',
+	'restore.filterHint': 'Подходит любое из выбранных значений. Разные фильтры должны совпасть все.',
 	'restore.refresh': 'Обновить список из репозитория',
 	'restore.listLoading': 'Агент читает снимки репозитория…',
 	'restore.listNoSnapshots': 'В этом репозитории нет снимков',
 	'restore.listNoSnapshotsDescription':
 		'Сначала выполните резервное копирование, затем обновите список.',
-	'restore.listFiltered': '{shown} из {total} снимков',
 	'restore.listAge': 'Обновлён {time}',
 	'restore.listPending': 'Читаем снимки из репозитория…',
 	'restore.listEmpty': 'Ни один снимок не подходит под фильтры.',
@@ -1142,7 +1140,6 @@ export const ru: Record<MessageKey, string> = {
 	'restore.listTruncated':
 		'В репозитории больше снимков, чем помещается в один результат. В списке самые новые снимки.',
 	'restore.listFailed': 'Не удалось получить список снимков: {reason}',
-	'restore.snapshots': 'Снимки',
 	'restore.files': 'Файлы',
 	'restore.snapshot': 'Снимок',
 	'restore.time': 'Время',
@@ -1199,7 +1196,6 @@ export const ru: Record<MessageKey, string> = {
 	'restore.overwrite.if-newer': 'Заменять файл, который старше снимка',
 	'restore.overwrite.never': 'Оставлять каждый существующий файл',
 	'restore.openJob': 'Открыть журнал задания',
-	'restore.listCount': 'Снимков: {count}',
 	'restore.snapshotTitle': 'Снимок {id}',
 	'restore.snapshotMissingTitle': 'Снимка нет в сохранённом списке',
 	'restore.snapshotMissingDescription': 'Вернитесь к списку снимков и повторите поиск.',
