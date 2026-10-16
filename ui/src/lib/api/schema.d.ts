@@ -2272,6 +2272,7 @@ export interface components {
              */
             planned_steps: string[];
             progress?: components["schemas"]["ProgressView"] | null;
+            restore?: components["schemas"]["RestoreParamsView"] | null;
             /**
              * @description The identifier of the job signing key that signed the job. Null until the control plane sent
              *     the job, and for a job that it sent before it recorded the key.
@@ -2920,6 +2921,19 @@ export interface components {
              *     `dry_run`.
              */
             verify?: boolean;
+        };
+        /** @description The parameters that the operator chose for a restore (FR-RS-03, FR-RS-04). */
+        RestoreParamsView: {
+            dry_run: boolean;
+            /** @description Empty unless `includes` is empty. */
+            excludes: string[];
+            /** @description The paths of the snapshot to restore. Empty restores the whole snapshot. */
+            includes: string[];
+            overwrite: components["schemas"]["OverwriteMode"];
+            snapshot_id: string;
+            /** @description The directory on the host that runs the job. */
+            target: string;
+            verify: boolean;
         };
         /** @description What `restic restore --json` reported (FR-RS-04). */
         RestoreSummary: {

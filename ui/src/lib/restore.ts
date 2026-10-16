@@ -3,6 +3,7 @@
  * overwrite modes (FR-RS-02, FR-RS-04).
  */
 import type { OverwriteMode } from '#lib/api/index.ts';
+import type { IconName } from '#lib/components/ui/index.ts';
 
 export const OVERWRITE_MODES: OverwriteMode[] = ['always', 'if-changed', 'if-newer', 'never'];
 
@@ -114,4 +115,102 @@ export function warnsSystemPath(
 		return path !== '' && !/^[a-z]:$/i.test(path);
 	});
 	return !isWithinRoots(target, narrow, windows);
+}
+
+const PROFILE_TAG = /^restichub-profile-([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i;
+
+/** The profile identifier inside an automatic `restichub-profile-<id>` tag, or null for any other tag. */
+export function profileOfTag(tag: string): string | null {
+	return PROFILE_TAG.exec(tag)?.[1] ?? null;
+}
+
+const EXTENSIONS: [IconName, string[]][] = [
+	['file-archive', ['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'zst', '7z', 'rar', 'iso']],
+	['file-image', ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'tif', 'tiff', 'heic', 'ico']],
+	['file-audio', ['mp3', 'wav', 'flac', 'ogg', 'aac', 'm4a', 'opus']],
+	['file-video', ['mp4', 'mkv', 'avi', 'mov', 'webm', 'wmv']],
+	['file-spreadsheet', ['xls', 'xlsx', 'ods', 'csv', 'tsv']],
+	['file-document', ['pdf', 'doc', 'docx', 'odt', 'rtf', 'ppt', 'pptx', 'odp', 'epub']],
+	['file-executable', ['exe', 'msi', 'dll', 'so', 'bin', 'app', 'com']],
+	[
+		'file-code',
+		['js', 'ts', 'py', 'rs', 'go', 'php', 'java', 'c', 'h', 'cpp', 'cs', 'rb', 'sh', 'ps1', 'bat']
+	],
+	[
+		'file-code',
+		['html', 'css', 'json', 'yml', 'yaml', 'toml', 'xml', 'sql', 'conf', 'ini', 'cfg', 'service']
+	],
+	['file-text', ['txt', 'md', 'log', 'readme', 'license']]
+];
+
+const BY_EXTENSION = new Map(
+	EXTENSIONS.flatMap(([icon, list]) => list.map((extension) => [extension, icon] as const))
+);
+
+/**
+ * The icon of a tree entry. A directory and a link have their own icons; a file gets one by its
+ * extension, and a file with an execute bit and no known extension counts as executable.
+ */
+export function iconOfNode(
+	node: { kind: 'file' | 'dir' | 'symlink' | 'other'; name: string; permissions?: string },
+	expanded = false
+): IconName {
+	if (node.kind === 'dir') return expanded ? 'folder-open' : 'folder';
+	if (node.kind === 'symlink') return 'link';
+	if (node.kind === 'other') return 'file-other';
+	const dot = node.name.lastIndexOf('.');
+	const extension = dot > 0 ? node.name.slice(dot + 1).toLowerCase() : '';
+	const known = BY_EXTENSION.get(extension);
+	if (known) return known;
+	const mode = node.permissions ?? '';
+	return [3, 6, 9].some((index) => mode[index] === 'x') ? 'file-executable' : 'file';
+}
+
+/** The filters of the snapshot list, as they travel in the query string of both Restore pages. */
+export interface RestoreFilters {
+	host: string;
+	tag: string;
+	path: string;
+	from: string;
+	to: string;
+}
+
+export const EMPTY_FILTERS: RestoreFilters = { host: '', tag: '', path: '', from: '', to: '' };
+
+/** The query string of the filters. A filter without a value stays out. */
+export function filtersToQuery(
+	filters: RestoreFilters,
+	extra: Record<string, string> = {}
+): URLSearchParams {
+	const query = new URLSearchParams();
+	for (const [key, value] of Object.entries({ ...filters, ...extra })) {
+		if (value) query.set(key, value);
+	}
+	return query;
+}
+
+export function filtersFromQuery(query: URLSearchParams): RestoreFilters {
+	return {
+		host: query.get('host') ?? '',
+		tag: query.get('tag') ?? '',
+		path: query.get('path') ?? '',
+		from: query.get('from') ?? '',
+		to: query.get('to') ?? ''
+	};
+}
+
+/** The patterns of an exclude field: one per comma or line, without blanks. */
+export function parsePatterns(text: string): string[] {
+	return text
+		.split(/[,\n]/)
+		.map((item) => item.trim())
+		.filter((item) => item !== '');
+}
+
+/** The path where a restored path lands: the target followed by the path from the snapshot. */
+export function landingPath(target: string, snapshotPath: string, windows: boolean): string {
+	const base = target.trim().replace(/[\\/]+$/, '');
+	const separator = windows ? '\\' : '/';
+	const rest = snapshotPath.replace(/^\/+/, '');
+	return rest === '' ? base : `${base}${separator}${windows ? rest.replaceAll('/', '\\') : rest}`;
 }

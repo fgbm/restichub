@@ -11,6 +11,7 @@ use axum::extract::{Path, Query, State};
 use restichub_db::job_logs;
 use restichub_db::job_steps::{self, JobProgress, JobStep, StepOutput};
 use restichub_db::jobs as job_repo;
+use restichub_db::restore::{self as restore_repo, JobRequest, OverwriteMode};
 use restichub_db::{
     JobKind, JobStatus, LogLevel, LogStream, PlannedKind, PlannedPhase, StepStatus,
 };
@@ -188,6 +189,23 @@ pub struct JobDetailView {
     /// The identifier of the job signing key that signed the job. Null until the control plane sent
     /// the job, and for a job that it sent before it recorded the key.
     pub signing_key_id: Option<String>,
+    /// The parameters of a restore job. Null for any other job.
+    pub restore: Option<RestoreParamsView>,
+}
+
+/// The parameters that the operator chose for a restore (FR-RS-03, FR-RS-04).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RestoreParamsView {
+    pub snapshot_id: String,
+    /// The paths of the snapshot to restore. Empty restores the whole snapshot.
+    pub includes: Vec<String>,
+    /// Empty unless `includes` is empty.
+    pub excludes: Vec<String>,
+    /// The directory on the host that runs the job.
+    pub target: String,
+    pub overwrite: OverwriteMode,
+    pub dry_run: bool,
+    pub verify: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -233,6 +251,18 @@ pub async fn get_job(
             let progress = job_steps::get_progress(tx, job_id).await?;
             let log = job_logs::state(tx, job_id).await?;
             let signing_key_id = restichub_db::queue::signer_key_id(tx, job_id).await?;
+            let restore = match restore_repo::get_request(tx, job_id).await? {
+                Some(JobRequest::Restore(request)) => Some(RestoreParamsView {
+                    snapshot_id: request.snapshot_id,
+                    includes: request.includes,
+                    excludes: request.excludes,
+                    target: request.target,
+                    overwrite: request.overwrite,
+                    dry_run: request.dry_run,
+                    verify: request.verify,
+                }),
+                _ => None,
+            };
             Ok(Some((
                 detail,
                 steps,
@@ -240,10 +270,11 @@ pub async fn get_job(
                 progress,
                 log,
                 signing_key_id,
+                restore,
             )))
         })
         .await?;
-    let Some((detail, steps, planned, progress, log, signing_key_id)) = found else {
+    let Some((detail, steps, planned, progress, log, signing_key_id, restore)) = found else {
         return Err(ApiError::not_found());
     };
     let summary = steps
@@ -288,6 +319,7 @@ pub async fn get_job(
                 .filter(|seconds| *seconds > 0),
         },
         signing_key_id,
+        restore,
         log: LogInfo {
             lines: log.as_ref().map_or(0, |state| state.last_seq),
             truncated: log.as_ref().is_some_and(|state| state.truncated),

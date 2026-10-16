@@ -70,7 +70,19 @@ export const mapping = {
 	book: 'book-open',
 	grip: 'grip-vertical',
 	checklist: 'list-checks',
-	flask: 'flask-conical'
+	flask: 'flask-conical',
+	'folder-open': 'folder-open',
+	link: 'link',
+	'file-text': 'file-text',
+	'file-code': 'file-code',
+	'file-image': 'file-image',
+	'file-audio': 'file-audio',
+	'file-video': 'file-video',
+	'file-archive': 'file-archive',
+	'file-spreadsheet': 'file-spreadsheet',
+	'file-document': 'file-type',
+	'file-executable': 'file-terminal',
+	'file-other': 'file-question-mark'
 };
 
 /** Icons that Lucide draws as an outline but the app shows as a solid shape. */

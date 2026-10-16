@@ -257,6 +257,21 @@ async fn fr_rs_01_the_job_list_hides_the_browse_jobs() {
         .call(&env.admin, "GET", &format!("/api/v1/jobs/{browse}"), None)
         .await;
     assert_eq!(status, StatusCode::OK);
+
+    // The detail of a restore job carries the parameters of the request; a browse job has none.
+    let restore_id = restore["id"].as_str().expect("a job id");
+    let (_, detail) = env
+        .call(&env.admin, "GET", &format!("/api/v1/jobs/{restore_id}"), None)
+        .await;
+    assert_eq!(detail["restore"]["snapshot_id"], "0123abcd", "{detail}");
+    assert_eq!(detail["restore"]["target"], target.to_str().expect("UTF-8"));
+    assert_eq!(detail["restore"]["overwrite"], "always");
+    assert_eq!(detail["restore"]["includes"], json!([]));
+    assert_eq!(detail["restore"]["dry_run"], false);
+    let (_, detail) = env
+        .call(&env.admin, "GET", &format!("/api/v1/jobs/{browse}"), None)
+        .await;
+    assert!(detail["restore"].is_null(), "{detail}");
     env.db.cleanup().await;
 }
 
