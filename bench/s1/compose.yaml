@@ -19,6 +19,7 @@ x-agent: &agent
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -97,10 +98,12 @@ services:
       - '127.0.0.1:${CP_WEB_PORT:-18080}:8080'
       - '127.0.0.1:${CP_AGENT_PORT:-18443}:8443'
     mem_limit: 512m
+    restart: unless-stopped
 
   # The repository of the bench: a rest-server without authentication on the bench network.
   rest-server:
     image: restic/rest-server:0.14.0
+    restart: unless-stopped
     environment:
       OPTIONS: --no-auth
     volumes:
