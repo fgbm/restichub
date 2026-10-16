@@ -17,6 +17,8 @@
 		rows = [],
 		rowKey,
 		rowHref,
+		rowLabel,
+		rowSelected,
 		onRowOpen,
 		detailTitle,
 		actions,
@@ -43,6 +45,10 @@
 		rowKey: (row: T) => string;
 		/** The resolved address of the record page; the row opens it through a real link. */
 		rowHref?: (row: T) => string;
+		/** The accessible name of the row link, when the primary cell text is too terse. */
+		rowLabel?: (row: T) => string;
+		/** Marks the row of the record that the person opened last. */
+		rowSelected?: (row: T) => boolean;
 		/** For a table without a record page: the row opens a side panel. */
 		onRowOpen?: (row: T) => void;
 		/** The row opens a built-in side panel with every column, under this title. */
@@ -279,8 +285,10 @@
 					</tr>
 				{:else}
 					{#each shown as row (rowKey(row))}
+						{@const selected = rowSelected?.(row) ?? false}
 						<tr
 							class:table__row--opens={opens}
+							class:table__row--selected={selected}
 							onclick={opens ? (event) => openFromRow(event, row) : undefined}
 							onauxclick={rowHref ? (event) => openFromRow(event, row) : undefined}
 						>
@@ -293,10 +301,21 @@
 									class:table__cell--narrow-hidden={column.hideNarrow}
 								>
 									{#if column.key === primaryKey && rowHref}
-										<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- rowHref returns a resolved path -->
-										<a class="row-link" href={rowHref(row)}>{@render content(row, column)}</a>
+										<!-- eslint-disable svelte/no-navigation-without-resolve -- rowHref returns a resolved path -->
+										<a
+											class="row-link"
+											href={rowHref(row)}
+											aria-label={rowLabel?.(row)}
+											aria-current={selected ? 'true' : undefined}>{@render content(row, column)}</a
+										>
+										<!-- eslint-enable svelte/no-navigation-without-resolve -->
 									{:else if column.key === primaryKey && openRow}
-										<button type="button" class="row-link" onclick={() => openRow?.(row)}>
+										<button
+											type="button"
+											class="row-link"
+											aria-label={rowLabel?.(row)}
+											onclick={() => openRow?.(row)}
+										>
 											{@render content(row, column)}
 										</button>
 									{:else}
@@ -476,6 +495,10 @@
 
 	.table__row--opens {
 		cursor: pointer;
+	}
+
+	tbody tr.table__row--selected {
+		background-color: var(--rh-color-selected);
 	}
 
 	/* The record link reads as the row, not as a link (UI principles 2.1). */

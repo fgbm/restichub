@@ -13,7 +13,6 @@ const legacyScreens = [
 	'src/lib/components/HostPage.svelte',
 	'src/lib/components/ProfileEditor.svelte',
 	'src/lib/components/RepositoryEditor.svelte',
-	'src/routes/(app)/+page.svelte',
 	'src/routes/(app)/restore/[[]repository]/[[]snapshot]/+page.svelte',
 	'src/routes/(app)/settings/scripts/templates/+page.svelte'
 ];

@@ -5,24 +5,25 @@
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Repository, SnapshotItem, SnapshotsView } from '#lib/api/index.ts';
-	import SnapshotFilterBar from '#lib/components/SnapshotFilterBar.svelte';
 	import SnapshotTags from '#lib/components/SnapshotTags.svelte';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
+		DataTable,
 		EmptyState,
-		PageHeader,
+		FilterBar,
 		Panel,
 		Select,
 		Skeleton
 	} from '#lib/components/ui/index.ts';
-	import type { SelectOption } from '#lib/components/ui/index.ts';
-	import { formatBytes, formatLocalTime, relativeTime } from '#lib/format.ts';
+	import type { FilterFacet, SelectOption, TableColumn } from '#lib/components/ui/index.ts';
+	import { formatBytes, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import { EMPTY_FILTERS, filtersFromQuery, filtersToQuery, targetExtra } from '#lib/restore.ts';
 	import type { RestoreFilters } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
-	import { applyFilters, hasFilters } from '#lib/snapshot-filter.ts';
+	import { applyFilters, facetCounts, hasFilters, tagLabel } from '#lib/snapshot-filter.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
 	const PAGE_SIZE = 15;
@@ -41,7 +42,7 @@
 	let pending = $state(false);
 	let error = $state<string | null>(null);
 	let view = $state<SnapshotsView | null>(null);
-	let visible = $state(PAGE_SIZE);
+	let tablePage = $state(1);
 	// A newer request makes the answer of an older one obsolete.
 	let generation = 0;
 	let addressTimer: ReturnType<typeof setTimeout> | undefined;
@@ -52,7 +53,48 @@
 	);
 	const snapshots = $derived(view?.state === 'done' ? view.snapshots : []);
 	const matching = $derived(applyFilters(snapshots, filters, Date.now()));
-	const shown = $derived(matching.slice(0, visible));
+
+	const columns = $derived<TableColumn<SnapshotItem>[]>([
+		{
+			key: 'short_id',
+			header: t('restore.snapshot'),
+			sortable: false,
+			render: snapshotCell
+		},
+		{
+			key: 'time',
+			header: t('restore.time'),
+			date: 'absolute',
+			sortable: false,
+			value: (row) => row.time ?? ''
+		},
+		{ key: 'hostname', header: t('restore.hostColumn'), truncate: 'sm', sortable: false },
+		{ key: 'tags', header: t('restore.tags'), sortable: false, hideNarrow: true, render: tagsCell },
+		{
+			key: 'total_bytes',
+			header: t('restore.size'),
+			align: 'right',
+			nowrap: true,
+			sortable: false,
+			value: (row) => (row.total_bytes == null ? '—' : formatBytes(row.total_bytes))
+		}
+	]);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'host',
+			label: t('restore.facetHost'),
+			options: facetCounts(snapshots, (item) => [item.hostname])
+		},
+		{
+			key: 'tag',
+			label: t('restore.facetTag'),
+			options: facetCounts(snapshots, (item) => item.tags).map((option) => ({
+				...option,
+				label: tagLabel(option.value, profiles)
+			}))
+		}
+	]);
 
 	function describe(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -94,7 +136,7 @@
 			if (stored.state === 'empty' || !isWhole(stored)) await find();
 			else {
 				view = stored;
-				visible = PAGE_SIZE;
+				tablePage = 1;
 			}
 		} catch (problem) {
 			if (mine === generation) error = describe(problem);
@@ -121,7 +163,7 @@
 			);
 			if (done && mine === generation) {
 				view = done;
-				visible = PAGE_SIZE;
+				tablePage = 1;
 			}
 		} catch (problem) {
 			if (mine === generation) error = describe(problem);
@@ -132,13 +174,13 @@
 
 	function change(patch: Partial<RestoreFilters>): void {
 		filters = { ...filters, ...patch };
-		visible = PAGE_SIZE;
+		tablePage = 1;
 		rememberSoon();
 	}
 
 	function reset(): void {
 		filters = { ...EMPTY_FILTERS };
-		visible = PAGE_SIZE;
+		tablePage = 1;
 		rememberSoon();
 	}
 
@@ -178,143 +220,141 @@
 	});
 </script>
 
-<svelte:head>
-	<title>{t('restore.title')} · {t('app.name')}</title>
-</svelte:head>
+{#snippet snapshotCell(row: SnapshotItem)}
+	<span class="row__id">{row.short_id}</span>
+	<span class="row__paths" title={row.paths.join(', ')}>{row.paths.join(', ')}</span>
+{/snippet}
 
-<PageHeader title={t('restore.title')} description={t('restore.description')}>
-	{#if canRestore && repositories.length > 0}
-		<div class="repository">
-			<label class="repository__label" for="restore-repository"
-				>{t('restore.repositoryLabel')}</label
+{#snippet tagsCell(row: SnapshotItem)}
+	<SnapshotTags tags={row.tags} {profiles} />
+{/snippet}
+
+<Page title={t('restore.title')} description={t('restore.description')}>
+	{#snippet context()}
+		{#if canRestore && repositories.length > 0}
+			<div class="repository">
+				<label class="repository__label" for="restore-repository"
+					>{t('restore.repositoryLabel')}</label
+				>
+				<Select
+					id="restore-repository"
+					options={repositoryOptions}
+					bind:value={repositoryId}
+					onchange={changeRepository}
+				/>
+			</div>
+		{/if}
+	{/snippet}
+
+	{#if !canRestore}
+		<Alert tone="attention" icon="lock" title={t('restore.forbidden')} />
+	{:else if !loading && repositories.length === 0}
+		<EmptyState
+			icon="restore"
+			title={t('restore.noRepositoriesTitle')}
+			description={t('restore.noRepositoriesDescription')}
+			bordered
+		>
+			<Button variant="primary" onclick={() => goto(resolve('/(app)/repositories'))}>
+				{t('restore.noRepositoriesAction')}
+			</Button>
+		</EmptyState>
+	{:else}
+		{#if error}
+			<Alert tone="danger" title={error} />
+		{/if}
+		{#if view?.state === 'failed'}
+			<Alert tone="danger" title={t('restore.listFailed', { reason: reasonOf(view.error_code) })}>
+				{#snippet actions()}
+					{#if view?.job_id}
+						<a class="alert-link" href={resolve('/(app)/jobs/[id]', { id: view.job_id })}>
+							{t('restore.openJob')}
+						</a>
+					{/if}
+				{/snippet}
+			</Alert>
+		{/if}
+		{#if view?.truncated}
+			<Alert tone="attention" title={t('restore.listTruncated')} />
+		{/if}
+
+		<div class="list">
+			<Panel
+				title={t('restore.snapshots')}
+				subtitle={view?.state === 'done'
+					? hasFilters(filters)
+						? t('restore.listFiltered', { shown: matching.length, total: snapshots.length })
+						: t('restore.listCount', { count: snapshots.length })
+					: ''}
+				flush
 			>
-			<Select
-				id="restore-repository"
-				options={repositoryOptions}
-				bind:value={repositoryId}
-				onchange={changeRepository}
-			/>
+				{#snippet actions()}
+					{#if view?.state === 'done' && view.fetched_at}
+						<span class="muted"
+							>{t('restore.listAge', { time: relativeTime(view.fetched_at) })}</span
+						>
+					{/if}
+					<Button
+						variant="ghost"
+						size="sm"
+						icon="refresh"
+						aria-label={t('restore.refresh')}
+						title={t('restore.refresh')}
+						loading={pending}
+						disabled={!repositoryId}
+						onclick={() => void find()}
+					/>
+				{/snippet}
+				{#if loading || (pending && !view)}
+					<div class="list__state">
+						<p class="muted">{t('restore.listLoading')}</p>
+						<Skeleton variant="row" />
+					</div>
+				{:else if view?.state === 'done' && snapshots.length === 0}
+					<EmptyState
+						icon="restore"
+						title={t('restore.listNoSnapshots')}
+						description={t('restore.listNoSnapshotsDescription')}
+					/>
+				{:else if view?.state === 'done'}
+					<DataTable
+						{columns}
+						rows={matching}
+						rowKey={(row) => row.id}
+						rowHref={detailHref}
+						rowLabel={(row) => t('restore.openSnapshot', { id: row.short_id })}
+						rowSelected={(row) => row.id === opened}
+						bind:page={tablePage}
+						pageSize={PAGE_SIZE}
+						flush
+						emptyIcon="search"
+						emptyTitle={t('restore.listEmpty')}
+						emptyDescription={t('filter.noMatchesDescription')}
+					>
+						{#snippet toolbar()}
+							<FilterBar
+								label={t('restore.filterBar')}
+								value={{ ...filters }}
+								search={{
+									key: 'path',
+									id: 'restore-path',
+									label: t('restore.pathSearch'),
+									placeholder: t('restore.pathPlaceholder'),
+									mono: true
+								}}
+								{facets}
+								period
+								hint={t('restore.filterHint')}
+								onchange={change}
+								onreset={reset}
+							/>
+						{/snippet}
+					</DataTable>
+				{/if}
+			</Panel>
 		</div>
 	{/if}
-</PageHeader>
-
-{#if !canRestore}
-	<Alert tone="attention" icon="lock" title={t('restore.forbidden')} />
-{:else if !loading && repositories.length === 0}
-	<EmptyState
-		icon="restore"
-		title={t('restore.noRepositoriesTitle')}
-		description={t('restore.noRepositoriesDescription')}
-		bordered
-	>
-		<Button variant="primary" onclick={() => goto(resolve('/(app)/repositories'))}>
-			{t('restore.noRepositoriesAction')}
-		</Button>
-	</EmptyState>
-{:else}
-	{#if error}
-		<Alert tone="danger" title={error} />
-	{/if}
-	{#if view?.state === 'failed'}
-		<Alert tone="danger" title={t('restore.listFailed', { reason: reasonOf(view.error_code) })}>
-			{#snippet actions()}
-				{#if view?.job_id}
-					<a class="alert-link" href={resolve('/(app)/jobs/[id]', { id: view.job_id })}>
-						{t('restore.openJob')}
-					</a>
-				{/if}
-			{/snippet}
-		</Alert>
-	{/if}
-	{#if view?.truncated}
-		<Alert tone="attention" title={t('restore.listTruncated')} />
-	{/if}
-
-	<div class="list">
-		<Panel
-			title={t('restore.snapshots')}
-			subtitle={view?.state === 'done'
-				? hasFilters(filters)
-					? t('restore.listFiltered', { shown: matching.length, total: snapshots.length })
-					: t('restore.listCount', { count: snapshots.length })
-				: ''}
-			flush
-		>
-			{#snippet actions()}
-				{#if view?.state === 'done' && view.fetched_at}
-					<span class="muted">{t('restore.listAge', { time: relativeTime(view.fetched_at) })}</span>
-				{/if}
-				<Button
-					variant="ghost"
-					size="sm"
-					icon="refresh"
-					aria-label={t('restore.refresh')}
-					title={t('restore.refresh')}
-					loading={pending}
-					disabled={!repositoryId}
-					onclick={() => void find()}
-				/>
-			{/snippet}
-			{#if view?.state === 'done' && snapshots.length > 0}
-				<SnapshotFilterBar {snapshots} {filters} {profiles} onchange={change} onreset={reset} />
-			{/if}
-			{#if loading || (pending && !view)}
-				<div class="list__state">
-					<p class="muted">{t('restore.listLoading')}</p>
-					<Skeleton variant="row" />
-				</div>
-			{:else if view?.state === 'done' && snapshots.length === 0}
-				<EmptyState
-					icon="restore"
-					title={t('restore.listNoSnapshots')}
-					description={t('restore.listNoSnapshotsDescription')}
-				/>
-			{:else if view && matching.length === 0}
-				<EmptyState icon="search" title={t('restore.listEmpty')}>
-					<Button onclick={reset}>{t('restore.reset')}</Button>
-				</EmptyState>
-			{:else}
-				<div class="head" aria-hidden="true">
-					<span>{t('restore.snapshot')}</span>
-					<span>{t('restore.time')}</span>
-					<span>{t('restore.hostColumn')}</span>
-					<span>{t('restore.tags')}</span>
-					<span class="head__size">{t('restore.size')}</span>
-				</div>
-				<ul class="rows">
-					{#each shown as row (row.id)}
-						<li class="row" class:row--opened={row.id === opened}>
-							<span class="row__snapshot">
-								<!-- eslint-disable svelte/no-navigation-without-resolve -- the address starts with a resolved path -->
-								<a
-									class="row__id"
-									href={detailHref(row)}
-									aria-label={t('restore.openSnapshot', { id: row.short_id })}
-									aria-current={row.id === opened ? 'true' : undefined}>{row.short_id}</a
-								>
-								<!-- eslint-enable svelte/no-navigation-without-resolve -->
-								<span class="row__paths">{row.paths.join(', ')}</span>
-							</span>
-							<span class="row__time">{row.time ? formatLocalTime(row.time) : '—'}</span>
-							<span class="row__host">{row.hostname}</span>
-							<span class="row__tags"><SnapshotTags tags={row.tags} {profiles} /></span>
-							<span class="row__size">
-								{row.total_bytes == null ? '—' : formatBytes(row.total_bytes)}
-							</span>
-						</li>
-					{/each}
-				</ul>
-				{#if matching.length > shown.length}
-					<div class="more">
-						<Button onclick={() => (visible += PAGE_SIZE)}>
-							{t('restore.showMore', { count: matching.length - shown.length })}
-						</Button>
-					</div>
-				{/if}
-			{/if}
-		</Panel>
-	</div>
-{/if}
+</Page>
 
 <style>
 	.repository {
@@ -350,160 +390,20 @@
 		font-weight: var(--rh-font-weight-semibold);
 	}
 
-	.head,
-	.row {
-		display: grid;
-		grid-template-columns: minmax(9rem, 1.2fr) 10rem 9rem minmax(12rem, 3fr) 6rem;
-		gap: var(--rh-space-3);
-		align-items: start;
-		padding: var(--rh-space-3) var(--rh-space-4);
-	}
-
-	.head {
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.head__size,
-	.row__size {
-		text-align: right;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.rows {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.row {
-		position: relative;
-		border-bottom: var(--rh-border-width) solid var(--rh-color-border-muted);
-	}
-
-	.row:last-child {
-		border-bottom: 0;
-	}
-
-	.row:hover {
-		background-color: var(--rh-color-hover);
-	}
-
-	.row--opened,
-	.row--opened:hover {
-		background-color: var(--rh-color-selected);
-		box-shadow: inset 0 0 0 1px var(--rh-color-link);
-	}
-
-	.row__snapshot {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-1);
-		min-width: 0;
-	}
-
 	.row__id {
-		align-self: flex-start;
-		color: var(--rh-color-link);
-		font-family: var(--rh-font-mono, monospace);
+		display: block;
+		font-family: var(--rh-font-mono);
 		font-weight: var(--rh-font-weight-semibold);
-		text-decoration: none;
-	}
-
-	/* The link covers the whole row, so a click anywhere on it opens the snapshot. */
-	.row__id::after {
-		content: '';
-		position: absolute;
-		inset: 0;
-	}
-
-	.row__id:hover {
-		text-decoration: underline;
-	}
-
-	.row__id:focus-visible {
-		outline: none;
-	}
-
-	.row__id:focus-visible::after {
-		outline: 2px solid var(--rh-color-focus, var(--rh-color-link));
-		outline-offset: -2px;
 	}
 
 	.row__paths {
+		display: block;
+		max-width: 22rem;
+		overflow: hidden;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
-		overflow-wrap: anywhere;
-	}
-
-	.row__time {
-		color: var(--rh-color-text-muted);
-	}
-
-	.row__host,
-	.row__time {
-		overflow-wrap: anywhere;
-	}
-
-	.more {
-		display: flex;
-		justify-content: center;
-		padding: var(--rh-space-3);
-		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
-	}
-
-	@media (max-width: 40rem) {
-		/* The label leaves the screen but stays the accessible name; the header has no room for both. */
-		.repository__label {
-			position: absolute;
-			width: 1px;
-			height: 1px;
-			overflow: hidden;
-			clip-path: inset(50%);
-		}
-
-		.repository :global(.rh-select) {
-			min-width: 9rem;
-		}
-	}
-
-	@media (max-width: 52rem) {
-		.head {
-			display: none;
-		}
-
-		.row {
-			grid-template-columns: minmax(0, 1fr) auto;
-			grid-template-areas:
-				'snapshot size'
-				'time host'
-				'tags tags';
-			gap: var(--rh-space-1) var(--rh-space-3);
-		}
-
-		.row__snapshot {
-			grid-area: snapshot;
-		}
-
-		.row__size {
-			grid-area: size;
-		}
-
-		.row__time {
-			grid-area: time;
-			font-size: var(--rh-font-size-sm);
-		}
-
-		.row__host {
-			grid-area: host;
-			font-size: var(--rh-font-size-sm);
-			text-align: right;
-		}
-
-		.row__tags {
-			grid-area: tags;
-		}
+		font-weight: var(--rh-font-weight-regular);
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 </style>
