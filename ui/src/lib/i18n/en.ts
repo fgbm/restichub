@@ -249,11 +249,19 @@ export const en = {
 		'This account belongs to other organizations. The user or a Platform Admin can reset the password.',
 	'users.sharedNote':
 		'An account that belongs to more than one organization is a shared account. Only the user or a Platform Admin can reset its password.',
-	'users.roles': 'Roles',
 	'users.roles.admin':
 		'All organization operations, including users, agent revocation and installation.',
 	'users.roles.operator': 'Profiles, plans, manual runs, cancellation and restore.',
 	'users.roles.viewer': 'Read only, including the organization audit log.',
+	'users.account': 'Account',
+	'users.access': 'Access',
+	'users.lastSignIn': 'Last sign-in',
+	'users.emailUnverified': 'not verified',
+	'users.selfHint': 'This is your account',
+	'users.platformManagedHint': 'A Platform Admin manages this account',
+	'users.disableTitle': 'Disable the user?',
+	'users.disableBody':
+		'{name} cannot work in the organization {org}. The role stays; you can enable the user again.',
 
 	// Platform users (installation-wide accounts)
 	'platformUsers.title': 'Users',
@@ -272,7 +280,6 @@ export const en = {
 	'platformUsers.role': 'Role',
 	'platformUsers.created': 'The account is created.',
 	'platformUsers.changeRole': 'Change the role',
-	'platformUsers.removeMembership': 'Remove',
 	'platformUsers.removed': 'The membership is removed.',
 	'platformUsers.roleChanged': 'The role is changed.',
 	'platformUsers.added': 'The membership is added.',
@@ -288,6 +295,23 @@ export const en = {
 	'platformUsers.revokeAdmin': 'Remove the Platform Admin right',
 	'platformUsers.rightGranted': 'The Platform Admin right is granted.',
 	'platformUsers.rightRemoved': 'The Platform Admin right is removed.',
+	'platformUsers.disableBody':
+		'{name} cannot sign in to any organization. The memberships and the roles stay; you can enable the user again.',
+	'platformUsers.lastAdminHint': 'This is the last Platform Admin',
+	'platformUsers.roleIn': 'Role in the organization {name}',
+	'platformUsers.removeFrom': 'Remove from the organization {name}',
+	'platformUsers.removeSelfHint': 'You cannot remove your own membership',
+	'platformUsers.removeTitle': 'Remove from the organization?',
+	'platformUsers.removeBody':
+		'{name} loses the access to the organization {org}. The account stays; you can add the membership again.',
+	'platformUsers.removeConfirm': 'Remove',
+	'platformUsers.revokeTitle': 'Remove the Platform Admin right?',
+	'platformUsers.revokeBody':
+		'{name} can no longer manage the organizations and the users of the installation. The memberships do not change.',
+	'platformUsers.revokeConfirm': 'Remove the right',
+	'platformUsers.noMemberships': 'The user is not a member of an organization.',
+	'platformUsers.noMembershipsAdminHint':
+		'The Platform Admin right gives no access to the data of an organization. Add an organization to work in it.',
 
 	// API tokens
 	'tokens.title': 'API tokens',
@@ -2082,7 +2106,6 @@ export const en = {
 	'tenants.userCount.few': '{n} users',
 	'tenants.userCount.many': '{n} users',
 	'tenants.userCount.other': '{n} users',
-	'platformUsers.manage': 'Change memberships',
 	'platformUsers.facet.organization': 'Organization',
 	'platformUsers.meta.membership': '{name} — {role}',
 	'platformUsers.meta.platformAdmin': 'platform admin',

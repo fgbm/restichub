@@ -119,6 +119,7 @@ export const endpoints = {
 		createUser: '/platform/users',
 		userById: (id: string) => `/platform/users/${encodeURIComponent(id)}`,
 		userMemberships: (id: string) => `/platform/users/${encodeURIComponent(id)}/memberships`,
+		userPassword: (id: string) => `/platform/users/${encodeURIComponent(id)}/password`,
 		userMembership: (id: string, tenantId: string) =>
 			`/platform/users/${encodeURIComponent(id)}/memberships/${encodeURIComponent(tenantId)}`,
 		audit: '/platform/audit'
