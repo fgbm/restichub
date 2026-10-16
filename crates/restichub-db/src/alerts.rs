@@ -442,7 +442,8 @@ pub struct AlertPage {
     /// Clamped to [`MAX_PAGE_LIMIT`].
     pub limit: i64,
     pub after: Option<AlertCursor>,
-    /// Skipped alerts after the cursor; the caller keeps it in `0..=COUNT_LIMIT`.
+    /// Skipped rows of a numbered page; the caller keeps it in `0..=COUNT_LIMIT` and sends no
+    /// cursor with it.
     pub offset: i64,
     /// `None` lists both states.
     pub status: Option<AlertStatus>,

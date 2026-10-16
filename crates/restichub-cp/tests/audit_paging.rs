@@ -161,12 +161,17 @@ async fn fr_ui_01_an_audit_offset_out_of_bounds_gives_a_stable_code() {
         .map(str::to_owned)
         .unwrap_or_else(|| "1;00000000-0000-0000-0000-000000000000".to_owned());
     let cases = [
-        ("offset=10001".to_owned(), "out_of_range"),
-        ("offset=-1".to_owned(), "out_of_range"),
-        ("offset=many".to_owned(), "invalid_format"),
-        (format!("offset=0&cursor={cursor}"), "invalid_format"),
+        ("offset=10001".to_owned(), "offset", "out_of_range"),
+        ("offset=-1".to_owned(), "offset", "out_of_range"),
+        ("offset=many".to_owned(), "offset", "invalid_format"),
+        ("limit=x".to_owned(), "limit", "invalid_format"),
+        (
+            format!("offset=0&cursor={cursor}"),
+            "offset",
+            "invalid_format",
+        ),
     ];
-    for (query, reason) in cases {
+    for (query, field, reason) in cases {
         let (status, _, problem) = send(
             &app,
             request(
@@ -179,10 +184,7 @@ async fn fr_ui_01_an_audit_offset_out_of_bounds_gives_a_stable_code() {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{query}: {problem}");
         assert_eq!(problem["code"], "invalid_argument", "{query}");
-        if query.starts_with("offset=many") {
-            continue;
-        }
-        assert_eq!(problem["field"], "offset", "{query}: {problem}");
+        assert_eq!(problem["field"], field, "{query}: {problem}");
         assert_eq!(problem["reason"], reason, "{query}: {problem}");
     }
 

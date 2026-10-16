@@ -335,6 +335,35 @@ async fn db_audit_list_does_not_show_another_tenant() -> TestResult {
 }
 
 #[tokio::test]
+async fn db_a_tenant_audit_list_reads_its_own_tenant_whatever_the_filter() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let own = insert_audit(&mut tx, AuditAction::ConfigCreate).await?;
+    tx.commit().await?;
+    let mut tx = db.database().begin_tenant(tenant_b).await?;
+    insert_audit(&mut tx, AuditAction::ConfigCreate).await?;
+    tx.commit().await?;
+
+    let filter = AuditFilter {
+        tenant_id: Some(tenant_b),
+        ..AuditFilter::default()
+    };
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    let page = audit::list(&mut tx, &filter, &AuditPage::default()).await?;
+    tx.commit().await?;
+    let ids: Vec<AuditLogId> = page.records.iter().map(|record| record.id).collect();
+    assert_eq!(ids, vec![own]);
+    assert_eq!(page.total, 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn db_audit_platform_list_sees_every_tenant() -> TestResult {
     let Some(db) = test_database().await else {
         return Ok(());

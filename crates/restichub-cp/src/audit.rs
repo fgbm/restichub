@@ -8,8 +8,7 @@
 //! (AC-AU-01).
 
 use axum::Json;
-use axum::extract::{FromRequestParts, Query, State};
-use axum::http::request::Parts;
+use axum::extract::State;
 use restichub_db::ActorType;
 use restichub_db::DbError;
 use restichub_db::audit as repo;
@@ -23,7 +22,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
-use crate::list_query::check_window;
+use crate::list_query::{ApiQuery, check_window};
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -223,26 +222,6 @@ fn invalid_cursor(cause: impl Into<String>) -> ApiError {
     ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
 }
 
-/// A bad query gives an RFC 9457 problem with the code `invalid_argument`.
-pub struct AuditParams(pub AuditQuery);
-
-impl FromRequestParts<AppState> for AuditParams {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        match Query::<AuditQuery>::from_request_parts(parts, state).await {
-            Ok(Query(query)) => Ok(Self(query)),
-            Err(error) => {
-                tracing::debug!(%error, "the audit query is not valid");
-                Err(invalid_query(error.to_string()))
-            }
-        }
-    }
-}
-
 fn format_time(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
@@ -294,10 +273,9 @@ fn decode_cursor(value: &str) -> Result<repo::AuditCursor, String> {
 pub async fn list_tenant_audit(
     State(state): State<AppState>,
     context: RequestContext,
-    params: AuditParams,
+    ApiQuery(query): ApiQuery<AuditQuery>,
 ) -> Result<Json<AuditPageResponse>, ApiError> {
     context.authorize(Operation::AuditRead)?;
-    let query = params.0;
     let filter = query.filter()?;
     let page = query.page()?;
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
@@ -321,10 +299,9 @@ pub async fn list_tenant_audit(
 pub async fn list_platform_audit(
     State(state): State<AppState>,
     context: RequestContext,
-    params: AuditParams,
+    ApiQuery(query): ApiQuery<AuditQuery>,
 ) -> Result<Json<AuditPageResponse>, ApiError> {
     context.authorize(Operation::PlatformAuditRead)?;
-    let query = params.0;
     let filter = query.filter()?;
     let page = query.page()?;
     let mut tx = state.db().begin_platform().await?;
