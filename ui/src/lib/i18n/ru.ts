@@ -2073,5 +2073,14 @@ export const ru: Record<MessageKey, string> = {
 	'tokens.meta.used': 'использован {time}',
 	'tokens.meta.neverUsed': 'не использовался',
 	'tokens.meta.noExpiry': 'бессрочный',
-	'tokens.emptyTitle': 'Токенов API пока нет'
+	'tokens.emptyTitle': 'Токенов API пока нет',
+	'users.tab.active': 'Активные',
+	'users.tab.disabled': 'Отключены',
+	'users.sort.name': 'Имя',
+	'users.sort.role': 'Роль',
+	'users.meta.shared': 'общая учётная запись',
+	'users.changeRole': 'Изменить роль',
+	'users.changeRoleTitle': 'Изменить роль',
+	'users.roleChanged': 'Роль изменена.',
+	'users.emptyTitle': 'Пользователей пока нет'
 };

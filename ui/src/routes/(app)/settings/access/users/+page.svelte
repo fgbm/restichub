@@ -5,25 +5,27 @@
 	import { SettingsLayout } from '#lib/components/index.ts';
 	import {
 		Alert,
-		Badge,
 		Button,
 		Dialog,
 		Icon,
+		KeyValue,
+		ListView,
 		Panel,
 		PasswordField,
-		DataTable,
 		FilterBar,
 		Select,
-		StatusPill,
+		SidePanel,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type {
 		FilterFacet,
 		IconName,
+		KeyValueItem,
+		ListMeta,
 		RowAction,
-		SelectOption,
-		TableColumn
+		SelectOption
 	} from '#lib/components/ui/index.ts';
+	import { iconOf, pillOf, userState } from '#lib/vocabulary.ts';
 	import { matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
@@ -82,30 +84,7 @@
 		{ role: 'viewer', icon: 'eye', body: 'users.roles.viewer' }
 	];
 
-	const columns = $derived<TableColumn<User>[]>([
-		{ key: 'display_name', header: t('users.user'), truncate: 'sm' },
-		{
-			key: 'username',
-			header: t('users.username'),
-			mono: true,
-			nowrap: true,
-			render: loginCell
-		},
-		{
-			key: 'role',
-			header: t('users.role'),
-			cell: (row) => roleKeys[row.role],
-			badge: () => 'neutral'
-		},
-		{
-			key: 'disabled',
-			header: t('common.status'),
-			value: (row) => (row.disabled ? t('common.disabled') : t('common.active')),
-			render: stateCell
-		}
-	]);
-
-	const filters = queryFilters(['q', 'role', 'state'] as const);
+	const filters = queryFilters(['q', 'role', 'state', 'sort', 'order'] as const);
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -118,30 +97,129 @@
 					label: roleKeys[role],
 					count: users.filter((user) => user.role === role).length
 				}))
-		},
-		{
-			key: 'state',
-			label: t('common.status'),
-			multiple: false,
-			options: (['active', 'disabled'] as const).map((value) => ({
-				value,
-				label: t(value === 'active' ? 'common.active' : 'common.disabled'),
-				count: users.filter((user) => user.disabled === (value === 'disabled')).length
-			}))
 		}
 	]);
 
-	const shown = $derived(
+	const matching = $derived(
 		users.filter((user) => {
-			const { q, role, state } = filters.value;
+			const { q, role } = filters.value;
 			if (role && !splitList(role).includes(user.role)) return false;
-			if (state && user.disabled !== (state === 'disabled')) return false;
 			return matchesSearch(q, [user.display_name, user.username]);
 		})
 	);
 
+	const states = $derived({
+		default: 'active',
+		options: [
+			{
+				value: 'active',
+				label: t('users.tab.active'),
+				count: matching.filter((user) => !user.disabled).length
+			},
+			{
+				value: 'disabled',
+				label: t('users.tab.disabled'),
+				count: matching.filter((user) => user.disabled).length
+			}
+		]
+	});
+
+	const ROLE_ORDER: Role[] = ['platform_admin', 'admin', 'operator', 'viewer'];
+	const sort = $derived({
+		default: 'name',
+		options: [
+			{ value: 'name', label: t('users.sort.name') },
+			{ value: 'role', label: t('users.sort.role') }
+		]
+	});
+
+	const shown = $derived.by(() => {
+		const disabled = filters.value.state === 'disabled';
+		const list = matching.filter((user) => user.disabled === disabled);
+		const factor = filters.value.order === 'desc' ? -1 : 1;
+		const byRole = filters.value.sort === 'role';
+		return [...list].sort(
+			(a, b) =>
+				factor *
+				(byRole
+					? ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) ||
+						a.display_name.localeCompare(b.display_name)
+					: a.display_name.localeCompare(b.display_name))
+		);
+	});
+
+	const filtered = $derived(users.length > 0 && Boolean(filters.value.q || filters.value.role));
+
+	function resetFilters(): void {
+		filters.update({ q: '', role: '', state: '' });
+	}
+
+	function meta(user: User): ListMeta[] {
+		return [
+			{ text: user.username, mono: true },
+			roleKeys[user.role],
+			user.shared ? t('users.meta.shared') : null
+		];
+	}
+
+	let detail = $state<User | null>(null);
+	let detailOpen = $state(false);
+
+	function openDetail(user: User): void {
+		detail = user;
+		detailOpen = true;
+	}
+
+	const detailItems = $derived<KeyValueItem[]>(
+		detail
+			? [
+					{ key: 'username', label: t('users.username'), value: detail.username, mono: true },
+					{ key: 'role', label: t('users.role'), value: roleKeys[detail.role] },
+					{ key: 'state', label: t('common.status'), value: userState(detail).label },
+					...(detail.shared
+						? [{ key: 'shared', label: t('users.shared'), value: t('common.yes') }]
+						: [])
+				]
+			: []
+	);
+
+	let roleOpen = $state(false);
+	let roleUser = $state<User | null>(null);
+	let roleValue = $state<Role>('viewer');
+	let roleSaving = $state(false);
+	let roleError = $state<string | null>(null);
+
+	function openRole(user: User): void {
+		roleUser = user;
+		roleValue = user.role;
+		roleError = null;
+		roleOpen = true;
+	}
+
+	async function saveRole(): Promise<void> {
+		if (!roleUser) return;
+		roleSaving = true;
+		roleError = null;
+		try {
+			await service.updateUser(roleUser.id, { role: roleValue });
+			pushToast('success', t('users.roleChanged'));
+			roleOpen = false;
+			await load();
+		} catch (problem) {
+			roleError = messageOf(problem);
+		} finally {
+			roleSaving = false;
+		}
+	}
+
 	function rowActions(user: User): RowAction[] {
 		return [
+			{
+				id: 'role',
+				label: t('users.changeRole'),
+				icon: 'shield',
+				onSelect: () => openRole(user)
+			},
 			{
 				id: 'reset',
 				label: t('users.resetPassword'),
@@ -153,8 +231,8 @@
 			{
 				id: 'disable',
 				label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
-				icon: 'octagon',
-				danger: true,
+				icon: 'power',
+				danger: !user.disabled,
 				onSelect: () => toggleDisabled(user)
 			}
 		];
@@ -250,21 +328,6 @@
 	}
 </script>
 
-{#snippet loginCell(user: User)}
-	<span class="user__line">
-		{user.username}
-		{#if user.shared}
-			<Badge icon="users">{t('users.shared')}</Badge>
-		{/if}
-	</span>
-{/snippet}
-
-{#snippet stateCell(user: User)}
-	<StatusPill tone={user.disabled ? 'neutral' : 'success'}>
-		{user.disabled ? t('common.disabled') : t('common.active')}
-	</StatusPill>
-{/snippet}
-
 <SettingsLayout
 	title={t('users.title')}
 	description={t('users.description', { name: tenantName })}
@@ -276,30 +339,41 @@
 
 	<Alert variant="inline" icon="users" title={t('users.sharedNote')} />
 
-	<DataTable
-		{columns}
-		rows={shown}
-		{loading}
-		{error}
-		rowKey={(user) => user.id}
-		detailTitle={(user) => user.display_name}
+	<ListView
+		label={t('users.title')}
+		items={shown}
+		itemKey={(user) => user.id}
+		icon={(user) => iconOf(userState(user))}
+		pill={(user) => pillOf(userState(user))}
+		title={(user) => user.display_name}
+		onOpen={openDetail}
+		{meta}
 		actions={rowActions}
 		moreLabel={(user) => t('users.moreActions', { name: user.display_name })}
-		emptyTitle={filters.value.q || filters.value.role || filters.value.state
-			? t('filter.noMatches')
-			: undefined}
+		{loading}
+		{error}
+		{filtered}
+		onReset={resetFilters}
+		emptyIcon="users"
+		emptyTitle={t('users.emptyTitle')}
 	>
 		{#snippet toolbar()}
 			<FilterBar
 				label={t('users.filters')}
 				value={filters.value}
 				search={{ key: 'q', label: t('hosts.search'), placeholder: t('users.searchPlaceholder') }}
+				{states}
 				{facets}
+				{sort}
 				onchange={filters.update}
-				onreset={filters.reset}
+				onreset={resetFilters}
 			/>
 		{/snippet}
-	</DataTable>
+	</ListView>
+
+	<SidePanel bind:open={detailOpen} title={detail?.display_name ?? ''}>
+		<KeyValue items={detailItems} stacked />
+	</SidePanel>
 
 	<Panel title={t('users.roles')} flush>
 		<ul class="roles">
@@ -389,13 +463,23 @@
 	{/snippet}
 </Dialog>
 
-<style>
-	.user__line {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-	}
+<Dialog bind:open={roleOpen} size="sm" title={t('users.changeRoleTitle')} onsubmit={saveRole}>
+	{#if roleError}
+		<Alert variant="inline" tone="danger" title={roleError} />
+	{/if}
+	<Select
+		id="user-role-change"
+		label={t('users.role')}
+		options={roleOptions}
+		bind:value={roleValue}
+	/>
+	{#snippet footer()}
+		<Button onclick={() => (roleOpen = false)}>{t('common.cancel')}</Button>
+		<Button type="submit" variant="primary" loading={roleSaving}>{t('common.save')}</Button>
+	{/snippet}
+</Dialog>
 
+<style>
 	.roles {
 		margin: 0;
 		padding: 0;

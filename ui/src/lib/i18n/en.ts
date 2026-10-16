@@ -2062,7 +2062,16 @@ export const en = {
 	'tokens.meta.used': 'used {time}',
 	'tokens.meta.neverUsed': 'never used',
 	'tokens.meta.noExpiry': 'no expiry',
-	'tokens.emptyTitle': 'No API tokens yet'
+	'tokens.emptyTitle': 'No API tokens yet',
+	'users.tab.active': 'Active',
+	'users.tab.disabled': 'Disabled',
+	'users.sort.name': 'Name',
+	'users.sort.role': 'Role',
+	'users.meta.shared': 'shared account',
+	'users.changeRole': 'Change role',
+	'users.changeRoleTitle': 'Change the role',
+	'users.roleChanged': 'The role is changed.',
+	'users.emptyTitle': 'No users yet'
 } as const;
 
 export type MessageKey = keyof typeof en;
