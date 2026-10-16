@@ -84,7 +84,7 @@ pub struct PlatformTenantView {
     /// In RFC 3339.
     pub created_at: String,
     pub user_count: i64,
-    /// The hosts that are not revoked.
+    /// Revoked hosts do not count.
     pub agent_count: i64,
     /// Derived from the memberships: `none` when the tenant has no active Admin (ADR-0028).
     pub admin_state: AdminState,

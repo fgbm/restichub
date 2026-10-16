@@ -1761,8 +1761,8 @@ export interface components {
             id: string;
             object_id?: string | null;
             /**
-             * @description The current name of the object. Null for a removed object, an object without a name and,
-             *     in the platform list, an object inside an organization.
+             * @description What the object is called now. Null for a removed object, an object without a name and, in
+             *     the platform list, an object inside an organization.
              */
             object_name?: string | null;
             object_type: string;
@@ -2785,7 +2785,7 @@ export interface components {
             admin_state: components["schemas"]["AdminState"];
             /**
              * Format: int64
-             * @description The hosts that are not revoked.
+             * @description Revoked hosts do not count.
              */
             agent_count: number;
             /** @description In RFC 3339. */
@@ -2990,7 +2990,7 @@ export interface components {
             /** @description False until an agent runs the init step. The MVP control plane never sets it true. */
             initialized: boolean;
             last_check?: components["schemas"]["LastCheckView"] | null;
-            /** @description The lock marks of the dashboard (FR-SC-06). */
+            /** @description Uses the same lock marks as the dashboard (FR-SC-06). */
             lock_state: components["schemas"]["LockState"];
             maintenance_agent_id?: string | null;
             name: string;

@@ -268,7 +268,7 @@ pub struct GroupCounts {
     pub groups: Vec<(JobGroup, CappedCount)>,
 }
 
-/// Counts the jobs of each group under the filter. The status and the group of the filter do not
+/// Counts the jobs of each state tab under the filter. The status and the tab of the filter do not
 /// apply: a tab shows what it would hold.
 pub async fn group_counts(
     tx: &mut TenantTx<'_>,

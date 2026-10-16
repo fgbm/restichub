@@ -34,7 +34,7 @@ pub struct TenantSummary {
     pub status: TenantStatus,
     pub created_at: OffsetDateTime,
     pub user_count: i64,
-    /// The hosts that are not revoked.
+    /// Revoked hosts do not count.
     pub agent_count: i64,
     /// Derived from the active administrator count of the memberships (ADR-0028).
     pub admin_state: AdminState,

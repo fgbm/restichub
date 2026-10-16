@@ -179,7 +179,7 @@ async fn fr_sc_09_the_job_list_counts_the_state_tabs_searches_the_names_and_sort
     let page = get(&app, &viewer, "/api/v1/jobs?status=running").await;
     assert_eq!(tabs(&page, &JOB_TABS), [1, 2, 1, 1]);
 
-    // The counts follow the other filters.
+    // The counts honour the host filter like the list does, so the tabs agree with it.
     let page = get(&app, &viewer, &format!("/api/v1/jobs?agent_id={database}")).await;
     assert_eq!(tabs(&page, &JOB_TABS), [0, 1, 0, 1]);
 

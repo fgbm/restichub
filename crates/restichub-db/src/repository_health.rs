@@ -13,9 +13,9 @@ use crate::tx::TenantTx;
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct RepositoryHealth {
     pub id: RepositoryId,
-    /// True when a job that waits or runs reported a held lock.
+    /// True when a waiting or running job reported that it holds the lock.
     pub lock_held: bool,
-    /// True when a waiting job found the lock stale (FR-SC-06).
+    /// True when a waiting job found a lock that outlived its holder (FR-SC-06).
     pub lock_stale: bool,
     pub check_finished_at: Option<OffsetDateTime>,
     pub check_status: Option<JobStatus>,

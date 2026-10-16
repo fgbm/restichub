@@ -158,7 +158,7 @@ pub struct AuditRecord {
     pub object_type: String,
     pub object_id: Option<Uuid>,
     pub diff: Option<Value>,
-    /// The current name of the object. `None` for a removed object, an object without a name and
+    /// What the object is called now. `None` for a removed object, an object without a name and
     /// an object that the scope of the reader does not see.
     pub object_name: Option<String>,
     /// The current name of a user, an API token or an agent actor, with the same rule.

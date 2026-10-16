@@ -72,8 +72,8 @@ pub struct AuditItem {
     pub action: AuditAction,
     pub object_type: String,
     pub object_id: Option<String>,
-    /// The current name of the object. Null for a removed object, an object without a name and,
-    /// in the platform list, an object inside an organization.
+    /// What the object is called now. Null for a removed object, an object without a name and, in
+    /// the platform list, an object inside an organization.
     pub object_name: Option<String>,
     /// The current name of a user, an API token or an agent actor, with the same rule.
     pub actor_name: Option<String>,

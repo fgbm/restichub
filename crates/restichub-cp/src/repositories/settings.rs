@@ -128,9 +128,9 @@ pub struct RepositoryView {
     pub updated_at: String,
     /// Null for an API token actor.
     pub created_by: Option<String>,
-    /// The lock marks of the dashboard (FR-SC-06).
+    /// Uses the same lock marks as the dashboard (FR-SC-06).
     pub lock_state: LockState,
-    /// The last check that ran to its end. A cancelled check does not count.
+    /// The newest check that ran to its end. A cancelled check does not count.
     pub last_check: Option<LastCheckView>,
     /// From the newest snapshot listing of the Restore screen, kept for 7 days. Null without a
     /// listing or when the listing was cut.
