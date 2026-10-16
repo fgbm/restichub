@@ -3569,10 +3569,7 @@ export interface operations {
                 offset: number | null;
                 /** @description A part of the host name or of a label, in any case; at most 200 characters. */
                 q: string | null;
-                /**
-                 * @description Comma-separated: `online`, `offline`, `waiting`, `revoked`. Each list holds at most 50
-                 *     values.
-                 */
+                /** @description Comma-separated, at most 50 values in each list: `online`, `offline`, `waiting`, `revoked`. */
                 state: string | null;
                 /** @description Comma-separated operating systems. */
                 os: string | null;
