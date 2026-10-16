@@ -383,7 +383,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Reads the metadata of one enrollment token. */
+        get: operations["get_enrollment_token"];
         put?: never;
         post?: never;
         /**
@@ -4619,6 +4620,11 @@ export interface operations {
             path: {
                 cursor: string | null;
                 limit: number | null;
+                /**
+                 * @description `true` lists only the tokens that can still enroll a host: not used, not revoked and not
+                 *     expired.
+                 */
+                pending: boolean | null;
             };
             cookie?: never;
         };
@@ -4704,6 +4710,65 @@ export interface operations {
             };
             /** @description The role is not sufficient. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_enrollment_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the token. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The token metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentTokenView"];
+                };
+            };
+            /** @description The identifier is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The token is not found. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
