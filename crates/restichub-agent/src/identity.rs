@@ -19,6 +19,7 @@ pub const SIGNING_KEYS_FILE: &str = "signing-keys.json";
 pub(crate) const STAGED_SUFFIX: &str = ".next";
 /// The staged marker. Its presence says that the staged key, certificate and chain are complete.
 pub(crate) const ROTATION_MARKER: &str = "rotation.next";
+const LOCK_FILE: &str = "identity.lock";
 
 /// The public job signing key set that the identity keeps (ADR-0026).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,6 +107,7 @@ impl StoredIdentity {
     /// Returns an error when a file is missing or malformed.
     pub fn load(dir: &Path) -> Result<Self> {
         let dir = recover(dir);
+        let _lock = lock(&dir)?;
         finish_rotation(&dir)?;
         let metadata: Metadata =
             serde_json::from_slice(&read(dir.join(METADATA_FILE))?).context("bad identity.json")?;
@@ -143,6 +145,7 @@ impl StoredIdentity {
     /// Returns an error when a staged file cannot be written or moved.
     pub fn install_rotation(dir: &Path, rotated: &Rotated) -> Result<()> {
         let dir = recover(dir);
+        let _lock = lock(&dir)?;
         // An interrupted earlier rotation with a complete staged set finishes first. Dropping the
         // set after some files moved would leave a new key with an old certificate.
         finish_rotation(&dir)?;
@@ -236,6 +239,29 @@ fn finish_rotation(dir: &Path) -> Result<()> {
     }
     std::fs::remove_file(&marker).context("cannot remove the rotation marker")?;
     paths::sync_dir(dir)
+}
+
+/// Takes the exclusive lock of the identity files; dropping the file releases it (FR-ID-03).
+///
+/// A load finishes or drops a staged rotation. Without the lock, a second process such as `status`
+/// that loads while the service stages a rotation deletes the staged key, and the service then
+/// installs the new certificate next to the old key. The lock also keeps a reader from seeing the
+/// key of one rotation with the certificate of the next.
+fn lock(dir: &Path) -> Result<std::fs::File> {
+    let path = dir.join(LOCK_FILE);
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(&path)
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    file.lock()
+        .with_context(|| format!("cannot lock {}", path.display()))?;
+    Ok(file)
 }
 
 /// An ECDSA P-256 key pair and its raw public key (ADR-0026).
@@ -601,6 +627,61 @@ pub(crate) mod tests {
         assert_eq!(cert, pem::encode("CERTIFICATE", &next.certificate_der));
         assert!(!dir.join(ROTATION_MARKER).exists());
         assert!(!staged(&dir, CERT_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Another process loads while the rotation has staged only the new key. Without the lock
+    /// the load drops the staged key, and the rotation installs the new certificate with the old
+    /// key.
+    #[test]
+    fn fr_id_03_a_load_waits_for_a_rotation_that_stages_its_files() {
+        let dir = temp_dir("rotation-lock");
+        sample().save(&dir).expect("the save must succeed");
+        let next = rotated();
+        let held = lock(&dir).expect("the rotation takes the lock");
+        paths::create_protected_file(&staged(&dir, KEY_FILE), next.key_pem.as_bytes())
+            .expect("stage the key");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader_dir = dir.clone();
+        let reader = std::thread::spawn(move || {
+            let _ = tx.send(StoredIdentity::load(&reader_dir));
+        });
+        assert!(
+            matches!(
+                rx.recv_timeout(std::time::Duration::from_millis(500)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ),
+            "the load must wait for the rotation"
+        );
+        assert!(staged(&dir, KEY_FILE).exists());
+
+        paths::create_protected_file(
+            &staged(&dir, CERT_FILE),
+            pem::encode("CERTIFICATE", &next.certificate_der).as_bytes(),
+        )
+        .expect("stage the certificate");
+        let chain: String = next
+            .ca_chain_der
+            .iter()
+            .map(|der| pem::encode("CERTIFICATE", der))
+            .collect();
+        paths::create_protected_file(&staged(&dir, CA_CHAIN_FILE), chain.as_bytes())
+            .expect("stage the chain");
+        paths::create_protected_file(&dir.join(ROTATION_MARKER), b"1").expect("the marker");
+        finish_rotation(&dir).expect("the rotation must finish");
+        drop(held);
+
+        let loaded = rx
+            .recv()
+            .expect("the reader must answer")
+            .expect("the identity must load");
+        reader.join().expect("the reader must not panic");
+        assert_eq!(loaded.key_pem, next.key_pem);
+        assert_eq!(loaded.certificate_der, next.certificate_der);
+        let stored = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(stored.key_pem, next.key_pem);
+        assert_eq!(stored.certificate_der, next.certificate_der);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
