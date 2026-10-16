@@ -129,9 +129,28 @@ wait_job() {
 	return 1
 }
 
+# Right after a restart of the service, the control plane can still answer 409 agent_offline.
 start_job() {
-	curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
-		"$web/api/v1/repositories/$1/$2" -d '{}' | jq -r .id
+	local answer code
+	for _ in $(seq 1 30); do
+		answer="$(curl -sS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
+			-w '\n%{http_code}' "$web/api/v1/repositories/$1/$2" -d '{}')"
+		code="${answer##*$'\n'}"
+		if [ "$code" = 202 ]; then
+			printf '%s' "${answer%$'\n'*}" | jq -r .id
+			return 0
+		fi
+		[ "$code" = 409 ] || break
+		sleep 1
+	done
+	echo "cannot start the $2 job: HTTP $code ${answer%$'\n'*}" >&2
+	return 1
+}
+
+run_job() {
+	local id
+	id="$(start_job "$1" "$2")"
+	wait_job "$id"
 }
 
 # The installed service runs ten jobs on three local repositories below $2 (AC-AG-03). The password
@@ -152,11 +171,11 @@ canary_jobs() {
 	done <"$canaries"
 	[ "${#repositories[@]}" -eq 3 ] || { echo "three canaries are necessary" >&2; return 1; }
 	for repository in "${repositories[@]}"; do
-		wait_job "$(start_job "$repository" init)"
-		wait_job "$(start_job "$repository" test-access)"
-		wait_job "$(start_job "$repository" test-access)"
+		run_job "$repository" init
+		run_job "$repository" test-access
+		run_job "$repository" test-access
 	done
-	wait_job "$(start_job "${repositories[0]}" test-access)"
+	run_job "${repositories[0]}" test-access
 	echo "ten canary jobs succeeded"
 }
 
