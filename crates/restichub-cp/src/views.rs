@@ -26,6 +26,8 @@ pub struct UserView {
     pub role: Role,
     /// The account holds an active membership in another active tenant.
     pub shared: bool,
+    /// The last sign-in into the tenant or switch to it, in RFC 3339. Set in the user list only.
+    pub last_sign_in_at: Option<String>,
 }
 
 impl UserView {
@@ -37,6 +39,7 @@ impl UserView {
             disabled: member.disabled || member.account_disabled,
             role: member.role,
             shared: member.shared,
+            last_sign_in_at: None,
         }
     }
 
@@ -49,6 +52,7 @@ impl UserView {
             disabled: account.disabled,
             role,
             shared: false,
+            last_sign_in_at: None,
         }
     }
 }
@@ -70,7 +74,8 @@ impl From<&Tenant> for TenantView {
 
 /// A tenant in a platform administration response (FR-TN-02).
 ///
-/// The view holds the user count only. It never holds a user list or a secret of the tenant.
+/// The view holds the user and host counts only. It never holds a user list or a secret of the
+/// tenant.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PlatformTenantView {
     pub id: String,
@@ -79,6 +84,8 @@ pub struct PlatformTenantView {
     /// In RFC 3339.
     pub created_at: String,
     pub user_count: i64,
+    /// The hosts that are not revoked.
+    pub agent_count: i64,
     /// Derived from the memberships: `none` when the tenant has no active Admin (ADR-0028).
     pub admin_state: AdminState,
 }
@@ -91,6 +98,7 @@ impl From<&TenantSummary> for PlatformTenantView {
             status: tenant.status,
             created_at: format_time(tenant.created_at),
             user_count: tenant.user_count,
+            agent_count: tenant.agent_count,
             admin_state: tenant.admin_state,
         }
     }

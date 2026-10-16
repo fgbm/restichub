@@ -6,6 +6,7 @@
 //! migration 0017 through this module. Each function carries its own scope rule at the database
 //! level, so this module cannot widen the reach of a caller.
 
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::Database;
@@ -267,6 +268,36 @@ pub async fn list_members(tx: &mut TenantTx<'_>) -> Result<Vec<Member>, DbError>
     .await
     .map_err(DbError::Query)?;
     Ok(rows.into_iter().map(Member::from).collect())
+}
+
+/// The time of the last sign-in into the tenant of the transaction or switch to it, for each given
+/// account that has one.
+///
+/// The audit log keeps these records, so the time survives the end of the session. The tenant
+/// condition is explicit: the read policies of the table are ORed (see [`crate::audit::list`]).
+pub async fn last_sign_ins(
+    tx: &mut TenantTx<'_>,
+    ids: &[UserId],
+) -> Result<Vec<(UserId, OffsetDateTime)>, DbError> {
+    let ids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+    let rows: Vec<(Uuid, OffsetDateTime)> = sqlx::query_as(
+        "SELECT member.id, s.occurred_at \
+         FROM unnest($2::uuid[]) AS member(id) \
+         JOIN LATERAL ( \
+             SELECT a.occurred_at FROM audit_log a \
+             WHERE a.tenant_id = $1 AND a.actor_id = member.id AND a.actor_type = 'user' \
+               AND a.action IN ('sign_in', 'session_switch') \
+             ORDER BY a.occurred_at DESC LIMIT 1) s ON true",
+    )
+    .bind(tx.tenant())
+    .bind(&ids)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, time)| (UserId::from_uuid(id), time))
+        .collect())
 }
 
 /// Reads one member of the tenant of the transaction. `None` when the account is not a member.

@@ -9,7 +9,9 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
-use restichub_db::job_search::{self, JobCursor, JobFilter, JobQuery, JobSort, JobWindow};
+use restichub_db::job_search::{
+    self, CappedCount, JobCursor, JobFilter, JobGroup, JobQuery, JobSort, JobWindow,
+};
 use restichub_db::jobs::{self as job_repo, NewJob};
 use restichub_db::plans as plans_repo;
 use restichub_db::queue as queue_repo;
@@ -29,7 +31,8 @@ use crate::error::{ApiError, map_write_error};
 use crate::jobs::{JobView, ensure_agent_active, parse_job_id, resolve_agent};
 use crate::json::ApiJson;
 use crate::list_query::{
-    ApiQuery, SortOrder, check_period, check_window, parse_list, parse_time, split_list,
+    ApiQuery, SortOrder, TabCount, check_period, check_window, parse_list, parse_search,
+    parse_time, split_list,
 };
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -48,6 +51,8 @@ const UNLOCK_ALL_LIFETIME: time::Duration = time::Duration::hours(1);
 pub enum JobSortKey {
     CreatedAt,
     StartedAt,
+    FinishedAt,
+    Duration,
     Status,
     Plan,
     Host,
@@ -58,6 +63,8 @@ impl From<JobSortKey> for JobSort {
         match key {
             JobSortKey::CreatedAt => Self::Created,
             JobSortKey::StartedAt => Self::Started,
+            JobSortKey::FinishedAt => Self::Finished,
+            JobSortKey::Duration => Self::Duration,
             JobSortKey::Status => Self::Status,
             JobSortKey::Plan => Self::Plan,
             JobSortKey::Host => Self::Host,
@@ -82,11 +89,18 @@ pub struct JobListQuery {
     /// Comma-separated, for example `backup,check`.
     pub kind: Option<String>,
     pub status: Option<JobStatus>,
+    /// A state tab. `failed` leaves out the cancelled jobs; `succeeded` leaves out the jobs with
+    /// warnings.
+    #[param(inline)]
+    pub group: Option<JobGroupKey>,
+    /// A part of the plan, host or repository name, in any case; at most 200 characters.
+    pub q: Option<String>,
     /// In RFC 3339: the first creation time that the list holds.
     pub from: Option<String>,
     /// In RFC 3339: the last creation time that the list holds. Not before `from`.
     pub to: Option<String>,
-    /// Default: `created_at`. A cursor takes only the default order.
+    /// Default: `created_at`. A cursor takes only the default order. `duration` puts an unfinished
+    /// job last.
     #[param(inline)]
     pub sort: Option<JobSortKey>,
     /// Default: `desc`.
@@ -103,6 +117,54 @@ pub struct JobListResponse {
     pub total: i64,
     /// More jobs match than `total` counts.
     pub total_capped: bool,
+    /// The jobs of each state tab under the other filters; `status` and `group` do not apply.
+    pub counts: JobGroupCounts,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobGroupKey {
+    Running,
+    Failed,
+    Succeeded,
+    SucceededWithWarnings,
+}
+
+impl From<JobGroupKey> for JobGroup {
+    fn from(key: JobGroupKey) -> Self {
+        match key {
+            JobGroupKey::Running => Self::Running,
+            JobGroupKey::Failed => Self::Failed,
+            JobGroupKey::Succeeded => Self::Succeeded,
+            JobGroupKey::SucceededWithWarnings => Self::SucceededWithWarnings,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct JobGroupCounts {
+    pub running: TabCount,
+    pub failed: TabCount,
+    pub succeeded: TabCount,
+    pub succeeded_with_warnings: TabCount,
+}
+
+impl JobGroupCounts {
+    fn of(counts: &[(JobGroup, CappedCount)]) -> Self {
+        let get = |wanted: JobGroup| {
+            counts
+                .iter()
+                .find(|(group, _)| *group == wanted)
+                .map_or(CappedCount::of(0), |(_, count)| *count)
+                .into()
+        };
+        Self {
+            running: get(JobGroup::Running),
+            failed: get(JobGroup::Failed),
+            succeeded: get(JobGroup::Succeeded),
+            succeeded_with_warnings: get(JobGroup::SucceededWithWarnings),
+        }
+    }
 }
 
 /// The request body of the `unlock_all` action (FR-SC-06).
@@ -121,7 +183,7 @@ pub struct UnlockAllRequest {
     get,
     path = "/api/v1/jobs",
     summary = "Lists the jobs of the tenant.",
-    description = "The list is newest first by default. Filter by plan, repository, agent, kind, status and creation time; sort by a column; read the next page with the cursor or with an offset.",
+    description = "The list is newest first by default. Filter by plan, repository, agent, kind, status, state tab, name search and creation time; sort by a column; read the next page with the cursor or with an offset. The response counts the jobs of each state tab.",
     security(("cookie" = []), ("bearer" = [])),
     params(JobListQuery),
     responses(
@@ -146,6 +208,8 @@ pub async fn list_jobs(
         agent_ids: parse_ids(query.agent_id.as_deref(), "agent_id", AgentId::from_uuid)?,
         kinds: parse_list("kind", query.kind.as_deref(), JobKind::parse)?,
         status: query.status,
+        group: query.group.map(JobGroup::from),
+        search: parse_search(query.q.as_deref())?,
         created_from: parse_time("from", query.from.as_deref())?,
         created_to: parse_time("to", query.to.as_deref())?,
     };
@@ -167,8 +231,11 @@ pub async fn list_jobs(
         window,
         limit: query.limit.unwrap_or(queue_repo::DEFAULT_PAGE_LIMIT),
     };
-    let result = context
-        .tenant_tx(&state, async |tx| Ok(job_search::search(tx, &page).await?))
+    let (result, counts) = context
+        .tenant_tx(&state, async |tx| {
+            let result = job_search::search(tx, &page).await?;
+            Ok((result, job_search::group_counts(tx, &filter).await?))
+        })
         .await?;
     let next_cursor = (result.has_more && default_order && query.offset.is_none())
         .then(|| {
@@ -186,6 +253,7 @@ pub async fn list_jobs(
         next_cursor,
         total: result.total,
         total_capped: result.total_capped,
+        counts: JobGroupCounts::of(&counts),
     }))
 }
 

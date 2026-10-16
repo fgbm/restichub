@@ -83,6 +83,10 @@ pub struct ChannelView {
     pub url_origin: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// The end of the last delivery attempt of an alert, in RFC 3339. A test send does not count.
+    pub last_delivery_at: Option<String>,
+    /// Null when no alert delivery was attempted. False also for an attempt that waits for a retry.
+    pub last_delivery_ok: Option<bool>,
 }
 
 impl From<&Channel> for ChannelView {
@@ -96,6 +100,8 @@ impl From<&Channel> for ChannelView {
             url_origin: channel.url_origin.clone(),
             created_at: format_time(channel.created_at),
             updated_at: format_time(channel.updated_at),
+            last_delivery_at: channel.last_delivery_at.map(format_time),
+            last_delivery_ok: channel.last_delivery_ok,
         }
     }
 }

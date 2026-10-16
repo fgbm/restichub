@@ -7,6 +7,7 @@
 use time::OffsetDateTime;
 
 use crate::DbError;
+use crate::agent_search::search_pattern;
 use crate::enums::{JobKind, JobStatus};
 use crate::ids::{AgentId, JobId, PlanId, RepositoryId};
 use crate::jobs::job_columns;
@@ -24,9 +25,50 @@ pub struct JobFilter {
     pub agent_ids: Vec<AgentId>,
     pub kinds: Vec<JobKind>,
     pub status: Option<JobStatus>,
+    pub group: Option<JobGroup>,
+    /// A part of the plan, host or repository name, in any case.
+    pub search: Option<String>,
     /// Both creation bounds are inclusive.
     pub created_from: Option<OffsetDateTime>,
     pub created_to: Option<OffsetDateTime>,
+}
+
+/// A status tab of the list. The groups do not overlap; a queued or sent job, a cancelled job and
+/// an expired job are in none of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobGroup {
+    Running,
+    /// Failed or dead letter, without the cancelled jobs, as the dashboard counts them.
+    Failed,
+    /// Succeeded without warnings.
+    Succeeded,
+    SucceededWithWarnings,
+}
+
+impl JobGroup {
+    pub const ALL: [Self; 4] = [
+        Self::Running,
+        Self::Failed,
+        Self::Succeeded,
+        Self::SucceededWithWarnings,
+    ];
+
+    fn condition(self) -> &'static str {
+        match self {
+            Self::Running => " AND j.status = 'running'",
+            Self::Failed => {
+                " AND j.status IN ('failed', 'dead_letter') \
+                  AND j.result_code IS DISTINCT FROM 'cancelled'"
+            }
+            Self::Succeeded => {
+                " AND j.status = 'succeeded' \
+                  AND j.result_code IS DISTINCT FROM 'succeeded_with_warnings'"
+            }
+            Self::SucceededWithWarnings => {
+                " AND j.status = 'succeeded' AND j.result_code = 'succeeded_with_warnings'"
+            }
+        }
+    }
 }
 
 /// The column that orders the list. Each order ends with the identifier, so a page is stable.
@@ -35,6 +77,8 @@ pub enum JobSort {
     #[default]
     Created,
     Started,
+    Finished,
+    Duration,
     Status,
     Plan,
     Host,
@@ -74,8 +118,26 @@ pub struct JobSearchResult {
     pub total_capped: bool,
 }
 
+/// A number of rows that a count read only up to [`COUNT_LIMIT`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CappedCount {
+    pub count: i64,
+    pub capped: bool,
+}
+
+impl CappedCount {
+    /// `counted` is the result of a count that stops after `COUNT_LIMIT + 1` rows.
+    pub fn of(counted: i64) -> Self {
+        Self {
+            count: counted.min(COUNT_LIMIT),
+            capped: counted > COUNT_LIMIT,
+        }
+    }
+}
+
 // The binds are the same in each query: $1 plans, $2 repositories, $3 agents, $4 kinds, $5 status,
-// $6 the first and $7 the last creation time.
+// $6 the first and $7 the last creation time, $8 the search pattern. The name subqueries are small
+// tables of the tenant, so the search adds no join to the count.
 macro_rules! filter_sql {
     () => {
         " WHERE j.kind NOT IN ('snapshots', 'ls') \
@@ -85,7 +147,11 @@ macro_rules! filter_sql {
             AND (cardinality($4::text[]) = 0 OR j.kind = ANY($4)) \
             AND ($5::text IS NULL OR j.status = $5) \
             AND ($6::timestamptz IS NULL OR j.created_at >= $6) \
-            AND ($7::timestamptz IS NULL OR j.created_at <= $7)"
+            AND ($7::timestamptz IS NULL OR j.created_at <= $7) \
+            AND ($8::text IS NULL \
+                 OR j.plan_id IN (SELECT id FROM plans WHERE name ILIKE $8) \
+                 OR j.agent_id IN (SELECT id FROM agents WHERE hostname ILIKE $8) \
+                 OR j.repository_id IN (SELECT id FROM repositories WHERE name ILIKE $8))"
     };
 }
 
@@ -103,6 +169,12 @@ fn order_sql(sort: JobSort, descending: bool) -> String {
     match sort {
         JobSort::Created => format!("j.created_at {dir}, j.id {dir}"),
         JobSort::Started => format!("j.started_at {dir} NULLS LAST, j.created_at DESC, j.id DESC"),
+        JobSort::Finished => {
+            format!("j.finished_at {dir} NULLS LAST, j.created_at DESC, j.id DESC")
+        }
+        JobSort::Duration => {
+            format!("(j.finished_at - j.started_at) {dir} NULLS LAST, j.created_at DESC, j.id DESC")
+        }
         JobSort::Status => format!("j.status {dir}, j.created_at DESC, j.id DESC"),
         JobSort::Plan => format!("lower(p.name) {dir} NULLS LAST, j.created_at DESC, j.id DESC"),
         JobSort::Host => {
@@ -117,6 +189,7 @@ struct Binds {
     agents: Vec<uuid::Uuid>,
     kinds: Vec<&'static str>,
     status: Option<&'static str>,
+    search: Option<String>,
 }
 
 fn binds(filter: &JobFilter) -> Binds {
@@ -130,6 +203,7 @@ fn binds(filter: &JobFilter) -> Binds {
         agents: filter.agent_ids.iter().map(|id| id.as_uuid()).collect(),
         kinds: filter.kinds.iter().map(|kind| kind.as_str()).collect(),
         status: filter.status.map(JobStatus::as_str),
+        search: filter.search.as_deref().map(search_pattern),
     }
 }
 
@@ -147,12 +221,13 @@ pub async fn search(
     };
     let sql = format!(
         "SELECT {columns}, p.name AS plan_name, a.hostname AS agent_hostname, \
-                r.name AS repository_name {joins} {filter} \
-           AND ($8::timestamptz IS NULL OR (j.created_at, j.id) < ($8, $9)) \
-         ORDER BY {order} LIMIT $10 OFFSET $11",
+                r.name AS repository_name {joins} {filter}{group} \
+           AND ($9::timestamptz IS NULL OR (j.created_at, j.id) < ($9, $10)) \
+         ORDER BY {order} LIMIT $11 OFFSET $12",
         columns = job_columns!("j."),
         joins = joins_sql!(),
         filter = filter_sql!(),
+        group = filter.group.map_or("", JobGroup::condition),
         order = order_sql(query.sort, query.descending),
     );
     let rows = sqlx::query_as::<_, DetailRow>(sqlx::AssertSqlSafe(sql))
@@ -163,6 +238,7 @@ pub async fn search(
         .bind(bound.status)
         .bind(filter.created_from)
         .bind(filter.created_to)
+        .bind(bound.search.as_deref())
         .bind(after_time)
         .bind(after_id)
         .bind(limit + 1)
@@ -176,26 +252,57 @@ pub async fn search(
         .take(limit as usize)
         .map(JobDetail::from)
         .collect();
-    let counted: i64 = sqlx::query_scalar(concat!(
-        "SELECT count(*) FROM (SELECT 1 FROM jobs j",
-        filter_sql!(),
-        " LIMIT $8) s"
-    ))
-    .bind(&bound.plans)
-    .bind(&bound.repositories)
-    .bind(&bound.agents)
-    .bind(&bound.kinds)
-    .bind(bound.status)
-    .bind(filter.created_from)
-    .bind(filter.created_to)
-    .bind(COUNT_LIMIT + 1)
-    .fetch_one(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
+    let total = count(tx, &bound, filter, filter.group).await?;
     Ok(JobSearchResult {
         jobs,
         has_more,
-        total: counted.min(COUNT_LIMIT),
-        total_capped: counted > COUNT_LIMIT,
+        total: total.count,
+        total_capped: total.capped,
     })
+}
+
+/// Counts the jobs of each group under the filter. The status and the group of the filter do not
+/// apply: a tab shows what it would hold.
+pub async fn group_counts(
+    tx: &mut TenantTx<'_>,
+    filter: &JobFilter,
+) -> Result<Vec<(JobGroup, CappedCount)>, DbError> {
+    let unfiltered = JobFilter {
+        status: None,
+        group: None,
+        ..filter.clone()
+    };
+    let bound = binds(&unfiltered);
+    let mut counts = Vec::with_capacity(JobGroup::ALL.len());
+    for group in JobGroup::ALL {
+        counts.push((group, count(tx, &bound, &unfiltered, Some(group)).await?));
+    }
+    Ok(counts)
+}
+
+async fn count(
+    tx: &mut TenantTx<'_>,
+    bound: &Binds,
+    filter: &JobFilter,
+    group: Option<JobGroup>,
+) -> Result<CappedCount, DbError> {
+    let sql = format!(
+        "SELECT count(*) FROM (SELECT 1 FROM jobs j {filter}{group} LIMIT $9) s",
+        filter = filter_sql!(),
+        group = group.map_or("", JobGroup::condition),
+    );
+    let counted: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .bind(&bound.plans)
+        .bind(&bound.repositories)
+        .bind(&bound.agents)
+        .bind(&bound.kinds)
+        .bind(bound.status)
+        .bind(filter.created_from)
+        .bind(filter.created_to)
+        .bind(bound.search.as_deref())
+        .bind(COUNT_LIMIT + 1)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(CappedCount::of(counted))
 }

@@ -14,7 +14,7 @@ use crate::agent_search::search_pattern;
 use crate::channels::{self, Channel};
 use crate::enums::JobKind;
 use crate::ids::{AgentId, AlertId, ChannelId, DeliveryId, JobId, PlanId, RepositoryId};
-use crate::job_search::COUNT_LIMIT;
+use crate::job_search::{COUNT_LIMIT, CappedCount};
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -521,6 +521,32 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &AlertPage) -> Result<AlertPageRe
     })
 }
 
+/// Counts the open and the resolved alerts under the kind and search filters of the page.
+pub async fn status_counts(
+    tx: &mut TenantTx<'_>,
+    page: &AlertPage,
+) -> Result<(CappedCount, CappedCount), DbError> {
+    let kinds: Vec<&str> = page.kinds.iter().map(|kind| kind.as_str()).collect();
+    let pattern = page.search.as_deref().map(search_pattern);
+    let mut counts = Vec::with_capacity(2);
+    for status in [AlertStatus::Open, AlertStatus::Resolved] {
+        let counted: i64 = sqlx::query_scalar(concat!(
+            "SELECT count(*) FROM (SELECT 1 FROM alert_state",
+            alert_filter_sql!(),
+            " LIMIT $4) s"
+        ))
+        .bind(status.as_str())
+        .bind(&kinds)
+        .bind(pattern.as_deref())
+        .bind(COUNT_LIMIT + 1)
+        .fetch_one(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+        counts.push(CappedCount::of(counted));
+    }
+    Ok((counts[0], counts[1]))
+}
+
 /// Removes the resolved alerts that resolved before `before`. Their deliveries go with them.
 pub async fn purge_resolved(tx: &mut TenantTx<'_>, before: OffsetDateTime) -> Result<u64, DbError> {
     let result =
@@ -707,7 +733,8 @@ pub async fn mark_sent(
     note: Option<&str>,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE alert_deliveries SET status = 'sent', sent_at = $3, last_error = $4 \
+        "UPDATE alert_deliveries SET status = 'sent', sent_at = $3, attempted_at = $3, \
+             last_error = $4 \
          WHERE id = $1 AND attempts = $2 AND status = 'pending'",
     )
     .bind(id)
@@ -728,17 +755,19 @@ pub async fn mark_attempt_failed(
     attempt: i32,
     error: &str,
     retry_at: Option<OffsetDateTime>,
+    now: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE alert_deliveries \
          SET status = CASE WHEN $4::timestamptz IS NULL THEN 'failed' ELSE 'pending' END, \
-             next_attempt_at = COALESCE($4, next_attempt_at), last_error = $3 \
+             next_attempt_at = COALESCE($4, next_attempt_at), last_error = $3, attempted_at = $5 \
          WHERE id = $1 AND attempts = $2 AND status = 'pending'",
     )
     .bind(id)
     .bind(attempt)
     .bind(error)
     .bind(retry_at)
+    .bind(now)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

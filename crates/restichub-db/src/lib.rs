@@ -38,6 +38,7 @@ pub mod plans;
 pub mod profiles;
 pub mod queue;
 pub mod repositories;
+pub mod repository_health;
 pub mod restore;
 pub mod script_templates;
 pub mod secrets;

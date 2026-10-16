@@ -345,6 +345,7 @@ async fn setup_multi(
         disabled: false,
         role: PLATFORM_ADMIN_ROLE,
         shared: false,
+        last_sign_in_at: None,
     };
     tracing::info!("the first Platform Admin is created");
     Ok((StatusCode::CREATED, Json(user)))

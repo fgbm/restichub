@@ -23,6 +23,7 @@ use restichub_db::audit::{AuditAction, diff};
 use restichub_db::repositories::{
     self as repo, NewRepository, RepositorySecrets, RepositoryUpdate,
 };
+use restichub_db::repository_health as health_repo;
 use restichub_secrets::SecretPurpose;
 
 use crate::context::{Operation, RequestContext};
@@ -34,8 +35,8 @@ use crate::validation;
 use crate::validation::Reason;
 
 pub use settings::{
-    BackendSettings, CreateRepositoryRequest, CredentialsView, RepositoryListResponse,
-    RepositoryView, UpdateRepositoryRequest,
+    BackendSettings, CheckResult, CreateRepositoryRequest, CredentialsView, LastCheckView,
+    RepositoryListResponse, RepositoryView, UpdateRepositoryRequest,
 };
 use settings::{
     bind_new_credentials, created_diff, current_diff, ensure_agent, parse_optional_agent_id,
@@ -60,12 +61,21 @@ pub async fn list_repositories(
     context: RequestContext,
 ) -> Result<Json<RepositoryListResponse>, ApiError> {
     context.authorize(Operation::RepositoriesRead)?;
-    let list = context
-        .tenant_tx(&state, async |tx| Ok(repo::list(tx).await?))
+    let (list, health) = context
+        .tenant_tx(&state, async |tx| {
+            let list = repo::list(tx).await?;
+            let ids: Vec<RepositoryId> = list.iter().map(|repository| repository.id).collect();
+            Ok((list, health_repo::health(tx, &ids).await?))
+        })
         .await?;
-    Ok(Json(RepositoryListResponse {
-        items: list.iter().map(RepositoryView::from).collect(),
-    }))
+    let items = list
+        .iter()
+        .map(|repository| {
+            let facts = health.iter().find(|facts| facts.id == repository.id);
+            RepositoryView::new(repository, facts)
+        })
+        .collect();
+    Ok(Json(RepositoryListResponse { items }))
 }
 
 /// Reads one repository of the tenant.
@@ -87,11 +97,15 @@ pub async fn get_repository(
 ) -> Result<Json<RepositoryView>, ApiError> {
     context.authorize(Operation::RepositoriesRead)?;
     let repository_id = parse_repository_id(&id)?;
-    let repository = context
-        .tenant_tx(&state, async |tx| Ok(repo::get(tx, repository_id).await?))
+    let read = context
+        .tenant_tx(&state, async |tx| {
+            let repository = repo::get(tx, repository_id).await?;
+            let health = health_repo::health(tx, &[repository_id]).await?;
+            Ok(repository.map(|repository| (repository, health)))
+        })
         .await?;
-    match repository {
-        Some(repository) => Ok(Json(RepositoryView::from(&repository))),
+    match read {
+        Some((repository, health)) => Ok(Json(RepositoryView::new(&repository, health.first()))),
         None => Err(ApiError::not_found()),
     }
 }
@@ -196,7 +210,10 @@ pub async fn create_repository(
             "the created repository is not found after the read",
         ));
     };
-    Ok((StatusCode::CREATED, Json(RepositoryView::from(&created))))
+    Ok((
+        StatusCode::CREATED,
+        Json(RepositoryView::new(&created, None)),
+    ))
 }
 
 /// Updates a repository and replaces the secret values that it carries.
@@ -351,13 +368,14 @@ pub async fn update_repository(
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let updated = repo::get(&mut tx, repository_id).await?;
+    let health = health_repo::health(&mut tx, &[repository_id]).await?;
     tx.commit().await?;
     let Some(updated) = updated else {
         return Err(ApiError::internal(
             "the updated repository is not found after the read",
         ));
     };
-    Ok(Json(RepositoryView::from(&updated)))
+    Ok(Json(RepositoryView::new(&updated, health.first())))
 }
 
 /// Removes a repository and its bound secrets.

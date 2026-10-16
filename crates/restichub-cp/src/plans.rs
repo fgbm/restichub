@@ -22,8 +22,10 @@ use restichub_db::profiles::{self as profiles_repo};
 use restichub_db::{AgentId, AgentStatus, MissedRunPolicy, PlanId, ProfileId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use time::Duration;
 use utoipa::{IntoParams, ToSchema};
 
+use crate::alerts::rpo::{self, RpoState};
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
@@ -115,12 +117,45 @@ pub struct PlanView {
     pub next_run_at: Option<String>,
     /// The last fire time that the scheduler processed, in RFC 3339.
     pub last_fire_time: Option<String>,
+    /// The finish time of the last succeeded backup, in RFC 3339. Null when the plan never
+    /// succeeded.
+    pub last_success_at: Option<String>,
+    /// The state of the dashboard (ADR-0036). `unknown` when the host of the plan is revoked.
+    pub rpo_state: PlanRpoState,
     pub created_at: String,
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanRpoState {
+    Ok,
+    AtRisk,
+    Violated,
+    Unknown,
+}
+
+impl From<RpoState> for PlanRpoState {
+    fn from(state: RpoState) -> Self {
+        match state {
+            RpoState::Ok => Self::Ok,
+            RpoState::AtRisk => Self::AtRisk,
+            RpoState::Violated => Self::Violated,
+        }
+    }
+}
+
 impl From<&Plan> for PlanView {
     fn from(plan: &Plan) -> Self {
+        let now = time::OffsetDateTime::now_utc();
+        let rpo = rpo::effective_rpo(&plan.cron, &plan.time_zone, plan.rpo_seconds, now);
+        // The dashboard leaves out a plan whose host cannot run a backup any more.
+        let rpo_state = if plan.agent_status == AgentStatus::Active {
+            let age = (now - plan.last_success_at.unwrap_or(plan.created_at)).max(Duration::ZERO);
+            PlanRpoState::from(rpo::state_of(age, rpo))
+        } else {
+            PlanRpoState::Unknown
+        };
         Self {
             id: plan.id.to_string(),
             name: plan.name.clone(),
@@ -134,15 +169,11 @@ impl From<&Plan> for PlanView {
             missed_run_policy: plan.missed_run_policy,
             enabled: plan.enabled,
             rpo_seconds: plan.rpo_seconds,
-            effective_rpo_seconds: crate::alerts::rpo::effective_rpo(
-                &plan.cron,
-                &plan.time_zone,
-                plan.rpo_seconds,
-                time::OffsetDateTime::now_utc(),
-            )
-            .whole_seconds(),
+            effective_rpo_seconds: rpo.whole_seconds(),
             next_run_at: plan.next_run_at.map(format_time),
             last_fire_time: plan.last_fire_time.map(format_time),
+            last_success_at: plan.last_success_at.map(format_time),
+            rpo_state,
             created_at: format_time(plan.created_at),
             updated_at: format_time(plan.updated_at),
         }

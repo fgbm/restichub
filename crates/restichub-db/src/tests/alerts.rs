@@ -255,7 +255,7 @@ async fn ac_mn_07_db_a_late_write_after_a_second_claim_changes_nothing() -> Test
         "the old holder cannot start a second send of the same attempt"
     );
     assert!(!alerts::mark_sent(&mut tx, id, 0, lease, None).await?);
-    assert!(!alerts::mark_attempt_failed(&mut tx, id, 0, "late", None).await?);
+    assert!(!alerts::mark_attempt_failed(&mut tx, id, 0, "late", None, lease).await?);
     assert!(!alerts::release(&mut tx, id, 0, lease).await?);
     let counts = alerts::delivery_counts(&mut tx).await?;
     assert_eq!(
