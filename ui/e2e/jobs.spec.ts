@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { chooseFacet } from './filters';
 
 // The Jobs screen lists the jobs, cancels a queued one and shows a manual run (FR-SC-09).
 async function signIn(page: Page): Promise<void> {
@@ -35,8 +36,8 @@ test('the jobs screen lists the jobs and cancels a queued job', async ({ page })
 	await expect(table.getByText('Running')).toBeVisible();
 	await expect(table.getByText('Succeeded', { exact: true })).toBeVisible();
 	await expect(table.getByText('Succeeded with warnings')).toBeVisible();
-	await expect(table.getByText('The profile no longer fits the host.')).toBeVisible();
-	await expect(table.getByText('The repository stayed locked after every retry.')).toBeVisible();
+	// A list shows the status only; the reason is on the job page.
+	await expect(table.getByText('The profile no longer fits the host.')).toHaveCount(0);
 
 	// Cancel the queued job after the confirmation dialog.
 	const queued = table.getByRole('row').filter({ hasText: 'Waiting' });
@@ -54,7 +55,7 @@ test('the status filter narrows the list', async ({ page }) => {
 	await signIn(page);
 	await openJobs(page);
 
-	await page.locator('#jobs-status').selectOption({ label: 'Succeeded' });
+	await chooseFacet(page, 'Status', 'Succeeded');
 	const table = page.getByRole('table');
 	await expect(table.getByText('Succeeded', { exact: true })).toBeVisible();
 	await expect(table.getByText('Running')).toHaveCount(0);
@@ -68,8 +69,10 @@ test('a manual run from the plans screen appears as a waiting job', async ({ pag
 		.getByRole('navigation', { name: 'Primary navigation' })
 		.getByRole('link', { name: 'Plans', exact: true })
 		.click();
-	await page.getByRole('button', { name: 'More actions for nightly-web' }).click();
-	await page.getByRole('menuitem', { name: 'Run now' }).click();
+	await page
+		.getByRole('row', { name: /nightly-web/ })
+		.getByRole('button', { name: 'Run now' })
+		.click();
 	await expect(page.getByText('The job is queued. It starts when the host is free.')).toBeVisible();
 
 	await openJobs(page);

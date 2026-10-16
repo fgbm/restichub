@@ -352,6 +352,7 @@
 
 <Page
 	title={t('platformUsers.title')}
+	documentTitle={`${t('platformUsers.title')} · ${t('nav.platformMode')}`}
 	description={t('platformUsers.description')}
 	count={loading ? undefined : accounts.length}
 >

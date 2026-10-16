@@ -6,6 +6,7 @@
 
 	let {
 		title,
+		documentTitle,
 		crumbs = [],
 		listQuery,
 		description,
@@ -19,6 +20,8 @@
 	}: {
 		/** The heading and the document title. */
 		title: string;
+		/** The document title when it says more than the heading, such as the platform mode. */
+		documentTitle?: string;
 		/** The breadcrumb levels below the section; the last one is this page. A list page has none. */
 		crumbs?: Crumb[];
 		/** The query of the section level of the breadcrumb, for an address opened in a new tab. */
@@ -37,7 +40,7 @@
 	} = $props();
 </script>
 
-<PageMeta {title} {crumbs} {listQuery} />
+<PageMeta title={documentTitle ?? title} {crumbs} {listQuery} />
 
 {#if loading}
 	<div class="page-loading" aria-busy="true">

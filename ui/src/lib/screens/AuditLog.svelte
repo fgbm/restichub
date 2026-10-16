@@ -274,7 +274,11 @@
 	{/if}
 {/snippet}
 
-<Page {title} description={t('audit.description')}>
+<Page
+	{title}
+	documentTitle={scope === 'platform' ? `${title} · ${t('nav.platformMode')}` : undefined}
+	description={t('audit.description')}
+>
 	{#if error && !loading}
 		<div class="alert">
 			<Alert tone="danger" title={error} />

@@ -39,9 +39,8 @@ test('the repositories screen creates, edits and deletes a repository', async ({
 	await expect(page.getByText('s3://backups-prod')).toBeVisible();
 
 	// Edit: the name changes and the secret fields stay empty.
-	await page.getByRole('button', { name: 'More actions for s3-prod' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	await expect(page.getByRole('heading', { level: 1, name: 'Edit repository' })).toBeVisible();
+	await page.getByRole('link', { name: 's3-prod', exact: true }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 's3-prod' })).toBeVisible();
 	// The password field is create-only: the password cannot be replaced until FR-RP-06.
 	await expect(page.locator('#repo-password')).toHaveCount(0);
 	await expect(page.getByText('cannot be replaced')).toBeVisible();
@@ -161,9 +160,8 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 	await expect(page.getByText('The unlock job is queued.')).toBeVisible();
 
 	// Edit the schedules: a preset fills the cron, the preview lists the next runs.
-	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
-	await expect(page.getByRole('heading', { level: 1, name: 'Edit repository' })).toBeVisible();
+	await page.getByRole('link', { name: 'repo-m', exact: true }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'repo-m' })).toBeVisible();
 	await expect(page.locator('#maintenance-retention-cron')).toHaveValue('0 3 * * 0');
 	await page.getByRole('button', { name: 'Daily at 03:00' }).click();
 	await expect(page.locator('#maintenance-retention-cron')).toHaveValue('0 3 * * *');
@@ -171,7 +169,6 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('The repository is updated.')).toBeVisible();
 
-	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.getByRole('link', { name: 'repo-m', exact: true }).click();
 	await expect(page.locator('#maintenance-retention-cron')).toHaveValue('0 3 * * *');
 });

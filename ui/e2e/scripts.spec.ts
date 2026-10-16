@@ -27,8 +27,7 @@ async function openSample(page: Page, link: string): Promise<void> {
 
 test('a profile keeps its scripts in two ordered lists and saves a reorder', async ({ page }) => {
 	await openSample(page, 'Profiles');
-	await page.getByRole('button', { name: 'More actions for db-nightly' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.getByRole('link', { name: 'db-nightly', exact: true }).click();
 	await page.getByRole('button', { name: /^Scripts on the host/ }).click();
 
 	const before = page.getByTestId('scripts-before');
@@ -58,8 +57,7 @@ test('a script is added from a template and the host without the trust mode is n
 }) => {
 	await openSample(page, 'Profiles');
 	// The host of this profile is win-fs01, which did not turn on the trust mode.
-	await page.getByRole('button', { name: 'More actions for web-daily' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.getByRole('link', { name: 'web-daily', exact: true }).click();
 	await page.getByRole('button', { name: /^Scripts on the host/ }).click();
 	await expect(page.getByTestId('scripts-before').getByTestId('script-card')).toHaveCount(0);
 
@@ -115,8 +113,11 @@ test('the script templates screen opens a built-in template read-only and copies
 			.getByRole('button', { name: 'Delete' })
 	).toHaveCount(0);
 
-	await page.getByRole('button', { name: 'More actions for Database dump' }).click();
-	await page.getByRole('menuitem', { name: 'Delete' }).click();
+	await page
+		.getByRole('row')
+		.filter({ hasText: 'Database dump' })
+		.getByRole('button', { name: 'Delete' })
+		.click();
 	await page
 		.getByRole('dialog', { name: 'Delete the template?' })
 		.getByRole('button', { name: 'Delete' })
@@ -126,19 +127,27 @@ test('the script templates screen opens a built-in template read-only and copies
 
 test('the host page shows the trust mode and the command', async ({ page }) => {
 	await openSample(page, 'Hosts');
-	await page.getByRole('link', { name: 'Server scripts: win-fs01', exact: true }).click();
+	await page.getByRole('link', { name: 'win-fs01', exact: true }).click();
 	await expect(page.getByRole('heading', { level: 1, name: 'win-fs01' })).toBeVisible();
 	await expect(page.locator('#scripts input[readonly]')).toHaveValue(
 		'restichub-agent.exe trust-server-scripts --enable'
 	);
-	await page.getByRole('link', { name: 'Back to the hosts' }).click();
-	await page.getByRole('link', { name: 'Server scripts: srv-db-01' }).click();
+	// The breadcrumb is the way back (UI principles 1.1).
+	await page
+		.getByRole('navigation', { name: 'Breadcrumb' })
+		.getByRole('link', { name: 'Hosts' })
+		.click();
+	await page.getByRole('link', { name: 'srv-db-01', exact: true }).click();
 	await expect(page.locator('#scripts').getByText('bash, sh')).toBeVisible();
 });
 
 test('a finished job lists each script as a step with its own log', async ({ page }) => {
 	await openSample(page, 'Jobs');
-	await page.getByRole('link', { name: /Open the job nightly-db/ }).click();
+	await page
+		.getByRole('table')
+		.getByRole('link', { name: 'nightly-db', exact: true })
+		.first()
+		.click();
 	await expect(page.getByText('4 of 4 complete')).toBeVisible();
 
 	const dump = page.getByRole('button', { name: 'Show the log of Dump the PostgreSQL database' });

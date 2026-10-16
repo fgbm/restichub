@@ -7,7 +7,7 @@
 		crumbs = [],
 		listQuery
 	}: {
-		/** The document title. */
+		/** The document title, before the product name. */
 		title: string;
 		/** The breadcrumb levels below the section; the last one is this page. */
 		crumbs?: Crumb[];

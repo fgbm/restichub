@@ -211,6 +211,7 @@
 
 <Page
 	title={t('tenants.title')}
+	documentTitle={`${t('tenants.title')} · ${t('nav.platformMode')}`}
 	description={t('tenants.description')}
 	count={loading ? undefined : tenants.length}
 >
