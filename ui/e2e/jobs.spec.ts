@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { chooseFacet } from './filters';
 
 // The Jobs screen lists the jobs, cancels a queued one and shows a manual run (FR-SC-09).
 async function signIn(page: Page): Promise<void> {
@@ -32,22 +31,23 @@ test('the jobs screen lists the jobs and cancels a queued job', async ({ page })
 	await signIn(page);
 	await openJobs(page);
 
-	const table = page.getByRole('table');
-	await expect(table.getByText('Running')).toBeVisible();
-	await expect(table.getByText('Succeeded', { exact: true }).first()).toBeVisible();
-	await expect(table.getByTitle('Succeeded with warnings')).toBeVisible();
+	const list = page.getByRole('list', { name: 'Jobs' });
+	await expect(list.locator('.status', { hasText: 'Running' })).toBeVisible();
+	// A usual success has no pill and a grey icon with the state in its tooltip.
+	await expect(list.locator('.item__lead[title="Succeeded"]').first()).toBeVisible();
+	await expect(list.locator('.status[title="Succeeded with warnings"]')).toBeVisible();
 	// A list shows the status only; the reason is on the job page.
-	await expect(table.getByText('The profile no longer fits the host.')).toHaveCount(0);
+	await expect(list.getByText('The profile no longer fits the host.')).toHaveCount(0);
 
 	// Cancel the queued job after the confirmation dialog.
-	const queued = table.getByRole('row').filter({ hasText: 'Waiting' });
+	const queued = list.locator('li.item').filter({ hasText: 'Waiting' });
 	await queued.getByRole('button', { name: 'Cancel job' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Cancel the job?' });
 	await expect(dialog).toBeVisible();
 	await dialog.getByRole('button', { name: 'Cancel job' }).click();
 	await expect(page.getByText('The job is cancelled.')).toBeVisible();
-	await expect(table.getByText('Cancelled')).toBeVisible();
-	await expect(table.getByText('Waiting')).toHaveCount(0);
+	await expect(list.locator('.status', { hasText: 'Cancelled' })).toBeVisible();
+	await expect(list.locator('.status', { hasText: 'Waiting' })).toHaveCount(0);
 });
 
 test('the status filter narrows the list', async ({ page }) => {
@@ -55,10 +55,13 @@ test('the status filter narrows the list', async ({ page }) => {
 	await signIn(page);
 	await openJobs(page);
 
-	await chooseFacet(page, 'Status', 'Succeeded');
-	const table = page.getByRole('table');
-	await expect(table.getByText('Succeeded', { exact: true }).first()).toBeVisible();
-	await expect(table.getByText('Running')).toHaveCount(0);
+	await page
+		.getByRole('group', { name: 'States' })
+		.getByRole('button', { name: 'Succeeded' })
+		.click();
+	const list = page.getByRole('list', { name: 'Jobs' });
+	await expect(list.locator('.item__lead[title="Succeeded"]').first()).toBeVisible();
+	await expect(list.locator('.status', { hasText: 'Running' })).toHaveCount(0);
 });
 
 test('a manual run from the plans screen appears as a waiting job', async ({ page }) => {
@@ -70,12 +73,17 @@ test('a manual run from the plans screen appears as a waiting job', async ({ pag
 		.getByRole('link', { name: 'Plans', exact: true })
 		.click();
 	await page
-		.getByRole('row', { name: /nightly-web/ })
+		.getByRole('list', { name: 'Plans' })
+		.locator('li.item')
+		.filter({ hasText: 'nightly-web' })
+		.first()
 		.getByRole('button', { name: 'Run now' })
 		.click();
 	await expect(page.getByText('The job is queued. It starts when the host is free.')).toBeVisible();
 
 	await openJobs(page);
 	// The sample holds one waiting job; the manual run adds a second.
-	await expect(page.getByRole('table').getByText('Waiting')).toHaveCount(2);
+	await expect(
+		page.getByRole('list', { name: 'Jobs' }).locator('.status', { hasText: 'Waiting' })
+	).toHaveCount(2);
 });

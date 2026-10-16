@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { chooseFacet } from './filters';
 
 // The Overview dashboard, the Alerts list and the notification settings (FR-MN-01, FR-MN-03,
 // FR-MN-04).
@@ -26,16 +25,19 @@ test('the overview shows the plan state, the hosts and the open alerts', async (
 
 	await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
 	await expect(page.locator('.stats').getByText('Hosts offline')).toBeVisible();
-	const plans = page.getByRole('table').first();
+	const plans = page.getByRole('list', { name: 'Plans' });
 	await expect(plans.getByText('nightly-web').first()).toBeVisible();
-	await expect(plans.getByText('At risk')).toBeVisible();
+	await expect(plans.locator('.status', { hasText: 'At risk' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Open alerts' })).toBeVisible();
 	await expect(page.getByText('Host offline').first()).toBeVisible();
 
 	await page.getByRole('link', { name: 'All alerts' }).click();
 	await expect(page.getByRole('heading', { level: 1, name: 'Alerts' })).toBeVisible();
 	await expect(page.getByText('mac-build-01').first()).toBeVisible();
-	await chooseFacet(page, 'State', 'Resolved');
+	await page
+		.getByRole('group', { name: 'States' })
+		.getByRole('button', { name: 'Resolved' })
+		.click();
 	await expect(page.getByText('Backup overdue')).toBeVisible();
 	await expect(page.getByText('mac-build-01')).toHaveCount(0);
 });

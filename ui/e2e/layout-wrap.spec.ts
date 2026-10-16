@@ -41,7 +41,7 @@ async function wrapped(page: Page): Promise<string[]> {
 			}
 		};
 		for (const element of document.querySelectorAll(
-			'time, .status, td.table__cell--nowrap, .about__time'
+			'time, .status, td.table__cell--nowrap, .about__time, .item__aside'
 		)) {
 			add(element);
 		}
@@ -65,6 +65,7 @@ for (const width of [1440, 1280]) {
 			localStorage.setItem('restichub.mock.agents', 'sample');
 			localStorage.setItem('restichub.mock.profiles', 'sample');
 			localStorage.setItem('restichub.mock.plans', 'sample');
+			localStorage.setItem('restichub.mock.alerts', 'sample');
 			localStorage.setItem('restichub.locale', 'ru');
 		});
 		await page.setViewportSize({ width, height: 900 });
@@ -78,12 +79,12 @@ for (const width of [1440, 1280]) {
 			await page.getByRole('heading', { level: 1 }).waitFor();
 			await page.waitForTimeout(400);
 			if (WITH_DATA.has(path)) {
-				const cells = await page.locator('td, .row').count();
+				const cells = await page.locator('td, .row, li.item').count();
 				expect(cells, `${path} shows no data`).toBeGreaterThan(0);
 			}
 			expect(await wrapped(page), `${path} at ${width} px`).toEqual([]);
 			if (path === '/jobs') {
-				await page.getByRole('table').getByRole('link').first().click();
+				await page.getByRole('list', { name: 'Задания' }).getByRole('link').first().click();
 				await expect(page.locator('.about__time').first()).toBeVisible();
 				expect(await wrapped(page), `a job detail at ${width} px`).toEqual([]);
 				await page.goBack();

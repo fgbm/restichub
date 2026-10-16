@@ -144,7 +144,7 @@ test('the host page shows the trust mode and the command', async ({ page }) => {
 test('a finished job lists each script as a step with its own log', async ({ page }) => {
 	await openSample(page, 'Jobs');
 	await page
-		.getByRole('table')
+		.getByRole('list', { name: 'Jobs' })
 		.getByRole('link', { name: 'nightly-db', exact: true })
 		.first()
 		.click();

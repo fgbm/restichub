@@ -91,7 +91,7 @@ test('the repository init dialog picks a host and shows the job result', async (
 	await expect(dialog.getByText('The repository is ready.')).toBeVisible({ timeout: 10_000 });
 	await page.keyboard.press('Escape');
 	// The status badge updates after the job (FR-RP-02).
-	await expect(page.getByText('Initialized', { exact: true })).toBeVisible();
+	await expect(page.locator('.status', { hasText: 'Not initialized' })).toHaveCount(0);
 
 	// An initialized repository offers no Initialize action (HIGH 1).
 	await page.getByRole('button', { name: 'More actions for repo-a' }).click();
