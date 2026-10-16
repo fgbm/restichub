@@ -111,7 +111,7 @@ services:
 
   agent-a:
     <<: *agent
-    image: restichub-bench-agent:${RESTIC_A:-0.18.1}
+    image: ${BENCH_AGENT_IMAGE:-restichub-bench-agent}:${RESTIC_A:-0.18.1}
     build:
       context: ../..
       network: ${BUILD_NETWORK:-default}
@@ -123,7 +123,7 @@ services:
 
   agent-b:
     <<: *agent
-    image: restichub-bench-agent:${RESTIC_B:-0.19.1}
+    image: ${BENCH_AGENT_IMAGE:-restichub-bench-agent}:${RESTIC_B:-0.19.1}
     build:
       context: ../..
       network: ${BUILD_NETWORK:-default}
