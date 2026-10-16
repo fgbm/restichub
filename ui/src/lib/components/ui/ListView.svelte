@@ -67,7 +67,7 @@
 		/** The accessible name of the title, when the visible title is too terse. */
 		titleLabel?: (item: T) => string;
 		/** The resolved address of the record page. The title is the only link of the item. */
-		href?: (item: T) => string;
+		href?: (item: T) => string | undefined;
 		/** For an entity without a record page: the title opens a side panel. */
 		onOpen?: (item: T) => void;
 		/** Only an unusual state has a pill. */
@@ -222,6 +222,7 @@
 					{@const fields = fieldsOf(item)}
 					{@const number = aside?.(item) ?? ''}
 					{@const name = title(item)}
+					{@const link = href?.(item)}
 					{#if row.group !== null}
 						<li class="group">{row.group}</li>
 					{/if}
@@ -237,12 +238,12 @@
 						</span>
 						<span class="item__body">
 							<span class="item__line">
-								{#if href}
+								{#if link}
 									<!-- eslint-disable svelte/no-navigation-without-resolve -- href returns a resolved path -->
 									<a
 										class="item__title"
 										class:item__title--mono={titleMono}
-										href={href(item)}
+										href={link}
 										title={name}
 										aria-label={titleLabel?.(item)}>{name}</a
 									>

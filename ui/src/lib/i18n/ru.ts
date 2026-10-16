@@ -2016,11 +2016,16 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.tab.succeeded': 'Успешно',
 	'jobs.meta.attempt': 'попытка {n}',
 	'jobs.emptyAction': 'Добавить план',
-	'jobs.emptyRecent': 'За последние 7 дней заданий не было. Выберите период длиннее, чтобы увидеть старые задания.',
+	'jobs.emptyRecent':
+		'За последние 7 дней заданий не было. Выберите период длиннее, чтобы увидеть старые задания.',
 	'alerts.tab.open': 'Открытые',
 	'alerts.tab.resolved': 'Закрытые',
 	'alerts.tab.all': 'Все',
 	'alerts.title.item': '{kind}: {subject}',
 	'alerts.meta.opened': 'открыто {time}',
-	'alerts.meta.lasted': 'длилось {time}'
+	'alerts.meta.lasted': 'длилось {time}',
+	'plans.status.violated': 'Копия просрочена',
+	'plans.status.atRisk': 'Под угрозой',
+	'plans.meta.lastBackup': 'копия {time}',
+	'plans.meta.noBackup': 'копий не было'
 };

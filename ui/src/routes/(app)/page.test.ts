@@ -135,26 +135,26 @@ describe('the Overview screen', () => {
 		expect(within(stats).getByText('RPO violated').previousElementSibling).toHaveTextContent('1');
 		expect(within(stats).getByText('Plans at risk').previousElementSibling).toHaveTextContent('1');
 
-		const brokenRow = screen.getAllByText('broken')[0].closest('tr') as HTMLElement;
-		expect(within(brokenRow).getByText('Violated')).toBeInTheDocument();
-		expect(within(brokenRow).getByText('No successful backup yet')).toBeInTheDocument();
-		const riskyRow = screen.getByText('risky').closest('tr') as HTMLElement;
-		expect(within(riskyRow).getByText('At risk')).toBeInTheDocument();
-		expect(
-			within(screen.getByText('healthy').closest('tr') as HTMLElement).getByText('OK')
-		).toBeInTheDocument();
+		const plans = screen.getByRole('list', { name: 'Plans' });
+		const broken = within(plans).getByRole('link', { name: 'broken' }).closest('li') as HTMLElement;
+		expect(within(broken).getByText('Backup overdue')).toHaveClass('status');
+		expect(within(broken).getByText('no backup yet')).toBeInTheDocument();
+		expect(within(broken).getByRole('link')).toHaveAttribute('href', '/plans/pl_3');
+		const risky = within(plans).getByRole('link', { name: 'risky' }).closest('li') as HTMLElement;
+		expect(within(risky).getByText('At risk')).toHaveClass('status');
+		// A plan in the usual state has no pill (design/style/ui-principles.md, 2.7).
+		const healthy = within(plans).getByRole('link', { name: 'healthy' }).closest('li') as HTMLElement;
+		expect(healthy.querySelector('.status')).toBeNull();
 
-		expect(screen.getByText('Stale lock')).toBeInTheDocument();
-		expect(screen.getByText('No lock')).toBeInTheDocument();
-		expect(screen.getByText('mac-build-01')).toBeInTheDocument();
-		expect(screen.getByText('Backup overdue')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: 'broken win-fs01' })).toHaveAttribute(
+		const repositories = screen.getByRole('list', { name: 'Repositories' });
+		expect(within(repositories).getByText('Stale lock')).toHaveClass('status');
+		expect(within(repositories).getAllByText(/./, { selector: '.status' })).toHaveLength(1);
+		expect(screen.getByRole('link', { name: 'mac-build-01' })).toHaveAttribute('href', '/hosts/a_2');
+		expect(screen.getByText('Backup overdue: broken')).toBeInTheDocument();
+		const failed = screen.getByRole('list', { name: 'Recent failed jobs' });
+		expect(within(failed).getByRole('link', { name: 'broken' })).toHaveAttribute(
 			'href',
 			'/jobs/j_9'
-		);
-		expect(screen.getByRole('link', { name: 'broken win-fs01 · primary-s3' })).toHaveAttribute(
-			'href',
-			'/plans?q=broken'
 		);
 	});
 

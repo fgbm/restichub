@@ -2012,7 +2012,11 @@ export const en = {
 	'alerts.tab.all': 'All',
 	'alerts.title.item': '{kind}: {subject}',
 	'alerts.meta.opened': 'opened {time}',
-	'alerts.meta.lasted': 'lasted {time}'
+	'alerts.meta.lasted': 'lasted {time}',
+	'plans.status.violated': 'Backup overdue',
+	'plans.status.atRisk': 'At risk',
+	'plans.meta.lastBackup': 'backup {time}',
+	'plans.meta.noBackup': 'no backup yet'
 } as const;
 
 export type MessageKey = keyof typeof en;
