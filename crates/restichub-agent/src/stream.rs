@@ -163,6 +163,8 @@ pub enum Disconnect {
     /// The control plane refused the protocol version of the agent (FR-PR-09). Back off at the
     /// maximum: only an update of the agent or of the control plane helps.
     Incompatible,
+    /// A registration stored the identity of another agent (FR-ID-03).
+    Replaced,
 }
 
 /// Runs the connect loop with the operating system shutdown signal (FR-AG-01, FR-ID-08).
@@ -221,7 +223,8 @@ fn spawn_shutdown(shutdown: Option<Receiver<()>>, stop: watch::Sender<bool>) -> 
 ///
 /// # Errors
 ///
-/// Returns an error only when the key chain cannot be read. A failed connection is retried.
+/// Returns [`IdentityReplaced::Agent`] when a registration stored the identity of another agent,
+/// so the service starts again with it. A failed connection is retried.
 pub async fn run(
     identity: &StoredIdentity,
     dir: &Path,
@@ -276,6 +279,15 @@ pub async fn run(
                 crate::connection::record_closed(dir, cp_url);
                 (false, healthy)
             }
+            // The service manager starts the agent again, and the new process loads the new
+            // identity. A clean exit or exit code 78 would keep it stopped.
+            Ok(Disconnect::Replaced) => {
+                tracing::error!(
+                    agent_id = %identity.agent_id,
+                    "a registration stored the identity of another agent; the agent stops so that the service starts again with it"
+                );
+                return Err(IdentityReplaced::Agent.into());
+            }
             Err(error) => {
                 tracing::warn!(agent_id = %identity.agent_id, %error, "the agent stream stopped");
                 crate::connection::record_failure(dir, cp_url, &format!("{error:#}"));
@@ -283,7 +295,7 @@ pub async fn run(
             }
         };
         // A rotation stored a newer certificate during the stream; the next connection uses it.
-        if let Some(fresh) = fresher_identity(dir, rotated.as_ref().unwrap_or(identity)) {
+        if let Some(fresh) = fresher_identity(dir, rotated.as_ref().unwrap_or(identity)).await {
             rotated = Some(fresh);
         }
         if *stop.borrow() {
@@ -327,7 +339,7 @@ async fn wait_before_retry(dir: &Path, current: &StoredIdentity, delay: Duration
         let step = IDENTITY_POLL.min(delay - waited);
         tokio::time::sleep(step).await;
         waited += step;
-        if fresher_identity(dir, current).is_some() {
+        if fresher_identity(dir, current).await.is_some() {
             return;
         }
     }
@@ -335,11 +347,11 @@ async fn wait_before_retry(dir: &Path, current: &StoredIdentity, delay: Duration
 
 /// Reads the identity that a rotation stored, when it holds a newer certificate of the same agent
 /// (FR-ID-03).
-fn fresher_identity(dir: &Path, active: &StoredIdentity) -> Option<StoredIdentity> {
+async fn fresher_identity(dir: &Path, active: &StoredIdentity) -> Option<StoredIdentity> {
     if !StoredIdentity::exists(dir) {
         return None;
     }
-    let stored = StoredIdentity::load(dir).ok()?;
+    let stored = load_off_runtime(dir).await.ok()?;
     let same_agent = stored.agent_id == active.agent_id && stored.tenant_id == active.tenant_id;
     let newer = stored.certificate_expiry().ok()? > active.certificate_expiry().ok()?;
     (same_agent && newer).then_some(stored)
@@ -710,7 +722,9 @@ async fn handle_control(
                 &pending,
                 &issued,
                 now,
-            ) {
+            )
+            .await
+            {
                 Ok(serial) => {
                     upkeep.certificate_der.clone_from(&issued.certificate_der);
                     tracing::info!(
@@ -725,22 +739,28 @@ async fn handle_control(
                             )),
                         })
                         .await;
-                    upkeep.validity = StoredIdentity::load(dir)
+                    upkeep.validity = load_off_runtime(dir)
+                        .await
                         .and_then(|stored| stored.certificate_validity())
                         .ok();
                     upkeep.arm_at_due(timeouts);
                 }
-                Err(error) if error.downcast_ref::<IdentityReplaced>().is_some() => {
-                    tracing::warn!(
-                        %error,
-                        "the agent dropped the rotated certificate and connects with the stored identity"
-                    );
-                    return Ok(Handled::Stop(Disconnect::Closed { healthy: false }));
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "the agent refused the rotated certificate");
-                    upkeep.arm_retry(timeouts);
-                }
+                Err(error) => match error.downcast_ref::<IdentityReplaced>() {
+                    Some(IdentityReplaced::Agent) => {
+                        return Ok(Handled::Stop(Disconnect::Replaced));
+                    }
+                    Some(IdentityReplaced::Certificate) => {
+                        tracing::warn!(
+                            %error,
+                            "the agent dropped the rotated certificate; the next connection uses the stored one"
+                        );
+                        return Ok(Handled::Stop(Disconnect::Closed { healthy: false }));
+                    }
+                    None => {
+                        tracing::warn!(%error, "the agent refused the rotated certificate");
+                        upkeep.arm_retry(timeouts);
+                    }
+                },
             }
         }
         Some(control_message::Payload::CertificateRejected(rejected)) => {
@@ -755,7 +775,7 @@ async fn handle_control(
 
 /// Checks the issued certificate and stores it (FR-ID-03). Returns the serial for the
 /// confirmation.
-fn install(
+async fn install(
     identity: &StoredIdentity,
     dir: &Path,
     replaced_der: &[u8],
@@ -764,8 +784,21 @@ fn install(
     now: OffsetDateTime,
 ) -> Result<Vec<u8>> {
     let rotated = rotation::accept(identity, pending, issued, now)?;
-    StoredIdentity::install_rotation(dir, &identity.agent_id, replaced_der, &rotated)?;
+    let dir = dir.to_path_buf();
+    let agent_id = identity.agent_id.clone();
+    let replaced_der = replaced_der.to_vec();
+    // The identity lock can wait for up to a minute.
+    let rotated = tokio::task::spawn_blocking(move || {
+        StoredIdentity::install_rotation(&dir, &agent_id, &replaced_der, &rotated).map(|()| rotated)
+    })
+    .await??;
     rotation::serial_of(&rotated.certificate_der)
+}
+
+/// The identity lock can wait for up to a minute, so the load leaves the runtime worker free.
+async fn load_off_runtime(dir: &Path) -> Result<StoredIdentity> {
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || StoredIdentity::load(&dir)).await?
 }
 
 /// Answers a heartbeat with the echoed nonce (FR-ID-07).

@@ -70,7 +70,7 @@ impl StoredIdentity {
         let _ = std::fs::remove_dir_all(&staging);
         paths::ensure_config_dir(&staging)?;
         // The first registration has no directory to lock yet.
-        let _lock = if lock_file(dir).parent().is_some_and(Path::is_dir) {
+        let _lock = if lock_path(dir).parent().is_some_and(Path::is_dir) {
             Some(lock(dir)?)
         } else {
             None
@@ -170,10 +170,11 @@ impl StoredIdentity {
         // certificate belongs to the old one and would break the new identity.
         let metadata: Metadata =
             serde_json::from_slice(&read(dir.join(METADATA_FILE))?).context("bad identity.json")?;
-        if metadata.agent_id != agent_id
-            || first_block(&read(dir.join(CERT_FILE))?)? != replaced_der
-        {
-            return Err(IdentityReplaced.into());
+        if metadata.agent_id != agent_id {
+            return Err(IdentityReplaced::Agent.into());
+        }
+        if first_block(&read(dir.join(CERT_FILE))?)? != replaced_der {
+            return Err(IdentityReplaced::Certificate.into());
         }
         discard_staged(&dir);
         paths::create_protected_file(&staged(&dir, KEY_FILE), rotated.key_pem.as_bytes())?;
@@ -236,12 +237,24 @@ pub struct Rotated {
 }
 
 /// The stored identity is no longer the one that a rotation started from (FR-ID-03).
-#[derive(Debug)]
-pub struct IdentityReplaced;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityReplaced {
+    /// A registration stored a new certificate of the same agent.
+    Certificate,
+    /// A registration stored the identity of another agent.
+    Agent,
+}
 
 impl std::fmt::Display for IdentityReplaced {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("the stored identity changed after the rotation started")
+        f.write_str(match self {
+            Self::Certificate => {
+                "a registration stored a new certificate after the rotation started"
+            }
+            Self::Agent => {
+                "a registration stored another agent identity after the rotation started"
+            }
+        })
     }
 }
 
@@ -308,33 +321,40 @@ fn lock_within(dir: &Path, wait: Duration) -> Result<std::fs::File> {
     let deadline = Instant::now() + wait;
     loop {
         let path = lock_path(dir);
-        let file = open_lock_file(&path)?;
-        loop {
-            match file.try_lock() {
-                Ok(()) => break,
-                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                // TimedOut is not a damaged identity, so the service restarts instead of exiting 78.
-                Err(std::fs::TryLockError::WouldBlock) => {
-                    return Err(std::io::Error::from(std::io::ErrorKind::TimedOut)).with_context(
-                        || {
-                            format!(
-                                "another process holds the lock {} for more than {wait:?}; stop that process and run the command again",
-                                path.display()
-                            )
-                        },
-                    );
-                }
+        match open_lock_file(&path) {
+            Ok(file) => match file.try_lock() {
+                Ok(()) if still_at(&file, &path) => return Ok(file),
+                Ok(()) | Err(std::fs::TryLockError::WouldBlock) => {}
                 Err(std::fs::TryLockError::Error(error)) => {
                     return Err(error).with_context(|| format!("cannot lock {}", path.display()));
                 }
-            }
+            },
+            // A save renamed the directory between `lock_path` and the open.
+            Err(error) if is_not_found(&error) && swap_in_progress(dir) => {}
+            Err(error) => return Err(error),
         }
-        if still_at(&file, &path) {
-            return Ok(file);
+        if Instant::now() >= deadline {
+            // TimedOut is not a damaged identity, so the service restarts instead of exiting 78.
+            return Err(std::io::Error::from(std::io::ErrorKind::TimedOut)).with_context(|| {
+                format!(
+                    "another process holds the lock {} for more than {wait:?}; stop that process and run the command again",
+                    path.display()
+                )
+            });
         }
+        std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+fn is_not_found(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn swap_in_progress(dir: &Path) -> bool {
+    dir.exists() || sibling(dir, ".old").exists()
 }
 
 #[cfg(windows)]
@@ -747,8 +767,9 @@ pub(crate) mod tests {
 
         let error =
             install_from_sample(&dir, &rotated()).expect_err("the rotation must be refused");
-        assert!(
-            error.downcast_ref::<IdentityReplaced>().is_some(),
+        assert_eq!(
+            error.downcast_ref::<IdentityReplaced>(),
+            Some(&IdentityReplaced::Certificate),
             "{error:#}"
         );
         let loaded = StoredIdentity::load(&dir).expect("the identity must load");
@@ -765,8 +786,9 @@ pub(crate) mod tests {
         other.save(&dir).expect("the third save must succeed");
         let error =
             install_from_sample(&dir, &rotated()).expect_err("the rotation must be refused");
-        assert!(
-            error.downcast_ref::<IdentityReplaced>().is_some(),
+        assert_eq!(
+            error.downcast_ref::<IdentityReplaced>(),
+            Some(&IdentityReplaced::Agent),
             "{error:#}"
         );
         let loaded = StoredIdentity::load(&dir).expect("the identity must load");
@@ -966,6 +988,100 @@ pub(crate) mod tests {
             "{text}"
         );
         drop(held);
+        remove(&dir);
+    }
+
+    #[test]
+    fn fr_ag_04_a_save_after_an_interrupted_swap_waits_for_the_lock() {
+        let dir = temp_dir("save-backup-lock");
+        sample().save(&dir).expect("the save must succeed");
+        let backup = sibling(&dir, ".old");
+        std::fs::rename(&dir, &backup).expect("cannot move the identity to the backup");
+        let held = lock(&dir).expect("cannot take the lock");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let save_dir = dir.clone();
+        let save = std::thread::spawn(move || {
+            let mut new = sample();
+            new.agent_id = "new-agent".to_owned();
+            let _ = tx.send(new.save(&save_dir));
+        });
+        assert_waits(&rx, "the save");
+        assert!(!dir.exists(), "the save must not swap under the lock");
+        assert!(backup.join(METADATA_FILE).exists());
+        drop(held);
+
+        rx.recv()
+            .expect("the save must answer")
+            .expect("the save must succeed");
+        save.join().expect("the save must not panic");
+        let loaded = StoredIdentity::load(&dir).expect("the identity must load");
+        assert_eq!(loaded.agent_id, "new-agent");
+        remove(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_id_03_a_lock_taken_during_repeated_saves_never_finds_the_directory_missing() {
+        let dir = temp_dir("lock-during-saves");
+        sample().save(&dir).expect("the save must succeed");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let saver_dir = dir.clone();
+        let saver_stop = std::sync::Arc::clone(&stop);
+        let saver = std::thread::spawn(move || {
+            while !saver_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                sample().save(&saver_dir).expect("the save must succeed");
+            }
+        });
+        for _ in 0..200 {
+            lock_within(&dir, Duration::from_secs(10)).expect("the lock must be taken");
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        saver.join().expect("the saver must not panic");
+        remove(&dir);
+    }
+
+    /// The holder keeps swapping in a new directory with a held lock, so the waiter never holds
+    /// a lock that is still in place.
+    #[cfg(unix)]
+    #[test]
+    fn fr_id_03_a_waiter_that_keeps_losing_the_swapped_lock_stops_at_its_deadline() {
+        let dir = temp_dir("lock-chase");
+        sample().save(&dir).expect("the save must succeed");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let swapper_dir = dir.clone();
+        let swapper_stop = std::sync::Arc::clone(&stop);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let swapper = std::thread::spawn(move || {
+            let old = sibling(&swapper_dir, ".swapped");
+            let mut held = lock(&swapper_dir).expect("cannot take the lock");
+            let _ = ready_tx.send(());
+            while !swapper_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = std::fs::remove_dir_all(&old);
+                std::fs::rename(&swapper_dir, &old).expect("cannot move the directory");
+                paths::ensure_config_dir(&swapper_dir).expect("cannot create the directory");
+                held = lock(&swapper_dir).expect("cannot take the new lock");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            drop(held);
+            let _ = std::fs::remove_dir_all(&old);
+        });
+        ready_rx.recv().expect("the swapper must start");
+
+        let started = Instant::now();
+        let error = lock_within(&dir, Duration::from_millis(300))
+            .expect_err("a lock that keeps moving must time out");
+        let elapsed = started.elapsed();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        swapper.join().expect("the swapper must not panic");
+        assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+        assert!(
+            error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::TimedOut),
+            "{error:#}"
+        );
         remove(&dir);
     }
 
