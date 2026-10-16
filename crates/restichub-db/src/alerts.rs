@@ -10,9 +10,11 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 
 use crate::DbError;
+use crate::agent_search::search_pattern;
 use crate::channels::{self, Channel};
 use crate::enums::JobKind;
 use crate::ids::{AgentId, AlertId, ChannelId, DeliveryId, JobId, PlanId, RepositoryId};
+use crate::job_search::COUNT_LIMIT;
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -460,10 +462,6 @@ pub struct AlertPageResult {
     pub total_capped: bool,
 }
 
-/// A list counts at most this many alerts, so a long history does not make each page read all of
-/// it.
-pub const COUNT_LIMIT: i64 = 10_000;
-
 macro_rules! alert_filter_sql {
     () => {
         " WHERE ($1::text IS NULL OR status = $1) \
@@ -520,20 +518,6 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &AlertPage) -> Result<AlertPageRe
         total: counted.min(COUNT_LIMIT),
         total_capped: counted > COUNT_LIMIT,
     })
-}
-
-/// `%`, `_` and `\` in the text match themselves.
-fn search_pattern(text: &str) -> String {
-    let mut pattern = String::with_capacity(text.len() + 2);
-    pattern.push('%');
-    for character in text.chars() {
-        if matches!(character, '%' | '_' | '\\') {
-            pattern.push('\\');
-        }
-        pattern.push(character);
-    }
-    pattern.push('%');
-    pattern
 }
 
 /// Removes the resolved alerts that resolved before `before`. Their deliveries go with them.

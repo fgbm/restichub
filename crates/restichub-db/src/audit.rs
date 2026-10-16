@@ -24,14 +24,12 @@ use uuid::Uuid;
 use crate::DbError;
 use crate::enums::ActorType;
 use crate::ids::{ApiTokenId, AuditLogId, SecretId, TenantId, UserId};
+use crate::job_search::COUNT_LIMIT;
 use crate::tx::{PlatformTx, TenantTx};
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
 
 pub const MAX_PAGE_LIMIT: i64 = 200;
-
-/// A list counts at most this many records, so a long log does not make each page read all of it.
-pub const COUNT_LIMIT: i64 = 10_000;
 
 macro_rules! filter_sql {
     () => {

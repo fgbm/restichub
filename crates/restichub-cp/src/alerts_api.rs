@@ -4,7 +4,7 @@
 //! come from the evaluation loop of [`crate::alerts`]; no endpoint creates or resolves one.
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use restichub_db::AlertId;
 use restichub_db::alerts::{
     self as repo, Alert, AlertCursor, AlertKind, AlertPage, AlertParams, AlertRule, AlertStatus,
@@ -19,6 +19,7 @@ use crate::alerts::message::{error_text, link};
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
+use crate::list_query::{ApiQuery, check_window, parse_list, parse_search};
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -49,52 +50,6 @@ pub struct AlertListQuery {
     /// Skipped alerts, in `0..=10000`. Not with `cursor`.
     pub offset: Option<i64>,
     pub limit: Option<i64>,
-}
-
-const MAX_SEARCH: usize = 200;
-
-impl AlertListQuery {
-    fn kinds(&self) -> Result<Vec<AlertKind>, ApiError> {
-        self.kind
-            .as_deref()
-            .unwrap_or_default()
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| {
-                AlertKind::parse(value)
-                    .ok_or_else(|| ApiError::invalid_field("kind", Reason::Unknown))
-            })
-            .collect()
-    }
-
-    fn search(&self) -> Result<Option<String>, ApiError> {
-        let Some(text) = self
-            .q
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-        else {
-            return Ok(None);
-        };
-        if text.chars().count() > MAX_SEARCH {
-            return Err(ApiError::invalid_field("q", Reason::TooLong));
-        }
-        Ok(Some(text.to_owned()))
-    }
-
-    fn offset(&self) -> Result<i64, ApiError> {
-        match self.offset {
-            None => Ok(0),
-            Some(_) if self.cursor.is_some() => Err(ApiError::invalid_field_cause(
-                "offset",
-                Reason::InvalidFormat,
-                "a page reads either a cursor or an offset",
-            )),
-            Some(offset) if (0..=repo::COUNT_LIMIT).contains(&offset) => Ok(offset),
-            Some(_) => Err(ApiError::invalid_field("offset", Reason::OutOfRange)),
-        }
-    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -175,9 +130,10 @@ pub struct AlertListResponse {
 pub async fn list_alerts(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<AlertListQuery>,
+    ApiQuery(query): ApiQuery<AlertListQuery>,
 ) -> Result<Json<AlertListResponse>, ApiError> {
     context.authorize(Operation::AlertsRead)?;
+    check_window(query.cursor.as_deref(), query.offset, true)?;
     let status = match query.status.unwrap_or_default() {
         StatusFilter::Open => Some(AlertStatus::Open),
         StatusFilter::Resolved => Some(AlertStatus::Resolved),
@@ -186,9 +142,9 @@ pub async fn list_alerts(
     let page = AlertPage {
         limit: query.limit.unwrap_or(repo::DEFAULT_PAGE_LIMIT),
         status,
-        kinds: query.kinds()?,
-        search: query.search()?,
-        offset: query.offset()?,
+        kinds: parse_list("kind", query.kind.as_deref(), AlertKind::parse)?,
+        search: parse_search(query.q.as_deref())?,
+        offset: query.offset.unwrap_or(0),
         after: query
             .cursor
             .as_deref()

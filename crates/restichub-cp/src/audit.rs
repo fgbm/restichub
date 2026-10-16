@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
+use crate::list_query::check_window;
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -205,22 +206,11 @@ impl AuditQuery {
             .map(decode_cursor)
             .transpose()
             .map_err(invalid_cursor)?;
-        let offset = match self.offset {
-            None => 0,
-            Some(_) if after.is_some() => {
-                return Err(ApiError::invalid_field_cause(
-                    "offset",
-                    Reason::InvalidFormat,
-                    "a page reads either a cursor or an offset",
-                ));
-            }
-            Some(offset) if (0..=repo::COUNT_LIMIT).contains(&offset) => offset,
-            Some(_) => return Err(ApiError::invalid_field("offset", Reason::OutOfRange)),
-        };
+        check_window(self.cursor.as_deref(), self.offset, true)?;
         Ok(AuditPage {
             limit,
             after,
-            offset,
+            offset: self.offset.unwrap_or(0),
         })
     }
 }
