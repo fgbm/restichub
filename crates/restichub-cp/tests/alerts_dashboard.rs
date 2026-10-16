@@ -324,3 +324,50 @@ async fn ac_mn_09_dashboard_facts_are_cached_for_a_short_time() {
     assert_eq!(online(&body), 2, "a zero time-to-live reads again");
     db.cleanup().await;
 }
+
+/// AC-MN-09: the agent API reports `online` by the same rule as the dashboard.
+#[tokio::test]
+async fn ac_mn_09_the_agent_view_reports_online_by_the_dashboard_rule() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "ac-mn-09-agent-online").await;
+    let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
+    let now = OffsetDateTime::now_utc();
+    let online = seed_agent(db.database(), tenant, "host-online").await;
+    let offline = seed_agent(db.database(), tenant, "host-offline").await;
+    let waiting = seed_agent(db.database(), tenant, "host-waiting").await;
+    set_last_seen(&db, tenant, online, Some(now)).await;
+    set_last_seen(&db, tenant, offline, Some(now - Duration::minutes(10))).await;
+    let app = router(AppState::new(db.database().clone()).with_tenancy(TenancyConfig::multi()));
+
+    for (agent, expected) in [(online, true), (offline, false), (waiting, false)] {
+        let (status, _, body) = send(
+            &app,
+            request(
+                "GET",
+                &format!("/api/v1/agents/{agent}"),
+                Some(&viewer),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["online"], expected);
+    }
+    let (_, _, page) = send(&app, request("GET", "/api/v1/agents", Some(&viewer), None)).await;
+    let flags: Vec<(String, bool)> = page["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|item| {
+            (
+                item["hostname"].as_str().expect("hostname").to_owned(),
+                item["online"].as_bool().expect("online"),
+            )
+        })
+        .collect();
+    assert!(flags.contains(&("host-online".to_owned(), true)));
+    assert!(flags.contains(&("host-offline".to_owned(), false)));
+    db.cleanup().await;
+}

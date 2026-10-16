@@ -109,6 +109,9 @@ pub struct AgentView {
     pub control_plane_version: String,
     pub version_status: crate::agent_version::AgentVersionStatus,
     pub status: AgentStatus,
+    /// Whether the control plane saw the host within the online window of the dashboard. Always
+    /// false for a revoked host.
+    pub online: bool,
     pub last_seen_at: Option<String>,
     /// The time of the first stream open. Null while an active host waits for its first connection.
     pub first_connected_at: Option<String>,
@@ -130,8 +133,8 @@ pub struct DuplicateOfView {
     pub is_older: bool,
 }
 
-impl From<&repo::Agent> for AgentView {
-    fn from(agent: &repo::Agent) -> Self {
+impl AgentView {
+    fn new(agent: &repo::Agent, now: OffsetDateTime) -> Self {
         Self {
             id: agent.id.to_string(),
             hostname: agent.hostname.clone(),
@@ -159,6 +162,8 @@ impl From<&repo::Agent> for AgentView {
                     .zip(agent.protocol_version_minor),
             ),
             status: agent.status,
+            online: agent.status == AgentStatus::Active
+                && crate::dashboard::is_online(agent.first_connected_at, agent.last_seen_at, now),
             last_seen_at: agent.last_seen_at.map(format_time),
             first_connected_at: agent.first_connected_at.map(format_time),
             created_at: format_time(agent.created_at),
@@ -235,6 +240,7 @@ pub async fn list_agents(
                 ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
             })?,
     };
+    let now = state.auth().clock.now();
     let result = context
         .tenant_tx(&state, async |tx| Ok(repo::list(tx, status, &page).await?))
         .await?;
@@ -249,7 +255,11 @@ pub async fn list_agents(
         None
     };
     Ok(Json(AgentListResponse {
-        items: result.agents.iter().map(AgentView::from).collect(),
+        items: result
+            .agents
+            .iter()
+            .map(|agent| AgentView::new(agent, now))
+            .collect(),
         next_cursor,
     }))
 }
@@ -277,7 +287,7 @@ pub async fn get_agent(
         .tenant_tx(&state, async |tx| Ok(repo::get(tx, agent_id).await?))
         .await?;
     match agent {
-        Some(agent) => Ok(Json(AgentView::from(&agent))),
+        Some(agent) => Ok(Json(AgentView::new(&agent, state.auth().clock.now()))),
         None => Err(ApiError::not_found()),
     }
 }
@@ -325,7 +335,7 @@ pub async fn rename_agent(
         })
         .await?;
     match agent {
-        Some(agent) => Ok(Json(AgentView::from(&agent))),
+        Some(agent) => Ok(Json(AgentView::new(&agent, state.auth().clock.now()))),
         None => Err(ApiError::not_found()),
     }
 }
