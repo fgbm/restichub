@@ -5289,7 +5289,7 @@ export interface operations {
                 sort: ("created_at" | "started_at" | "finished_at" | "duration" | "status" | "plan" | "host") | null;
                 /** @description Default: `desc`. */
                 order: ("asc" | "desc") | null;
-                /** @description Adds the counts of the state tabs to the response. */
+                /** @description Adds the state tab totals to the response. */
                 counts: boolean | null;
             };
             cookie?: never;

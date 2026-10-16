@@ -51,7 +51,7 @@ test('the switcher entry enters the platform mode and an organization leaves it'
 	await expect(page.getByRole('heading', { level: 1, name: 'Users' })).toBeVisible();
 
 	await nav.getByRole('link', { name: 'Audit', exact: true }).click();
-	await expect(page).toHaveURL(/\/platform\/audit$/);
+	await expect(page).toHaveURL(/\/platform\/audit(\?period=30d)?$/);
 	await expect(page).toHaveTitle('Audit · Platform administration · ResticHub');
 	expect(await tabNames(page)).toEqual(['Organizations', 'Users', 'Audit']);
 
