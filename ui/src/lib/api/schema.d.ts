@@ -3570,9 +3570,9 @@ export interface operations {
                 state: string | null;
                 /** @description Comma-separated operating systems. */
                 os: string | null;
-                /** @description Comma-separated agent versions. */
+                /** @description Comma-separated, for example `0.4.1,0.4.2`. */
                 agent_version: string | null;
-                /** @description Comma-separated labels. A host with one of them matches. */
+                /** @description Comma-separated; a host with one of them matches. */
                 label: string | null;
                 server_scripts: ("enabled" | "disabled") | null;
                 /** @description Default: `created_at`. A cursor takes only the default order. */
@@ -5095,13 +5095,13 @@ export interface operations {
                 limit: number | null;
                 /** @description The first row of a numbered page. Do not combine with `cursor`. */
                 offset: number | null;
-                /** @description Comma-separated plan identifiers. */
+                /** @description Comma-separated identifiers. */
                 plan_id: string | null;
-                /** @description Comma-separated repository identifiers. */
+                /** @description Comma-separated identifiers. */
                 repository_id: string | null;
-                /** @description Comma-separated agent identifiers. */
+                /** @description Comma-separated identifiers. */
                 agent_id: string | null;
-                /** @description Comma-separated job kinds, for example `backup,check`. */
+                /** @description Comma-separated, for example `backup,check`. */
                 kind: string | null;
                 status: components["schemas"]["JobStatus"] | null;
                 /** @description In RFC 3339: the first creation time that the list holds. */
