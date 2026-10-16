@@ -2272,7 +2272,6 @@ export interface components {
              */
             planned_steps: string[];
             progress?: components["schemas"]["ProgressView"] | null;
-            /** @description The parameters that the operator chose. Null for every other kind of job. */
             restore?: components["schemas"]["RestoreParamsView"] | null;
             /**
              * @description The identifier of the job signing key that signed the job. Null until the control plane sent
