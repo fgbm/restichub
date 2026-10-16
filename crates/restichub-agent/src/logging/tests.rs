@@ -516,3 +516,30 @@ fn an_event_text_stays_in_the_limit() {
     assert_eq!(truncate(&long).chars().count(), 31_000);
     assert_eq!(truncate("short"), "short");
 }
+
+#[test]
+fn an_event_text_outside_the_basic_plane_stays_in_the_utf16_limit() {
+    let long = "\u{1f600}".repeat(40_000);
+    let cut = truncate(&long);
+    assert_eq!(cut.encode_utf16().count(), 31_000);
+    assert!(cut.chars().all(|c| c == '\u{1f600}'));
+    let odd = format!("a{long}");
+    assert_eq!(truncate(&odd).encode_utf16().count(), 30_999);
+}
+
+#[test]
+fn ac_ag_03_the_repeat_table_forgets_old_events() {
+    let sinks = sinks("repeats-expire", 1 << 20);
+    for job in 1..=50 {
+        let line = format!("t1  WARN jobs: job {job} cannot start\n");
+        sinks.log.write(Level::WARN, line.as_bytes());
+        sinks.log.write(Level::WARN, line.as_bytes());
+    }
+    let repeats = || sinks.log.repeats.lock().expect("cannot lock").len();
+    assert_eq!(repeats(), 50);
+    sinks.advance(REPEAT_WINDOW * 2);
+    sinks
+        .log
+        .write(Level::WARN, b"t2  WARN jobs: another warning\n");
+    assert_eq!(repeats(), 1);
+}

@@ -11,8 +11,8 @@ use tracing_subscriber::fmt::MakeWriter;
 
 use super::RotatingFile;
 
-/// The Event Log takes at most 31 839 characters in one string.
-const MAX_EVENT_CHARS: usize = 31_000;
+/// The Event Log takes at most 31 839 UTF-16 code units in one string.
+const MAX_EVENT_UNITS: usize = 31_000;
 
 /// How long a failed sink waits before the service opens it again.
 pub(crate) const RETRY_AFTER: Duration = Duration::from_secs(60);
@@ -38,7 +38,7 @@ enum Sink<T> {
     },
 }
 
-struct Repeat {
+pub(super) struct Repeat {
     until: Instant,
     skipped: u64,
 }
@@ -46,7 +46,7 @@ struct Repeat {
 pub(crate) struct ServiceLog {
     file: Mutex<Sink<RotatingFile>>,
     events: Mutex<Sink<Box<dyn EventSink>>>,
-    repeats: Mutex<HashMap<u64, Repeat>>,
+    pub(super) repeats: Mutex<HashMap<u64, Repeat>>,
     open_file: OpenFile,
     open_events: OpenEvents,
     now: Clock,
@@ -155,7 +155,9 @@ impl ServiceLog {
         let key = hasher.finish();
         let now = (self.now)();
         let mut repeats = lock(&self.repeats);
-        repeats.retain(|_, repeat| repeat.skipped > 0 || now < repeat.until);
+        // A count that no later identical event reports is dropped one window later, so events
+        // with varying values cannot grow the table without bound.
+        repeats.retain(|_, repeat| now < repeat.until + REPEAT_WINDOW);
         let skipped = match repeats.get_mut(&key) {
             Some(repeat) if now < repeat.until => {
                 repeat.skipped += 1;
@@ -281,10 +283,14 @@ pub(crate) fn escape(text: &str) -> Cow<'_, str> {
 
 /// Cuts `text` to the length that the event log takes in one string.
 pub(crate) fn truncate(text: &str) -> &str {
-    match text.char_indices().nth(MAX_EVENT_CHARS) {
-        Some((end, _)) => &text[..end],
-        None => text,
+    let mut units = 0;
+    for (end, c) in text.char_indices() {
+        units += c.len_utf16();
+        if units > MAX_EVENT_UNITS {
+            return &text[..end];
+        }
     }
+    text
 }
 
 pub(crate) struct ServiceWriter(pub(crate) Arc<ServiceLog>);
