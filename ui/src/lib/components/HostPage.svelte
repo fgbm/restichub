@@ -169,6 +169,12 @@
 		return t(`jobs.status.${job.status}` as MessageKey);
 	}
 
+	function jobFullLabel(job: Job): string | undefined {
+		return job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings'
+			? t('jobs.statusFull.succeeded_with_warnings')
+			: undefined;
+	}
+
 	function jobTone(job: Job): StatusTone {
 		if (job.status === 'failed' && job.result_code === 'cancelled') return 'cancelled';
 		if (job.status === 'succeeded' && job.result_code === 'succeeded_with_warnings') {
@@ -491,7 +497,9 @@
 						<ul class="rows">
 							{#each jobs as job (job.id)}
 								<li>
-									<StatusPill tone={jobTone(job)}>{jobLabel(job)}</StatusPill>
+									<StatusPill tone={jobTone(job)} title={jobFullLabel(job)}
+										>{jobLabel(job)}</StatusPill
+									>
 									<a class="rows__main" href={resolve('/(app)/jobs/[id]', { id: job.id })}>
 										{job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey)}
 									</a>
