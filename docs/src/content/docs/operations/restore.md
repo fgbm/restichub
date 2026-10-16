@@ -18,11 +18,19 @@ The data of a restore goes from the repository to the target agent. It does not 
 ## List the snapshots
 
 1. Open **Restore**.
-2. Select a repository. The screen shows the newest stored list and its age.
-3. Enter a snapshot host, a tag or a path. Enter a date range if you need one.
-4. Click **Find snapshots**. An agent runs `restic snapshots` with the filters, and the list updates. The button applies all filters together, the dates included. Click **Reset filters** to clear them.
+2. Select a repository in the page header. An agent runs `restic snapshots` once for the whole repository, and the screen shows all snapshots. If the control plane already holds a stored list, the screen shows it with its age.
+3. Narrow the list with the filter bar above the table. The filters apply at once, on the loaded list. There is no search button.
+   - **Path**: type a part of a path. A snapshot matches when any of its backup paths contains the text. The search ignores case.
+   - **Host** and **Tag**: select one or more values. The menus list the values that the loaded snapshots hold, with the number of snapshots for each value. A tag that comes from a profile shows the name of the profile.
+   - **Period**: select 24 hours, 7 days, 30 days, 90 days or all time. **Custom range** takes two dates, and the range includes both days.
+4. Each filter that you set shows as a chip. Click the cross on a chip to remove it. Click **Reset** to remove all filters.
+5. Click the refresh button to run the list job again and read the current snapshots from the repository. The text next to it shows the age of the list.
 
-The control plane applies the date range to the list. restic applies the host, the tag and the path. The list agrees with `restic snapshots --json` for the same filters. When a repository holds more snapshots than a result can carry, the screen shows a warning and keeps the newest snapshots.
+Several values of one filter match any of them. Different filters must all match. For example, the host `nas` or `ws`, with the tag `daily`, shows the snapshots of either host that carry the tag `daily`.
+
+The address of the page keeps the repository and the filters. The link **Back to the snapshots** on a snapshot page returns to the same view. The screen has an empty state for each case: no repository, no snapshots in the repository, and no snapshot that matches the filters.
+
+The API keeps its filter parameters. The control plane applies the date range, and restic applies the host, the tag and the path. The screen filters the loaded list by the same rules. The result agrees with `restic snapshots --json` for the same filters. When a repository holds more snapshots than a result can carry, the screen shows a warning and keeps the newest snapshots.
 
 ## Browse a snapshot
 

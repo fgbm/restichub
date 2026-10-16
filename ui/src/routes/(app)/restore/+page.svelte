@@ -5,6 +5,7 @@
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Repository, SnapshotItem, SnapshotsView } from '#lib/api/index.ts';
+	import SnapshotFilterBar from '#lib/components/SnapshotFilterBar.svelte';
 	import SnapshotTags from '#lib/components/SnapshotTags.svelte';
 	import {
 		Alert,
@@ -13,31 +14,28 @@
 		PageHeader,
 		Panel,
 		Select,
-		Skeleton,
-		TextField
+		Skeleton
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption } from '#lib/components/ui/index.ts';
 	import { formatBytes, formatLocalTime, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode, tOr } from '#lib/i18n/index.ts';
 	import { EMPTY_FILTERS, filtersFromQuery, filtersToQuery, targetExtra } from '#lib/restore.ts';
+	import type { RestoreFilters } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
+	import { applyFilters, hasFilters } from '#lib/snapshot-filter.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
 	const PAGE_SIZE = 15;
+	const ADDRESS_DELAY = 300;
 
 	const query = page.url.searchParams;
-	const initial = filtersFromQuery(query);
 	// The snapshot that the person had open: the detail page links back with it.
 	const opened = query.get('snapshot') ?? '';
 
 	let repositories = $state<Repository[]>([]);
 	let profiles = $state(new Map<string, string>());
 	let repositoryId = $state(query.get('repository') ?? '');
-	let host = $state(initial.host);
-	let tag = $state(initial.tag);
-	let path = $state(initial.path);
-	let from = $state(initial.from);
-	let to = $state(initial.to);
+	let filters = $state<RestoreFilters>(filtersFromQuery(query));
 
 	let loading = $state(true);
 	let pending = $state(false);
@@ -46,13 +44,15 @@
 	let visible = $state(PAGE_SIZE);
 	// A newer request makes the answer of an older one obsolete.
 	let generation = 0;
+	let addressTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const canRestore = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const repositoryOptions = $derived<SelectOption[]>(
 		repositories.map((item) => ({ value: item.id, label: item.name }))
 	);
-	const snapshots = $derived(view?.snapshots ?? []);
-	const shown = $derived(snapshots.slice(0, visible));
+	const snapshots = $derived(view?.state === 'done' ? view.snapshots : []);
+	const matching = $derived(applyFilters(snapshots, filters, Date.now()));
+	const shown = $derived(matching.slice(0, visible));
 
 	function describe(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -65,51 +65,23 @@
 		return tOr(`jobs.reason.${code}`, code);
 	}
 
-	// The date inputs hold a day. The range covers the whole local day.
-	function range(): { from?: string; to?: string } {
-		return {
-			from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined,
-			to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined
-		};
-	}
-
-	function filters() {
-		return { host: host.trim(), tag: tag.trim(), path: path.trim(), from, to };
-	}
-
-	function sameList(list: string[], value: string): boolean {
-		return value === '' ? list.length === 0 : list.length === 1 && list[0] === value;
-	}
-
-	// The stored list answers the filters of the address only when restic applied the same ones.
-	function answers(stored: SnapshotsView): boolean {
-		const wanted = filters();
-		return (
-			sameList(stored.hosts, wanted.host) &&
-			sameList(stored.tags, wanted.tag) &&
-			sameList(stored.paths, wanted.path)
-		);
+	// The screen filters the whole list itself, so only a list that restic made without filters fits.
+	function isWhole(stored: SnapshotsView): boolean {
+		return stored.hosts.length === 0 && stored.tags.length === 0 && stored.paths.length === 0;
 	}
 
 	function remember(): void {
-		const address = `${resolve('/(app)/restore')}?${filtersToQuery(filters(), { repository: repositoryId, ...targetExtra(query) })}`;
+		const address = `${resolve('/(app)/restore')}?${filtersToQuery(filters, { repository: repositoryId, ...targetExtra(query) })}`;
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the address starts with a resolved path
-		void goto(address, { replaceState: true });
+		void goto(address, { replace: true, reset: false });
 	}
 
-	async function show(next: SnapshotsView, mine: number): Promise<void> {
-		const done = await settle(
-			next,
-			(item) => service.getSnapshots(repositoryId, { job: item.job_id ?? undefined, ...range() }),
-			{ cancelled: () => mine !== generation }
-		);
-		if (done && mine === generation) {
-			view = done;
-			visible = PAGE_SIZE;
-		}
+	function rememberSoon(): void {
+		clearTimeout(addressTimer);
+		addressTimer = setTimeout(remember, ADDRESS_DELAY);
 	}
 
-	/** Reads the stored list of the repository. A repository without a fitting one gets a request. */
+	/** Reads the stored list of the repository. A repository without a whole one gets a request. */
 	async function open(): Promise<void> {
 		generation += 1;
 		const mine = generation;
@@ -117,9 +89,9 @@
 		error = null;
 		if (!repositoryId) return;
 		try {
-			const stored = await service.getSnapshots(repositoryId, range());
+			const stored = await service.getSnapshots(repositoryId);
 			if (mine !== generation) return;
-			if ((stored.state === 'empty' || !answers(stored)) && canRestore) await find();
+			if (stored.state === 'empty' || !isWhole(stored)) await find();
 			else {
 				view = stored;
 				visible = PAGE_SIZE;
@@ -129,23 +101,28 @@
 		}
 	}
 
+	/** Runs a list job for the whole repository. The old list stays on screen until the new one is in. */
 	async function find(): Promise<void> {
 		generation += 1;
 		const mine = generation;
 		pending = true;
 		error = null;
 		try {
-			const wanted = filters();
-			const list = (value: string) => (value ? [value] : []);
 			const started = await service.startSnapshots(repositoryId, {
-				hosts: list(wanted.host),
-				tags: list(wanted.tag),
-				paths: list(wanted.path)
+				hosts: [],
+				tags: [],
+				paths: []
 			});
 			if (mine !== generation) return;
-			view = started;
-			remember();
-			await show(started, mine);
+			const done = await settle(
+				started,
+				(item) => service.getSnapshots(repositoryId, { job: item.job_id ?? undefined }),
+				{ cancelled: () => mine !== generation }
+			);
+			if (done && mine === generation) {
+				view = done;
+				visible = PAGE_SIZE;
+			}
 		} catch (problem) {
 			if (mine === generation) error = describe(problem);
 		} finally {
@@ -153,13 +130,16 @@
 		}
 	}
 
+	function change(patch: Partial<RestoreFilters>): void {
+		filters = { ...filters, ...patch };
+		visible = PAGE_SIZE;
+		rememberSoon();
+	}
+
 	function reset(): void {
-		host = EMPTY_FILTERS.host;
-		tag = EMPTY_FILTERS.tag;
-		path = EMPTY_FILTERS.path;
-		from = EMPTY_FILTERS.from;
-		to = EMPTY_FILTERS.to;
-		void find();
+		filters = { ...EMPTY_FILTERS };
+		visible = PAGE_SIZE;
+		rememberSoon();
 	}
 
 	function changeRepository(): void {
@@ -172,26 +152,29 @@
 			repository: repositoryId,
 			snapshot: snapshot.id
 		});
-		return `${address}?${filtersToQuery(filters(), targetExtra(query))}`;
+		return `${address}?${filtersToQuery(filters, targetExtra(query))}`;
 	}
 
-	onMount(async () => {
-		try {
-			const [allRepositories, allProfiles] = await Promise.all([
-				service.listRepositories(),
-				service.listProfiles().catch(() => [])
-			]);
-			repositories = allRepositories.filter((item) => item.initialized);
-			profiles = new Map(allProfiles.map((item) => [item.id, item.name]));
-			if (!repositories.some((item) => item.id === repositoryId)) {
-				repositoryId = repositories[0]?.id ?? '';
+	onMount(() => {
+		void (async () => {
+			try {
+				const [allRepositories, allProfiles] = await Promise.all([
+					service.listRepositories(),
+					service.listProfiles().catch(() => [])
+				]);
+				repositories = allRepositories.filter((item) => item.initialized);
+				profiles = new Map(allProfiles.map((item) => [item.id, item.name]));
+				if (!repositories.some((item) => item.id === repositoryId)) {
+					repositoryId = repositories[0]?.id ?? '';
+				}
+			} catch (problem) {
+				error = describe(problem);
+			} finally {
+				loading = false;
 			}
-		} catch (problem) {
-			error = describe(problem);
-		} finally {
-			loading = false;
-		}
-		await open();
+			await open();
+		})();
+		return () => clearTimeout(addressTimer);
 	});
 </script>
 
@@ -199,7 +182,21 @@
 	<title>{t('restore.title')} · {t('app.name')}</title>
 </svelte:head>
 
-<PageHeader title={t('restore.title')} description={t('restore.description')} />
+<PageHeader title={t('restore.title')} description={t('restore.description')}>
+	{#if canRestore && repositories.length > 0}
+		<div class="repository">
+			<label class="repository__label" for="restore-repository"
+				>{t('restore.repositoryLabel')}</label
+			>
+			<Select
+				id="restore-repository"
+				options={repositoryOptions}
+				bind:value={repositoryId}
+				onchange={changeRepository}
+			/>
+		</div>
+	{/if}
+</PageHeader>
 
 {#if !canRestore}
 	<Alert tone="attention" icon="lock" title={t('restore.forbidden')} />
@@ -215,35 +212,6 @@
 		</Button>
 	</EmptyState>
 {:else}
-	<Panel title={t('restore.filters')}>
-		<form
-			class="filters"
-			onsubmit={(event) => {
-				event.preventDefault();
-				void find();
-			}}
-		>
-			<Select
-				id="restore-repository"
-				label={t('restore.repository')}
-				options={repositoryOptions}
-				bind:value={repositoryId}
-				onchange={changeRepository}
-			/>
-			<TextField id="restore-host" label={t('restore.host')} bind:value={host} />
-			<TextField id="restore-tag" label={t('restore.tag')} bind:value={tag} />
-			<TextField id="restore-path" label={t('restore.path')} mono bind:value={path} />
-			<TextField id="restore-from" type="date" label={t('restore.from')} bind:value={from} />
-			<TextField id="restore-to" type="date" label={t('restore.to')} bind:value={to} />
-			<div class="filters__actions">
-				<Button type="submit" variant="primary" icon="search" loading={pending}>
-					{t('restore.find')}
-				</Button>
-				<Button variant="ghost" onclick={reset}>{t('restore.reset')}</Button>
-			</div>
-		</form>
-	</Panel>
-
 	{#if error}
 		<Alert tone="danger" title={error} />
 	{/if}
@@ -265,20 +233,46 @@
 	<div class="list">
 		<Panel
 			title={t('restore.snapshots')}
-			subtitle={view?.state === 'done' ? t('restore.listCount', { count: snapshots.length }) : ''}
+			subtitle={view?.state === 'done'
+				? hasFilters(filters)
+					? t('restore.listFiltered', { shown: matching.length, total: snapshots.length })
+					: t('restore.listCount', { count: snapshots.length })
+				: ''}
 			flush
 		>
 			{#snippet actions()}
 				{#if view?.state === 'done' && view.fetched_at}
 					<span class="muted">{t('restore.listAge', { time: relativeTime(view.fetched_at) })}</span>
 				{/if}
+				<Button
+					variant="ghost"
+					size="sm"
+					icon="refresh"
+					aria-label={t('restore.refresh')}
+					title={t('restore.refresh')}
+					loading={pending}
+					disabled={!repositoryId}
+					onclick={() => void find()}
+				/>
 			{/snippet}
-			{#if loading || (pending && snapshots.length === 0)}
-				<div class="list__state"><Skeleton variant="row" /></div>
-			{:else if snapshots.length === 0}
-				<p class="list__state muted">
-					{view?.state === 'empty' ? t('restore.listNone') : t('restore.listEmpty')}
-				</p>
+			{#if view?.state === 'done' && snapshots.length > 0}
+				<SnapshotFilterBar {snapshots} {filters} {profiles} onchange={change} onreset={reset} />
+			{/if}
+			{#if loading || (pending && !view)}
+				<div class="list__state">
+					<p class="muted">{t('restore.listLoading')}</p>
+					<Skeleton variant="row" />
+				</div>
+			{:else if view?.state === 'done' && snapshots.length === 0}
+				<EmptyState
+					icon="restore"
+					title={t('restore.listNoSnapshots')}
+					description={t('restore.listNoSnapshotsDescription')}
+				/>
+			{:else if view && matching.length === 0}
+				<EmptyState icon="search" title={t('restore.listEmpty')}>
+					<Button onclick={reset}>{t('restore.reset')}</Button>
+				</EmptyState>
 			{:else}
 				<div class="head" aria-hidden="true">
 					<span>{t('restore.snapshot')}</span>
@@ -310,10 +304,10 @@
 						</li>
 					{/each}
 				</ul>
-				{#if snapshots.length > shown.length}
+				{#if matching.length > shown.length}
 					<div class="more">
 						<Button onclick={() => (visible += PAGE_SIZE)}>
-							{t('restore.showMore', { count: snapshots.length - shown.length })}
+							{t('restore.showMore', { count: matching.length - shown.length })}
 						</Button>
 					</div>
 				{/if}
@@ -323,18 +317,19 @@
 {/if}
 
 <style>
-	.filters {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-		gap: var(--rh-space-3);
-		align-items: end;
-	}
-
-	.filters__actions {
+	.repository {
 		display: flex;
-		grid-column: 1 / -1;
 		align-items: center;
 		gap: var(--rh-space-2);
+	}
+
+	.repository__label {
+		color: var(--rh-color-text-muted);
+		white-space: nowrap;
+	}
+
+	.repository :global(.rh-select) {
+		min-width: 12rem;
 	}
 
 	.list {
@@ -342,7 +337,6 @@
 	}
 
 	.list__state {
-		margin: 0;
 		padding: var(--rh-space-4);
 	}
 
@@ -458,6 +452,21 @@
 		justify-content: center;
 		padding: var(--rh-space-3);
 		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
+	}
+
+	@media (max-width: 40rem) {
+		/* The label leaves the screen but stays the accessible name; the header has no room for both. */
+		.repository__label {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+		}
+
+		.repository :global(.rh-select) {
+			min-width: 9rem;
+		}
 	}
 
 	@media (max-width: 52rem) {
