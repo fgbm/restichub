@@ -15,7 +15,7 @@
 	} from '#lib/api/index.ts';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Alert, Button, Checkbox, Select, TextField } from './ui/index.ts';
+	import { Alert, Button, Checkbox, ConfirmDialog, Select, TextField } from './ui/index.ts';
 	import type { KeyValueItem, SelectOption } from './ui/index.ts';
 	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -54,6 +54,8 @@
 	let repositories = $state<Repository[]>([]);
 	let saving = $state(false);
 	let saved = false;
+	let deleteOpen = $state(false);
+	let deleting = $state(false);
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let baseline = $state('');
@@ -307,6 +309,23 @@
 			saving = false;
 		}
 	}
+
+	// Delete is on the plan page only, so a list item keeps two actions.
+	async function confirmDelete(): Promise<void> {
+		if (!existing) return;
+		deleting = true;
+		try {
+			await service.deletePlan(existing.id);
+			pushToast('success', t('plans.deleted'));
+			deleteOpen = false;
+			saved = true;
+			await goto(resolve('/(app)/plans'));
+		} catch (problem) {
+			pushToast('danger', messageOf(problem));
+		} finally {
+			deleting = false;
+		}
+	}
 </script>
 
 <RecordPage
@@ -319,6 +338,16 @@
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
 		<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
+		{#if existing && canWrite}
+			<Button
+				size="sm"
+				variant="danger"
+				icon="trash"
+				title={t('plans.delete')}
+				aria-label={t('plans.delete')}
+				onclick={() => (deleteOpen = true)}
+			/>
+		{/if}
 	{/snippet}
 	{#snippet banners()}
 		{#if formError}
@@ -477,6 +506,16 @@
 			bind:value={rpoHours}
 		/>
 	</ProfileSection>
+
+	<ConfirmDialog
+		bind:open={deleteOpen}
+		title={t('plans.deleteTitle')}
+		message={t('plans.deleteBody', { name: existing?.name ?? '' })}
+		confirmLabel={t('plans.delete')}
+		tone="danger"
+		loading={deleting}
+		onConfirm={confirmDelete}
+	/>
 </RecordPage>
 
 <style>

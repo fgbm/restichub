@@ -9,7 +9,7 @@ import Profiles from './+page.svelte';
 const mocks = vi.hoisted(() => ({
 	listProfiles: vi.fn(),
 	listRepositories: vi.fn(),
-	listAgents: vi.fn(),
+	listPlans: vi.fn(),
 	goto: vi.fn()
 }));
 
@@ -33,7 +33,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			listProfiles: mocks.listProfiles,
 			listRepositories: mocks.listRepositories,
-			listAgents: mocks.listAgents
+			listPlans: mocks.listPlans
 		}
 	};
 });
@@ -46,11 +46,13 @@ beforeEach(() => {
 			name: 'db-nightly',
 			repository_id: 'r_1',
 			tags: ['db'],
-			retention: null
+			retention: { keep_daily: 7, keep_weekly: 4 },
+			paths: { all: ['/srv/db', '/etc'] },
+			updated_at: '2026-10-01T00:00:00Z'
 		}
 	]);
 	mocks.listRepositories.mockResolvedValue([{ id: 'r_1', name: 'offsite' }]);
-	mocks.listAgents.mockResolvedValue([]);
+	mocks.listPlans.mockResolvedValue([{ id: 'pl_1', profile_id: 'p_1' }]);
 });
 
 describe('Profiles list', () => {
@@ -60,12 +62,33 @@ describe('Profiles list', () => {
 		expect(link).toHaveAttribute('href', '/(app)/profiles/p_1');
 	});
 
-	it('opens the editor page from the row and keeps preview and delete as icon buttons', async () => {
+	it('keeps copy and delete as icon buttons and blocks the delete of a profile in use', async () => {
 		render(Profiles);
-		const link = await screen.findByRole('link', { name: 'db-nightly' });
-		expect(link.getAttribute('href')).toContain('p_1');
-		expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
+		await screen.findByRole('link', { name: 'db-nightly' });
+		expect(screen.getByRole('button', { name: 'Make a copy' })).toBeInTheDocument();
+		const remove = screen.getByRole('button', { name: 'Delete profile' });
+		expect(remove).toBeDisabled();
+		expect(remove).toHaveAttribute('title', 'A plan uses the profile. Delete the plans first.');
 		expect(screen.queryByRole('button', { name: 'More actions for db-nightly' })).toBeNull();
+		expect(screen.getByText('offsite')).toBeInTheDocument();
+		expect(screen.getByText('1 plan')).toBeInTheDocument();
+		expect(screen.getByText('/srv/db +1')).toBeInTheDocument();
+		expect(screen.getByText('7 d · 4 wk')).toBeInTheDocument();
+	});
+
+	it('opens a new profile as a copy', async () => {
+		const user = userEvent.setup();
+		render(Profiles);
+		await user.click(await screen.findByRole('button', { name: 'Make a copy' }));
+		expect(mocks.goto).toHaveBeenCalledWith('/(app)/profiles/new?from=p_1');
+	});
+
+	it('marks a profile without plans as not used', async () => {
+		mocks.listPlans.mockResolvedValue([]);
+		render(Profiles);
+		await screen.findByRole('link', { name: 'db-nightly' });
+		expect(screen.getByText('Not used', { selector: '.status' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Delete profile' })).toBeEnabled();
 	});
 
 	it('opens the new profile page from the Add button', async () => {

@@ -148,6 +148,16 @@ async function expand(u: ReturnType<typeof userEvent.setup>, title: RegExp) {
 	await u.click(await screen.findByRole('button', { name: title }));
 }
 
+describe('Profile editor copy', () => {
+	it('starts a new profile as a copy of another profile', async () => {
+		render(ProfileEditor, { copyFrom: 'p_1' });
+		await screen.findByRole('heading', { level: 1, name: 'New profile' });
+		expect(document.querySelector<HTMLInputElement>('#profile-name')?.value).toBe(
+			'db-nightly (copy)'
+		);
+	});
+});
+
 describe('Profile editor scripts', () => {
 	it('shows the scripts of the profile and warns about the host of its plan', async () => {
 		const u = user();

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 	listPlans: vi.fn(),
 	deletePlan: vi.fn(),
 	runPlan: vi.fn(),
+	updatePlan: vi.fn(),
 	pushToast: vi.fn(),
 	goto: vi.fn()
 }));
@@ -46,7 +47,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			listPlans: mocks.listPlans,
 			deletePlan: mocks.deletePlan,
-			runPlan: mocks.runPlan
+			runPlan: mocks.runPlan,
+			updatePlan: mocks.updatePlan
 		}
 	};
 });
@@ -90,9 +92,11 @@ describe('the Plans screen', () => {
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
 		expect(screen.getByText('win-fs01')).toBeInTheDocument();
 		expect(screen.getByText('web-daily')).toBeInTheDocument();
-		// The schedule column shows the phrase and the cron expression.
-		expect(screen.getByText('Every day at 02:00')).toBeInTheDocument();
-		expect(screen.getByText('0 2 * * *')).toBeInTheDocument();
+		// The schedule shows the phrase; the cron expression and the zone are in its tooltip.
+		expect(screen.getByText('Every day at 02:00')).toHaveAttribute(
+			'title',
+			'0 2 * * * · Europe/Berlin'
+		);
 	});
 
 	it('opens the new plan page from the add button', async () => {
@@ -139,18 +143,31 @@ describe('the Plans screen', () => {
 		expect(link).toHaveAttribute('href', '/plans/pl_1');
 	});
 
-	it('deletes a plan after the confirmation', async () => {
+	it('disables a plan from its item and keeps delete on the plan page', async () => {
 		const user = userEvent.setup();
-		mocks.listPlans.mockResolvedValueOnce([plan()]).mockResolvedValueOnce([]);
-		mocks.deletePlan.mockResolvedValue(undefined);
+		mocks.listPlans.mockResolvedValue([plan()]);
+		mocks.updatePlan.mockResolvedValue({});
 		render(Plans);
 
 		await screen.findByText('nightly-web');
-		await user.click(screen.getByRole('button', { name: 'Delete plan' }));
-		const dialog = await screen.findByRole('dialog');
-		await user.click(within(dialog).getByRole('button', { name: 'Delete plan' }));
+		expect(screen.queryByRole('button', { name: 'Delete plan' })).not.toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Disable' }));
+		await waitFor(() =>
+			expect(mocks.updatePlan).toHaveBeenCalledWith(
+				'pl_1',
+				expect.objectContaining({ enabled: false, cron: '0 2 * * *', profile_id: 'p_1' })
+			)
+		);
+	});
 
-		await waitFor(() => expect(mocks.deletePlan).toHaveBeenCalledWith('pl_1'));
-		expect(await screen.findByText('No plans yet')).toBeInTheDocument();
+	it('shows the Disabled pill and filters the disabled plans with a tab', async () => {
+		const user = userEvent.setup();
+		mocks.listPlans.mockResolvedValue([plan(), plan({ id: 'pl_2', name: 'old', enabled: false })]);
+		render(Plans);
+
+		await screen.findByText('old');
+		expect(screen.getAllByText('Disabled').some((node) => node.closest('.status'))).toBe(true);
+		await user.click(screen.getByRole('button', { name: 'Disabled 1' }));
+		expect(mocks.goto).toHaveBeenCalled();
 	});
 });

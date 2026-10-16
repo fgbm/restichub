@@ -41,7 +41,14 @@
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 
-	let { profileId = null }: { profileId?: string | null } = $props();
+	let {
+		profileId = null,
+		copyFrom = null
+	}: {
+		profileId?: string | null;
+		/** A new profile starts as a copy of this profile. */
+		copyFrom?: string | null;
+	} = $props();
 
 	const SECTIONS = SUMMARY_ORDER;
 
@@ -161,7 +168,13 @@
 				existing = found;
 				draft = draftFromProfile(found);
 			} else {
-				draft = emptyDraft(repositoryList[0]?.id ?? '', defaults);
+				const source = copyFrom ? profileList.find((item) => item.id === copyFrom) : undefined;
+				if (source) {
+					draft = draftFromProfile(source);
+					draft.name = t('profiles.copyName', { name: source.name });
+				} else {
+					draft = emptyDraft(repositoryList[0]?.id ?? '', defaults);
+				}
 			}
 			// The templates and the secrets serve the script editor only. A failure leaves the
 			// editor without choices and does not block the page.

@@ -3,34 +3,22 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Agent, ApiProblem, PreviewResponse, Profile } from '#lib/api/index.ts';
+	import type { Plan, Profile } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
-	import {
-		Alert,
-		Badge,
-		Button,
-		ConfirmDialog,
-		DataTable,
-		EmptyState,
-		FilterBar,
-		Select,
-		SidePanel
-	} from '#lib/components/ui/index.ts';
-	import type {
-		FilterFacet,
-		RowAction,
-		SelectOption,
-		TableColumn
-	} from '#lib/components/ui/index.ts';
+	import { Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, ListMeta, RowAction } from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import type { MessageKey } from '#lib/i18n/index.ts';
+	import { plural } from '#lib/list-format.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
 
 	let profiles = $state<Profile[]>([]);
 	let repositories = $state<{ id: string; name: string }[]>([]);
-	let agents = $state<Agent[]>([]);
+	let plans = $state<Plan[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
@@ -38,50 +26,23 @@
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
 
-	let previewOpen = $state(false);
-	let previewTarget = $state<Profile | null>(null);
-	let previewAgentId = $state('');
-	let previewLoading = $state(false);
-	let previewResult = $state<PreviewResponse | null>(null);
-	let previewProblem = $state<ApiProblem | null>(null);
-
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const repositoryNames = $derived(new Map(repositories.map((item) => [item.id, item.name])));
-	const agentOptions = $derived<SelectOption[]>([
-		{ value: '', label: t('profiles.previewHost') },
-		...agents
-			.filter((agent) => agent.status === 'active')
-			.map((agent) => ({ value: agent.id, label: agent.hostname }))
-	]);
-
-	const columns = $derived<TableColumn<Profile>[]>([
-		{ key: 'name', header: t('profiles.profile'), truncate: 'sm' },
-		{
-			key: 'repository',
-			header: t('profiles.repository'),
-			truncate: 'sm',
-			value: repositoryName
-		},
-		{
-			key: 'tags',
-			header: t('profiles.tags'),
-			truncate: 'sm',
-			value: (row) => row.tags.join(', ')
-		},
-		{
-			key: 'retention',
-			header: t('profiles.retention'),
-			truncate: 'md',
-			hideNarrow: true,
-			value: (row) => retentionSummary(row)
-		}
-	]);
+	const planCounts = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const plan of plans) counts.set(plan.profile_id, (counts.get(plan.profile_id) ?? 0) + 1);
+		return counts;
+	});
 
 	function repositoryName(profile: Profile): string {
 		return repositoryNames.get(profile.repository_id) ?? profile.repository_id;
 	}
 
-	const filters = queryFilters(['q', 'repository', 'tag'] as const);
+	function planCount(profile: Profile): number {
+		return planCounts.get(profile.id) ?? 0;
+	}
+
+	const filters = queryFilters(['q', 'repository', 'tag', 'state', 'sort', 'order'] as const);
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -99,7 +60,7 @@
 		}
 	]);
 
-	const shown = $derived(
+	const matching = $derived(
 		profiles.filter((profile) => {
 			const { q, repository, tag } = filters.value;
 			if (!matchesSearch(q, [profile.name, repositoryName(profile), ...profile.tags])) return false;
@@ -109,26 +70,112 @@
 		})
 	);
 
-	const empty = $derived(!loading && !error && profiles.length === 0);
+	const states = $derived({
+		default: 'all',
+		options: [
+			{ value: 'all', label: t('profiles.tab.all'), count: matching.length },
+			{
+				value: 'unused',
+				label: t('profiles.tab.unused'),
+				count: matching.filter((profile) => planCount(profile) === 0).length
+			}
+		]
+	});
 
-	function openCreate(): void {
-		void goto(resolve('/(app)/profiles/new'));
+	const sort = $derived({
+		default: 'name',
+		options: [
+			{ value: 'name', label: t('profiles.sort.name') },
+			{ value: 'changed', label: t('profiles.sort.changed'), order: 'desc' as const }
+		]
+	});
+
+	const shown = $derived.by(() => {
+		const list = matching.filter(
+			(profile) => filters.value.state !== 'unused' || planCount(profile) === 0
+		);
+		const byChange = filters.value.sort === 'changed';
+		const order = filters.value.order || (byChange ? 'desc' : 'asc');
+		const factor = order === 'desc' ? -1 : 1;
+		const key = (profile: Profile) => (byChange ? profile.updated_at : profile.name);
+		return [...list].sort((a, b) => factor * key(a).localeCompare(key(b)));
+	});
+
+	const filtered = $derived(
+		profiles.length > 0 &&
+			Boolean(filters.value.q || filters.value.repository || filters.value.tag || filters.value.state)
+	);
+
+	function resetFilters(): void {
+		filters.update({ q: '', repository: '', tag: '', state: '' });
+	}
+
+	function firstPath(profile: Profile): { first: string; total: number } | null {
+		const paths = profile.paths;
+		const all = [
+			...(paths.all ?? []),
+			...(paths.windows ?? []),
+			...(paths.linux ?? []),
+			...(paths.macos ?? [])
+		];
+		return all.length > 0 ? { first: all[0], total: all.length } : null;
+	}
+
+	const RETENTION: [keyof NonNullable<Profile['retention']>, MessageKey][] = [
+		['keep_last', 'profiles.short.last'],
+		['keep_hourly', 'profiles.short.hourly'],
+		['keep_daily', 'profiles.short.daily'],
+		['keep_weekly', 'profiles.short.weekly'],
+		['keep_monthly', 'profiles.short.monthly'],
+		['keep_yearly', 'profiles.short.yearly']
+	];
+
+	function retentionShort(profile: Profile): string {
+		const retention = profile.retention;
+		if (!retention) return '';
+		const parts = RETENTION.filter(([key]) => Number(retention[key] ?? 0) > 0).map(
+			([key, message]) => t(message, { count: Number(retention[key]) })
+		);
+		if (retention.keep_within) {
+			parts.push(t('profiles.short.within', { value: retention.keep_within }));
+		}
+		return parts.join(' · ');
+	}
+
+	function meta(profile: Profile): ListMeta[] {
+		const path = firstPath(profile);
+		const count = planCount(profile);
+		return [
+			repositoryName(profile),
+			path
+				? {
+						text: path.total > 1 ? `${path.first} +${path.total - 1}` : path.first,
+						mono: true
+					}
+				: null,
+			retentionShort(profile),
+			count > 0 ? plural('profiles.plans', count) : t('profiles.noPlans')
+		];
 	}
 
 	function actionsFor(profile: Profile): RowAction[] {
+		if (!canWrite) return [];
+		const used = planCount(profile) > 0;
 		return [
 			{
-				id: 'preview',
-				label: t('profiles.preview'),
-				icon: 'eye',
-				onSelect: () => openPreview(profile)
+				id: 'copy',
+				label: t('profiles.copy'),
+				icon: 'copy',
+				onSelect: () =>
+					void goto(`${resolve('/(app)/profiles/new')}?from=${encodeURIComponent(profile.id)}`)
 			},
 			{
 				id: 'delete',
 				label: t('profiles.delete'),
-				icon: 'octagon',
+				hint: used ? t('profiles.deleteInUse') : undefined,
+				icon: 'trash',
 				danger: true,
-				hidden: !canWrite,
+				disabled: used,
 				onSelect: () => {
 					deleteTarget = profile;
 					deleteOpen = true;
@@ -137,50 +184,23 @@
 		];
 	}
 
-	function retentionSummary(profile: Profile): string {
-		if (!profile.retention) return t('common.none');
-		const retention = profile.retention;
-		const parts: string[] = [];
-		if ((retention.keep_last ?? 0) > 0)
-			parts.push(t('profiles.retention.summary.last', { count: retention.keep_last ?? 0 }));
-		if ((retention.keep_daily ?? 0) > 0)
-			parts.push(t('profiles.retention.summary.daily', { count: retention.keep_daily ?? 0 }));
-		if ((retention.keep_weekly ?? 0) > 0)
-			parts.push(t('profiles.retention.summary.weekly', { count: retention.keep_weekly ?? 0 }));
-		if ((retention.keep_monthly ?? 0) > 0)
-			parts.push(t('profiles.retention.summary.monthly', { count: retention.keep_monthly ?? 0 }));
-		if ((retention.keep_yearly ?? 0) > 0)
-			parts.push(t('profiles.retention.summary.yearly', { count: retention.keep_yearly ?? 0 }));
-		if (retention.keep_within)
-			parts.push(t('profiles.retention.summary.within', { value: retention.keep_within }));
-		return parts.length > 0 ? parts.join(', ') : t('common.none');
-	}
-
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
 		return t('table.error');
-	}
-
-	function problemOf(problem: unknown): ApiProblem | null {
-		if (problem instanceof ApiError) return problem.problem;
-		if (problem && typeof problem === 'object' && 'problem' in problem) {
-			return (problem as { problem: ApiProblem }).problem;
-		}
-		return null;
 	}
 
 	async function load(): Promise<void> {
 		loading = true;
 		error = null;
 		try {
-			const [profileList, repositoryList, agentList] = await Promise.all([
+			const [profileList, repositoryList, planList] = await Promise.all([
 				service.listProfiles(),
 				service.listRepositories(),
-				service.listAgents()
+				service.listPlans()
 			]);
 			profiles = profileList;
 			repositories = repositoryList;
-			agents = agentList;
+			plans = planList;
 		} catch (problem) {
 			error = messageOf(problem);
 		} finally {
@@ -189,6 +209,10 @@
 	}
 
 	onMount(load);
+
+	function openCreate(): void {
+		void goto(resolve('/(app)/profiles/new'));
+	}
 
 	async function confirmDelete(): Promise<void> {
 		if (!deleteTarget) return;
@@ -205,28 +229,6 @@
 			deleting = false;
 		}
 	}
-
-	function openPreview(profile: Profile): void {
-		previewTarget = profile;
-		previewAgentId = '';
-		previewResult = null;
-		previewProblem = null;
-		previewOpen = true;
-	}
-
-	async function runPreview(): Promise<void> {
-		if (!previewTarget || !previewAgentId) return;
-		previewLoading = true;
-		previewProblem = null;
-		previewResult = null;
-		try {
-			previewResult = await service.previewProfile(previewTarget.id, previewAgentId);
-		} catch (problem) {
-			previewProblem = problemOf(problem);
-		} finally {
-			previewLoading = false;
-		}
-	}
 </script>
 
 <Page
@@ -240,93 +242,48 @@
 		{/if}
 	{/snippet}
 
-	{#if empty}
-		<EmptyState
-			icon="checklist"
-			title={t('profiles.emptyTitle')}
-			description={t('profiles.emptyDescription')}
-			bordered
-		>
+	<ListView
+		label={t('profiles.title')}
+		items={shown}
+		itemKey={(profile) => profile.id}
+		icon={() => ({ name: ENTITY_ICONS.profile })}
+		pill={(profile) =>
+			planCount(profile) === 0 ? { tone: 'neutral', label: t('profiles.unused') } : null}
+		title={(profile) => profile.name}
+		href={(profile) => resolve('/(app)/profiles/[id]', { id: profile.id })}
+		{meta}
+		actions={actionsFor}
+		moreLabel={(profile) => t('profiles.moreActions', { name: profile.name })}
+		{loading}
+		{error}
+		{filtered}
+		onReset={resetFilters}
+		emptyIcon={ENTITY_ICONS.profile}
+		emptyTitle={t('profiles.emptyTitle')}
+		emptyDescription={t('profiles.emptyDescription')}
+	>
+		{#snippet emptyActions()}
 			{#if canWrite}
 				<Button variant="primary" onclick={openCreate}>{t('profiles.addFirst')}</Button>
 			{/if}
-		</EmptyState>
-	{:else}
-		<DataTable
-			{columns}
-			rows={shown}
-			{loading}
-			{error}
-			rowKey={(profile) => profile.id}
-			rowHref={(profile) => resolve('/(app)/profiles/[id]', { id: profile.id })}
-			actions={actionsFor}
-			moreLabel={(profile) => t('profiles.moreActions', { name: profile.name })}
-			emptyTitle={t('filter.noMatches')}
-			emptyDescription={t('filter.noMatchesDescription')}
-		>
-			{#snippet toolbar()}
-				<FilterBar
-					label={t('profiles.filters')}
-					value={filters.value}
-					search={{
-						key: 'q',
-						label: t('hosts.search'),
-						placeholder: t('profiles.searchPlaceholder')
-					}}
-					{facets}
-					onchange={filters.update}
-					onreset={filters.reset}
-				/>
-			{/snippet}
-		</DataTable>
-	{/if}
-
-	<SidePanel
-		bind:open={previewOpen}
-		title={t('profiles.previewTitle')}
-		subtitle={t('profiles.previewDescription')}
-	>
-		<div class="preview">
-			<Select
-				id="preview-host"
-				label={t('profiles.previewHost')}
-				options={agentOptions}
-				bind:value={previewAgentId}
-				onchange={runPreview}
+		{/snippet}
+		{#snippet toolbar()}
+			<FilterBar
+				label={t('profiles.filters')}
+				value={filters.value}
+				search={{
+					key: 'q',
+					label: t('hosts.search'),
+					placeholder: t('profiles.searchPlaceholder')
+				}}
+				{states}
+				{facets}
+				{sort}
+				onchange={filters.update}
+				onreset={resetFilters}
 			/>
-			{#if previewProblem}
-				<Alert tone="danger" title={tErrorCode(previewProblem.code) ?? previewProblem.title}>
-					{previewProblem.field}{previewProblem.reason ? `: ${previewProblem.reason}` : ''}
-				</Alert>
-			{/if}
-			{#if previewLoading}
-				<p class="preview__hint">{t('common.loading')}</p>
-			{:else if previewResult}
-				{#each previewResult.steps as step (step.kind + step.command)}
-					<div class="step">
-						<div class="step__head">
-							<span class="step__kind">{step.kind}</span>
-							{#if step.maintenance}
-								<Badge tone="info">{t('profiles.previewMaintenance')}</Badge>
-							{/if}
-						</div>
-						<div class="step__label">{t('profiles.previewCommand')}</div>
-						<pre class="step__command">{step.command}</pre>
-						{#if step.environment.length > 0}
-							<div class="step__label">{t('profiles.previewEnvironment')}</div>
-							<ul class="step__env">
-								{#each step.environment as entry (entry.name)}
-									<li><span class="step__env-name">{entry.name}</span> = {entry.value}</li>
-								{/each}
-							</ul>
-						{/if}
-					</div>
-				{/each}
-			{:else}
-				<p class="preview__hint">{t('profiles.previewEmpty')}</p>
-			{/if}
-		</div>
-	</SidePanel>
+		{/snippet}
+	</ListView>
 
 	<ConfirmDialog
 		bind:open={deleteOpen}
@@ -338,62 +295,3 @@
 		onConfirm={confirmDelete}
 	/>
 </Page>
-
-<style>
-	.preview {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-4);
-	}
-
-	.preview__hint {
-		color: var(--rh-color-text-muted);
-	}
-
-	.step {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-2);
-		padding: var(--rh-space-3);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
-	}
-
-	.step__head {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-	}
-
-	.step__kind {
-		font-weight: var(--rh-font-weight-semibold);
-	}
-
-	.step__label {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.step__command {
-		margin: 0;
-		padding: var(--rh-space-2);
-		overflow-x: auto;
-		border-radius: var(--rh-radius-sm);
-		background-color: var(--rh-color-surface-sunken, var(--rh-color-control-bg));
-		font-family: var(--rh-font-mono);
-		font-size: var(--rh-font-size-sm);
-		white-space: pre-wrap;
-		word-break: break-all;
-	}
-
-	.step__env {
-		margin: 0;
-		padding-left: var(--rh-space-4);
-		font-family: var(--rh-font-mono);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.step__env-name {
-		color: var(--rh-color-text-muted);
-	}
-</style>
