@@ -74,6 +74,66 @@ export interface RowAction {
 	disabled?: boolean;
 }
 
+/** The tones that color a list item; the usual state has no tone. */
+export type ListTone = 'danger' | 'warning' | 'running' | 'neutral';
+
+export interface ListIcon {
+	name: IconName;
+	/** Only `danger`, `warning` and `running` color the icon. */
+	tone?: ListTone;
+	spin?: boolean;
+	/** The state that the icon shows, for the tooltip and the accessible name. */
+	label?: string;
+}
+
+export interface ListPill {
+	tone: ListTone;
+	label: string;
+	/** The full meaning of a short label, for the tooltip and the accessible name. */
+	full?: string;
+}
+
+export interface ListField {
+	text: string;
+	mono?: boolean;
+	/** An RFC 3339 time: the field is a `<time>` element with the full time in a tooltip. */
+	time?: string;
+	/** The tooltip of the field, for example the cron expression of a schedule. */
+	title?: string;
+}
+
+/** An empty field is left out, so the order of the other fields stays. */
+export type ListMeta = ListField | string | null | undefined | false;
+
+export interface FilterTab {
+	value: string;
+	label: string;
+	count?: number;
+	/** The count is red when it is more than zero, for the failure tab only. */
+	danger?: boolean;
+}
+
+export interface FilterTabs {
+	/** The query parameter of the tab. Default: `state`. */
+	key?: string;
+	options: FilterTab[];
+	/** The tab that an empty parameter selects. */
+	default: string;
+}
+
+export interface FilterSortOption {
+	value: string;
+	label: string;
+	/** The order that the field starts with. Default: `asc`. */
+	order?: 'asc' | 'desc';
+}
+
+export interface FilterSort {
+	options: FilterSortOption[];
+	/** The field that an empty `sort` parameter selects. */
+	default: string;
+}
+
 export interface TableSort {
 	key: string;
 	direction: 'asc' | 'desc';

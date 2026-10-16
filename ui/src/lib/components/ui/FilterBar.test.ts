@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { createRawSnippet } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
@@ -125,7 +125,8 @@ describe('FilterBar', () => {
 		);
 		await user.click(screen.getByRole('button', { name: /^Object ID/ }));
 		const field = await waitFor(() => document.getElementById('filter-object_id') as HTMLElement);
-		await user.type(field, '2');
+		// The focus scope of the popover settles late in jsdom, so the test types without the pointer.
+		await fireEvent.input(field, { target: { value: 'r_12' } });
 		expect(onchange).toHaveBeenLastCalledWith({ object_id: 'r_12' });
 	});
 
@@ -146,5 +147,96 @@ describe('FilterBar', () => {
 		);
 		await user.click(screen.getByRole('button', { name: /^OS/ }));
 		expect(await screen.findByText('Any chosen value matches.')).toBeInTheDocument();
+	});
+});
+
+describe('FilterBar in a list view', () => {
+	const context = new Map([['rh-list-view', true]]);
+	const states = {
+		default: 'all',
+		options: [
+			{ value: 'all', label: 'All', count: 124 },
+			{ value: 'failed', label: 'Failed', count: 3, danger: true },
+			{ value: 'running', label: 'Running', count: 0, danger: false }
+		]
+	};
+	const sort = {
+		default: 'name',
+		options: [
+			{ value: 'name', label: 'Name' },
+			{ value: 'contact', label: 'Last contact', order: 'desc' as const }
+		]
+	};
+
+	it('shows the state tabs with counts and writes the state key', async () => {
+		const onchange = vi.fn();
+		render(FilterBar, {
+			props: { label: 'Job filters', value: {}, states, onchange },
+			context
+		});
+		const all = screen.getByRole('button', { name: 'All 124' });
+		expect(all).toHaveAttribute('aria-pressed', 'true');
+		const failed = screen.getByRole('button', { name: 'Failed 3' });
+		expect(failed.querySelector('.count')).toHaveClass('count--danger');
+		await userEvent.click(failed);
+		expect(onchange).toHaveBeenLastCalledWith({ state: 'failed' });
+		await userEvent.click(all);
+		expect(onchange).toHaveBeenLastCalledWith({ state: '' });
+	});
+
+	it('makes the count red only for the failure tab with a count above zero', () => {
+		render(FilterBar, {
+			props: {
+				label: 'Job filters',
+				value: {},
+				states: {
+					...states,
+					options: [{ value: 'failed', label: 'Failed', count: 0, danger: true }]
+				},
+				onchange: vi.fn()
+			},
+			context
+		});
+		expect(
+			screen.getByRole('button', { name: 'Failed 0' }).querySelector('.count')
+		).not.toHaveClass('count--danger');
+	});
+
+	it('shows the total in place of the tabs of an entity without states', () => {
+		render(FilterBar, {
+			props: { label: 'Profile filters', value: {}, total: 7, onchange: vi.fn() },
+			context
+		});
+		expect(screen.getByText('Total')).toHaveTextContent('Total 7');
+	});
+
+	it('sets the sort field and the order in the Sort menu', async () => {
+		const user = userEvent.setup();
+		const onchange = vi.fn();
+		render(FilterBar, {
+			props: { label: 'Host filters', value: {}, sort, onchange },
+			context
+		});
+		await user.click(screen.getByRole('button', { name: /Name/ }));
+		await user.click(await screen.findByText('Last contact'));
+		expect(onchange).toHaveBeenLastCalledWith({ sort: 'contact', order: '' });
+	});
+
+	it('resets the filters and the state tab but keeps the sort', async () => {
+		const onchange = vi.fn();
+		render(FilterBar, {
+			props: {
+				label: 'Host filters',
+				value: { q: 'web', state: 'failed', sort: 'contact' },
+				search,
+				states,
+				sort,
+				onchange
+			},
+			context
+		});
+		const user = userEvent.setup({ pointerEventsCheck: 0 });
+		await user.click(screen.getByRole('button', { name: 'Reset' }));
+		expect(onchange).toHaveBeenLastCalledWith({ q: '', state: '' });
 	});
 });

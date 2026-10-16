@@ -15,6 +15,7 @@ export { default as FilterBar } from './FilterBar.svelte';
 export { default as Icon } from './Icon.svelte';
 export { default as JsonDiff } from './JsonDiff.svelte';
 export { default as KeyValue } from './KeyValue.svelte';
+export { default as ListView } from './ListView.svelte';
 export { default as RowActions } from './RowActions.svelte';
 export { default as PageHeader } from './PageHeader.svelte';
 export { default as Pagination } from './Pagination.svelte';
@@ -37,7 +38,16 @@ export type {
 	FilterFacet,
 	FilterOption,
 	FilterSearch,
+	FilterSort,
+	FilterSortOption,
+	FilterTab,
+	FilterTabs,
 	KeyValueItem,
+	ListField,
+	ListIcon,
+	ListMeta,
+	ListPill,
+	ListTone,
 	MenuItem,
 	RowAction,
 	SelectOption,

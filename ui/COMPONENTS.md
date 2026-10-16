@@ -43,6 +43,33 @@ The other properties are the same as in `Page`.
 
 `SummaryPanel` is a panel of the side panel. It shows `items` (`KeyValueItem[]`) with the label above the value. An item can have a `render` snippet instead of a text value. The panel does not appear when it has no items and no content.
 
+## ListView
+
+`ListView` (`$lib/components/ui`) is the list of the entities: hosts, jobs, plans, repositories, profiles, snapshots, alerts, audit events, channels, users, tokens, secrets, templates and organizations. Each item has two lines. Use `DataTable` only for tabular data.
+
+| Property                        | Function                                                                                                                                                   |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `items`, `itemKey`, `label`     | The items, the key of an item and the accessible name of the list.                                                                                         |
+| `icon(item)`                    | `ListIcon`: `{ name, tone?, spin?, label? }`. The icon is in a fixed column at the left. Only the `danger`, `warning` and `running` tones color it.        |
+| `title(item)`, `titleMono`      | The name in bold. A long name is cut with an ellipsis, and a tooltip shows the full name.                                                                  |
+| `href(item)`                    | The resolved address of the record page. The name is the only link of the item. The remaining part of the item is not clickable.                           |
+| `onOpen(item)`                  | For an entity without a record page. The name opens a side panel.                                                                                          |
+| `titleLabel(item)`              | The accessible name of the name, when the name is too short, for example the time of a snapshot.                                                           |
+| `pill(item)`                    | `ListPill` or `null`: `{ tone, label, full? }`. Return a pill only for a state that is not usual.                                                          |
+| `meta(item)`                    | `ListMeta[]`: the fields of line 2 in the sequence of their priority. A field is a text or `{ text, mono?, time?, title? }`. An empty field does not show. |
+| `aside(item)`                   | A number in a right-aligned column of 96 px, for example a duration or a size.                                                                             |
+| `actions(item)`, `moreLabel`    | `RowAction[]` as in `DataTable`. One or two actions are icon buttons. Three or more actions are in one "…" menu.                                           |
+| `groupBy(item)`                 | The heading of the group of the item, for example the day. Sort the items by the group.                                                                    |
+| `mode`, `page`, `pageSize`, …   | The pages, as in `DataTable`.                                                                                                                              |
+| `filtered`, `onReset`           | When a filter applies, an empty list shows "Nothing found" and a "Reset filters" button.                                                                   |
+| `emptyTitle`, `emptyActions`, … | The first-run state of an empty list, with the primary action.                                                                                             |
+| `toolbar`                       | A snippet above the list. Put the `FilterBar` in it.                                                                                                       |
+| `flush`                         | For a list in a panel body.                                                                                                                                |
+
+When the list is narrower than 560 px, line 2 shows only the first two fields. The number of `aside` goes to the end of line 2.
+
+`$lib/vocabulary.ts` has the one label, tone and icon of each entity state, for example `jobState`, `hostState` and `planState`. Use `iconOf(state)` and `pillOf(state)` for the `icon` and `pill` properties. `ENTITY_ICONS` has the type icon of each entity. `$lib/list-format.ts` has the formats of the time, the duration, the size and the plural forms.
+
 ## DataTable
 
 `DataTable` (`$lib/components/ui`) is the only table component. The lint rule `ui/no-raw-table` reports a raw `<table>` element and the older `Table` component.
@@ -79,17 +106,22 @@ Do not put a link to another entity in a cell. Do not put a status text below a 
 
 `FilterBar` (`$lib/components/ui`) is the one compact filter bar above a table. Each change applies at once.
 
-| Property   | Function                                                                                                                                                                                     |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `label`    | The accessible name of the bar.                                                                                                                                                              |
-| `value`    | The filter state (`FilterState`): one string for each query parameter. A facet with more than one value joins the values with a comma.                                                       |
-| `search`   | `{ key, label, placeholder?, mono?, id? }`: the search field.                                                                                                                                |
-| `facets`   | `FilterFacet[]`: `{ key, label, options: { value, label?, count? }[], multiple?, hint? }`. A facet is a popover with the counts. The `hint` is a short muted line at the top of the popover. |
-| `period`   | Show the period facet with the presets and a custom range. It writes the `period`, `from` and `to` keys.                                                                                     |
-| `hint`     | A short help text behind an information icon.                                                                                                                                                |
-| `end`      | A snippet at the right end of the row, for example the age of the list and a refresh button.                                                                                                 |
-| `onchange` | Receives a patch of the state.                                                                                                                                                               |
-| `onreset`  | By default, the Reset button sets each key of the bar to an empty value.                                                                                                                     |
+| Property   | Function                                                                                                                                                                                      |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`    | The accessible name of the bar.                                                                                                                                                               |
+| `value`    | The filter state (`FilterState`): one string for each query parameter. A facet with more than one value joins the values with a comma.                                                        |
+| `search`   | `{ key, label, placeholder?, mono?, id? }`: the search field.                                                                                                                                 |
+| `facets`   | `FilterFacet[]`: `{ key, label, options: { value, label?, count? }[], multiple?, hint? }`. A facet is a popover with the counts. The `hint` is a short muted line at the top of the popover.  |
+| `period`   | Show the period facet with the presets and a custom range. It writes the `period`, `from` and `to` keys.                                                                                      |
+| `states`   | `FilterTabs`: `{ key?, options: { value, label, count?, danger? }[], default }`. The state tabs with counts. A tab writes the `state` key. A `danger` count is red when it is more than zero. |
+| `total`    | The count of an entity without states, in place of the tabs. `totalNote` adds a short text, for example the period.                                                                           |
+| `sort`     | `FilterSort`: `{ options: { value, label, order? }[], default }`. The Sort menu writes the `sort` and `order` keys. An empty key is the default.                                              |
+| `hint`     | A short help text behind an information icon.                                                                                                                                                 |
+| `end`      | A snippet at the right end of the row, for example the age of the list and a refresh button.                                                                                                  |
+| `onchange` | Receives a patch of the state.                                                                                                                                                                |
+| `onreset`  | By default, the Reset button sets each key of the bar to an empty value.                                                                                                                      |
+
+Inside a `ListView`, the bar is the list header. The search field is above it. The tabs or the total are at the left, and the facets and the Sort menu are at the right. Below 640 px, the facets go into one "Filters" popover and the Sort menu becomes an icon button. A facet with seven values or more has a search field in its popover. The Reset button also returns the tabs to the default tab. It does not change the sort.
 
 The bar shows a chip with a × button for each applied filter and a Reset button when a filter applies. Put the page context, for example the repository, in the page header and not in the bar.
 
