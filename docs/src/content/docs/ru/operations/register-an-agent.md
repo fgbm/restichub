@@ -174,6 +174,7 @@ last connected:      2026-10-15 09:30:12.0 +00:00:00
 | Исполняемый файл агента | `/opt/restichub-agent/bin/restichub-agent` | `%ProgramFiles%\ResticHub\Agent\restichub-agent.exe` |
 | Restic | `/opt/restichub-agent/bin/restic` | `%ProgramFiles%\ResticHub\Agent\restic.exe` |
 | Учётные данные, файл состояния, запись restic, кэш, журнал | `/etc/restichub-agent`, `/var/lib/restichub-agent`, `/var/cache/restichub-agent` | `%ProgramData%\ResticHub\Agent` |
+| Корень восстановления по умолчанию | `/var/lib/restichub-restore` | `%ProgramData%\ResticHub-Restore` |
 
 В прежней установке restic лежал в `/var/lib/restichub-agent/bin`. В прежней установке на Windows он лежал в `%ProgramFiles%\ResticHub\Agent\bin` или в `%ProgramData%\ResticHub\Agent\bin`. Команды `register` и `install-service` останавливают работающую службу, переносят restic в каталог программы, переключают службу на новый путь и удаляют старые копии и пустой каталог `bin`. Агент сверяет перенесённый файл с хешем из записи. Учётная запись агента сохраняется, поэтому хост не регистрируется заново. Служба Windows, которая запускается с новым агентом, переносит restic сама, поэтому она продолжает работать без нового `register`. Чтобы перенести старую установку, распакуйте новый пакет агента и выполните `restichub-agent install-service` от имени `root` или администратора.
 

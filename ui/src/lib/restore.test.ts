@@ -80,8 +80,8 @@ describe('restore helpers (FR-RS-02, FR-RS-04)', () => {
 		for (const path of ['/etc', '/', '/var/lib/restichub-restore2', '/srv/restore/../etc']) {
 			expect(isWithinRoots(path, posix, false), path).toBe(false);
 		}
-		const windows = ['C:\\ProgramData\\ResticHub\\Restore'];
-		expect(isWithinRoots('c:/programdata/resticHUB/restore/x', windows, true)).toBe(true);
+		const windows = ['C:\\ProgramData\\ResticHub-Restore'];
+		expect(isWithinRoots('c:/programdata/resticHUB-restore/x', windows, true)).toBe(true);
 		expect(isWithinRoots('D:\\restore', windows, true)).toBe(false);
 		expect(isWithinRoots('/anything', ['/'], false)).toBe(true);
 		expect(isWithinRoots('/anything', [], false)).toBe(false);
@@ -91,8 +91,8 @@ describe('restore helpers (FR-RS-02, FR-RS-04)', () => {
 		expect(suggestTarget('/var/lib/restichub-restore', 'a1b2c3d4', false)).toBe(
 			'/var/lib/restichub-restore/a1b2c3d4'
 		);
-		expect(suggestTarget('C:\\ProgramData\\ResticHub\\Restore\\', 'a1b2c3d4', true)).toBe(
-			'C:\\ProgramData\\ResticHub\\Restore\\a1b2c3d4'
+		expect(suggestTarget('C:\\ProgramData\\ResticHub-Restore\\', 'a1b2c3d4', true)).toBe(
+			'C:\\ProgramData\\ResticHub-Restore\\a1b2c3d4'
 		);
 		expect(suggestTarget(undefined, 'a1b2c3d4', false)).toBe('');
 	});

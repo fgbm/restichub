@@ -63,7 +63,7 @@ The agent runs as root on Linux and as LocalSystem on Windows. It restores only 
 | System | Default root |
 |---|---|
 | Linux | `/var/lib/restichub-restore` |
-| Windows | `C:\ProgramData\ResticHub\Restore` |
+| Windows | `C:\ProgramData\ResticHub-Restore` |
 
 `install-service` creates the default root with access for the service account only. The agent reports its roots to the control plane. The screen suggests the first root, and the control plane refuses a target outside the roots with HTTP 409 `restore_target_denied`. The agent checks the target again and has the last word. It rejects the job with the reason `restore_target_denied`.
 
@@ -74,6 +74,10 @@ A root must be writable only by root or Administrators. The root and each existi
 A root of `/` allows a restore to any other directory, for example `/srv/data`. A file of the agent, a parent of one and a path inside one stay refused. The target `/` is not possible, because it holds the files of the agent. Set the root `/` only when you want this. The screen shows a warning for a system path such as `/etc`.
 
 The agent always refuses a target that is, holds or lies inside its own files. These are the configuration directory, the cache directory, and the directory of the agent and restic binaries. It follows symbolic links first. A root of `/` does not change this rule.
+
+### The default root of an earlier version
+
+An earlier agent for Windows used `C:\ProgramData\ResticHub\Restore` as the default root. That directory lies in the tree of the agent, where the agent sets the access of each directory itself. The agent no longer uses it as a default root. It does not move or change the data in it. A restore to that directory fails with the reason `restore_target_denied`, until you add the root again. Restore to the new default root, or write the old path on one line of the file `C:\ProgramData\ResticHub\Agent-restore-roots.txt`.
 
 ## API
 

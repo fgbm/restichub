@@ -399,6 +399,15 @@ fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
         job_error(JobStatus::NotInitialized, &Progress::default()).map(|error| error.code),
         Some("repository_missing".to_owned())
     );
+    let not_started = Progress {
+        stopped_code: Some(-1),
+        restic_not_started: true,
+        ..Progress::default()
+    };
+    assert_eq!(
+        job_error(JobStatus::Failed, &not_started).map(|error| error.code),
+        Some("step_not_started".to_owned())
+    );
 }
 
 #[test]

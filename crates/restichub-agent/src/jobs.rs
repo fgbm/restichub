@@ -739,6 +739,9 @@ impl Jobs {
             ) {
                 progress.limit = outcome.error;
             }
+            if outcome.error == Some(StepError::NotStarted) {
+                progress.restic_not_started = true;
+            }
             match outcome.status {
                 StepStatus::Success => {
                     succeeded += 1;

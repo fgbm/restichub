@@ -259,6 +259,7 @@ A failed or refused job shows a reason under its title. The list of jobs shows t
 | `stalled` | The job was stopped: restic made no progress for too long. |
 | `step_failed` | restic stopped with an error. |
 | `step_missing` | The profile no longer holds this step. |
+| `step_not_started` | restic did not start. The job log has the cause. |
 | `succeeded_with_warnings` | Finished with warnings. |
 | `timed_out` | The job ran longer than its maximum duration. |
 | `unacknowledged_expired` | The host did not confirm the job before it expired. |
@@ -277,6 +278,7 @@ A failed or refused job shows a reason under its title. The list of jobs shows t
 | `repository_missing` | repository not found |
 | `stalled` | no progress |
 | `step_failed` | restic error |
+| `step_not_started` | restic did not start |
 | `wrong_password` | wrong password or keys |
 
 ## Roles

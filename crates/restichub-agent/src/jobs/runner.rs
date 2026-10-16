@@ -352,12 +352,10 @@ impl Jobs {
             Err(error) => {
                 let detail = format!("{error:#}");
                 tracing::warn!(%detail, "cannot start restic");
-                // The chain holds paths and OS messages, no secret: the user needs it to find why
-                // the job did not run.
                 log.push(
                     step_id,
                     LogStream::Agent,
-                    &format!("restic did not start: {detail}"),
+                    &scrubber.scrub(&format!("restic did not start: {detail}")),
                 );
                 self.send_log(log).await;
                 return StepOutcome::not_started();

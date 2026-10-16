@@ -696,11 +696,13 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.wrong_password':
 		'Пароль репозитория или ключи доступа неверны. Исправьте их в настройках репозитория.',
 	'jobs.reason.step_failed': 'restic остановился с ошибкой. Прочитайте журнал задания.',
+	'jobs.reason.step_not_started': 'restic не запустился. Прочитайте журнал задания.',
 	'jobs.reason.hook_failed': 'Скрипт завершился ошибкой. Прочитайте журнал скрипта.',
 	'jobs.reason.cancelled': 'Задание отменено.',
 	'jobs.reason.succeeded_with_warnings': 'Завершено с предупреждениями.',
 	'jobs.errorCode.interrupted': 'прервано перезапуском агента',
 	'jobs.errorCode.step_failed': 'ошибка restic',
+	'jobs.errorCode.step_not_started': 'restic не запустился',
 	'jobs.errorCode.wrong_password': 'неверный пароль или ключи',
 	'jobs.errorCode.repository_missing': 'репозиторий не найден',
 	'jobs.errorCode.hook_failed': 'ошибка скрипта или хука',
