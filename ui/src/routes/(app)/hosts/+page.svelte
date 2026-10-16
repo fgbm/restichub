@@ -450,9 +450,13 @@
 						</span>
 						{#if canWrite}
 							<span class="pending__action">
-								<Button size="sm" onclick={() => openCancel(token)}>
-									{t('hosts.pending.cancel')}
-								</Button>
+								<Button
+									size="sm"
+									icon="x"
+									title={t('hosts.pending.cancel')}
+									aria-label={t('hosts.pending.cancelFor', { prefix: token.display_prefix })}
+									onclick={() => openCancel(token)}
+								/>
 							</span>
 						{/if}
 					</li>

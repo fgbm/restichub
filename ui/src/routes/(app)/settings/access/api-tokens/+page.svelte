@@ -251,14 +251,15 @@
 		{#snippet rowActions(token)}
 			<Button
 				size="sm"
+				icon="circle-slash"
 				disabled={!!token.revoked_at}
+				title={t('tokens.revoke')}
+				aria-label={t('tokens.revokeFor', { name: token.name })}
 				onclick={() => {
 					revokeTarget = token;
 					revokeOpen = true;
 				}}
-			>
-				{t('tokens.revoke')}
-			</Button>
+			/>
 		{/snippet}
 	</Table>
 

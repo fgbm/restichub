@@ -8,6 +8,7 @@
 		Alert,
 		Button,
 		Dialog,
+		DropdownMenu,
 		PasswordField,
 		Select,
 		Table,
@@ -198,16 +199,34 @@
 </script>
 
 {#snippet rowActions(secret: Secret)}
-	{#if canReplaceValue(secret)}
-		<Button size="sm" onclick={() => openReplace(secret)}>{t('secrets.replace')}</Button>
-	{/if}
-	<Button size="sm" icon="trash" onclick={() => openDelete(secret)}>
-		{t('secrets.delete')}
-	</Button>
+	<span class="row-actions">
+		{#if canReplaceValue(secret)}
+			<Button
+				size="sm"
+				icon="refresh"
+				title={t('secrets.replace')}
+				aria-label={t('secrets.replaceFor', { name: secret.name })}
+				onclick={() => openReplace(secret)}
+			/>
+		{/if}
+		<DropdownMenu
+			icon="more"
+			align="end"
+			label={t('secrets.moreActions', { name: secret.name })}
+			items={[
+				{
+					label: t('secrets.delete'),
+					icon: 'trash',
+					tone: 'danger',
+					onSelect: () => openDelete(secret)
+				}
+			]}
+		/>
+	</span>
 {/snippet}
 
 {#snippet nameCell(secret: Secret)}
-	<span class="secret-name">{secret.name}</span>
+	<span class="secret-name" title={secret.name}>{secret.name}</span>
 {/snippet}
 
 {#snippet usersList(secret: Secret)}
@@ -375,7 +394,17 @@
 
 <style>
 	.secret-name {
+		display: block;
+		max-width: 28ch;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		font-weight: var(--rh-font-weight-semibold);
+	}
+
+	.row-actions {
+		display: inline-flex;
+		gap: var(--rh-space-1);
 	}
 
 	.muted {

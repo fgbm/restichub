@@ -2,7 +2,15 @@
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Tenant } from '#lib/api/index.ts';
-	import { Alert, Button, Dialog, PageHeader, Table, TextField } from '#lib/components/ui/index.ts';
+	import {
+		Alert,
+		Button,
+		Dialog,
+		DropdownMenu,
+		PageHeader,
+		Table,
+		TextField
+	} from '#lib/components/ui/index.ts';
 	import type { TableColumn } from '#lib/components/ui/index.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -167,26 +175,36 @@
 >
 	{#snippet rowActions(tenant)}
 		{#if tenant.status !== 'deleted'}
-			<Button
-				size="sm"
-				variant="ghost"
-				loading={busyId === tenant.id}
-				onclick={() => toggleStatus(tenant)}
-			>
-				{tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
-			</Button>
-			<Button
-				size="sm"
-				variant="ghost"
-				disabled={tenant.status !== 'suspended'}
-				onclick={() => {
-					deleteTarget = tenant;
-					deleteTyped = '';
-					deleteOpen = true;
-				}}
-			>
-				{t('common.delete')}
-			</Button>
+			<span class="row-actions">
+				<Button
+					size="sm"
+					icon={tenant.status === 'active' ? 'pause' : 'refresh'}
+					loading={busyId === tenant.id}
+					title={tenant.status === 'active' ? t('tenants.suspend') : t('tenants.resume')}
+					aria-label={tenant.status === 'active'
+						? t('tenants.suspendFor', { name: tenant.name })
+						: t('tenants.resumeFor', { name: tenant.name })}
+					onclick={() => toggleStatus(tenant)}
+				/>
+				<DropdownMenu
+					icon="more"
+					align="end"
+					label={t('tenants.moreActions', { name: tenant.name })}
+					items={[
+						{
+							label: t('common.delete'),
+							icon: 'trash',
+							tone: 'danger',
+							disabled: tenant.status !== 'suspended',
+							onSelect: () => {
+								deleteTarget = tenant;
+								deleteTyped = '';
+								deleteOpen = true;
+							}
+						}
+					]}
+				/>
+			</span>
 		{/if}
 	{/snippet}
 </Table>
@@ -242,3 +260,10 @@
 		</Button>
 	{/snippet}
 </Dialog>
+
+<style>
+	.row-actions {
+		display: inline-flex;
+		gap: var(--rh-space-1);
+	}
+</style>

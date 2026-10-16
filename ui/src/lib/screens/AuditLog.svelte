@@ -336,7 +336,13 @@
 		rowKey={(record) => record.id}
 	>
 		{#snippet rowActions(record)}
-			<Button size="sm" icon="eye" onclick={() => openRecord(record)}>{t('audit.details')}</Button>
+			<Button
+				size="sm"
+				icon="eye"
+				title={t('audit.details')}
+				aria-label={t('audit.detailsFor', { id: record.id })}
+				onclick={() => openRecord(record)}
+			/>
 		{/snippet}
 	</Table>
 </div>

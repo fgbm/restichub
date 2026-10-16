@@ -183,6 +183,9 @@ export const en = {
 	'tenants.created': 'The organization is created.',
 	'tenants.suspend': 'Suspend',
 	'tenants.resume': 'Resume',
+	'tenants.suspendFor': 'Suspend {name}',
+	'tenants.resumeFor': 'Resume {name}',
+	'tenants.moreActions': 'More actions for {name}',
 	'tenants.suspended': 'The organization is suspended.',
 	'tenants.resumed': 'The organization is resumed.',
 	'tenants.deleteTitle': 'Delete the organization?',
@@ -287,6 +290,7 @@ export const en = {
 	'tokens.lastUsed': 'Last used',
 	'tokens.created': 'The token is created.',
 	'tokens.revoke': 'Revoke',
+	'tokens.revokeFor': 'Revoke {name}',
 	'tokens.revokeTitle': 'Revoke the token?',
 	'tokens.revokeBody':
 		'This action revokes the token "{name}". Tools with this token stop. Continue?',
@@ -328,6 +332,8 @@ export const en = {
 	'secrets.usage.channel': 'Channel',
 	'secrets.usage.jobTemplate': 'Job template',
 	'secrets.replace': 'Replace value',
+	'secrets.replaceFor': 'Replace the value of {name}',
+	'secrets.moreActions': 'More actions for {name}',
 	'secrets.replaceTitle': 'Replace the value of the secret',
 	'secrets.replaceHidden': 'The old value stays hidden',
 	'secrets.replaceHiddenText':
@@ -419,6 +425,7 @@ export const en = {
 	'hosts.pending.subtitle': 'Enrollment tokens that wait for a host.',
 	'hosts.pending.meta': 'Created by {name} · {created} · expires {expires}',
 	'hosts.pending.cancel': 'Cancel',
+	'hosts.pending.cancelFor': 'Cancel the token {prefix}',
 	'hosts.pending.keep': 'Keep',
 	'hosts.pending.cancelTitle': 'Cancel the registration?',
 	'hosts.pending.cancelBody':
@@ -969,6 +976,7 @@ export const en = {
 	'audit.filters.allActions': 'All actions',
 	'audit.copyJson': 'Copy as JSON',
 	'audit.details': 'Details',
+	'audit.detailsFor': 'Details of the record {id}',
 	'audit.recordTitle': 'Audit record {id}',
 	'audit.oldAndNew': 'Old and new',
 	'audit.actorType.user': 'User',
