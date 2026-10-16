@@ -1,14 +1,13 @@
 <script lang="ts" generics="T">
 	import type { Snippet } from 'svelte';
-	import { formatCount, formatLocalTime, formatTime, relativeTime } from '#lib/format.ts';
+	import { formatLocalTime, formatTime, relativeTime } from '#lib/format.ts';
 	import { t } from '#lib/i18n/index.ts';
 	import Badge from './Badge.svelte';
-	import Button from './Button.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import Icon from './Icon.svelte';
+	import ListFooter from './ListFooter.svelte';
 	import type { IconName } from './icons';
 	import RowActions from './RowActions.svelte';
-	import Select from './Select.svelte';
 	import SidePanel from './SidePanel.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import type { MenuItem, RowAction, TableColumn, TableSort } from './types';
@@ -135,42 +134,16 @@
 			? sorted
 			: sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 	);
-	const rangeFrom = $derived(totalRows === 0 ? 0 : (currentPage - 1) * pageSize + 1);
-	const rangeTo = $derived(Math.min(currentPage * pageSize, totalRows));
-
 	function goTo(next: number): void {
 		page = next;
 		onPageChange?.(next);
 	}
 
-	const sizeChoices = $derived([...new Set([...pageSizes, pageSize])].sort((a, b) => a - b));
-	const showSizes = $derived(
-		(!server || Boolean(onPageSizeChange)) && totalRows > (sizeChoices[0] ?? pageSize)
-	);
-	const totalLabel = $derived(totalCapped ? `${formatCount(totalRows)}+` : formatCount(totalRows));
-
-	function setPageSize(value: string): void {
-		const next = Number(value);
-		if (!Number.isFinite(next) || next === pageSize) return;
+	function setPageSize(next: number): void {
 		pageSize = next;
 		page = 1;
 		onPageSizeChange?.(next);
 	}
-
-	/** The first, the last and the neighbours of the current page; a gap stands for the rest. */
-	const pageItems = $derived.by((): (number | null)[] => {
-		if (pageCount <= 7) return Array.from({ length: pageCount }, (_, index) => index + 1);
-		const from = Math.max(2, Math.min(currentPage - 1, pageCount - 4));
-		const to = Math.min(pageCount - 1, Math.max(currentPage + 1, 5));
-		const middle = Array.from({ length: to - from + 1 }, (_, index) => from + index);
-		return [
-			1,
-			...(from > 2 ? [null] : []),
-			...middle,
-			...(to < pageCount - 1 ? [null] : []),
-			pageCount
-		];
-	});
 
 	function toggleSort(column: TableColumn<T>): void {
 		if (column.sortable === false) return;
@@ -377,63 +350,18 @@
 	</div>
 
 	{#if showPager && !loading && !error && totalRows > 0}
-		<div class="table-footer">
-			<p class="table-footer__summary">
-				{t('pagination.summary', {
-					from: formatCount(rangeFrom),
-					to: formatCount(rangeTo),
-					total: totalLabel
-				})}
-			</p>
-			<div class="table-footer__controls">
-				{#if showSizes}
-					<div class="table-footer__size">
-						<span class="table-footer__size-label" aria-hidden="true">
-							{t('pagination.pageSize')}
-						</span>
-						<Select
-							value={String(pageSize)}
-							options={sizeChoices.map((size) => ({ value: String(size), label: String(size) }))}
-							aria-label={t('pagination.pageSize')}
-							onchange={(event) => setPageSize(event.currentTarget.value)}
-						/>
-					</div>
-				{/if}
-				{#if pageCount > 1}
-					<nav class="table-footer__pager" aria-label={t('pagination.label')}>
-						<Button
-							size="sm"
-							disabled={currentPage <= 1}
-							onclick={() => goTo(currentPage - 1)}
-							icon="chevron-left"
-							aria-label={t('pagination.previous')}
-						/>
-						{#each pageItems as item, index (item ?? `gap-${index}`)}
-							{#if item === null}
-								<span class="table-footer__gap" aria-hidden="true">…</span>
-							{:else}
-								<Button
-									size="sm"
-									variant={item === currentPage ? 'primary' : 'ghost'}
-									aria-current={item === currentPage ? 'page' : undefined}
-									aria-label={t('pagination.page', { page: item })}
-									onclick={() => goTo(item)}
-								>
-									{formatCount(item)}
-								</Button>
-							{/if}
-						{/each}
-						<Button
-							size="sm"
-							disabled={currentPage >= pageCount}
-							onclick={() => goTo(currentPage + 1)}
-							icon="chevron-right"
-							aria-label={t('pagination.next')}
-						/>
-					</nav>
-				{/if}
-			</div>
-		</div>
+		<ListFooter
+			page={currentPage}
+			{pageCount}
+			{pageSize}
+			{pageSizes}
+			total={totalRows}
+			{totalCapped}
+			sizes={!server || Boolean(onPageSizeChange)}
+			{flush}
+			onPage={goTo}
+			onPageSize={setPageSize}
+		/>
 	{/if}
 </div>
 
@@ -475,10 +403,6 @@
 	.table-wrap--flush :global(th:last-child .th-btn),
 	.table-wrap--flush :global(td:last-child) {
 		padding-right: var(--rh-space-4);
-	}
-
-	.table-wrap--flush .table-footer {
-		padding: var(--rh-space-2) var(--rh-space-4);
 	}
 
 	.table-scroll {
@@ -693,62 +617,5 @@
 	.table-detail :global(.table__truncate) {
 		max-width: none;
 		white-space: normal;
-	}
-
-	.table-footer {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--rh-space-2);
-		padding: var(--rh-space-2) var(--rh-space-3);
-		border-top: var(--rh-border-width) solid var(--rh-color-border);
-	}
-
-	.table-footer__summary {
-		margin: 0;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.table-footer__controls {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--rh-space-4);
-	}
-
-	.table-footer__size {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-		white-space: nowrap;
-	}
-
-	.table-footer__size :global(.rh-select) {
-		width: auto;
-		height: 28px;
-		padding-right: var(--rh-space-6);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.table-footer__pager {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-1);
-	}
-
-	.table-footer__pager :global(.btn:not(.btn--icon)) {
-		min-width: 28px;
-		justify-content: center;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.table-footer__gap {
-		min-width: 20px;
-		color: var(--rh-color-text-muted);
-		text-align: center;
 	}
 </style>
