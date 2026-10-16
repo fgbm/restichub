@@ -7,19 +7,16 @@
 		Alert,
 		Button,
 		Checkbox,
-		DataTable,
 		Dialog,
 		FilterBar,
+		ListView,
 		PasswordField,
 		Select,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type {
-		FilterFacet,
-		RowAction,
-		SelectOption,
-		TableColumn
-	} from '#lib/components/ui/index.ts';
+	import type { FilterFacet, ListMeta, RowAction, SelectOption } from '#lib/components/ui/index.ts';
+	import { plural } from '#lib/list-format.ts';
+	import { iconOf, pillOf, userState } from '#lib/vocabulary.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -82,85 +79,116 @@
 			.map((tenant) => ({ value: tenant.id, label: tenant.name }))
 	]);
 
-	const columns = $derived<TableColumn<PlatformUser>[]>([
-		{ key: 'username', header: t('platformUsers.username'), mono: true, truncate: 'sm' },
-		{ key: 'display_name', header: t('platformUsers.displayName'), truncate: 'sm' },
-		{
-			key: 'email',
-			header: t('platformUsers.email'),
-			truncate: 'sm',
-			hideNarrow: true,
-			value: (row) => row.email ?? ''
-		},
-		{
-			key: 'platform_admin',
-			header: t('platformUsers.platformAdmin'),
-			cell: (row) => (row.platform_admin ? t('platformUsers.platformAdmin') : t('common.none')),
-			badge: (row) => (row.platform_admin ? 'accent' : null)
-		},
-		{
-			key: 'disabled',
-			header: t('common.status'),
-			cell: (row) => (row.disabled ? t('common.disabled') : t('common.enabled')),
-			badge: (row) => (row.disabled ? 'warning' : 'success')
-		},
-		{
-			key: 'memberships',
-			header: t('platformUsers.memberships'),
-			truncate: 'md',
-			hideNarrow: true,
-			value: (row) =>
-				row.memberships.length === 0
-					? t('platformUsers.noOrganizations')
-					: row.memberships
-							.map((member) => `${member.tenant_name} · ${roleKeys[member.role]}`)
-							.join(', ')
-		}
-	]);
+	const filters = queryFilters(['q', 'tenant', 'role', 'state', 'sort', 'order'] as const);
 
-	const filters = queryFilters(['q', 'tenant', 'admin', 'state'] as const);
+	function rolesOf(user: PlatformUser): Role[] {
+		return [
+			...(user.platform_admin ? (['platform_admin'] as Role[]) : []),
+			...user.memberships.map((member) => member.role)
+		];
+	}
 
 	const facets = $derived<FilterFacet[]>([
 		{
 			key: 'tenant',
-			label: t('platformUsers.memberships'),
+			label: t('platformUsers.facet.organization'),
 			options: facetCounts(accounts, (user) => user.memberships.map((member) => member.tenant_name))
 		},
 		{
-			key: 'admin',
-			label: t('platformUsers.platformAdmin'),
-			multiple: false,
-			options: (['yes', 'no'] as const).map((value) => ({
-				value,
-				label: t(value === 'yes' ? 'common.yes' : 'common.no'),
-				count: accounts.filter((user) => user.platform_admin === (value === 'yes')).length
-			}))
-		},
-		{
-			key: 'state',
-			label: t('common.status'),
-			multiple: false,
-			options: (['enabled', 'disabled'] as const).map((value) => ({
-				value,
-				label: t(value === 'enabled' ? 'common.enabled' : 'common.disabled'),
-				count: accounts.filter((user) => user.disabled === (value === 'disabled')).length
+			key: 'role',
+			label: t('users.role'),
+			options: facetCounts(accounts, (user) => [...new Set(rolesOf(user))]).map((option) => ({
+				...option,
+				label: roleKeys[option.value as Role] ?? option.value
 			}))
 		}
 	]);
 
-	const shown = $derived(
+	const matching = $derived(
 		accounts.filter((user) => {
-			const { q, tenant, admin, state } = filters.value;
+			const { q, tenant, role } = filters.value;
 			const names = user.memberships.map((member) => member.tenant_name);
 			if (tenant && !splitList(tenant).some((name) => names.includes(name))) return false;
-			if (admin && user.platform_admin !== (admin === 'yes')) return false;
-			if (state && user.disabled !== (state === 'disabled')) return false;
+			if (role && !splitList(role).some((item) => rolesOf(user).includes(item as Role))) {
+				return false;
+			}
 			return matchesSearch(q, [user.username, user.display_name, user.email]);
 		})
 	);
 
+	const states = $derived({
+		default: 'active',
+		options: [
+			{
+				value: 'active',
+				label: t('users.tab.active'),
+				count: matching.filter((user) => !user.disabled).length
+			},
+			{
+				value: 'disabled',
+				label: t('users.tab.disabled'),
+				count: matching.filter((user) => user.disabled).length
+			}
+		]
+	});
+
+	const sort = $derived({
+		default: 'name',
+		options: [{ value: 'name', label: t('users.sort.name') }]
+	});
+
+	const shown = $derived.by(() => {
+		const disabled = filters.value.state === 'disabled';
+		const factor = filters.value.order === 'desc' ? -1 : 1;
+		return matching
+			.filter((user) => user.disabled === disabled)
+			.sort((a, b) => factor * a.display_name.localeCompare(b.display_name));
+	});
+
+	const filtered = $derived(
+		accounts.length > 0 && Boolean(filters.value.q || filters.value.tenant || filters.value.role)
+	);
+
+	function resetFilters(): void {
+		filters.update({ q: '', tenant: '', role: '', state: '' });
+	}
+
+	// Two memberships read as text; more read as a count.
+	function membershipsText(user: PlatformUser): string {
+		if (user.memberships.length === 0) return t('platformUsers.noOrganizations');
+		if (user.memberships.length > 2)
+			return plural('platformUsers.orgCount', user.memberships.length);
+		return user.memberships
+			.map((member) =>
+				t('platformUsers.meta.membership', {
+					name: member.tenant_name,
+					role: roleKeys[member.role].toLocaleLowerCase()
+				})
+			)
+			.join(', ');
+	}
+
+	function meta(user: PlatformUser): ListMeta[] {
+		return [
+			{ text: user.username, mono: true },
+			membershipsText(user),
+			user.platform_admin ? t('platformUsers.meta.platformAdmin') : null,
+			user.email
+				? user.email_verified
+					? user.email
+					: t('platformUsers.meta.unverified', { email: user.email })
+				: null
+		];
+	}
+
 	function rowActions(user: PlatformUser): RowAction[] {
 		return [
+			{
+				id: 'memberships',
+				label: t('platformUsers.manage'),
+				icon: 'building-2',
+				onSelect: () => openManage(user)
+			},
 			{
 				id: 'admin',
 				label: user.platform_admin ? t('platformUsers.revokeAdmin') : t('platformUsers.grantAdmin'),
@@ -171,8 +199,8 @@
 			{
 				id: 'disable',
 				label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
-				icon: 'octagon',
-				danger: true,
+				icon: 'power',
+				danger: !user.disabled,
 				disabled: busyKey !== null,
 				onSelect: () => toggleDisabled(user)
 			}
@@ -361,27 +389,38 @@
 	{/snippet}
 
 	<!-- An account has no record page: the row opens its memberships (design/style/ui-principles.md, 2.2). -->
-	<DataTable
-		{columns}
-		rows={shown}
-		{loading}
-		{error}
-		rowKey={(user) => user.id}
-		onRowOpen={openManage}
+	<!-- An account has no record page: the name opens its memberships. -->
+	<ListView
+		label={t('platformUsers.title')}
+		items={shown}
+		itemKey={(user) => user.id}
+		icon={(user) => iconOf(userState(user))}
+		pill={(user) => pillOf(userState(user))}
+		title={(user) => user.display_name}
+		onOpen={openManage}
+		{meta}
 		actions={rowActions}
 		moreLabel={(user) => t('users.moreActions', { name: user.username })}
+		{loading}
+		{error}
+		{filtered}
+		onReset={resetFilters}
+		emptyIcon="users"
+		emptyTitle={t('users.emptyTitle')}
 	>
 		{#snippet toolbar()}
 			<FilterBar
 				label={t('users.filters')}
 				value={filters.value}
 				search={{ key: 'q', label: t('hosts.search'), placeholder: t('users.searchPlaceholder') }}
+				{states}
 				{facets}
+				{sort}
 				onchange={filters.update}
-				onreset={filters.reset}
+				onreset={resetFilters}
 			/>
 		{/snippet}
-	</DataTable>
+	</ListView>
 </Page>
 
 <Dialog bind:open={createOpen} title={t('platformUsers.createTitle')} onsubmit={createUser}>

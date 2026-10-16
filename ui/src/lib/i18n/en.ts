@@ -2081,7 +2081,16 @@ export const en = {
 	'tenants.userCount.one': '{n} user',
 	'tenants.userCount.few': '{n} users',
 	'tenants.userCount.many': '{n} users',
-	'tenants.userCount.other': '{n} users'
+	'tenants.userCount.other': '{n} users',
+	'platformUsers.manage': 'Change memberships',
+	'platformUsers.facet.organization': 'Organization',
+	'platformUsers.meta.membership': '{name} — {role}',
+	'platformUsers.meta.platformAdmin': 'platform admin',
+	'platformUsers.meta.unverified': '{email}, not confirmed',
+	'platformUsers.orgCount.one': '{n} organization',
+	'platformUsers.orgCount.few': '{n} organizations',
+	'platformUsers.orgCount.many': '{n} organizations',
+	'platformUsers.orgCount.other': '{n} organizations'
 } as const;
 
 export type MessageKey = keyof typeof en;

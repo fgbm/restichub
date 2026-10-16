@@ -2092,5 +2092,14 @@ export const ru: Record<MessageKey, string> = {
 	'tenants.userCount.one': 'пользователей: {n}',
 	'tenants.userCount.few': 'пользователей: {n}',
 	'tenants.userCount.many': 'пользователей: {n}',
-	'tenants.userCount.other': 'пользователей: {n}'
+	'tenants.userCount.other': 'пользователей: {n}',
+	'platformUsers.manage': 'Изменить членство',
+	'platformUsers.facet.organization': 'Организация',
+	'platformUsers.meta.membership': '{name} — {role}',
+	'platformUsers.meta.platformAdmin': 'администратор платформы',
+	'platformUsers.meta.unverified': '{email}, не подтверждена',
+	'platformUsers.orgCount.one': 'организаций: {n}',
+	'platformUsers.orgCount.few': 'организаций: {n}',
+	'platformUsers.orgCount.many': 'организаций: {n}',
+	'platformUsers.orgCount.other': 'организаций: {n}'
 };
