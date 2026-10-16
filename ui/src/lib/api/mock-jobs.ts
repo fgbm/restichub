@@ -340,6 +340,17 @@ function plannedStepsOf(job: Job): PlannedStep[] {
 	return plain(['backup', 'forget']);
 }
 
+/** The parameters that a seeded restore job shows. */
+const SAMPLE_RESTORE = {
+	snapshot_id: `a1b2c3d4${'0'.repeat(56)}`,
+	includes: ['/srv/data', '/etc/nginx'],
+	excludes: [],
+	target: '/var/lib/restichub-restore/a1b2c3d4',
+	overwrite: 'if-changed' as const,
+	dry_run: false,
+	verify: true
+};
+
 const MOCK_SIGNING_KEY_ID = '3f9c2a71-5b4e-4d08-9a6c-1e7d0b8f42ac';
 
 /** The detail of a job at the time `now`: steps, summary, progress and the state of the log. */
@@ -360,6 +371,7 @@ export function detailOf(job: Job, now: number): JobDetail {
 		summary,
 		progress: progressOf(job, now),
 		signing_key_id: job.status === 'queued' ? null : MOCK_SIGNING_KEY_ID,
+		restore: job.kind === 'restore' ? SAMPLE_RESTORE : null,
 		log: { lines: logLinesOf(job, now).length, truncated: false, purged: false },
 		limits: {
 			max_duration_seconds: 48 * 3600,

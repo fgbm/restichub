@@ -38,7 +38,7 @@ test('captures the templates and the snapshot card in Russian, light', async ({ 
 		.locator('a[href="/restore"]')
 		.first()
 		.click();
-	await expect(page.getByRole('button', { name: /^Открыть снимок / }).first()).toBeVisible();
+	await expect(page.getByRole('link', { name: /^Открыть снимок / }).first()).toBeVisible();
 	await page.screenshot({ path: `${out}/snapshots-filled-ru-light.png`, fullPage: true });
 
 	await page.locator('#restore-host').fill('нет-такого-хоста');

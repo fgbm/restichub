@@ -41,7 +41,24 @@ export function makeSnapshots(): SnapshotItem[] {
 		snapshot(3, 'nas-backup', ['weekly', 'monthly'], ['/srv'], 80),
 		snapshot(4, 'ws-anna', ['daily'], ['/home/anna'], 33),
 		snapshot(5, 'ws-boris', ['laptop'], ['/home/boris/projects'], 120),
-		snapshot(6, 'nas-backup', ['weekly'], ['/srv', '/etc'], 200)
+		snapshot(6, 'nas-backup', ['weekly'], ['/srv', '/etc'], 200),
+		snapshot(
+			7,
+			'nas-backup',
+			[
+				'restichub-profile-0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c',
+				'daily',
+				'monthly',
+				'offsite',
+				'verified',
+				'critical',
+				'finance-archive',
+				'2026-10',
+				'before-upgrade'
+			],
+			['/srv', '/etc', '/home/anna'],
+			1
+		)
 	].sort((a, b) => (b.time ?? '').localeCompare(a.time ?? ''));
 }
 
@@ -75,18 +92,28 @@ function node(
 	path: string,
 	kind: NodeItem['kind'],
 	size = 0,
-	mtime: string | null = '2026-10-12T21:04:00Z'
+	options: { mtime?: string | null; mode?: string; target?: string } = {}
 ): NodeItem {
 	const name = path.slice(path.lastIndexOf('/') + 1);
+	const modes = {
+		dir: 'drwxr-xr-x',
+		symlink: 'Lrwxrwxrwx',
+		file: '-rw-r--r--',
+		other: 'crw-rw-rw-'
+	};
 	return {
 		name,
 		kind,
 		path,
 		size,
-		permissions: kind === 'dir' ? 'drwxr-xr-x' : '-rw-r--r--',
-		mtime,
-		link_target: ''
+		permissions: options.mode ?? modes[kind],
+		mtime: options.mtime === undefined ? '2026-10-12T21:04:00Z' : options.mtime,
+		link_target: options.target ?? ''
 	};
+}
+
+function link(path: string, target: string): NodeItem {
+	return node(path, 'symlink', 0, { target });
 }
 
 const DIRECTORIES: Record<string, NodeItem[]> = {
@@ -101,8 +128,21 @@ const DIRECTORIES: Record<string, NodeItem[]> = {
 	'/home': [node('/home/anna', 'dir'), node('/home/boris', 'dir')],
 	'/home/anna': [
 		node('/home/anna/Documents', 'dir'),
+		node('/home/anna/Music', 'dir'),
+		node('/home/anna/.bashrc', 'file', 3_771),
+		link('/home/anna/current-project', '/srv/www'),
+		node('/home/anna/budget-2026.xlsx', 'file', 48_220),
+		node('/home/anna/holiday.mp4', 'file', 214_003_712),
+		node('/home/anna/manual.pdf', 'file', 1_902_114),
 		node('/home/anna/notes.txt', 'file', 5_120),
-		node('/home/anna/photo.jpg', 'file', 3_914_880)
+		node('/home/anna/photo.jpg', 'file', 3_914_880),
+		node('/home/anna/photos-2025.tar.gz', 'file', 1_204_511_232),
+		node('/home/anna/setup.exe', 'file', 8_120_320),
+		node('/home/anna/sync.sh', 'file', 612, { mode: '-rwxr-xr-x' })
+	],
+	'/home/anna/Music': [
+		node('/home/anna/Music/song.mp3', 'file', 6_204_113),
+		link('/home/anna/Music/favourites', '../Documents')
 	],
 	'/home/anna/Documents': [node('/home/anna/Documents/report.odt', 'file', 88_113)],
 	'/home/boris': [node('/home/boris/projects', 'dir')],
@@ -111,9 +151,17 @@ const DIRECTORIES: Record<string, NodeItem[]> = {
 	'/srv': [node('/srv/data', 'dir'), node('/srv/www', 'dir')],
 	'/srv/data': [
 		node('/srv/data/backup.sql', 'file', 1_204_511_232),
-		node('/srv/data/latest', 'file', 0)
+		node('/srv/data/config.yml', 'file', 1_204),
+		link('/srv/data/latest', 'backup.sql'),
+		node('/srv/data/main.rs', 'file', 9_410),
+		node('/srv/data/run', 'file', 41_220, { mode: '-rwxr-xr-x' }),
+		node('/srv/data/ttyS0', 'other')
 	],
-	'/srv/www': [node('/srv/www/index.php', 'file', 3_201), node(LARGE_DIRECTORY, 'dir')],
+	'/srv/www': [
+		link('/srv/www/current', 'releases/2026-10-12'),
+		node('/srv/www/index.php', 'file', 3_201),
+		node(LARGE_DIRECTORY, 'dir')
+	],
 	'/var': [node('/var/log', 'dir')],
 	'/var/log': [node('/var/log/syslog', 'file', 9_204_113)]
 };

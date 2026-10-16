@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+	EMPTY_FILTERS,
 	escapeGlob,
+	filtersFromQuery,
+	filtersToQuery,
+	iconOfNode,
 	includePaths,
 	isAbsolutePath,
 	isCovered,
 	isSystemPath,
 	isWithinRoots,
+	landingPath,
+	parsePatterns,
+	profileOfTag,
 	suggestTarget,
 	warnsSystemPath
 } from './restore';
@@ -104,5 +111,62 @@ describe('restore helpers (FR-RS-02, FR-RS-04)', () => {
 		expect(warnsSystemPath('/etc', ['/'], false)).toBe(true);
 		expect(warnsSystemPath('/srv/restore', ['/'], false)).toBe(false);
 		expect(warnsSystemPath('C:\\Windows', ['C:\\'], true)).toBe(true);
+	});
+});
+
+describe('restore page helpers (FR-RS-01, FR-RS-02)', () => {
+	it('fr_rs_02_picks_an_icon_for_each_kind_of_entry', () => {
+		const file = (name: string, permissions = '-rw-r--r--') => ({
+			kind: 'file' as const,
+			name,
+			permissions
+		});
+		expect(iconOfNode({ kind: 'dir', name: 'etc' })).toBe('folder');
+		expect(iconOfNode({ kind: 'dir', name: 'etc' }, true)).toBe('folder-open');
+		expect(iconOfNode({ kind: 'symlink', name: 'latest' })).toBe('link');
+		expect(iconOfNode({ kind: 'other', name: 'tty' })).toBe('file-other');
+		expect(iconOfNode(file('a.PNG'))).toBe('file-image');
+		expect(iconOfNode(file('song.mp3'))).toBe('file-audio');
+		expect(iconOfNode(file('clip.mkv'))).toBe('file-video');
+		expect(iconOfNode(file('backup.tar.gz'))).toBe('file-archive');
+		expect(iconOfNode(file('budget.xlsx'))).toBe('file-spreadsheet');
+		expect(iconOfNode(file('manual.pdf'))).toBe('file-document');
+		expect(iconOfNode(file('main.rs'))).toBe('file-code');
+		expect(iconOfNode(file('notes.txt'))).toBe('file-text');
+		expect(iconOfNode(file('setup.exe'))).toBe('file-executable');
+		expect(iconOfNode(file('tool', '-rwxr-xr-x'))).toBe('file-executable');
+		expect(iconOfNode(file('data'))).toBe('file');
+		expect(iconOfNode(file('.bashrc'))).toBe('file');
+	});
+
+	it('fr_rs_01_reads_the_profile_of_an_automatic_tag', () => {
+		const id = '0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c';
+		expect(profileOfTag(`restichub-profile-${id}`)).toBe(id);
+		expect(profileOfTag('restichub-profile-nothing')).toBeNull();
+		expect(profileOfTag('daily')).toBeNull();
+	});
+
+	it('fr_rs_01_keeps_the_filters_in_the_query_string', () => {
+		const filters = { ...EMPTY_FILTERS, host: 'nas', tag: 'daily', from: '2026-10-01' };
+		const query = filtersToQuery(filters, { repository: 'r_1' });
+		expect(query.toString()).toBe('host=nas&tag=daily&from=2026-10-01&repository=r_1');
+		expect(filtersFromQuery(query)).toEqual(filters);
+		expect(filtersToQuery(EMPTY_FILTERS).toString()).toBe('');
+	});
+
+	it('fr_rs_04_splits_exclude_patterns', () => {
+		expect(parsePatterns(' *.tmp, /var/cache\n,, node_modules ')).toEqual([
+			'*.tmp',
+			'/var/cache',
+			'node_modules'
+		]);
+		expect(parsePatterns('a\nb')).toEqual(['a', 'b']);
+		expect(parsePatterns('  ')).toEqual([]);
+	});
+
+	it('fr_rs_04_shows_where_a_path_lands', () => {
+		expect(landingPath('/srv/restore/', '/etc/fstab', false)).toBe('/srv/restore/etc/fstab');
+		expect(landingPath('D:\\restore', '/etc', true)).toBe('D:\\restore\\etc');
+		expect(landingPath('/srv/restore', '/', false)).toBe('/srv/restore');
 	});
 });

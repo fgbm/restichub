@@ -19,14 +19,14 @@ The data of a restore goes from the repository to the target agent. It does not 
 
 1. Open **Restore**.
 2. Select a repository. The screen shows the newest stored list and its age.
-3. Enter a host, a tag or a path. Enter a date range if you need one.
-4. Click **Find snapshots**. An agent runs `restic snapshots` with the filters, and the list updates.
+3. Enter a snapshot host, a tag or a path. Enter a date range if you need one.
+4. Click **Find snapshots**. An agent runs `restic snapshots` with the filters, and the list updates. The button applies all filters together, the dates included. Click **Reset filters** to clear them.
 
 The control plane applies the date range to the list. restic applies the host, the tag and the path. The list agrees with `restic snapshots --json` for the same filters. When a repository holds more snapshots than a result can carry, the screen shows a warning and keeps the newest snapshots.
 
 ## Browse a snapshot
 
-Select a snapshot to open its file tree. The screen shows one directory at a time. The agent reads the directory and returns a page of at most 1000 entries. Select **Load more** to read the next page. A directory with one million files shows its first page in less than 5 seconds.
+Select a snapshot to open its page. The page shows the snapshot identifier, time, host, paths and tags, and the file tree. The link **Back to the snapshots** returns to the list with the same filters. A folder, a link and each type of file have their own icon. A link shows its target and has no size. The tree scrolls inside a box, and the footer under it shows the selected paths. The screen shows one directory at a time. The agent reads the directory and returns a page of at most 1000 entries. Select **Load more** to read the next page. A directory with one million files shows its first page in less than 5 seconds.
 
 The control plane keeps a page for 10 minutes. If you open the same directory again in that time, the screen shows the stored page and no job runs. A request that is the same as a job that still waits or runs gets that job. The control plane keeps a snapshot list for one hour. The Jobs list does not show the browse jobs.
 
@@ -36,12 +36,14 @@ One person can send 60 list and page requests in one minute. Each control plane 
 
 1. Select the files and directories that you need in the tree. If you select nothing, the restore uses the whole snapshot.
 2. Click **Restore…**.
-3. Select the target host ("Target host"). The default is the maintenance agent of the repository.
+3. Select the target host ("Target host"). The default is the host of the snapshot when that host is active. Otherwise it is the maintenance agent of the repository.
 4. Check the target path. The screen suggests a new folder in the first restore root of the agent, for example `/var/lib/restichub-restore/a1b2c3d4`. The path must be absolute and must lie inside a restore root.
-5. Select what to do with a file that exists in the target.
-6. Click **Start restore**. The screen opens the job.
+5. If you selected no path, you can enter paths to exclude. Use restic patterns and separate them with commas.
+6. Select what to do with a file that exists in the target. For "Replace every file", the screen shows a warning.
+7. Read the summary at the end of the dialog.
+8. Click **Start restore**. The screen opens the job.
 
-The job detail shows the progress while the restore runs. After it ends, the detail shows how many files and bytes the agent restored and how many it skipped.
+The job detail shows the block "Restore parameters". The block names the snapshot, the target host and path, the paths, the overwrite mode, and the verify and dry run settings. The detail also shows the progress while the restore runs. After it ends, the detail shows how many files and bytes the agent restored and how many it skipped.
 
 | Option | Meaning |
 |---|---|

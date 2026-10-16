@@ -24,10 +24,7 @@ async function createRepository(page: Page): Promise<void> {
 	await page.locator('#repo-password').fill('repo-password');
 	await page.locator('#repo-s3-access-key').fill('access-key');
 	await page.locator('#repo-s3-secret-key').fill('secret-key');
-	await page
-		.getByRole('dialog', { name: 'Add a repository' })
-		.getByRole('button', { name: 'Save' })
-		.click();
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('The repository is created.')).toBeVisible();
 }
 
