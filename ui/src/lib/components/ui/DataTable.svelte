@@ -4,10 +4,10 @@
 	import { t } from '#lib/i18n/index.ts';
 	import Badge from './Badge.svelte';
 	import Button from './Button.svelte';
-	import DropdownMenu from './DropdownMenu.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import Icon from './Icon.svelte';
 	import type { IconName } from './icons';
+	import RowActions from './RowActions.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import type { MenuItem, RowAction, TableColumn, TableSort } from './types';
 
@@ -135,6 +135,7 @@
 	function menuItems(list: RowAction[]): MenuItem[] {
 		return list.map((action) => ({
 			label: action.label,
+			hint: action.hint,
 			icon: action.icon,
 			onSelect: action.onSelect,
 			disabled: action.disabled,
@@ -263,7 +264,6 @@
 					</tr>
 				{:else}
 					{#each shown as row (rowKey(row))}
-						{@const rowActions = actions ? visibleActions(row) : []}
 						<tr
 							class:table__row--opens={opens}
 							onclick={opens ? (event) => openFromRow(event, row) : undefined}
@@ -291,27 +291,10 @@
 							{/each}
 							{#if actions}
 								<td class="table__cell--actions" data-row-control>
-									{#if rowActions.length > 2}
-										<DropdownMenu
-											icon="more"
-											align="end"
-											label={moreLabel?.(row) ?? t('table.moreActions')}
-											items={menuItems(rowActions)}
-										/>
-									{:else if rowActions.length > 0}
-										<span class="table__row-actions">
-											{#each rowActions as action (action.id)}
-												<Button
-													size="sm"
-													icon={action.icon}
-													disabled={action.disabled}
-													title={action.hint ?? action.label}
-													aria-label={action.label}
-													onclick={() => action.onSelect()}
-												/>
-											{/each}
-										</span>
-									{/if}
+									<RowActions
+										items={menuItems(visibleActions(row))}
+										moreLabel={moreLabel?.(row) ?? t('table.moreActions')}
+									/>
 								</td>
 							{/if}
 						</tr>
@@ -535,11 +518,6 @@
 		text-align: right;
 		white-space: nowrap;
 		cursor: default;
-	}
-
-	.table__row-actions {
-		display: inline-flex;
-		gap: var(--rh-space-1);
 	}
 
 	@media (max-width: 720px) {
