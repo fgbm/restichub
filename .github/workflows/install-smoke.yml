@@ -60,7 +60,7 @@ jobs:
         run: echo "SMOKE_DIR=$(cygpath -m "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")/smoke" >> "$GITHUB_ENV"
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: Build the control plane and the agent
-        run: cargo build -p restichub-cp -p restichub-agent
+        run: cargo build -p restichub-cp -p restichub-agent -p restichub-canary-scan
       - name: Prepare the database
         env:
           PGHOST: 127.0.0.1
@@ -108,6 +108,33 @@ jobs:
           sudo systemctl restart restichub-agent
           test "$(systemctl is-active restichub-agent)" = active
           scripts/install-smoke.sh connected "$since" 60
+      # The service writes its log to journald. The scan reads the entries of all units.
+      - name: journald holds no canary after ten jobs (AC-AG-03)
+        run: |
+          set -euo pipefail
+          since="$(date -u +%s)"
+          # The restart puts the greeting of the service into the scanned window.
+          sudo systemctl restart restichub-agent
+          scripts/install-smoke.sh connected "$since" 60
+          canaries="$SMOKE_DIR/canaries"
+          for _ in 1 2 3; do echo "CANARY-$(cat /proc/sys/kernel/random/uuid)"; done >"$canaries"
+          scripts/install-smoke.sh canary-jobs "$canaries" "$SMOKE_DIR/canary"
+          control="CANARY-$(cat /proc/sys/kernel/random/uuid)"
+          echo "control line $control" | systemd-cat --identifier restichub-canary-control
+          journal="$SMOKE_DIR/journal.export"
+          for _ in $(seq 1 30); do
+            sudo journalctl --no-pager --output=export --since "@$since" >"$journal"
+            if grep -q "$control" "$journal"; then break; fi
+            sleep 1
+          done
+          echo "--- the lines of the service in the scanned window"
+          sudo journalctl --no-pager --output=cat --since "@$since" -u restichub-agent
+          lines="$(sudo journalctl --no-pager --output=cat --since "@$since" -u restichub-agent | grep -c 'the control plane greeted the agent' || true)"
+          if [ "$lines" -lt 1 ]; then echo "the journal holds no line of the service"; exit 1; fi
+          code=0
+          target/debug/restichub-canary-scan --canary "$control" --file "$journal" >/dev/null || code=$?
+          if [ "$code" -ne 1 ]; then echo "the scan must find the control line (exit $code)"; exit 1; fi
+          target/debug/restichub-canary-scan --canary-file "$canaries" --file "$journal"
       - name: Diagnostics
         if: failure()
         run: |
@@ -130,7 +157,7 @@ jobs:
         run: echo "SMOKE_DIR=$(cygpath -m "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")/smoke" >> "$GITHUB_ENV"
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: Build the control plane and the agent
-        run: cargo build -p restichub-cp -p restichub-agent
+        run: cargo build -p restichub-cp -p restichub-agent -p restichub-canary-scan
       # The runner holds PostgreSQL but no container engine. A fresh cluster in a temporary
       # directory does not depend on the version or the credentials of the installed one.
       - name: Start PostgreSQL
@@ -329,6 +356,40 @@ jobs:
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           bash scripts/install-smoke.sh connected $since 60
           Remove-Item $restore -Recurse -Force
+      # The service writes no event itself: its standard error goes nowhere. The service control
+      # manager writes the state changes of the service to the System log.
+      - name: The Event Log holds no canary after ten jobs (AC-AG-03)
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $start = [DateTime]::UtcNow.AddSeconds(-2)
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          Restart-Service restichub-agent
+          bash scripts/install-smoke.sh connected $since 60
+          if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+          $canaries = Join-Path $env:SMOKE_DIR 'canaries'
+          $values = 1..3 | ForEach-Object { "CANARY-$([guid]::NewGuid())" }
+          [IO.File]::WriteAllText($canaries, ($values -join "`n") + "`n")
+          bash scripts/install-smoke.sh canary-jobs $canaries "$env:SMOKE_DIR/canary"
+          if ($LASTEXITCODE -ne 0) { throw 'the canary jobs failed' }
+          $control = "CANARY-$([guid]::NewGuid())"
+          eventcreate /L APPLICATION /T INFORMATION /SO RestichubCanaryControl /ID 100 /D "control $control" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'cannot write the control event' }
+          $query = "*[System[TimeCreated[@SystemTime>='$($start.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'))']]]"
+          $dump = Join-Path $env:SMOKE_DIR 'eventlog.xml'
+          $text = foreach ($log in 'Application', 'System') {
+            wevtutil qe $log "/q:$query" /f:RenderedXml
+            if ($LASTEXITCODE -ne 0) { throw "cannot read the $log log" }
+          }
+          $text | Set-Content -Encoding utf8 $dump
+          Write-Host '--- the events of the service in the scanned window'
+          Get-WinEvent -FilterHashtable @{LogName='System'; StartTime=$start.ToLocalTime()} -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'ResticHub Agent' } | Format-Table -AutoSize TimeCreated, Id, ProviderName, Message
+          if (-not (Select-String -Path $dump -Pattern 'ResticHub Agent' -Quiet)) { throw 'the dump holds no event of the service' }
+          & target/debug/restichub-canary-scan.exe --canary $control --file $dump | Out-Null
+          if ($LASTEXITCODE -ne 1) { throw "the scan must find the control event (exit $LASTEXITCODE)" }
+          & target/debug/restichub-canary-scan.exe --canary-file $canaries --file $dump
+          if ($LASTEXITCODE -ne 0) { throw "the canary is in the Event Log (exit $LASTEXITCODE)" }
       - name: Diagnostics
         if: failure()
         shell: pwsh
