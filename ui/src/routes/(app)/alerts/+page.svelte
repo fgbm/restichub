@@ -27,9 +27,7 @@
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { alertCondition } from '#lib/alert-text.ts';
 	import { formatCount, formatTime } from '#lib/format.ts';
-
-	const DEFAULT_PAGE_SIZE = 25;
-	const PAGE_SIZES = [10, 25, 50, 100];
+	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
 
 	let alerts = $state<Alert[]>([]);
 	let total = $state(0);
@@ -46,10 +44,8 @@
 			: 'all'
 	);
 
-	const tablePage = $derived(Math.max(1, Number(filters.value.page) || 1));
-	const pageSize = $derived(
-		PAGE_SIZES.includes(Number(filters.value.size)) ? Number(filters.value.size) : DEFAULT_PAGE_SIZE
-	);
+	const tablePage = $derived(pageNumber(filters.value.page));
+	const pageSize = $derived(pageSizeOf(filters.value.size));
 
 	let detail = $state<Alert | null>(null);
 	let detailOpen = $state(false);
@@ -198,6 +194,11 @@
 		try {
 			const page = await service.listAlerts(queryOf());
 			if (mine !== request) return;
+			const last = lastPageIfPast(tablePage, pageSize, page.total, page.items.length);
+			if (last !== null) {
+				filters.update({ page: String(last) });
+				return;
+			}
 			alerts = page.items;
 			total = page.total;
 			totalCapped = page.total_capped;
@@ -291,7 +292,7 @@
 			<FilterBar
 				label={t('alerts.filter')}
 				value={filters.value}
-				search={{ key: 'q', label: t('hosts.search'), placeholder: t('alerts.searchPlaceholder') }}
+				search={{ key: 'q', label: t('alerts.search'), placeholder: t('alerts.searchPlaceholder') }}
 				{facets}
 				onchange={filters.update}
 				onreset={filters.reset}

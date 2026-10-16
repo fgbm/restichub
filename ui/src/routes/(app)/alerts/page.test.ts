@@ -154,4 +154,45 @@ describe('the Alerts screen', () => {
 			})
 		);
 	});
+
+	it('fr_ui_01 keeps the page size when Reset clears the filters', async () => {
+		const user = userEvent.setup();
+		route.url = new URL('http://localhost/alerts?status=open&kind=job_failed&size=50');
+		mocks.listAlerts.mockResolvedValue(list([alert()]));
+		render(Alerts);
+		await screen.findByText('nightly-web');
+		expect(mocks.listAlerts).toHaveBeenLastCalledWith({
+			status: 'open',
+			kind: 'job_failed',
+			offset: 0,
+			limit: 50
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Reset' }));
+		await waitFor(() =>
+			expect(mocks.listAlerts).toHaveBeenLastCalledWith({ status: 'all', offset: 0, limit: 50 })
+		);
+		expect(route.url.searchParams.get('size')).toBe('50');
+		expect(route.url.searchParams.get('kind')).toBeNull();
+	});
+
+	it('fr_ui_01 moves to the last page when a refresh leaves the shown page empty', async () => {
+		route.url = new URL('http://localhost/alerts?status=open&page=3');
+		mocks.listAlerts
+			.mockResolvedValueOnce(list([], 40))
+			.mockImplementation(async (query: { offset: number }) =>
+				list(
+					Array.from({ length: 15 }, (_, index) =>
+						alert({ id: `al_${query.offset + index}`, plan_name: `plan-${query.offset + index}` })
+					),
+					40
+				)
+			);
+		render(Alerts);
+
+		expect(await screen.findByText('plan-25')).toBeInTheDocument();
+		expect(mocks.listAlerts.mock.calls.map(([query]) => query.offset)).toEqual([50, 25]);
+		expect(route.url.searchParams.get('page')).toBe('2');
+		expect(screen.getByText('Showing 26 to 40 of 40')).toBeInTheDocument();
+	});
 });
