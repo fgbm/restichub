@@ -189,7 +189,7 @@
 
 <ConfirmDialog
 	bind:open={revokeOpen}
-	icon="octagon-x"
+	icon="octagon"
 	title={t('platformUsers.revokeTitle')}
 	message={t('platformUsers.revokeBody', { name })}
 	confirmLabel={t('platformUsers.revokeConfirm')}
@@ -200,7 +200,7 @@
 
 <ConfirmDialog
 	bind:open={disableOpen}
-	icon="octagon-x"
+	icon="octagon"
 	title={t('users.disableTitle')}
 	message={t('platformUsers.disableBody', { name })}
 	confirmLabel={t('users.disableUser')}

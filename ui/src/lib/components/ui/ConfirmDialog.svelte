@@ -21,7 +21,7 @@
 		confirmLabel: string;
 		cancelLabel?: string;
 		tone?: 'primary' | 'danger';
-		/** Title icon; a destructive confirmation uses `octagon-x`. */
+		/** Title icon; a destructive confirmation uses `octagon`. */
 		icon?: IconName;
 		loading?: boolean;
 		onConfirm?: () => void;

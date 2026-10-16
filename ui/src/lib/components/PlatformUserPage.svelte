@@ -377,7 +377,7 @@
 
 <ConfirmDialog
 	bind:open={removeOpen}
-	icon="octagon-x"
+	icon="octagon"
 	title={t('platformUsers.removeTitle')}
 	message={t('platformUsers.removeBody', { name, org: removeTarget?.tenant_name ?? '' })}
 	confirmLabel={t('platformUsers.removeConfirm')}
@@ -460,7 +460,12 @@
 	@media (max-width: 720px) {
 		.memberships :global(th:nth-child(2)),
 		.memberships :global(td:nth-child(2)) {
-			width: 170px;
+			width: 1%;
+		}
+
+		/* The select takes the width of the longest role, so no role name is cut. */
+		.memberships :global(.role-select) {
+			width: auto;
 		}
 
 		.add {

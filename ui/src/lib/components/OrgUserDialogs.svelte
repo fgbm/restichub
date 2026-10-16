@@ -108,7 +108,7 @@
 
 <ConfirmDialog
 	bind:open={disableOpen}
-	icon="octagon-x"
+	icon="octagon"
 	title={t('users.disableTitle')}
 	message={t('users.disableBody', { name, org: tenantName })}
 	confirmLabel={t('users.disableUser')}
