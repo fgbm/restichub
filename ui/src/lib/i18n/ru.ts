@@ -2198,5 +2198,5 @@ export const ru: Record<MessageKey, string> = {
 	'tenants.hostCount.few': 'хостов: {n}',
 	'tenants.hostCount.many': 'хостов: {n}',
 	'tenants.hostCount.other': 'хостов: {n}',
-	'audit.searchByName': 'Поиск по действию, объекту, пользователю'
+	'audit.searchByName': 'Поиск по имени объекта или действующего лица, коду действия'
 };

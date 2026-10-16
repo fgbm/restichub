@@ -139,10 +139,31 @@ describe('the audit log', () => {
 		expect(screen.getByText('API token ci-deploy')).toBeInTheDocument();
 		expect(screen.getByText('agent srv-db-01')).toBeInTheDocument();
 
+		mocks.listAudit.mockClear();
 		await user.type(screen.getByRole('searchbox'), 'nightly');
 		await waitFor(() =>
 			expect(mocks.listAudit).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'nightly' }))
 		);
+		// The typed search waits for a pause, so the server reads the whole word once.
+		await new Promise((resolve) => setTimeout(resolve, 400));
+		expect(mocks.listAudit).toHaveBeenCalledTimes(1);
+	});
+
+	it('fr_au_01 opens on the last 30 days and reads all time on request', async () => {
+		mocks.listAudit.mockResolvedValue(page(0, 25, 0));
+		render(AuditLog);
+
+		await waitFor(() => expect(mocks.listAudit).toHaveBeenCalled());
+		const from = mocks.listAudit.mock.lastCall?.[0].from;
+		expect(Date.now() - Date.parse(from)).toBeGreaterThan(29 * 86_400_000);
+		expect(Date.now() - Date.parse(from)).toBeLessThan(31 * 86_400_000);
+		expect(route.url.searchParams.get('period')).toBe('30d');
+
+		route.url = new URL('http://localhost/audit?period=');
+		mocks.listAudit.mockClear();
+		render(AuditLog);
+		await waitFor(() => expect(mocks.listAudit).toHaveBeenCalled());
+		expect(mocks.listAudit).toHaveBeenLastCalledWith(expect.objectContaining({ from: undefined }));
 	});
 
 	it('shows a capped total with a plus and a hint', async () => {

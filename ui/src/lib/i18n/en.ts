@@ -2187,7 +2187,7 @@ export const en = {
 	'tenants.hostCount.few': '{n} hosts',
 	'tenants.hostCount.many': '{n} hosts',
 	'tenants.hostCount.other': '{n} hosts',
-	'audit.searchByName': 'Search by action, object or person'
+	'audit.searchByName': 'Search by object or actor name, or action code'
 } as const;
 
 export type MessageKey = keyof typeof en;

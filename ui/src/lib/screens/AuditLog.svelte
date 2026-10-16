@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { AuditActorType, AuditQuery, AuditRecord } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
@@ -45,6 +46,11 @@
 		'page',
 		'size'
 	] as const);
+	// The log opens on the last 30 days, so a search reads one month of records; "All time" in the
+	// period facet reads the rest.
+	if (!page.url.searchParams.has('period') && !filters.value.from && !filters.value.to) {
+		filters.update({ period: '30d', page: filters.value.page });
+	}
 	const tablePage = $derived(pageNumber(filters.value.page));
 	const pageSize = $derived(pageSizeOf(filters.value.size));
 

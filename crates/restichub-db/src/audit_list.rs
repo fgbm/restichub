@@ -35,6 +35,8 @@ macro_rules! names_cte {
              UNION ALL \
              SELECT user_id, COALESCE(NULLIF(display_name, ''), username) \
              FROM auth_platform_accounts()), \
+         named_plans AS MATERIALIZED ( \
+             SELECT id FROM plans WHERE $9::text IS NOT NULL AND name ILIKE $9), \
          named AS MATERIALIZED ( \
              SELECT id FROM people WHERE $9::text IS NOT NULL AND name ILIKE $9 \
              UNION ALL SELECT id FROM agents WHERE $9::text IS NOT NULL AND hostname ILIKE $9 \
@@ -43,10 +45,7 @@ macro_rules! names_cte {
                        WHERE $9::text IS NOT NULL AND name ILIKE $9 \
              UNION ALL SELECT id FROM job_templates WHERE $9::text IS NOT NULL AND name ILIKE $9 \
              UNION ALL SELECT id FROM script_templates WHERE $9::text IS NOT NULL AND name ILIKE $9 \
-             UNION ALL SELECT id FROM plans WHERE $9::text IS NOT NULL AND name ILIKE $9 \
-             UNION ALL SELECT j.id FROM jobs j \
-                       JOIN plans p ON p.tenant_id = j.tenant_id AND p.id = j.plan_id \
-                       WHERE $9::text IS NOT NULL AND p.name ILIKE $9 \
+             UNION ALL SELECT id FROM named_plans \
              UNION ALL SELECT id FROM profiles WHERE $9::text IS NOT NULL AND name ILIKE $9 \
              UNION ALL SELECT id FROM repositories WHERE $9::text IS NOT NULL AND name ILIKE $9 \
              UNION ALL SELECT id FROM secrets WHERE $9::text IS NOT NULL AND name ILIKE $9 \
@@ -55,14 +54,17 @@ macro_rules! names_cte {
 }
 
 /// `$tenant` is the condition on `$8`: a plain `tenant_id = $8` keeps the
-/// `(tenant_id, occurred_at)` index usable in a generic plan of the prepared statement. The search
+/// `(tenant_id, occurred_at)` index usable in a generic plan of the prepared statement, and the
+/// time bounds without `IS NULL` give that plan an index range for the period. The search
 /// matches the action code or a name; an identifier is unique across the tables, so the object
-/// type needs no check.
+/// type needs no check. A job is named after its plan: a long history holds many jobs of a plan, so
+/// the search looks up the plan of each job record and does not collect the jobs of the plans. The
+/// uncorrelated `EXISTS` runs once and skips the lookups when no plan name matches.
 macro_rules! filter_sql {
     ($tenant:literal) => {
         concat!(
-            " WHERE ($1::timestamptz IS NULL OR a.occurred_at >= $1) \
-               AND ($2::timestamptz IS NULL OR a.occurred_at <= $2) \
+            " WHERE a.occurred_at >= COALESCE($1::timestamptz, '-infinity') \
+               AND a.occurred_at <= COALESCE($2::timestamptz, 'infinity') \
                AND ($3::text IS NULL OR a.action = $3) \
                AND ($4::text IS NULL OR a.actor_type = $4) \
                AND ($5::uuid IS NULL OR a.actor_id = $5) \
@@ -70,7 +72,10 @@ macro_rules! filter_sql {
                AND ($7::uuid IS NULL OR a.object_id = $7) \
                AND ($9::text IS NULL OR a.action ILIKE $9 \
                     OR a.object_id IN (SELECT id FROM named) \
-                    OR a.actor_id IN (SELECT id FROM named)) \
+                    OR a.actor_id IN (SELECT id FROM named) \
+                    OR (a.object_type = 'job' AND EXISTS (SELECT 1 FROM named_plans) \
+                        AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = a.object_id \
+                                      AND j.plan_id IN (SELECT id FROM named_plans)))) \
                AND ",
             $tenant
         )
@@ -251,6 +256,16 @@ async fn list_rows(
     filter: &AuditFilter,
     page: &AuditPage,
 ) -> Result<AuditPageResult, DbError> {
+    // The planner prices the job lookup of the search for each row, although few rows reach it.
+    // With that estimate a generic plan scans the whole tenant instead of the period, and the JIT
+    // compilation takes longer than the scan.
+    sqlx::query(
+        "SELECT set_config('jit', 'off', true), \
+                set_config('plan_cache_mode', 'force_custom_plan', true)",
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(DbError::Query)?;
     let limit = page.limit.clamp(1, MAX_PAGE_LIMIT);
     let action = filter.action.as_ref().map(AuditAction::as_str);
     let actor_type = filter.actor.as_ref().map(Actor::actor_type);
