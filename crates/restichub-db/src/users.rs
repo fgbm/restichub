@@ -191,7 +191,7 @@ pub async fn admin_set_password(
     WriteStatus::parse(&status)
 }
 
-/// The password write of the Platform Admin for any account (migration 0050). It needs the platform
+/// The password write of the Platform Admin for any account (migration 0051). It needs the platform
 /// tenant or the platform scope and no membership.
 pub async fn platform_set_password(
     tx: &mut TenantTx<'_>,
