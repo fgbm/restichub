@@ -349,12 +349,12 @@ fn first_block(text: &[u8]) -> Result<Vec<u8>> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
 
-    fn sample() -> StoredIdentity {
+    pub(crate) fn sample() -> StoredIdentity {
         StoredIdentity {
             agent_id: "0192f1e0-0000-7000-8000-000000000001".to_owned(),
             tenant_id: "0192f1e0-0000-7000-8000-000000000002".to_owned(),

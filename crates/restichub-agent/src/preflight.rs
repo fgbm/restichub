@@ -3,7 +3,7 @@
 //! A registration that cannot save its identity would burn the token for nothing, so the agent
 //! proves first that it has the rights and that every directory is ready.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 
@@ -53,13 +53,14 @@ fn is_elevated() -> Result<bool> {
 /// holds only entries of the agent (threat T20); see [`paths::repair_config_dir`].
 ///
 /// The check covers the configuration directory, the staging directory that the identity save uses
-/// and the cache directory. It leaves no probe file behind.
+/// and the cache directory. It leaves no probe file behind. Returns the identity entries that
+/// another account could change before the repair.
 ///
 /// # Errors
 ///
 /// Returns an error when a directory cannot be created, is not safe, or does not take a file.
-pub fn prepare_directories(config: &Path, cache: &Path) -> Result<()> {
-    paths::repair_config_dir(config, &mut |line| println!("{line}"))?;
+pub fn prepare_directories(config: &Path, cache: &Path) -> Result<Vec<PathBuf>> {
+    let changeable = paths::repair_config_dir(config, &mut |line| println!("{line}"))?;
     paths::ensure_config_dir(config)
         .with_context(|| format!("cannot prepare the directory {}", config.display()))?;
     let staging = crate::identity::sibling(config, ".staging");
@@ -70,7 +71,8 @@ pub fn prepare_directories(config: &Path, cache: &Path) -> Result<()> {
     let _ = std::fs::remove_dir_all(&staging);
     staged?;
     prepare_cache(cache)?;
-    probe(cache)
+    probe(cache)?;
+    Ok(changeable)
 }
 
 /// Makes the cache directory of the restic child (FR-AG-06).

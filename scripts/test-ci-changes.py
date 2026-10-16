@@ -48,6 +48,12 @@ class Classify(unittest.TestCase):
     def test_unrelated_file_runs_nothing(self):
         self.assertEqual(picked("bench/run.sh"), set())
 
+    def test_agent_package_args(self):
+        self.assertEqual(
+            ci_changes.package_args(AGENT),
+            "-p restichub-agent -p restichub-common -p restichub-compiler -p restichub-proto",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

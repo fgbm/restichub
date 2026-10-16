@@ -41,6 +41,7 @@ jobs:
       site: ${{ steps.groups.outputs.site }}
       comments: ${{ steps.groups.outputs.comments }}
       deps: ${{ steps.groups.outputs.deps }}
+      agent-packages: ${{ steps.groups.outputs.agent-packages }}
     steps:
       - uses: actions/checkout@v7
       - name: Check the classifier
@@ -147,9 +148,10 @@ jobs:
           done
           echo "no binary crate enables the test helper in the normal graph"
 
-  # A pull request runs the Windows job only when the agent, or a crate that the agent needs in a
-  # normal or build dependency, changes. A change to the control plane alone cannot change the
-  # agent on Windows. A push to main runs it always.
+  # The control plane runs only in a Linux container, so the Windows job builds and tests only the
+  # agent and the crates that the agent needs in a normal or build dependency. The `changes` job
+  # gives this crate list. A pull request runs the job only when one of these crates changes. A
+  # push to main runs it always.
   rust-windows:
     name: Rust (windows-latest)
     needs: [changes, restic]
@@ -172,11 +174,10 @@ jobs:
           echo "RESTICHUB_REQUIRE_RESTIC=1" >> "$GITHUB_ENV"
       # The action reads rust-toolchain.toml.
       - uses: actions-rust-lang/setup-rust-toolchain@v2
-      # The database tests skip here because RESTICHUB_TEST_DATABASE_URL is not set.
       - name: Build the tests
-        run: cargo test --workspace --no-run
+        run: cargo test ${{ needs.changes.outputs.agent-packages }} --no-run
       - name: Test
-        run: cargo test --workspace
+        run: cargo test ${{ needs.changes.outputs.agent-packages }}
 
   # A service container runs only on a Linux runner, so the database tests are their own job.
   database:

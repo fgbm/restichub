@@ -106,7 +106,51 @@ pub async fn provision_and_register(
     if !options.no_service {
         crate::service::check_install_location(restic.path())?;
     }
+    if options.trust_server_scripts {
+        let was_enabled = crate::scripts::ScriptStore::for_config_dir(dir, cache).mode()
+            == crate::scripts::ScriptMode::Enabled;
+        return enroll_with_trust_mode(
+            dir,
+            was_enabled,
+            &crate::scripts::set_mode,
+            register_async(options, dir, cache, &restic),
+        )
+        .await;
+    }
     register_async(options, dir, cache, &restic).await
+}
+
+/// Writes the trust mode before the enrollment, so a mode file that the host cannot trust never
+/// spends the token. A failed enrollment puts the earlier mode back (FR-HK-08, ADR-0037).
+async fn enroll_with_trust_mode(
+    dir: &Path,
+    was_enabled: bool,
+    write_mode: &dyn Fn(&Path, bool) -> Result<()>,
+    enroll: impl std::future::Future<Output = Result<()>>,
+) -> Result<()> {
+    let mode_file = crate::scripts::mode_file_for(dir);
+    let existed = std::fs::symlink_metadata(&mode_file).is_ok();
+    write_mode(dir, true).context(
+        "the trust mode cannot be written, so the agent did not register and the token is not used",
+    )?;
+    let Err(error) = enroll.await else {
+        println!("{}", trust_enabled_text(dir));
+        return Ok(());
+    };
+    let reset = if !existed {
+        std::fs::remove_file(&mode_file)
+            .with_context(|| format!("cannot remove {}", mode_file.display()))
+    } else if was_enabled {
+        Ok(())
+    } else {
+        write_mode(dir, false)
+    };
+    match reset {
+        Ok(()) => Err(error),
+        Err(reset_error) => Err(error.context(format!(
+            "the registration failed, and the trust mode stays on because it cannot be reset ({reset_error:#}); run: restichub-agent trust-server-scripts --disable"
+        ))),
+    }
 }
 
 /// Installs and starts the service after a successful enrollment, unless `--no-service` is set
@@ -207,9 +251,26 @@ pub fn install_service(options: &ResticFileOptions) -> Result<()> {
 /// The identity load finishes a staged rotation, so the tree check and the repair run before it, as
 /// in `register`: another account may have planted the staged files (T20).
 fn prepare_install(dir: &Path, cache: &Path) -> Result<()> {
-    crate::preflight::prepare_directories(dir, cache)?;
+    let changeable = crate::preflight::prepare_directories(dir, cache)?;
+    refuse_changeable_identity(&changeable)?;
     crate::setup::require_identity(dir)?;
     Ok(())
+}
+
+/// Another account that could write the identity could have replaced the CA chain, the signing
+/// keys or the endpoint, so the repaired access does not make the identity trusted again (T20).
+fn refuse_changeable_identity(changeable: &[PathBuf]) -> Result<()> {
+    if changeable.is_empty() {
+        return Ok(());
+    }
+    let files = changeable
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "the identity of this host could be changed by another account ({files}), so the agent does not use it and the service is not installed; the access control is repaired; register the host again: create a token with \"Re-register\" on the host page and run `restichub-agent register --force --url <URL> --token <TOKEN>`"
+    )
 }
 
 /// Installs restic when it is absent and returns it (ADR-0038).
@@ -319,26 +380,110 @@ pub async fn register_async(
 
 /// Turns the local trust mode for server scripts on or off (FR-HK-08, ADR-0037).
 ///
+/// The agent reads the mode before each job, but reports it only when it connects. An idle running
+/// service therefore restarts and the command waits until it is connected again, unless
+/// `no_restart` is set. A service with a job in progress keeps running, because a restart would
+/// stop the job.
+///
 /// # Errors
 ///
-/// Returns an error when the setting file cannot be written or the host would not trust it, for
-/// example when the command does not run as root or Administrator.
-pub fn trust_server_scripts(enable: bool) -> Result<()> {
-    let dir = crate::paths::config_dir();
-    crate::scripts::set_mode(&dir, enable)?;
-    let file = crate::scripts::mode_file_for(&dir);
+/// Returns an error when the process is not elevated, the setting file cannot be written, the
+/// service cannot be restarted, or the agent does not connect again.
+pub fn trust_server_scripts(enable: bool, no_restart: bool) -> Result<()> {
+    crate::preflight::ensure_elevated()?;
+    apply_trust_mode(
+        &HostService,
+        &crate::paths::config_dir(),
+        enable,
+        no_restart,
+        WaitOptions::default(),
+        &crate::scripts::set_mode,
+    )
+}
+
+#[cfg(windows)]
+const RESTART_COMMAND: &str = "Restart-Service restichub-agent";
+#[cfg(not(windows))]
+const RESTART_COMMAND: &str = "systemctl restart restichub-agent";
+
+fn apply_trust_mode(
+    manager: &dyn ServiceManager,
+    dir: &Path,
+    enable: bool,
+    no_restart: bool,
+    wait: WaitOptions,
+    write_mode: &dyn Fn(&Path, bool) -> Result<()>,
+) -> Result<()> {
+    write_mode(dir, enable)?;
     if enable {
-        println!(
-            "Server scripts are enabled on this host ({}). The control plane can now run code here as the agent account.",
-            file.display()
-        );
+        println!("{}", trust_enabled_text(dir));
     } else {
         println!(
             "Server scripts are disabled on this host ({}).",
-            file.display()
+            crate::scripts::mode_file_for(dir).display()
         );
     }
-    Ok(())
+    if no_restart {
+        println!(
+            "the mode applies to the next job; the control plane shows it after the service connects again, for example after: {RESTART_COMMAND}"
+        );
+        return Ok(());
+    }
+    let state = manager.state()?;
+    if !state.installed || !state.running {
+        println!(
+            "no agent service is running; the mode applies to the next job, and the control plane shows it when the service connects"
+        );
+        return Ok(());
+    }
+    if let Some(reason) = busy_reason(dir) {
+        println!(
+            "{reason}, so the service does not restart; the mode applies to the next job, and the control plane shows it after the service connects again, for example after the job ends and you run: {RESTART_COMMAND}"
+        );
+        return Ok(());
+    }
+    let since = OffsetDateTime::now_utc();
+    manager.restart().with_context(|| {
+        format!(
+            "the mode is written and applies to the next job, but the service did not restart; restart it by hand: {RESTART_COMMAND}"
+        )
+    })?;
+    match crate::connection::wait_for_connection(dir, since, wait.timeout, wait.poll) {
+        crate::connection::Wait::Connected(_) => {
+            println!("the agent reconnected; the control plane now sees the new state");
+            Ok(())
+        }
+        crate::connection::Wait::TimedOut(_) => bail!(
+            "the mode is written and applies to the next job, but the agent did not connect again after the restart; the control plane shows the mode after it connects: {NOT_CONNECTED}"
+        ),
+    }
+}
+
+/// Why a restart could stop a job, from the job journal that the service keeps. A journal that
+/// cannot be read gives no proof that the service is idle.
+fn busy_reason(dir: &Path) -> Option<String> {
+    match crate::journal::FileJournal::load(dir.join(crate::journal::JOURNAL_FILE)) {
+        Ok(journal) if journal.has_unfinished_job(now_timestamp()) => {
+            Some("the job journal shows a job in progress".to_owned())
+        }
+        Ok(_) => None,
+        Err(error) => Some(format!("the job journal cannot be read ({error:#})")),
+    }
+}
+
+fn now_timestamp() -> prost_types::Timestamp {
+    let now = OffsetDateTime::now_utc();
+    prost_types::Timestamp {
+        seconds: now.unix_timestamp(),
+        nanos: now.nanosecond() as i32,
+    }
+}
+
+fn trust_enabled_text(dir: &Path) -> String {
+    format!(
+        "Server scripts are enabled on this host ({}). The control plane can now run any command here as the agent account.",
+        crate::scripts::mode_file_for(dir).display()
+    )
 }
 
 fn check_register_input(options: &RegisterOptions, dir: &Path) -> Result<()> {
@@ -510,6 +655,276 @@ mod tests {
 
     use super::*;
 
+    mod trust_mode {
+        use std::cell::{Cell, RefCell};
+        use std::time::Duration;
+
+        use prost_types::Timestamp;
+        use restichub_proto::signing::JobJournal as _;
+
+        use super::*;
+        use crate::journal::{FileJournal, JOURNAL_FILE};
+        use crate::service::{ServiceState, StartType};
+
+        /// A service double that records the calls in order. Its state is fixed; a restart writes
+        /// the connection status like a service that connected, when `connects` is set.
+        struct Fake {
+            state: ServiceState,
+            dir: PathBuf,
+            connects: bool,
+            restart_fails: bool,
+            events: RefCell<Vec<String>>,
+        }
+
+        impl Fake {
+            fn new(dir: &Path, state: ServiceState) -> Self {
+                Self {
+                    state,
+                    dir: dir.to_path_buf(),
+                    connects: true,
+                    restart_fails: false,
+                    events: RefCell::new(Vec::new()),
+                }
+            }
+
+            fn events(&self) -> Vec<String> {
+                self.events.borrow().clone()
+            }
+        }
+
+        impl ServiceManager for Fake {
+            fn install_and_start(&self, _restic: &Path) -> Result<()> {
+                self.events.borrow_mut().push("start".to_owned());
+                Ok(())
+            }
+
+            fn state(&self) -> Result<ServiceState> {
+                Ok(self.state)
+            }
+
+            fn stop(&self) -> Result<()> {
+                Ok(())
+            }
+
+            fn restart(&self) -> Result<()> {
+                self.events.borrow_mut().push("restart".to_owned());
+                if self.restart_fails {
+                    bail!("cannot stop the service");
+                }
+                if self.connects {
+                    crate::connection::record_connected(&self.dir, "https://cp.example:8443");
+                }
+                Ok(())
+            }
+        }
+
+        const RUNNING: ServiceState = ServiceState {
+            installed: true,
+            running: true,
+            start_type: StartType::Automatic,
+        };
+
+        const STOPPED: ServiceState = ServiceState {
+            installed: true,
+            running: false,
+            start_type: StartType::Automatic,
+        };
+
+        fn quick() -> WaitOptions {
+            WaitOptions {
+                timeout: Duration::from_millis(100),
+                poll: Duration::from_millis(10),
+            }
+        }
+
+        fn config_dir(name: &str) -> PathBuf {
+            let base = std::env::temp_dir().join(format!(
+                "restichub-agent-trustmode-{name}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            let dir = base.join("config");
+            std::fs::create_dir_all(&dir).expect("config dir");
+            dir
+        }
+
+        /// Writes the mode file without the trust check, which needs root or Administrators.
+        fn write_mode(dir: &Path, enabled: bool) -> Result<()> {
+            let value = if enabled { "enabled" } else { "disabled" };
+            std::fs::write(
+                crate::scripts::mode_file_for(dir),
+                format!("server_scripts = {value}\n"),
+            )?;
+            Ok(())
+        }
+
+        fn refuse_mode(_dir: &Path, _enabled: bool) -> Result<()> {
+            bail!("the agent would not trust the file")
+        }
+
+        fn mode_text(dir: &Path) -> String {
+            std::fs::read_to_string(crate::scripts::mode_file_for(dir)).unwrap_or_default()
+        }
+
+        fn cleanup(dir: &Path) {
+            let _ = std::fs::remove_dir_all(dir.parent().expect("parent"));
+        }
+
+        fn apply(fake: &Fake, dir: &Path, enable: bool, no_restart: bool) -> Result<()> {
+            apply_trust_mode(fake, dir, enable, no_restart, quick(), &write_mode)
+        }
+
+        fn accept_job(dir: &Path, finished: bool) {
+            let mut journal = FileJournal::load(dir.join(JOURNAL_FILE)).expect("journal");
+            let expires = Timestamp {
+                seconds: OffsetDateTime::now_utc().unix_timestamp() + 3600,
+                nanos: 0,
+            };
+            journal.record_accepted("job-1", expires);
+            if finished {
+                journal.record_completed(
+                    "job-1",
+                    restichub_proto::agent::v1::JobResult {
+                        job_id: "job-1".to_owned(),
+                        ..Default::default()
+                    },
+                );
+            }
+            journal.persist().expect("persist");
+        }
+
+        #[test]
+        fn fr_hk_08_trust_enable_restarts_an_idle_service_and_waits_for_the_connection() {
+            let dir = config_dir("restart");
+            accept_job(&dir, true);
+            let fake = Fake::new(&dir, RUNNING);
+            apply(&fake, &dir, true, false).expect("apply");
+            assert!(mode_text(&dir).contains("server_scripts = enabled"));
+            assert_eq!(fake.events(), ["restart"]);
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_trust_change_does_not_restart_a_service_with_a_job_in_progress() {
+            let dir = config_dir("busy");
+            accept_job(&dir, false);
+            let fake = Fake::new(&dir, RUNNING);
+            apply(&fake, &dir, false, false).expect("apply");
+            assert!(mode_text(&dir).contains("server_scripts = disabled"));
+            assert!(fake.events().is_empty());
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_a_journal_that_cannot_be_read_does_not_prove_an_idle_service() {
+            let dir = config_dir("bad-journal");
+            std::fs::write(dir.join(JOURNAL_FILE), b"not json").expect("write");
+            let fake = Fake::new(&dir, RUNNING);
+            apply(&fake, &dir, true, false).expect("apply");
+            assert!(fake.events().is_empty());
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_trust_enable_fails_when_the_agent_does_not_reconnect() {
+            let dir = config_dir("no-reconnect");
+            let mut fake = Fake::new(&dir, RUNNING);
+            fake.connects = false;
+            let error = format!(
+                "{:#}",
+                apply(&fake, &dir, true, false).expect_err("no connection")
+            );
+            assert!(error.contains("did not connect again"), "{error}");
+            assert!(error.contains("the mode is written"), "{error}");
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_a_failed_restart_says_that_the_mode_is_written() {
+            let dir = config_dir("restart-fails");
+            let mut fake = Fake::new(&dir, RUNNING);
+            fake.restart_fails = true;
+            let error = format!(
+                "{:#}",
+                apply(&fake, &dir, false, false).expect_err("restart fails")
+            );
+            assert!(error.contains("the mode is written"), "{error}");
+            assert!(error.contains(RESTART_COMMAND), "{error}");
+            assert!(mode_text(&dir).contains("server_scripts = disabled"));
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_trust_change_does_not_restart_a_stopped_or_absent_service() {
+            let dir = config_dir("stopped");
+            for state in [STOPPED, ServiceState::NOT_INSTALLED] {
+                let fake = Fake::new(&dir, state);
+                apply(&fake, &dir, false, false).expect("apply");
+                assert!(fake.events().is_empty());
+            }
+            assert!(mode_text(&dir).contains("server_scripts = disabled"));
+            cleanup(&dir);
+        }
+
+        #[test]
+        fn fr_hk_08_no_restart_leaves_the_service_alone() {
+            let dir = config_dir("no-restart");
+            let fake = Fake::new(&dir, RUNNING);
+            apply(&fake, &dir, true, true).expect("apply");
+            assert!(fake.events().is_empty());
+            cleanup(&dir);
+        }
+
+        #[tokio::test]
+        async fn fr_hk_08_register_writes_the_trust_mode_before_the_enrollment() {
+            let dir = config_dir("register");
+            let enroll = async {
+                assert!(mode_text(&dir).contains("server_scripts = enabled"));
+                Ok(())
+            };
+            enroll_with_trust_mode(&dir, false, &write_mode, enroll)
+                .await
+                .expect("register");
+            assert!(mode_text(&dir).contains("server_scripts = enabled"));
+            cleanup(&dir);
+        }
+
+        #[tokio::test]
+        async fn fr_hk_08_a_mode_that_cannot_be_written_does_not_spend_the_token() {
+            let dir = config_dir("register-refused");
+            let enrolled = Cell::new(false);
+            let enroll = async {
+                enrolled.set(true);
+                Ok(())
+            };
+            let error = enroll_with_trust_mode(&dir, false, &refuse_mode, enroll)
+                .await
+                .expect_err("the mode cannot be written");
+            assert!(
+                format!("{error:#}").contains("token is not used"),
+                "{error:#}"
+            );
+            assert!(!enrolled.get(), "the enrollment ran");
+            cleanup(&dir);
+        }
+
+        #[tokio::test]
+        async fn fr_hk_08_a_failed_enrollment_puts_the_earlier_mode_back() {
+            let dir = config_dir("register-fails");
+            let failed = || async { Err(anyhow::anyhow!("the control plane refused the token")) };
+            enroll_with_trust_mode(&dir, false, &write_mode, failed())
+                .await
+                .expect_err("the enrollment fails");
+            assert!(!crate::scripts::mode_file_for(&dir).exists());
+            write_mode(&dir, false).expect("write");
+            enroll_with_trust_mode(&dir, false, &write_mode, failed())
+                .await
+                .expect_err("the enrollment fails");
+            assert!(mode_text(&dir).contains("server_scripts = disabled"));
+            cleanup(&dir);
+        }
+    }
+
     #[test]
     fn fr_in_07_a_moved_restic_that_differs_from_its_record_fails() {
         let base =
@@ -583,6 +998,23 @@ mod tests {
         );
         assert!(dir.join("agent-key.pem.next").exists());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_install_service_refuses_an_identity_that_another_account_could_change() {
+        refuse_changeable_identity(&[]).expect("an untouched identity is used");
+        let chain = PathBuf::from("Agent").join(crate::identity::CA_CHAIN_FILE);
+        let error = format!(
+            "{:#}",
+            refuse_changeable_identity(std::slice::from_ref(&chain))
+                .expect_err("a changeable identity must be refused")
+        );
+        assert!(error.contains(&chain.display().to_string()), "{error}");
+        assert!(error.contains("the service is not installed"), "{error}");
+        assert!(
+            error.contains("register --force --url <URL> --token <TOKEN>"),
+            "{error}"
+        );
     }
 
     #[test]

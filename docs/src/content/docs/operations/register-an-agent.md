@@ -20,6 +20,7 @@ restichub-agent register --url https://<control-plane> --token <token>
 - `--ca-file PATH` verifies the control plane with the CA in the file. Without this option the agent uses the system root certificates.
 - `--force` replaces an existing identity. Use it to register the host again.
 - `--no-service` enrolls the host and installs no service. Run `install-service` later.
+- `--trust-server-scripts` turns on the local trust mode before the token is used. The control plane can then run any command on this host, as root or LocalSystem. Without this option the mode is off. See [Scripts](/restichub/operations/scripts/).
 - `--restic-archive PATH`, `--restic-sums PATH` and `--restic-sums-sig PATH` give the restic release files of an offline host (see "The restic binary"). Give all three or none.
 
 Run the command as `root` on Linux, or in an elevated PowerShell on Windows ("Run as administrator"). You can run it from any folder. The agent checks the rights, creates its directories and proves that it can write there before it contacts the control plane. A failed check does not use the token.
@@ -160,7 +161,7 @@ All commands of the agent:
 | `restic update` | Download the latest restic and replace the installed one. |
 | `uninstall-service` | Stop and remove the service. |
 | `status` | Print the state of the agent. |
-| `trust-server-scripts --enable` or `--disable` | Turn the local trust mode for [server scripts](/restichub/operations/scripts/) on or off. Run it as `root` or Administrator. |
+| `trust-server-scripts --enable` or `--disable` | Turn the local trust mode for [server scripts](/restichub/operations/scripts/) on or off. Run it as `root` or Administrator. The new state applies to the next job. The command restarts an idle service, so that the control plane sees the new state. It does not restart a service with a job in progress. Use `--no-restart` to skip the restart. |
 | `run` | Run the agent in the foreground. The service uses this command. You do not start it by hand. |
 | `version`, `--version` or `-V` | Print the agent version and the protocol version, for example `restichub-agent 0.1.0+3b21922 (protocol 1.1)`. |
 | `help`, `--help` or `-h` | Print the usage. |
@@ -195,6 +196,7 @@ The agent does not use a file that another account could change before the repai
 - If another account could change `Agent-restore-roots.txt`, the command renames the file to `Agent-restore-roots.txt.untrusted-<time>`. The extra restore roots are then off. Examine the file, and then rename it back to turn them on again.
 - In a directory that another account could change, the command removes the files of an incomplete certificate rotation: `rotation.next` and the files that end with `.next`.
 - If another account could read or change the identity, the command shows a warning. Register the host again (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)).
+- Another account could change the `Agent` directory or a file of the identity, for example `ca-chain.pem`, `signing-keys.json` or `identity.json`. Then `install-service` does not use the identity and does not start the service. That account could replace the trust anchors of the agent. Register the host again with `register --force`.
 
 The command stops at an item that it cannot repair. Such an item has another owner, is a link or a hard link, or is not a file of the agent. The message names the item.
 
@@ -221,6 +223,7 @@ The exit code is 0 on success and 1 on an error. The exit code is 78 when the se
 | `the control plane does not accept the protocol version of this agent` | The agent and the control plane have different protocol versions. | Update the agent (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)). |
 | `... cannot protect the directory ...ResticHub ... grants the access mask ... to an account that is not SYSTEM or Administrators` | An older agent left `%ProgramData%\ResticHub` with the access of `%ProgramData%`. | Run `restichub-agent install-service` of the new package as Administrator. The command repairs the access and keeps the identity. Do not delete the directory, because it holds the identity. |
 | `... holds ..., which is not a file of the agent`, `... is owned by an account that is not SYSTEM or Administrators, so the agent does not use it`, `... is a hard link ...` or `... is a reparse point ...` | The directory holds a file that the agent does not know, a file that another account owns, a hard link or a link. | Check the named file. Remove that file, not the directory. Run the command again. If the file is a part of the identity, for example `agent-key.pem`, register the host again after the removal. |
+| `the identity of this host could be changed by another account (...)` | An older agent let another account change the `Agent` directory or a file of the identity. The repair stopped that access, but that account could replace the CA chain, the signing keys or the endpoint. `install-service` does not install the service. | Create a token with "Re-register" on the host page. Run `restichub-agent register --force --url <URL> --token <TOKEN>` (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)). |
 | `warning: another account could read or change ..., so the agent identity may be exposed` | An older agent let another account read or change the identity. The repair stopped that access, but the key can be already known. | Register the host again (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)). |
 | `... is owned by an account that is not SYSTEM or Administrators, so that account may have put files there` | Another account owns a directory of the agent. The agent does not repair it. | Check the files in the directory. Then run the two PowerShell lines from the message: `icacls <directory> /setowner *S-1-5-32-544` and `Set-Acl` with the SDDL `O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`. Run the command again. |
 | The command refuses a directory or file | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
