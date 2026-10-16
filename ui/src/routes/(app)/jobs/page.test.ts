@@ -241,9 +241,7 @@ describe('the Jobs screen', () => {
 		render(Jobs);
 
 		await screen.findByText('nightly-web');
-		await user.click(screen.getByRole('button', { name: 'More actions for the job nightly-web' }));
-		// The menu content is hidden in jsdom, so the text query finds the item.
-		await user.click(await screen.findByText('Cancel job'));
+		await user.click(screen.getByRole('button', { name: 'Cancel job' }));
 		const dialog = await screen.findByRole('dialog');
 		expect(mocks.cancelJob).not.toHaveBeenCalled();
 		await user.click(within(dialog).getByRole('button', { name: 'Cancel job' }));

@@ -17,7 +17,8 @@ interval="${INTERVAL:-60}"
 mkdir -p "$out"
 sign_in
 
-echo 'time,agents_online,queued,sent,running,succeeded,failed,expired,dead_letter,check_failed,restic_procs,cp_cpu_pct,cp_mem_mib,pg_mem_mib,agents_mem_mib' >"$out/samples.csv"
+# A collector that starts again appends to the file of the run.
+if [ ! -s "$out/samples.csv" ]; then echo 'time,agents_online,queued,sent,running,succeeded,failed,expired,dead_letter,check_failed,restic_procs,cp_cpu_pct,cp_mem_mib,pg_mem_mib,agents_mem_mib' >"$out/samples.csv"; fi
 
 to_mib() {
 	awk '{v=$1; if (v ~ /GiB/) {sub(/GiB/,"",v); print v*1024} else if (v ~ /MiB/) {sub(/MiB/,"",v); print v} else if (v ~ /KiB/) {sub(/KiB/,"",v); print v/1024} else {print 0}}'

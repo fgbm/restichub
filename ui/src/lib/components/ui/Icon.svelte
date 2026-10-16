@@ -79,7 +79,7 @@
 	}
 
 	.icon--spin {
-		animation: icon-spin 0.7s linear infinite;
+		animation: icon-spin var(--rh-spin-duration) linear infinite;
 	}
 
 	@keyframes icon-spin {

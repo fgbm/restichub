@@ -7,12 +7,12 @@
 		Button,
 		Checkbox,
 		Dialog,
-		DropdownMenu,
 		PageHeader,
 		PasswordField,
 		Select,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -299,38 +299,32 @@
 	filterPlaceholder={t('users.searchPlaceholder')}
 >
 	{#snippet rowActions(user)}
-		<span class="row-actions">
-			<Button
-				size="sm"
-				icon="users"
-				title={t('platformUsers.memberships')}
-				aria-label={t('platformUsers.membershipsFor', { name: user.username })}
-				onclick={() => openManage(user)}
-			/>
-			<DropdownMenu
-				icon="more"
-				align="end"
-				label={t('users.moreActions', { name: user.username })}
-				items={[
-					{
-						label: user.platform_admin
-							? t('platformUsers.revokeAdmin')
-							: t('platformUsers.grantAdmin'),
-						icon: 'shield',
-						disabled: busyKey !== null,
-						onSelect: () => (user.platform_admin ? revokeRight(user) : openGrant(user))
-					},
-					{
-						label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
-						icon: 'octagon',
-						tone: 'danger',
-						separatorBefore: true,
-						disabled: busyKey !== null,
-						onSelect: () => toggleDisabled(user)
-					}
-				]}
-			/>
-		</span>
+		<RowActions
+			moreLabel={t('users.moreActions', { name: user.username })}
+			items={[
+				{
+					label: t('platformUsers.memberships'),
+					icon: 'users',
+					onSelect: () => openManage(user)
+				},
+				{
+					label: user.platform_admin
+						? t('platformUsers.revokeAdmin')
+						: t('platformUsers.grantAdmin'),
+					icon: 'shield',
+					disabled: busyKey !== null,
+					onSelect: () => (user.platform_admin ? revokeRight(user) : openGrant(user))
+				},
+				{
+					label: user.disabled ? t('users.enableUser') : t('users.disableUser'),
+					icon: 'octagon',
+					tone: 'danger',
+					separatorBefore: true,
+					disabled: busyKey !== null,
+					onSelect: () => toggleDisabled(user)
+				}
+			]}
+		/>
 	{/snippet}
 </Table>
 
@@ -489,11 +483,6 @@
 </Dialog>
 
 <style>
-	.row-actions {
-		display: inline-flex;
-		gap: var(--rh-space-1);
-	}
-
 	.membership {
 		display: flex;
 		align-items: flex-end;

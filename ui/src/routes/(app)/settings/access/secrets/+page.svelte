@@ -11,7 +11,8 @@
 		PasswordField,
 		Select,
 		Table,
-		TextField
+		TextField,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption, TableColumn } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -198,16 +199,30 @@
 </script>
 
 {#snippet rowActions(secret: Secret)}
-	{#if canReplaceValue(secret)}
-		<Button size="sm" onclick={() => openReplace(secret)}>{t('secrets.replace')}</Button>
-	{/if}
-	<Button size="sm" icon="trash" onclick={() => openDelete(secret)}>
-		{t('secrets.delete')}
-	</Button>
+	<RowActions
+		moreLabel={t('secrets.moreActions', { name: secret.name })}
+		items={[
+			...(canReplaceValue(secret)
+				? [
+						{
+							label: t('secrets.replace'),
+							icon: 'refresh' as const,
+							onSelect: () => openReplace(secret)
+						}
+					]
+				: []),
+			{
+				label: t('secrets.delete'),
+				icon: 'trash',
+				tone: 'danger',
+				onSelect: () => openDelete(secret)
+			}
+		]}
+	/>
 {/snippet}
 
 {#snippet nameCell(secret: Secret)}
-	<span class="secret-name">{secret.name}</span>
+	<span class="secret-name" title={secret.name}>{secret.name}</span>
 {/snippet}
 
 {#snippet usersList(secret: Secret)}
@@ -375,6 +390,11 @@
 
 <style>
 	.secret-name {
+		display: block;
+		max-width: 28ch;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		font-weight: var(--rh-font-weight-semibold);
 	}
 

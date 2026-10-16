@@ -10,12 +10,12 @@
 		Badge,
 		Button,
 		ConfirmDialog,
-		DropdownMenu,
 		EmptyState,
 		PageHeader,
 		Select,
 		StatusPill,
-		Table
+		Table,
+		RowActions
 	} from '#lib/components/ui/index.ts';
 	import type {
 		MenuItem,
@@ -355,10 +355,8 @@
 		{/snippet}
 		{#snippet rowActions(job)}
 			{#if actionsFor(job).length > 0}
-				<DropdownMenu
-					icon="more"
-					align="end"
-					label={t('jobs.moreActions', { name: planLabel(job) })}
+				<RowActions
+					moreLabel={t('jobs.moreActions', { name: planLabel(job) })}
 					items={actionsFor(job)}
 				/>
 			{/if}
