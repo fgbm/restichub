@@ -60,12 +60,12 @@ describe('Profiles list', () => {
 		expect(link).toHaveAttribute('href', '/(app)/profiles/p_1');
 	});
 
-	it('opens the editor page from the Edit action', async () => {
-		const user = userEvent.setup();
+	it('opens the editor page from the row and keeps preview and delete as icon buttons', async () => {
 		render(Profiles);
-		await user.click(await screen.findByRole('button', { name: 'More actions for db-nightly' }));
-		await user.click(await screen.findByText('Edit'));
-		expect(mocks.goto).toHaveBeenCalledWith('/(app)/profiles/p_1');
+		const link = await screen.findByRole('link', { name: 'db-nightly' });
+		expect(link.getAttribute('href')).toContain('p_1');
+		expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'More actions for db-nightly' })).toBeNull();
 	});
 
 	it('opens the new profile page from the Add button', async () => {

@@ -93,15 +93,16 @@ describe('the Jobs screen', () => {
 	});
 
 	it('reads only the jobs of the host that the link names', async () => {
-		route.url = new URL('http://localhost/jobs?agent_id=a_01');
+		route.url = new URL('http://localhost/jobs?agent_id=a_1');
 		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
 		render(Jobs);
 
 		await waitFor(() =>
-			expect(mocks.listJobs).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'a_01' }))
+			expect(mocks.listJobs).toHaveBeenCalledWith(expect.objectContaining({ agent_id: 'a_1' }))
 		);
-		expect(await screen.findByText('Host: win-fs01')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: 'Show all jobs' })).toBeInTheDocument();
+		const chips = await screen.findByRole('list', { name: 'Applied filters' });
+		expect(chips).toHaveTextContent('Host: win-fs01');
+		expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
 	});
 
 	it('shows a dash for an empty start and duration and keeps the filter in the toolbar', async () => {
@@ -114,11 +115,11 @@ describe('the Jobs screen', () => {
 		const table = within(await screen.findByRole('table'));
 		expect((await table.findAllByText('—')).length).toBe(2);
 		expect(screen.queryByText('None')).not.toBeInTheDocument();
-		const filter = screen.getByRole('combobox', { name: 'Status filter' });
-		expect(filter.closest('.table-toolbar')).not.toBeNull();
+		const filters = screen.getByRole('group', { name: 'Job filters' });
+		expect(filters.closest('.table-wrap')).not.toBeNull();
 	});
 
-	it('shows a cancelled job apart from a failed one and translates the reason', async () => {
+	it('shows a cancelled job apart from a failed one, with the pill only', async () => {
 		mocks.listJobs.mockResolvedValue({
 			items: [
 				job({
@@ -143,10 +144,13 @@ describe('the Jobs screen', () => {
 		const table = within(await screen.findByRole('table'));
 		expect(await table.findByText('Cancelled')).toBeInTheDocument();
 		expect(table.getByText('Gave up')).toBeInTheDocument();
-		expect(screen.getByText('The repository stayed locked after every retry.')).toBeInTheDocument();
+		// The reason is on the job page (design/style/ui-principles.md, 2.5).
+		expect(
+			screen.queryByText('The repository stayed locked after every retry.')
+		).not.toBeInTheDocument();
 	});
 
-	it('shows a job with warnings and a locked job with their typed results', async () => {
+	it('shows a job with warnings and a locked job by their status only', async () => {
 		mocks.listJobs.mockResolvedValue({
 			items: [
 				job({
@@ -169,12 +173,13 @@ describe('the Jobs screen', () => {
 
 		const table = within(await screen.findByRole('table'));
 		expect(await table.findByText('Succeeded with warnings')).toBeInTheDocument();
+		expect(table.getByText('Failed')).toBeInTheDocument();
 		expect(
-			screen.getByText(
+			screen.queryByText(
 				'Another process locks the repository. Wait for it to end and run the job again.'
 			)
-		).toBeInTheDocument();
-		expect(screen.getByText('Forget selected no snapshots')).toBeInTheDocument();
+		).not.toBeInTheDocument();
+		expect(screen.queryByText('Forget selected no snapshots')).not.toBeInTheDocument();
 	});
 
 	it('keeps the status, the start time and the duration on one line', async () => {
@@ -188,43 +193,13 @@ describe('the Jobs screen', () => {
 		}
 	});
 
-	it('translates the interrupted result of a job', async () => {
-		mocks.listJobs.mockResolvedValue({
-			items: [
-				job({
-					id: 'j_6',
-					status: 'failed',
-					result_code: 'failed',
-					result_message: 'interrupted',
-					finished_at: '2026-10-14T10:03:00Z'
-				})
-			],
-			next_cursor: null
-		});
+	it('opens the job page from the row link', async () => {
+		mocks.listJobs.mockResolvedValue({ items: [job()], next_cursor: null });
 		render(Jobs);
 
-		expect(
-			await screen.findByText('Interrupted: the agent restarted while scripts ran')
-		).toBeInTheDocument();
-		expect(screen.queryByText('interrupted')).not.toBeInTheDocument();
-	});
-
-	it('shows the raw code of a result that has no translation', async () => {
-		mocks.listJobs.mockResolvedValue({
-			items: [
-				job({
-					id: 'j_7',
-					status: 'failed',
-					result_code: 'failed',
-					result_message: 'brand_new_code',
-					finished_at: '2026-10-14T10:03:00Z'
-				})
-			],
-			next_cursor: null
-		});
-		render(Jobs);
-
-		expect(await screen.findByText('brand_new_code')).toBeInTheDocument();
+		const link = await screen.findByRole('link', { name: 'nightly-web' });
+		expect(link).toHaveAttribute('href', expect.stringMatching(/\/jobs\/j_1$/));
+		expect(screen.queryByRole('link', { name: 'win-fs01' })).not.toBeInTheDocument();
 	});
 
 	it('shows the empty state when no job exists', async () => {

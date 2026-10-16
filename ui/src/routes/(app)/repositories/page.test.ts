@@ -89,7 +89,7 @@ describe('the Repositories screen maintenance', () => {
 		expect(screen.getByText('No maintenance host')).toBeInTheDocument();
 	});
 
-	it('fr_rp_08 opens the repository page from the name and from the menu', async () => {
+	it('fr_rp_08 opens the repository page from the row and has no Edit action', async () => {
 		const user = userEvent.setup();
 		render(Repositories);
 
@@ -97,9 +97,10 @@ describe('the Repositories screen maintenance', () => {
 		expect(link).toHaveAttribute('href', '/repositories/r_1');
 		await user.click(screen.getByRole('button', { name: 'Add repository' }));
 		expect(mocks.goto).toHaveBeenCalledWith('/repositories/new');
+		// Opening the record is not a row action (design/style/ui-principles.md, 2.3).
 		await user.click(screen.getByRole('button', { name: 'More actions for repo-a' }));
-		await user.click(await screen.findByText('Edit'));
-		expect(mocks.goto).toHaveBeenCalledWith('/repositories/r_1');
+		await screen.findByText('Test access');
+		expect(screen.queryByText('Edit')).not.toBeInTheDocument();
 	});
 
 	it('fr_sc_09 lets an Operator run a maintenance task now', async () => {

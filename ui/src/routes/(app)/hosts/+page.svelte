@@ -11,30 +11,32 @@
 		EnrollmentTokenCreated,
 		ApiProblem
 	} from '#lib/api/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Badge,
 		Button,
 		ConfirmDialog,
 		CopyField,
+		DataTable,
 		Dialog,
 		EmptyState,
+		FilterBar,
 		Icon,
-		PageHeader,
 		Panel,
 		StatusPill,
-		Table,
-		TextField,
-		RowActions
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { TableColumn } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, RowAction, TableColumn } from '#lib/components/ui/index.ts';
+	import { facetCounts, matchesSearch } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
-	let actions: HostActions;
+	let hostActions: HostActions;
 	let agents = $state<Agent[]>([]);
 	let enrollmentTokens = $state<EnrollmentToken[]>([]);
 	let loading = $state(true);
@@ -83,17 +85,19 @@
 	);
 
 	const columns = $derived<TableColumn<Agent>[]>([
-		{
-			key: 'hostname',
-			header: t('hosts.host'),
-			value: (row) => `${row.hostname} ${row.os} ${row.arch}`,
-			render: hostCell
-		},
+		{ key: 'hostname', header: t('hosts.host'), truncate: 'sm' },
 		{
 			key: 'status',
 			header: t('hosts.status'),
 			value: (row) => statusLabel(row),
 			render: statusCell
+		},
+		{
+			key: 'os',
+			header: t('hosts.system'),
+			hideNarrow: true,
+			nowrap: true,
+			value: (row) => `${row.os} · ${row.arch}`
 		},
 		{
 			key: 'server_scripts',
@@ -112,10 +116,10 @@
 		{
 			key: 'last_seen_at',
 			hideNarrow: true,
-			nowrap: true,
 			header: t('hosts.lastSeen'),
+			date: 'relative',
 			value: (row) => row.last_seen_at ?? '',
-			render: lastSeenCell
+			cell: () => t('common.never')
 		},
 		{
 			key: 'certificate_expires_at',
@@ -124,17 +128,77 @@
 			value: (row) => row.certificate_expires_at,
 			render: certificateCell
 		},
+		{ key: 'created_at', header: t('hosts.created'), hideNarrow: true, date: 'relative' }
+	]);
+
+	type HostState = 'online' | 'offline' | 'waiting' | 'revoked';
+
+	function stateOf(agent: Agent): HostState {
+		if (agent.status === 'revoked') return 'revoked';
+		if (isWaiting(agent)) return 'waiting';
+		return agent.online ? 'online' : 'offline';
+	}
+
+	const filters = queryFilters(['q', 'state', 'os'] as const);
+
+	const facets = $derived<FilterFacet[]>([
 		{
-			key: 'created_at',
-			header: t('hosts.created'),
-			nowrap: true,
-			hideNarrow: true,
-			render: createdCell
+			key: 'state',
+			label: t('hosts.status'),
+			multiple: false,
+			options: (['online', 'offline', 'waiting', 'revoked'] as const).map((value) => ({
+				value,
+				label: stateLabel(value),
+				count: agents.filter((agent) => stateOf(agent) === value).length
+			}))
+		},
+		{
+			key: 'os',
+			label: t('hosts.os'),
+			options: facetCounts(agents, (agent) => [agent.os])
 		}
 	]);
 
-	function scriptsHref(agent: Agent): string {
-		return `${resolve('/(app)/hosts/[id]', { id: agent.id })}#scripts`;
+	const shown = $derived(
+		agents.filter((agent) => {
+			const { q, state, os } = filters.value;
+			if (!matchesSearch(q, [agent.hostname, ...agent.labels])) return false;
+			if (state && stateOf(agent) !== state) return false;
+			if (os && !os.split(',').includes(agent.os)) return false;
+			return true;
+		})
+	);
+
+	function rowActions(agent: Agent): RowAction[] {
+		if (!canWrite || agent.status !== 'active') return [];
+		return [
+			{
+				id: 'rename',
+				label: t('hosts.rename'),
+				icon: 'tag',
+				onSelect: () => hostActions.openRename(agent)
+			},
+			{
+				id: 'reregister',
+				label: t('hosts.reregister'),
+				icon: 'key',
+				onSelect: () => hostActions.openReregister(agent)
+			},
+			{
+				id: 'replace',
+				label: t('hosts.replaceOld'),
+				icon: 'host',
+				hidden: !agent.possible_duplicate_of?.is_older,
+				onSelect: () => hostActions.openReplace(agent)
+			},
+			{
+				id: 'revoke',
+				label: t('hosts.revokeAgent'),
+				icon: 'octagon',
+				danger: true,
+				onSelect: () => hostActions.openRevoke(agent)
+			}
+		];
 	}
 
 	function scriptsLabel(agent: Agent): string {
@@ -154,10 +218,14 @@
 		return agent.status === 'active' && !agent.first_connected_at;
 	}
 
+	function stateLabel(state: HostState): string {
+		if (state === 'revoked') return t('hosts.status.revoked');
+		if (state === 'waiting') return t('hosts.status.waiting');
+		return t(state === 'online' ? 'hp.state.online' : 'hp.state.offline');
+	}
+
 	function statusLabel(agent: Agent): string {
-		if (agent.status === 'revoked') return t('hosts.status.revoked');
-		if (isWaiting(agent)) return t('hosts.status.waiting');
-		return t(agent.online ? 'hp.state.online' : 'hp.state.offline');
+		return stateLabel(stateOf(agent));
 	}
 
 	// The token row shows the creator's name when the caller created it (getSession is the caller).
@@ -298,29 +366,6 @@
 	}
 </script>
 
-{#snippet timeCell(value: string | null | undefined)}
-	{#if value}
-		<time datetime={value} title={formatTime(value)}>{relativeTime(value)}</time>
-	{:else}
-		{t('common.never')}
-	{/if}
-{/snippet}
-
-{#snippet lastSeenCell(agent: Agent)}
-	<span class="nowrap">{@render timeCell(agent.last_seen_at)}</span>
-{/snippet}
-
-{#snippet createdCell(agent: Agent)}
-	<span class="nowrap">{@render timeCell(agent.created_at)}</span>
-{/snippet}
-
-{#snippet hostCell(agent: Agent)}
-	<span class="host">
-		<a class="host__name" href={resolve('/(app)/hosts/[id]', { id: agent.id })}>{agent.hostname}</a>
-		<span class="host__meta">{agent.os} · {agent.arch}</span>
-	</span>
-{/snippet}
-
 {#snippet statusCell(agent: Agent)}
 	<span class="status">
 		<span title={isWaiting(agent) ? t('hosts.waitingTitle') : undefined}>
@@ -334,28 +379,19 @@
 				{statusLabel(agent)}
 			</StatusPill>
 		</span>
+		<!-- AC-ID-09: both records of a duplicate show the warning in the list. -->
 		{#if agent.possible_duplicate_of && agent.status === 'active'}
 			<span title={t('hosts.duplicateTitle', { name: agent.possible_duplicate_of.hostname })}>
-				<Badge tone="warning">
-					{t('hosts.duplicate')}
-				</Badge>
+				<Badge tone="warning">{t('hosts.duplicate')}</Badge>
 			</span>
 		{/if}
 	</span>
 {/snippet}
 
 {#snippet scriptsCell(agent: Agent)}
-	<!-- eslint-disable svelte/no-navigation-without-resolve -- resolved path with a query or a fragment -->
-	<a
-		class="host__scripts"
-		href={scriptsHref(agent)}
-		aria-label={`${t('hosts.serverScripts')}: ${agent.hostname}`}
-	>
-		<StatusPill tone={agent.server_scripts === 'enabled' ? 'info' : 'neutral'}>
-			{scriptsLabel(agent)}
-		</StatusPill>
-	</a>
-	<!-- eslint-enable svelte/no-navigation-without-resolve -->
+	<StatusPill tone={agent.server_scripts === 'enabled' ? 'info' : 'neutral'}>
+		{scriptsLabel(agent)}
+	</StatusPill>
 {/snippet}
 
 {#snippet versionCell(agent: Agent)}
@@ -405,227 +441,174 @@
 	</span>
 {/snippet}
 
-<svelte:head>
-	<title>{t('hosts.title')} · {t('app.name')}</title>
-</svelte:head>
-
-<PageHeader
+<Page
 	title={t('hosts.title')}
 	description={t('hosts.description')}
 	count={loading ? undefined : agents.length}
 >
-	{#if canWrite}
-		<Button variant="primary" icon="plus" onclick={openAdd}>{t('hosts.add')}</Button>
-	{/if}
-</PageHeader>
-
-{#if pending.length > 0}
-	<div class="pending">
-		<Panel title={t('hosts.pending.title')} subtitle={t('hosts.pending.subtitle')} flush>
-			<ul class="pending__list">
-				{#each pending as token (token.id)}
-					<li class="pending__row">
-						<span class="pending__icon"><Icon name="key" /></span>
-						<span class="pending__body">
-							<span class="pending__head">
-								<span class="pending__prefix">{token.display_prefix}</span>
-								{#each token.labels as label (label)}
-									<Badge tone="neutral">{label}</Badge>
-								{/each}
-								{#if token.replaces_agent_id}
-									<Badge tone="info">
-										{t('hosts.pending.reregisters', {
-											name: replacesName(token) ?? token.replaces_agent_id
-										})}
-									</Badge>
-								{/if}
-							</span>
-							<span class="pending__meta">
-								{t('hosts.pending.meta', {
-									name: createdByLabel(token),
-									created: relativeTime(token.created_at),
-									expires: relativeTime(token.expires_at)
-								})}
-							</span>
-						</span>
-						{#if canWrite}
-							<span class="pending__action">
-								<Button
-									size="sm"
-									icon="x"
-									title={t('hosts.pending.cancel')}
-									aria-label={t('hosts.pending.cancelFor', { prefix: token.display_prefix })}
-									onclick={() => openCancel(token)}
-								/>
-							</span>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		</Panel>
-	</div>
-{/if}
-
-{#if empty}
-	<EmptyState
-		icon="host"
-		title={t('hosts.emptyTitle')}
-		description={t('hosts.emptyDescription')}
-		bordered
-	>
+	{#snippet actions()}
 		{#if canWrite}
-			<Button variant="primary" onclick={openAdd}>{t('hosts.addFirst')}</Button>
-		{/if}
-	</EmptyState>
-{:else}
-	<Table
-		{columns}
-		rows={agents}
-		{loading}
-		{error}
-		rowKey={(agent) => agent.id}
-		filterPlaceholder={t('hosts.searchPlaceholder')}
-	>
-		{#snippet rowActions(agent)}
-			{#if canWrite && agent.status === 'active'}
-				<RowActions
-					moreLabel={t('hosts.moreActions', { name: agent.hostname })}
-					items={[
-						{
-							label: t('hosts.rename'),
-							icon: 'tag',
-							onSelect: () => actions.openRename(agent)
-						},
-						{
-							label: t('hosts.reregister'),
-							icon: 'key',
-							onSelect: () => actions.openReregister(agent)
-						},
-						...(agent.possible_duplicate_of?.is_older
-							? [
-									{
-										label: t('hosts.replaceOld'),
-										icon: 'host' as const,
-										onSelect: () => actions.openReplace(agent)
-									}
-								]
-							: []),
-						{
-							label: t('hosts.revokeAgent'),
-							icon: 'octagon',
-							tone: 'danger',
-							separatorBefore: true,
-							onSelect: () => actions.openRevoke(agent)
-						}
-					]}
-				/>
-			{/if}
-		{/snippet}
-	</Table>
-{/if}
-
-<Dialog
-	bind:open={addOpen}
-	size={createdToken && !registeredHost ? 'lg' : 'md'}
-	title={registeredHost
-		? t('hosts.registeredTitle')
-		: createdToken
-			? t('hosts.tokenTitle')
-			: t('hosts.addTitle')}
-	description={createdToken ? undefined : t('hosts.addDescription')}
-	onsubmit={createdToken ? closeAdd : createToken}
->
-	{#if registeredHost}
-		<Alert
-			tone="success"
-			icon="check"
-			title={t('hosts.registered', { name: registeredHost.hostname })}
-		/>
-	{:else if createdToken}
-		<Alert tone="attention" icon="key" title={t('tokens.valueOnceBody')}>
-			{t('hosts.tokenNote')}
-		</Alert>
-		<CopyField value={createdToken.token} label={t('hosts.tokenValue')} secret />
-		<CopyField value={installCommand} label={t('hosts.installCommand')} />
-	{:else}
-		{#if createError}
-			<Alert tone="danger" title={createError} />
-		{/if}
-		<TextField
-			id="host-labels"
-			label={t('hosts.labels')}
-			error={fieldError(createProblem, 'labels')}
-			bind:value={labels}
-			placeholder={t('hosts.labelsPlaceholder')}
-		/>
-	{/if}
-	{#snippet footer()}
-		{#if createdToken}
-			<Button type="submit" variant="primary">{t('common.done')}</Button>
-		{:else}
-			<Button onclick={closeAdd}>{t('common.cancel')}</Button>
-			<Button type="submit" variant="primary" loading={creating}>
-				{t('hosts.createToken')}
-			</Button>
+			<Button variant="primary" icon="plus" onclick={openAdd}>{t('hosts.add')}</Button>
 		{/if}
 	{/snippet}
-</Dialog>
 
-<ConfirmDialog
-	bind:open={cancelOpen}
-	title={t('hosts.pending.cancelTitle')}
-	message={t('hosts.pending.cancelBody', { prefix: cancelTarget?.display_prefix ?? '' })}
-	confirmLabel={t('hosts.pending.cancel')}
-	cancelLabel={t('hosts.pending.keep')}
-	tone="danger"
-	loading={cancelling}
-	onConfirm={confirmCancel}
-/>
+	{#if pending.length > 0}
+		<div class="pending">
+			<Panel title={t('hosts.pending.title')} subtitle={t('hosts.pending.subtitle')} flush>
+				<ul class="pending__list">
+					{#each pending as token (token.id)}
+						<li class="pending__row">
+							<span class="pending__icon"><Icon name="key" /></span>
+							<span class="pending__body">
+								<span class="pending__head">
+									<span class="pending__prefix">{token.display_prefix}</span>
+									{#each token.labels as label (label)}
+										<Badge tone="neutral">{label}</Badge>
+									{/each}
+									{#if token.replaces_agent_id}
+										<Badge tone="info">
+											{t('hosts.pending.reregisters', {
+												name: replacesName(token) ?? token.replaces_agent_id
+											})}
+										</Badge>
+									{/if}
+								</span>
+								<span class="pending__meta">
+									{t('hosts.pending.meta', {
+										name: createdByLabel(token),
+										created: relativeTime(token.created_at),
+										expires: relativeTime(token.expires_at)
+									})}
+								</span>
+							</span>
+							{#if canWrite}
+								<span class="pending__action">
+									<Button
+										size="sm"
+										icon="x"
+										title={t('hosts.pending.cancel')}
+										aria-label={t('hosts.pending.cancelFor', { prefix: token.display_prefix })}
+										onclick={() => openCancel(token)}
+									/>
+								</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			</Panel>
+		</div>
+	{/if}
 
-<HostActions bind:this={actions} onchanged={load} />
+	{#if empty}
+		<EmptyState
+			icon="host"
+			title={t('hosts.emptyTitle')}
+			description={t('hosts.emptyDescription')}
+			bordered
+		>
+			{#if canWrite}
+				<Button variant="primary" onclick={openAdd}>{t('hosts.addFirst')}</Button>
+			{/if}
+		</EmptyState>
+	{:else}
+		<DataTable
+			{columns}
+			rows={shown}
+			{loading}
+			{error}
+			rowKey={(agent) => agent.id}
+			rowHref={(agent) => resolve('/(app)/hosts/[id]', { id: agent.id })}
+			actions={rowActions}
+			moreLabel={(agent) => t('hosts.moreActions', { name: agent.hostname })}
+			emptyTitle={t('filter.noMatches')}
+			emptyDescription={t('filter.noMatchesDescription')}
+		>
+			{#snippet toolbar()}
+				<FilterBar
+					label={t('hosts.filters')}
+					value={filters.value}
+					search={{ key: 'q', label: t('hosts.search'), placeholder: t('hosts.searchPlaceholder') }}
+					{facets}
+					onchange={filters.update}
+					onreset={filters.reset}
+				/>
+			{/snippet}
+		</DataTable>
+	{/if}
+
+	<Dialog
+		bind:open={addOpen}
+		size={createdToken && !registeredHost ? 'lg' : 'md'}
+		title={registeredHost
+			? t('hosts.registeredTitle')
+			: createdToken
+				? t('hosts.tokenTitle')
+				: t('hosts.addTitle')}
+		description={createdToken ? undefined : t('hosts.addDescription')}
+		onsubmit={createdToken ? closeAdd : createToken}
+	>
+		{#if registeredHost}
+			<Alert
+				tone="success"
+				icon="check"
+				title={t('hosts.registered', { name: registeredHost.hostname })}
+			/>
+		{:else if createdToken}
+			<Alert tone="attention" icon="key" title={t('tokens.valueOnceBody')}>
+				{t('hosts.tokenNote')}
+			</Alert>
+			<CopyField value={createdToken.token} label={t('hosts.tokenValue')} secret />
+			<CopyField value={installCommand} label={t('hosts.installCommand')} />
+		{:else}
+			{#if createError}
+				<Alert tone="danger" title={createError} />
+			{/if}
+			<TextField
+				id="host-labels"
+				label={t('hosts.labels')}
+				error={fieldError(createProblem, 'labels')}
+				bind:value={labels}
+				placeholder={t('hosts.labelsPlaceholder')}
+			/>
+		{/if}
+		{#snippet footer()}
+			{#if createdToken}
+				<Button type="submit" variant="primary">{t('common.done')}</Button>
+			{:else}
+				<Button onclick={closeAdd}>{t('common.cancel')}</Button>
+				<Button type="submit" variant="primary" loading={creating}>
+					{t('hosts.createToken')}
+				</Button>
+			{/if}
+		{/snippet}
+	</Dialog>
+
+	<ConfirmDialog
+		bind:open={cancelOpen}
+		title={t('hosts.pending.cancelTitle')}
+		message={t('hosts.pending.cancelBody', { prefix: cancelTarget?.display_prefix ?? '' })}
+		confirmLabel={t('hosts.pending.cancel')}
+		cancelLabel={t('hosts.pending.keep')}
+		tone="danger"
+		loading={cancelling}
+		onConfirm={confirmCancel}
+	/>
+
+	<HostActions bind:this={hostActions} onchanged={load} />
+</Page>
 
 <style>
-	.host__scripts {
-		text-decoration: none;
-	}
-
 	.status {
 		display: inline-flex;
-		flex-direction: column;
-		align-items: flex-start;
+		align-items: center;
 		gap: var(--rh-space-1);
+		white-space: nowrap;
 	}
 
 	@media (max-width: 720px) {
 		.status :global(.status) {
 			white-space: normal;
 		}
-	}
-
-	.nowrap {
-		white-space: nowrap;
-	}
-
-	.host {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.host__name {
-		color: var(--rh-color-text);
-		font-weight: var(--rh-font-weight-semibold);
-		text-decoration: none;
-		white-space: nowrap;
-	}
-
-	.host__name:hover {
-		color: var(--rh-color-link);
-		text-decoration: underline;
-	}
-
-	.host__meta {
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
 	}
 
 	.host__version {

@@ -40,4 +40,16 @@ describe('jobReason', () => {
 	it('returns null for a job without a message', () => {
 		expect(jobReason({ result_code: 'succeeded' })).toBeNull();
 	});
+
+	it('translates a typed result message and keeps a code without a translation', () => {
+		expect(jobReason({ result_code: 'failed', result_message: 'interrupted' })).toBe(
+			'Interrupted: the agent restarted while scripts ran'
+		);
+		expect(jobReason({ result_code: 'failed', result_message: 'lock_retries_exhausted' })).toBe(
+			'The repository stayed locked after every retry.'
+		);
+		expect(jobReason({ result_code: 'failed', result_message: 'brand_new_code' })).toBe(
+			'brand_new_code'
+		);
+	});
 });

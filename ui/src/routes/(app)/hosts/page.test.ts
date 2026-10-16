@@ -193,7 +193,7 @@ describe('the Hosts screen', () => {
 		await waitFor(() => expect(mocks.renameAgent).toHaveBeenCalledWith('a_01', 'new-name'));
 	});
 
-	it('shows the trust mode of each host and links it to the host page (FR-HK-08)', async () => {
+	it('shows the trust mode of each host as plain text in the row (FR-HK-08)', async () => {
 		mocks.listAgents.mockResolvedValue([
 			agent({ id: 'a_01', hostname: 'win-fs01', os: 'windows' }),
 			agent({
@@ -208,14 +208,12 @@ describe('the Hosts screen', () => {
 
 		await screen.findByText('win-fs01');
 		expect(screen.getByText('Enabled')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: 'Server scripts: win-fs01' })).toHaveAttribute(
-			'href',
-			expect.stringMatching(/\/hosts\/a_01#scripts$/)
-		);
-		expect(screen.getByRole('link', { name: 'Server scripts: srv-db-01' })).toHaveAttribute(
-			'href',
-			expect.stringMatching(/\/hosts\/a_02#scripts$/)
-		);
+		expect(screen.getByText('Disabled')).toBeInTheDocument();
+		// The row holds one link: the host page (design/style/ui-principles.md, 2.4).
+		expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+			expect.stringMatching(/\/hosts\/a_01$/),
+			expect.stringMatching(/\/hosts\/a_02$/)
+		]);
 	});
 
 	it('links the host name to the host page', async () => {

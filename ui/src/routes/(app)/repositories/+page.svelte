@@ -11,20 +11,28 @@
 		Repository,
 		RepositoryBackendKind
 	} from '#lib/api/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
 		ConfirmDialog,
+		DataTable,
 		Dialog,
 		EmptyState,
-		PageHeader,
+		FilterBar,
 		Select,
 		StatusPill,
-		Table,
-		TextField,
-		RowActions
+		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { SelectOption, StatusTone, TableColumn } from '#lib/components/ui/index.ts';
+	import type {
+		FilterFacet,
+		RowAction,
+		SelectOption,
+		StatusTone,
+		TableColumn
+	} from '#lib/components/ui/index.ts';
+	import { matchesSearch, splitList } from '#lib/filters.ts';
+	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -106,17 +114,20 @@
 	};
 
 	const columns = $derived<TableColumn<Repository>[]>([
+		{ key: 'name', header: t('repositories.repository'), truncate: 'sm' },
 		{
-			key: 'name',
-			header: t('repositories.repository'),
-			value: (row) => row.name,
-			render: nameCell
+			key: 'address',
+			header: t('rp.section.location'),
+			mono: true,
+			truncate: 'md',
+			hideNarrow: true,
+			value: backendAddress
 		},
 		{
 			key: 'backend',
 			header: t('repositories.backend'),
-			value: (row) => t(backendLabels[row.backend.kind]),
-			render: backendCell
+			nowrap: true,
+			value: (row) => t(backendLabels[row.backend.kind])
 		},
 		{
 			key: 'maintenance_agent_id',
@@ -161,8 +172,97 @@
 		void goto(resolve('/(app)/repositories/new'));
 	}
 
-	function openEdit(repository: Repository): void {
-		void goto(resolve('/(app)/repositories/[id]', { id: repository.id }));
+	const filters = queryFilters(['q', 'backend', 'state'] as const);
+
+	const facets = $derived<FilterFacet[]>([
+		{
+			key: 'backend',
+			label: t('repositories.backend'),
+			options: (Object.keys(backendLabels) as RepositoryBackendKind[]).map((value) => ({
+				value,
+				label: t(backendLabels[value]),
+				count: repositories.filter((repository) => repository.backend.kind === value).length
+			}))
+		},
+		{
+			key: 'state',
+			label: t('repositories.status'),
+			multiple: false,
+			options: (['initialized', 'not_initialized'] as const).map((value) => ({
+				value,
+				label: t(
+					value === 'initialized'
+						? 'repositories.status.initialized'
+						: 'repositories.status.notInitialized'
+				),
+				count: repositories.filter(
+					(repository) => repository.initialized === (value === 'initialized')
+				).length
+			}))
+		}
+	]);
+
+	const shown = $derived(
+		repositories.filter((repository) => {
+			const { q, backend, state } = filters.value;
+			if (!matchesSearch(q, [repository.name, backendAddress(repository)])) return false;
+			if (backend && !splitList(backend).includes(repository.backend.kind)) return false;
+			if (state && repository.initialized !== (state === 'initialized')) return false;
+			return true;
+		})
+	);
+
+	function rowActions(repository: Repository): RowAction[] {
+		const maintained = canRun && Boolean(repository.maintenance_agent_id) && repository.initialized;
+		return [
+			{
+				id: 'retention',
+				label: t('repositories.runRetention'),
+				icon: 'refresh',
+				hidden: !maintained,
+				onSelect: () => void runTask(repository, 'retention')
+			},
+			{
+				id: 'check',
+				label: t('repositories.runCheck'),
+				icon: 'refresh',
+				hidden: !maintained,
+				onSelect: () => void runTask(repository, 'check')
+			},
+			{
+				id: 'init',
+				label: t('repositories.initialize'),
+				icon: 'plus',
+				hidden: !canWrite || repository.initialized,
+				onSelect: () => openJob(repository, 'init')
+			},
+			{
+				id: 'test',
+				label: t('repositories.testAccess'),
+				icon: 'eye',
+				hidden: !canWrite,
+				onSelect: () => openJob(repository, 'test_access')
+			},
+			{
+				id: 'unlock',
+				label: t('repositories.unlockAll'),
+				icon: 'lock',
+				danger: true,
+				hidden: !canWrite || !repository.initialized,
+				onSelect: () => openUnlockAll(repository)
+			},
+			{
+				id: 'delete',
+				label: t('repositories.delete'),
+				icon: 'octagon',
+				danger: true,
+				hidden: !canWrite,
+				onSelect: () => {
+					deleteTarget = repository;
+					deleteOpen = true;
+				}
+			}
+		];
 	}
 
 	const empty = $derived(!loading && !error && repositories.length === 0);
@@ -328,19 +428,6 @@
 	}
 </script>
 
-{#snippet nameCell(repository: Repository)}
-	<span class="repo">
-		<a class="repo__name" href={resolve('/(app)/repositories/[id]', { id: repository.id })}>
-			{repository.name}
-		</a>
-		<span class="repo__meta">{backendAddress(repository)}</span>
-	</span>
-{/snippet}
-
-{#snippet backendCell(repository: Repository)}
-	<span class="repo__backend">{t(backendLabels[repository.backend.kind])}</span>
-{/snippet}
-
 {#snippet maintenanceCell(repository: Repository)}
 	{#if repository.maintenance_agent_id}
 		<span>{maintenanceName(repository)}</span>
@@ -355,234 +442,162 @@
 	</StatusPill>
 {/snippet}
 
-<svelte:head>
-	<title>{t('repositories.title')} · {t('app.name')}</title>
-</svelte:head>
-
-<PageHeader
+<Page
 	title={t('repositories.title')}
 	description={t('repositories.description')}
 	count={loading ? undefined : repositories.length}
 >
-	{#if canWrite}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('repositories.add')}</Button>
-	{/if}
-</PageHeader>
-
-{#if empty}
-	<EmptyState
-		icon="repository"
-		title={t('repositories.emptyTitle')}
-		description={t('repositories.emptyDescription')}
-		bordered
-	>
+	{#snippet actions()}
 		{#if canWrite}
-			<Button variant="primary" onclick={openCreate}>{t('repositories.addFirst')}</Button>
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('repositories.add')}</Button>
 		{/if}
-	</EmptyState>
-{:else}
-	<Table
-		{columns}
-		rows={repositories}
-		{loading}
-		{error}
-		rowKey={(repository) => repository.id}
-		filterPlaceholder={t('repositories.searchPlaceholder')}
-	>
-		{#snippet rowActions(repository)}
-			{#if canWrite || canRun}
-				<RowActions
-					moreLabel={t('repositories.moreActions', { name: repository.name })}
-					items={[
-						...(canRun && repository.maintenance_agent_id && repository.initialized
-							? [
-									{
-										label: t('repositories.runRetention'),
-										icon: 'refresh' as const,
-										onSelect: () => void runTask(repository, 'retention')
-									},
-									{
-										label: t('repositories.runCheck'),
-										icon: 'refresh' as const,
-										onSelect: () => void runTask(repository, 'check')
-									}
-								]
-							: []),
-						...(canWrite
-							? [
-									...(repository.initialized
-										? []
-										: [
-												{
-													label: t('repositories.initialize'),
-													icon: 'plus' as const,
-													onSelect: () => openJob(repository, 'init')
-												}
-											]),
-									{
-										label: t('repositories.testAccess'),
-										icon: 'eye' as const,
-										onSelect: () => openJob(repository, 'test_access')
-									},
-									...(repository.initialized
-										? [
-												{
-													label: t('repositories.unlockAll'),
-													icon: 'lock' as const,
-													tone: 'danger' as const,
-													onSelect: () => openUnlockAll(repository)
-												}
-											]
-										: []),
-									{
-										label: t('repositories.edit'),
-										icon: 'settings' as const,
-										onSelect: () => openEdit(repository)
-									},
-									{
-										label: t('repositories.delete'),
-										icon: 'octagon' as const,
-										tone: 'danger' as const,
-										onSelect: () => {
-											deleteTarget = repository;
-											deleteOpen = true;
-										}
-									}
-								]
-							: [])
-					]}
+	{/snippet}
+
+	{#if empty}
+		<EmptyState
+			icon="repository"
+			title={t('repositories.emptyTitle')}
+			description={t('repositories.emptyDescription')}
+			bordered
+		>
+			{#if canWrite}
+				<Button variant="primary" onclick={openCreate}>{t('repositories.addFirst')}</Button>
+			{/if}
+		</EmptyState>
+	{:else}
+		<DataTable
+			{columns}
+			rows={shown}
+			{loading}
+			{error}
+			rowKey={(repository) => repository.id}
+			rowHref={(repository) => resolve('/(app)/repositories/[id]', { id: repository.id })}
+			actions={rowActions}
+			moreLabel={(repository) => t('repositories.moreActions', { name: repository.name })}
+			emptyTitle={t('filter.noMatches')}
+			emptyDescription={t('filter.noMatchesDescription')}
+		>
+			{#snippet toolbar()}
+				<FilterBar
+					label={t('repositories.filters')}
+					value={filters.value}
+					search={{
+						key: 'q',
+						label: t('hosts.search'),
+						placeholder: t('repositories.searchPlaceholder')
+					}}
+					{facets}
+					onchange={filters.update}
+					onreset={filters.reset}
 				/>
+			{/snippet}
+		</DataTable>
+	{/if}
+
+	<div class="note">
+		<Alert variant="inline" icon="lock" title={t('repositories.valueNote')} />
+	</div>
+
+	<Dialog
+		bind:open={unlockOpen}
+		size="sm"
+		icon="octagon"
+		title={t('repositories.unlockAllTitle')}
+		onsubmit={submitUnlockAll}
+	>
+		{#if unlockError}
+			<Alert tone="danger" title={unlockError} />
+		{/if}
+		<Alert tone="danger" icon="alert" title={t('repositories.unlockAllWarningTitle')}>
+			{t('repositories.unlockAllWarning', { name: unlockTarget?.name ?? '' })}
+		</Alert>
+		<TextField
+			id="unlock-all-confirm"
+			label={t('repositories.unlockAllConfirm')}
+			help={t('repositories.unlockAllConfirmHint', { name: unlockTarget?.name ?? '' })}
+			autocomplete="off"
+			bind:value={unlockConfirm}
+		/>
+		{#snippet footer()}
+			<Button onclick={() => (unlockOpen = false)}>{t('common.cancel')}</Button>
+			<Button
+				type="submit"
+				variant="danger"
+				loading={unlocking}
+				disabled={!unlockTarget || unlockConfirm !== unlockTarget.name}
+			>
+				{t('repositories.unlockAll')}
+			</Button>
+		{/snippet}
+	</Dialog>
+
+	<ConfirmDialog
+		bind:open={deleteOpen}
+		title={t('repositories.deleteTitle')}
+		message={t('repositories.deleteBody', { name: deleteTarget?.name ?? '' })}
+		confirmLabel={t('repositories.delete')}
+		tone="danger"
+		loading={deleting}
+		onConfirm={confirmDelete}
+	/>
+
+	<Dialog
+		bind:open={jobOpen}
+		size="md"
+		title={jobKind === 'init'
+			? t('repositories.initializeTitle')
+			: t('repositories.testAccessTitle')}
+		onsubmit={startJob}
+	>
+		{#if jobError}
+			<Alert tone="danger" title={jobError} />
+		{/if}
+		{#if jobKind === 'init'}
+			<Alert tone="attention" icon="lock" title={t('repositories.initialize')}>
+				{t('repositories.initializeBody')}
+			</Alert>
+		{:else}
+			<Alert tone="info" icon="eye" title={t('repositories.testAccess')}>
+				{t('repositories.testAccessBody')}
+			</Alert>
+		{/if}
+		{#if job}
+			<div class="job">
+				<div class="job__row">
+					<span class="job__label">{t('repositories.jobStatus')}</span>
+					<StatusPill tone={jobTone()}>{t(jobStatusLabels[job.status])}</StatusPill>
+				</div>
+				<p class="job__result">
+					{#if jobExpired}
+						{t('repositories.jobExpired')}
+					{:else if jobDone && job.result_code}
+						{t(jobResultLabels[job.result_code])}
+					{:else}
+						{t('repositories.jobRunning')}
+					{/if}
+				</p>
+			</div>
+		{:else}
+			<Select
+				id="job-host"
+				label={t('repositories.jobHost')}
+				help={t('repositories.jobHostHint')}
+				options={jobAgentOptions}
+				bind:value={jobHost}
+			/>
+		{/if}
+		{#snippet footer()}
+			<Button onclick={closeJob}>{t('common.close')}</Button>
+			{#if !job}
+				<Button type="submit" variant="primary" loading={jobStarting} disabled={!jobHost}>
+					{t('repositories.jobStart')}
+				</Button>
 			{/if}
 		{/snippet}
-	</Table>
-{/if}
-
-<div class="note">
-	<Alert variant="inline" icon="lock" title={t('repositories.valueNote')} />
-</div>
-
-<Dialog
-	bind:open={unlockOpen}
-	size="sm"
-	icon="octagon"
-	title={t('repositories.unlockAllTitle')}
-	onsubmit={submitUnlockAll}
->
-	{#if unlockError}
-		<Alert tone="danger" title={unlockError} />
-	{/if}
-	<Alert tone="danger" icon="alert" title={t('repositories.unlockAllWarningTitle')}>
-		{t('repositories.unlockAllWarning', { name: unlockTarget?.name ?? '' })}
-	</Alert>
-	<TextField
-		id="unlock-all-confirm"
-		label={t('repositories.unlockAllConfirm')}
-		help={t('repositories.unlockAllConfirmHint', { name: unlockTarget?.name ?? '' })}
-		autocomplete="off"
-		bind:value={unlockConfirm}
-	/>
-	{#snippet footer()}
-		<Button onclick={() => (unlockOpen = false)}>{t('common.cancel')}</Button>
-		<Button
-			type="submit"
-			variant="danger"
-			loading={unlocking}
-			disabled={!unlockTarget || unlockConfirm !== unlockTarget.name}
-		>
-			{t('repositories.unlockAll')}
-		</Button>
-	{/snippet}
-</Dialog>
-
-<ConfirmDialog
-	bind:open={deleteOpen}
-	title={t('repositories.deleteTitle')}
-	message={t('repositories.deleteBody', { name: deleteTarget?.name ?? '' })}
-	confirmLabel={t('repositories.delete')}
-	tone="danger"
-	loading={deleting}
-	onConfirm={confirmDelete}
-/>
-
-<Dialog
-	bind:open={jobOpen}
-	size="md"
-	title={jobKind === 'init' ? t('repositories.initializeTitle') : t('repositories.testAccessTitle')}
-	onsubmit={startJob}
->
-	{#if jobError}
-		<Alert tone="danger" title={jobError} />
-	{/if}
-	{#if jobKind === 'init'}
-		<Alert tone="attention" icon="lock" title={t('repositories.initialize')}>
-			{t('repositories.initializeBody')}
-		</Alert>
-	{:else}
-		<Alert tone="info" icon="eye" title={t('repositories.testAccess')}>
-			{t('repositories.testAccessBody')}
-		</Alert>
-	{/if}
-	{#if job}
-		<div class="job">
-			<div class="job__row">
-				<span class="job__label">{t('repositories.jobStatus')}</span>
-				<StatusPill tone={jobTone()}>{t(jobStatusLabels[job.status])}</StatusPill>
-			</div>
-			<p class="job__result">
-				{#if jobExpired}
-					{t('repositories.jobExpired')}
-				{:else if jobDone && job.result_code}
-					{t(jobResultLabels[job.result_code])}
-				{:else}
-					{t('repositories.jobRunning')}
-				{/if}
-			</p>
-		</div>
-	{:else}
-		<Select
-			id="job-host"
-			label={t('repositories.jobHost')}
-			help={t('repositories.jobHostHint')}
-			options={jobAgentOptions}
-			bind:value={jobHost}
-		/>
-	{/if}
-	{#snippet footer()}
-		<Button onclick={closeJob}>{t('common.close')}</Button>
-		{#if !job}
-			<Button type="submit" variant="primary" loading={jobStarting} disabled={!jobHost}>
-				{t('repositories.jobStart')}
-			</Button>
-		{/if}
-	{/snippet}
-</Dialog>
+	</Dialog>
+</Page>
 
 <style>
-	.repo {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.repo__name {
-		color: var(--rh-color-text);
-		font-weight: var(--rh-font-weight-semibold);
-		white-space: nowrap;
-	}
-
-	.repo__name:hover {
-		color: var(--rh-color-link);
-	}
-
-	.repo__meta {
-		color: var(--rh-color-text-muted);
-		font-family: var(--rh-font-mono);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.repo__backend {
-		white-space: nowrap;
-	}
-
 	.note {
 		margin-top: var(--rh-space-4);
 	}
