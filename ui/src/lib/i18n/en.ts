@@ -667,7 +667,7 @@ export const en = {
 	'jobs.status.expired': 'Expired',
 	'jobs.status.dead_letter': 'Gave up',
 	'jobs.status.cancelled': 'Cancelled',
-	'jobs.status.succeeded_with_warnings': 'Warnings',
+	'jobs.status.succeeded_with_warnings': 'Succeeded',
 	'jobs.statusFull.succeeded_with_warnings': 'Succeeded with warnings',
 	'jobs.kind.init': 'Initialize',
 	'jobs.kind.test_access': 'Test access',

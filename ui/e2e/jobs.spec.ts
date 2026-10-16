@@ -33,8 +33,8 @@ test('the jobs screen lists the jobs and cancels a queued job', async ({ page })
 
 	const table = page.getByRole('table');
 	await expect(table.getByText('Running')).toBeVisible();
-	await expect(table.getByText('Succeeded', { exact: true })).toBeVisible();
-	await expect(table.getByText('Warnings')).toBeVisible();
+	await expect(table.getByText('Succeeded', { exact: true }).first()).toBeVisible();
+	await expect(table.getByTitle('Succeeded with warnings')).toBeVisible();
 	await expect(table.getByText('The profile no longer fits the host.')).toBeVisible();
 	await expect(table.getByText('The repository stayed locked after every retry.')).toBeVisible();
 

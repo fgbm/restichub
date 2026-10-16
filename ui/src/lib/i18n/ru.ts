@@ -672,7 +672,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.status.expired': 'Срок истёк',
 	'jobs.status.dead_letter': 'Остановлено',
 	'jobs.status.cancelled': 'Отменено',
-	'jobs.status.succeeded_with_warnings': 'Предупреждения',
+	'jobs.status.succeeded_with_warnings': 'Успешно',
 	'jobs.statusFull.succeeded_with_warnings': 'Успешно, есть предупреждения',
 	'jobs.kind.init': 'Инициализация',
 	'jobs.kind.test_access': 'Проверка доступа',
