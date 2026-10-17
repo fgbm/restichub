@@ -1080,7 +1080,9 @@ pub(crate) mod tests {
         let swapper_stop = std::sync::Arc::clone(&stop);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let swapper = std::thread::spawn(move || {
-            let old = sibling(&swapper_dir, ".swapped");
+            // A save moves the directory to the backup name, and a waiter relies on it to tell a swap
+            // from a missing directory.
+            let old = sibling(&swapper_dir, ".old");
             let mut held = lock(&swapper_dir).expect("cannot take the lock");
             let _ = ready_tx.send(());
             while !swapper_stop.load(std::sync::atomic::Ordering::Relaxed) {
