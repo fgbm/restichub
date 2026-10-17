@@ -3,6 +3,8 @@ title: Environment variables
 description: Every RESTICHUB_ variable that the control plane and the agent read, with its default, its unit and its meaning.
 ---
 
+import Ui from '../../../components/Ui.astro';
+
 The control plane reads a configuration file (TOML) and the environment variables that start with `RESTICHUB_`. An environment variable overrides the same value in the file. The agent reads one `RESTICHUB_` variable. A value in seconds is a whole number of seconds.
 
 Set the variables in the environment of the control plane process. For the Docker Compose stack, add them to the `environment` section of the service `cp`, or pass them through the file `.env` (see [Install the control plane](/restichub/getting-started/install-control-plane/)).
@@ -67,7 +69,7 @@ Set the variables in the environment of the control plane process. For the Docke
 | `RESTICHUB_QUEUE_REPOSITORY_LIMIT` | `4` | count | The largest number of backups that run on one repository. |
 | `RESTICHUB_QUEUE_GLOBAL_LIMIT` | `100` | count | The largest number of jobs that run in one organization. |
 | `RESTICHUB_QUEUE_LEASE_SECS` | `60` | seconds | The time that the control plane waits for the acknowledgement of a job before it sends the job again. The smallest value is 15. |
-| `RESTICHUB_QUEUE_LOCK_RETRY_LIMIT` | `5` | count | The number of lock results after which a job gets the state "Gave up". |
+| `RESTICHUB_QUEUE_LOCK_RETRY_LIMIT` | `5` | count | The number of lock results after which a job gets the state "<Ui k="jobs.status.dead_letter" />". |
 | `RESTICHUB_QUEUE_LOCK_RETRY_BASE_SECS` | `30` | seconds | The delay before the first lock retry. The delay doubles for each retry. |
 
 See [Jobs](/restichub/concepts/job-lifecycle/) for the rules of the queue.
